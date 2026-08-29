@@ -1,4 +1,4 @@
-package main
+package percept
 
 import "github.com/google/uuid"
 

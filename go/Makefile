@@ -1,4 +1,4 @@
 .PHONY: build
 
 build:
-	go build -o percept .
+	go build -o percept ./cmd/percept

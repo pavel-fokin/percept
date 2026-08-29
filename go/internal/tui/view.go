@@ -1,10 +1,12 @@
-package main
+package tui
 
 import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/pavel-fokin/percept/go/internal/percept"
 )
 
 func (m model) View() tea.View {
@@ -22,17 +24,18 @@ func (m model) View() tea.View {
 }
 
 func (m model) renderTranscript() string {
-	lines := make([]string, 0, len(m.events))
-	for _, e := range m.events {
+	events := m.app.Events()
+	lines := make([]string, 0, len(events))
+	for _, e := range events {
 		lines = append(lines, m.renderLine(e))
 	}
 	return lipgloss.NewStyle().Width(m.viewport.Width()).Render(strings.Join(lines, "\n"))
 }
 
-func (m model) renderLine(e Event) string {
+func (m model) renderLine(e percept.Event) string {
 	style, prefix := m.userStyle, "You: "
-	if e.sender == senderAssistant {
+	if e.Sender == percept.SenderAssistant {
 		style, prefix = m.assistantStyle, "Assistant: "
 	}
-	return style.Render(prefix) + e.content
+	return style.Render(prefix) + e.Content
 }
