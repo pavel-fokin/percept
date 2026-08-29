@@ -9,6 +9,9 @@ const (
 	senderAssistant
 )
 
+// EventID identifies an Event.
+type EventID = ID[Event]
+
 // Event records one chat message: who sent it, what it said, and when.
 // Events are the app's only record of the transcript - they're kept
 // in memory, in the model's events slice, for the life of the process.
@@ -20,7 +23,7 @@ type Event struct {
 }
 
 func newEvent(from sender, content string) (Event, error) {
-	id, err := newEventID()
+	id, err := NewID[Event]()
 	if err != nil {
 		return Event{}, err
 	}

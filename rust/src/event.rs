@@ -1,12 +1,15 @@
 use std::time::SystemTime;
 
-use crate::id::EventId;
+use crate::id::Id;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Sender {
     User,
     Assistant,
 }
+
+/// Identifies an Event.
+pub type EventId = Id<Event>;
 
 /// Records one chat message: who sent it, what it said, and when. Events
 /// are the app's only record of the transcript - they're kept in memory,

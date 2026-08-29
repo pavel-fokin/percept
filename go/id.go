@@ -2,19 +2,17 @@ package main
 
 import "github.com/google/uuid"
 
-// EventID uniquely identifies an Event. Per ADR, entity IDs use UUIDv7 -
-// time-ordered, so IDs sort by creation - wrapped in a type dedicated to
-// that entity, so IDs from different entities can't be swapped by mistake.
-type EventID uuid.UUID
+// ID is a phantom-typed UUID: T pins it to one entity type, so IDs from
+// different entities can't be mixed up. Per ADR, entity IDs use UUIDv7 -
+// time-ordered, so IDs sort by creation. uuid.UUID is embedded, not
+// wrapped by a plain type definition, so ID[T] keeps its promoted
+// methods (String, MarshalText, database/sql support) for free.
+type ID[T any] struct{ uuid.UUID }
 
-func newEventID() (EventID, error) {
-	id, err := uuid.NewV7()
+func NewID[T any]() (ID[T], error) {
+	u, err := uuid.NewV7()
 	if err != nil {
-		return EventID{}, err
+		return ID[T]{}, err
 	}
-	return EventID(id), nil
-}
-
-func (id EventID) String() string {
-	return uuid.UUID(id).String()
+	return ID[T]{u}, nil
 }
