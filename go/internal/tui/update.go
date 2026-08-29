@@ -8,6 +8,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+type replyMsg string
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -16,6 +18,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKeyPress(msg)
 	case cursor.BlinkMsg:
 		return m.handleCursorBlink(msg)
+	case replyMsg:
+		return m.handleReply(msg), nil
 	}
 	return m, nil
 }
@@ -35,7 +39,7 @@ func (m model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "esc":
 		return m, tea.Quit
 	case "enter":
-		return m.submit(), nil
+		return m.submit()
 	default:
 		var cmd tea.Cmd
 		m.textarea, cmd = m.textarea.Update(msg)
@@ -49,19 +53,32 @@ func (m model) handleCursorBlink(msg cursor.BlinkMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// submit sends the pending input to the application layer, then resets
-// the input and scrolls to the bottom. Bails without resetting if the
-// app layer errors, same as before.
-func (m model) submit() model {
+// submit sends the user's message immediately (visible right away), then
+// returns a Cmd that fetches the reply on its own goroutine. Bails
+// without resetting if the app layer errors, same as before.
+func (m model) submit() (tea.Model, tea.Cmd) {
 	text := strings.TrimSpace(m.textarea.Value())
 	if text == "" {
-		return m
+		return m, nil
 	}
-	if err := m.app.Submit(context.Background(), text); err != nil {
-		return m
+	fetch, err := m.app.Submit(context.Background(), text)
+	if err != nil {
+		return m, nil
 	}
 	m.viewport.SetContent(m.renderTranscript())
 	m.textarea.Reset()
+	m.viewport.GotoBottom()
+
+	return m, func() tea.Msg { return replyMsg(fetch()) }
+}
+
+// handleReply appends the fetched reply and re-renders. The only place
+// AppendReply is called - always on Bubble Tea's event-loop goroutine.
+func (m model) handleReply(msg replyMsg) model {
+	if err := m.app.AppendReply(string(msg)); err != nil {
+		return m
+	}
+	m.viewport.SetContent(m.renderTranscript())
 	m.viewport.GotoBottom()
 	return m
 }

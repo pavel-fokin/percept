@@ -6,9 +6,6 @@ import (
 	"github.com/pavel-fokin/percept/go/internal/percept"
 )
 
-// Conversation orchestrates a chat: turns input into domain events, asks
-// the configured Model for a reply, keeps the transcript. Pure
-// orchestration - no vocabulary beyond percept's.
 type Conversation struct {
 	events []percept.Event
 	chat   percept.Model
@@ -18,23 +15,36 @@ func NewConversation(chat percept.Model) *Conversation {
 	return &Conversation{chat: chat}
 }
 
-func (c *Conversation) Submit(ctx context.Context, text string) error {
+// Submit records the user's message and returns a thunk that computes
+// the assistant's reply. The history it needs is captured now, before
+// returning - the thunk touches no shared state, so it's safe to run on
+// any goroutine.
+func (c *Conversation) Submit(ctx context.Context, text string) (func() string, error) {
 	userEvent, err := percept.NewEvent(percept.SenderUser, text)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	c.events = append(c.events, userEvent)
 
-	reply, err := c.chat.Reply(ctx, percept.ToMessages(c.events))
-	if err != nil {
-		reply = "Sorry, something went wrong."
-	}
+	history := percept.ToMessages(c.events)
+	return func() string {
+		reply, err := c.chat.Reply(ctx, history)
+		if err != nil {
+			return "Sorry, something went wrong."
+		}
+		return reply
+	}, nil
+}
 
-	assistantEvent, err := percept.NewEvent(percept.SenderAssistant, reply)
+// AppendReply records an assistant reply. Must only be called from the
+// goroutine that owns the Conversation (tui's event loop) - never from
+// inside the thunk Submit returns.
+func (c *Conversation) AppendReply(content string) error {
+	event, err := percept.NewEvent(percept.SenderAssistant, content)
 	if err != nil {
 		return err
 	}
-	c.events = append(c.events, assistantEvent)
+	c.events = append(c.events, event)
 	return nil
 }
 

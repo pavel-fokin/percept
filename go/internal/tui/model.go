@@ -14,7 +14,8 @@ import (
 // App is what tui needs from the application layer - defined here so tui
 // depends on a narrow contract, not app's concrete Conversation type.
 type App interface {
-	Submit(ctx context.Context, text string) error
+	Submit(ctx context.Context, text string) (func() string, error)
+	AppendReply(content string) error
 	Events() []percept.Event
 }
 
