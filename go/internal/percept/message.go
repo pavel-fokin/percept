@@ -17,12 +17,14 @@ type Message struct {
 	Content string
 }
 
-// Model turns a conversation into a reply - the domain's core capability,
-// mechanism-agnostic. Kept synchronous for now; a network-backed provider
-// will need to move this behind a tea.Cmd so it doesn't block the UI -
-// a deliberate follow-up, not an oversight.
+// Model turns a conversation into a streamed reply - the domain's core
+// capability, mechanism-agnostic. Reply returns as soon as streaming has
+// started (not once it's finished); chunks arrive on the returned
+// channel as they're produced, and the channel is closed when the reply
+// is complete. Mid-stream errors are out of scope - only a failure
+// before streaming starts is reported via the returned error.
 type Model interface {
-	Reply(ctx context.Context, messages []Message) (string, error)
+	Reply(ctx context.Context, messages []Message) (<-chan string, error)
 }
 
 // ToMessages converts the transcript into the form Model expects.

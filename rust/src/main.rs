@@ -12,11 +12,11 @@ mod tui;
 
 use app::Conversation;
 use providers::Stub;
-use tui::Chat;
+use tui::{Chat, StreamEvent};
 
 async fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat<'_>) -> io::Result<()> {
     let mut term_events = EventStream::new();
-    let (reply_tx, mut reply_rx) = mpsc::unbounded_channel::<String>();
+    let (reply_tx, mut reply_rx) = mpsc::unbounded_channel::<StreamEvent>();
 
     loop {
         terminal.draw(|frame| tui::draw(frame, chat))?;
@@ -31,8 +31,11 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat<'_>) -> io
                     }
                 }
             }
-            Some(reply) = reply_rx.recv() => {
-                chat.conversation.append_reply(reply);
+            Some(event) = reply_rx.recv() => {
+                match event {
+                    StreamEvent::Chunk(chunk) => chat.conversation.append_chunk(chunk),
+                    StreamEvent::Done => chat.conversation.end_stream(),
+                }
             }
         }
     }
