@@ -1,14 +1,15 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use tokio::sync::mpsc::UnboundedSender;
 
 use super::Chat;
 
 /// Handle one key press. Returns true if the app should quit.
-pub fn handle_key(chat: &mut Chat, key: KeyEvent) -> bool {
+pub fn handle_key(chat: &mut Chat, key: KeyEvent, reply_tx: &UnboundedSender<String>) -> bool {
     match (key.code, key.modifiers) {
         (KeyCode::Esc, _) => true,
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => true,
         (KeyCode::Enter, _) => {
-            submit(chat);
+            submit(chat, reply_tx);
             false
         }
         _ => {
@@ -18,14 +19,18 @@ pub fn handle_key(chat: &mut Chat, key: KeyEvent) -> bool {
     }
 }
 
-/// Sends the pending input to the application layer, then resets the
-/// input. Bails without resetting if the app layer errors, same as Go.
-fn submit(chat: &mut Chat) {
+/// Sends the user's message immediately (visible right away), then
+/// spawns a thunk that fetches the reply on tokio's blocking pool.
+fn submit(chat: &mut Chat, reply_tx: &UnboundedSender<String>) {
     let text = chat.textarea.lines()[0].trim().to_string();
     if text.is_empty() {
         return;
     }
-    if chat.conversation.submit(text).is_ok() {
-        chat.textarea.clear();
-    }
+    chat.textarea.clear();
+
+    let fetch = chat.conversation.submit(text);
+    let reply_tx = reply_tx.clone();
+    tokio::task::spawn_blocking(move || {
+        let _ = reply_tx.send(fetch());
+    });
 }

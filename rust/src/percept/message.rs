@@ -15,10 +15,11 @@ pub struct Message {
 }
 
 /// Turns a conversation into a reply - the domain's core capability,
-/// mechanism-agnostic. Kept synchronous for now; a network-backed
-/// provider will need to move this onto a thread with a channel back to
-/// the main loop - a deliberate follow-up, not an oversight.
-pub trait Model {
+/// mechanism-agnostic. The method itself stays synchronous; the caller
+/// runs it off the UI thread (e.g. via `spawn_blocking`) instead.
+/// `Send + Sync` are required so a provider can be shared (`Arc`)
+/// across that boundary.
+pub trait Model: Send + Sync {
     fn reply(&self, messages: &[Message]) -> Result<String, Box<dyn std::error::Error>>;
 }
 
