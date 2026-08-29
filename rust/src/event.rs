@@ -36,7 +36,3 @@ impl Event {
         }
     }
 }
-
-pub fn stub_assistant_reply(user_text: &str) -> String {
-    format!("You said: {user_text}")
-}

@@ -6,6 +6,8 @@ use crossterm::event::{Event, KeyEventKind};
 mod app;
 mod event;
 mod id;
+mod llm;
+mod providers;
 mod ui;
 mod update;
 

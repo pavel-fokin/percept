@@ -1,6 +1,10 @@
 package main
 
-import "time"
+import (
+	"time"
+
+	"github.com/pavel-fokin/percept/go/llm"
+)
 
 type sender int
 
@@ -35,6 +39,16 @@ func newEvent(from sender, content string) (Event, error) {
 	}, nil
 }
 
-func stubAssistantReply(userText string) string {
-	return "You said: " + userText
+// toMessages converts the transcript into the provider-agnostic form the
+// llm package expects.
+func toMessages(events []Event) []llm.Message {
+	messages := make([]llm.Message, len(events))
+	for i, e := range events {
+		role := llm.RoleUser
+		if e.sender == senderAssistant {
+			role = llm.RoleAssistant
+		}
+		messages[i] = llm.Message{Role: role, Content: e.content}
+	}
+	return messages
 }

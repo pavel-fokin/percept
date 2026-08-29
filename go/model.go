@@ -5,12 +5,16 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/pavel-fokin/percept/go/llm"
+	"github.com/pavel-fokin/percept/go/providers"
 )
 
 type model struct {
 	viewport       viewport.Model
 	textarea       textarea.Model
 	events         []Event
+	chat           llm.Model
 	userStyle      lipgloss.Style
 	assistantStyle lipgloss.Style
 	ready          bool
@@ -20,6 +24,7 @@ func initialModel() model {
 	return model{
 		textarea:       newTextarea(),
 		viewport:       newViewport(),
+		chat:           providers.Stub{},
 		userStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color("5")).Bold(true),
 		assistantStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("2")).Bold(true),
 	}

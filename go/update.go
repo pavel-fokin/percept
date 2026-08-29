@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 
 	"charm.land/bubbles/v2/cursor"
@@ -48,8 +49,9 @@ func (m model) handleCursorBlink(msg cursor.BlinkMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// submit appends the pending input as a user event plus an immediate
-// stub assistant reply, then resets the input and scrolls to the bottom.
+// submit appends the pending input as a user event, asks the configured
+// chat model for a reply, then appends that as an assistant event before
+// resetting the input and scrolling to the bottom.
 func (m model) submit() model {
 	text := strings.TrimSpace(m.textarea.Value())
 	if text == "" {
@@ -60,12 +62,19 @@ func (m model) submit() model {
 	if err != nil {
 		return m
 	}
-	assistantEvent, err := newEvent(senderAssistant, stubAssistantReply(text))
+	m.events = append(m.events, userEvent)
+
+	reply, err := m.chat.Reply(context.Background(), toMessages(m.events))
+	if err != nil {
+		reply = "Sorry, something went wrong."
+	}
+
+	assistantEvent, err := newEvent(senderAssistant, reply)
 	if err != nil {
 		return m
 	}
+	m.events = append(m.events, assistantEvent)
 
-	m.events = append(m.events, userEvent, assistantEvent)
 	m.viewport.SetContent(m.renderTranscript())
 	m.textarea.Reset()
 	m.viewport.GotoBottom()
