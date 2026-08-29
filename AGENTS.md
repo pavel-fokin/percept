@@ -7,7 +7,26 @@ line only.
 
 ## Architecture
 
-Split state, input handling, and rendering into separate, small files; keep the entrypoint to wiring only.
+Layer by dependency direction - each layer depends only on the one below
+it, never sideways or up:
+
+- **Domain**: entities and the capabilities they need, expressed as
+  interfaces. No outward dependencies.
+- **Application**: orchestrates domain objects to fulfill one use case.
+  No vocabulary beyond the domain's.
+- **Presentation**: renders and forwards input. No business logic.
+- **Infrastructure**: implements the domain's interfaces - a database, an
+  API client, a stub.
+
+Wire concrete types together only at the entrypoint.
+
+## Domain
+
+- Distinguish entities (identity, tracked over time) from value objects
+  (no identity, just data).
+- The domain can own interfaces for capabilities it fundamentally needs,
+  not just persistence - it should know the capability, never the
+  mechanism behind it.
 
 ## ADR
 
