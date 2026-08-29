@@ -2,7 +2,8 @@
 
 ## Git
 
-Use conventional commit messages under 72 chars.
+Use conventional commit messages under 72 chars. Skip the body -- subject
+line only.
 
 ## Architecture
 
