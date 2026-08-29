@@ -1,6 +1,6 @@
 use std::time::SystemTime;
 
-use crate::id::Id;
+use super::id::Id;
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum Sender {
@@ -13,7 +13,7 @@ pub type EventId = Id<Event>;
 
 /// Records one chat message: who sent it, what it said, and when. Events
 /// are the app's only record of the transcript - they're kept in memory,
-/// in the app's events vec, for the life of the process.
+/// in the application layer's events vec, for the life of the process.
 ///
 /// `id` and `created_at` aren't read yet - the UI only renders `sender`
 /// and `content` - but they're part of the entity per the ADR, not dead

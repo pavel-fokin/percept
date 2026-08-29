@@ -1,4 +1,4 @@
-use crate::llm::{Message, Model, Role};
+use crate::percept::{Message, Model, Role};
 
 /// Echoes the last user message back, prefixed. Useful for exercising the
 /// chat UI without a real API key or network access.

@@ -4,22 +4,21 @@ use std::time::Duration;
 use crossterm::event::{Event, KeyEventKind};
 
 mod app;
-mod event;
-mod id;
-mod llm;
+mod percept;
 mod providers;
-mod ui;
-mod update;
+mod tui;
 
-use app::App;
+use app::Conversation;
+use providers::Stub;
+use tui::Chat;
 
-fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()> {
+fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat) -> io::Result<()> {
     loop {
-        terminal.draw(|frame| ui::draw(frame, app))?;
+        terminal.draw(|frame| tui::draw(frame, chat))?;
 
         if crossterm::event::poll(Duration::from_millis(250))? {
             if let Event::Key(key) = crossterm::event::read()? {
-                if key.kind == KeyEventKind::Press && update::handle_key(app, key) {
+                if key.kind == KeyEventKind::Press && tui::handle_key(chat, key) {
                     return Ok(());
                 }
             }
@@ -29,8 +28,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal, app: &mut App) -> io::Result<()>
 
 fn main() -> io::Result<()> {
     let mut terminal = ratatui::init();
-    let mut app = App::new();
-    let result = run(&mut terminal, &mut app);
+    let conversation = Conversation::new(Box::new(Stub));
+    let mut chat = Chat::new(Box::new(conversation));
+    let result = run(&mut terminal, &mut chat);
     ratatui::restore();
     result
 }

@@ -3,26 +3,26 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-use crate::app::App;
-use crate::event::{Event, Sender};
+use super::Chat;
+use crate::percept::{Event, Sender};
 
-pub fn draw(frame: &mut Frame, app: &App) {
+pub fn draw(frame: &mut Frame, chat: &Chat) {
     let [transcript_area, input_area] =
         Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(frame.area());
 
-    let (text, offset) = transcript(app, transcript_area);
+    let (text, offset) = transcript(chat, transcript_area);
     frame.render_widget(Paragraph::new(text).scroll((offset, 0)), transcript_area);
-    frame.render_widget(&app.textarea, input_area);
+    frame.render_widget(&chat.textarea, input_area);
 }
 
 /// Wrapped, styled transcript lines plus the scroll offset that pins the
 /// view to the bottom. There's no persistent scroll state to update -
 /// ratatui redraws from scratch every frame, so this just recomputes it.
-fn transcript(app: &App, area: Rect) -> (Text<'static>, u16) {
+fn transcript(chat: &Chat, area: Rect) -> (Text<'static>, u16) {
     let width = area.width.max(1) as usize;
     let mut lines: Vec<Line<'static>> = Vec::new();
-    for event in &app.events {
-        lines.extend(message_lines(app, event, width));
+    for event in chat.conversation.events() {
+        lines.extend(message_lines(chat, event, width));
     }
 
     let total = lines.len() as u16;
@@ -30,10 +30,10 @@ fn transcript(app: &App, area: Rect) -> (Text<'static>, u16) {
     (Text::from(lines), offset)
 }
 
-fn message_lines(app: &App, event: &Event, width: usize) -> Vec<Line<'static>> {
+fn message_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
     let (style, prefix) = match event.sender {
-        Sender::User => (app.user_style, "You: "),
-        Sender::Assistant => (app.assistant_style, "Assistant: "),
+        Sender::User => (chat.user_style, "You: "),
+        Sender::Assistant => (chat.assistant_style, "Assistant: "),
     };
     let full_line = format!("{prefix}{}", event.content);
 
