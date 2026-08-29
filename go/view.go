@@ -22,17 +22,17 @@ func (m model) View() tea.View {
 }
 
 func (m model) renderTranscript() string {
-	lines := make([]string, 0, len(m.messages))
-	for _, msg := range m.messages {
-		lines = append(lines, m.renderLine(msg))
+	lines := make([]string, 0, len(m.events))
+	for _, e := range m.events {
+		lines = append(lines, m.renderLine(e))
 	}
 	return lipgloss.NewStyle().Width(m.viewport.Width()).Render(strings.Join(lines, "\n"))
 }
 
-func (m model) renderLine(msg chatMessage) string {
+func (m model) renderLine(e Event) string {
 	style, prefix := m.userStyle, "You: "
-	if msg.from == senderAssistant {
+	if e.sender == senderAssistant {
 		style, prefix = m.assistantStyle, "Assistant: "
 	}
-	return style.Render(prefix) + msg.text
+	return style.Render(prefix) + e.content
 }

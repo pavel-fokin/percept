@@ -787,6 +787,7 @@ dependencies = [
  "ratatui",
  "ratatui-textarea",
  "textwrap",
+ "uuid",
 ]
 
 [[package]]

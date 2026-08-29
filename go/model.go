@@ -10,7 +10,7 @@ import (
 type model struct {
 	viewport       viewport.Model
 	textarea       textarea.Model
-	messages       []chatMessage
+	events         []Event
 	userStyle      lipgloss.Style
 	assistantStyle lipgloss.Style
 	ready          bool

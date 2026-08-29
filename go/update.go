@@ -48,17 +48,24 @@ func (m model) handleCursorBlink(msg cursor.BlinkMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// submit appends the pending input as a user message plus an immediate
+// submit appends the pending input as a user event plus an immediate
 // stub assistant reply, then resets the input and scrolls to the bottom.
 func (m model) submit() model {
 	text := strings.TrimSpace(m.textarea.Value())
 	if text == "" {
 		return m
 	}
-	m.messages = append(m.messages,
-		chatMessage{from: senderUser, text: text},
-		chatMessage{from: senderAssistant, text: stubAssistantReply(text)},
-	)
+
+	userEvent, err := newEvent(senderUser, text)
+	if err != nil {
+		return m
+	}
+	assistantEvent, err := newEvent(senderAssistant, stubAssistantReply(text))
+	if err != nil {
+		return m
+	}
+
+	m.events = append(m.events, userEvent, assistantEvent)
 	m.viewport.SetContent(m.renderTranscript())
 	m.textarea.Reset()
 	m.viewport.GotoBottom()

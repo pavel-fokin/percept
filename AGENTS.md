@@ -4,6 +4,14 @@
 
 Use conventional commit messages under 72 chars.
 
+## Architecture
+
+Split state, input handling, and rendering into separate, small files; keep the entrypoint to wiring only.
+
+## ADR
+
+- 2026-08-29: entity IDs use UUIDv7, each wrapped in a type specific to that entity, not a bare or shared ID type.
+
 ## Writing
 
 Chats and docs are both text. Write for a specific reader.
