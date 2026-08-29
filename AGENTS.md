@@ -10,23 +10,22 @@ line only.
 Layer by dependency direction - each layer depends only on the one below
 it, never sideways or up:
 
-- **Domain**: entities and the capabilities they need, expressed as
-  interfaces. No outward dependencies.
-- **Application**: orchestrates domain objects to fulfill one use case.
-  No vocabulary beyond the domain's.
-- **Presentation**: renders and forwards input. No business logic.
-- **Infrastructure**: implements the domain's interfaces - a database, an
-  API client, a stub.
+| Layer | Package | Owns |
+|---|---|---|
+| Domain | `percept` | `Event`, `Message`, `Model` - entities and the capabilities they need, as interfaces. No outward dependencies. |
+| Application | `app` | `Conversation` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. |
+| Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
+| Infrastructure | `providers` | `Stub` today, real LLM clients later - implements `percept.Model`. |
 
-Wire concrete types together only at the entrypoint.
+Wire concrete types together only at the entrypoint - `cmd/percept` in Go,
+`main` in Rust.
 
 ## Domain
 
-- Distinguish entities (identity, tracked over time) from value objects
-  (no identity, just data).
-- The domain can own interfaces for capabilities it fundamentally needs,
-  not just persistence - it should know the capability, never the
-  mechanism behind it.
+- `Event` is an entity (has an ID, tracked over time); `Message` is a
+  value object (no identity) - the shape `Model` needs to talk to an LLM.
+- `Model` is domain-owned, not infrastructure: `percept` needs "a reply
+  given messages," never the mechanism behind it.
 
 ## ADR
 
