@@ -1,15 +1,6 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::percept::{self, Actor, Event, EventId};
-
-/// Process-global event sequence. Gap-free and monotonic across every
-/// Conversation in the process, assigned when an event is committed.
-static EVENT_SEQ: AtomicU64 = AtomicU64::new(0);
-
-fn next_seq() -> u64 {
-    EVENT_SEQ.fetch_add(1, Ordering::Relaxed)
-}
 
 /// Streams the reply chunk by chunk; returning means it's done.
 pub type ReplyStream = Box<dyn FnOnce(&mut dyn FnMut(String)) + Send>;
@@ -45,6 +36,10 @@ pub trait AppService {
 /// in-memory transcript ahead of what's durable.
 pub struct Conversation {
     events: Vec<Event>,
+    /// The seq the next committed event gets. One counter per log, so
+    /// it only moves once an append succeeds - a failed write leaves no
+    /// gap behind.
+    next_seq: u64,
     chat: Arc<dyn percept::Model>,
     log: Arc<dyn percept::EventLog>,
     /// Text of the reply now streaming, or None between replies.
@@ -56,20 +51,18 @@ pub struct Conversation {
 
 impl Conversation {
     /// Opens on whatever `log` already holds, so the transcript
-    /// survives a restart. Seeds the process-global sequence past the
-    /// loaded maximum, so events committed from here on keep the ADR's
-    /// gap-free ordering.
+    /// survives a restart. The sequence picks up past the loaded
+    /// maximum, keeping the ADR's gap-free ordering across runs.
     pub fn new(
         chat: Arc<dyn percept::Model>,
         log: Arc<dyn percept::EventLog>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let events = log.load()?;
-        if let Some(max) = events.iter().map(Event::seq).max() {
-            EVENT_SEQ.fetch_max(max + 1, Ordering::Relaxed);
-        }
+        let next_seq = events.iter().map(Event::seq).max().map_or(0, |max| max + 1);
 
         Ok(Self {
             events,
+            next_seq,
             chat,
             log,
             pending: None,
@@ -80,8 +73,9 @@ impl Conversation {
 
 impl AppService for Conversation {
     fn submit(&mut self, text: String) -> Result<ReplyStream, Box<dyn std::error::Error>> {
-        let event = Event::message_received(Actor::User, text, next_seq(), None);
+        let event = Event::message_received(Actor::User, text, self.next_seq, None);
         self.log.append(&event)?;
+        self.next_seq += 1;
         self.pending_cause = Some(event.id());
         self.events.push(event);
 
@@ -109,10 +103,11 @@ impl AppService for Conversation {
         let event = Event::message_received(
             Actor::Model,
             content.clone(),
-            next_seq(),
+            self.next_seq,
             self.pending_cause,
         );
         self.log.append(&event)?;
+        self.next_seq += 1;
         self.pending = None;
         self.pending_cause = None;
         self.events.push(event);
@@ -132,7 +127,7 @@ impl AppService for Conversation {
 mod tests {
     use super::*;
     use crate::percept::{Actor, Message, Payload};
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
 
     struct Silent;
@@ -153,22 +148,6 @@ mod tests {
         }
     }
 
-    fn clone_event(event: &Event) -> Event {
-        let payload = match event.payload() {
-            Payload::MessageReceived { content } => Payload::MessageReceived {
-                content: content.clone(),
-            },
-        };
-        Event::restore(
-            event.id(),
-            event.seq(),
-            event.actor(),
-            event.causation_id(),
-            event.created_at(),
-            payload,
-        )
-    }
-
     /// An in-memory EventLog for tests. `fail_append` flips `append`
     /// into an error without touching the filesystem, and can be
     /// flipped mid-conversation.
@@ -186,12 +165,6 @@ mod tests {
             }
         }
 
-        fn failing() -> Self {
-            let log = Self::default();
-            log.start_failing();
-            log
-        }
-
         fn start_failing(&self) {
             self.fail_append.store(true, Ordering::Relaxed);
         }
@@ -202,18 +175,12 @@ mod tests {
             if self.fail_append.load(Ordering::Relaxed) {
                 return Err("append failed".into());
             }
-            self.events.lock().unwrap().push(clone_event(event));
+            self.events.lock().unwrap().push(event.clone());
             Ok(())
         }
 
         fn load(&self) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
-            Ok(self
-                .events
-                .lock()
-                .unwrap()
-                .iter()
-                .map(clone_event)
-                .collect())
+            Ok(self.events.lock().unwrap().clone())
         }
     }
 
@@ -270,8 +237,9 @@ mod tests {
 
     #[test]
     fn append_failure_surfaces_as_err_and_leaves_transcript_unchanged() {
-        let log = Arc::new(FakeLog::failing());
-        let mut convo = Conversation::new(Arc::new(Silent), log).unwrap();
+        let log = Arc::new(FakeLog::default());
+        log.start_failing();
+        let mut convo = Conversation::new(Arc::new(Silent), log.clone()).unwrap();
 
         assert!(convo.submit("hi".to_string()).is_err());
         assert!(convo.events().is_empty());

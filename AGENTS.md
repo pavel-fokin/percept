@@ -48,12 +48,14 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   `percept::EventLog` port; `store::Jsonl` is the implementation. The
   path is relative to the working directory, not a fixed location - a
   deliberate choice, so the transcript follows wherever the app is
-  launched from. On start, `seq` resumes past the log's maximum, so the
-  gap-free ordering above survives a restart. An append failure ends
-  the run: losing a committed event silently is worse than quitting.
-  One process per log file - nothing enforces this. The file is one
-  endless conversation; there's no session or conversation boundary
-  yet.
+  launched from. `seq` leaves the process-global static above for one
+  counter per `Conversation`, seeded past its own log's maximum and
+  advanced only once an append succeeds - one log, one gap-free
+  sequence, across both restarts and failed writes. An append failure
+  ends the run: losing a committed event silently is worse than
+  quitting. One process per log file - nothing enforces this. The file
+  is one endless conversation; there's no session or conversation
+  boundary yet.
 
 ## Workflow
 

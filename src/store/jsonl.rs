@@ -8,9 +8,9 @@ use crate::store::{Error, Event};
 
 /// A JSONL event log: one compact `store::Event` per line, appended to
 /// as the app runs and replayed to rebuild the transcript on start.
-/// Implements `percept::EventLog` - `append` flushes after every write
-/// but never calls `fsync`, so a killed process loses nothing, but a
-/// power cut can lose the tail line.
+/// Implements `percept::EventLog`. Each append is one unbuffered write
+/// with no `fsync`: a killed process loses nothing, since the bytes are
+/// already the kernel's, but a power cut can lose the tail line.
 pub struct Jsonl {
     /// Every read and write goes through this one handle, so the log
     /// can't be read from one file while being written to another -
@@ -26,14 +26,9 @@ impl Jsonl {
     /// for the life of the process.
     ///
     /// One handle per path, and one process per log file. Nothing
-    /// enforces this. A second handle repairs the tail (below) with no
-    /// knowledge of what the first has half-written, so it can truncate
-    /// away a line that was about to be finished.
-    ///
-    /// A torn final line is truncated here, before anything is
-    /// appended. Reads tolerate one, but a later append would land
-    /// directly after the partial bytes and fuse into a line that
-    /// isn't final - and so isn't tolerated - bricking the log.
+    /// enforces this. A second handle would repair the tail knowing
+    /// nothing of what the first has half-written, cutting away a line
+    /// that was about to be finished.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
@@ -52,14 +47,10 @@ impl Jsonl {
         })
     }
 
-    fn parse_line(raw: &str) -> Result<percept::Event, Error> {
-        let wire: Event = serde_json::from_str(raw).map_err(Error::BadLine)?;
-        percept::Event::try_from(wire)
-    }
 }
 
 impl EventLog for Jsonl {
-    /// Appends one event as a compact JSON line and flushes.
+    /// Appends one event as a compact JSON line.
     fn append(&self, event: &percept::Event) -> Result<(), Box<dyn std::error::Error>> {
         let mut line =
             serde_json::to_string(&Event::from(event)).expect("store::Event always serializes");
@@ -67,14 +58,10 @@ impl EventLog for Jsonl {
 
         let mut file = self.file.lock().expect("jsonl file mutex poisoned");
         if let Err(e) = file.write_all(line.as_bytes()) {
-            // A short write leaves a partial line with no newline. The
-            // next append would land right after it and fuse into one
-            // corrupt line that no longer looks torn, which nothing
-            // repairs. Cut it back before returning the failure.
+            // A short write leaves a tail no later append may fuse with.
             let _ = truncate_torn_tail(&mut file);
             return Err(Error::Io(e).into());
         }
-        file.flush().map_err(Error::Io)?;
         Ok(())
     }
 
@@ -94,13 +81,9 @@ impl EventLog for Jsonl {
         let mut file = self.file.lock().expect("jsonl file mutex poisoned");
         let bytes = read_all(&mut file)?;
 
-        let complete = match bytes.iter().rposition(|byte| *byte == b'\n') {
-            Some(last) => &bytes[..=last],
-            None => &[][..],
-        };
         // Bytes, not `read_to_string`: a torn write can split a
         // multi-byte character, and that tail is about to be discarded.
-        let contents = std::str::from_utf8(complete)
+        let contents = std::str::from_utf8(&bytes[..complete_len(&bytes)])
             .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
 
         let mut events = Vec::new();
@@ -108,7 +91,7 @@ impl EventLog for Jsonl {
             if raw.is_empty() {
                 continue;
             }
-            let event = Jsonl::parse_line(raw).map_err(|source| Error::AtLine {
+            let event = parse_line(raw).map_err(|source| Error::AtLine {
                 line: idx + 1,
                 source: Box::new(source),
             })?;
@@ -118,6 +101,11 @@ impl EventLog for Jsonl {
     }
 }
 
+fn parse_line(raw: &str) -> Result<percept::Event, Error> {
+    let wire: Event = serde_json::from_str(raw).map_err(Error::BadLine)?;
+    percept::Event::try_from(wire)
+}
+
 fn read_all(file: &mut fs::File) -> Result<Vec<u8>, Error> {
     file.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
     let mut bytes = Vec::new();
@@ -125,40 +113,103 @@ fn read_all(file: &mut fs::File) -> Result<Vec<u8>, Error> {
     Ok(bytes)
 }
 
-/// Cuts the file back to its last complete line. Does nothing to a file
-/// that's empty or already ends in a newline.
-fn truncate_torn_tail(file: &mut fs::File) -> Result<(), Error> {
-    let bytes = read_all(file)?;
-    if bytes.last().is_none_or(|byte| *byte == b'\n') {
-        return Ok(());
-    }
-    let keep = bytes
+/// How much of `bytes` is complete lines - everything up to and
+/// including the last newline. The file format's one invariant, so
+/// reading and repairing both ask here.
+fn complete_len(bytes: &[u8]) -> usize {
+    bytes
         .iter()
         .rposition(|byte| *byte == b'\n')
-        .map_or(0, |last| last as u64 + 1);
-    file.set_len(keep).map_err(Error::Io)
+        .map_or(0, |last| last + 1)
+}
+
+/// Cuts the file back to its last complete line. A tail with no
+/// newline is a write that was killed part-way: reads ignore it, but a
+/// later append would land right after those bytes and fuse into a
+/// line that no longer looks torn, which nothing would ever repair.
+///
+/// Does nothing to a file that's empty or already ends in a newline -
+/// the case on every clean start, which is why it costs a seek and one
+/// byte rather than a read of the whole log.
+fn truncate_torn_tail(file: &mut fs::File) -> Result<(), Error> {
+    let len = file.seek(SeekFrom::End(0)).map_err(Error::Io)?;
+    if len == 0 {
+        return Ok(());
+    }
+    file.seek(SeekFrom::End(-1)).map_err(Error::Io)?;
+    let mut last = [0u8; 1];
+    file.read_exact(&mut last).map_err(Error::Io)?;
+    if last[0] == b'\n' {
+        return Ok(());
+    }
+
+    let bytes = read_all(file)?;
+    file.set_len(complete_len(&bytes) as u64).map_err(Error::Io)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::percept::{Actor, Payload};
-    use std::fs::OpenOptions as StdOpenOptions;
     use std::path::PathBuf;
     use uuid::Uuid;
 
-    fn temp_path() -> PathBuf {
-        std::env::temp_dir().join(format!("percept-jsonl-test-{}.jsonl", Uuid::now_v7()))
+    /// A log file on a temp path, removed when the test ends - a
+    /// trailing `remove_file` never runs on the failing test, which is
+    /// the one whose file you'd want gone.
+    struct TempLog {
+        path: PathBuf,
+    }
+
+    impl TempLog {
+        fn new() -> Self {
+            Self {
+                path: std::env::temp_dir().join(format!("percept-jsonl-{}.jsonl", Uuid::now_v7())),
+            }
+        }
+
+        /// A handle on the file - call it twice to stand in for a
+        /// restart.
+        fn open(&self) -> Jsonl {
+            Jsonl::open(&self.path).unwrap()
+        }
+
+        fn write_raw(&self, text: &str) {
+            let mut file = OpenOptions::new().append(true).open(&self.path).unwrap();
+            file.write_all(text.as_bytes()).unwrap();
+        }
+
+        /// Half a line, no newline: a process killed mid-write.
+        fn write_torn_tail(&self) {
+            let line = line(&message(Actor::Model, "torn", 9));
+            self.write_raw(&line[..line.len() / 2]);
+        }
+    }
+
+    impl Drop for TempLog {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.path);
+        }
     }
 
     fn message(actor: Actor, content: &str, seq: u64) -> percept::Event {
         percept::Event::message_received(actor, content.to_string(), seq, None)
     }
 
+    fn line(event: &percept::Event) -> String {
+        serde_json::to_string(&Event::from(event)).unwrap()
+    }
+
+    fn content(event: &percept::Event) -> &str {
+        match event.payload() {
+            Payload::MessageReceived { content } => content,
+        }
+    }
+
     #[test]
     fn round_trips_several_events_in_order() {
-        let path = temp_path();
-        let log = Jsonl::open(&path).unwrap();
+        let temp = TempLog::new();
+        let log = temp.open();
 
         let events = vec![
             message(Actor::User, "hi", 0),
@@ -176,90 +227,76 @@ mod tests {
             assert_eq!(restored.seq(), original.seq());
             assert!(restored.actor() == original.actor());
         }
-
-        fs::remove_file(&path).unwrap();
     }
 
     #[test]
     fn missing_file_loads_empty() {
-        let path = temp_path();
-        assert!(!path.exists());
+        let temp = TempLog::new();
+        assert!(!temp.path.exists());
 
-        let log = Jsonl::open(&path).unwrap();
-        assert!(log.load().unwrap().is_empty());
-
-        fs::remove_file(&path).unwrap();
+        assert!(temp.open().load().unwrap().is_empty());
     }
 
     #[test]
     fn torn_final_line_is_dropped() {
-        let path = temp_path();
-        let log = Jsonl::open(&path).unwrap();
-
-        log.append(&message(Actor::User, "complete line", 0))
-            .unwrap();
-
-        // Simulate a process killed mid-write: a second line with no
-        // trailing newline.
-        let wire = Event::from(&message(Actor::Model, "torn", 1));
-        let partial = serde_json::to_string(&wire).unwrap();
-        let mut file = StdOpenOptions::new().append(true).open(&path).unwrap();
-        file.write_all(&partial.as_bytes()[..partial.len() / 2])
-            .unwrap();
-        file.flush().unwrap();
-        drop(file);
+        let temp = TempLog::new();
+        let log = temp.open();
+        log.append(&message(Actor::User, "complete line", 0)).unwrap();
+        temp.write_torn_tail();
 
         let loaded = log.load().unwrap();
         assert_eq!(loaded.len(), 1);
-        match loaded[0].payload() {
-            Payload::MessageReceived { content } => assert_eq!(content, "complete line"),
-        }
+        assert_eq!(content(&loaded[0]), "complete line");
+    }
 
-        fs::remove_file(&path).unwrap();
+    #[test]
+    fn reopening_after_a_torn_write_drops_the_partial_line() {
+        let temp = TempLog::new();
+        let log = temp.open();
+        log.append(&message(Actor::User, "complete line", 0)).unwrap();
+        temp.write_torn_tail();
+        drop(log);
+
+        // The next run appends after the torn bytes. Without truncation
+        // they'd fuse into one unreadable line.
+        let reopened = temp.open();
+        reopened.append(&message(Actor::User, "next run", 1)).unwrap();
+
+        let loaded = reopened.load().unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(content(&loaded[1]), "next run");
     }
 
     #[test]
     fn malformed_mid_file_line_fails_with_its_line_number() {
-        let path = temp_path();
-        let log = Jsonl::open(&path).unwrap();
+        let temp = TempLog::new();
+        let log = temp.open();
 
         log.append(&message(Actor::User, "first", 0)).unwrap();
-
-        let mut file = StdOpenOptions::new().append(true).open(&path).unwrap();
-        writeln!(file, "not json").unwrap();
-        file.flush().unwrap();
-        drop(file);
-
+        temp.write_raw("not json\n");
         log.append(&message(Actor::User, "third", 2)).unwrap();
 
-        match log.load() {
-            Err(err) => match err.downcast_ref::<Error>() {
-                Some(Error::AtLine { line, source }) => {
-                    assert_eq!(*line, 2);
-                    assert!(matches!(**source, Error::BadLine(_)));
-                }
-                _ => panic!("expected Error::AtLine"),
-            },
-            _ => panic!("expected Err(AtLine)"),
+        let Err(err) = log.load() else {
+            panic!("a malformed line must fail the load");
+        };
+        match err.downcast_ref::<Error>() {
+            Some(Error::AtLine { line, source }) => {
+                assert_eq!(*line, 2);
+                assert!(matches!(**source, Error::BadLine(_)));
+            }
+            _ => panic!("expected Error::AtLine, got {err}"),
         }
-
-        fs::remove_file(&path).unwrap();
     }
 
     #[test]
     fn empty_lines_are_skipped() {
-        let path = temp_path();
-        let log = Jsonl::open(&path).unwrap();
+        let temp = TempLog::new();
+        let log = temp.open();
 
         let event = message(Actor::User, "hi", 0);
-        let wire = Event::from(&event);
-        let line = serde_json::to_string(&wire).unwrap();
-        fs::write(&path, format!("\n{line}\n\n")).unwrap();
+        fs::write(&temp.path, format!("\n{}\n\n", line(&event))).unwrap();
 
-        let loaded = log.load().unwrap();
-        assert_eq!(loaded.len(), 1);
-
-        fs::remove_file(&path).unwrap();
+        assert_eq!(log.load().unwrap().len(), 1);
     }
 
     #[test]
@@ -273,34 +310,5 @@ mod tests {
         assert_eq!(log.load().unwrap().len(), 1);
 
         fs::remove_dir_all(&dir).unwrap();
-    }
-
-    #[test]
-    fn reopening_after_a_torn_write_drops_the_partial_line() {
-        let path = temp_path();
-        let log = Jsonl::open(&path).unwrap();
-        log.append(&message(Actor::User, "complete line", 0))
-            .unwrap();
-
-        let wire = Event::from(&message(Actor::Model, "torn", 1));
-        let partial = serde_json::to_string(&wire).unwrap();
-        let mut file = StdOpenOptions::new().append(true).open(&path).unwrap();
-        file.write_all(&partial.as_bytes()[..partial.len() / 2])
-            .unwrap();
-        drop(file);
-        drop(log);
-
-        // The next run appends after the torn bytes. Without truncation
-        // they'd fuse into one unreadable line.
-        let reopened = Jsonl::open(&path).unwrap();
-        reopened.append(&message(Actor::User, "next run", 1)).unwrap();
-
-        let loaded = reopened.load().unwrap();
-        assert_eq!(loaded.len(), 2);
-        match loaded[1].payload() {
-            Payload::MessageReceived { content } => assert_eq!(content, "next run"),
-        }
-
-        fs::remove_file(&path).unwrap();
     }
 }

@@ -30,39 +30,30 @@ async fn run(
     loop {
         terminal.draw(|frame| tui::draw(frame, chat))?;
 
-        let mut quit = false;
         tokio::select! {
+            // Biased, so a finished reply is always committed before a
+            // keypress that could quit. Unbiased, select! picks at
+            // random and Esc can beat a queued Done, leaving the log
+            // with a prompt and no answer.
+            biased;
+
+            Some(event) = reply_rx.recv() => {
+                match event {
+                    StreamEvent::Chunk(chunk) => chat.conversation.append_chunk(chunk),
+                    StreamEvent::Done => chat.conversation.end_stream()?,
+                }
+            }
             Some(Ok(event)) = term_events.next() => {
                 if let CtEvent::Key(key) = event {
                     if key.kind == KeyEventKind::Press
                         && tui::handle_key(chat, key, &reply_tx)?
                     {
-                        quit = true;
+                        return Ok(());
                     }
                 }
             }
-            Some(event) = reply_rx.recv() => apply(chat, event)?,
-        }
-
-        if quit {
-            // A reply that finished while the quit key was in flight is
-            // still queued: select! picks at random between the two
-            // ready branches, so the keypress can win. Commit it rather
-            // than leaving the log with a prompt and no answer.
-            while let Ok(event) = reply_rx.try_recv() {
-                apply(chat, event)?;
-            }
-            return Ok(());
         }
     }
-}
-
-fn apply(chat: &mut Chat<'_>, event: StreamEvent) -> Result<(), Box<dyn std::error::Error>> {
-    match event {
-        StreamEvent::Chunk(chunk) => chat.conversation.append_chunk(chunk),
-        StreamEvent::Done => chat.conversation.end_stream()?,
-    }
-    Ok(())
 }
 
 async fn try_main() -> Result<(), Box<dyn std::error::Error>> {

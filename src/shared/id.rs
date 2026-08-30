@@ -31,7 +31,6 @@ impl<T> Id<T> {
         }
     }
 
-    #[allow(dead_code)]
     pub fn as_uuid(&self) -> Uuid {
         self.uuid
     }
