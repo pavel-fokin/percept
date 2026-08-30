@@ -1,10 +1,5 @@
 # AI agent instructions
 
-## Git
-
-Use conventional commit messages under 72 chars. Skip the body -- subject
-line only.
-
 ## Architecture
 
 Layer by dependency direction - each layer depends only on the one below
@@ -33,9 +28,14 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   in parallel to compare the stack; Rust wins going forward. The Go
   implementation is removed - it isn't kept as a reference.
 
+## Git
+
+Use conventional commit messages under 72 chars. Skip the body -- subject
+line only.
+
 ## Writing
 
-Chats and docs are both text. Write for a specific reader.
+These rules apply to any human-readable text. Write for a specific reader.
 
 - One idea per sentence. Average under 20 words.
 - No metadiscourse. Don't announce what you're about to say.
@@ -45,6 +45,9 @@ Chats and docs are both text. Write for a specific reader.
   prose -- lists are for parallel items only.
 - Cut before you add. Most sentences fail the question
   "what breaks if this is gone?"
+- In code, that means: don't restate what a signature or an
+  identifier's name already shows. Comment only what the code can't
+  tell the reader.
 
 Target Flesch-Kincaid grade 12 or below. Treat it as a smoke test,
 not a gate -- professional terms inflate the score honestly. If
