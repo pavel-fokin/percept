@@ -23,7 +23,7 @@ it, never sideways or up:
 | Application | `app` | `Conversation` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. |
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
 | Infrastructure | `providers` | `Stub` today, real LLM clients later - implements `percept::Model`. |
-| Infrastructure | `codec` | JSON wire format for the event log - the serde boundary. Consumed once persistence lands. |
+| Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog`. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 
 Wire concrete types together only at the entrypoint - `main` in Rust.
@@ -39,11 +39,23 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   `actor`, `causation_id` (the event that directly caused this one),
   `created_at` (`Timestamp`), and a typed `payload` enum - `message.received`
   is the only variant so far. The domain stays serde-free; the JSON wire
-  format lives in `codec`, which rejects event types it doesn't know
-  rather than the DTO failing to parse. `Id<T>` and `Timestamp` live in
-  `shared`, below the domain. Streaming is separate from the log: reply
-  chunks reach the UI transiently and one `Event` is committed when the
-  reply completes.
+  format lives in `store`, which rejects event types it doesn't know
+  rather than the wire event failing to parse. `Id<T>` and
+  `Timestamp` live in `shared`, below the domain. Streaming is separate
+  from the log: reply chunks reach the UI transiently and one `Event` is
+  committed when the reply completes.
+- 2026-08-30: events persist to `percept.jsonl` through the domain-owned
+  `percept::EventLog` port; `store::Jsonl` is the implementation. The
+  path is relative to the working directory, not a fixed location - a
+  deliberate choice, so the transcript follows wherever the app is
+  launched from. `seq` leaves the process-global static above for one
+  counter per `Conversation`, seeded past its own log's maximum and
+  advanced only once an append succeeds - one log, one gap-free
+  sequence, across both restarts and failed writes. An append failure
+  ends the run: losing a committed event silently is worse than
+  quitting. One process per log file - nothing enforces this. The file
+  is one endless conversation; there's no session or conversation
+  boundary yet.
 
 ## Workflow
 

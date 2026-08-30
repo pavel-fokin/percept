@@ -1,4 +1,3 @@
-use std::io;
 use std::sync::Arc;
 
 use crossterm::event::{Event as CtEvent, EventStream, KeyEventKind};
@@ -6,17 +5,25 @@ use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
 mod app;
-mod codec;
 mod percept;
 mod providers;
 mod shared;
+mod store;
 mod tui;
 
 use app::Conversation;
 use providers::Stub;
+use store::Jsonl;
 use tui::{Chat, StreamEvent};
 
-async fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat<'_>) -> io::Result<()> {
+/// Where the event log lives: `percept.jsonl` in the working directory,
+/// so the transcript follows wherever the app is launched from.
+const LOG_PATH: &str = "percept.jsonl";
+
+async fn run(
+    terminal: &mut ratatui::DefaultTerminal,
+    chat: &mut Chat<'_>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut term_events = EventStream::new();
     let (reply_tx, mut reply_rx) = mpsc::unbounded_channel::<StreamEvent>();
 
@@ -24,31 +31,46 @@ async fn run(terminal: &mut ratatui::DefaultTerminal, chat: &mut Chat<'_>) -> io
         terminal.draw(|frame| tui::draw(frame, chat))?;
 
         tokio::select! {
-            Some(Ok(event)) = term_events.next() => {
-                if let CtEvent::Key(key) = event {
-                    if key.kind == KeyEventKind::Press
-                        && tui::handle_key(chat, key, &reply_tx)
-                    {
-                        return Ok(());
-                    }
-                }
-            }
+            // Biased, so a finished reply is always committed before a
+            // keypress that could quit. Unbiased, select! picks at
+            // random and Esc can beat a queued Done, leaving the log
+            // with a prompt and no answer.
+            biased;
+
             Some(event) = reply_rx.recv() => {
                 match event {
                     StreamEvent::Chunk(chunk) => chat.conversation.append_chunk(chunk),
-                    StreamEvent::Done => chat.conversation.end_stream(),
+                    StreamEvent::Done => chat.conversation.end_stream()?,
+                }
+            }
+            Some(Ok(event)) = term_events.next() => {
+                if let CtEvent::Key(key) = event {
+                    if key.kind == KeyEventKind::Press
+                        && tui::handle_key(chat, key, &reply_tx)?
+                    {
+                        return Ok(());
+                    }
                 }
             }
         }
     }
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() -> io::Result<()> {
+async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
+    let log = Arc::new(Jsonl::open(LOG_PATH)?);
+    let conversation = Conversation::new(Arc::new(Stub), log)?;
+
     let mut terminal = ratatui::init();
-    let conversation = Conversation::new(Arc::new(Stub));
     let mut chat = Chat::new(Box::new(conversation));
     let result = run(&mut terminal, &mut chat).await;
     ratatui::restore();
     result
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    if let Err(err) = try_main().await {
+        eprintln!("percept: {err}");
+        std::process::exit(1);
+    }
 }

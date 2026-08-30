@@ -1,15 +1,6 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use crate::percept::{self, Actor, Event, EventId};
-
-/// Process-global event sequence. Gap-free and monotonic across every
-/// Conversation in the process, assigned when an event is committed.
-static EVENT_SEQ: AtomicU64 = AtomicU64::new(0);
-
-fn next_seq() -> u64 {
-    EVENT_SEQ.fetch_add(1, Ordering::Relaxed)
-}
 
 /// Streams the reply chunk by chunk; returning means it's done.
 pub type ReplyStream = Box<dyn FnOnce(&mut dyn FnMut(String)) + Send>;
@@ -19,8 +10,9 @@ pub type ReplyStream = Box<dyn FnOnce(&mut dyn FnMut(String)) + Send>;
 pub trait AppService {
     /// Records the user's message and returns a thunk that computes the
     /// reply. The thunk captures its own history snapshot, so it's safe
-    /// to run off-thread.
-    fn submit(&mut self, text: String) -> ReplyStream;
+    /// to run off-thread. Errs, without recording anything, if the
+    /// event can't be appended to the log.
+    fn submit(&mut self, text: String) -> Result<ReplyStream, Box<dyn std::error::Error>>;
 
     /// Appends a chunk to the in-progress reply. The reply isn't an
     /// event yet - it's committed once by `end_stream`. Call only from
@@ -28,8 +20,9 @@ pub trait AppService {
     fn append_chunk(&mut self, content: String);
 
     /// Commits the streamed reply as one assistant event. A reply with
-    /// no chunks commits nothing.
-    fn end_stream(&mut self);
+    /// no chunks commits nothing. Errs if the event can't be appended
+    /// to the log.
+    fn end_stream(&mut self) -> Result<(), Box<dyn std::error::Error>>;
 
     fn events(&self) -> &[Event];
 
@@ -38,10 +31,17 @@ pub trait AppService {
 }
 
 /// Orchestrates a chat: turns input into events, asks Model for a
-/// reply, keeps the transcript.
+/// reply, keeps the transcript. Every event goes through `log` before
+/// it's added to `events`, so a failed write can never leave the
+/// in-memory transcript ahead of what's durable.
 pub struct Conversation {
     events: Vec<Event>,
+    /// The seq the next committed event gets. One counter per log, so
+    /// it only moves once an append succeeds - a failed write leaves no
+    /// gap behind.
+    next_seq: u64,
     chat: Arc<dyn percept::Model>,
+    log: Arc<dyn percept::EventLog>,
     /// Text of the reply now streaming, or None between replies.
     pending: Option<String>,
     /// The user message the streaming reply answers - its `causation_id`
@@ -50,29 +50,42 @@ pub struct Conversation {
 }
 
 impl Conversation {
-    pub fn new(chat: Arc<dyn percept::Model>) -> Self {
-        Self {
-            events: Vec::new(),
+    /// Opens on whatever `log` already holds, so the transcript
+    /// survives a restart. The sequence picks up past the loaded
+    /// maximum, keeping the ADR's gap-free ordering across runs.
+    pub fn new(
+        chat: Arc<dyn percept::Model>,
+        log: Arc<dyn percept::EventLog>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let events = log.load()?;
+        let next_seq = events.iter().map(Event::seq).max().map_or(0, |max| max + 1);
+
+        Ok(Self {
+            events,
+            next_seq,
             chat,
+            log,
             pending: None,
             pending_cause: None,
-        }
+        })
     }
 }
 
 impl AppService for Conversation {
-    fn submit(&mut self, text: String) -> ReplyStream {
-        let event = Event::message_received(Actor::User, text, next_seq(), None);
+    fn submit(&mut self, text: String) -> Result<ReplyStream, Box<dyn std::error::Error>> {
+        let event = Event::message_received(Actor::User, text, self.next_seq, None);
+        self.log.append(&event)?;
+        self.next_seq += 1;
         self.pending_cause = Some(event.id());
         self.events.push(event);
 
         let history = percept::to_messages(&self.events);
         let chat = Arc::clone(&self.chat);
-        Box::new(move |on_chunk: &mut dyn FnMut(String)| {
+        Ok(Box::new(move |on_chunk: &mut dyn FnMut(String)| {
             if chat.reply(&history, on_chunk).is_err() {
                 on_chunk("Sorry, something went wrong.".to_string());
             }
-        })
+        }))
     }
 
     fn append_chunk(&mut self, content: String) {
@@ -81,16 +94,24 @@ impl AppService for Conversation {
             .push_str(&content);
     }
 
-    fn end_stream(&mut self) {
-        if let Some(content) = self.pending.take() {
-            let event = Event::message_received(
-                Actor::Model,
-                content,
-                next_seq(),
-                self.pending_cause.take(),
-            );
-            self.events.push(event);
-        }
+    fn end_stream(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let Some(content) = self.pending.as_ref() else {
+            return Ok(());
+        };
+        // The reply is only cleared once it's durable. Taking it first
+        // would leave a failed append with nothing to retry from.
+        let event = Event::message_received(
+            Actor::Model,
+            content.clone(),
+            self.next_seq,
+            self.pending_cause,
+        );
+        self.log.append(&event)?;
+        self.next_seq += 1;
+        self.pending = None;
+        self.pending_cause = None;
+        self.events.push(event);
+        Ok(())
     }
 
     fn events(&self) -> &[Event] {
@@ -106,6 +127,8 @@ impl AppService for Conversation {
 mod tests {
     use super::*;
     use crate::percept::{Actor, Message, Payload};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
 
     struct Silent;
 
@@ -125,11 +148,48 @@ mod tests {
         }
     }
 
+    /// An in-memory EventLog for tests. `fail_append` flips `append`
+    /// into an error without touching the filesystem, and can be
+    /// flipped mid-conversation.
+    #[derive(Default)]
+    struct FakeLog {
+        events: Mutex<Vec<Event>>,
+        fail_append: AtomicBool,
+    }
+
+    impl FakeLog {
+        fn seeded(events: Vec<Event>) -> Self {
+            Self {
+                events: Mutex::new(events),
+                ..Self::default()
+            }
+        }
+
+        fn start_failing(&self) {
+            self.fail_append.store(true, Ordering::Relaxed);
+        }
+    }
+
+    impl percept::EventLog for FakeLog {
+        fn append(&self, event: &Event) -> Result<(), Box<dyn std::error::Error>> {
+            if self.fail_append.load(Ordering::Relaxed) {
+                return Err("append failed".into());
+            }
+            self.events.lock().unwrap().push(event.clone());
+            Ok(())
+        }
+
+        fn load(&self) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
+            Ok(self.events.lock().unwrap().clone())
+        }
+    }
+
     #[test]
     fn streamed_reply_commits_one_event_caused_by_the_prompt() {
-        let mut convo = Conversation::new(Arc::new(Silent));
+        let mut convo =
+            Conversation::new(Arc::new(Silent), Arc::new(FakeLog::default())).unwrap();
 
-        let _ = convo.submit("hi".to_string());
+        let _ = convo.submit("hi".to_string()).unwrap();
         assert_eq!(convo.events().len(), 1);
         assert!(convo.pending_reply().is_none());
 
@@ -138,7 +198,7 @@ mod tests {
         assert_eq!(convo.pending_reply(), Some("hello"));
         assert_eq!(convo.events().len(), 1);
 
-        convo.end_stream();
+        convo.end_stream().unwrap();
         assert!(convo.pending_reply().is_none());
 
         let events = convo.events();
@@ -152,9 +212,50 @@ mod tests {
 
     #[test]
     fn empty_reply_commits_nothing() {
-        let mut convo = Conversation::new(Arc::new(Silent));
-        let _ = convo.submit("hi".to_string());
-        convo.end_stream();
+        let mut convo =
+            Conversation::new(Arc::new(Silent), Arc::new(FakeLog::default())).unwrap();
+        let _ = convo.submit("hi".to_string()).unwrap();
+        convo.end_stream().unwrap();
+        assert_eq!(convo.events().len(), 1);
+    }
+
+    #[test]
+    fn preseeded_log_becomes_the_opening_transcript_and_seq_resumes_past_it() {
+        let seeded = vec![
+            Event::message_received(Actor::User, "hi".to_string(), 5, None),
+            Event::message_received(Actor::Model, "hello".to_string(), 9, None),
+        ];
+        let log = Arc::new(FakeLog::seeded(seeded));
+        let mut convo = Conversation::new(Arc::new(Silent), log).unwrap();
+        assert_eq!(convo.events().len(), 2);
+
+        let _ = convo.submit("next".to_string()).unwrap();
+        let events = convo.events();
+        assert_eq!(events.len(), 3);
+        assert!(events[2].seq() > 9);
+    }
+
+    #[test]
+    fn append_failure_surfaces_as_err_and_leaves_transcript_unchanged() {
+        let log = Arc::new(FakeLog::default());
+        log.start_failing();
+        let mut convo = Conversation::new(Arc::new(Silent), log.clone()).unwrap();
+
+        assert!(convo.submit("hi".to_string()).is_err());
+        assert!(convo.events().is_empty());
+    }
+
+    #[test]
+    fn a_failed_reply_append_leaves_the_reply_pending() {
+        let log = Arc::new(FakeLog::default());
+        let mut convo = Conversation::new(Arc::new(Silent), log.clone()).unwrap();
+
+        let _ = convo.submit("hi".to_string()).unwrap();
+        convo.append_chunk("hello".to_string());
+        log.start_failing();
+
+        assert!(convo.end_stream().is_err());
+        assert_eq!(convo.pending_reply(), Some("hello"));
         assert_eq!(convo.events().len(), 1);
     }
 }

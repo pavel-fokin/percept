@@ -23,9 +23,7 @@ impl<T> Id<T> {
     }
 
     /// Rebuilds an Id from a UUID read off the wire. No validation that
-    /// the UUID is v7 - the storage layer owns what it persisted. Unused
-    /// until the store lands; see `codec`.
-    #[allow(dead_code)]
+    /// the UUID is v7 - the storage layer owns what it persisted.
     pub fn from_uuid(uuid: Uuid) -> Self {
         Self {
             uuid,
@@ -33,7 +31,6 @@ impl<T> Id<T> {
         }
     }
 
-    #[allow(dead_code)]
     pub fn as_uuid(&self) -> Uuid {
         self.uuid
     }

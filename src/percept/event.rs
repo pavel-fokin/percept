@@ -16,14 +16,16 @@ pub enum Actor {
 }
 
 /// Event-specific data. One variant per kind of fact the log records.
+#[derive(Clone)]
 pub enum Payload {
     MessageReceived { content: String },
 }
 
 /// One recorded fact in the conversation log. Append-only: a committed
 /// Event never changes. `actor` and the `payload` variant together say
-/// what happened; `causation_id` says what led to it. Events live in
-/// memory for the life of the process today; persistence comes later.
+/// what happened; `causation_id` says what led to it. `Clone` copies a
+/// record, id and all - it never makes a committed event editable.
+#[derive(Clone)]
 pub struct Event {
     id: EventId,
     seq: u64,
@@ -54,8 +56,7 @@ impl Event {
 
     /// Rebuilds an Event from stored fields - the persistence boundary,
     /// where `id` and `created_at` come from storage rather than being
-    /// minted fresh. Unused until the store lands; see `codec`.
-    #[allow(dead_code)]
+    /// minted fresh.
     pub fn restore(
         id: EventId,
         seq: u64,
