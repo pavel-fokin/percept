@@ -4,7 +4,7 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
 use super::Chat;
-use crate::percept::{Event, Sender};
+use crate::percept::{Actor, Event, Payload};
 
 pub fn draw(frame: &mut Frame, chat: &Chat) {
     let [transcript_area, input_area] =
@@ -22,7 +22,10 @@ fn transcript(chat: &Chat, area: Rect) -> (Text<'static>, u16) {
     let width = area.width.max(1) as usize;
     let mut lines: Vec<Line<'static>> = Vec::new();
     for event in chat.conversation.events() {
-        lines.extend(message_lines(chat, event, width));
+        lines.extend(event_lines(chat, event, width));
+    }
+    if let Some(reply) = chat.conversation.pending_reply() {
+        lines.extend(styled_lines(chat, Actor::Model, reply, width));
     }
 
     let total = lines.len() as u16;
@@ -30,12 +33,21 @@ fn transcript(chat: &Chat, area: Rect) -> (Text<'static>, u16) {
     (Text::from(lines), offset)
 }
 
-fn message_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
-    let (style, prefix) = match event.sender {
-        Sender::User => (chat.user_style, "You: "),
-        Sender::Assistant => (chat.assistant_style, "Assistant: "),
+fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
+    match event.payload() {
+        Payload::MessageReceived { content } => {
+            styled_lines(chat, event.actor(), content, width)
+        }
+    }
+}
+
+fn styled_lines(chat: &Chat, actor: Actor, content: &str, width: usize) -> Vec<Line<'static>> {
+    let (style, prefix) = match actor {
+        Actor::User => (chat.user_style, "You: "),
+        Actor::Model => (chat.assistant_style, "Assistant: "),
+        Actor::System => (chat.assistant_style, "System: "),
     };
-    let full_line = format!("{prefix}{}", event.content);
+    let full_line = format!("{prefix}{content}");
 
     textwrap::wrap(&full_line, width)
         .iter()

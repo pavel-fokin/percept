@@ -1,38 +1,100 @@
-use std::time::SystemTime;
-
-use super::id::Id;
-
-#[derive(Clone, Copy, PartialEq)]
-pub enum Sender {
-    User,
-    Assistant,
-}
+use crate::shared::{Id, Timestamp};
 
 /// Identifies an Event.
 pub type EventId = Id<Event>;
 
-/// Records one chat message: who sent it, what it said, and when. Events
-/// are the app's only record of the transcript, kept in memory for the
-/// life of the process.
-///
-/// `id` and `created_at` aren't read yet - the UI only renders `sender`
-/// and `content` - but they're part of the entity per the ADR, so the
-/// lint is suppressed rather than the fields removed.
-#[allow(dead_code)]
+/// Who an Event is attributed to. Extend by adding a variant.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Actor {
+    User,
+    Model,
+    // No producer yet - file and tool events come later. Part of the
+    // actor vocabulary per ADR; the lint is suppressed rather than the
+    // variant removed.
+    #[allow(dead_code)]
+    System,
+}
+
+/// Event-specific data. One variant per kind of fact the log records.
+pub enum Payload {
+    MessageReceived { content: String },
+}
+
+/// One recorded fact in the conversation log. Append-only: a committed
+/// Event never changes. `actor` and the `payload` variant together say
+/// what happened; `causation_id` says what led to it. Events live in
+/// memory for the life of the process today; persistence comes later.
 pub struct Event {
-    pub id: EventId,
-    pub created_at: SystemTime,
-    pub sender: Sender,
-    pub content: String,
+    id: EventId,
+    seq: u64,
+    actor: Actor,
+    causation_id: Option<EventId>,
+    created_at: Timestamp,
+    payload: Payload,
 }
 
 impl Event {
-    pub fn new(sender: Sender, content: String) -> Self {
+    /// A `message.received` event. Fills `id` and `created_at`; the
+    /// caller owns `seq` (the log's ordering) and `causation_id`.
+    pub fn message_received(
+        actor: Actor,
+        content: String,
+        seq: u64,
+        causation_id: Option<EventId>,
+    ) -> Self {
         Self {
             id: EventId::new(),
-            created_at: SystemTime::now(),
-            sender,
-            content,
+            seq,
+            actor,
+            causation_id,
+            created_at: Timestamp::now(),
+            payload: Payload::MessageReceived { content },
         }
+    }
+
+    /// Rebuilds an Event from stored fields - the persistence boundary,
+    /// where `id` and `created_at` come from storage rather than being
+    /// minted fresh. Unused until the store lands; see `codec`.
+    #[allow(dead_code)]
+    pub fn restore(
+        id: EventId,
+        seq: u64,
+        actor: Actor,
+        causation_id: Option<EventId>,
+        created_at: Timestamp,
+        payload: Payload,
+    ) -> Self {
+        Self {
+            id,
+            seq,
+            actor,
+            causation_id,
+            created_at,
+            payload,
+        }
+    }
+
+    pub fn id(&self) -> EventId {
+        self.id
+    }
+
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    pub fn actor(&self) -> Actor {
+        self.actor
+    }
+
+    pub fn causation_id(&self) -> Option<EventId> {
+        self.causation_id
+    }
+
+    pub fn created_at(&self) -> Timestamp {
+        self.created_at
+    }
+
+    pub fn payload(&self) -> &Payload {
+        &self.payload
     }
 }

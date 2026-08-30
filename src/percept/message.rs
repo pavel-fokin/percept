@@ -1,21 +1,15 @@
-use super::{Event, Sender};
-
-/// Identifies who authored a Message.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Role {
-    User,
-    Assistant,
-}
+use super::{Actor, Event, Payload};
 
 /// One turn in a conversation - the value-object shape Model needs,
-/// independent of Event's identity/audit concerns.
+/// independent of Event's identity and audit concerns. Derived from the
+/// log at the boundary, never stored.
 ///
 /// `role` and `content` aren't read yet - Stub ignores `messages` while
-/// it streams static text - but they're part of Model's contract, so
-/// the lint is suppressed rather than the fields removed.
+/// it streams static text - but they're Model's contract, so the lint
+/// is suppressed rather than the fields removed.
 #[allow(dead_code)]
 pub struct Message {
-    pub role: Role,
+    pub role: Actor,
     pub content: String,
 }
 
@@ -32,16 +26,17 @@ pub trait Model: Send + Sync {
     ) -> Result<(), Box<dyn std::error::Error>>;
 }
 
-/// Converts the transcript into the form Model expects.
+/// Converts the transcript into the form Model expects. The `match` is
+/// exhaustive: a new `Payload` variant won't compile here until it says
+/// whether it maps to a turn.
 pub fn to_messages(events: &[Event]) -> Vec<Message> {
     events
         .iter()
-        .map(|e| Message {
-            role: match e.sender {
-                Sender::User => Role::User,
-                Sender::Assistant => Role::Assistant,
+        .map(|e| match e.payload() {
+            Payload::MessageReceived { content } => Message {
+                role: e.actor(),
+                content: content.clone(),
             },
-            content: e.content.clone(),
         })
         .collect()
 }

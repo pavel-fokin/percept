@@ -21,6 +21,22 @@ impl<T> Id<T> {
             _entity: PhantomData,
         }
     }
+
+    /// Rebuilds an Id from a UUID read off the wire. No validation that
+    /// the UUID is v7 - the storage layer owns what it persisted. Unused
+    /// until the store lands; see `codec`.
+    #[allow(dead_code)]
+    pub fn from_uuid(uuid: Uuid) -> Self {
+        Self {
+            uuid,
+            _entity: PhantomData,
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn as_uuid(&self) -> Uuid {
+        self.uuid
+    }
 }
 
 impl<T> Default for Id<T> {
