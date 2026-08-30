@@ -45,10 +45,26 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   chunks reach the UI transiently and one `Event` is committed when the
   reply completes.
 
+## Workflow
+
+Non-trivial work runs plan, build, review. A one-line fix skips it.
+
+- **Plan.** The main agent breaks the request into issues via the `plan`
+  skill. An issue has one clear outcome and at most five settled
+  decisions. It is product (a vertical slice of behaviour) or tech
+  (refactoring, docs, tooling). Scope each as small as it goes. The user
+  agrees the set before any code.
+- **Build.** Each issue goes to the `software-developer` subagent. It
+  follows this file, writes the code, runs the build and tests, and
+  reports back. It does not design, choose scope, commit, or push.
+- **Review.** The main agent checks the diff against the issue, then runs
+  `/code-review`. Small fixes land here; larger rework goes back to the
+  subagent.
+
 ## Git
 
 Use conventional commit messages under 72 chars. Skip the body -- subject
-line only.
+line only. One commit per issue.
 
 ## Writing
 
