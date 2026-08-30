@@ -3,16 +3,14 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::percept;
+use crate::percept::{self, EventLog};
 use crate::store::{Error, Event};
 
 /// A JSONL event log: one compact `store::Event` per line, appended to
 /// as the app runs and replayed to rebuild the transcript on start.
-///
-/// `append` flushes after every write but never calls `fsync` - a killed
-/// process loses nothing, a power cut can lose the tail line. Not wired
-/// into the app yet; the trait it will implement arrives next issue.
-#[allow(dead_code)]
+/// Implements `percept::EventLog` - `append` flushes after every write
+/// but never calls `fsync`, so a killed process loses nothing, but a
+/// power cut can lose the tail line.
 pub struct Jsonl {
     /// Every read and write goes through this one handle, so the log
     /// can't be read from one file while being written to another -
@@ -21,7 +19,6 @@ pub struct Jsonl {
     file: Mutex<fs::File>,
 }
 
-#[allow(dead_code)]
 impl Jsonl {
     /// Opens the log at `path`, creating its parent directory and the
     /// file itself if either is missing. A missing file is an empty
@@ -55,15 +52,30 @@ impl Jsonl {
         })
     }
 
+    fn parse_line(raw: &str) -> Result<percept::Event, Error> {
+        let wire: Event = serde_json::from_str(raw).map_err(Error::BadLine)?;
+        percept::Event::try_from(wire)
+    }
+}
+
+impl EventLog for Jsonl {
     /// Appends one event as a compact JSON line and flushes.
-    pub fn append(&self, event: &percept::Event) -> Result<(), Error> {
+    fn append(&self, event: &percept::Event) -> Result<(), Box<dyn std::error::Error>> {
         let mut line =
             serde_json::to_string(&Event::from(event)).expect("store::Event always serializes");
         line.push('\n');
 
         let mut file = self.file.lock().expect("jsonl file mutex poisoned");
-        file.write_all(line.as_bytes()).map_err(Error::Io)?;
-        file.flush().map_err(Error::Io)
+        if let Err(e) = file.write_all(line.as_bytes()) {
+            // A short write leaves a partial line with no newline. The
+            // next append would land right after it and fuse into one
+            // corrupt line that no longer looks torn, which nothing
+            // repairs. Cut it back before returning the failure.
+            let _ = truncate_torn_tail(&mut file);
+            return Err(Error::Io(e).into());
+        }
+        file.flush().map_err(Error::Io)?;
+        Ok(())
     }
 
     /// Loads every event in the log, in the order it was appended.
@@ -78,7 +90,7 @@ impl Jsonl {
     /// when it doesn't. The lock is held throughout, so an `append`
     /// running on another thread can't have its half-written line read
     /// as a torn one and dropped.
-    pub fn load(&self) -> Result<Vec<percept::Event>, Error> {
+    fn load(&self) -> Result<Vec<percept::Event>, Box<dyn std::error::Error>> {
         let mut file = self.file.lock().expect("jsonl file mutex poisoned");
         let bytes = read_all(&mut file)?;
 
@@ -96,18 +108,13 @@ impl Jsonl {
             if raw.is_empty() {
                 continue;
             }
-            let event = Self::parse_line(raw).map_err(|source| Error::AtLine {
+            let event = Jsonl::parse_line(raw).map_err(|source| Error::AtLine {
                 line: idx + 1,
                 source: Box::new(source),
             })?;
             events.push(event);
         }
         Ok(events)
-    }
-
-    fn parse_line(raw: &str) -> Result<percept::Event, Error> {
-        let wire: Event = serde_json::from_str(raw).map_err(Error::BadLine)?;
-        percept::Event::try_from(wire)
     }
 }
 
@@ -226,10 +233,13 @@ mod tests {
         log.append(&message(Actor::User, "third", 2)).unwrap();
 
         match log.load() {
-            Err(Error::AtLine { line, source }) => {
-                assert_eq!(line, 2);
-                assert!(matches!(*source, Error::BadLine(_)));
-            }
+            Err(err) => match err.downcast_ref::<Error>() {
+                Some(Error::AtLine { line, source }) => {
+                    assert_eq!(*line, 2);
+                    assert!(matches!(**source, Error::BadLine(_)));
+                }
+                _ => panic!("expected Error::AtLine"),
+            },
             _ => panic!("expected Err(AtLine)"),
         }
 

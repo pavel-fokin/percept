@@ -54,8 +54,7 @@ impl Event {
 
     /// Rebuilds an Event from stored fields - the persistence boundary,
     /// where `id` and `created_at` come from storage rather than being
-    /// minted fresh. Unused until `store` reads the log back.
-    #[allow(dead_code)]
+    /// minted fresh.
     pub fn restore(
         id: EventId,
         seq: u64,
