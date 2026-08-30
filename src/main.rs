@@ -6,8 +6,10 @@ use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
 mod app;
+mod codec;
 mod percept;
 mod providers;
+mod shared;
 mod tui;
 
 use app::Conversation;

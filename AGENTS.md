@@ -1,5 +1,17 @@
 # AI agent instructions
 
+## Domain
+
+- `Event` is an append-only log entry: `id`, a process-global `seq`, an
+  `actor`, an optional `causation_id`, a `created_at`, and a typed
+  `payload`. Once committed it never changes.
+- `Message` is a value object (no identity) - the shape `Model` needs to
+  talk to an LLM. Derived from the log at the boundary, never stored.
+- `Actor` (`User`, `Model`, `System`) is the one vocabulary for who a
+  message or event is attributed to.
+- `Model` is domain-owned, not infrastructure: `percept` needs "a reply
+  given messages," never the mechanism behind it.
+
 ## Architecture
 
 Layer by dependency direction - each layer depends only on the one below
@@ -7,19 +19,14 @@ it, never sideways or up:
 
 | Layer | Package | Owns |
 |---|---|---|
-| Domain | `percept` | `Event`, `Message`, `Model` - entities and the capabilities they need, as interfaces. No outward dependencies. |
+| Domain | `percept` | `Event`, `Message`, `Model` - entities and the capabilities they need, as interfaces. Serde-free; depends only on `shared`. |
 | Application | `app` | `Conversation` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. |
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
-| Infrastructure | `providers` | `Stub` today, real LLM clients later - implements `percept.Model`. |
+| Infrastructure | `providers` | `Stub` today, real LLM clients later - implements `percept::Model`. |
+| Infrastructure | `codec` | JSON wire format for the event log - the serde boundary. Consumed once persistence lands. |
+| Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 
 Wire concrete types together only at the entrypoint - `main` in Rust.
-
-## Domain
-
-- `Event` is an entity (has an ID, tracked over time); `Message` is a
-  value object (no identity) - the shape `Model` needs to talk to an LLM.
-- `Model` is domain-owned, not infrastructure: `percept` needs "a reply
-  given messages," never the mechanism behind it.
 
 ## ADR
 
@@ -27,6 +34,16 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
 - 2026-08-30: Rust is the implementation language, not Go. Both were built
   in parallel to compare the stack; Rust wins going forward. The Go
   implementation is removed - it isn't kept as a reference.
+- 2026-08-30: `Event` is an append-only log envelope, not a mutable
+  record. Fields: `id` (UUIDv7), `seq` (u64, process-global, gap-free),
+  `actor`, `causation_id` (the event that directly caused this one),
+  `created_at` (`Timestamp`), and a typed `payload` enum - `message.received`
+  is the only variant so far. The domain stays serde-free; the JSON wire
+  format lives in `codec`, which rejects event types it doesn't know
+  rather than the DTO failing to parse. `Id<T>` and `Timestamp` live in
+  `shared`, below the domain. Streaming is separate from the log: reply
+  chunks reach the UI transiently and one `Event` is committed when the
+  reply completes.
 
 ## Git
 
