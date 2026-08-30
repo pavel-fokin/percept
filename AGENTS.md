@@ -59,19 +59,30 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
 
 ## Workflow
 
-Non-trivial work runs plan, build, review. A one-line fix skips it.
+Non-trivial work runs plan, build, review, reflect. A one-line fix
+skips it.
 
 - **Plan.** The main agent breaks the request into issues via the `plan`
-  skill. An issue has one clear outcome and at most five settled
-  decisions. It is product (a vertical slice of behaviour) or tech
-  (refactoring, docs, tooling). Scope each as small as it goes. The user
-  agrees the set before any code.
-- **Build.** Each issue goes to the `software-developer` subagent. It
-  follows this file, writes the code, runs the build and tests, and
-  reports back. It does not design, choose scope, commit, or push.
-- **Review.** The main agent checks the diff against the issue, then runs
-  `/code-review`. Small fixes land here; larger rework goes back to the
-  subagent.
+  skill. An issue has one clear outcome. It is product (a vertical slice
+  of behaviour) or tech (refactoring, docs, tooling). Scope each as
+  small as it goes. Decisions the user lives with - paths, filenames,
+  defaults - are settled with them before the build, never assumed. The
+  user agrees the set before any code.
+- **Build.** An issue with no design left in it, touching one or two
+  files, the main agent builds itself. Anything larger goes to the
+  `software-developer` subagent, which follows this file, writes the
+  code, runs the build and tests, and reports back. It does not design,
+  choose scope, commit, or push.
+- **Review.** The main agent checks the diff against the issue, then
+  runs `/code-review`. Small fixes land here; larger rework goes back to
+  the subagent. `/simplify` runs once per branch, before it merges.
+- **Reflect.** Close the session by proposing changes to this workflow.
+  Cutting a step counts for more than adding one. Aim for the smallest
+  process that still catches mistakes.
+
+The TUI only runs on a real terminal. `scripts/drive.py` forks a pty,
+sends timed keystrokes, and prints the frames; `--plain` strips the
+escapes so the rendered text can be grepped.
 
 ## Git
 
