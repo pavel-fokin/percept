@@ -1,8 +1,9 @@
 use std::fmt;
 
-/// Why a `store::Event` couldn't become a domain `percept::Event`. An
-/// unknown `type` or `actor` means the log was written by a newer build -
-/// the wire event still deserializes, it just has no domain form here.
+/// Why a `store::Event` couldn't become a domain `percept::Event`, or why
+/// the JSONL log couldn't be read or written. An unknown `type` or
+/// `actor` means the log was written by a newer build - the wire event
+/// still deserializes, it just has no domain form here.
 #[derive(Debug)]
 pub enum Error {
     UnknownEventType(String),
@@ -10,6 +11,13 @@ pub enum Error {
     BadUuid(String),
     BadTimestamp(String),
     BadPayload(serde_json::Error),
+    /// A log line isn't valid JSON at all - distinct from `BadPayload`,
+    /// which is a well-formed line whose `payload` field doesn't match
+    /// its `type`.
+    BadLine(serde_json::Error),
+    Io(std::io::Error),
+    /// Wraps any of the above with the 1-based line number it came from.
+    AtLine { line: usize, source: Box<Error> },
 }
 
 impl fmt::Display for Error {
@@ -20,6 +28,9 @@ impl fmt::Display for Error {
             Self::BadUuid(s) => write!(f, "malformed uuid: {s}"),
             Self::BadTimestamp(s) => write!(f, "malformed timestamp: {s}"),
             Self::BadPayload(e) => write!(f, "malformed payload: {e}"),
+            Self::BadLine(e) => write!(f, "malformed line: {e}"),
+            Self::Io(e) => write!(f, "{e}"),
+            Self::AtLine { line, source } => write!(f, "line {line}: {source}"),
         }
     }
 }
