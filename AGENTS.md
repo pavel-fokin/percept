@@ -23,7 +23,7 @@ it, never sideways or up:
 | Application | `app` | `Conversation` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. |
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
 | Infrastructure | `providers` | `Stub` today, real LLM clients later - implements `percept::Model`. |
-| Infrastructure | `codec` | JSON wire format for the event log - the serde boundary. Consumed once persistence lands. |
+| Infrastructure | `store` | The JSONL event log - the serde boundary. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 
 Wire concrete types together only at the entrypoint - `main` in Rust.
@@ -39,11 +39,11 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   `actor`, `causation_id` (the event that directly caused this one),
   `created_at` (`Timestamp`), and a typed `payload` enum - `message.received`
   is the only variant so far. The domain stays serde-free; the JSON wire
-  format lives in `codec`, which rejects event types it doesn't know
-  rather than the DTO failing to parse. `Id<T>` and `Timestamp` live in
-  `shared`, below the domain. Streaming is separate from the log: reply
-  chunks reach the UI transiently and one `Event` is committed when the
-  reply completes.
+  format lives in `store`, which rejects event types it doesn't know
+  rather than the wire event failing to parse. `Id<T>` and
+  `Timestamp` live in `shared`, below the domain. Streaming is separate
+  from the log: reply chunks reach the UI transiently and one `Event` is
+  committed when the reply completes.
 
 ## Workflow
 
