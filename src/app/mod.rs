@@ -2,42 +2,36 @@ use std::sync::Arc;
 
 use crate::percept::{self, Event, Sender};
 
-/// A thunk that streams the assistant's reply, invoking the given
-/// callback once per chunk; returning marks the reply complete.
+/// Streams the reply chunk by chunk; returning means it's done.
 pub type ReplyStream = Box<dyn FnOnce(&mut dyn FnMut(String)) + Send>;
 
-/// What tui needs from the application layer. Owned here, not in tui:
-/// Rust requires the implementor to import a trait to name it in an impl
-/// block, so putting this in tui would force an app -> tui edge. tui
-/// depends on this trait instead of the concrete Conversation type.
+/// What tui needs from the app layer. Lives here, not in tui, so
+/// implementing it doesn't pull tui into app's dependencies.
 pub trait AppService {
-    /// Records the user's message and returns a thunk that streams the
-    /// assistant's reply. The history it needs is captured now, before
-    /// returning - the thunk borrows nothing, so it's safe to run on any
-    /// thread (e.g. via `spawn_blocking`).
+    /// Records the user's message and returns a thunk that computes the
+    /// reply. The thunk captures its own history snapshot, so it's safe
+    /// to run off-thread.
     fn submit(&mut self, text: String) -> ReplyStream;
 
-    /// Appends a chunk to the in-progress assistant reply, starting a
-    /// new assistant event on the first chunk of a stream. Must only be
-    /// called from the task that owns the Conversation - never from
-    /// inside the thunk.
+    /// Appends a chunk to the in-progress reply, starting a new
+    /// assistant event on the first chunk. Call only from the task that
+    /// owns the Conversation, never from inside the thunk.
     fn append_chunk(&mut self, content: String);
 
-    /// Marks the in-progress reply complete, so the next chunk received
-    /// starts a new assistant event instead of extending this one.
+    /// Marks the reply complete, so the next chunk starts a new
+    /// assistant event instead of extending this one.
     fn end_stream(&mut self);
 
     fn events(&self) -> &[Event];
 }
 
-/// Conversation orchestrates a chat: turns input into domain events, asks
-/// the configured Model for a reply, keeps the transcript. Pure
-/// orchestration - no vocabulary beyond percept's.
+/// Orchestrates a chat: turns input into events, asks Model for a
+/// reply, keeps the transcript.
 pub struct Conversation {
     events: Vec<Event>,
     chat: Arc<dyn percept::Model>,
-    /// Index into events of the assistant event currently receiving
-    /// chunks, or None if no stream is in progress.
+    /// Index of the event currently receiving chunks, or None if no
+    /// stream is in progress.
     streaming: Option<usize>,
 }
 

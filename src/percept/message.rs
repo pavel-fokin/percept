@@ -11,9 +11,8 @@ pub enum Role {
 /// independent of Event's identity/audit concerns.
 ///
 /// `role` and `content` aren't read yet - Stub ignores `messages` while
-/// it streams static text - but they're part of Model's contract, not
-/// dead weight, so the lint is suppressed rather than the fields
-/// removed.
+/// it streams static text - but they're part of Model's contract, so
+/// the lint is suppressed rather than the fields removed.
 #[allow(dead_code)]
 pub struct Message {
     pub role: Role,
@@ -21,12 +20,10 @@ pub struct Message {
 }
 
 /// Turns a conversation into a streamed reply - the domain's core
-/// capability, mechanism-agnostic. `reply` is a single blocking call
-/// (run off the UI thread via `spawn_blocking`, same as before);
-/// instead of returning the whole reply at once, it invokes `on_chunk`
-/// for each piece as it's produced, then returns once complete.
-/// Mid-stream errors are out of scope - only a failure before streaming
-/// starts is returned here.
+/// capability, mechanism-agnostic. `reply` runs synchronously - call it
+/// off-thread, e.g. via `spawn_blocking` - and returning means the
+/// reply is complete. Mid-stream errors are out of scope - only a
+/// failure before streaming starts is returned here.
 pub trait Model: Send + Sync {
     fn reply(
         &self,

@@ -1,4 +1,4 @@
-//! Concrete `llm::Model` implementations.
+//! Concrete `percept::Model` implementations.
 
 mod stub;
 
