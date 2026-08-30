@@ -17,8 +17,7 @@ it, never sideways or up:
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
 | Infrastructure | `providers` | `Stub` today, real LLM clients later - implements `percept.Model`. |
 
-Wire concrete types together only at the entrypoint - `cmd/percept` in Go,
-`main` in Rust.
+Wire concrete types together only at the entrypoint - `main` in Rust.
 
 ## Domain
 
@@ -30,6 +29,9 @@ Wire concrete types together only at the entrypoint - `cmd/percept` in Go,
 ## ADR
 
 - 2026-08-29: entity IDs use UUIDv7, each wrapped in a type specific to that entity, not a bare or shared ID type.
+- 2026-08-30: Rust is the implementation language, not Go. Both were built
+  in parallel to compare the stack; Rust wins going forward. The Go
+  implementation is removed - it isn't kept as a reference.
 
 ## Writing
 

@@ -1,9 +1,4 @@
-.PHONY: build build-go build-rust
+.PHONY: build
 
-build: build-go build-rust
-
-build-go:
-	$(MAKE) -C go build
-
-build-rust:
+build:
 	cargo build --release --manifest-path rust/Cargo.toml
