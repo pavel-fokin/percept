@@ -24,6 +24,7 @@ it, never sideways or up:
 | Domain | `percept` | `Event`, `Message`, `Model` - entities and the capabilities they need, as interfaces. Serde-free; depends only on `shared`. |
 | Application | `app` | `App` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. |
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
+| Presentation | `cli` | `percept events publish` - appends one event without opening the TUI. |
 | Infrastructure | `providers` | `Stub` today, real LLM clients later - implements `percept::Model`. |
 | Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog`. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
@@ -68,8 +69,9 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   where `Actor` stays closed. Lines written before the field load as
   `unknown`. A message from any source is still `message.received` -
   `source` says where it came from, so a second type would only
-  duplicate one payload shape. No reader filters by `source` yet; the
-  log is one stream every reader sees whole.
+  duplicate one payload shape. No reader filters by `source` yet. The
+  TUI loads the log once at startup, so events another writer appends
+  mid-session show up only on the next run.
 
 ## Workflow
 

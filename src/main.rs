@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
+use clap::Parser;
 use crossterm::event::{Event as CtEvent, EventStream, KeyEventKind};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
 mod app;
+mod cli;
 mod percept;
 mod providers;
 mod shared;
@@ -12,6 +14,7 @@ mod store;
 mod tui;
 
 use app::App;
+use cli::{Cli, Command, EventsCommand};
 use providers::Stub;
 use store::Jsonl;
 use tui::{Chat, StreamEvent};
@@ -67,9 +70,26 @@ async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
     result
 }
 
-#[tokio::main(flavor = "current_thread")]
-async fn main() {
-    if let Err(err) = try_main().await {
+// Argument parsing happens before tokio starts: the publish path never
+// touches the network or the terminal, so it must not pay for a
+// runtime it doesn't use.
+fn main() {
+    let cli = Cli::parse();
+
+    let result = match cli.command {
+        Some(Command::Events {
+            command: EventsCommand::Publish(args),
+        }) => Jsonl::open(LOG_PATH)
+            .map_err(Box::<dyn std::error::Error>::from)
+            .and_then(|log| cli::publish(args, &log)),
+        None => tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed to start the tokio runtime")
+            .block_on(try_main()),
+    };
+
+    if let Err(err) = result {
         eprintln!("percept: {err}");
         std::process::exit(1);
     }
