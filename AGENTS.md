@@ -1,5 +1,22 @@
 # AI agent instructions
 
+## Purpose
+
+percept records what happens across the tools its user works in, so a
+model can query that record. Today it is a console utility: it appends
+events and prints them for something else to filter. The ambition is a
+harness - percept hosting the loop rather than feeding one - if the
+primitive earns it. The shape comes from Recursive Language Models
+(arxiv.org/abs/2512.24601), where a model holds a corpus as an
+environment and writes programs over it instead of reading it as prompt
+text.
+
+Two rules follow from being a primitive. percept does not rank,
+summarise, or answer - the model judges relevance, and percept's job is
+to make looking cheap. Output is constant-size per event by default, so
+a caller spends tokens on a payload deliberately rather than by
+accident.
+
 ## Domain
 
 - `Event` is an append-only log entry: `id`, an `actor`, a `source`, an
@@ -82,7 +99,6 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   later load. The lock binds only processes that take it - a stray
   shell append is still unprotected - and it is unreliable on network
   filesystems.
-
 ## Workflow
 
 Non-trivial work runs plan, build, review, reflect. A one-line fix
