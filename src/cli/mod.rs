@@ -3,10 +3,8 @@
 //! forwards parsed input to `store` and has no chat logic of its own.
 
 use clap::{Args, Parser, Subcommand};
-use uuid::Uuid;
 
-use crate::percept::{self, EventLog};
-use crate::shared::Timestamp;
+use crate::percept::EventLog;
 use crate::store;
 
 #[derive(Parser)]
@@ -52,43 +50,18 @@ fn non_blank(s: &str) -> Result<String, String> {
     Ok(s.to_string())
 }
 
-/// Appends one event built from `args` to `log`. Reuses `store`'s
-/// wire-to-domain conversion to validate `actor`, `type`, and
-/// `payload`, so that contract stays in one place; only `id` and
-/// `created_at` are minted here.
+/// Appends one event built from `args` to `log`. `store` owns the
+/// decode, so the CLI only parses flags.
 pub fn publish(args: PublishArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
-    let payload: serde_json::Value =
-        serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
-    let wire = store::Event {
-        id: Uuid::now_v7().to_string(),
-        actor: args.actor,
-        source: Some(args.source),
-        kind: args.kind,
-        causation_id: None,
-        created_at: Timestamp::now().to_string(),
-        payload: payload.clone(),
-    };
-    let event = percept::Event::try_from(wire)?;
-
-    // The load path drops unknown payload fields on purpose, so old
-    // logs survive a format change. On the way in that same tolerance
-    // would accept data the log never records, and report success.
-    if store::Event::from(&event).payload != payload {
-        return Err(format!("payload has fields {} does not record", event_kind(&event)).into());
-    }
+    let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
+    let event = store::decode(&args.actor, args.source, &args.kind, payload)?;
     log.append(&event)
-}
-
-/// The wire `type` an event serializes as - named here only to make the
-/// rejection above say which shape the caller missed.
-fn event_kind(event: &percept::Event) -> String {
-    store::Event::from(event).kind
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percept::Event;
+    use crate::percept::{self, Event};
     use std::sync::Mutex;
 
     #[derive(Default)]

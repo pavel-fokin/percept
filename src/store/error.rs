@@ -11,13 +11,19 @@ pub enum Error {
     BadUuid(String),
     BadTimestamp(String),
     BadPayload(serde_json::Error),
+    /// A payload carried fields the event type doesn't record, so
+    /// storing it would silently drop them.
+    UnrecordedPayloadFields(String),
     /// A log line isn't valid JSON at all - distinct from `BadPayload`,
     /// which is a well-formed line whose `payload` field doesn't match
     /// its `type`.
     BadLine(serde_json::Error),
     Io(std::io::Error),
     /// Wraps any of the above with the 1-based line number it came from.
-    AtLine { line: usize, source: Box<Error> },
+    AtLine {
+        line: usize,
+        source: Box<Error>,
+    },
 }
 
 impl fmt::Display for Error {
@@ -28,6 +34,9 @@ impl fmt::Display for Error {
             Self::BadUuid(s) => write!(f, "malformed uuid: {s}"),
             Self::BadTimestamp(s) => write!(f, "malformed timestamp: {s}"),
             Self::BadPayload(e) => write!(f, "malformed payload: {e}"),
+            Self::UnrecordedPayloadFields(t) => {
+                write!(f, "payload has fields {t} does not record")
+            }
             Self::BadLine(e) => write!(f, "malformed line: {e}"),
             Self::Io(e) => write!(f, "{e}"),
             Self::AtLine { line, source } => write!(f, "line {line}: {source}"),

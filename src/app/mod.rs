@@ -184,7 +184,12 @@ mod tests {
 
     #[test]
     fn streamed_reply_commits_one_event_caused_by_the_prompt() {
-        let mut app = App::new(Arc::new(Silent), Arc::new(FakeLog::default()), SOURCE.to_string()).unwrap();
+        let mut app = App::new(
+            Arc::new(Silent),
+            Arc::new(FakeLog::default()),
+            SOURCE.to_string(),
+        )
+        .unwrap();
 
         let _ = app.submit("hi".to_string()).unwrap();
         assert_eq!(app.events().len(), 1);
@@ -210,7 +215,12 @@ mod tests {
 
     #[test]
     fn empty_reply_commits_nothing() {
-        let mut app = App::new(Arc::new(Silent), Arc::new(FakeLog::default()), SOURCE.to_string()).unwrap();
+        let mut app = App::new(
+            Arc::new(Silent),
+            Arc::new(FakeLog::default()),
+            SOURCE.to_string(),
+        )
+        .unwrap();
         let _ = app.submit("hi".to_string()).unwrap();
         app.end_stream().unwrap();
         assert_eq!(app.events().len(), 1);

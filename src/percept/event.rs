@@ -37,14 +37,15 @@ pub struct Event {
 }
 
 impl Event {
-    /// A `message.received` event. Fills `id` and `created_at`; the
-    /// caller owns `source` (which writer produced it) and
+    /// A fresh event. `id` and `created_at` are minted here, so no
+    /// caller outside the domain decides what an event's identity is;
+    /// the caller owns `source` (which writer produced it) and
     /// `causation_id`.
-    pub fn message_received(
+    pub fn new(
         actor: Actor,
-        content: String,
         source: String,
         causation_id: Option<EventId>,
+        payload: Payload,
     ) -> Self {
         Self {
             id: EventId::new(),
@@ -52,8 +53,23 @@ impl Event {
             source,
             causation_id,
             created_at: Timestamp::now(),
-            payload: Payload::MessageReceived { content },
+            payload,
         }
+    }
+
+    /// A `message.received` event.
+    pub fn message_received(
+        actor: Actor,
+        content: String,
+        source: String,
+        causation_id: Option<EventId>,
+    ) -> Self {
+        Self::new(
+            actor,
+            source,
+            causation_id,
+            Payload::MessageReceived { content },
+        )
     }
 
     /// Rebuilds an Event from stored fields - the persistence boundary,

@@ -8,26 +8,20 @@ use crate::store::Error;
 
 /// A `percept::Event` as it travels over the wire. Flat JSON:
 /// `{ id, actor, source, type, causation_id, created_at, payload }`.
-/// `payload` shape depends on `type`. A line with no `source` key -
-/// written before the field existed - loads as `"unknown"`.
+/// `payload` shape depends on `type`.
 #[derive(Serialize, Deserialize)]
 pub struct Event {
     pub id: String,
     pub actor: String,
-    /// Absent or null - a line written before the field existed, or by
-    /// a writer that leaves it unset - loads as `"unknown"`.
-    #[serde(default)]
+    /// Absent, null, or blank - a line written before the field
+    /// existed, or by a writer that leaves it unset - loads as
+    /// `"unknown"`.
     pub source: Option<String>,
     #[serde(rename = "type")]
     pub kind: String,
-    #[serde(default)]
     pub causation_id: Option<String>,
     pub created_at: String,
     pub payload: Value,
-}
-
-fn unknown_source() -> String {
-    "unknown".to_string()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -63,16 +57,7 @@ impl TryFrom<Event> for percept::Event {
     type Error = Error;
 
     fn try_from(event: Event) -> Result<Self, Self::Error> {
-        let payload = match event.kind.as_str() {
-            "message.received" => {
-                let body: MessageBody =
-                    serde_json::from_value(event.payload).map_err(Error::BadPayload)?;
-                Payload::MessageReceived {
-                    content: body.content,
-                }
-            }
-            other => return Err(Error::UnknownEventType(other.to_string())),
-        };
+        let payload = decode_payload(&event.kind, event.payload)?;
 
         let id = EventId::from_uuid(parse_uuid(&event.id)?);
         let causation_id = match event.causation_id {
@@ -88,12 +73,59 @@ impl TryFrom<Event> for percept::Event {
         Ok(percept::Event::restore(
             id,
             actor,
-            event.source.unwrap_or_else(unknown_source),
+            named_source(event.source),
             causation_id,
             created_at,
             payload,
         ))
     }
+}
+
+/// Builds a fresh domain event from the parts a writer supplies - the
+/// inbound half of the serde boundary. `kind` and `payload` are checked
+/// against the same shapes `load` accepts, so one place decides what a
+/// payload of each type may hold.
+pub fn decode(
+    actor: &str,
+    source: String,
+    kind: &str,
+    payload: Value,
+) -> Result<percept::Event, Error> {
+    let event = percept::Event::new(
+        parse_actor(actor)?,
+        source,
+        None,
+        decode_payload(kind, payload.clone())?,
+    );
+
+    // `load` drops unknown payload fields on purpose, so a log written
+    // by an older build still reads. Inbound, that same tolerance would
+    // record less than the caller passed and report success.
+    if Event::from(&event).payload != payload {
+        return Err(Error::UnrecordedPayloadFields(kind.to_string()));
+    }
+    Ok(event)
+}
+
+fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
+    match kind {
+        "message.received" => {
+            let body: MessageBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::MessageReceived {
+                content: body.content,
+            })
+        }
+        other => Err(Error::UnknownEventType(other.to_string())),
+    }
+}
+
+/// Every event names a writer. A line that leaves `source` absent,
+/// null, or blank names nobody, so it reads as `unknown` rather than
+/// as a writer whose name happens to be empty.
+fn named_source(source: Option<String>) -> String {
+    source
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn actor_str(actor: Actor) -> &'static str {

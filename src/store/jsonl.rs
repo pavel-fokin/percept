@@ -44,7 +44,7 @@ impl Jsonl {
             .open(path)
             .map_err(Error::Io)?;
         {
-            let _lock = Lock::acquire(&file)?;
+            let _lock = Lock::exclusive(&file)?;
             truncate_torn_tail(&file)?;
         }
 
@@ -53,6 +53,23 @@ impl Jsonl {
         })
     }
 
+    /// Runs `f` holding both locks: the mutex that orders this
+    /// process's threads, and the file lock that orders processes.
+    /// Every operation goes through here, so none can be written that
+    /// forgets one.
+    fn with_exclusive<T>(&self, f: impl FnOnce(&File) -> Result<T, Error>) -> Result<T, Error> {
+        let file = self.file.lock().expect("jsonl file mutex poisoned");
+        let _lock = Lock::exclusive(&file)?;
+        f(&file)
+    }
+
+    /// As `with_exclusive`, but readers only exclude writers, not each
+    /// other.
+    fn with_shared<T>(&self, f: impl FnOnce(&File) -> Result<T, Error>) -> Result<T, Error> {
+        let file = self.file.lock().expect("jsonl file mutex poisoned");
+        let _lock = Lock::shared(&file)?;
+        f(&file)
+    }
 }
 
 impl EventLog for Jsonl {
@@ -62,13 +79,15 @@ impl EventLog for Jsonl {
             serde_json::to_string(&Event::from(event)).expect("store::Event always serializes");
         line.push('\n');
 
-        let file = self.file.lock().expect("jsonl file mutex poisoned");
-        let _lock = Lock::acquire(&file)?;
-        if let Err(e) = (&*file).write_all(line.as_bytes()) {
-            // A short write leaves a tail no later append may fuse with.
-            let _ = truncate_torn_tail(&file);
-            return Err(Error::Io(e).into());
-        }
+        self.with_exclusive(|file| {
+            // One mechanism for every torn tail, whoever left it: a
+            // dead writer, a write that failed here last time, or an
+            // append by something that never took the lock. The common
+            // case reads a single byte.
+            truncate_torn_tail(file)?;
+            let mut file = file;
+            file.write_all(line.as_bytes()).map_err(Error::Io)
+        })?;
         Ok(())
     }
 
@@ -85,9 +104,7 @@ impl EventLog for Jsonl {
     /// running on another thread or in another process can't have its
     /// half-written line read as a torn one and dropped.
     fn load(&self) -> Result<Vec<percept::Event>, Box<dyn std::error::Error>> {
-        let file = self.file.lock().expect("jsonl file mutex poisoned");
-        let _lock = Lock::acquire(&file)?;
-        let bytes = read_all(&file)?;
+        let bytes = self.with_shared(read_all)?;
 
         // Bytes, not `read_to_string`: a torn write can split a
         // multi-byte character, and that tail is about to be discarded.
@@ -114,11 +131,10 @@ fn parse_line(raw: &str) -> Result<percept::Event, Error> {
     percept::Event::try_from(wire)
 }
 
-fn read_all(file: &File) -> Result<Vec<u8>, Error> {
-    let mut handle = file;
-    handle.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
+fn read_all(mut file: &File) -> Result<Vec<u8>, Error> {
+    file.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
     let mut bytes = Vec::new();
-    handle.read_to_end(&mut bytes).map_err(Error::Io)?;
+    file.read_to_end(&mut bytes).map_err(Error::Io)?;
     Ok(bytes)
 }
 
@@ -132,8 +148,13 @@ fn read_all(file: &File) -> Result<Vec<u8>, Error> {
 struct Lock<'a>(&'a File);
 
 impl<'a> Lock<'a> {
-    fn acquire(file: &'a File) -> Result<Self, Error> {
+    fn exclusive(file: &'a File) -> Result<Self, Error> {
         file.lock().map_err(Error::Io)?;
+        Ok(Self(file))
+    }
+
+    fn shared(file: &'a File) -> Result<Self, Error> {
+        file.lock_shared().map_err(Error::Io)?;
         Ok(Self(file))
     }
 }
@@ -162,21 +183,40 @@ fn complete_len(bytes: &[u8]) -> usize {
 /// Does nothing to a file that's empty or already ends in a newline -
 /// the case on every clean start, which is why it costs a seek and one
 /// byte rather than a read of the whole log.
-fn truncate_torn_tail(file: &File) -> Result<(), Error> {
-    let mut handle = file;
-    let len = handle.seek(SeekFrom::End(0)).map_err(Error::Io)?;
+fn truncate_torn_tail(mut file: &File) -> Result<(), Error> {
+    let len = file.seek(SeekFrom::End(0)).map_err(Error::Io)?;
     if len == 0 {
         return Ok(());
     }
-    handle.seek(SeekFrom::End(-1)).map_err(Error::Io)?;
+    file.seek(SeekFrom::End(-1)).map_err(Error::Io)?;
     let mut last = [0u8; 1];
-    handle.read_exact(&mut last).map_err(Error::Io)?;
+    file.read_exact(&mut last).map_err(Error::Io)?;
     if last[0] == b'\n' {
         return Ok(());
     }
 
-    let bytes = read_all(file)?;
-    file.set_len(complete_len(&bytes) as u64).map_err(Error::Io)
+    let keep = last_line_end(file, len)?;
+    file.set_len(keep).map_err(Error::Io)
+}
+
+/// Where the log's last complete line ends, found by scanning back in
+/// growing windows. Only the tail can be torn, so reading the whole
+/// file to locate one newline would cost more the longer the log gets -
+/// and this runs on every append.
+fn last_line_end(mut file: &File, len: u64) -> Result<u64, Error> {
+    let mut window = 64 * 1024;
+    loop {
+        let start = len.saturating_sub(window);
+        file.seek(SeekFrom::Start(start)).map_err(Error::Io)?;
+        let mut bytes = vec![0u8; (len - start) as usize];
+        file.read_exact(&mut bytes).map_err(Error::Io)?;
+
+        let complete = complete_len(&bytes) as u64;
+        if complete > 0 || start == 0 {
+            return Ok(start + complete);
+        }
+        window *= 2;
+    }
 }
 
 #[cfg(test)]
@@ -339,8 +379,12 @@ mod tests {
         // lock past its own scope, this would hang instead of failing.
         let second = temp.open();
 
-        first.append(&message(Actor::User, "from the first")).unwrap();
-        second.append(&message(Actor::Model, "from the second")).unwrap();
+        first
+            .append(&message(Actor::User, "from the first"))
+            .unwrap();
+        second
+            .append(&message(Actor::Model, "from the second"))
+            .unwrap();
 
         let loaded = second.load().unwrap();
         assert_eq!(loaded.len(), 2);

@@ -70,10 +70,8 @@ async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
     result
 }
 
-// Argument parsing happens before tokio starts: the publish path never
-// touches the network or the terminal, so it must not pay for a
-// runtime it doesn't use.
-fn main() {
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
@@ -82,11 +80,7 @@ fn main() {
         }) => Jsonl::open(LOG_PATH)
             .map_err(Box::<dyn std::error::Error>::from)
             .and_then(|log| cli::publish(args, &log)),
-        None => tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("failed to start the tokio runtime")
-            .block_on(try_main()),
+        None => try_main().await,
     };
 
     if let Err(err) = result {
