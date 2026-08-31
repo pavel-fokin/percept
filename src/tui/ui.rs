@@ -36,6 +36,8 @@ fn transcript(chat: &Chat, area: Rect) -> (Text<'static>, u16) {
 fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
     match event.payload() {
         Payload::MessageReceived { content } => styled_lines(chat, event.actor(), content, width),
+        // Not dialogue - tui renders the transcript, not tool activity.
+        Payload::ToolUsed { .. } => Vec::new(),
     }
 }
 

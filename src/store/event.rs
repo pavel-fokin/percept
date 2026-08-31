@@ -39,6 +39,13 @@ impl From<&percept::Event> for Event {
                 })
                 .expect("MessageBody always serializes"),
             ),
+            // `body` was validated as JSON on the way in, either by
+            // `decode_payload` parsing it or by `load` deserializing the
+            // wire event - either way, re-parsing it here cannot fail.
+            Payload::ToolUsed { body } => (
+                "tool.used",
+                serde_json::from_str(body).expect("ToolUsed body is validated JSON"),
+            ),
         };
 
         Self {
@@ -115,6 +122,12 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 content: body.content,
             })
         }
+        // Opaque: the domain never reads a tool call, so `body` keeps
+        // the canonical serialization of whatever object the source
+        // sent, unparsed.
+        "tool.used" => Ok(Payload::ToolUsed {
+            body: serde_json::to_string(&payload).expect("Value always serializes"),
+        }),
         other => Err(Error::UnknownEventType(other.to_string())),
     }
 }
@@ -178,6 +191,38 @@ mod tests {
         assert!(restored.created_at() == original.created_at());
         match restored.payload() {
             Payload::MessageReceived { content } => assert_eq!(content, "hello world"),
+            Payload::ToolUsed { .. } => panic!("expected MessageReceived"),
+        }
+    }
+
+    #[test]
+    fn tool_used_round_trips_through_json_as_a_nested_object() {
+        let original = percept::Event::restore(
+            EventId::new(),
+            Actor::Model,
+            "claude-code".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::ToolUsed {
+                body: r#"{"tool_name":"Edit","tool_input":{"file_path":"/x/y.rs"}}"#.to_string(),
+            },
+        );
+
+        let wire = Event::from(&original);
+        // The wire payload is a real nested object, not an escaped
+        // string, so a caller can index into it with a JSON tool.
+        assert_eq!(wire.payload["tool_input"]["file_path"], "/x/y.rs");
+
+        let json = serde_json::to_string(&wire).unwrap();
+        let reparsed: Event = serde_json::from_str(&json).unwrap();
+        let restored = percept::Event::try_from(reparsed).unwrap();
+
+        match restored.payload() {
+            Payload::ToolUsed { body } => {
+                let value: Value = serde_json::from_str(body).unwrap();
+                assert_eq!(value["tool_input"]["file_path"], "/x/y.rs");
+            }
+            Payload::MessageReceived { .. } => panic!("expected ToolUsed"),
         }
     }
 

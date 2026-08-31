@@ -16,9 +16,14 @@ pub enum Actor {
 }
 
 /// Event-specific data. One variant per kind of fact the log records.
+/// A variant carries typed fields only when the domain reads them -
+/// `to_messages` needs `content`, so `MessageReceived` is typed.
+/// `ToolUsed` stays opaque: nothing in the domain reads a tool call, so
+/// `body` is the raw JSON text its source sent, unparsed.
 #[derive(Clone)]
 pub enum Payload {
     MessageReceived { content: String },
+    ToolUsed { body: String },
 }
 
 /// One recorded fact in the conversation log. Append-only: a committed

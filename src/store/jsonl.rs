@@ -275,6 +275,7 @@ mod tests {
     fn content(event: &percept::Event) -> &str {
         match event.payload() {
             Payload::MessageReceived { content } => content,
+            Payload::ToolUsed { .. } => panic!("expected a message.received event"),
         }
     }
 

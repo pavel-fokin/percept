@@ -99,6 +99,17 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   later load. The lock binds only processes that take it - a stray
   shell append is still unprotected - and it is unreliable on network
   filesystems.
+- 2026-08-31: `Event` gains `Payload::ToolUsed { body: String }` for a
+  tool call. A `Payload` variant is typed only when the domain reads
+  it: `to_messages` needs `content`, so `MessageReceived` stays typed;
+  nothing in the domain reads a tool call, so `body` is the raw JSON
+  text its source sent, unparsed. `to_messages` now filters to
+  `message.received` - a tool call is no longer fabricated into
+  dialogue. On the wire, `payload` is a real nested object rather than
+  an escaped string, so a caller can still index into it with `jq`. A
+  known type carried opaquely is not the same as accepting arbitrary
+  types - `store::decode` still rejects a `type` it doesn't know.
+
 ## Workflow
 
 Non-trivial work runs plan, build, review, reflect. A one-line fix

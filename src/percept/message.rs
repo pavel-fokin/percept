@@ -26,17 +26,45 @@ pub trait Model: Send + Sync {
     ) -> Result<(), Box<dyn std::error::Error>>;
 }
 
-/// Converts the transcript into the form Model expects. The `match` is
-/// exhaustive: a new `Payload` variant won't compile here until it says
-/// whether it maps to a turn.
+/// Converts the transcript into the form Model expects. Only
+/// `message.received` is dialogue - a tool call recorded as `ToolUsed`
+/// is filtered out rather than fabricated into a turn.
 pub fn to_messages(events: &[Event]) -> Vec<Message> {
     events
         .iter()
-        .map(|e| match e.payload() {
-            Payload::MessageReceived { content } => Message {
+        .filter_map(|e| match e.payload() {
+            Payload::MessageReceived { content } => Some(Message {
                 role: e.actor(),
                 content: content.clone(),
-            },
+            }),
+            Payload::ToolUsed { .. } => None,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_tool_used_event_is_filtered_out_while_a_neighbouring_message_survives() {
+        let events = vec![
+            Event::message_received(Actor::User, "hi".to_string(), "tui".to_string(), None),
+            Event::new(
+                Actor::Model,
+                "claude-code".to_string(),
+                None,
+                Payload::ToolUsed {
+                    body: r#"{"tool_name":"Edit"}"#.to_string(),
+                },
+            ),
+            Event::message_received(Actor::Model, "done".to_string(), "tui".to_string(), None),
+        ];
+
+        let messages = to_messages(&events);
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].content, "hi");
+        assert_eq!(messages[1].content, "done");
+    }
 }
