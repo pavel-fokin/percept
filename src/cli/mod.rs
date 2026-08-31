@@ -10,6 +10,8 @@
 //! so a caller spends tokens on the whole of one deliberately, via
 //! `--full` or `show`.
 
+use std::io::{self, Write};
+
 use clap::{Args, Parser, Subcommand};
 
 use crate::percept::{self, Actor, EventId, EventLog};
@@ -104,15 +106,32 @@ pub fn publish(args: PublishArgs, log: &dyn EventLog) -> Result<(), Box<dyn std:
 pub fn list(args: ListArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
     let events = Filters::parse(&args)?.apply(log.load()?);
 
+    // One buffered writer rather than a syscall per line: the caller is
+    // a pipe into jq, and a whole-log listing runs to thousands of
+    // lines.
+    let mut out = io::BufWriter::new(io::stdout().lock());
     for event in &events {
         let line = if args.full {
             store::encode(event)
         } else {
             store::summarize(event)
         };
-        println!("{line}");
+        if let Err(e) = writeln!(out, "{line}") {
+            return stop_if_pipe_closed(e);
+        }
     }
-    Ok(())
+    out.flush().or_else(stop_if_pipe_closed)
+}
+
+/// A reader that stops early - `head`, or a `jq` that has seen enough -
+/// closes the pipe. That is the caller's choice, not a failure to
+/// report.
+fn stop_if_pipe_closed(e: io::Error) -> Result<(), Box<dyn std::error::Error>> {
+    if e.kind() == io::ErrorKind::BrokenPipe {
+        Ok(())
+    } else {
+        Err(e.into())
+    }
 }
 
 /// The filters `args` asks for, each parsed once into the value it is
