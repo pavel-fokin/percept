@@ -20,7 +20,7 @@ it, never sideways or up:
 | Layer | Package | Owns |
 |---|---|---|
 | Domain | `percept` | `Event`, `Message`, `Model` - entities and the capabilities they need, as interfaces. Serde-free; depends only on `shared`. |
-| Application | `app` | `Conversation` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. |
+| Application | `app` | `App` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. |
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
 | Infrastructure | `providers` | `Stub` today, real LLM clients later - implements `percept::Model`. |
 | Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog`. |
@@ -49,7 +49,7 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   path is relative to the working directory, not a fixed location - a
   deliberate choice, so the transcript follows wherever the app is
   launched from. `seq` leaves the process-global static above for one
-  counter per `Conversation`, seeded past its own log's maximum and
+  counter per `App`, seeded past its own log's maximum and
   advanced only once an append succeeds - one log, one gap-free
   sequence, across both restarts and failed writes. An append failure
   ends the run: losing a committed event silently is worse than

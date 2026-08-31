@@ -16,7 +16,7 @@ pub trait AppService {
 
     /// Appends a chunk to the in-progress reply. The reply isn't an
     /// event yet - it's committed once by `end_stream`. Call only from
-    /// the task that owns the Conversation, never from inside the thunk.
+    /// the task that owns the App, never from inside the thunk.
     fn append_chunk(&mut self, content: String);
 
     /// Commits the streamed reply as one assistant event. A reply with
@@ -34,7 +34,7 @@ pub trait AppService {
 /// reply, keeps the transcript. Every event goes through `log` before
 /// it's added to `events`, so a failed write can never leave the
 /// in-memory transcript ahead of what's durable.
-pub struct Conversation {
+pub struct App {
     events: Vec<Event>,
     /// The seq the next committed event gets. One counter per log, so
     /// it only moves once an append succeeds - a failed write leaves no
@@ -49,7 +49,7 @@ pub struct Conversation {
     pending_cause: Option<EventId>,
 }
 
-impl Conversation {
+impl App {
     /// Opens on whatever `log` already holds, so the transcript
     /// survives a restart. The sequence picks up past the loaded
     /// maximum, keeping the ADR's gap-free ordering across runs.
@@ -71,7 +71,7 @@ impl Conversation {
     }
 }
 
-impl AppService for Conversation {
+impl AppService for App {
     fn submit(&mut self, text: String) -> Result<ReplyStream, Box<dyn std::error::Error>> {
         let event = Event::message_received(Actor::User, text, self.next_seq, None);
         self.log.append(&event)?;
@@ -186,22 +186,21 @@ mod tests {
 
     #[test]
     fn streamed_reply_commits_one_event_caused_by_the_prompt() {
-        let mut convo =
-            Conversation::new(Arc::new(Silent), Arc::new(FakeLog::default())).unwrap();
+        let mut app = App::new(Arc::new(Silent), Arc::new(FakeLog::default())).unwrap();
 
-        let _ = convo.submit("hi".to_string()).unwrap();
-        assert_eq!(convo.events().len(), 1);
-        assert!(convo.pending_reply().is_none());
+        let _ = app.submit("hi".to_string()).unwrap();
+        assert_eq!(app.events().len(), 1);
+        assert!(app.pending_reply().is_none());
 
-        convo.append_chunk("he".to_string());
-        convo.append_chunk("llo".to_string());
-        assert_eq!(convo.pending_reply(), Some("hello"));
-        assert_eq!(convo.events().len(), 1);
+        app.append_chunk("he".to_string());
+        app.append_chunk("llo".to_string());
+        assert_eq!(app.pending_reply(), Some("hello"));
+        assert_eq!(app.events().len(), 1);
 
-        convo.end_stream().unwrap();
-        assert!(convo.pending_reply().is_none());
+        app.end_stream().unwrap();
+        assert!(app.pending_reply().is_none());
 
-        let events = convo.events();
+        let events = app.events();
         assert_eq!(events.len(), 2);
         assert!(events[0].actor() == Actor::User);
         assert!(events[1].actor() == Actor::Model);
@@ -212,11 +211,10 @@ mod tests {
 
     #[test]
     fn empty_reply_commits_nothing() {
-        let mut convo =
-            Conversation::new(Arc::new(Silent), Arc::new(FakeLog::default())).unwrap();
-        let _ = convo.submit("hi".to_string()).unwrap();
-        convo.end_stream().unwrap();
-        assert_eq!(convo.events().len(), 1);
+        let mut app = App::new(Arc::new(Silent), Arc::new(FakeLog::default())).unwrap();
+        let _ = app.submit("hi".to_string()).unwrap();
+        app.end_stream().unwrap();
+        assert_eq!(app.events().len(), 1);
     }
 
     #[test]
@@ -226,11 +224,11 @@ mod tests {
             Event::message_received(Actor::Model, "hello".to_string(), 9, None),
         ];
         let log = Arc::new(FakeLog::seeded(seeded));
-        let mut convo = Conversation::new(Arc::new(Silent), log).unwrap();
-        assert_eq!(convo.events().len(), 2);
+        let mut app = App::new(Arc::new(Silent), log).unwrap();
+        assert_eq!(app.events().len(), 2);
 
-        let _ = convo.submit("next".to_string()).unwrap();
-        let events = convo.events();
+        let _ = app.submit("next".to_string()).unwrap();
+        let events = app.events();
         assert_eq!(events.len(), 3);
         assert!(events[2].seq() > 9);
     }
@@ -239,23 +237,23 @@ mod tests {
     fn append_failure_surfaces_as_err_and_leaves_transcript_unchanged() {
         let log = Arc::new(FakeLog::default());
         log.start_failing();
-        let mut convo = Conversation::new(Arc::new(Silent), log.clone()).unwrap();
+        let mut app = App::new(Arc::new(Silent), log.clone()).unwrap();
 
-        assert!(convo.submit("hi".to_string()).is_err());
-        assert!(convo.events().is_empty());
+        assert!(app.submit("hi".to_string()).is_err());
+        assert!(app.events().is_empty());
     }
 
     #[test]
     fn a_failed_reply_append_leaves_the_reply_pending() {
         let log = Arc::new(FakeLog::default());
-        let mut convo = Conversation::new(Arc::new(Silent), log.clone()).unwrap();
+        let mut app = App::new(Arc::new(Silent), log.clone()).unwrap();
 
-        let _ = convo.submit("hi".to_string()).unwrap();
-        convo.append_chunk("hello".to_string());
+        let _ = app.submit("hi".to_string()).unwrap();
+        app.append_chunk("hello".to_string());
         log.start_failing();
 
-        assert!(convo.end_stream().is_err());
-        assert_eq!(convo.pending_reply(), Some("hello"));
-        assert_eq!(convo.events().len(), 1);
+        assert!(app.end_stream().is_err());
+        assert_eq!(app.pending_reply(), Some("hello"));
+        assert_eq!(app.events().len(), 1);
     }
 }

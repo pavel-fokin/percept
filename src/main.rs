@@ -11,7 +11,7 @@ mod shared;
 mod store;
 mod tui;
 
-use app::Conversation;
+use app::App;
 use providers::Stub;
 use store::Jsonl;
 use tui::{Chat, StreamEvent};
@@ -39,8 +39,8 @@ async fn run(
 
             Some(event) = reply_rx.recv() => {
                 match event {
-                    StreamEvent::Chunk(chunk) => chat.conversation.append_chunk(chunk),
-                    StreamEvent::Done => chat.conversation.end_stream()?,
+                    StreamEvent::Chunk(chunk) => chat.app.append_chunk(chunk),
+                    StreamEvent::Done => chat.app.end_stream()?,
                 }
             }
             Some(Ok(event)) = term_events.next() => {
@@ -58,10 +58,10 @@ async fn run(
 
 async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
     let log = Arc::new(Jsonl::open(LOG_PATH)?);
-    let conversation = Conversation::new(Arc::new(Stub), log)?;
+    let app = App::new(Arc::new(Stub), log)?;
 
     let mut terminal = ratatui::init();
-    let mut chat = Chat::new(Box::new(conversation));
+    let mut chat = Chat::new(Box::new(app));
     let result = run(&mut terminal, &mut chat).await;
     ratatui::restore();
     result

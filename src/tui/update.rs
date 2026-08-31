@@ -37,7 +37,7 @@ fn submit(
     }
     chat.textarea.clear();
 
-    let stream = chat.conversation.submit(text)?;
+    let stream = chat.app.submit(text)?;
     let reply_tx = reply_tx.clone();
     tokio::task::spawn_blocking(move || {
         let mut on_chunk = |chunk: String| {

@@ -22,11 +22,11 @@ pub struct Chat<'a> {
     pub textarea: TextArea<'a>,
     pub user_style: Style,
     pub assistant_style: Style,
-    pub conversation: Box<dyn AppService>,
+    pub app: Box<dyn AppService>,
 }
 
 impl<'a> Chat<'a> {
-    pub fn new(conversation: Box<dyn AppService>) -> Self {
+    pub fn new(app: Box<dyn AppService>) -> Self {
         Self {
             textarea: new_textarea(),
             user_style: Style::default()
@@ -35,7 +35,7 @@ impl<'a> Chat<'a> {
             assistant_style: Style::default()
                 .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
-            conversation,
+            app,
         }
     }
 }
