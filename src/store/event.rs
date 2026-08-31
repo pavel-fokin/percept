@@ -29,13 +29,18 @@ struct MessageBody {
     content: String,
 }
 
-/// The wire `type` an event serializes as - the one place a `Payload`
-/// variant is named, so a reader filtering by type and a line being
-/// written can't disagree.
+const MESSAGE_RECEIVED: &str = "message.received";
+const TOOL_USED: &str = "tool.used";
+
+/// Every `type` the log records. `list --type` checks against this, so
+/// a misspelt filter is rejected rather than matching nothing.
+pub const KINDS: [&str; 2] = [MESSAGE_RECEIVED, TOOL_USED];
+
+/// The wire `type` an event serializes as.
 pub fn kind(event: &percept::Event) -> &'static str {
     match event.payload() {
-        Payload::MessageReceived { .. } => "message.received",
-        Payload::ToolUsed { .. } => "tool.used",
+        Payload::MessageReceived { .. } => MESSAGE_RECEIVED,
+        Payload::ToolUsed { .. } => TOOL_USED,
     }
 }
 
@@ -44,72 +49,63 @@ pub fn encode(event: &percept::Event) -> String {
     serde_json::to_string(&Event::from(event)).expect("store::Event always serializes")
 }
 
-/// One event as a constant-size line: the envelope in full, the payload
-/// truncated to `preview_chars`. A caller reaches past this to `encode`
-/// deliberately, per the purpose rule in AGENTS.md.
-pub fn summarize(event: &percept::Event, preview_chars: usize) -> String {
-    let wire = Event::from(event);
-    let summary = Summary {
-        preview: preview(&wire.payload, preview_chars),
-        id: &wire.id,
-        created_at: &wire.created_at,
-        actor: &wire.actor,
-        source: &named_source(wire.source.clone()),
-        kind: &wire.kind,
-    };
-    serde_json::to_string(&summary).expect("Summary always serializes")
+/// Longest string kept whole in a shortened payload.
+const PREVIEW_CHARS: usize = 120;
+
+/// One event as a cheap line: the same shape `encode` writes, with
+/// every long string in the payload cut short. The payload stays a real
+/// object, so one `jq` expression reads both this and `encode`'s
+/// output. A caller reaches for `encode` deliberately, per the purpose
+/// rule in AGENTS.md.
+pub fn summarize(event: &percept::Event) -> String {
+    let mut wire = Event::from(event);
+    wire.payload = shorten(wire.payload);
+    serde_json::to_string(&wire).expect("store::Event always serializes")
 }
 
-#[derive(Serialize)]
-struct Summary<'a> {
-    id: &'a str,
-    created_at: &'a str,
-    actor: &'a str,
-    source: &'a str,
-    #[serde(rename = "type")]
-    kind: &'a str,
-    preview: String,
-}
-
-/// `payload` as compact JSON, cut to `max_chars` with an ellipsis. Cut
-/// by characters, never bytes: a multi-byte character split in half
-/// would not be valid JSON output.
-fn preview(payload: &Value, max_chars: usize) -> String {
-    let compact = serde_json::to_string(payload).expect("Value always serializes");
-
-    let mut chars = compact.chars();
-    let truncated: String = chars.by_ref().take(max_chars).collect();
-    if chars.next().is_some() {
-        format!("{truncated}\u{2026}")
-    } else {
-        truncated
+/// Cuts every long string in `payload`, keeping its structure. Cutting
+/// the serialized text instead would leave a fragment no JSON tool
+/// could read. Counts characters, never bytes, so a multi-byte
+/// character is never split in half.
+fn shorten(payload: Value) -> Value {
+    match payload {
+        Value::String(s) => {
+            let mut chars = s.chars();
+            let kept: String = chars.by_ref().take(PREVIEW_CHARS).collect();
+            Value::String(if chars.next().is_some() {
+                format!("{kept}\u{2026}")
+            } else {
+                kept
+            })
+        }
+        Value::Array(items) => Value::Array(items.into_iter().map(shorten).collect()),
+        Value::Object(fields) => {
+            Value::Object(fields.into_iter().map(|(k, v)| (k, shorten(v))).collect())
+        }
+        other => other,
     }
 }
 
 impl From<&percept::Event> for Event {
     fn from(event: &percept::Event) -> Self {
-        let (kind, payload) = match event.payload() {
-            Payload::MessageReceived { content } => (
-                kind(event),
-                serde_json::to_value(MessageBody {
-                    content: content.clone(),
-                })
-                .expect("MessageBody always serializes"),
-            ),
+        let payload = match event.payload() {
+            Payload::MessageReceived { content } => serde_json::to_value(MessageBody {
+                content: content.clone(),
+            })
+            .expect("MessageBody always serializes"),
             // `body` was validated as JSON on the way in, either by
             // `decode_payload` parsing it or by `load` deserializing the
             // wire event - either way, re-parsing it here cannot fail.
-            Payload::ToolUsed { body } => (
-                kind(event),
-                serde_json::from_str(body).expect("ToolUsed body is validated JSON"),
-            ),
+            Payload::ToolUsed { body } => {
+                serde_json::from_str(body).expect("ToolUsed body is validated JSON")
+            }
         };
 
         Self {
             id: event.id().as_uuid().to_string(),
             actor: actor_name(event.actor()).to_string(),
             source: Some(event.source().to_string()),
-            kind: kind.to_string(),
+            kind: kind(event).to_string(),
             causation_id: event.causation_id().map(|id| id.as_uuid().to_string()),
             created_at: event.created_at().to_string(),
             payload,
@@ -173,7 +169,7 @@ pub fn decode(
 
 fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
     match kind {
-        "message.received" => {
+        MESSAGE_RECEIVED => {
             let body: MessageBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
             Ok(Payload::MessageReceived {
                 content: body.content,
@@ -182,7 +178,7 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
         // Opaque: the domain never reads a tool call, so `body` keeps
         // the canonical serialization of whatever object the source
         // sent, unparsed.
-        "tool.used" => Ok(Payload::ToolUsed {
+        TOOL_USED => Ok(Payload::ToolUsed {
             body: serde_json::to_string(&payload).expect("Value always serializes"),
         }),
         other => Err(Error::UnknownEventType(other.to_string())),
@@ -198,7 +194,7 @@ fn named_source(source: Option<String>) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
-pub fn actor_name(actor: Actor) -> &'static str {
+fn actor_name(actor: Actor) -> &'static str {
     match actor {
         Actor::User => "user",
         Actor::Model => "model",
@@ -206,13 +202,19 @@ pub fn actor_name(actor: Actor) -> &'static str {
     }
 }
 
-fn parse_actor(s: &str) -> Result<Actor, Error> {
+pub fn parse_actor(s: &str) -> Result<Actor, Error> {
     match s {
         "user" => Ok(Actor::User),
         "model" => Ok(Actor::Model),
         "system" => Ok(Actor::System),
         other => Err(Error::UnknownActor(other.to_string())),
     }
+}
+
+/// An `EventId` from its wire spelling - so a caller comparing ids
+/// parses once rather than rendering every event to compare as text.
+pub fn parse_event_id(s: &str) -> Result<EventId, Error> {
+    Ok(EventId::from_uuid(parse_uuid(s)?))
 }
 
 fn parse_uuid(s: &str) -> Result<Uuid, Error> {
@@ -223,40 +225,49 @@ fn parse_uuid(s: &str) -> Result<Uuid, Error> {
 mod tests {
     use super::*;
 
-    /// The character budget `cli` passes; fixed here so the boundary
-    /// cases below stay readable.
-    const PREVIEW_CHARS: usize = 120;
-
     #[test]
-    fn preview_under_the_limit_is_untouched() {
+    fn a_short_payload_is_left_alone() {
         let payload = serde_json::json!({"content": "hi"});
-        assert_eq!(preview(&payload, PREVIEW_CHARS), r#"{"content":"hi"}"#);
+        assert_eq!(shorten(payload.clone()), payload);
     }
 
     #[test]
-    fn preview_past_the_limit_is_truncated_with_an_ellipsis() {
-        let payload = serde_json::json!({"content": "a".repeat(200)});
-        let result = preview(&payload, PREVIEW_CHARS);
+    fn a_long_string_is_cut_but_its_object_keeps_its_shape() {
+        let payload = serde_json::json!({
+            "tool_name": "Edit",
+            "tool_result": "a".repeat(500),
+        });
+        let short = shorten(payload);
 
-        assert_eq!(result.chars().count(), PREVIEW_CHARS + 1);
-        assert!(result.ends_with('…'));
+        // Still an object, so one jq expression reads this and the
+        // whole payload alike.
+        assert_eq!(short["tool_name"], "Edit");
+        let cut = short["tool_result"].as_str().unwrap();
+        assert!(cut.ends_with('\u{2026}'));
+        assert_eq!(cut.chars().count(), PREVIEW_CHARS + 1);
+    }
+
+    #[test]
+    fn a_cut_never_splits_a_multi_byte_character() {
+        // 119 ascii chars, then a 3-byte character straddling the cut.
+        // Truncating by bytes would split it.
+        let payload = serde_json::json!({ "c": format!("{}\u{20ac}\u{20ac}", "a".repeat(119)) });
+        let short = shorten(payload);
+
+        let cut = short["c"].as_str().unwrap();
+        assert!(std::str::from_utf8(cut.as_bytes()).is_ok());
+        assert_eq!(cut.chars().count(), PREVIEW_CHARS + 1);
+    }
+
+    #[test]
+    fn nested_and_array_values_are_reached() {
+        let payload = serde_json::json!({"a": {"b": ["x".repeat(500)]}});
+        let short = shorten(payload);
+
         assert_eq!(
-            result.chars().take(PREVIEW_CHARS).collect::<String>(),
-            serde_json::to_string(&payload).unwrap()[..PREVIEW_CHARS]
+            short["a"]["b"][0].as_str().unwrap().chars().count(),
+            PREVIEW_CHARS + 1
         );
-    }
-
-    #[test]
-    fn preview_never_splits_a_multi_byte_character_at_the_boundary() {
-        // 119 ascii chars, then a 3-byte character straddling the
-        // 120-char cut. A byte-offset truncation would split it.
-        let content = format!("{}€€", "a".repeat(119));
-        let payload = serde_json::json!({ "content": content });
-        let result = preview(&payload, PREVIEW_CHARS);
-
-        assert!(result.ends_with('…'));
-        assert!(std::str::from_utf8(result.trim_end_matches('…').as_bytes()).is_ok());
-        assert_eq!(result.chars().count(), PREVIEW_CHARS + 1);
     }
 
     #[test]

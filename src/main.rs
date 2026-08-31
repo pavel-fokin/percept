@@ -75,21 +75,13 @@ async fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Some(Command::Events {
-            command: EventsCommand::Publish(args),
-        }) => Jsonl::open(LOG_PATH)
+        Some(Command::Events { command }) => Jsonl::open(LOG_PATH)
             .map_err(Box::<dyn std::error::Error>::from)
-            .and_then(|log| cli::publish(args, &log)),
-        Some(Command::Events {
-            command: EventsCommand::List(args),
-        }) => Jsonl::open(LOG_PATH)
-            .map_err(Box::<dyn std::error::Error>::from)
-            .and_then(|log| cli::list(args, &log)),
-        Some(Command::Events {
-            command: EventsCommand::Show(args),
-        }) => Jsonl::open(LOG_PATH)
-            .map_err(Box::<dyn std::error::Error>::from)
-            .and_then(|log| cli::show(args, &log)),
+            .and_then(|log| match command {
+                EventsCommand::Publish(args) => cli::publish(args, &log),
+                EventsCommand::List(args) => cli::list(args, &log),
+                EventsCommand::Show(args) => cli::show(args, &log),
+            }),
         None => try_main().await,
     };
 

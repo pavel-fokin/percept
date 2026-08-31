@@ -6,5 +6,5 @@ mod event;
 mod jsonl;
 
 pub use error::Error;
-pub use event::{actor_name, decode, encode, kind, summarize, Event};
+pub use event::{decode, encode, kind, parse_actor, parse_event_id, summarize, Event, KINDS};
 pub use jsonl::Jsonl;

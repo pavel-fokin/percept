@@ -6,20 +6,15 @@
 //!
 //! `list` and `show` are the query primitive a model composes with:
 //! every line is JSONL, for a caller piping into `jq`, never a table or
-//! prose. `list`'s default line is constant-size per event - `preview`
-//! truncates the payload - so a caller spends tokens on the full
-//! payload deliberately, via `--full` or `show`.
+//! prose. `list`'s default line shortens long strings in the payload,
+//! so a caller spends tokens on the whole of one deliberately, via
+//! `--full` or `show`.
 
 use clap::{Args, Parser, Subcommand};
-use jiff::{Span, Timestamp as JiffTimestamp};
 
-use crate::percept::{self, EventLog};
+use crate::percept::{self, Actor, EventId, EventLog};
 use crate::shared::Timestamp;
 use crate::store;
-
-/// A payload's compact serialization is truncated past this many
-/// characters, so `list`'s default line stays constant-size.
-const PREVIEW_MAX_CHARS: usize = 120;
 
 #[derive(Parser)]
 #[command(name = "percept")]
@@ -107,53 +102,87 @@ pub fn publish(args: PublishArgs, log: &dyn EventLog) -> Result<(), Box<dyn std:
 /// log order. `store` owns the wire shape; the CLI only filters and
 /// formats it.
 pub fn list(args: ListArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
-    let events = filter(log.load()?, &args)?;
+    let events = Filters::parse(&args)?.apply(log.load()?);
 
     for event in &events {
         let line = if args.full {
             store::encode(event)
         } else {
-            store::summarize(event, PREVIEW_MAX_CHARS)
+            store::summarize(event)
         };
         println!("{line}");
     }
     Ok(())
 }
 
-/// Applies `args`'s filters to `events`, converting to the wire shape
-/// along the way. `--limit N` keeps the N most recent matches but
-/// leaves them in log order - it slices the tail rather than sorting.
-fn filter(events: Vec<percept::Event>, args: &ListArgs) -> Result<Vec<percept::Event>, String> {
-    let since = args.since.as_deref().map(parse_since).transpose()?;
-    let mut events = events;
-
-    if let Some(since) = since {
-        events.retain(|event| event.created_at() >= since);
-    }
-    if let Some(actor) = &args.actor {
-        events.retain(|event| store::actor_name(event.actor()) == actor);
-    }
-    if let Some(source) = &args.source {
-        events.retain(|event| event.source() == source);
-    }
-    if let Some(kind) = &args.kind {
-        events.retain(|event| store::kind(event) == kind);
-    }
-    if let Some(limit) = args.limit {
-        let start = events.len().saturating_sub(limit);
-        events = events.split_off(start);
-    }
-    Ok(events)
+/// The filters `args` asks for, each parsed once into the value it is
+/// compared against. A filter naming something the log has no word for
+/// is an error here rather than a query that quietly matches nothing.
+struct Filters {
+    since: Option<Timestamp>,
+    actor: Option<Actor>,
+    source: Option<String>,
+    kind: Option<String>,
+    limit: Option<usize>,
 }
 
-/// Prints one event whose id matches `args.id` as the whole wire event.
-/// No id in the log names it, so the search fails loudly rather than
-/// printing nothing.
+impl Filters {
+    fn parse(args: &ListArgs) -> Result<Self, String> {
+        let kind = match &args.kind {
+            Some(kind) if !store::KINDS.contains(&kind.as_str()) => {
+                return Err(format!(
+                    "unknown --type {kind}, expected one of: {}",
+                    store::KINDS.join(", ")
+                ))
+            }
+            other => other.clone(),
+        };
+
+        Ok(Self {
+            since: args.since.as_deref().map(parse_since).transpose()?,
+            actor: args
+                .actor
+                .as_deref()
+                .map(|a| store::parse_actor(a).map_err(|e| e.to_string()))
+                .transpose()?,
+            source: args.source.clone(),
+            kind,
+            limit: args.limit,
+        })
+    }
+
+    /// `limit` keeps the most recent matches but leaves them in log
+    /// order - it slices the tail rather than sorting.
+    fn apply(&self, mut events: Vec<percept::Event>) -> Vec<percept::Event> {
+        if let Some(since) = self.since {
+            events.retain(|event| event.created_at() >= since);
+        }
+        if let Some(actor) = self.actor {
+            events.retain(|event| event.actor() == actor);
+        }
+        if let Some(source) = &self.source {
+            events.retain(|event| event.source() == source);
+        }
+        if let Some(kind) = &self.kind {
+            events.retain(|event| store::kind(event) == kind);
+        }
+        if let Some(limit) = self.limit {
+            let start = events.len().saturating_sub(limit);
+            events = events.split_off(start);
+        }
+        events
+    }
+}
+
+/// Prints the one event `args.id` names. An id the log doesn't carry
+/// fails loudly rather than printing nothing, so an empty result never
+/// means "your id was wrong".
 pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
+    let wanted: EventId = store::parse_event_id(&args.id)?;
     let event = log
         .load()?
         .into_iter()
-        .find(|event| event.id().as_uuid().to_string() == args.id)
+        .find(|event| event.id() == wanted)
         .ok_or_else(|| format!("no event with id {}", args.id))?;
 
     println!("{}", store::encode(&event));
@@ -163,33 +192,23 @@ pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error
 /// Parses `--since`: an ISO-8601 timestamp, or a relative shorthand -
 /// `<N>d`, `<N>h`, `<N>m` - measured back from now.
 fn parse_since(s: &str) -> Result<Timestamp, String> {
-    match relative_span(s) {
-        Some(span) => JiffTimestamp::now()
-            .checked_sub(span)
-            .map_err(|e| format!("invalid --since value {s}: {e}"))?
-            .to_string()
-            .parse()
-            .map_err(|e| format!("invalid --since value {s}: {e}")),
-        None => s
-            .parse()
-            .map_err(|e| format!("invalid --since value {s}: {e}")),
-    }
+    let parsed = match relative_minutes(s) {
+        Some(minutes) => Timestamp::now().minus_minutes(minutes),
+        None => s.parse().ok(),
+    };
+    parsed.ok_or_else(|| format!("invalid --since value {s}"))
 }
 
-/// `<N>d`, `<N>h`, or `<N>m` as a span, expressed in hours and minutes
-/// so it never carries a calendar unit `Timestamp` arithmetic rejects.
-/// `None` for anything else - `parse_since` then tries it as ISO-8601.
-fn relative_span(s: &str) -> Option<Span> {
-    let split_at = s.len().checked_sub(1)?;
-    let (digits, unit) = s.split_at(split_at);
+/// `<N>d`, `<N>h`, or `<N>m` as a count of minutes. `None` for anything
+/// else - `parse_since` then tries it as ISO-8601.
+fn relative_minutes(s: &str) -> Option<i64> {
+    let (digits, unit) = s.split_at_checked(s.len().checked_sub(1)?)?;
     let n: i64 = digits.parse().ok()?;
 
     match unit {
-        "d" => n
-            .checked_mul(24)
-            .and_then(|hours| Span::new().try_hours(hours).ok()),
-        "h" => Span::new().try_hours(n).ok(),
-        "m" => Span::new().try_minutes(n).ok(),
+        "d" => n.checked_mul(24 * 60),
+        "h" => n.checked_mul(60),
+        "m" => Some(n),
         _ => None,
     }
 }
@@ -270,13 +289,26 @@ mod tests {
         assert!(parse_since("not a time").is_err());
     }
 
+    #[test]
+    fn an_unknown_type_filter_is_rejected_rather_than_matching_nothing() {
+        let args = ListArgs {
+            kind: Some("message.recieved".to_string()),
+            ..no_filters()
+        };
+        assert!(Filters::parse(&args).is_err());
+    }
+
+    #[test]
+    fn an_unknown_actor_filter_is_rejected_rather_than_matching_nothing() {
+        let args = ListArgs {
+            actor: Some("User".to_string()),
+            ..no_filters()
+        };
+        assert!(Filters::parse(&args).is_err());
+    }
+
     fn event_at(source: &str, offset_minutes: i64) -> Event {
-        let created_at = JiffTimestamp::now()
-            .checked_sub(Span::new().try_minutes(offset_minutes).unwrap())
-            .unwrap()
-            .to_string()
-            .parse()
-            .unwrap();
+        let created_at = Timestamp::now().minus_minutes(offset_minutes).unwrap();
         Event::restore(
             percept::EventId::new(),
             percept::Actor::User,
@@ -302,18 +334,16 @@ mod tests {
 
     #[test]
     fn limit_keeps_the_most_recent_events_but_preserves_log_order() {
-        // In log order, oldest first - `filter` trusts that order
+        // In log order, oldest first - `apply` trusts that order
         // rather than re-sorting by `created_at`.
         let events = vec![event_at("a", 3), event_at("b", 2), event_at("c", 1)];
 
-        let kept = filter(
-            events,
-            &ListArgs {
-                limit: Some(2),
-                ..no_filters()
-            },
-        )
-        .unwrap();
+        let kept = Filters::parse(&ListArgs {
+            limit: Some(2),
+            ..no_filters()
+        })
+        .unwrap()
+        .apply(events);
 
         let sources: Vec<_> = kept.iter().map(|e| e.source().to_string()).collect();
         assert_eq!(sources, vec!["b", "c"]);
@@ -323,14 +353,12 @@ mod tests {
     fn limit_larger_than_the_log_keeps_everything() {
         let events = vec![event_at("a", 2), event_at("b", 1)];
 
-        let kept = filter(
-            events,
-            &ListArgs {
-                limit: Some(10),
-                ..no_filters()
-            },
-        )
-        .unwrap();
+        let kept = Filters::parse(&ListArgs {
+            limit: Some(10),
+            ..no_filters()
+        })
+        .unwrap()
+        .apply(events);
 
         assert_eq!(kept.len(), 2);
     }

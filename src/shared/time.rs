@@ -11,6 +11,14 @@ impl Timestamp {
     pub fn now() -> Self {
         Self(jiff::Timestamp::now())
     }
+
+    /// This instant less `minutes`, or `None` if that leaves the range
+    /// a timestamp can hold. Minutes, not days: a day is a calendar
+    /// unit, and an instant has no calendar to measure it against.
+    pub fn minus_minutes(self, minutes: i64) -> Option<Self> {
+        let span = jiff::Span::new().try_minutes(minutes).ok()?;
+        self.0.checked_sub(span).ok().map(Self)
+    }
 }
 
 impl fmt::Display for Timestamp {
