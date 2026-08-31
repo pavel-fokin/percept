@@ -1,4 +1,4 @@
-use std::fs::{self, OpenOptions};
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Mutex;
@@ -11,6 +11,9 @@ use crate::store::{Error, Event};
 /// Implements `percept::EventLog`. Each append is one unbuffered write
 /// with no `fsync`: a killed process loses nothing, since the bytes are
 /// already the kernel's, but a power cut can lose the tail line.
+///
+/// Several processes may share one log. Every operation holds the
+/// file's advisory lock, so none of them observes another mid-write.
 pub struct Jsonl {
     /// Every read and write goes through this one handle, so the log
     /// can't be read from one file while being written to another -
@@ -25,22 +28,25 @@ impl Jsonl {
     /// log, not an error. The returned handle stays open in append mode
     /// for the life of the process.
     ///
-    /// One handle per path, and one process per log file. Nothing
-    /// enforces this. A second handle would repair the tail knowing
-    /// nothing of what the first has half-written, cutting away a line
-    /// that was about to be finished.
+    /// A tail with no newline is repaired under the lock, so it can
+    /// only be a dead writer's leftovers. Without the lock a second
+    /// process could not tell that from a line still being written,
+    /// and would cut away bytes another writer was about to finish.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, Error> {
         let path = path.as_ref();
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(Error::Io)?;
         }
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .create(true)
             .read(true)
             .append(true)
             .open(path)
             .map_err(Error::Io)?;
-        truncate_torn_tail(&mut file)?;
+        {
+            let _lock = Lock::acquire(&file)?;
+            truncate_torn_tail(&file)?;
+        }
 
         Ok(Self {
             file: Mutex::new(file),
@@ -56,10 +62,11 @@ impl EventLog for Jsonl {
             serde_json::to_string(&Event::from(event)).expect("store::Event always serializes");
         line.push('\n');
 
-        let mut file = self.file.lock().expect("jsonl file mutex poisoned");
-        if let Err(e) = file.write_all(line.as_bytes()) {
+        let file = self.file.lock().expect("jsonl file mutex poisoned");
+        let _lock = Lock::acquire(&file)?;
+        if let Err(e) = (&*file).write_all(line.as_bytes()) {
             // A short write leaves a tail no later append may fuse with.
-            let _ = truncate_torn_tail(&mut file);
+            let _ = truncate_torn_tail(&file);
             return Err(Error::Io(e).into());
         }
         Ok(())
@@ -74,12 +81,13 @@ impl EventLog for Jsonl {
     ///
     /// Anything after the last newline is ignored: an empty tail when
     /// the file ends cleanly, or a torn write from a killed process
-    /// when it doesn't. The lock is held throughout, so an `append`
-    /// running on another thread can't have its half-written line read
-    /// as a torn one and dropped.
+    /// when it doesn't. Both locks are held throughout, so an `append`
+    /// running on another thread or in another process can't have its
+    /// half-written line read as a torn one and dropped.
     fn load(&self) -> Result<Vec<percept::Event>, Box<dyn std::error::Error>> {
-        let mut file = self.file.lock().expect("jsonl file mutex poisoned");
-        let bytes = read_all(&mut file)?;
+        let file = self.file.lock().expect("jsonl file mutex poisoned");
+        let _lock = Lock::acquire(&file)?;
+        let bytes = read_all(&file)?;
 
         // Bytes, not `read_to_string`: a torn write can split a
         // multi-byte character, and that tail is about to be discarded.
@@ -106,11 +114,34 @@ fn parse_line(raw: &str) -> Result<percept::Event, Error> {
     percept::Event::try_from(wire)
 }
 
-fn read_all(file: &mut fs::File) -> Result<Vec<u8>, Error> {
-    file.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
+fn read_all(file: &File) -> Result<Vec<u8>, Error> {
+    let mut handle = file;
+    handle.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(Error::Io)?;
+    handle.read_to_end(&mut bytes).map_err(Error::Io)?;
     Ok(bytes)
+}
+
+/// Holds the log's advisory lock until dropped. Taken for every open,
+/// append, and load, so the file is only ever seen between whole
+/// lines - the invariant a repair depends on to tell a dead writer's
+/// tail from a live writer's.
+///
+/// Advisory, so it binds only processes that ask for it, and it is
+/// unreliable on network filesystems.
+struct Lock<'a>(&'a File);
+
+impl<'a> Lock<'a> {
+    fn acquire(file: &'a File) -> Result<Self, Error> {
+        file.lock().map_err(Error::Io)?;
+        Ok(Self(file))
+    }
+}
+
+impl Drop for Lock<'_> {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
 }
 
 /// How much of `bytes` is complete lines - everything up to and
@@ -131,14 +162,15 @@ fn complete_len(bytes: &[u8]) -> usize {
 /// Does nothing to a file that's empty or already ends in a newline -
 /// the case on every clean start, which is why it costs a seek and one
 /// byte rather than a read of the whole log.
-fn truncate_torn_tail(file: &mut fs::File) -> Result<(), Error> {
-    let len = file.seek(SeekFrom::End(0)).map_err(Error::Io)?;
+fn truncate_torn_tail(file: &File) -> Result<(), Error> {
+    let mut handle = file;
+    let len = handle.seek(SeekFrom::End(0)).map_err(Error::Io)?;
     if len == 0 {
         return Ok(());
     }
-    file.seek(SeekFrom::End(-1)).map_err(Error::Io)?;
+    handle.seek(SeekFrom::End(-1)).map_err(Error::Io)?;
     let mut last = [0u8; 1];
-    file.read_exact(&mut last).map_err(Error::Io)?;
+    handle.read_exact(&mut last).map_err(Error::Io)?;
     if last[0] == b'\n' {
         return Ok(());
     }
@@ -297,6 +329,22 @@ mod tests {
         fs::write(&temp.path, format!("\n{}\n\n", line(&event))).unwrap();
 
         assert_eq!(log.load().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn two_handles_on_one_path_share_the_log() {
+        let temp = TempLog::new();
+        let first = temp.open();
+        // A second handle must not block: if any operation held the
+        // lock past its own scope, this would hang instead of failing.
+        let second = temp.open();
+
+        first.append(&message(Actor::User, "from the first")).unwrap();
+        second.append(&message(Actor::Model, "from the second")).unwrap();
+
+        let loaded = second.load().unwrap();
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(first.load().unwrap().len(), 2);
     }
 
     #[test]

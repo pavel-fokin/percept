@@ -72,6 +72,16 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   duplicate one payload shape. No reader filters by `source` yet. The
   TUI loads the log once at startup, so events another writer appends
   mid-session show up only on the next run.
+- 2026-08-31: several writers may share one log. Every open, append,
+  and load holds the file's advisory lock, superseding "one process per
+  log file" above. The repair that trims a torn tail runs only under
+  that lock, where a tail with no newline can only be a dead writer's.
+  Without it a second process cannot tell that from a line still being
+  written: it would cut away those bytes, the live writer's next chunk
+  would land after the cut, and the fused remainder would fail every
+  later load. The lock binds only processes that take it - a stray
+  shell append is still unprotected - and it is unreliable on network
+  filesystems.
 
 ## Workflow
 
