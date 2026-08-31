@@ -2,9 +2,11 @@
 
 ## Domain
 
-- `Event` is an append-only log entry: `id`, a process-global `seq`, an
-  `actor`, an optional `causation_id`, a `created_at`, and a typed
-  `payload`. Once committed it never changes.
+- `Event` is an append-only log entry: `id`, an `actor`, a `source`, an
+  optional `causation_id`, a `created_at`, and a typed `payload`. Once
+  committed it never changes.
+- `source` names the writer that produced an event - `tui`,
+  `claude-code`, `telegram`. Open by design, where `Actor` is closed.
 - `Message` is a value object (no identity) - the shape `Model` needs to
   talk to an LLM. Derived from the log at the boundary, never stored.
 - `Actor` (`User`, `Model`, `System`) is the one vocabulary for who a
@@ -34,7 +36,8 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
 - 2026-08-30: Rust is the implementation language, not Go. Both were built
   in parallel to compare the stack; Rust wins going forward. The Go
   implementation is removed - it isn't kept as a reference.
-- 2026-08-30: `Event` is an append-only log envelope, not a mutable
+- 2026-08-30 (the `seq` parts superseded 2026-08-31): `Event` is an
+  append-only log envelope, not a mutable
   record. Fields: `id` (UUIDv7), `seq` (u64, process-global, gap-free),
   `actor`, `causation_id` (the event that directly caused this one),
   `created_at` (`Timestamp`), and a typed `payload` enum - `message.received`
@@ -44,7 +47,8 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   `Timestamp` live in `shared`, below the domain. Streaming is separate
   from the log: reply chunks reach the UI transiently and one `Event` is
   committed when the reply completes.
-- 2026-08-30: events persist to `percept.jsonl` through the domain-owned
+- 2026-08-30 (the `seq` parts superseded 2026-08-31): events persist to
+  `percept.jsonl` through the domain-owned
   `percept::EventLog` port; `store::Jsonl` is the implementation. The
   path is relative to the working directory, not a fixed location - a
   deliberate choice, so the transcript follows wherever the app is
@@ -56,6 +60,16 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   quitting. One process per log file - nothing enforces this. The file
   is one endless conversation; there's no session or conversation
   boundary yet.
+- 2026-08-31: `seq` is removed from `Event`. Nothing read it but the
+  counter that minted it, and a file's line order already carries the
+  same ordering. A per-`App` counter also cannot survive the several
+  writers the log is heading for. `Event` gains `source`: the writer
+  that produced it. It is a plain `String` because that set is open,
+  where `Actor` stays closed. Lines written before the field load as
+  `unknown`. A message from any source is still `message.received` -
+  `source` says where it came from, so a second type would only
+  duplicate one payload shape. No reader filters by `source` yet; the
+  log is one stream every reader sees whole.
 
 ## Workflow
 

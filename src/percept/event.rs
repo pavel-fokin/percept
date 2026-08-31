@@ -23,13 +23,14 @@ pub enum Payload {
 
 /// One recorded fact in the conversation log. Append-only: a committed
 /// Event never changes. `actor` and the `payload` variant together say
-/// what happened; `causation_id` says what led to it. `Clone` copies a
-/// record, id and all - it never makes a committed event editable.
+/// what happened; `source` says which writer produced it; `causation_id`
+/// says what led to it. `Clone` copies a record, id and all - it never
+/// makes a committed event editable.
 #[derive(Clone)]
 pub struct Event {
     id: EventId,
-    seq: u64,
     actor: Actor,
+    source: String,
     causation_id: Option<EventId>,
     created_at: Timestamp,
     payload: Payload,
@@ -37,17 +38,18 @@ pub struct Event {
 
 impl Event {
     /// A `message.received` event. Fills `id` and `created_at`; the
-    /// caller owns `seq` (the log's ordering) and `causation_id`.
+    /// caller owns `source` (which writer produced it) and
+    /// `causation_id`.
     pub fn message_received(
         actor: Actor,
         content: String,
-        seq: u64,
+        source: String,
         causation_id: Option<EventId>,
     ) -> Self {
         Self {
             id: EventId::new(),
-            seq,
             actor,
+            source,
             causation_id,
             created_at: Timestamp::now(),
             payload: Payload::MessageReceived { content },
@@ -59,16 +61,16 @@ impl Event {
     /// minted fresh.
     pub fn restore(
         id: EventId,
-        seq: u64,
         actor: Actor,
+        source: String,
         causation_id: Option<EventId>,
         created_at: Timestamp,
         payload: Payload,
     ) -> Self {
         Self {
             id,
-            seq,
             actor,
+            source,
             causation_id,
             created_at,
             payload,
@@ -79,12 +81,12 @@ impl Event {
         self.id
     }
 
-    pub fn seq(&self) -> u64 {
-        self.seq
-    }
-
     pub fn actor(&self) -> Actor {
         self.actor
+    }
+
+    pub fn source(&self) -> &str {
+        &self.source
     }
 
     pub fn causation_id(&self) -> Option<EventId> {

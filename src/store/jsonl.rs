@@ -181,7 +181,7 @@ mod tests {
 
         /// Half a line, no newline: a process killed mid-write.
         fn write_torn_tail(&self) {
-            let line = line(&message(Actor::Model, "torn", 9));
+            let line = line(&message(Actor::Model, "torn"));
             self.write_raw(&line[..line.len() / 2]);
         }
     }
@@ -192,8 +192,8 @@ mod tests {
         }
     }
 
-    fn message(actor: Actor, content: &str, seq: u64) -> percept::Event {
-        percept::Event::message_received(actor, content.to_string(), seq, None)
+    fn message(actor: Actor, content: &str) -> percept::Event {
+        percept::Event::message_received(actor, content.to_string(), "tui".to_string(), None)
     }
 
     fn line(event: &percept::Event) -> String {
@@ -212,9 +212,9 @@ mod tests {
         let log = temp.open();
 
         let events = vec![
-            message(Actor::User, "hi", 0),
-            message(Actor::Model, "hello", 1),
-            message(Actor::User, "how are you", 2),
+            message(Actor::User, "hi"),
+            message(Actor::Model, "hello"),
+            message(Actor::User, "how are you"),
         ];
         for event in &events {
             log.append(event).unwrap();
@@ -224,7 +224,7 @@ mod tests {
         assert_eq!(loaded.len(), events.len());
         for (original, restored) in events.iter().zip(loaded.iter()) {
             assert!(restored.id() == original.id());
-            assert_eq!(restored.seq(), original.seq());
+            assert_eq!(restored.source(), original.source());
             assert!(restored.actor() == original.actor());
         }
     }
@@ -241,7 +241,7 @@ mod tests {
     fn torn_final_line_is_dropped() {
         let temp = TempLog::new();
         let log = temp.open();
-        log.append(&message(Actor::User, "complete line", 0)).unwrap();
+        log.append(&message(Actor::User, "complete line")).unwrap();
         temp.write_torn_tail();
 
         let loaded = log.load().unwrap();
@@ -253,14 +253,14 @@ mod tests {
     fn reopening_after_a_torn_write_drops_the_partial_line() {
         let temp = TempLog::new();
         let log = temp.open();
-        log.append(&message(Actor::User, "complete line", 0)).unwrap();
+        log.append(&message(Actor::User, "complete line")).unwrap();
         temp.write_torn_tail();
         drop(log);
 
         // The next run appends after the torn bytes. Without truncation
         // they'd fuse into one unreadable line.
         let reopened = temp.open();
-        reopened.append(&message(Actor::User, "next run", 1)).unwrap();
+        reopened.append(&message(Actor::User, "next run")).unwrap();
 
         let loaded = reopened.load().unwrap();
         assert_eq!(loaded.len(), 2);
@@ -272,9 +272,9 @@ mod tests {
         let temp = TempLog::new();
         let log = temp.open();
 
-        log.append(&message(Actor::User, "first", 0)).unwrap();
+        log.append(&message(Actor::User, "first")).unwrap();
         temp.write_raw("not json\n");
-        log.append(&message(Actor::User, "third", 2)).unwrap();
+        log.append(&message(Actor::User, "third")).unwrap();
 
         let Err(err) = log.load() else {
             panic!("a malformed line must fail the load");
@@ -293,7 +293,7 @@ mod tests {
         let temp = TempLog::new();
         let log = temp.open();
 
-        let event = message(Actor::User, "hi", 0);
+        let event = message(Actor::User, "hi");
         fs::write(&temp.path, format!("\n{}\n\n", line(&event))).unwrap();
 
         assert_eq!(log.load().unwrap().len(), 1);
@@ -306,7 +306,7 @@ mod tests {
         assert!(!dir.exists());
 
         let log = Jsonl::open(&path).unwrap();
-        log.append(&message(Actor::User, "hi", 0)).unwrap();
+        log.append(&message(Actor::User, "hi")).unwrap();
         assert_eq!(log.load().unwrap().len(), 1);
 
         fs::remove_dir_all(&dir).unwrap();

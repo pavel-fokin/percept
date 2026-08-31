@@ -36,10 +36,9 @@ pub trait AppService {
 /// in-memory transcript ahead of what's durable.
 pub struct App {
     events: Vec<Event>,
-    /// The seq the next committed event gets. One counter per log, so
-    /// it only moves once an append succeeds - a failed write leaves no
-    /// gap behind.
-    next_seq: u64,
+    /// The writer this app records as - stamped on every event it
+    /// commits, so the log can tell its events from other writers'.
+    source: String,
     chat: Arc<dyn percept::Model>,
     log: Arc<dyn percept::EventLog>,
     /// Text of the reply now streaming, or None between replies.
@@ -51,18 +50,17 @@ pub struct App {
 
 impl App {
     /// Opens on whatever `log` already holds, so the transcript
-    /// survives a restart. The sequence picks up past the loaded
-    /// maximum, keeping the ADR's gap-free ordering across runs.
+    /// survives a restart.
     pub fn new(
         chat: Arc<dyn percept::Model>,
         log: Arc<dyn percept::EventLog>,
+        source: String,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let events = log.load()?;
-        let next_seq = events.iter().map(Event::seq).max().map_or(0, |max| max + 1);
 
         Ok(Self {
             events,
-            next_seq,
+            source,
             chat,
             log,
             pending: None,
@@ -73,9 +71,8 @@ impl App {
 
 impl AppService for App {
     fn submit(&mut self, text: String) -> Result<ReplyStream, Box<dyn std::error::Error>> {
-        let event = Event::message_received(Actor::User, text, self.next_seq, None);
+        let event = Event::message_received(Actor::User, text, self.source.clone(), None);
         self.log.append(&event)?;
-        self.next_seq += 1;
         self.pending_cause = Some(event.id());
         self.events.push(event);
 
@@ -103,11 +100,10 @@ impl AppService for App {
         let event = Event::message_received(
             Actor::Model,
             content.clone(),
-            self.next_seq,
+            self.source.clone(),
             self.pending_cause,
         );
         self.log.append(&event)?;
-        self.next_seq += 1;
         self.pending = None;
         self.pending_cause = None;
         self.events.push(event);
@@ -129,6 +125,8 @@ mod tests {
     use crate::percept::{Actor, Message, Payload};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
+
+    const SOURCE: &str = "tui";
 
     struct Silent;
 
@@ -186,7 +184,7 @@ mod tests {
 
     #[test]
     fn streamed_reply_commits_one_event_caused_by_the_prompt() {
-        let mut app = App::new(Arc::new(Silent), Arc::new(FakeLog::default())).unwrap();
+        let mut app = App::new(Arc::new(Silent), Arc::new(FakeLog::default()), SOURCE.to_string()).unwrap();
 
         let _ = app.submit("hi".to_string()).unwrap();
         assert_eq!(app.events().len(), 1);
@@ -206,38 +204,37 @@ mod tests {
         assert!(events[1].actor() == Actor::Model);
         assert_eq!(content(&events[1]), "hello");
         assert!(events[1].causation_id() == Some(events[0].id()));
-        assert!(events[1].seq() > events[0].seq());
+        assert_eq!(events[0].source(), SOURCE);
+        assert_eq!(events[1].source(), SOURCE);
     }
 
     #[test]
     fn empty_reply_commits_nothing() {
-        let mut app = App::new(Arc::new(Silent), Arc::new(FakeLog::default())).unwrap();
+        let mut app = App::new(Arc::new(Silent), Arc::new(FakeLog::default()), SOURCE.to_string()).unwrap();
         let _ = app.submit("hi".to_string()).unwrap();
         app.end_stream().unwrap();
         assert_eq!(app.events().len(), 1);
     }
 
     #[test]
-    fn preseeded_log_becomes_the_opening_transcript_and_seq_resumes_past_it() {
+    fn preseeded_log_becomes_the_opening_transcript() {
         let seeded = vec![
-            Event::message_received(Actor::User, "hi".to_string(), 5, None),
-            Event::message_received(Actor::Model, "hello".to_string(), 9, None),
+            Event::message_received(Actor::User, "hi".to_string(), SOURCE.to_string(), None),
+            Event::message_received(Actor::Model, "hello".to_string(), SOURCE.to_string(), None),
         ];
         let log = Arc::new(FakeLog::seeded(seeded));
-        let mut app = App::new(Arc::new(Silent), log).unwrap();
+        let mut app = App::new(Arc::new(Silent), log, SOURCE.to_string()).unwrap();
         assert_eq!(app.events().len(), 2);
 
         let _ = app.submit("next".to_string()).unwrap();
-        let events = app.events();
-        assert_eq!(events.len(), 3);
-        assert!(events[2].seq() > 9);
+        assert_eq!(app.events().len(), 3);
     }
 
     #[test]
     fn append_failure_surfaces_as_err_and_leaves_transcript_unchanged() {
         let log = Arc::new(FakeLog::default());
         log.start_failing();
-        let mut app = App::new(Arc::new(Silent), log.clone()).unwrap();
+        let mut app = App::new(Arc::new(Silent), log.clone(), SOURCE.to_string()).unwrap();
 
         assert!(app.submit("hi".to_string()).is_err());
         assert!(app.events().is_empty());
@@ -246,7 +243,7 @@ mod tests {
     #[test]
     fn a_failed_reply_append_leaves_the_reply_pending() {
         let log = Arc::new(FakeLog::default());
-        let mut app = App::new(Arc::new(Silent), log.clone()).unwrap();
+        let mut app = App::new(Arc::new(Silent), log.clone(), SOURCE.to_string()).unwrap();
 
         let _ = app.submit("hi".to_string()).unwrap();
         app.append_chunk("hello".to_string());

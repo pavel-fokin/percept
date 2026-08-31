@@ -7,18 +7,27 @@ use crate::shared::Timestamp;
 use crate::store::Error;
 
 /// A `percept::Event` as it travels over the wire. Flat JSON:
-/// `{ id, seq, actor, type, causation_id, created_at, payload }`.
-/// `payload` shape depends on `type`.
+/// `{ id, actor, source, type, causation_id, created_at, payload }`.
+/// `payload` shape depends on `type`. A line with no `source` key -
+/// written before the field existed - loads as `"unknown"`.
 #[derive(Serialize, Deserialize)]
 pub struct Event {
     pub id: String,
-    pub seq: u64,
     pub actor: String,
+    /// Absent or null - a line written before the field existed, or by
+    /// a writer that leaves it unset - loads as `"unknown"`.
+    #[serde(default)]
+    pub source: Option<String>,
     #[serde(rename = "type")]
     pub kind: String,
+    #[serde(default)]
     pub causation_id: Option<String>,
     pub created_at: String,
     pub payload: Value,
+}
+
+fn unknown_source() -> String {
+    "unknown".to_string()
 }
 
 #[derive(Serialize, Deserialize)]
@@ -40,8 +49,8 @@ impl From<&percept::Event> for Event {
 
         Self {
             id: event.id().as_uuid().to_string(),
-            seq: event.seq(),
             actor: actor_str(event.actor()).to_string(),
+            source: Some(event.source().to_string()),
             kind: kind.to_string(),
             causation_id: event.causation_id().map(|id| id.as_uuid().to_string()),
             created_at: event.created_at().to_string(),
@@ -78,8 +87,8 @@ impl TryFrom<Event> for percept::Event {
 
         Ok(percept::Event::restore(
             id,
-            event.seq,
             actor,
+            event.source.unwrap_or_else(unknown_source),
             causation_id,
             created_at,
             payload,
@@ -117,8 +126,8 @@ mod tests {
         let cause = EventId::new();
         let original = percept::Event::restore(
             EventId::new(),
-            7,
             Actor::Model,
+            "tui".to_string(),
             Some(cause),
             Timestamp::now(),
             Payload::MessageReceived {
@@ -131,7 +140,7 @@ mod tests {
         let restored = percept::Event::try_from(wire).unwrap();
 
         assert!(restored.id() == original.id());
-        assert_eq!(restored.seq(), original.seq());
+        assert_eq!(restored.source(), original.source());
         assert!(restored.actor() == original.actor());
         assert!(restored.causation_id() == original.causation_id());
         assert!(restored.created_at() == original.created_at());
@@ -157,5 +166,39 @@ mod tests {
             percept::Event::try_from(wire),
             Err(Error::UnknownEventType(_))
         ));
+    }
+
+    #[test]
+    fn explicit_null_source_and_absent_causation_id_load() {
+        let json = r#"{
+            "id": "0192d1f0-1111-7000-8000-000000000000",
+            "actor": "user",
+            "source": null,
+            "type": "message.received",
+            "created_at": "2026-08-30T00:00:00Z",
+            "payload": { "content": "hi" }
+        }"#;
+
+        let wire: Event = serde_json::from_str(json).expect("wire event deserializes");
+        let event = percept::Event::try_from(wire).expect("known event type restores");
+        assert_eq!(event.source(), "unknown");
+        assert!(event.causation_id().is_none());
+    }
+
+    #[test]
+    fn legacy_line_with_seq_and_no_source_loads_as_unknown_source() {
+        let json = r#"{
+            "id": "0192d1f0-1111-7000-8000-000000000000",
+            "seq": 1,
+            "actor": "user",
+            "type": "message.received",
+            "causation_id": null,
+            "created_at": "2026-08-30T00:00:00Z",
+            "payload": { "content": "hi" }
+        }"#;
+
+        let wire: Event = serde_json::from_str(json).expect("wire event deserializes");
+        let event = percept::Event::try_from(wire).expect("known event type restores");
+        assert_eq!(event.source(), "unknown");
     }
 }

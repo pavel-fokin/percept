@@ -58,7 +58,7 @@ async fn run(
 
 async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
     let log = Arc::new(Jsonl::open(LOG_PATH)?);
-    let app = App::new(Arc::new(Stub), log)?;
+    let app = App::new(Arc::new(Stub), log, "tui".to_string())?;
 
     let mut terminal = ratatui::init();
     let mut chat = Chat::new(Box::new(app));
