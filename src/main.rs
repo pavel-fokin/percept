@@ -80,6 +80,16 @@ async fn main() {
         }) => Jsonl::open(LOG_PATH)
             .map_err(Box::<dyn std::error::Error>::from)
             .and_then(|log| cli::publish(args, &log)),
+        Some(Command::Events {
+            command: EventsCommand::List(args),
+        }) => Jsonl::open(LOG_PATH)
+            .map_err(Box::<dyn std::error::Error>::from)
+            .and_then(|log| cli::list(args, &log)),
+        Some(Command::Events {
+            command: EventsCommand::Show(args),
+        }) => Jsonl::open(LOG_PATH)
+            .map_err(Box::<dyn std::error::Error>::from)
+            .and_then(|log| cli::show(args, &log)),
         None => try_main().await,
     };
 

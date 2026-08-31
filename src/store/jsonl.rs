@@ -75,8 +75,7 @@ impl Jsonl {
 impl EventLog for Jsonl {
     /// Appends one event as a compact JSON line.
     fn append(&self, event: &percept::Event) -> Result<(), Box<dyn std::error::Error>> {
-        let mut line =
-            serde_json::to_string(&Event::from(event)).expect("store::Event always serializes");
+        let mut line = crate::store::encode(event);
         line.push('\n');
 
         self.with_exclusive(|file| {
