@@ -31,6 +31,11 @@ pub struct Chat<'a> {
     pub assistant_style: Style,
     pub thought_style: Style,
     pub error_style: Style,
+    /// Chrome, not content: the input's border and the status row.
+    pub hint_style: Style,
+    /// Which spinner frame the status row shows. Advanced by `tick`
+    /// while a turn streams, so a wait with no tokens yet still moves.
+    pub spinner: usize,
     pub app: Box<dyn AppService>,
     /// Why the last reply broke, shown until the next submit. Transient
     /// tui state - it never reaches the log.
@@ -49,15 +54,22 @@ impl<'a> Chat<'a> {
                 .add_modifier(Modifier::BOLD),
             thought_style: Style::default().fg(Color::DarkGray),
             error_style: Style::default().fg(Color::Red),
+            hint_style: Style::default().fg(Color::DarkGray),
+            spinner: 0,
             app,
             error: None,
         }
+    }
+
+    pub fn tick(&mut self) {
+        self.spinner = self.spinner.wrapping_add(1);
     }
 }
 
 fn new_textarea<'a>() -> TextArea<'a> {
     let mut textarea = TextArea::default();
-    textarea.set_placeholder_text("Type a message and press Enter...");
+    textarea.set_placeholder_text("Send a message…");
     textarea.set_cursor_line_style(Style::default());
+    textarea.set_placeholder_style(Style::default().fg(Color::DarkGray));
     textarea
 }

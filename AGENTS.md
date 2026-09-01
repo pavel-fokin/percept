@@ -179,6 +179,20 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   prompt's `causation_id` and both replies fused into one event. The
   guard lives in `App`, which owns the turn, not in the TUI that types
   into it.
+- 2026-09-01: the TUI reads as a chat, not a log dump. A turn is a
+  marker in a two-column gutter - `>` for the user, `⏺` for the model,
+  `✻` for a streaming thought - with the body hanging under itself and
+  a blank line between turns. The `You: ` prefix is gone: a prefix
+  inside the text moves as the text wraps, where a gutter stays a
+  column. Input sits in a rounded box with its own `>`, so it reads as
+  somewhere to type rather than the transcript's last line. A status
+  row under it shows one of three things: the error in red, wrapped
+  and capped at four rows; a spinner with `Thinking…` until the first
+  reply chunk and `Responding…` after, because a first token can be
+  minutes away; or `Enter send · Esc quit`. The spinner ticks from the
+  main loop, and only while a turn streams - idle, nothing moves, so
+  no frame is worth redrawing. The error moves out of the transcript
+  into that row, where the rest of the not-logged text already lived.
 
 ## Workflow
 
