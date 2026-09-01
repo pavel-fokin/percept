@@ -15,6 +15,11 @@ use crate::app::AppService;
 pub enum StreamEvent {
     Chunk(String),
     Done,
+    /// The reply broke. Carries the provider's own words, so "ollama
+    /// isn't running" and "the model isn't pulled" read differently.
+    /// Never a Chunk - a chunk becomes a committed model turn, and the
+    /// log records what the model said, not what failed while asking.
+    Failed(String),
 }
 
 /// Chat is tui's own state - textarea, styling - plus whatever fulfills
@@ -23,7 +28,11 @@ pub struct Chat<'a> {
     pub textarea: TextArea<'a>,
     pub user_style: Style,
     pub assistant_style: Style,
+    pub error_style: Style,
     pub app: Box<dyn AppService>,
+    /// Why the last reply broke, shown until the next submit. Transient
+    /// tui state - it never reaches the log.
+    pub error: Option<String>,
 }
 
 impl<'a> Chat<'a> {
@@ -36,7 +45,9 @@ impl<'a> Chat<'a> {
             assistant_style: Style::default()
                 .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
+            error_style: Style::default().fg(Color::Red),
             app,
+            error: None,
         }
     }
 }

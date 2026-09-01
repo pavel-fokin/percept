@@ -28,9 +28,23 @@ fn transcript(chat: &Chat, area: Rect) -> (Text<'static>, u16) {
         lines.extend(styled_lines(chat, Actor::Model, reply, width));
     }
 
+    if let Some(error) = &chat.error {
+        lines.extend(error_lines(chat, error, width));
+    }
+
     let total = lines.len() as u16;
     let offset = total.saturating_sub(area.height);
     (Text::from(lines), offset)
+}
+
+/// The last failure, in the provider's own words. Styled apart from
+/// the transcript because it isn't part of it - nothing here is in the
+/// log.
+fn error_lines(chat: &Chat, error: &str, width: usize) -> Vec<Line<'static>> {
+    textwrap::wrap(&format!("! {error}"), width)
+        .iter()
+        .map(|w| Line::from(Span::styled(w.to_string(), chat.error_style)))
+        .collect()
 }
 
 fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {

@@ -49,6 +49,12 @@ async fn run(
                 match event {
                     StreamEvent::Chunk(chunk) => chat.app.append_chunk(chunk),
                     StreamEvent::Done => chat.app.end_stream()?,
+                    StreamEvent::Failed(message) => {
+                        // Whatever the model managed to say is real and
+                        // commits; the failure is only shown.
+                        chat.app.end_stream()?;
+                        chat.error = Some(message);
+                    }
                 }
             }
             Some(Ok(event)) = term_events.next() => {

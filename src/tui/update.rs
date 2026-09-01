@@ -4,10 +4,6 @@ use tokio_stream::StreamExt;
 
 use super::{Chat, StreamEvent};
 
-/// Ends the reply when the stream yields an `Err`. Chunks already
-/// shown stand, so a reply that broke mid-sentence keeps what arrived.
-const REPLY_FAILED: &str = "Sorry, something went wrong.";
-
 /// Handle one key press. Returns true if the app should quit. Errs if
 /// submit couldn't append its event to the log - see AppService::submit.
 pub fn handle_key(
@@ -32,8 +28,8 @@ pub fn handle_key(
 /// Sends the user's message immediately (visible right away), then
 /// spawns a task draining the reply stream, forwarding each chunk (and
 /// a final Done once the stream is exhausted) over reply_tx. An `Err`
-/// item ends the reply with a fixed message rather than the chunk it
-/// carries.
+/// item ends the reply as Failed instead - whatever text already
+/// arrived still commits, but the error itself never does.
 fn submit(
     chat: &mut Chat,
     reply_tx: &UnboundedSender<StreamEvent>,
@@ -43,6 +39,7 @@ fn submit(
         return Ok(());
     }
     chat.textarea.clear();
+    chat.error = None;
 
     let mut stream = chat.app.submit(text)?;
     let reply_tx = reply_tx.clone();
@@ -52,9 +49,9 @@ fn submit(
                 Ok(chunk) => {
                     let _ = reply_tx.send(StreamEvent::Chunk(chunk));
                 }
-                Err(_) => {
-                    let _ = reply_tx.send(StreamEvent::Chunk(REPLY_FAILED.to_string()));
-                    break;
+                Err(err) => {
+                    let _ = reply_tx.send(StreamEvent::Failed(err.to_string()));
+                    return;
                 }
             }
         }
