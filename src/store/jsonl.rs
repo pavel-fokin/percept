@@ -3,8 +3,10 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Mutex;
 
+use serde::Deserialize;
+
 use crate::percept::{self, EventId, EventLog, EventQuery, EventSearch};
-use crate::store::{Error, Event};
+use crate::store::{parse_event_id, Error, Event};
 
 /// A JSONL event log: one compact `store::Event` per line, appended to
 /// as the app runs and replayed to rebuild the transcript on start.
@@ -104,14 +106,10 @@ impl EventLog for Jsonl {
     /// half-written line read as a torn one and dropped.
     fn load(&self) -> Result<Vec<percept::Event>, Box<dyn std::error::Error>> {
         let bytes = self.with_shared(read_all)?;
-        let contents = complete_text(&bytes)?;
 
         let mut events = Vec::new();
-        for (idx, raw) in contents.split('\n').enumerate() {
-            if raw.is_empty() {
-                continue;
-            }
-            events.push(parse_line(raw).map_err(|source| at_line(idx + 1, source))?);
+        for (line, raw) in lines(complete_text(&bytes)?) {
+            events.push(parse_line(raw).map_err(|source| at_line(line, source))?);
         }
         Ok(events)
     }
@@ -122,61 +120,38 @@ impl EventLog for Jsonl {
     /// the fetch only when it is the line named.
     fn get(&self, id: EventId) -> Result<Option<percept::Event>, Box<dyn std::error::Error>> {
         let bytes = self.with_shared(read_all)?;
-        let contents = complete_text(&bytes)?;
 
-        for (idx, raw) in contents.split('\n').enumerate() {
-            if raw.is_empty() {
+        for (line, raw) in lines(complete_text(&bytes)?) {
+            let WireId { id: found } =
+                serde_json::from_str(raw).map_err(|e| at_line(line, Error::BadLine(e)))?;
+            if parse_event_id(&found).map_err(|e| at_line(line, e))? != id {
                 continue;
             }
-            let line = idx + 1;
-            let wire: Event =
-                serde_json::from_str(raw).map_err(|e| at_line(line, Error::BadLine(e)))?;
-            let found = crate::store::parse_event_id(&wire.id).map_err(|e| at_line(line, e))?;
-            if found == id {
-                let event = percept::Event::try_from(wire).map_err(|e| at_line(line, e))?;
-                return Ok(Some(event));
-            }
+            return Ok(Some(parse_line(raw).map_err(|e| at_line(line, e))?));
         }
         Ok(None)
     }
 }
 
 impl EventSearch for Jsonl {
-    /// Loads the whole log, then filters. Filtering before decode would
-    /// silently skip a line with an unknown event type instead of
-    /// failing loudly, which matters more here than the speed.
+    /// Loads the whole log, then applies the query. Filtering before
+    /// decode would silently skip a line with an unknown event type
+    /// instead of failing loudly, which matters more here than the
+    /// speed.
     fn search(
         &self,
         query: &EventQuery,
     ) -> Result<Vec<percept::Event>, Box<dyn std::error::Error>> {
-        Ok(apply(query, self.load()?))
+        Ok(query.apply(self.load()?))
     }
 }
 
-/// The filters `query` asks for, applied in order. `size` keeps the
-/// most recent matches but leaves them in log order - it slices the
-/// tail rather than sorting.
-fn apply(query: &EventQuery, mut events: Vec<percept::Event>) -> Vec<percept::Event> {
-    if let Some(since) = query.since {
-        events.retain(|event| event.created_at() >= since);
-    }
-    if let Some(until) = query.until {
-        events.retain(|event| event.created_at() < until);
-    }
-    if !query.actors.is_empty() {
-        events.retain(|event| query.actors.contains(&event.actor()));
-    }
-    if !query.sources.is_empty() {
-        events.retain(|event| query.sources.iter().any(|source| source == event.source()));
-    }
-    if !query.kinds.is_empty() {
-        events.retain(|event| query.kinds.contains(&event.kind()));
-    }
-    if let Some(size) = query.size {
-        let start = events.len().saturating_sub(size);
-        events = events.split_off(start);
-    }
-    events
+/// Just enough of a line to tell whether it is the one asked for.
+/// serde walks past the rest, so no payload is built for a line the
+/// caller only passes over.
+#[derive(Deserialize)]
+struct WireId {
+    id: String,
 }
 
 fn parse_line(raw: &str) -> Result<percept::Event, Error> {
@@ -190,6 +165,16 @@ fn parse_line(raw: &str) -> Result<percept::Event, Error> {
 fn complete_text(bytes: &[u8]) -> Result<&str, Error> {
     std::str::from_utf8(&bytes[..complete_len(bytes)])
         .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
+}
+
+/// Every non-empty line, paired with its 1-based number - how the log
+/// is framed, written once for both readers of it.
+fn lines(contents: &str) -> impl Iterator<Item = (usize, &str)> {
+    contents
+        .split('\n')
+        .enumerate()
+        .filter(|(_, raw)| !raw.is_empty())
+        .map(|(idx, raw)| (idx + 1, raw))
 }
 
 fn at_line(line: usize, source: Error) -> Error {
@@ -291,7 +276,6 @@ fn last_line_end(mut file: &File, len: u64) -> Result<u64, Error> {
 mod tests {
     use super::*;
     use crate::percept::{Actor, EventQuery, Payload};
-    use crate::shared::Timestamp;
     use std::path::PathBuf;
     use uuid::Uuid;
 
@@ -335,24 +319,6 @@ mod tests {
 
     fn message(actor: Actor, content: &str) -> percept::Event {
         percept::Event::message_received(actor, content.to_string(), "tui".to_string(), None)
-    }
-
-    /// A message from `source`, timestamped `offset_minutes` in the
-    /// past - `Jsonl::append` writes whatever `created_at` the event
-    /// already carries, so this is how the search tests below get
-    /// events with a known order in time.
-    fn event_at(actor: Actor, source: &str, offset_minutes: i64) -> percept::Event {
-        let created_at = Timestamp::now().minus_minutes(offset_minutes).unwrap();
-        percept::Event::restore(
-            percept::EventId::new(),
-            actor,
-            source.to_string(),
-            None,
-            created_at,
-            Payload::MessageReceived {
-                content: "hi".to_string(),
-            },
-        )
     }
 
     fn line(event: &percept::Event) -> String {
@@ -508,79 +474,19 @@ mod tests {
     }
 
     #[test]
-    fn size_keeps_the_most_recent_matches_but_preserves_log_order() {
-        // In log order, oldest first - `search` trusts that order
-        // rather than re-sorting by `created_at`.
+    fn search_reads_the_file_and_applies_the_query() {
         let temp = TempLog::new();
         let log = temp.open();
-        for (source, offset) in [("a", 3), ("b", 2), ("c", 1)] {
-            log.append(&event_at(Actor::User, source, offset)).unwrap();
-        }
+        log.append(&message(Actor::User, "hi")).unwrap();
+        log.append(&message(Actor::Model, "hello")).unwrap();
 
         let query = EventQuery {
-            size: Some(2),
+            actors: vec![Actor::Model],
             ..Default::default()
         };
-        let kept = log.search(&query).unwrap();
+        let found = log.search(&query).unwrap();
 
-        let sources: Vec<_> = kept.iter().map(|e| e.source().to_string()).collect();
-        assert_eq!(sources, vec!["b", "c"]);
-    }
-
-    #[test]
-    fn size_larger_than_the_log_keeps_everything() {
-        let temp = TempLog::new();
-        let log = temp.open();
-        for (source, offset) in [("a", 2), ("b", 1)] {
-            log.append(&event_at(Actor::User, source, offset)).unwrap();
-        }
-
-        let query = EventQuery {
-            size: Some(10),
-            ..Default::default()
-        };
-        let kept = log.search(&query).unwrap();
-
-        assert_eq!(kept.len(), 2);
-    }
-
-    #[test]
-    fn since_is_inclusive_and_until_is_exclusive() {
-        let temp = TempLog::new();
-        let log = temp.open();
-        let a = event_at(Actor::User, "a", 30);
-        let b = event_at(Actor::User, "b", 20);
-        let c = event_at(Actor::User, "c", 10);
-        for event in [&a, &b, &c] {
-            log.append(event).unwrap();
-        }
-
-        let query = EventQuery {
-            since: Some(b.created_at()),
-            until: Some(c.created_at()),
-            ..Default::default()
-        };
-        let kept = log.search(&query).unwrap();
-
-        let sources: Vec<_> = kept.iter().map(|e| e.source().to_string()).collect();
-        assert_eq!(sources, vec!["b"]);
-    }
-
-    #[test]
-    fn a_multi_valued_filter_matches_any_of_its_values() {
-        let temp = TempLog::new();
-        let log = temp.open();
-        for source in ["a", "b", "c"] {
-            log.append(&event_at(Actor::User, source, 0)).unwrap();
-        }
-
-        let query = EventQuery {
-            sources: vec!["a".to_string(), "c".to_string()],
-            ..Default::default()
-        };
-        let kept = log.search(&query).unwrap();
-
-        let sources: Vec<_> = kept.iter().map(|e| e.source().to_string()).collect();
-        assert_eq!(sources, vec!["a", "c"]);
+        assert_eq!(found.len(), 1);
+        assert!(found[0].actor() == Actor::Model);
     }
 }

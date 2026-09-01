@@ -112,7 +112,9 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
 - 2026-09-01: searching the log is a capability of its own, separate
   from persisting it. `percept::EventQuery` names a query and
   `percept::EventSearch` answers one; `store::Jsonl` implements both
-  ports. Before this the CLI held the filtering, comparing domain
+  ports. `EventQuery` also decides what matches, so each rule lives in
+  the type whose doc comment states it and a store only supplies the
+  events. Before this the CLI held the filtering, comparing domain
   values in the presentation layer. `EventQuery` carries absolute
   timestamps and never reads a clock - a relative shorthand like `1d`
   resolves in the CLI, before the domain sees it. `since` is inclusive

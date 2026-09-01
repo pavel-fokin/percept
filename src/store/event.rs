@@ -32,8 +32,8 @@ struct MessageBody {
 const MESSAGE_RECEIVED: &str = "message.received";
 const TOOL_USED: &str = "tool.used";
 
-/// Every `type` the log records. `list --type` checks against this, so
-/// a misspelt filter is rejected rather than matching nothing.
+/// Every `type` the log records, for the error that lists them when a
+/// caller names one that isn't here.
 pub const KINDS: [&str; 2] = [MESSAGE_RECEIVED, TOOL_USED];
 
 /// The wire `type` a kind serializes as.

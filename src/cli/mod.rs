@@ -56,7 +56,7 @@ pub struct PublishArgs {
     payload: String,
 }
 
-#[derive(Args)]
+#[derive(Args, Default)]
 pub struct SearchArgs {
     /// An ISO-8601 timestamp, or a relative shorthand measured back
     /// from now: `<N>d`, `<N>h`, `<N>m`. Inclusive.
@@ -150,14 +150,7 @@ fn parse_query(args: &SearchArgs) -> Result<EventQuery, String> {
     let kinds = args
         .kind
         .iter()
-        .map(|kind| {
-            store::parse_kind(kind).map_err(|_| {
-                format!(
-                    "unknown --type {kind}, expected one of: {}",
-                    store::KINDS.join(", ")
-                )
-            })
-        })
+        .map(|kind| store::parse_kind(kind).map_err(|e| e.to_string()))
         .collect::<Result<Vec<_>, _>>()?;
 
     let actors = args
@@ -314,29 +307,15 @@ mod tests {
 
     #[test]
     fn parse_time_rejects_an_unparseable_value_and_names_its_flag() {
-        match parse_time("until", "3x") {
-            Ok(_) => panic!("3x should not parse"),
-            Err(err) => assert_eq!(err, "invalid --until value 3x"),
-        }
-    }
-
-    fn no_filters() -> SearchArgs {
-        SearchArgs {
-            since: None,
-            until: None,
-            source: Vec::new(),
-            actor: Vec::new(),
-            kind: Vec::new(),
-            size: None,
-            full: false,
-        }
+        let err = parse_time("until", "3x").err().unwrap();
+        assert_eq!(err, "invalid --until value 3x");
     }
 
     #[test]
     fn an_unknown_type_filter_is_rejected_rather_than_matching_nothing() {
         let args = SearchArgs {
             kind: vec!["message.recieved".to_string()],
-            ..no_filters()
+            ..Default::default()
         };
         assert!(parse_query(&args).is_err());
     }
@@ -349,7 +328,7 @@ mod tests {
             kind: vec!["tool.used".to_string()],
             size: Some(3),
             since: Some("1d".to_string()),
-            ..no_filters()
+            ..Default::default()
         };
 
         let query = parse_query(&args).unwrap();
@@ -366,7 +345,7 @@ mod tests {
         let args = SearchArgs {
             since: Some("1h".to_string()),
             until: Some("2h".to_string()),
-            ..no_filters()
+            ..Default::default()
         };
         assert!(parse_query(&args).is_err());
     }
@@ -375,7 +354,7 @@ mod tests {
     fn an_unknown_actor_filter_is_rejected_rather_than_matching_nothing() {
         let args = SearchArgs {
             actor: vec!["User".to_string()],
-            ..no_filters()
+            ..Default::default()
         };
         assert!(parse_query(&args).is_err());
     }

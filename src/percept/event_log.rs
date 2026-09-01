@@ -13,8 +13,7 @@ pub trait EventLog: Send + Sync {
     /// Loads every event in the log, in commit order.
     fn load(&self) -> Result<Vec<Event>, Box<dyn std::error::Error>>;
 
-    /// The one event `id` names, or `None` if the log has none. An id
-    /// the log doesn't carry is an absence, not an error - the caller
-    /// decides what to make of it.
+    /// An id the log doesn't carry is an absence, not an error - the
+    /// caller decides what to make of it.
     fn get(&self, id: EventId) -> Result<Option<Event>, Box<dyn std::error::Error>>;
 }
