@@ -28,6 +28,9 @@ const OLLAMA_URL: &str = "http://localhost:11434";
 /// The model ollama serves replies with.
 const OLLAMA_MODEL: &str = "gemma4";
 
+/// How often the status row's spinner advances while a turn streams.
+const SPINNER_TICK: std::time::Duration = std::time::Duration::from_millis(90);
+
 async fn run(
     terminal: &mut ratatui::DefaultTerminal,
     chat: &mut Chat<'_>,
@@ -54,6 +57,11 @@ async fn run(
                 while let Ok(event) = reply_rx.try_recv() {
                     tui::handle_stream(chat, event)?;
                 }
+            }
+            // Only while a turn streams: idle, nothing moves, so
+            // there is no frame worth redrawing.
+            _ = tokio::time::sleep(SPINNER_TICK), if chat.app.is_replying() => {
+                chat.tick();
             }
             Some(Ok(event)) = term_events.next() => {
                 if let CtEvent::Key(key) = event {
