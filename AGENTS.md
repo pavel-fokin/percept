@@ -128,7 +128,8 @@ skips it.
   choose scope, commit, or push.
 - **Review.** The main agent checks the diff against the issue, then
   runs `/code-review`. Small fixes land here; larger rework goes back to
-  the subagent. `/simplify` runs once per branch, before it merges.
+  the subagent. `/simplify` runs once per branch, before the user
+  merges it.
 - **Reflect.** Close the session by proposing changes to this workflow.
   Cutting a step counts for more than adding one. Aim for the smallest
   process that still catches mistakes.
@@ -141,6 +142,10 @@ escapes so the rendered text can be grepped.
 
 Use conventional commit messages under 72 chars. Skip the body -- subject
 line only. One commit per issue.
+
+Work happens on a branch. Merging it into main is the user's call, not
+the agent's - hand back a reviewed branch and stop there. The same holds
+for pushing.
 
 ## Writing
 
