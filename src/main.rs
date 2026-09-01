@@ -79,7 +79,7 @@ async fn main() {
             .map_err(Box::<dyn std::error::Error>::from)
             .and_then(|log| match command {
                 EventsCommand::Publish(args) => cli::publish(args, &log),
-                EventsCommand::List(args) => cli::list(args, &log),
+                EventsCommand::Search(args) => cli::search(args, &log),
                 EventsCommand::Show(args) => cli::show(args, &log),
             }),
         None => try_main().await,

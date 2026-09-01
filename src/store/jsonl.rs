@@ -3,7 +3,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::percept::{self, EventId, EventLog};
+use crate::percept::{self, EventId, EventLog, EventQuery, EventSearch};
 use crate::store::{Error, Event};
 
 /// A JSONL event log: one compact `store::Event` per line, appended to
@@ -141,6 +141,44 @@ impl EventLog for Jsonl {
     }
 }
 
+impl EventSearch for Jsonl {
+    /// Loads the whole log, then filters. Filtering before decode would
+    /// silently skip a line with an unknown event type instead of
+    /// failing loudly, which matters more here than the speed.
+    fn search(
+        &self,
+        query: &EventQuery,
+    ) -> Result<Vec<percept::Event>, Box<dyn std::error::Error>> {
+        Ok(apply(query, self.load()?))
+    }
+}
+
+/// The filters `query` asks for, applied in order. `size` keeps the
+/// most recent matches but leaves them in log order - it slices the
+/// tail rather than sorting.
+fn apply(query: &EventQuery, mut events: Vec<percept::Event>) -> Vec<percept::Event> {
+    if let Some(since) = query.since {
+        events.retain(|event| event.created_at() >= since);
+    }
+    if let Some(until) = query.until {
+        events.retain(|event| event.created_at() < until);
+    }
+    if !query.actors.is_empty() {
+        events.retain(|event| query.actors.contains(&event.actor()));
+    }
+    if !query.sources.is_empty() {
+        events.retain(|event| query.sources.iter().any(|source| source == event.source()));
+    }
+    if !query.kinds.is_empty() {
+        events.retain(|event| query.kinds.contains(&event.kind()));
+    }
+    if let Some(size) = query.size {
+        let start = events.len().saturating_sub(size);
+        events = events.split_off(start);
+    }
+    events
+}
+
 fn parse_line(raw: &str) -> Result<percept::Event, Error> {
     let wire: Event = serde_json::from_str(raw).map_err(Error::BadLine)?;
     percept::Event::try_from(wire)
@@ -252,7 +290,8 @@ fn last_line_end(mut file: &File, len: u64) -> Result<u64, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percept::{Actor, Payload};
+    use crate::percept::{Actor, EventQuery, Payload};
+    use crate::shared::Timestamp;
     use std::path::PathBuf;
     use uuid::Uuid;
 
@@ -296,6 +335,24 @@ mod tests {
 
     fn message(actor: Actor, content: &str) -> percept::Event {
         percept::Event::message_received(actor, content.to_string(), "tui".to_string(), None)
+    }
+
+    /// A message from `source`, timestamped `offset_minutes` in the
+    /// past - `Jsonl::append` writes whatever `created_at` the event
+    /// already carries, so this is how the search tests below get
+    /// events with a known order in time.
+    fn event_at(actor: Actor, source: &str, offset_minutes: i64) -> percept::Event {
+        let created_at = Timestamp::now().minus_minutes(offset_minutes).unwrap();
+        percept::Event::restore(
+            percept::EventId::new(),
+            actor,
+            source.to_string(),
+            None,
+            created_at,
+            Payload::MessageReceived {
+                content: "hi".to_string(),
+            },
+        )
     }
 
     fn line(event: &percept::Event) -> String {
@@ -448,5 +505,82 @@ mod tests {
         assert_eq!(log.load().unwrap().len(), 1);
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn size_keeps_the_most_recent_matches_but_preserves_log_order() {
+        // In log order, oldest first - `search` trusts that order
+        // rather than re-sorting by `created_at`.
+        let temp = TempLog::new();
+        let log = temp.open();
+        for (source, offset) in [("a", 3), ("b", 2), ("c", 1)] {
+            log.append(&event_at(Actor::User, source, offset)).unwrap();
+        }
+
+        let query = EventQuery {
+            size: Some(2),
+            ..Default::default()
+        };
+        let kept = log.search(&query).unwrap();
+
+        let sources: Vec<_> = kept.iter().map(|e| e.source().to_string()).collect();
+        assert_eq!(sources, vec!["b", "c"]);
+    }
+
+    #[test]
+    fn size_larger_than_the_log_keeps_everything() {
+        let temp = TempLog::new();
+        let log = temp.open();
+        for (source, offset) in [("a", 2), ("b", 1)] {
+            log.append(&event_at(Actor::User, source, offset)).unwrap();
+        }
+
+        let query = EventQuery {
+            size: Some(10),
+            ..Default::default()
+        };
+        let kept = log.search(&query).unwrap();
+
+        assert_eq!(kept.len(), 2);
+    }
+
+    #[test]
+    fn since_is_inclusive_and_until_is_exclusive() {
+        let temp = TempLog::new();
+        let log = temp.open();
+        let a = event_at(Actor::User, "a", 30);
+        let b = event_at(Actor::User, "b", 20);
+        let c = event_at(Actor::User, "c", 10);
+        for event in [&a, &b, &c] {
+            log.append(event).unwrap();
+        }
+
+        let query = EventQuery {
+            since: Some(b.created_at()),
+            until: Some(c.created_at()),
+            ..Default::default()
+        };
+        let kept = log.search(&query).unwrap();
+
+        let sources: Vec<_> = kept.iter().map(|e| e.source().to_string()).collect();
+        assert_eq!(sources, vec!["b"]);
+    }
+
+    #[test]
+    fn a_multi_valued_filter_matches_any_of_its_values() {
+        let temp = TempLog::new();
+        let log = temp.open();
+        for source in ["a", "b", "c"] {
+            log.append(&event_at(Actor::User, source, 0)).unwrap();
+        }
+
+        let query = EventQuery {
+            sources: vec!["a".to_string(), "c".to_string()],
+            ..Default::default()
+        };
+        let kept = log.search(&query).unwrap();
+
+        let sources: Vec<_> = kept.iter().map(|e| e.source().to_string()).collect();
+        assert_eq!(sources, vec!["a", "c"]);
     }
 }
