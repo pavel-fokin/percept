@@ -16,7 +16,7 @@ pub fn handle_key(
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => Ok(true),
         // Input still types while a reply streams - only sending
         // waits, so what's typed is sent once the reply lands.
-        (KeyCode::Enter, _) if chat.replying => Ok(false),
+        (KeyCode::Enter, _) if chat.app.is_replying() => Ok(false),
         (KeyCode::Enter, _) => {
             submit(chat, reply_tx)?;
             Ok(false)
@@ -28,11 +28,26 @@ pub fn handle_key(
     }
 }
 
+/// Applies one stream event. Whatever the model managed to say is real
+/// and commits; a failure is only shown.
+pub fn handle_stream(
+    chat: &mut Chat,
+    event: StreamEvent,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match event {
+        StreamEvent::Chunk(chunk) => chat.app.append_chunk(chunk),
+        StreamEvent::Ended(error) => {
+            chat.app.end_stream()?;
+            chat.error = error;
+        }
+    }
+    Ok(())
+}
+
 /// Sends the user's message immediately (visible right away), then
-/// spawns a task draining the reply stream, forwarding each chunk (and
-/// a final Done once the stream is exhausted) over reply_tx. An `Err`
-/// item ends the reply as Failed instead - whatever text already
-/// arrived still commits, but the error itself never does.
+/// spawns a task draining the reply stream, forwarding each chunk and
+/// then Ended over reply_tx. An `Err` item ends the turn early, and
+/// carries its own words into Ended.
 fn submit(
     chat: &mut Chat,
     reply_tx: &UnboundedSender<StreamEvent>,
@@ -43,7 +58,6 @@ fn submit(
     }
     chat.textarea.clear();
     chat.error = None;
-    chat.replying = true;
 
     let mut stream = chat.app.submit(text)?;
     let reply_tx = reply_tx.clone();
@@ -54,12 +68,12 @@ fn submit(
                     let _ = reply_tx.send(StreamEvent::Chunk(chunk));
                 }
                 Err(err) => {
-                    let _ = reply_tx.send(StreamEvent::Failed(err.to_string()));
+                    let _ = reply_tx.send(StreamEvent::Ended(Some(err.to_string())));
                     return;
                 }
             }
         }
-        let _ = reply_tx.send(StreamEvent::Done);
+        let _ = reply_tx.send(StreamEvent::Ended(None));
     });
     Ok(())
 }

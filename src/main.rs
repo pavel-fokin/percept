@@ -46,19 +46,13 @@ async fn run(
             biased;
 
             Some(event) = reply_rx.recv() => {
-                match event {
-                    StreamEvent::Chunk(chunk) => chat.app.append_chunk(chunk),
-                    StreamEvent::Done => {
-                        chat.app.end_stream()?;
-                        chat.replying = false;
-                    }
-                    StreamEvent::Failed(message) => {
-                        // Whatever the model managed to say is real and
-                        // commits; the failure is only shown.
-                        chat.app.end_stream()?;
-                        chat.error = Some(message);
-                        chat.replying = false;
-                    }
+                tui::handle_stream(chat, event)?;
+                // Tokens arrive far faster than a frame is worth
+                // drawing, and every frame re-wraps the whole
+                // transcript. Applying the queue first costs one frame
+                // per burst instead of one per token.
+                while let Ok(event) = reply_rx.try_recv() {
+                    tui::handle_stream(chat, event)?;
                 }
             }
             Some(Ok(event)) = term_events.next() => {

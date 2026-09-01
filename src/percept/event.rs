@@ -16,12 +16,12 @@ pub enum Actor {
 }
 
 /// Event-specific data. One variant per kind of fact the log records.
-/// A variant carries typed fields only when the domain reads them -
-/// `to_messages` needs `content`, so `MessageReceived` is typed, and
-/// `ThoughtRecorded` is typed for the same reason: `App` builds it and
-/// `tui` renders it. `ToolUsed` stays opaque: nothing in the domain
-/// reads a tool call, so `body` is the raw JSON text its source sent,
-/// unparsed.
+/// A variant carries typed fields only when the domain produces or
+/// reads them - `to_messages` needs `content`, so `MessageReceived` is
+/// typed, and `App` assembles a thought from streamed text, so
+/// `ThoughtRecorded` is too. `ToolUsed` stays opaque: it arrives as
+/// JSON from another writer and nothing in the domain reads it, so
+/// `body` is that raw text, unparsed.
 #[derive(Clone)]
 pub enum Payload {
     MessageReceived { content: String },

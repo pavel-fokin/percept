@@ -8,16 +8,16 @@ use tokio_stream::StreamExt;
 
 use crate::percept::{Actor, Chunk, Message, Model, ReplyStream};
 
-/// Sends and receives with a local ollama server's `/api/chat`, which
-/// streams NDJSON: one JSON object per line, each carrying a token of
-/// the reply.
 /// How long to wait for the server to accept a connection. Without it
 /// a host that never answers hangs on the OS TCP timeout, and the reply
 /// neither arrives nor fails.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Sends and receives with a local ollama server's `/api/chat`, which
+/// streams NDJSON: one JSON object per line, each carrying a token of
+/// the reply.
 pub struct Ollama {
-    base_url: String,
+    url: String,
     model: String,
     client: reqwest::Client,
 }
@@ -25,7 +25,7 @@ pub struct Ollama {
 impl Ollama {
     pub fn new(base_url: String, model: String) -> Self {
         Self {
-            base_url,
+            url: format!("{base_url}/api/chat"),
             model,
             // Only the connect is bounded. A first token can be minutes
             // away while ollama loads the model, so a read timeout
@@ -98,6 +98,9 @@ enum Line {
 }
 
 fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
+    if line.trim().is_empty() {
+        return Ok(Line::Empty);
+    }
     let raw: ChatChunk =
         serde_json::from_str(line).map_err(|err| format!("malformed line from ollama: {err}"))?;
     if let Some(error) = raw.error {
@@ -123,34 +126,19 @@ fn take_lines(buf: &mut Vec<u8>, chunk: &[u8]) -> Vec<String> {
     buf.extend_from_slice(chunk);
     let mut lines = Vec::new();
     while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
-        let rest = buf.split_off(pos + 1);
-        let line = std::mem::replace(buf, rest);
-        lines.push(String::from_utf8_lossy(&line[..line.len() - 1]).into_owned());
+        lines.push(String::from_utf8_lossy(&buf[..pos]).into_owned());
+        buf.drain(..=pos);
     }
     lines
 }
 
-/// Whatever is left once the body ends without a trailing newline -
-/// still a line, just one the server never terminated.
-fn take_final_line(buf: &[u8]) -> Option<String> {
-    if buf.is_empty() {
-        None
-    } else {
-        Some(String::from_utf8_lossy(buf).into_owned())
-    }
-}
-
 /// Parses and forwards one line. Returns `true` once the stream is
 /// over - the `done` sentinel, a parse failure, or the receiver having
-/// gone away - so the caller knows to stop reading the body. A blank
-/// line is skipped, as `store::Jsonl` skips one.
+/// gone away - so the caller knows to stop reading the body.
 fn handle_line(
     line: &str,
     tx: &UnboundedSender<Result<Chunk, Box<dyn Error + Send + Sync>>>,
 ) -> bool {
-    if line.trim().is_empty() {
-        return false;
-    }
     match parse_line(line) {
         Ok(Line::Chunk(chunk)) => tx.send(Ok(chunk)).is_err(),
         Ok(Line::Empty) => false,
@@ -167,7 +155,7 @@ impl Model for Ollama {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
         let client = self.client.clone();
-        let url = format!("{}/api/chat", self.base_url);
+        let url = self.url.clone();
         let request = ChatRequest {
             model: self.model.clone(),
             messages: messages
@@ -213,9 +201,9 @@ impl Model for Ollama {
                 }
             }
 
-            if let Some(line) = take_final_line(&buf) {
-                handle_line(&line, &tx);
-            }
+            // Whatever the body ended on without a trailing newline is
+            // still a line; an empty tail parses as nothing.
+            handle_line(&String::from_utf8_lossy(&buf), &tx);
         });
 
         Box::pin(UnboundedReceiverStream::new(rx))
@@ -236,18 +224,11 @@ mod tests {
     }
 
     #[test]
-    fn an_unterminated_final_line_is_still_taken() {
+    fn an_unterminated_final_line_is_left_in_the_buffer() {
         let mut buf = Vec::new();
         let lines = take_lines(&mut buf, b"{\"foo\":1}\nunterminated");
         assert_eq!(lines, vec!["{\"foo\":1}"]);
-        assert_eq!(take_final_line(&buf), Some("unterminated".to_string()));
-    }
-
-    #[test]
-    fn an_empty_tail_has_no_final_line() {
-        let mut buf = Vec::new();
-        take_lines(&mut buf, b"{\"foo\":1}\n");
-        assert_eq!(take_final_line(&buf), None);
+        assert_eq!(buf, b"unterminated");
     }
 
     #[test]

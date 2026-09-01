@@ -6,8 +6,8 @@ use crate::percept::{self, Actor, Event, EventId};
 /// implementing it doesn't pull tui into app's dependencies.
 pub trait AppService {
     /// Records the user's message and returns a stream of the reply's
-    /// chunks. Errs, without recording anything, if the event can't be
-    /// appended to the log.
+    /// chunks. Errs, without recording anything, if a turn is already
+    /// streaming or if the event can't be appended to the log.
     fn submit(&mut self, text: String) -> Result<percept::ReplyStream, Box<dyn std::error::Error>>;
 
     /// Appends a chunk - thought or reply text - to the in-progress
@@ -29,6 +29,20 @@ pub trait AppService {
 
     /// The thought now streaming, if any - not yet in `events`.
     fn pending_thought(&self) -> Option<&str>;
+
+    /// Whether a turn is still streaming. A second `submit` before it
+    /// ends would overwrite the first turn's cause and fuse both
+    /// replies into one event, and an append-only log keeps the damage.
+    fn is_replying(&self) -> bool;
+}
+
+/// The turn now streaming: what caused it, and the text arriving for
+/// each event it will commit. One value, so the cause can't outlive the
+/// buffers it belongs to.
+struct Turn {
+    cause: EventId,
+    thought: String,
+    reply: String,
 }
 
 /// Orchestrates a chat: turns input into events, asks Model for a
@@ -42,13 +56,8 @@ pub struct App {
     source: String,
     chat: Arc<dyn percept::Model>,
     log: Arc<dyn percept::EventLog>,
-    /// Text of the reply now streaming, or None between replies.
-    pending: Option<String>,
-    /// Text of the thought now streaming, or None between replies.
-    pending_thought: Option<String>,
-    /// The user message the streaming reply answers - its `causation_id`
-    /// once committed.
-    pending_cause: Option<EventId>,
+    /// The turn now streaming, or None between turns.
+    pending: Option<Turn>,
 }
 
 impl App {
@@ -67,17 +76,31 @@ impl App {
             chat,
             log,
             pending: None,
-            pending_thought: None,
-            pending_cause: None,
         })
+    }
+
+    /// Appends an event, then adds it to the transcript - never the
+    /// other way round, so a failed write can't leave the transcript
+    /// ahead of what's durable.
+    fn commit(&mut self, event: Event) -> Result<(), Box<dyn std::error::Error>> {
+        self.log.append(&event)?;
+        self.events.push(event);
+        Ok(())
     }
 }
 
 impl AppService for App {
     fn submit(&mut self, text: String) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
+        if self.pending.is_some() {
+            return Err("a reply is already streaming".into());
+        }
         let event = Event::message_received(Actor::User, text, self.source.clone(), None);
         self.log.append(&event)?;
-        self.pending_cause = Some(event.id());
+        self.pending = Some(Turn {
+            cause: event.id(),
+            thought: String::new(),
+            reply: String::new(),
+        });
         self.events.push(event);
 
         let history = percept::to_messages(&self.events);
@@ -85,50 +108,39 @@ impl AppService for App {
     }
 
     fn append_chunk(&mut self, chunk: percept::Chunk) {
+        let Some(turn) = self.pending.as_mut() else {
+            return;
+        };
         match chunk {
-            percept::Chunk::Thought(text) => {
-                self.pending_thought
-                    .get_or_insert_with(String::new)
-                    .push_str(&text);
-            }
-            percept::Chunk::Reply(text) => {
-                self.pending.get_or_insert_with(String::new).push_str(&text);
-            }
+            percept::Chunk::Thought(text) => turn.thought.push_str(&text),
+            percept::Chunk::Reply(text) => turn.reply.push_str(&text),
         }
     }
 
     fn end_stream(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        // The thought is only cleared once it's durable. Taking it
-        // first would leave a failed append with nothing to retry from.
-        // It commits before the reply - the prompt caused both, but the
-        // thought came first.
-        if let Some(content) = self.pending_thought.as_ref() {
-            let event = Event::thought_recorded(
-                Actor::Model,
-                content.clone(),
-                self.source.clone(),
-                self.pending_cause,
-            );
-            self.log.append(&event)?;
-            self.pending_thought = None;
-            self.events.push(event);
-        }
-
-        let Some(content) = self.pending.as_ref() else {
+        let Some(turn) = self.pending.as_ref() else {
             return Ok(());
         };
-        // Same durability rule: the reply is only cleared once it's
-        // durable.
-        let event = Event::message_received(
-            Actor::Model,
-            content.clone(),
-            self.source.clone(),
-            self.pending_cause,
-        );
-        self.log.append(&event)?;
+        let cause = Some(turn.cause);
+        let thought = turn.thought.clone();
+        let reply = turn.reply.clone();
+
+        // A buffer is only cleared once its event is durable. Taking
+        // the text first would leave a failed append with nothing to
+        // retry from. The thought commits before the reply - the prompt
+        // caused both, but the thought came first.
+        if !thought.is_empty() {
+            let event = Event::thought_recorded(Actor::Model, thought, self.source.clone(), cause);
+            self.commit(event)?;
+            if let Some(turn) = self.pending.as_mut() {
+                turn.thought.clear();
+            }
+        }
+        if !reply.is_empty() {
+            let event = Event::message_received(Actor::Model, reply, self.source.clone(), cause);
+            self.commit(event)?;
+        }
         self.pending = None;
-        self.pending_cause = None;
-        self.events.push(event);
         Ok(())
     }
 
@@ -137,12 +149,22 @@ impl AppService for App {
     }
 
     fn pending_reply(&self) -> Option<&str> {
-        self.pending.as_deref()
+        text(self.pending.as_ref().map(|turn| &turn.reply))
     }
 
     fn pending_thought(&self) -> Option<&str> {
-        self.pending_thought.as_deref()
+        text(self.pending.as_ref().map(|turn| &turn.thought))
     }
+
+    fn is_replying(&self) -> bool {
+        self.pending.is_some()
+    }
+}
+
+/// A buffer that has taken no chunks yet reads as nothing streaming,
+/// so a caller never renders an empty turn.
+fn text(buffer: Option<&String>) -> Option<&str> {
+    buffer.map(String::as_str).filter(|s| !s.is_empty())
 }
 
 #[cfg(test)]
@@ -275,6 +297,43 @@ mod tests {
         assert_eq!(content(&events[2]), "hello");
         assert!(events[1].causation_id() == Some(events[0].id()));
         assert!(events[2].causation_id() == Some(events[0].id()));
+    }
+
+    #[test]
+    fn a_submit_while_a_turn_streams_is_refused_and_records_nothing() {
+        let mut app = App::new(
+            Arc::new(Silent),
+            Arc::new(FakeLog::default()),
+            SOURCE.to_string(),
+        )
+        .unwrap();
+
+        let _ = app.submit("first".to_string()).unwrap();
+        assert!(app.is_replying());
+        assert!(app.submit("second".to_string()).is_err());
+        assert_eq!(app.events().len(), 1);
+
+        app.append_chunk(Chunk::Reply("done".to_string()));
+        app.end_stream().unwrap();
+        assert!(!app.is_replying());
+        assert!(app.submit("second".to_string()).is_ok());
+    }
+
+    #[test]
+    fn a_turn_with_a_thought_and_no_reply_still_ends() {
+        let mut app = App::new(
+            Arc::new(Silent),
+            Arc::new(FakeLog::default()),
+            SOURCE.to_string(),
+        )
+        .unwrap();
+
+        let _ = app.submit("hi".to_string()).unwrap();
+        app.append_chunk(Chunk::Thought("hm".to_string()));
+        app.end_stream().unwrap();
+
+        assert!(!app.is_replying());
+        assert_eq!(app.events().len(), 2);
     }
 
     #[test]

@@ -102,20 +102,19 @@ fn shorten(payload: Value) -> Value {
 impl From<&percept::Event> for Event {
     fn from(event: &percept::Event) -> Self {
         let payload = match event.payload() {
-            Payload::MessageReceived { content } => serde_json::to_value(MessageBody {
-                content: content.clone(),
-            })
-            .expect("MessageBody always serializes"),
+            // Both carry the same wire shape - one body, one arm.
+            Payload::MessageReceived { content } | Payload::ThoughtRecorded { content } => {
+                serde_json::to_value(MessageBody {
+                    content: content.clone(),
+                })
+                .expect("MessageBody always serializes")
+            }
             // `body` was validated as JSON on the way in, either by
             // `decode_payload` parsing it or by `load` deserializing the
             // wire event - either way, re-parsing it here cannot fail.
             Payload::ToolUsed { body } => {
                 serde_json::from_str(body).expect("ToolUsed body is validated JSON")
             }
-            Payload::ThoughtRecorded { content } => serde_json::to_value(MessageBody {
-                content: content.clone(),
-            })
-            .expect("MessageBody always serializes"),
         };
 
         Self {

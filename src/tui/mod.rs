@@ -5,7 +5,7 @@ mod ui;
 mod update;
 
 pub use ui::draw;
-pub use update::handle_key;
+pub use update::{handle_key, handle_stream};
 
 use crate::app::AppService;
 use crate::percept::Chunk;
@@ -15,12 +15,12 @@ use crate::percept::Chunk;
 /// `app` never sees this type.
 pub enum StreamEvent {
     Chunk(Chunk),
-    Done,
-    /// The reply broke. Carries the provider's own words, so "ollama
-    /// isn't running" and "the model isn't pulled" read differently.
-    /// Never a Chunk - a chunk becomes a committed model turn, and the
-    /// log records what the model said, not what failed while asking.
-    Failed(String),
+    /// The turn is over. `Some` carries why it broke, in the provider's
+    /// own words, so "ollama isn't running" and "the model isn't
+    /// pulled" read differently. Never a Chunk - a chunk becomes a
+    /// committed model turn, and the log records what the model said,
+    /// not what failed while asking.
+    Ended(Option<String>),
 }
 
 /// Chat is tui's own state - textarea, styling - plus whatever fulfills
@@ -35,10 +35,6 @@ pub struct Chat<'a> {
     /// Why the last reply broke, shown until the next submit. Transient
     /// tui state - it never reaches the log.
     pub error: Option<String>,
-    /// True from submit until the reply ends. A second submit before
-    /// then would overwrite the first reply's cause and merge both
-    /// replies into one event, and an append-only log keeps the damage.
-    pub replying: bool,
 }
 
 impl<'a> Chat<'a> {
@@ -55,7 +51,6 @@ impl<'a> Chat<'a> {
             error_style: Style::default().fg(Color::Red),
             app,
             error: None,
-            replying: false,
         }
     }
 }

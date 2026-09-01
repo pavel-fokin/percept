@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::pin::Pin;
 
-use tokio_stream::Stream;
+use futures_core::Stream;
 
 use super::{Actor, Event, Payload};
 
