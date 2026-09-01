@@ -1,4 +1,5 @@
 use std::error::Error;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
@@ -10,6 +11,11 @@ use crate::percept::{Actor, Message, Model, ReplyStream};
 /// Sends and receives with a local ollama server's `/api/chat`, which
 /// streams NDJSON: one JSON object per line, each carrying a token of
 /// the reply.
+/// How long to wait for the server to accept a connection. Without it
+/// a host that never answers hangs on the OS TCP timeout, and the reply
+/// neither arrives nor fails.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+
 pub struct Ollama {
     base_url: String,
     model: String,
@@ -21,7 +27,13 @@ impl Ollama {
         Self {
             base_url,
             model,
-            client: reqwest::Client::new(),
+            // Only the connect is bounded. A first token can be minutes
+            // away while ollama loads the model, so a read timeout
+            // would abort healthy replies.
+            client: reqwest::Client::builder()
+                .connect_timeout(CONNECT_TIMEOUT)
+                .build()
+                .expect("a client with no TLS backend always builds"),
         }
     }
 }
@@ -54,12 +66,18 @@ struct ChatMessage {
 /// `created_at`, timing stats on the final line) is ignored.
 #[derive(Deserialize)]
 struct ChatChunk {
+    /// Absent on a line that carries `error` instead. Required here
+    /// would fail the parse before the error could be read, hiding what
+    /// the server actually said.
+    #[serde(default)]
     message: ChatChunkMessage,
     #[serde(default)]
     done: bool,
+    #[serde(default)]
+    error: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct ChatChunkMessage {
     #[serde(default)]
     content: String,
@@ -73,8 +91,12 @@ enum Line {
     Done,
 }
 
-fn parse_line(line: &str) -> Result<Line, serde_json::Error> {
-    let chunk: ChatChunk = serde_json::from_str(line)?;
+fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
+    let chunk: ChatChunk =
+        serde_json::from_str(line).map_err(|err| format!("malformed line from ollama: {err}"))?;
+    if let Some(error) = chunk.error {
+        return Err(format!("ollama reported: {error}").into());
+    }
     if chunk.done {
         Ok(Line::Done)
     } else {
@@ -108,16 +130,20 @@ fn take_final_line(buf: &[u8]) -> Option<String> {
 
 /// Parses and forwards one line. Returns `true` once the stream is
 /// over - the `done` sentinel, a parse failure, or the receiver having
-/// gone away - so the caller knows to stop reading the body.
+/// gone away - so the caller knows to stop reading the body. A blank
+/// line is skipped, as `store::Jsonl` skips one.
 fn handle_line(
     line: &str,
     tx: &UnboundedSender<Result<String, Box<dyn Error + Send + Sync>>>,
 ) -> bool {
+    if line.trim().is_empty() {
+        return false;
+    }
     match parse_line(line) {
         Ok(Line::Content(content)) => tx.send(Ok(content)).is_err(),
         Ok(Line::Done) => true,
         Err(err) => {
-            let _ = tx.send(Err(format!("malformed line from ollama: {err}").into()));
+            let _ = tx.send(Err(err));
             true
         }
     }
@@ -233,6 +259,21 @@ mod tests {
     #[test]
     fn a_malformed_line_is_an_error() {
         assert!(parse_line("not json").is_err());
+    }
+
+    #[test]
+    fn an_error_line_surfaces_what_the_server_said() {
+        let Err(err) = parse_line(r#"{"error":"model 'nope' not found"}"#) else {
+            panic!("expected an error")
+        };
+        assert!(err.to_string().contains("model 'nope' not found"));
+    }
+
+    #[test]
+    fn a_blank_line_is_skipped_rather_than_ending_the_stream() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        assert!(!handle_line("   ", &tx));
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]
