@@ -1,7 +1,12 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use tokio::sync::mpsc::UnboundedSender;
+use tokio_stream::StreamExt;
 
 use super::{Chat, StreamEvent};
+
+/// Ends the reply when the stream yields an `Err`. Chunks already
+/// shown stand, so a reply that broke mid-sentence keeps what arrived.
+const REPLY_FAILED: &str = "Sorry, something went wrong.";
 
 /// Handle one key press. Returns true if the app should quit. Errs if
 /// submit couldn't append its event to the log - see AppService::submit.
@@ -25,8 +30,10 @@ pub fn handle_key(
 }
 
 /// Sends the user's message immediately (visible right away), then
-/// spawns the reply thunk on tokio's blocking pool, forwarding each
-/// chunk (and a final Done once the thunk returns) over reply_tx.
+/// spawns a task draining the reply stream, forwarding each chunk (and
+/// a final Done once the stream is exhausted) over reply_tx. An `Err`
+/// item ends the reply with a fixed message rather than the chunk it
+/// carries.
 fn submit(
     chat: &mut Chat,
     reply_tx: &UnboundedSender<StreamEvent>,
@@ -37,13 +44,20 @@ fn submit(
     }
     chat.textarea.clear();
 
-    let stream = chat.app.submit(text)?;
+    let mut stream = chat.app.submit(text)?;
     let reply_tx = reply_tx.clone();
-    tokio::task::spawn_blocking(move || {
-        let mut on_chunk = |chunk: String| {
-            let _ = reply_tx.send(StreamEvent::Chunk(chunk));
-        };
-        stream(&mut on_chunk);
+    tokio::spawn(async move {
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(chunk) => {
+                    let _ = reply_tx.send(StreamEvent::Chunk(chunk));
+                }
+                Err(_) => {
+                    let _ = reply_tx.send(StreamEvent::Chunk(REPLY_FAILED.to_string()));
+                    break;
+                }
+            }
+        }
         let _ = reply_tx.send(StreamEvent::Done);
     });
     Ok(())

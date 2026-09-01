@@ -2,21 +2,18 @@ use std::sync::Arc;
 
 use crate::percept::{self, Actor, Event, EventId};
 
-/// Streams the reply chunk by chunk; returning means it's done.
-pub type ReplyStream = Box<dyn FnOnce(&mut dyn FnMut(String)) + Send>;
-
 /// What tui needs from the app layer. Lives here, not in tui, so
 /// implementing it doesn't pull tui into app's dependencies.
 pub trait AppService {
-    /// Records the user's message and returns a thunk that computes the
-    /// reply. The thunk captures its own history snapshot, so it's safe
-    /// to run off-thread. Errs, without recording anything, if the
-    /// event can't be appended to the log.
-    fn submit(&mut self, text: String) -> Result<ReplyStream, Box<dyn std::error::Error>>;
+    /// Records the user's message and returns a stream of the reply's
+    /// chunks. Errs, without recording anything, if the event can't be
+    /// appended to the log.
+    fn submit(&mut self, text: String) -> Result<percept::ReplyStream, Box<dyn std::error::Error>>;
 
     /// Appends a chunk to the in-progress reply. The reply isn't an
     /// event yet - it's committed once by `end_stream`. Call only from
-    /// the task that owns the App, never from inside the thunk.
+    /// the task that owns the App, never from inside the task draining
+    /// the stream.
     fn append_chunk(&mut self, content: String);
 
     /// Commits the streamed reply as one assistant event. A reply with
@@ -70,19 +67,14 @@ impl App {
 }
 
 impl AppService for App {
-    fn submit(&mut self, text: String) -> Result<ReplyStream, Box<dyn std::error::Error>> {
+    fn submit(&mut self, text: String) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
         let event = Event::message_received(Actor::User, text, self.source.clone(), None);
         self.log.append(&event)?;
         self.pending_cause = Some(event.id());
         self.events.push(event);
 
         let history = percept::to_messages(&self.events);
-        let chat = Arc::clone(&self.chat);
-        Ok(Box::new(move |on_chunk: &mut dyn FnMut(String)| {
-            if chat.reply(&history, on_chunk).is_err() {
-                on_chunk("Sorry, something went wrong.".to_string());
-            }
-        }))
+        Ok(self.chat.reply(&history))
     }
 
     fn append_chunk(&mut self, content: String) {
@@ -131,12 +123,8 @@ mod tests {
     struct Silent;
 
     impl percept::Model for Silent {
-        fn reply(
-            &self,
-            _messages: &[Message],
-            _on_chunk: &mut dyn FnMut(String),
-        ) -> Result<(), Box<dyn std::error::Error>> {
-            Ok(())
+        fn reply(&self, _messages: &[Message]) -> percept::ReplyStream {
+            Box::pin(tokio_stream::empty())
         }
     }
 

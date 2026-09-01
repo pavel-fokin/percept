@@ -1,4 +1,15 @@
+use std::error::Error;
+use std::pin::Pin;
+
+use tokio_stream::Stream;
+
 use super::{Actor, Event, Payload};
+
+/// A reply as it streams in, chunk by chunk. `Send` so it can cross
+/// into a spawned task; boxed and pinned because `Model::reply` is a
+/// trait method and can't return `impl Stream` directly.
+pub type ReplyStream =
+    Pin<Box<dyn Stream<Item = Result<String, Box<dyn Error + Send + Sync>>> + Send>>;
 
 /// One turn in a conversation - the value-object shape Model needs,
 /// independent of Event's identity and audit concerns. Derived from the
@@ -14,16 +25,11 @@ pub struct Message {
 }
 
 /// Turns a conversation into a streamed reply - the domain's core
-/// capability, mechanism-agnostic. `reply` runs synchronously - call it
-/// off-thread, e.g. via `spawn_blocking` - and returning means the
-/// reply is complete. Mid-stream errors are out of scope - only a
-/// failure before streaming starts is returned here.
+/// capability, mechanism-agnostic. Returning the stream doesn't mean a
+/// connection succeeded - a failure to connect surfaces as the
+/// stream's first `Err` item, the same as a failure mid-reply.
 pub trait Model: Send + Sync {
-    fn reply(
-        &self,
-        messages: &[Message],
-        on_chunk: &mut dyn FnMut(String),
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    fn reply(&self, messages: &[Message]) -> ReplyStream;
 }
 
 /// Converts the transcript into the form Model expects. Only

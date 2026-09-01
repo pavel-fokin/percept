@@ -9,8 +9,9 @@ pub use update::handle_key;
 
 use crate::app::AppService;
 
-/// Adapts the thunk's callback-based streaming onto tokio's mpsc
-/// channel. Local to tui - `app` never sees this type.
+/// Adapts the reply stream onto tokio's mpsc channel, so the main
+/// select! loop can drive it alongside terminal events. Local to tui -
+/// `app` never sees this type.
 pub enum StreamEvent {
     Chunk(String),
     Done,
