@@ -8,12 +8,13 @@ pub use ui::draw;
 pub use update::handle_key;
 
 use crate::app::AppService;
+use crate::percept::Chunk;
 
 /// Adapts the reply stream onto tokio's mpsc channel, so the main
 /// select! loop can drive it alongside terminal events. Local to tui -
 /// `app` never sees this type.
 pub enum StreamEvent {
-    Chunk(String),
+    Chunk(Chunk),
     Done,
     /// The reply broke. Carries the provider's own words, so "ollama
     /// isn't running" and "the model isn't pulled" read differently.
@@ -28,6 +29,7 @@ pub struct Chat<'a> {
     pub textarea: TextArea<'a>,
     pub user_style: Style,
     pub assistant_style: Style,
+    pub thought_style: Style,
     pub error_style: Style,
     pub app: Box<dyn AppService>,
     /// Why the last reply broke, shown until the next submit. Transient
@@ -49,6 +51,7 @@ impl<'a> Chat<'a> {
             assistant_style: Style::default()
                 .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
+            thought_style: Style::default().fg(Color::DarkGray),
             error_style: Style::default().fg(Color::Red),
             app,
             error: None,

@@ -10,21 +10,25 @@ pub trait AppService {
     /// appended to the log.
     fn submit(&mut self, text: String) -> Result<percept::ReplyStream, Box<dyn std::error::Error>>;
 
-    /// Appends a chunk to the in-progress reply. The reply isn't an
-    /// event yet - it's committed once by `end_stream`. Call only from
-    /// the task that owns the App, never from inside the task draining
-    /// the stream.
-    fn append_chunk(&mut self, content: String);
+    /// Appends a chunk - thought or reply text - to the in-progress
+    /// turn. Neither is an event yet - both are committed once by
+    /// `end_stream`. Call only from the task that owns the App, never
+    /// from inside the task draining the stream.
+    fn append_chunk(&mut self, chunk: percept::Chunk);
 
-    /// Commits the streamed reply as one assistant event. A reply with
-    /// no chunks commits nothing. Errs if the event can't be appended
-    /// to the log.
+    /// Commits the streamed thought, if any, then the streamed reply, if
+    /// any, as separate model events. Either with no chunks commits
+    /// nothing. Errs if an event can't be appended to the log; a failed
+    /// thought append leaves the reply uncommitted too.
     fn end_stream(&mut self) -> Result<(), Box<dyn std::error::Error>>;
 
     fn events(&self) -> &[Event];
 
     /// The reply now streaming, if any - not yet in `events`.
     fn pending_reply(&self) -> Option<&str>;
+
+    /// The thought now streaming, if any - not yet in `events`.
+    fn pending_thought(&self) -> Option<&str>;
 }
 
 /// Orchestrates a chat: turns input into events, asks Model for a
@@ -40,6 +44,8 @@ pub struct App {
     log: Arc<dyn percept::EventLog>,
     /// Text of the reply now streaming, or None between replies.
     pending: Option<String>,
+    /// Text of the thought now streaming, or None between replies.
+    pending_thought: Option<String>,
     /// The user message the streaming reply answers - its `causation_id`
     /// once committed.
     pending_cause: Option<EventId>,
@@ -61,6 +67,7 @@ impl App {
             chat,
             log,
             pending: None,
+            pending_thought: None,
             pending_cause: None,
         })
     }
@@ -77,18 +84,41 @@ impl AppService for App {
         Ok(self.chat.reply(&history))
     }
 
-    fn append_chunk(&mut self, content: String) {
-        self.pending
-            .get_or_insert_with(String::new)
-            .push_str(&content);
+    fn append_chunk(&mut self, chunk: percept::Chunk) {
+        match chunk {
+            percept::Chunk::Thought(text) => {
+                self.pending_thought
+                    .get_or_insert_with(String::new)
+                    .push_str(&text);
+            }
+            percept::Chunk::Reply(text) => {
+                self.pending.get_or_insert_with(String::new).push_str(&text);
+            }
+        }
     }
 
     fn end_stream(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        // The thought is only cleared once it's durable. Taking it
+        // first would leave a failed append with nothing to retry from.
+        // It commits before the reply - the prompt caused both, but the
+        // thought came first.
+        if let Some(content) = self.pending_thought.as_ref() {
+            let event = Event::thought_recorded(
+                Actor::Model,
+                content.clone(),
+                self.source.clone(),
+                self.pending_cause,
+            );
+            self.log.append(&event)?;
+            self.pending_thought = None;
+            self.events.push(event);
+        }
+
         let Some(content) = self.pending.as_ref() else {
             return Ok(());
         };
-        // The reply is only cleared once it's durable. Taking it first
-        // would leave a failed append with nothing to retry from.
+        // Same durability rule: the reply is only cleared once it's
+        // durable.
         let event = Event::message_received(
             Actor::Model,
             content.clone(),
@@ -109,12 +139,16 @@ impl AppService for App {
     fn pending_reply(&self) -> Option<&str> {
         self.pending.as_deref()
     }
+
+    fn pending_thought(&self) -> Option<&str> {
+        self.pending_thought.as_deref()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percept::{Actor, Message, Payload};
+    use crate::percept::{Actor, Chunk, Message, Payload};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
 
@@ -131,7 +165,14 @@ mod tests {
     fn content(event: &Event) -> &str {
         match event.payload() {
             Payload::MessageReceived { content } => content,
-            Payload::ToolUsed { .. } => panic!("expected a message.received event"),
+            _ => panic!("expected a message.received event"),
+        }
+    }
+
+    fn thought(event: &Event) -> &str {
+        match event.payload() {
+            Payload::ThoughtRecorded { content } => content,
+            _ => panic!("expected a thought.recorded event"),
         }
     }
 
@@ -189,8 +230,8 @@ mod tests {
         assert_eq!(app.events().len(), 1);
         assert!(app.pending_reply().is_none());
 
-        app.append_chunk("he".to_string());
-        app.append_chunk("llo".to_string());
+        app.append_chunk(Chunk::Reply("he".to_string()));
+        app.append_chunk(Chunk::Reply("llo".to_string()));
         assert_eq!(app.pending_reply(), Some("hello"));
         assert_eq!(app.events().len(), 1);
 
@@ -205,6 +246,35 @@ mod tests {
         assert!(events[1].causation_id() == Some(events[0].id()));
         assert_eq!(events[0].source(), SOURCE);
         assert_eq!(events[1].source(), SOURCE);
+    }
+
+    #[test]
+    fn a_thought_and_a_reply_commit_as_two_model_events_thought_first() {
+        let mut app = App::new(
+            Arc::new(Silent),
+            Arc::new(FakeLog::default()),
+            SOURCE.to_string(),
+        )
+        .unwrap();
+
+        let _ = app.submit("hi".to_string()).unwrap();
+        app.append_chunk(Chunk::Thought("hmm".to_string()));
+        app.append_chunk(Chunk::Reply("hello".to_string()));
+        assert_eq!(app.pending_thought(), Some("hmm"));
+        assert_eq!(app.pending_reply(), Some("hello"));
+
+        app.end_stream().unwrap();
+        assert!(app.pending_thought().is_none());
+        assert!(app.pending_reply().is_none());
+
+        let events = app.events();
+        assert_eq!(events.len(), 3);
+        assert!(events[1].actor() == Actor::Model);
+        assert_eq!(thought(&events[1]), "hmm");
+        assert!(events[2].actor() == Actor::Model);
+        assert_eq!(content(&events[2]), "hello");
+        assert!(events[1].causation_id() == Some(events[0].id()));
+        assert!(events[2].causation_id() == Some(events[0].id()));
     }
 
     #[test]
@@ -250,10 +320,26 @@ mod tests {
         let mut app = App::new(Arc::new(Silent), log.clone(), SOURCE.to_string()).unwrap();
 
         let _ = app.submit("hi".to_string()).unwrap();
-        app.append_chunk("hello".to_string());
+        app.append_chunk(Chunk::Reply("hello".to_string()));
         log.start_failing();
 
         assert!(app.end_stream().is_err());
+        assert_eq!(app.pending_reply(), Some("hello"));
+        assert_eq!(app.events().len(), 1);
+    }
+
+    #[test]
+    fn a_failed_thought_append_leaves_the_reply_unattempted() {
+        let log = Arc::new(FakeLog::default());
+        let mut app = App::new(Arc::new(Silent), log.clone(), SOURCE.to_string()).unwrap();
+
+        let _ = app.submit("hi".to_string()).unwrap();
+        app.append_chunk(Chunk::Thought("hmm".to_string()));
+        app.append_chunk(Chunk::Reply("hello".to_string()));
+        log.start_failing();
+
+        assert!(app.end_stream().is_err());
+        assert_eq!(app.pending_thought(), Some("hmm"));
         assert_eq!(app.pending_reply(), Some("hello"));
         assert_eq!(app.events().len(), 1);
     }

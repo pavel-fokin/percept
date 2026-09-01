@@ -5,11 +5,19 @@ use tokio_stream::Stream;
 
 use super::{Actor, Event, Payload};
 
+/// One piece of a streaming reply. A thinking model interleaves
+/// `Thought` chunks with its `Reply` text; a provider that never thinks
+/// simply only ever yields `Reply`.
+pub enum Chunk {
+    Thought(String),
+    Reply(String),
+}
+
 /// A reply as it streams in, chunk by chunk. `Send` so it can cross
 /// into a spawned task; boxed and pinned because `Model::reply` is a
 /// trait method and can't return `impl Stream` directly.
 pub type ReplyStream =
-    Pin<Box<dyn Stream<Item = Result<String, Box<dyn Error + Send + Sync>>> + Send>>;
+    Pin<Box<dyn Stream<Item = Result<Chunk, Box<dyn Error + Send + Sync>>> + Send>>;
 
 /// One turn in a conversation - the value-object shape Model needs,
 /// independent of Event's identity and audit concerns. Derived from the
@@ -29,7 +37,9 @@ pub trait Model: Send + Sync {
 
 /// Converts the transcript into the form Model expects. Only
 /// `message.received` is dialogue - a tool call recorded as `ToolUsed`
-/// is filtered out rather than fabricated into a turn.
+/// is filtered out rather than fabricated into a turn, and so is a
+/// thought recorded as `ThoughtRecorded`: it is never replayed to the
+/// model as dialogue.
 pub fn to_messages(events: &[Event]) -> Vec<Message> {
     events
         .iter()
@@ -39,6 +49,7 @@ pub fn to_messages(events: &[Event]) -> Vec<Message> {
                 content: content.clone(),
             }),
             Payload::ToolUsed { .. } => None,
+            Payload::ThoughtRecorded { .. } => None,
         })
         .collect()
 }
@@ -58,6 +69,26 @@ mod tests {
                 Payload::ToolUsed {
                     body: r#"{"tool_name":"Edit"}"#.to_string(),
                 },
+            ),
+            Event::message_received(Actor::Model, "done".to_string(), "tui".to_string(), None),
+        ];
+
+        let messages = to_messages(&events);
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].content, "hi");
+        assert_eq!(messages[1].content, "done");
+    }
+
+    #[test]
+    fn a_thought_recorded_event_is_filtered_out_while_a_neighbouring_message_survives() {
+        let events = vec![
+            Event::message_received(Actor::User, "hi".to_string(), "tui".to_string(), None),
+            Event::thought_recorded(
+                Actor::Model,
+                "let me think".to_string(),
+                "tui".to_string(),
+                None,
             ),
             Event::message_received(Actor::Model, "done".to_string(), "tui".to_string(), None),
         ];

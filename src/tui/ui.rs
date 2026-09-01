@@ -24,6 +24,9 @@ fn transcript(chat: &Chat, area: Rect) -> (Text<'static>, u16) {
     for event in chat.app.events() {
         lines.extend(event_lines(chat, event, width));
     }
+    if let Some(thought) = chat.app.pending_thought() {
+        lines.extend(thought_lines(chat, thought, width));
+    }
     if let Some(reply) = chat.app.pending_reply() {
         lines.extend(styled_lines(chat, Actor::Model, reply, width));
     }
@@ -35,6 +38,16 @@ fn transcript(chat: &Chat, area: Rect) -> (Text<'static>, u16) {
     let total = lines.len() as u16;
     let offset = total.saturating_sub(area.height);
     (Text::from(lines), offset)
+}
+
+/// The thought now streaming, dimmed and with no `Assistant: ` prefix -
+/// it isn't dialogue. Disappears once the reply commits and the pending
+/// thought clears.
+fn thought_lines(chat: &Chat, thought: &str, width: usize) -> Vec<Line<'static>> {
+    textwrap::wrap(thought, width)
+        .iter()
+        .map(|w| Line::from(Span::styled(w.to_string(), chat.thought_style)))
+        .collect()
 }
 
 /// The last failure, in the provider's own words. Styled apart from
@@ -50,8 +63,10 @@ fn error_lines(chat: &Chat, error: &str, width: usize) -> Vec<Line<'static>> {
 fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
     match event.payload() {
         Payload::MessageReceived { content } => styled_lines(chat, event.actor(), content, width),
-        // Not dialogue - tui renders the transcript, not tool activity.
+        // Not dialogue - tui renders the transcript, not tool activity
+        // or a thought already shown while it streamed.
         Payload::ToolUsed { .. } => Vec::new(),
+        Payload::ThoughtRecorded { .. } => Vec::new(),
     }
 }
 

@@ -31,16 +31,18 @@ struct MessageBody {
 
 const MESSAGE_RECEIVED: &str = "message.received";
 const TOOL_USED: &str = "tool.used";
+const THOUGHT_RECORDED: &str = "thought.recorded";
 
 /// Every `type` the log records, for the error that lists them when a
 /// caller names one that isn't here.
-pub const KINDS: [&str; 2] = [MESSAGE_RECEIVED, TOOL_USED];
+pub const KINDS: [&str; 3] = [MESSAGE_RECEIVED, TOOL_USED, THOUGHT_RECORDED];
 
 /// The wire `type` a kind serializes as.
 fn kind(kind: EventKind) -> &'static str {
     match kind {
         EventKind::MessageReceived => MESSAGE_RECEIVED,
         EventKind::ToolUsed => TOOL_USED,
+        EventKind::ThoughtRecorded => THOUGHT_RECORDED,
     }
 }
 
@@ -50,6 +52,7 @@ pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
     match s {
         MESSAGE_RECEIVED => Ok(EventKind::MessageReceived),
         TOOL_USED => Ok(EventKind::ToolUsed),
+        THOUGHT_RECORDED => Ok(EventKind::ThoughtRecorded),
         other => Err(Error::UnknownEventType(other.to_string())),
     }
 }
@@ -109,6 +112,10 @@ impl From<&percept::Event> for Event {
             Payload::ToolUsed { body } => {
                 serde_json::from_str(body).expect("ToolUsed body is validated JSON")
             }
+            Payload::ThoughtRecorded { content } => serde_json::to_value(MessageBody {
+                content: content.clone(),
+            })
+            .expect("MessageBody always serializes"),
         };
 
         Self {
@@ -191,6 +198,12 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
         EventKind::ToolUsed => Ok(Payload::ToolUsed {
             body: serde_json::to_string(&payload).expect("Value always serializes"),
         }),
+        EventKind::ThoughtRecorded => {
+            let body: MessageBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::ThoughtRecorded {
+                content: body.content,
+            })
+        }
     }
 }
 
@@ -304,7 +317,7 @@ mod tests {
         assert!(restored.created_at() == original.created_at());
         match restored.payload() {
             Payload::MessageReceived { content } => assert_eq!(content, "hello world"),
-            Payload::ToolUsed { .. } => panic!("expected MessageReceived"),
+            _ => panic!("expected MessageReceived"),
         }
     }
 
@@ -335,7 +348,31 @@ mod tests {
                 let value: Value = serde_json::from_str(body).unwrap();
                 assert_eq!(value["tool_input"]["file_path"], "/x/y.rs");
             }
-            Payload::MessageReceived { .. } => panic!("expected ToolUsed"),
+            _ => panic!("expected ToolUsed"),
+        }
+    }
+
+    #[test]
+    fn thought_recorded_round_trips_through_json() {
+        let original = percept::Event::restore(
+            EventId::new(),
+            Actor::Model,
+            "tui".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::ThoughtRecorded {
+                content: "let me think".to_string(),
+            },
+        );
+
+        let json = serde_json::to_string(&Event::from(&original)).unwrap();
+        let wire: Event = serde_json::from_str(&json).unwrap();
+        assert_eq!(wire.kind, "thought.recorded");
+        let restored = percept::Event::try_from(wire).unwrap();
+
+        match restored.payload() {
+            Payload::ThoughtRecorded { content } => assert_eq!(content, "let me think"),
+            _ => panic!("expected ThoughtRecorded"),
         }
     }
 

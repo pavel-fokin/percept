@@ -6,7 +6,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
 
-use crate::percept::{Actor, Message, Model, ReplyStream};
+use crate::percept::{Actor, Chunk, Message, Model, ReplyStream};
 
 /// Sends and receives with a local ollama server's `/api/chat`, which
 /// streams NDJSON: one JSON object per line, each carrying a token of
@@ -81,26 +81,38 @@ struct ChatChunk {
 struct ChatChunkMessage {
     #[serde(default)]
     content: String,
+    /// A thinking model's reasoning, on a line of its own before its
+    /// `content` - present but empty on a line that carries none.
+    #[serde(default)]
+    thinking: String,
 }
 
-/// What one parsed NDJSON line means for the stream: more text to
-/// append, or the sentinel that ends it. The `done` line's `content` is
-/// always empty, so it never surfaces as a chunk.
+/// What one parsed NDJSON line means for the stream: a chunk to
+/// forward, the sentinel that ends it, or nothing - the `done` line's
+/// `content` is always empty, and a line with neither `thinking` nor
+/// `content` yields no chunk.
 enum Line {
-    Content(String),
+    Chunk(Chunk),
+    Empty,
     Done,
 }
 
 fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
-    let chunk: ChatChunk =
+    let raw: ChatChunk =
         serde_json::from_str(line).map_err(|err| format!("malformed line from ollama: {err}"))?;
-    if let Some(error) = chunk.error {
+    if let Some(error) = raw.error {
         return Err(format!("ollama reported: {error}").into());
     }
-    if chunk.done {
-        Ok(Line::Done)
+    if raw.done {
+        return Ok(Line::Done);
+    }
+    // Thinking arrives first when a line ever carried both.
+    if !raw.message.thinking.is_empty() {
+        Ok(Line::Chunk(Chunk::Thought(raw.message.thinking)))
+    } else if !raw.message.content.is_empty() {
+        Ok(Line::Chunk(Chunk::Reply(raw.message.content)))
     } else {
-        Ok(Line::Content(chunk.message.content))
+        Ok(Line::Empty)
     }
 }
 
@@ -134,13 +146,14 @@ fn take_final_line(buf: &[u8]) -> Option<String> {
 /// line is skipped, as `store::Jsonl` skips one.
 fn handle_line(
     line: &str,
-    tx: &UnboundedSender<Result<String, Box<dyn Error + Send + Sync>>>,
+    tx: &UnboundedSender<Result<Chunk, Box<dyn Error + Send + Sync>>>,
 ) -> bool {
     if line.trim().is_empty() {
         return false;
     }
     match parse_line(line) {
-        Ok(Line::Content(content)) => tx.send(Ok(content)).is_err(),
+        Ok(Line::Chunk(chunk)) => tx.send(Ok(chunk)).is_err(),
+        Ok(Line::Empty) => false,
         Ok(Line::Done) => true,
         Err(err) => {
             let _ = tx.send(Err(err));
@@ -238,12 +251,30 @@ mod tests {
     }
 
     #[test]
-    fn a_content_line_parses_as_content() {
+    fn a_content_line_parses_as_a_reply_chunk() {
         let line =
             r#"{"model":"gemma4","message":{"role":"assistant","content":"Hi"},"done":false}"#;
         match parse_line(line).unwrap() {
-            Line::Content(content) => assert_eq!(content, "Hi"),
-            Line::Done => panic!("expected content"),
+            Line::Chunk(Chunk::Reply(content)) => assert_eq!(content, "Hi"),
+            _ => panic!("expected a reply chunk"),
+        }
+    }
+
+    #[test]
+    fn a_thinking_line_parses_as_a_thought_chunk() {
+        let line = r#"{"model":"gemma4","message":{"role":"assistant","content":"","thinking":"Thinking"},"done":false}"#;
+        match parse_line(line).unwrap() {
+            Line::Chunk(Chunk::Thought(thinking)) => assert_eq!(thinking, "Thinking"),
+            _ => panic!("expected a thought chunk"),
+        }
+    }
+
+    #[test]
+    fn a_line_with_neither_thinking_nor_content_yields_no_chunk() {
+        let line = r#"{"model":"gemma4","message":{"role":"assistant","content":""},"done":false}"#;
+        match parse_line(line).unwrap() {
+            Line::Empty => {}
+            _ => panic!("expected no chunk"),
         }
     }
 
@@ -252,7 +283,7 @@ mod tests {
         let line = r#"{"model":"gemma4","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop"}"#;
         match parse_line(line).unwrap() {
             Line::Done => {}
-            Line::Content(_) => panic!("expected done"),
+            _ => panic!("expected done"),
         }
     }
 
