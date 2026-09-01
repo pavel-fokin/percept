@@ -38,11 +38,11 @@ it, never sideways or up:
 
 | Layer | Package | Owns |
 |---|---|---|
-| Domain | `percept` | `Event`, `Message`, `Model` - entities and the capabilities they need, as interfaces. Serde-free; depends only on `shared`. |
+| Domain | `percept` | `Event`, `Message`, `Model` - entities and the capabilities they need, as interfaces. Serde-free; depends on `shared` and on `futures-core`, for the stream type its reply port returns. |
 | Application | `app` | `App` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. |
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
 | Presentation | `cli` | `percept events publish`, `search`, `show` - the log without the TUI. |
-| Infrastructure | `providers` | `Stub` today, real LLM clients later - implements `percept::Model`. |
+| Infrastructure | `providers` | `Ollama` today, more LLM clients later - implements `percept::Model`. |
 | Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 
@@ -136,6 +136,49 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   the TUI rebuilds the transcript at startup. It can go once that read
   is a search with an empty query, leaving `EventLog` as `append` and
   `get`.
+- 2026-09-01: `percept::Model` returns a stream of chunks instead of
+  taking an `on_chunk` callback. A trait method can't return `impl
+  Stream`, so the port is a boxed, pinned `ReplyStream`. `reply` no
+  longer returns a `Result`: a connection that never opens is the
+  stream's first `Err` item, so one error path covers a failure before
+  a reply and during it. The domain names `futures_core::Stream` for
+  this, its first dependency beyond `shared` - `tokio_stream` would
+  have pointed the domain at a runtime. `Chunk` separates a model's
+  `Thought` from its `Reply`. Reasoning split from the answer is the
+  shape every current provider streams, not an ollama detail.
+- 2026-09-01: replies come from a local ollama server.
+  `providers::Ollama` posts to `/api/chat` and reads its NDJSON body,
+  one JSON object per token. Chunk boundaries don't align with lines,
+  so the reader buffers an incomplete tail. The URL and model are
+  `const` in `main` - `http://localhost:11434` and `gemma4` - not flags
+  or environment variables, so there is one place to change them.
+  `reqwest` carries no TLS feature: localhost is plain HTTP, and a
+  hosted provider can add one later. Only the connect is bounded, at
+  five seconds. A first token can be minutes away while ollama loads a
+  model, so a read timeout would abort healthy replies. `Stub` is
+  deleted rather than kept behind a flag, so `scripts/drive.py` now
+  needs a live server.
+- 2026-09-01: a thinking model's reasoning is a fact the log records.
+  `Payload::ThoughtRecorded` is its own variant, wire type
+  `thought.recorded`, sharing `message.received`'s payload shape. A
+  turn commits up to two events - the thought, then the reply, both
+  caused by the prompt - superseding "one `Event` is committed when the
+  reply completes" above. `to_messages` filters a thought out; it is
+  never replayed to the model as dialogue. The TUI shows it dimmed
+  while it streams and never again, so a reloaded transcript is
+  dialogue only. This amends the typed-variant rule: a variant is typed
+  when the domain produces or reads it. `App` assembles a thought from
+  streamed text, where `ToolUsed` only passes another writer's JSON
+  through.
+- 2026-09-01: a failed reply is shown, never logged. The provider's own
+  words reach a transient `error` on the TUI's `Chat`, cleared at the
+  next submit. Sending them as a chunk would commit them as something
+  the model said, and an append-only log keeps that forever. Whatever
+  text did arrive still commits. `App` refuses a second `submit` while
+  a turn streams: without the guard the first reply took the second
+  prompt's `causation_id` and both replies fused into one event. The
+  guard lives in `App`, which owns the turn, not in the TUI that types
+  into it.
 
 ## Workflow
 

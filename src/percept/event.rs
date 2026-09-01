@@ -16,14 +16,17 @@ pub enum Actor {
 }
 
 /// Event-specific data. One variant per kind of fact the log records.
-/// A variant carries typed fields only when the domain reads them -
-/// `to_messages` needs `content`, so `MessageReceived` is typed.
-/// `ToolUsed` stays opaque: nothing in the domain reads a tool call, so
-/// `body` is the raw JSON text its source sent, unparsed.
+/// A variant carries typed fields only when the domain produces or
+/// reads them - `to_messages` needs `content`, so `MessageReceived` is
+/// typed, and `App` assembles a thought from streamed text, so
+/// `ThoughtRecorded` is too. `ToolUsed` stays opaque: it arrives as
+/// JSON from another writer and nothing in the domain reads it, so
+/// `body` is that raw text, unparsed.
 #[derive(Clone)]
 pub enum Payload {
     MessageReceived { content: String },
     ToolUsed { body: String },
+    ThoughtRecorded { content: String },
 }
 
 /// What kind of fact an Event records - one variant per `Payload`
@@ -34,6 +37,7 @@ pub enum Payload {
 pub enum EventKind {
     MessageReceived,
     ToolUsed,
+    ThoughtRecorded,
 }
 
 /// One recorded fact in the conversation log. Append-only: a committed
@@ -87,6 +91,21 @@ impl Event {
         )
     }
 
+    /// A `thought.recorded` event.
+    pub fn thought_recorded(
+        actor: Actor,
+        content: String,
+        source: String,
+        causation_id: Option<EventId>,
+    ) -> Self {
+        Self::new(
+            actor,
+            source,
+            causation_id,
+            Payload::ThoughtRecorded { content },
+        )
+    }
+
     /// Rebuilds an Event from stored fields - the persistence boundary,
     /// where `id` and `created_at` come from storage rather than being
     /// minted fresh.
@@ -136,6 +155,7 @@ impl Event {
         match self.payload {
             Payload::MessageReceived { .. } => EventKind::MessageReceived,
             Payload::ToolUsed { .. } => EventKind::ToolUsed,
+            Payload::ThoughtRecorded { .. } => EventKind::ThoughtRecorded,
         }
     }
 }
