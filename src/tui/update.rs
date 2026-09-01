@@ -14,6 +14,9 @@ pub fn handle_key(
     match (key.code, key.modifiers) {
         (KeyCode::Esc, _) => Ok(true),
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => Ok(true),
+        // Input still types while a reply streams - only sending
+        // waits, so what's typed is sent once the reply lands.
+        (KeyCode::Enter, _) if chat.replying => Ok(false),
         (KeyCode::Enter, _) => {
             submit(chat, reply_tx)?;
             Ok(false)
@@ -40,6 +43,7 @@ fn submit(
     }
     chat.textarea.clear();
     chat.error = None;
+    chat.replying = true;
 
     let mut stream = chat.app.submit(text)?;
     let reply_tx = reply_tx.clone();

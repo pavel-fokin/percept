@@ -33,6 +33,10 @@ pub struct Chat<'a> {
     /// Why the last reply broke, shown until the next submit. Transient
     /// tui state - it never reaches the log.
     pub error: Option<String>,
+    /// True from submit until the reply ends. A second submit before
+    /// then would overwrite the first reply's cause and merge both
+    /// replies into one event, and an append-only log keeps the damage.
+    pub replying: bool,
 }
 
 impl<'a> Chat<'a> {
@@ -48,6 +52,7 @@ impl<'a> Chat<'a> {
             error_style: Style::default().fg(Color::Red),
             app,
             error: None,
+            replying: false,
         }
     }
 }

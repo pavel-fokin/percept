@@ -48,12 +48,16 @@ async fn run(
             Some(event) = reply_rx.recv() => {
                 match event {
                     StreamEvent::Chunk(chunk) => chat.app.append_chunk(chunk),
-                    StreamEvent::Done => chat.app.end_stream()?,
+                    StreamEvent::Done => {
+                        chat.app.end_stream()?;
+                        chat.replying = false;
+                    }
                     StreamEvent::Failed(message) => {
                         // Whatever the model managed to say is real and
                         // commits; the failure is only shown.
                         chat.app.end_stream()?;
                         chat.error = Some(message);
+                        chat.replying = false;
                     }
                 }
             }
