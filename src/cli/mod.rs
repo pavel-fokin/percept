@@ -202,9 +202,7 @@ impl Filters {
 pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
     let wanted: EventId = store::parse_event_id(&args.id)?;
     let event = log
-        .load()?
-        .into_iter()
-        .find(|event| event.id() == wanted)
+        .get(wanted)?
         .ok_or_else(|| format!("no event with id {}", args.id))?;
 
     println!("{}", store::encode(&event));
@@ -252,6 +250,11 @@ mod tests {
 
         fn load(&self) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
             Ok(self.0.lock().unwrap().clone())
+        }
+
+        fn get(&self, id: EventId) -> Result<Option<Event>, Box<dyn std::error::Error>> {
+            let events = self.0.lock().unwrap();
+            Ok(events.iter().find(|event| event.id() == id).cloned())
         }
     }
 

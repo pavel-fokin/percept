@@ -3,7 +3,7 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::percept::{self, EventLog};
+use crate::percept::{self, EventId, EventLog};
 use crate::store::{Error, Event};
 
 /// A JSONL event log: one compact `store::Event` per line, appended to
@@ -104,30 +104,61 @@ impl EventLog for Jsonl {
     /// half-written line read as a torn one and dropped.
     fn load(&self) -> Result<Vec<percept::Event>, Box<dyn std::error::Error>> {
         let bytes = self.with_shared(read_all)?;
-
-        // Bytes, not `read_to_string`: a torn write can split a
-        // multi-byte character, and that tail is about to be discarded.
-        let contents = std::str::from_utf8(&bytes[..complete_len(&bytes)])
-            .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
+        let contents = complete_text(&bytes)?;
 
         let mut events = Vec::new();
         for (idx, raw) in contents.split('\n').enumerate() {
             if raw.is_empty() {
                 continue;
             }
-            let event = parse_line(raw).map_err(|source| Error::AtLine {
-                line: idx + 1,
-                source: Box::new(source),
-            })?;
-            events.push(event);
+            events.push(parse_line(raw).map_err(|source| at_line(idx + 1, source))?);
         }
         Ok(events)
+    }
+
+    /// Reads the same lines `load` does, but compares each line's id on
+    /// the wire and stops at the match, so only the event asked for is
+    /// ever built. A line whose payload the domain can't decode fails
+    /// the fetch only when it is the line named.
+    fn get(&self, id: EventId) -> Result<Option<percept::Event>, Box<dyn std::error::Error>> {
+        let bytes = self.with_shared(read_all)?;
+        let contents = complete_text(&bytes)?;
+
+        for (idx, raw) in contents.split('\n').enumerate() {
+            if raw.is_empty() {
+                continue;
+            }
+            let line = idx + 1;
+            let wire: Event =
+                serde_json::from_str(raw).map_err(|e| at_line(line, Error::BadLine(e)))?;
+            let found = crate::store::parse_event_id(&wire.id).map_err(|e| at_line(line, e))?;
+            if found == id {
+                let event = percept::Event::try_from(wire).map_err(|e| at_line(line, e))?;
+                return Ok(Some(event));
+            }
+        }
+        Ok(None)
     }
 }
 
 fn parse_line(raw: &str) -> Result<percept::Event, Error> {
     let wire: Event = serde_json::from_str(raw).map_err(Error::BadLine)?;
     percept::Event::try_from(wire)
+}
+
+/// Everything up to the last newline. Bytes, not `read_to_string`: a
+/// torn write can split a multi-byte character, and that tail is about
+/// to be discarded.
+fn complete_text(bytes: &[u8]) -> Result<&str, Error> {
+    std::str::from_utf8(&bytes[..complete_len(bytes)])
+        .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
+}
+
+fn at_line(line: usize, source: Error) -> Error {
+    Error::AtLine {
+        line,
+        source: Box::new(source),
+    }
 }
 
 fn read_all(mut file: &File) -> Result<Vec<u8>, Error> {
@@ -276,6 +307,21 @@ mod tests {
             Payload::MessageReceived { content } => content,
             Payload::ToolUsed { .. } => panic!("expected a message.received event"),
         }
+    }
+
+    #[test]
+    fn get_finds_one_event_by_id_and_reports_a_missing_one_as_absent() {
+        let temp = TempLog::new();
+        let log = temp.open();
+
+        let wanted = message(Actor::Model, "hello");
+        for event in [message(Actor::User, "hi"), wanted.clone()] {
+            log.append(&event).unwrap();
+        }
+
+        let found = log.get(wanted.id()).unwrap().expect("appended event");
+        assert!(found.id() == wanted.id());
+        assert!(log.get(percept::EventId::new()).unwrap().is_none());
     }
 
     #[test]
