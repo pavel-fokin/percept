@@ -41,9 +41,9 @@ it, never sideways or up:
 | Domain | `percept` | `Event`, `Message`, `Model` - entities and the capabilities they need, as interfaces. Serde-free; depends only on `shared`. |
 | Application | `app` | `App` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. |
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
-| Presentation | `cli` | `percept events publish` - appends one event without opening the TUI. |
+| Presentation | `cli` | `percept events publish`, `search`, `show` - the log without the TUI. |
 | Infrastructure | `providers` | `Stub` today, real LLM clients later - implements `percept::Model`. |
-| Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog`. |
+| Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 
 Wire concrete types together only at the entrypoint - `main` in Rust.
@@ -109,6 +109,33 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   an escaped string, so a caller can still index into it with `jq`. A
   known type carried opaquely is not the same as accepting arbitrary
   types - `store::decode` still rejects a `type` it doesn't know.
+- 2026-09-01: searching the log is a capability of its own, separate
+  from persisting it. `percept::EventQuery` names a query and
+  `percept::EventSearch` answers one; `store::Jsonl` implements both
+  ports. `EventQuery` also decides what matches, so each rule lives in
+  the type whose doc comment states it and a store only supplies the
+  events. Before this the CLI held the filtering, comparing domain
+  values in the presentation layer. `EventQuery` carries absolute
+  timestamps and never reads a clock - a relative shorthand like `1d`
+  resolves in the CLI, before the domain sees it. `since` is inclusive
+  and `until` exclusive, so adjacent windows tile with no overlap and
+  no gap. A multi-valued filter matches any of its values; an empty one
+  is off. `size` replaces `limit` - the N most recent matches, still
+  printed oldest-first. There is no index: `search` loads and then
+  filters. Filtering before decode would silently skip a line naming an
+  unknown event type, and failing loudly is worth more than the speed.
+  Full-text search is not in yet. On the command line, `percept events
+  search` replaces `list`.
+- 2026-09-01: `EventKind` is the domain's word for what the wire calls
+  `type`, with one variant per `Payload` variant; `store` owns the
+  spelling. Rust reserves `type`, and `Kind` is what the ecosystem
+  names a discriminant, so the two layers differ by a word on purpose.
+  Fetching one event by its id is `EventLog::get`, not a search -
+  identity is not a criterion to match on - and `show` uses it rather
+  than loading the whole log to scan it. `EventLog::load` stays because
+  the TUI rebuilds the transcript at startup. It can go once that read
+  is a search with an empty query, leaving `EventLog` as `append` and
+  `get`.
 
 ## Workflow
 
@@ -119,17 +146,20 @@ skips it.
   skill. An issue has one clear outcome. It is product (a vertical slice
   of behaviour) or tech (refactoring, docs, tooling). Scope each as
   small as it goes. Decisions the user lives with - paths, filenames,
-  defaults - are settled with them before the build, never assumed. The
-  user agrees the set before any code.
+  flags, defaults - are settled with them before the build, never
+  assumed. Where a function or a rule sits inside the code is not one
+  of those: the builder proposes it, and review challenges it. The user
+  agrees the set before any code.
 - **Build.** An issue with no design left in it, touching one or two
   files, the main agent builds itself. Anything larger goes to the
   `software-developer` subagent, which follows this file, writes the
   code, runs the build and tests, and reports back. It does not design,
   choose scope, commit, or push.
-- **Review.** The main agent checks the diff against the issue, then
-  runs `/code-review`. Small fixes land here; larger rework goes back to
-  the subagent. `/simplify` runs once per branch, before the user
-  merges it.
+- **Review.** The main agent checks each diff against its issue, and
+  small fixes land there; larger rework goes back to the subagent.
+  `/code-review` and `/simplify` then run once each over the whole
+  branch, before the user merges. Two passes looking for different
+  things catch more than a pass per issue.
 - **Reflect.** Close the session by proposing changes to this workflow.
   Cutting a step counts for more than adding one. Aim for the smallest
   process that still catches mistakes.

@@ -1,4 +1,4 @@
-use super::Event;
+use super::{Event, EventId};
 
 /// Persists the append-only log so the transcript survives a restart -
 /// domain-owned, the way `Model` is a domain capability rather than an
@@ -12,4 +12,8 @@ pub trait EventLog: Send + Sync {
 
     /// Loads every event in the log, in commit order.
     fn load(&self) -> Result<Vec<Event>, Box<dyn std::error::Error>>;
+
+    /// An id the log doesn't carry is an absence, not an error - the
+    /// caller decides what to make of it.
+    fn get(&self, id: EventId) -> Result<Option<Event>, Box<dyn std::error::Error>>;
 }

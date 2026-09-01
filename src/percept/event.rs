@@ -26,6 +26,16 @@ pub enum Payload {
     ToolUsed { body: String },
 }
 
+/// What kind of fact an Event records - one variant per `Payload`
+/// variant, as a value a caller can compare and filter on without
+/// matching. The domain's word for what the wire calls `type`; `store`
+/// owns the spelling.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum EventKind {
+    MessageReceived,
+    ToolUsed,
+}
+
 /// One recorded fact in the conversation log. Append-only: a committed
 /// Event never changes. `actor` and the `payload` variant together say
 /// what happened; `source` says which writer produced it; `causation_id`
@@ -120,5 +130,12 @@ impl Event {
 
     pub fn payload(&self) -> &Payload {
         &self.payload
+    }
+
+    pub fn kind(&self) -> EventKind {
+        match self.payload {
+            Payload::MessageReceived { .. } => EventKind::MessageReceived,
+            Payload::ToolUsed { .. } => EventKind::ToolUsed,
+        }
     }
 }

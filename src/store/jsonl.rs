@@ -3,8 +3,10 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::sync::Mutex;
 
-use crate::percept::{self, EventLog};
-use crate::store::{Error, Event};
+use serde::Deserialize;
+
+use crate::percept::{self, EventId, EventLog, EventQuery, EventSearch};
+use crate::store::{parse_event_id, Error, Event};
 
 /// A JSONL event log: one compact `store::Event` per line, appended to
 /// as the app runs and replayed to rebuild the transcript on start.
@@ -105,29 +107,81 @@ impl EventLog for Jsonl {
     fn load(&self) -> Result<Vec<percept::Event>, Box<dyn std::error::Error>> {
         let bytes = self.with_shared(read_all)?;
 
-        // Bytes, not `read_to_string`: a torn write can split a
-        // multi-byte character, and that tail is about to be discarded.
-        let contents = std::str::from_utf8(&bytes[..complete_len(&bytes)])
-            .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))?;
-
         let mut events = Vec::new();
-        for (idx, raw) in contents.split('\n').enumerate() {
-            if raw.is_empty() {
-                continue;
-            }
-            let event = parse_line(raw).map_err(|source| Error::AtLine {
-                line: idx + 1,
-                source: Box::new(source),
-            })?;
-            events.push(event);
+        for (line, raw) in lines(complete_text(&bytes)?) {
+            events.push(parse_line(raw).map_err(|source| at_line(line, source))?);
         }
         Ok(events)
     }
+
+    /// Reads the same lines `load` does, but compares each line's id on
+    /// the wire and stops at the match, so only the event asked for is
+    /// ever built. A line whose payload the domain can't decode fails
+    /// the fetch only when it is the line named.
+    fn get(&self, id: EventId) -> Result<Option<percept::Event>, Box<dyn std::error::Error>> {
+        let bytes = self.with_shared(read_all)?;
+
+        for (line, raw) in lines(complete_text(&bytes)?) {
+            let WireId { id: found } =
+                serde_json::from_str(raw).map_err(|e| at_line(line, Error::BadLine(e)))?;
+            if parse_event_id(&found).map_err(|e| at_line(line, e))? != id {
+                continue;
+            }
+            return Ok(Some(parse_line(raw).map_err(|e| at_line(line, e))?));
+        }
+        Ok(None)
+    }
+}
+
+impl EventSearch for Jsonl {
+    /// Loads the whole log, then applies the query. Filtering before
+    /// decode would silently skip a line with an unknown event type
+    /// instead of failing loudly, which matters more here than the
+    /// speed.
+    fn search(
+        &self,
+        query: &EventQuery,
+    ) -> Result<Vec<percept::Event>, Box<dyn std::error::Error>> {
+        Ok(query.apply(self.load()?))
+    }
+}
+
+/// Just enough of a line to tell whether it is the one asked for.
+/// serde walks past the rest, so no payload is built for a line the
+/// caller only passes over.
+#[derive(Deserialize)]
+struct WireId {
+    id: String,
 }
 
 fn parse_line(raw: &str) -> Result<percept::Event, Error> {
     let wire: Event = serde_json::from_str(raw).map_err(Error::BadLine)?;
     percept::Event::try_from(wire)
+}
+
+/// Everything up to the last newline. Bytes, not `read_to_string`: a
+/// torn write can split a multi-byte character, and that tail is about
+/// to be discarded.
+fn complete_text(bytes: &[u8]) -> Result<&str, Error> {
+    std::str::from_utf8(&bytes[..complete_len(bytes)])
+        .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
+}
+
+/// Every non-empty line, paired with its 1-based number - how the log
+/// is framed, written once for both readers of it.
+fn lines(contents: &str) -> impl Iterator<Item = (usize, &str)> {
+    contents
+        .split('\n')
+        .enumerate()
+        .filter(|(_, raw)| !raw.is_empty())
+        .map(|(idx, raw)| (idx + 1, raw))
+}
+
+fn at_line(line: usize, source: Error) -> Error {
+    Error::AtLine {
+        line,
+        source: Box::new(source),
+    }
 }
 
 fn read_all(mut file: &File) -> Result<Vec<u8>, Error> {
@@ -221,7 +275,7 @@ fn last_line_end(mut file: &File, len: u64) -> Result<u64, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percept::{Actor, Payload};
+    use crate::percept::{Actor, EventQuery, Payload};
     use std::path::PathBuf;
     use uuid::Uuid;
 
@@ -276,6 +330,21 @@ mod tests {
             Payload::MessageReceived { content } => content,
             Payload::ToolUsed { .. } => panic!("expected a message.received event"),
         }
+    }
+
+    #[test]
+    fn get_finds_one_event_by_id_and_reports_a_missing_one_as_absent() {
+        let temp = TempLog::new();
+        let log = temp.open();
+
+        let wanted = message(Actor::Model, "hello");
+        for event in [message(Actor::User, "hi"), wanted.clone()] {
+            log.append(&event).unwrap();
+        }
+
+        let found = log.get(wanted.id()).unwrap().expect("appended event");
+        assert!(found.id() == wanted.id());
+        assert!(log.get(percept::EventId::new()).unwrap().is_none());
     }
 
     #[test]
@@ -402,5 +471,22 @@ mod tests {
         assert_eq!(log.load().unwrap().len(), 1);
 
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn search_reads_the_file_and_applies_the_query() {
+        let temp = TempLog::new();
+        let log = temp.open();
+        log.append(&message(Actor::User, "hi")).unwrap();
+        log.append(&message(Actor::Model, "hello")).unwrap();
+
+        let query = EventQuery {
+            actors: vec![Actor::Model],
+            ..Default::default()
+        };
+        let found = log.search(&query).unwrap();
+
+        assert_eq!(found.len(), 1);
+        assert!(found[0].actor() == Actor::Model);
     }
 }

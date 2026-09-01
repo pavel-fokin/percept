@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::percept::{self, Actor, EventId, Payload};
+use crate::percept::{self, Actor, EventId, EventKind, Payload};
 use crate::shared::Timestamp;
 use crate::store::Error;
 
@@ -32,15 +32,25 @@ struct MessageBody {
 const MESSAGE_RECEIVED: &str = "message.received";
 const TOOL_USED: &str = "tool.used";
 
-/// Every `type` the log records. `list --type` checks against this, so
-/// a misspelt filter is rejected rather than matching nothing.
+/// Every `type` the log records, for the error that lists them when a
+/// caller names one that isn't here.
 pub const KINDS: [&str; 2] = [MESSAGE_RECEIVED, TOOL_USED];
 
-/// The wire `type` an event serializes as.
-pub fn kind(event: &percept::Event) -> &'static str {
-    match event.payload() {
-        Payload::MessageReceived { .. } => MESSAGE_RECEIVED,
-        Payload::ToolUsed { .. } => TOOL_USED,
+/// The wire `type` a kind serializes as.
+fn kind(kind: EventKind) -> &'static str {
+    match kind {
+        EventKind::MessageReceived => MESSAGE_RECEIVED,
+        EventKind::ToolUsed => TOOL_USED,
+    }
+}
+
+/// An `EventKind` from its wire spelling - so a caller filtering by
+/// type parses once rather than comparing every event as text.
+pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
+    match s {
+        MESSAGE_RECEIVED => Ok(EventKind::MessageReceived),
+        TOOL_USED => Ok(EventKind::ToolUsed),
+        other => Err(Error::UnknownEventType(other.to_string())),
     }
 }
 
@@ -105,7 +115,7 @@ impl From<&percept::Event> for Event {
             id: event.id().as_uuid().to_string(),
             actor: actor_name(event.actor()).to_string(),
             source: Some(event.source().to_string()),
-            kind: kind(event).to_string(),
+            kind: kind(event.kind()).to_string(),
             causation_id: event.causation_id().map(|id| id.as_uuid().to_string()),
             created_at: event.created_at().to_string(),
             payload,
@@ -168,8 +178,8 @@ pub fn decode(
 }
 
 fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
-    match kind {
-        MESSAGE_RECEIVED => {
+    match parse_kind(kind)? {
+        EventKind::MessageReceived => {
             let body: MessageBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
             Ok(Payload::MessageReceived {
                 content: body.content,
@@ -178,10 +188,9 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
         // Opaque: the domain never reads a tool call, so `body` keeps
         // the canonical serialization of whatever object the source
         // sent, unparsed.
-        TOOL_USED => Ok(Payload::ToolUsed {
+        EventKind::ToolUsed => Ok(Payload::ToolUsed {
             body: serde_json::to_string(&payload).expect("Value always serializes"),
         }),
-        other => Err(Error::UnknownEventType(other.to_string())),
     }
 }
 

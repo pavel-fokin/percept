@@ -29,7 +29,11 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnknownEventType(t) => write!(f, "unknown event type: {t}"),
+            Self::UnknownEventType(t) => write!(
+                f,
+                "unknown event type: {t}, expected one of: {}",
+                super::event::KINDS.join(", ")
+            ),
             Self::UnknownActor(a) => write!(f, "unknown actor: {a}"),
             Self::BadUuid(s) => write!(f, "malformed uuid: {s}"),
             Self::BadTimestamp(s) => write!(f, "malformed timestamp: {s}"),

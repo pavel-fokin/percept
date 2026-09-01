@@ -181,6 +181,11 @@ mod tests {
         fn load(&self) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
             Ok(self.events.lock().unwrap().clone())
         }
+
+        fn get(&self, id: percept::EventId) -> Result<Option<Event>, Box<dyn std::error::Error>> {
+            let events = self.events.lock().unwrap();
+            Ok(events.iter().find(|event| event.id() == id).cloned())
+        }
     }
 
     #[test]
