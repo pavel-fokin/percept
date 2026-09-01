@@ -15,13 +15,18 @@ mod tui;
 
 use app::App;
 use cli::{Cli, Command, EventsCommand};
-use providers::Stub;
+use providers::Ollama;
 use store::Jsonl;
 use tui::{Chat, StreamEvent};
 
 /// Where the event log lives: `percept.jsonl` in the working directory,
 /// so the transcript follows wherever the app is launched from.
 const LOG_PATH: &str = "percept.jsonl";
+
+/// Where the local ollama server listens.
+const OLLAMA_URL: &str = "http://localhost:11434";
+/// The model ollama serves replies with.
+const OLLAMA_MODEL: &str = "gemma4";
 
 async fn run(
     terminal: &mut ratatui::DefaultTerminal,
@@ -61,7 +66,8 @@ async fn run(
 
 async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
     let log = Arc::new(Jsonl::open(LOG_PATH)?);
-    let app = App::new(Arc::new(Stub), log, "tui".to_string())?;
+    let model = Ollama::new(OLLAMA_URL.to_string(), OLLAMA_MODEL.to_string());
+    let app = App::new(Arc::new(model), log, "tui".to_string())?;
 
     let mut terminal = ratatui::init();
     let mut chat = Chat::new(Box::new(app));

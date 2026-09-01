@@ -14,11 +14,6 @@ pub type ReplyStream =
 /// One turn in a conversation - the value-object shape Model needs,
 /// independent of Event's identity and audit concerns. Derived from the
 /// log at the boundary, never stored.
-///
-/// `role` and `content` aren't read yet - Stub ignores `messages` while
-/// it streams static text - but they're Model's contract, so the lint
-/// is suppressed rather than the fields removed.
-#[allow(dead_code)]
 pub struct Message {
     pub role: Actor,
     pub content: String,

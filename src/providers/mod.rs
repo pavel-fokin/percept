@@ -1,5 +1,5 @@
 //! Concrete `percept::Model` implementations.
 
-mod stub;
+mod ollama;
 
-pub use stub::Stub;
+pub use ollama::Ollama;
