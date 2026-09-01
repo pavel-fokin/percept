@@ -14,7 +14,7 @@ use std::io::{self, Write};
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::percept::{self, Actor, EventId, EventLog};
+use crate::percept::{self, Actor, EventId, EventKind, EventLog};
 use crate::shared::Timestamp;
 use crate::store;
 
@@ -141,21 +141,24 @@ struct Filters {
     since: Option<Timestamp>,
     actor: Option<Actor>,
     source: Option<String>,
-    kind: Option<String>,
+    kind: Option<EventKind>,
     limit: Option<usize>,
 }
 
 impl Filters {
     fn parse(args: &ListArgs) -> Result<Self, String> {
-        let kind = match &args.kind {
-            Some(kind) if !store::KINDS.contains(&kind.as_str()) => {
-                return Err(format!(
-                    "unknown --type {kind}, expected one of: {}",
-                    store::KINDS.join(", ")
-                ))
-            }
-            other => other.clone(),
-        };
+        let kind = args
+            .kind
+            .as_deref()
+            .map(|kind| {
+                store::parse_kind(kind).map_err(|_| {
+                    format!(
+                        "unknown --type {kind}, expected one of: {}",
+                        store::KINDS.join(", ")
+                    )
+                })
+            })
+            .transpose()?;
 
         Ok(Self {
             since: args.since.as_deref().map(parse_since).transpose()?,
@@ -182,8 +185,8 @@ impl Filters {
         if let Some(source) = &self.source {
             events.retain(|event| event.source() == source);
         }
-        if let Some(kind) = &self.kind {
-            events.retain(|event| store::kind(event) == kind);
+        if let Some(kind) = self.kind {
+            events.retain(|event| event.kind() == kind);
         }
         if let Some(limit) = self.limit {
             let start = events.len().saturating_sub(limit);
