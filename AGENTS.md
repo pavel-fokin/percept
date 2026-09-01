@@ -146,17 +146,20 @@ skips it.
   skill. An issue has one clear outcome. It is product (a vertical slice
   of behaviour) or tech (refactoring, docs, tooling). Scope each as
   small as it goes. Decisions the user lives with - paths, filenames,
-  defaults - are settled with them before the build, never assumed. The
-  user agrees the set before any code.
+  flags, defaults - are settled with them before the build, never
+  assumed. Where a function or a rule sits inside the code is not one
+  of those: the builder proposes it, and review challenges it. The user
+  agrees the set before any code.
 - **Build.** An issue with no design left in it, touching one or two
   files, the main agent builds itself. Anything larger goes to the
   `software-developer` subagent, which follows this file, writes the
   code, runs the build and tests, and reports back. It does not design,
   choose scope, commit, or push.
-- **Review.** The main agent checks the diff against the issue, then
-  runs `/code-review`. Small fixes land here; larger rework goes back to
-  the subagent. `/simplify` runs once per branch, before the user
-  merges it.
+- **Review.** The main agent checks each diff against its issue, and
+  small fixes land there; larger rework goes back to the subagent.
+  `/code-review` and `/simplify` then run once each over the whole
+  branch, before the user merges. Two passes looking for different
+  things catch more than a pass per issue.
 - **Reflect.** Close the session by proposing changes to this workflow.
   Cutting a step counts for more than adding one. Aim for the smallest
   process that still catches mistakes.
