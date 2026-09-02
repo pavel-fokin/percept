@@ -15,6 +15,10 @@ use crate::percept::Chunk;
 /// `app` never sees this type.
 pub enum StreamEvent {
     Chunk(Chunk),
+    /// A tool finished off-thread; the string is what to feed back.
+    /// `App::finish_tool` takes it. On its own event so the blocking
+    /// `Tool::run` never sits on the main loop.
+    ToolResult(String),
     /// The turn is over. `Some` carries why it broke, in the provider's
     /// own words, so "ollama isn't running" and "the model isn't
     /// pulled" read differently. Never a Chunk - a chunk becomes a

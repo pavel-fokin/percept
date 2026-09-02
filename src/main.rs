@@ -18,7 +18,7 @@ mod tui;
 use app::App;
 use cli::{Cli, Command, EventsCommand};
 use providers::Ollama;
-use store::Jsonl;
+use store::{Jsonl, SearchEvents};
 use tui::{Chat, StreamEvent};
 
 /// Where the event log lives: `percept.jsonl` in the working directory,
@@ -68,13 +68,13 @@ async fn run(
             biased;
 
             Some(event) = reply_rx.recv() => {
-                tui::handle_stream(chat, event)?;
+                tui::handle_stream(chat, event, &reply_tx)?;
                 // Tokens arrive far faster than a frame is worth
                 // drawing, and every frame re-wraps the whole
                 // transcript. Applying the queue first costs one frame
                 // per burst instead of one per token.
                 while let Ok(event) = reply_rx.try_recv() {
-                    tui::handle_stream(chat, event)?;
+                    tui::handle_stream(chat, event, &reply_tx)?;
                 }
             }
             // Only while a turn streams: idle, nothing moves, so
@@ -100,7 +100,8 @@ async fn run(
 async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
     let log = Arc::new(Jsonl::open(LOG_PATH)?);
     let model = Ollama::new(OLLAMA_URL.to_string(), OLLAMA_MODEL.to_string());
-    let app = App::new(Arc::new(model), log, "tui".to_string())?;
+    let tools: Vec<Arc<dyn percept::Tool>> = vec![Arc::new(SearchEvents::new(log.clone()))];
+    let app = App::new(Arc::new(model), log, tools, "tui".to_string())?;
 
     let mut terminal = ratatui::init();
     let mouse = match MouseCapture::enable() {

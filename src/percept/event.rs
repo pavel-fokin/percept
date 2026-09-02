@@ -8,25 +8,42 @@ pub type EventId = Id<Event>;
 pub enum Actor {
     User,
     Model,
-    // No producer yet - file and tool events come later. Part of the
-    // actor vocabulary per ADR; the lint is suppressed rather than the
-    // variant removed.
-    #[allow(dead_code)]
+    /// percept itself acting - so far, feeding a tool's output back as
+    /// `tool.resulted`.
     System,
 }
 
 /// Event-specific data. One variant per kind of fact the log records.
 /// A variant carries typed fields only when the domain produces or
 /// reads them - `to_messages` needs `content`, so `MessageReceived` is
-/// typed, and `App` assembles a thought from streamed text, so
-/// `ThoughtRecorded` is too. `ToolUsed` stays opaque: it arrives as
-/// JSON from another writer and nothing in the domain reads it, so
-/// `body` is that raw text, unparsed.
+/// typed; `App` assembles a thought from streamed text, so
+/// `ThoughtRecorded` is; `App` runs the loop that emits `ToolCalled`
+/// and feeds `ToolResulted` back, so both are. `ToolUsed` stays
+/// opaque: it arrives as JSON from another writer and nothing in the
+/// domain reads it, so `body` is that raw text, unparsed.
 #[derive(Clone)]
 pub enum Payload {
-    MessageReceived { content: String },
-    ToolUsed { body: String },
-    ThoughtRecorded { content: String },
+    MessageReceived {
+        content: String,
+    },
+    ToolUsed {
+        body: String,
+    },
+    ThoughtRecorded {
+        content: String,
+    },
+    /// A tool call percept's own loop made. `arguments` is JSON text
+    /// the domain routes by `tool` name but never parses - the tool
+    /// owns that shape. Its `ToolResulted` names this event as cause.
+    ToolCalled {
+        tool: String,
+        arguments: String,
+    },
+    /// What percept fed back for a `ToolCalled` - its output or its
+    /// error text. `causation_id` points at the call.
+    ToolResulted {
+        content: String,
+    },
 }
 
 /// What kind of fact an Event records - one variant per `Payload`
@@ -38,6 +55,8 @@ pub enum EventKind {
     MessageReceived,
     ToolUsed,
     ThoughtRecorded,
+    ToolCalled,
+    ToolResulted,
 }
 
 /// One recorded fact in the conversation log. Append-only: a committed
@@ -106,6 +125,32 @@ impl Event {
         )
     }
 
+    /// A `tool.called` event - always the model's action.
+    pub fn tool_called(
+        tool: String,
+        arguments: String,
+        source: String,
+        causation_id: Option<EventId>,
+    ) -> Self {
+        Self::new(
+            Actor::Model,
+            source,
+            causation_id,
+            Payload::ToolCalled { tool, arguments },
+        )
+    }
+
+    /// A `tool.resulted` event - always percept feeding a tool's output
+    /// back, never the model.
+    pub fn tool_resulted(content: String, source: String, causation_id: Option<EventId>) -> Self {
+        Self::new(
+            Actor::System,
+            source,
+            causation_id,
+            Payload::ToolResulted { content },
+        )
+    }
+
     /// Rebuilds an Event from stored fields - the persistence boundary,
     /// where `id` and `created_at` come from storage rather than being
     /// minted fresh.
@@ -156,6 +201,8 @@ impl Event {
             Payload::MessageReceived { .. } => EventKind::MessageReceived,
             Payload::ToolUsed { .. } => EventKind::ToolUsed,
             Payload::ThoughtRecorded { .. } => EventKind::ThoughtRecorded,
+            Payload::ToolCalled { .. } => EventKind::ToolCalled,
+            Payload::ToolResulted { .. } => EventKind::ToolResulted,
         }
     }
 }

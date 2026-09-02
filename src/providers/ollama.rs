@@ -2,11 +2,14 @@ use std::error::Error;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
 
-use crate::percept::{Actor, Chunk, Message, Modality, Model, ModelCapabilities, ReplyStream};
+use crate::percept::{
+    Actor, Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream, ToolSpec,
+};
 
 /// How long to wait for the server to accept a connection. Without it
 /// a host that never answers hangs on the OS TCP timeout, and the reply
@@ -52,13 +55,94 @@ fn role(actor: Actor) -> &'static str {
 struct ChatRequest {
     model: String,
     messages: Vec<ChatMessage>,
+    /// Omitted when empty, so a plain chat request is unchanged.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tools: Vec<ToolDef>,
     stream: bool,
+}
+
+#[derive(Serialize)]
+struct ToolDef {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    function: ToolDefFunction,
+}
+
+#[derive(Serialize)]
+struct ToolDefFunction {
+    name: &'static str,
+    description: &'static str,
+    /// `ToolSpec` carries the schema as text; ollama wants an object.
+    parameters: Value,
+}
+
+fn tool_def(spec: &ToolSpec) -> ToolDef {
+    ToolDef {
+        kind: "function",
+        function: ToolDefFunction {
+            name: spec.name,
+            description: spec.description,
+            parameters: serde_json::from_str(spec.parameters)
+                .expect("ToolSpec parameters is a JSON Schema literal"),
+        },
+    }
 }
 
 #[derive(Serialize)]
 struct ChatMessage {
     role: &'static str,
     content: String,
+    /// A `Message::ToolCall` carries one; every other message none, so
+    /// a plain turn serializes as `{ role, content }` exactly as before.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tool_calls: Vec<ToolCall>,
+}
+
+/// One tool call, the same shape ollama sends in a streamed message
+/// and accepts back in a replayed one.
+#[derive(Serialize, Deserialize)]
+struct ToolCall {
+    function: ToolCallFunction,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ToolCallFunction {
+    name: String,
+    /// ollama takes and sends arguments as a JSON object; the domain
+    /// carries them as text.
+    arguments: Value,
+}
+
+/// One domain `Message` in ollama's `/api/chat` shape: a plain turn,
+/// the model's tool call as an `assistant` message with `tool_calls`,
+/// or a tool's output as a `tool` message.
+fn chat_message(message: &Message) -> ChatMessage {
+    match message {
+        Message::Text {
+            role: actor,
+            content,
+        } => ChatMessage {
+            role: role(*actor),
+            content: content.clone(),
+            tool_calls: Vec::new(),
+        },
+        Message::ToolCall { tool, arguments } => ChatMessage {
+            role: "assistant",
+            content: String::new(),
+            tool_calls: vec![ToolCall {
+                function: ToolCallFunction {
+                    name: tool.clone(),
+                    arguments: serde_json::from_str(arguments)
+                        .expect("ToolCall arguments is validated JSON"),
+                },
+            }],
+        },
+        Message::ToolResult { content } => ChatMessage {
+            role: "tool",
+            content: content.clone(),
+            tool_calls: Vec::new(),
+        },
+    }
 }
 
 /// One line of `/api/chat`'s NDJSON body. Only the fields Ollama reads
@@ -85,6 +169,9 @@ struct ChatChunkMessage {
     /// `content` - present but empty on a line that carries none.
     #[serde(default)]
     thinking: String,
+    /// A tool call arrives whole on one line, not token by token.
+    #[serde(default)]
+    tool_calls: Vec<ToolCall>,
 }
 
 /// What one parsed NDJSON line means for the stream: a chunk to
@@ -112,6 +199,15 @@ fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
     // Thinking arrives first when a line ever carried both.
     if !raw.message.thinking.is_empty() {
         Ok(Line::Chunk(Chunk::Thought(raw.message.thinking)))
+    } else if let Some(call) = raw.message.tool_calls.into_iter().next() {
+        // One call per line handled - the loop runs tools one at a
+        // time. A model that emits several in one message gets only
+        // the first run; the log records just that, so its replayed
+        // history stays consistent.
+        Ok(Line::Chunk(Chunk::ToolCall {
+            tool: call.function.name,
+            arguments: call.function.arguments.to_string(),
+        }))
     } else if !raw.message.content.is_empty() {
         Ok(Line::Chunk(Chunk::Reply(raw.message.content)))
     } else {
@@ -155,24 +251,19 @@ impl Model for Ollama {
         ModelCapabilities {
             input: &[Modality::Text],
             output: &[Modality::Text],
-            tool_use: false,
+            tool_use: true,
         }
     }
 
-    fn reply(&self, messages: &[Message]) -> ReplyStream {
+    fn reply(&self, request: &ModelRequest) -> ReplyStream {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
         let client = self.client.clone();
         let url = self.url.clone();
         let request = ChatRequest {
             model: self.model.clone(),
-            messages: messages
-                .iter()
-                .map(|m| ChatMessage {
-                    role: role(m.role),
-                    content: m.content.clone(),
-                })
-                .collect(),
+            messages: request.messages.iter().map(chat_message).collect(),
+            tools: request.tools.iter().map(tool_def).collect(),
             stream: true,
         };
 
@@ -255,6 +346,19 @@ mod tests {
         match parse_line(line).unwrap() {
             Line::Chunk(Chunk::Thought(thinking)) => assert_eq!(thinking, "Thinking"),
             _ => panic!("expected a thought chunk"),
+        }
+    }
+
+    #[test]
+    fn a_tool_call_line_parses_as_a_tool_call_chunk() {
+        let line = r#"{"model":"gemma4","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"search_events","arguments":{"size":5}}}]},"done":false}"#;
+        match parse_line(line).unwrap() {
+            Line::Chunk(Chunk::ToolCall { tool, arguments }) => {
+                assert_eq!(tool, "search_events");
+                let args: Value = serde_json::from_str(&arguments).unwrap();
+                assert_eq!(args["size"], 5);
+            }
+            _ => panic!("expected a tool call chunk"),
         }
     }
 

@@ -2,7 +2,11 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKi
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::StreamExt;
 
+use std::sync::Arc;
+
 use super::{Chat, StreamEvent};
+use crate::app::ToolStep;
+use crate::percept::{Chunk, ReplyStream, Tool};
 
 /// Handle one key press. Returns true if the app should quit. Errs if
 /// submit couldn't append its event to the log - see AppService::submit.
@@ -61,12 +65,27 @@ pub fn handle_mouse(chat: &mut Chat, mouse: MouseEvent) {
 }
 
 /// Applies one stream event. Whatever the model managed to say is real
-/// and commits; a failure is only shown.
+/// and commits; a failure is only shown. A tool call is not appended:
+/// `App` decides what the call means, and this only carries the
+/// decision out - run the tool off-thread, drain the next stream, or
+/// stop.
 pub fn handle_stream(
     chat: &mut Chat,
     event: StreamEvent,
+    reply_tx: &UnboundedSender<StreamEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match event {
+        StreamEvent::Chunk(Chunk::ToolCall { tool, arguments }) => {
+            match chat.app.begin_tool(&tool, arguments)? {
+                ToolStep::Run(run, arguments) => spawn_tool(run, arguments, reply_tx.clone()),
+                ToolStep::Continue(stream) => spawn_drain(stream, reply_tx.clone()),
+                ToolStep::Stop => {}
+            }
+        }
+        StreamEvent::ToolResult(output) => {
+            let stream = chat.app.finish_tool(output)?;
+            spawn_drain(stream, reply_tx.clone());
+        }
         StreamEvent::Chunk(chunk) => chat.app.append_chunk(chunk),
         StreamEvent::Ended(error) => {
             chat.app.end_stream()?;
@@ -76,10 +95,48 @@ pub fn handle_stream(
     Ok(())
 }
 
+/// Runs one tool on the blocking pool, off the single-threaded runtime,
+/// so a full-log scan never freezes the UI. Its output comes back as a
+/// `ToolResult` event.
+fn spawn_tool(tool: Arc<dyn Tool>, arguments: String, reply_tx: UnboundedSender<StreamEvent>) {
+    tokio::spawn(async move {
+        let output = tokio::task::spawn_blocking(move || {
+            tool.run(&arguments).unwrap_or_else(|err| err.to_string())
+        })
+        .await
+        .unwrap_or_else(|_| "the tool panicked".to_string());
+        let _ = reply_tx.send(StreamEvent::ToolResult(output));
+    });
+}
+
+/// Drains one reply stream on its own task, forwarding each chunk over
+/// `reply_tx`. A tool call is the last chunk of its stream - forward it
+/// and stop, no `Ended`, because the turn continues with `resume`. An
+/// `Err` item ends the turn early and carries its own words into
+/// `Ended`.
+fn spawn_drain(mut stream: ReplyStream, reply_tx: UnboundedSender<StreamEvent>) {
+    tokio::spawn(async move {
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(chunk) => {
+                    let done = matches!(chunk, Chunk::ToolCall { .. });
+                    let _ = reply_tx.send(StreamEvent::Chunk(chunk));
+                    if done {
+                        return;
+                    }
+                }
+                Err(err) => {
+                    let _ = reply_tx.send(StreamEvent::Ended(Some(err.to_string())));
+                    return;
+                }
+            }
+        }
+        let _ = reply_tx.send(StreamEvent::Ended(None));
+    });
+}
+
 /// Sends the user's message immediately (visible right away), then
-/// spawns a task draining the reply stream, forwarding each chunk and
-/// then Ended over reply_tx. An `Err` item ends the turn early, and
-/// carries its own words into Ended.
+/// drains the reply stream on a task.
 fn submit(
     chat: &mut Chat,
     reply_tx: &UnboundedSender<StreamEvent>,
@@ -91,21 +148,7 @@ fn submit(
     chat.textarea.clear();
     chat.error = None;
 
-    let mut stream = chat.app.submit(text)?;
-    let reply_tx = reply_tx.clone();
-    tokio::spawn(async move {
-        while let Some(item) = stream.next().await {
-            match item {
-                Ok(chunk) => {
-                    let _ = reply_tx.send(StreamEvent::Chunk(chunk));
-                }
-                Err(err) => {
-                    let _ = reply_tx.send(StreamEvent::Ended(Some(err.to_string())));
-                    return;
-                }
-            }
-        }
-        let _ = reply_tx.send(StreamEvent::Ended(None));
-    });
+    let stream = chat.app.submit(text)?;
+    spawn_drain(stream, reply_tx.clone());
     Ok(())
 }

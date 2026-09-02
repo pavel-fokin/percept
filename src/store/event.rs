@@ -29,13 +29,35 @@ struct MessageBody {
     content: String,
 }
 
+/// `arguments` is a real nested object on the wire, like `ToolUsed`'s
+/// body, so a caller can index into it with `jq`. The domain holds it
+/// as text - `From`/`TryFrom` parse and re-serialize across the seam.
+#[derive(Serialize, Deserialize)]
+struct ToolCalledBody {
+    tool: String,
+    arguments: Value,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ToolResultedBody {
+    content: String,
+}
+
 const MESSAGE_RECEIVED: &str = "message.received";
 const TOOL_USED: &str = "tool.used";
 const THOUGHT_RECORDED: &str = "thought.recorded";
+const TOOL_CALLED: &str = "tool.called";
+const TOOL_RESULTED: &str = "tool.resulted";
 
 /// Every `type` the log records, for the error that lists them when a
 /// caller names one that isn't here.
-pub const KINDS: [&str; 3] = [MESSAGE_RECEIVED, TOOL_USED, THOUGHT_RECORDED];
+pub const KINDS: [&str; 5] = [
+    MESSAGE_RECEIVED,
+    TOOL_USED,
+    THOUGHT_RECORDED,
+    TOOL_CALLED,
+    TOOL_RESULTED,
+];
 
 /// The wire `type` a kind serializes as.
 fn kind(kind: EventKind) -> &'static str {
@@ -43,6 +65,8 @@ fn kind(kind: EventKind) -> &'static str {
         EventKind::MessageReceived => MESSAGE_RECEIVED,
         EventKind::ToolUsed => TOOL_USED,
         EventKind::ThoughtRecorded => THOUGHT_RECORDED,
+        EventKind::ToolCalled => TOOL_CALLED,
+        EventKind::ToolResulted => TOOL_RESULTED,
     }
 }
 
@@ -53,6 +77,8 @@ pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
         MESSAGE_RECEIVED => Ok(EventKind::MessageReceived),
         TOOL_USED => Ok(EventKind::ToolUsed),
         THOUGHT_RECORDED => Ok(EventKind::ThoughtRecorded),
+        TOOL_CALLED => Ok(EventKind::ToolCalled),
+        TOOL_RESULTED => Ok(EventKind::ToolResulted),
         other => Err(Error::UnknownEventType(other.to_string())),
     }
 }
@@ -115,6 +141,17 @@ impl From<&percept::Event> for Event {
             Payload::ToolUsed { body } => {
                 serde_json::from_str(body).expect("ToolUsed body is validated JSON")
             }
+            // `arguments` was validated as JSON the same way `body` is.
+            Payload::ToolCalled { tool, arguments } => serde_json::to_value(ToolCalledBody {
+                tool: tool.clone(),
+                arguments: serde_json::from_str(arguments)
+                    .expect("ToolCalled arguments is validated JSON"),
+            })
+            .expect("ToolCalledBody always serializes"),
+            Payload::ToolResulted { content } => serde_json::to_value(ToolResultedBody {
+                content: content.clone(),
+            })
+            .expect("ToolResultedBody always serializes"),
         };
 
         Self {
@@ -200,6 +237,23 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
         EventKind::ThoughtRecorded => {
             let body: MessageBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
             Ok(Payload::ThoughtRecorded {
+                content: body.content,
+            })
+        }
+        EventKind::ToolCalled => {
+            let body: ToolCalledBody =
+                serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::ToolCalled {
+                tool: body.tool,
+                // Kept as text, like `ToolUsed`'s body - the domain
+                // routes by `tool` and never parses `arguments`.
+                arguments: serde_json::to_string(&body.arguments).expect("Value always serializes"),
+            })
+        }
+        EventKind::ToolResulted => {
+            let body: ToolResultedBody =
+                serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::ToolResulted {
                 content: body.content,
             })
         }
@@ -372,6 +426,67 @@ mod tests {
         match restored.payload() {
             Payload::ThoughtRecorded { content } => assert_eq!(content, "let me think"),
             _ => panic!("expected ThoughtRecorded"),
+        }
+    }
+
+    #[test]
+    fn tool_called_round_trips_with_arguments_as_a_nested_object() {
+        let original = percept::Event::restore(
+            EventId::new(),
+            Actor::Model,
+            "tui".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::ToolCalled {
+                tool: "search_events".to_string(),
+                arguments: r#"{"sources":["tui"],"size":5}"#.to_string(),
+            },
+        );
+
+        let wire = Event::from(&original);
+        assert_eq!(wire.kind, "tool.called");
+        // `arguments` is a real object on the wire, indexable by jq.
+        assert_eq!(wire.payload["arguments"]["size"], 5);
+
+        let json = serde_json::to_string(&wire).unwrap();
+        let reparsed: Event = serde_json::from_str(&json).unwrap();
+        let restored = percept::Event::try_from(reparsed).unwrap();
+
+        match restored.payload() {
+            Payload::ToolCalled { tool, arguments } => {
+                assert_eq!(tool, "search_events");
+                let value: Value = serde_json::from_str(arguments).unwrap();
+                assert_eq!(value["size"], 5);
+            }
+            _ => panic!("expected ToolCalled"),
+        }
+    }
+
+    #[test]
+    fn tool_resulted_round_trips_through_json() {
+        let cause = EventId::new();
+        let original = percept::Event::restore(
+            EventId::new(),
+            Actor::System,
+            "tui".to_string(),
+            Some(cause),
+            Timestamp::now(),
+            Payload::ToolResulted {
+                content: "3 events".to_string(),
+            },
+        );
+
+        let json = serde_json::to_string(&Event::from(&original)).unwrap();
+        let wire: Event = serde_json::from_str(&json).unwrap();
+        assert_eq!(wire.kind, "tool.resulted");
+        assert_eq!(wire.actor, "system");
+        let restored = percept::Event::try_from(wire).unwrap();
+
+        assert!(restored.actor() == Actor::System);
+        assert!(restored.causation_id() == Some(cause));
+        match restored.payload() {
+            Payload::ToolResulted { content } => assert_eq!(content, "3 events"),
+            _ => panic!("expected ToolResulted"),
         }
     }
 
