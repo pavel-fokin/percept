@@ -186,6 +186,7 @@ fn parse_query(args: &SearchArgs) -> Result<EventQuery, String> {
         actors,
         sources: args.source.clone(),
         kinds,
+        text: Vec::new(),
         size: args.size,
     })
 }

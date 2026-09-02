@@ -90,6 +90,7 @@ impl Tool for SearchEvents {
             actors,
             sources: args.sources,
             kinds,
+            text: Vec::new(),
             size: args.size.or(Some(DEFAULT_SIZE)),
         };
 
