@@ -44,6 +44,20 @@ pub enum Payload {
     },
 }
 
+impl Payload {
+    /// The event's text - the one string that runs long, and the one a
+    /// reader wants to see more of. A tool call carries none: its
+    /// `tool` and `arguments` are the model's own short strings.
+    pub fn content(&self) -> Option<&str> {
+        match self {
+            Self::MessageReceived { content }
+            | Self::ThoughtRecorded { content }
+            | Self::ToolResulted { content } => Some(content),
+            Self::ToolCalled { .. } => None,
+        }
+    }
+}
+
 /// What kind of fact an Event records - one variant per `Payload`
 /// variant, as a value a caller can compare and filter on without
 /// matching. The domain's word for what the wire calls `type`; `store`

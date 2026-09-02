@@ -50,8 +50,10 @@ const PARAMETERS: &str = r#"{
   "additionalProperties": false
 }"#;
 
+/// Unknown keys are refused rather than ignored, so a misspelt filter
+/// comes back as an error the model can read, not as a wider search.
 #[derive(Deserialize, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 struct Args {
     since: Option<String>,
     until: Option<String>,
@@ -239,10 +241,16 @@ mod tests {
 
     #[test]
     fn preview_sizes_the_content_window_and_zero_is_an_error() {
-        let out = tool().run(r#"{"preview":5}"#).unwrap();
+        let out = tool().run(r#"{"preview":2}"#).unwrap();
         let line: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
-        assert!(line["payload"]["content"].as_str().unwrap().chars().count() <= 6);
+        assert_eq!(line["payload"]["content"], "he\u{2026}");
+        assert_eq!(line["preview"]["len"], 5);
         assert!(tool().run(r#"{"preview":0}"#).is_err());
+    }
+
+    #[test]
+    fn an_unknown_argument_is_an_error() {
+        assert!(tool().run(r#"{"limit":3}"#).is_err());
     }
 
     #[test]

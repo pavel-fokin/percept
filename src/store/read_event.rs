@@ -5,6 +5,26 @@ use serde::Deserialize;
 use crate::percept::{EventLog, Tool, ToolSpec};
 use crate::store::{encode, excerpt, parse_event_id};
 
+/// One event by its wire id, as `encode` prints it, or with `content`
+/// sliced to `start..end` when either bound is given - the one path
+/// both the tool and `events show` take, so an unknown id or a range
+/// reads the same from a shell and from the model.
+pub fn read(
+    log: &dyn EventLog,
+    id: &str,
+    start: Option<usize>,
+    end: Option<usize>,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let event = log
+        .get(parse_event_id(id)?)?
+        .ok_or_else(|| format!("no event with id {id}"))?;
+    if start.is_none() && end.is_none() {
+        Ok(encode(&event))
+    } else {
+        Ok(excerpt(&event, start, end)?)
+    }
+}
+
 /// The `read_event` tool: fetches one event by id and prints it as
 /// `events show` does. With `start` and/or `end`, it returns
 /// `payload.content` sliced to that character range instead - the
@@ -42,8 +62,10 @@ const PARAMETERS: &str = r#"{
   "additionalProperties": false
 }"#;
 
+/// Unknown keys are refused rather than ignored: a misspelt bound would
+/// otherwise return the whole event, the very cost a range avoids.
 #[derive(Deserialize, Default)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 struct Args {
     id: Option<String>,
     start: Option<usize>,
@@ -62,19 +84,8 @@ impl Tool for ReadEvent {
     fn run(&self, arguments: &str) -> Result<String, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
         // The schema says `id` is required, but serde won't enforce it.
-        let id_text = args.id.ok_or("read_event requires id")?;
-        let id = parse_event_id(&id_text)?;
-
-        let event = self
-            .log
-            .get(id)?
-            .ok_or_else(|| format!("no event with id {id_text}"))?;
-
-        if args.start.is_none() && args.end.is_none() {
-            Ok(encode(&event))
-        } else {
-            Ok(excerpt(&event, args.start, args.end)?)
-        }
+        let id = args.id.ok_or("read_event requires id")?;
+        read(self.log.as_ref(), &id, args.start, args.end)
     }
 }
 
@@ -150,6 +161,20 @@ mod tests {
     }
 
     #[test]
+    fn an_unknown_argument_is_an_error() {
+        let event = message("hello");
+        let tool = ReadEvent::new(Arc::new(FakeLog::seeded(vec![event.clone()])));
+        let err = tool
+            .run(&format!(
+                r#"{{"id":"{}","range":"0:2"}}"#,
+                event.id().as_uuid()
+            ))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("range"), "{err}");
+    }
+
+    #[test]
     fn a_start_past_the_end_is_an_error() {
         let event = message("hello");
         let log = Arc::new(FakeLog::seeded(vec![event.clone()]));
@@ -157,7 +182,7 @@ mod tests {
 
         assert!(tool
             .run(&format!(
-                r#"{{"id":"{}","start":4,"end":2}}"#,
+                r#"{{"id":"{}","start":9000}}"#,
                 event.id().as_uuid()
             ))
             .is_err());

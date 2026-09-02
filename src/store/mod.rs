@@ -15,5 +15,5 @@ pub use event::{
     PREVIEW_CHARS,
 };
 pub use jsonl::Jsonl;
-pub use read_event::ReadEvent;
+pub use read_event::{read, ReadEvent};
 pub use search_events::SearchEvents;

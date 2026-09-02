@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -119,36 +121,31 @@ struct Summary {
 /// output. A caller reaches for `encode` deliberately, per the purpose
 /// rule in AGENTS.md. `content` is the event's text - the one string
 /// that runs long - so a cut to it is reported under `preview`, where
-/// a cut inside `arguments` is not. `hit` is a character offset into
+/// a cut inside `arguments` is not. `hit` is a character range in
 /// `content` the cut keeps in view - a search term's position - so a
 /// line explains why it matched; without one the cut keeps the head.
 /// `preview` is that window's size in characters; strings other than
 /// `content` are cut at `PREVIEW_CHARS` whatever it is, since they are
 /// the model's own short arguments, not the text a caller reads.
-pub fn summarize(event: &percept::Event, hit: Option<usize>, preview: usize) -> String {
+pub fn summarize(event: &percept::Event, hit: Option<Range<usize>>, preview: usize) -> String {
     let mut wire = Event::from(event);
     // `content` leaves the payload before `shorten` runs over the rest,
     // so it is cut once, here, at the caller's size.
-    let content = wire
-        .payload
-        .as_object_mut()
-        .and_then(|fields| fields.remove("content"))
-        .and_then(|value| match value {
-            Value::String(text) => Some(text),
-            _ => None,
-        });
+    if let Some(fields) = wire.payload.as_object_mut() {
+        fields.remove("content");
+    }
     wire.payload = shorten(wire.payload);
-    let preview = content.and_then(|text| {
+    let preview = event.payload().content().and_then(|text| {
         let chars: Vec<char> = text.chars().collect();
         let (shown, preview) = if chars.len() > preview {
-            let shown = window(&chars, hit.unwrap_or(0), preview);
-            let preview = Preview {
+            let cut = Preview {
                 len: chars.len(),
-                hit,
+                hit: hit.as_ref().map(|hit| hit.start),
             };
-            (shown, Some(preview))
+            let shown = window(&chars, hit.unwrap_or(0..0), preview);
+            (shown, Some(cut))
         } else {
-            (text, None)
+            (text.to_string(), None)
         };
         wire.payload["content"] = Value::String(shown);
         preview
@@ -160,12 +157,14 @@ pub fn summarize(event: &percept::Event, hit: Option<usize>, preview: usize) -> 
     .expect("store::Event always serializes")
 }
 
-/// `size` of `chars` with `around` near the middle, pulled back to the
-/// ends of the text rather than padded, and an ellipsis on each side
-/// that was cut. Only called when `chars` is longer than the window,
-/// so some side always is.
-fn window(chars: &[char], around: usize, size: usize) -> String {
-    let start = around.saturating_sub(size / 2).min(chars.len() - size);
+/// `size` of `chars` with `keep` near the middle - or, when `keep` is
+/// wider than the window, starting at it - pulled back to the ends of
+/// the text rather than padded, and an ellipsis on each side that was
+/// cut. Only called when `chars` is longer than the window, so some
+/// side always is.
+fn window(chars: &[char], keep: Range<usize>, size: usize) -> String {
+    let slack = size.saturating_sub(keep.len());
+    let start = keep.start.saturating_sub(slack / 2).min(chars.len() - size);
     let end = start + size;
     let mut out = String::with_capacity(end - start + 2);
     if start > 0 {
@@ -191,13 +190,11 @@ pub fn excerpt(
     start: Option<usize>,
     end: Option<usize>,
 ) -> Result<String, Error> {
+    let content = event
+        .payload()
+        .content()
+        .ok_or_else(|| Error::NoRangeableContent(kind(event.kind()).to_string()))?;
     let mut wire = Event::from(event);
-    let content = wire
-        .payload
-        .get("content")
-        .and_then(Value::as_str)
-        .ok_or_else(|| Error::NoRangeableContent(wire.kind.clone()))?
-        .to_string();
 
     let chars: Vec<char> = content.chars().collect();
     let len = chars.len();
@@ -462,12 +459,25 @@ mod tests {
         let text = format!("{}deploy{}", "a".repeat(400), "b".repeat(400));
         let event = message(Actor::Model, text);
         let line: Value =
-            serde_json::from_str(&summarize(&event, Some(400), PREVIEW_CHARS)).unwrap();
+            serde_json::from_str(&summarize(&event, Some(400..406), PREVIEW_CHARS)).unwrap();
         let cut = line["payload"]["content"].as_str().unwrap();
         assert!(cut.contains("deploy"));
         assert!(cut.starts_with('\u{2026}') && cut.ends_with('\u{2026}'));
         assert_eq!(cut.chars().count(), PREVIEW_CHARS + 2);
         assert_eq!(line["preview"]["match"], 400);
+    }
+
+    #[test]
+    fn a_term_wider_than_half_the_window_still_fits_in_it() {
+        let text = format!("{}deployment pipeline{}", "a".repeat(400), "b".repeat(400));
+        let event = message(Actor::Model, text);
+        let line: Value = serde_json::from_str(&summarize(&event, Some(400..419), 20)).unwrap();
+        let cut = line["payload"]["content"].as_str().unwrap();
+        assert!(cut.contains("deployment pipeline"), "{cut}");
+
+        let line: Value = serde_json::from_str(&summarize(&event, Some(400..419), 10)).unwrap();
+        let cut = line["payload"]["content"].as_str().unwrap();
+        assert!(cut.contains("deployment"), "{cut}");
     }
 
     #[test]
@@ -482,7 +492,7 @@ mod tests {
         let text = format!("{}deploy", "a".repeat(400));
         let event = message(Actor::Model, text);
         let line: Value =
-            serde_json::from_str(&summarize(&event, Some(400), PREVIEW_CHARS)).unwrap();
+            serde_json::from_str(&summarize(&event, Some(400..406), PREVIEW_CHARS)).unwrap();
         let cut = line["payload"]["content"].as_str().unwrap();
         assert!(cut.starts_with('\u{2026}') && cut.ends_with("deploy"));
         assert_eq!(cut.chars().count(), PREVIEW_CHARS + 1);

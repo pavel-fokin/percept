@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use super::{Actor, Event, EventKind, Payload};
 use crate::shared::Timestamp;
 
@@ -53,28 +55,42 @@ impl EventQuery {
 
 impl EventQuery {
     /// Where in `event`'s `content` the text filter hits: the character
-    /// offset of the earliest occurrence of any term, by the same rule
+    /// range of the earliest occurrence of any term, by the same rule
     /// `matches` applies. `None` when the filter is off, the event has
     /// no `content`, or no term is in it - a `tool.called` event can
     /// match on `tool` or `arguments` and still have no hit here.
-    pub fn hit(&self, event: &Event) -> Option<usize> {
-        let content = match event.payload() {
-            Payload::MessageReceived { content }
-            | Payload::ThoughtRecorded { content }
-            | Payload::ToolResulted { content } => content,
-            Payload::ToolCalled { .. } => return None,
-        };
-        self.text
+    pub fn hit(&self, event: &Event) -> Option<Range<usize>> {
+        let content = event.payload().content()?;
+        // Lowercasing can turn one character into several, so each
+        // lowercased character remembers which original it came from
+        // and the range is counted on the original text.
+        let mut lower = String::with_capacity(content.len());
+        let mut origin = Vec::with_capacity(content.len());
+        for (i, c) in content.chars().enumerate() {
+            for l in c.to_lowercase() {
+                lower.push(l);
+                origin.push(i);
+            }
+        }
+        let (at, term) = self
+            .text
             .iter()
-            .filter_map(|term| find(content, term))
-            .min()
+            .map(fold)
+            .filter_map(|term| lower.find(&term).map(|at| (at, term)))
+            .min_by_key(|(at, _)| *at)?;
+        let first = lower[..at].chars().count();
+        let last = first + term.chars().count();
+        let start = origin.get(first).copied().unwrap_or(0);
+        let end = origin.get(last.saturating_sub(1)).map_or(start, |&o| o + 1);
+        Some(start..end)
     }
 }
 
 /// Whether one of `payload`'s strings carries `term` as a
 /// case-insensitive substring.
 fn carries(payload: &Payload, term: &str) -> bool {
-    let has = |s: &str| find(s, term).is_some();
+    let term = fold(term);
+    let has = |s: &str| fold(s).contains(&term);
     match payload {
         Payload::MessageReceived { content }
         | Payload::ThoughtRecorded { content }
@@ -83,23 +99,11 @@ fn carries(payload: &Payload, term: &str) -> bool {
     }
 }
 
-/// The character offset in `haystack` of the first case-insensitive
-/// occurrence of `term`. Offsets are counted on the original text, not
-/// the lowercased copy: lowercasing can turn one character into
-/// several, so each lowercased character remembers which original it
-/// came from.
-fn find(haystack: &str, term: &str) -> Option<usize> {
-    let term = term.to_lowercase();
-    let mut lower = String::with_capacity(haystack.len());
-    let mut origin = Vec::with_capacity(haystack.len());
-    for (i, c) in haystack.chars().enumerate() {
-        for l in c.to_lowercase() {
-            lower.push(l);
-            origin.push(i);
-        }
-    }
-    let at = lower.find(&term)?;
-    Some(origin[lower[..at].chars().count()])
+/// Lowercases character by character - the same mapping `hit` walks -
+/// rather than `str::to_lowercase`, whose context-sensitive cases (a
+/// Greek final sigma) would make `matches` and `hit` disagree.
+fn fold(s: impl AsRef<str>) -> String {
+    s.as_ref().chars().flat_map(char::to_lowercase).collect()
 }
 
 /// Searches the committed log - domain-owned, the way `EventLog` is a
@@ -265,7 +269,7 @@ mod tests {
             text: vec!["deploy".to_string(), "then".to_string()],
             ..Default::default()
         };
-        assert_eq!(query.hit(&event), Some(9));
+        assert_eq!(query.hit(&event), Some(9..13));
 
         let off = EventQuery::default();
         assert_eq!(off.hit(&event), None);
@@ -280,7 +284,39 @@ mod tests {
             text: vec!["deploy".to_string()],
             ..Default::default()
         };
-        assert_eq!(query.hit(&event), Some(3));
+        assert_eq!(query.hit(&event), Some(3..9));
+    }
+
+    #[test]
+    fn a_hit_spans_the_original_characters_of_a_term_that_expands() {
+        let event = message("say İ now");
+        let query = EventQuery {
+            text: vec!["İ".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(query.hit(&event), Some(4..5));
+    }
+
+    #[test]
+    fn a_final_sigma_matches_and_hits_alike() {
+        let event = message("ΟΔΥΣΣΕΥΣ went home");
+        let query = EventQuery {
+            text: vec!["ΟΔΥΣΣΕΥΣ".to_string()],
+            ..Default::default()
+        };
+        assert!(query.matches(&event));
+        assert_eq!(query.hit(&event), Some(0..8));
+    }
+
+    #[test]
+    fn an_empty_term_matches_empty_content_without_panicking() {
+        let event = message("");
+        let query = EventQuery {
+            text: vec![String::new()],
+            ..Default::default()
+        };
+        assert!(query.matches(&event));
+        assert_eq!(query.hit(&event), Some(0..0));
     }
 
     #[test]
