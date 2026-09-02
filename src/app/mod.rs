@@ -179,6 +179,14 @@ mod tests {
     struct Silent;
 
     impl percept::Model for Silent {
+        fn capabilities(&self) -> percept::ModelCapabilities {
+            percept::ModelCapabilities {
+                input: vec![percept::Modality::Text],
+                output: vec![percept::Modality::Text],
+                tool_use: false,
+            }
+        }
+
         fn reply(&self, _messages: &[Message]) -> percept::ReplyStream {
             Box::pin(tokio_stream::empty())
         }

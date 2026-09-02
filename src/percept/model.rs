@@ -27,11 +27,39 @@ pub struct Message {
     pub content: String,
 }
 
+/// A kind of content a model reads or writes. Only the three the
+/// current model shapes call for - a model that needs video or
+/// embeddings adds its variant then.
+//
+// No reader yet: the tool-use step is the first consumer. Lint
+// suppressed rather than the vocabulary deferred.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Modality {
+    Text,
+    Image,
+    Audio,
+}
+
+/// What a model accepts and produces. `input` and `output` list its
+/// modalities; `tool_use` says whether it can call tools.
+#[allow(dead_code)]
+pub struct ModelCapabilities {
+    pub input: Vec<Modality>,
+    pub output: Vec<Modality>,
+    pub tool_use: bool,
+}
+
 /// Turns a conversation into a streamed reply - the domain's core
 /// capability, mechanism-agnostic. Returning the stream doesn't mean a
 /// connection succeeded - a failure to connect surfaces as the
 /// stream's first `Err` item, the same as a failure mid-reply.
 pub trait Model: Send + Sync {
+    /// What this model can accept, produce, and whether it calls tools.
+    /// No caller yet - it is the vocabulary the tool-use step builds on.
+    #[allow(dead_code)]
+    fn capabilities(&self) -> ModelCapabilities;
+
     fn reply(&self, messages: &[Message]) -> ReplyStream;
 }
 
