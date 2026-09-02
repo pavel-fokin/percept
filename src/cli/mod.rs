@@ -125,6 +125,11 @@ pub struct SearchArgs {
 #[derive(Args)]
 pub struct ShowArgs {
     id: String,
+    /// A character range `START:END` into `payload.content`, `END`
+    /// exclusive; omit `END` to reach the end of `content`, e.g.
+    /// `400:`. Only event kinds that carry `content` support a range.
+    #[arg(long, value_parser = parse_range)]
+    range: Option<(usize, Option<usize>)>,
 }
 
 #[derive(Args)]
@@ -132,6 +137,26 @@ pub struct AskArgs {
     /// The prompt to send.
     #[arg(value_parser = non_blank)]
     prompt: String,
+}
+
+/// Parses `--range START:END`: `END` may be blank, reaching the end of
+/// `content`.
+fn parse_range(s: &str) -> Result<(usize, Option<usize>), String> {
+    let (start, end) = s
+        .split_once(':')
+        .ok_or_else(|| format!("invalid range {s:?}, expected START:END"))?;
+    let start: usize = start
+        .parse()
+        .map_err(|_| format!("invalid range start {start:?}"))?;
+    let end = if end.is_empty() {
+        None
+    } else {
+        Some(
+            end.parse()
+                .map_err(|_| format!("invalid range end {end:?}"))?,
+        )
+    };
+    Ok((start, end))
 }
 
 /// Rejects a blank value at parse time. A source that names nobody, a
@@ -238,14 +263,19 @@ fn parse_query(args: &SearchArgs) -> Result<EventQuery, String> {
 
 /// Prints the one event `args.id` names. An id the log doesn't carry
 /// fails loudly rather than printing nothing, so an empty result never
-/// means "your id was wrong".
+/// means "your id was wrong". With `--range`, prints `payload.content`
+/// sliced to it instead of the whole event.
 pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
     let wanted: EventId = store::parse_event_id(&args.id)?;
     let event = log
         .get(wanted)?
         .ok_or_else(|| format!("no event with id {}", args.id))?;
 
-    println!("{}", store::encode(&event));
+    let line = match args.range {
+        Some((start, end)) => store::excerpt(&event, Some(start), end)?,
+        None => store::encode(&event),
+    };
+    println!("{line}");
     Ok(())
 }
 
@@ -467,6 +497,18 @@ mod tests {
 
         let blank = Cli::try_parse_from(["percept", "events", "search", "--contains", " "]);
         assert!(blank.is_err());
+    }
+
+    #[test]
+    fn a_range_without_an_end_reaches_the_end_of_content() {
+        let ok = Cli::try_parse_from(["percept", "events", "show", "abc", "--range", "400:"]);
+        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn a_range_with_no_colon_is_rejected_at_parse() {
+        let bad = Cli::try_parse_from(["percept", "events", "show", "abc", "--range", "400"]);
+        assert!(bad.is_err());
     }
 
     fn ask_args(prompt: &str) -> AskArgs {

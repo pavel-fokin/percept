@@ -130,6 +130,48 @@ pub fn summarize(event: &percept::Event) -> String {
     .expect("store::Event always serializes")
 }
 
+/// One event as a ranged slice: the same shape `encode` writes, with
+/// `payload.content` cut to `[start, end)` characters and `preview.len`
+/// naming the whole content's length - always, even when the slice
+/// covers it all, so a caller never has to guess whether this line was
+/// cut. `start` defaults to 0, `end` to the content's length and clamps
+/// to it. Counts characters, never bytes, so a multi-byte character is
+/// never split in half. An event whose payload carries no `content` -
+/// `tool.called` - has nothing to slice.
+pub fn excerpt(
+    event: &percept::Event,
+    start: Option<usize>,
+    end: Option<usize>,
+) -> Result<String, Error> {
+    let mut wire = Event::from(event);
+    let content = wire
+        .payload
+        .get("content")
+        .and_then(Value::as_str)
+        .ok_or_else(|| Error::NoRangeableContent(wire.kind.clone()))?
+        .to_string();
+
+    let chars: Vec<char> = content.chars().collect();
+    let len = chars.len();
+    let start = start.unwrap_or(0);
+    let end = end.unwrap_or(len).min(len);
+
+    if start > len {
+        return Err(Error::RangeStartPastEnd { start, len });
+    }
+    if start > end {
+        return Err(Error::InvertedRange { start, end });
+    }
+
+    wire.payload["content"] = Value::String(chars[start..end].iter().collect());
+
+    Ok(serde_json::to_string(&Summary {
+        event: wire,
+        preview: Some(Preview { len }),
+    })
+    .expect("store::Event always serializes"))
+}
+
 /// Cuts every long string in `payload`, keeping its structure. Cutting
 /// the serialized text instead would leave a fragment no JSON tool
 /// could read. Counts characters, never bytes, so a multi-byte
@@ -386,6 +428,73 @@ mod tests {
             .as_str()
             .unwrap()
             .ends_with('\u{2026}'));
+    }
+
+    #[test]
+    fn excerpt_slices_content_and_reports_the_whole_length() {
+        let event = message(Actor::Model, "hello world".to_string());
+        let line = excerpt(&event, Some(0), Some(5)).unwrap();
+        let value: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["payload"]["content"], "hello");
+        assert_eq!(value["preview"]["len"], 11);
+    }
+
+    #[test]
+    fn excerpt_never_splits_a_multi_byte_character() {
+        // "aaa" then two 3-byte euro signs - a byte slice at 4 would
+        // split the first one.
+        let event = message(Actor::Model, format!("aaa{}", "\u{20ac}\u{20ac}"));
+        let line = excerpt(&event, Some(3), Some(4)).unwrap();
+        let value: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["payload"]["content"], "\u{20ac}");
+    }
+
+    #[test]
+    fn excerpt_defaults_start_to_zero_and_end_to_the_length() {
+        let event = message(Actor::Model, "hi".to_string());
+        let line = excerpt(&event, None, None).unwrap();
+        let value: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["payload"]["content"], "hi");
+        assert_eq!(value["preview"]["len"], 2);
+    }
+
+    #[test]
+    fn excerpt_clamps_an_end_past_the_length() {
+        let event = message(Actor::Model, "hi".to_string());
+        let line = excerpt(&event, Some(0), Some(9000)).unwrap();
+        let value: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["payload"]["content"], "hi");
+    }
+
+    #[test]
+    fn excerpt_rejects_a_start_past_the_length_and_names_it() {
+        let event = message(Actor::Model, "hi".to_string());
+        let err = excerpt(&event, Some(9000), None).unwrap_err().to_string();
+        assert_eq!(err, "start 9000 is past the end of content (2 characters)");
+    }
+
+    #[test]
+    fn excerpt_rejects_an_inverted_range_and_names_both_ends() {
+        let event = message(Actor::Model, "hello".to_string());
+        let err = excerpt(&event, Some(4), Some(2)).unwrap_err().to_string();
+        assert_eq!(err, "start 4 is not before end 2");
+    }
+
+    #[test]
+    fn excerpt_on_a_tool_called_event_is_an_error() {
+        let call = percept::Event::restore(
+            EventId::new(),
+            Actor::Model,
+            "tui".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::ToolCalled {
+                tool: "search_events".to_string(),
+                arguments: "{}".to_string(),
+            },
+        );
+        let err = excerpt(&call, None, None).unwrap_err().to_string();
+        assert_eq!(err, "tool.called has no content to slice");
     }
 
     fn message(actor: Actor, content: String) -> percept::Event {

@@ -20,7 +20,7 @@ mod tui;
 use app::App;
 use cli::{Cli, Command, EventsCommand};
 use providers::Ollama;
-use store::{Jsonl, SearchEvents};
+use store::{Jsonl, ReadEvent, SearchEvents};
 use tui::{Chat, StreamEvent};
 
 /// Where the event log lives: `percept.jsonl` in the working directory,
@@ -104,7 +104,10 @@ async fn run(
 fn build_app(source: &str) -> Result<App, Box<dyn std::error::Error>> {
     let log = Arc::new(Jsonl::open(LOG_PATH)?);
     let model = Ollama::new(OLLAMA_URL.to_string(), OLLAMA_MODEL.to_string());
-    let tools: Vec<Arc<dyn percept::Tool>> = vec![Arc::new(SearchEvents::new(log.clone()))];
+    let tools: Vec<Arc<dyn percept::Tool>> = vec![
+        Arc::new(SearchEvents::new(log.clone())),
+        Arc::new(ReadEvent::new(log.clone())),
+    ];
     App::new(Arc::new(model), log, tools, source.to_string())
 }
 
