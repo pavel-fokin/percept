@@ -18,15 +18,36 @@ pub enum Actor {
 /// Event-specific data. One variant per kind of fact the log records.
 /// A variant carries typed fields only when the domain produces or
 /// reads them - `to_messages` needs `content`, so `MessageReceived` is
-/// typed, and `App` assembles a thought from streamed text, so
-/// `ThoughtRecorded` is too. `ToolUsed` stays opaque: it arrives as
-/// JSON from another writer and nothing in the domain reads it, so
-/// `body` is that raw text, unparsed.
+/// typed; `App` assembles a thought from streamed text, so
+/// `ThoughtRecorded` is; `App` runs the loop that emits `ToolCalled`
+/// and feeds `ToolResulted` back, so both are. `ToolUsed` stays
+/// opaque: it arrives as JSON from another writer and nothing in the
+/// domain reads it, so `body` is that raw text, unparsed.
 #[derive(Clone)]
 pub enum Payload {
-    MessageReceived { content: String },
-    ToolUsed { body: String },
-    ThoughtRecorded { content: String },
+    MessageReceived {
+        content: String,
+    },
+    ToolUsed {
+        body: String,
+    },
+    ThoughtRecorded {
+        content: String,
+    },
+    /// A tool call percept's own loop made. `arguments` is JSON text
+    /// the domain routes by `tool` name but never parses - the tool
+    /// owns that shape. `call_id` ties this to its `ToolResulted`.
+    ToolCalled {
+        call_id: String,
+        tool: String,
+        arguments: String,
+    },
+    /// What percept fed back for the `ToolCalled` with the same
+    /// `call_id`: the tool's output, or its error text.
+    ToolResulted {
+        call_id: String,
+        content: String,
+    },
 }
 
 /// What kind of fact an Event records - one variant per `Payload`
@@ -38,6 +59,8 @@ pub enum EventKind {
     MessageReceived,
     ToolUsed,
     ThoughtRecorded,
+    ToolCalled,
+    ToolResulted,
 }
 
 /// One recorded fact in the conversation log. Append-only: a committed
@@ -156,6 +179,8 @@ impl Event {
             Payload::MessageReceived { .. } => EventKind::MessageReceived,
             Payload::ToolUsed { .. } => EventKind::ToolUsed,
             Payload::ThoughtRecorded { .. } => EventKind::ThoughtRecorded,
+            Payload::ToolCalled { .. } => EventKind::ToolCalled,
+            Payload::ToolResulted { .. } => EventKind::ToolResulted,
         }
     }
 }

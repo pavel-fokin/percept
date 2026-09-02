@@ -79,6 +79,9 @@ pub fn to_messages(events: &[Event]) -> Vec<Message> {
             }),
             Payload::ToolUsed { .. } => None,
             Payload::ThoughtRecorded { .. } => None,
+            // Replayed to the model once `Message` grows tool variants
+            // (next issue); filtered until then.
+            Payload::ToolCalled { .. } | Payload::ToolResulted { .. } => None,
         })
         .collect()
 }

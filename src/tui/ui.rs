@@ -111,6 +111,9 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
         // or a thought already shown while it streamed.
         Payload::ToolUsed { .. } => Vec::new(),
         Payload::ThoughtRecorded { .. } => Vec::new(),
+        // Rendered in the transcript once tui grows tool markers (a
+        // later issue); hidden until then.
+        Payload::ToolCalled { .. } | Payload::ToolResulted { .. } => Vec::new(),
     }
 }
 
