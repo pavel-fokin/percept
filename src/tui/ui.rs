@@ -18,7 +18,7 @@ const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 /// long one from squeezing the transcript off the screen.
 const STATUS_MAX: usize = 4;
 
-pub fn draw(frame: &mut Frame, chat: &Chat) {
+pub fn draw(frame: &mut Frame, chat: &mut Chat) {
     // One blank column each side, so text never touches the edge.
     let area = frame.area().inner(Margin::new(1, 0));
     let width = area.width.max(1) as usize;
@@ -32,8 +32,12 @@ pub fn draw(frame: &mut Frame, chat: &Chat) {
     ])
     .areas(area);
 
-    let (text, offset) = transcript(chat, transcript_area);
-    frame.render_widget(Paragraph::new(text).scroll((offset, 0)), transcript_area);
+    let (text, scroll_limit) = transcript(chat, transcript_area);
+    chat.update_scroll_metrics(scroll_limit, transcript_area.height);
+    frame.render_widget(
+        Paragraph::new(text).scroll((chat.scroll_offset, 0)),
+        transcript_area,
+    );
     draw_input(frame, chat, input_area);
     frame.render_widget(Paragraph::new(status), status_area);
 }
@@ -64,9 +68,7 @@ fn draw_input(frame: &mut Frame, chat: &Chat, area: Rect) {
     frame.render_widget(&chat.textarea, entry_area);
 }
 
-/// Wrapped, styled transcript lines plus the scroll offset that pins the
-/// view to the bottom. There's no persistent scroll state to update -
-/// ratatui redraws from scratch every frame, so this just recomputes it.
+/// Wrapped, styled transcript lines plus the furthest valid offset.
 fn transcript(chat: &Chat, area: Rect) -> (Text<'static>, u16) {
     let width = area.width.max(1) as usize;
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -85,9 +87,8 @@ fn transcript(chat: &Chat, area: Rect) -> (Text<'static>, u16) {
         push_turn(&mut lines, actor_lines(chat, Actor::Model, reply, width));
     }
 
-    let total = lines.len() as u16;
-    let offset = total.saturating_sub(area.height);
-    (Text::from(lines), offset)
+    let limit = lines.len().saturating_sub(area.height as usize);
+    (Text::from(lines), limit.try_into().unwrap_or(u16::MAX))
 }
 
 /// Adds one turn's lines, separated from the turn above by a blank
@@ -168,8 +169,14 @@ fn status(chat: &Chat, width: usize) -> Vec<Line<'static>> {
             Span::styled(label, chat.hint_style),
         ])];
     }
+    if !chat.follows_transcript {
+        return vec![Line::from(Span::styled(
+            "PgUp/PgDn scroll · End latest",
+            chat.hint_style,
+        ))];
+    }
     vec![Line::from(Span::styled(
-        "Enter send · Ctrl+J newline · Esc quit",
+        "Enter send · Ctrl+J newline · PgUp/PgDn scroll · Esc quit",
         chat.hint_style,
     ))]
 }

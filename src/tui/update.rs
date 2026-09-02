@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::StreamExt;
 
@@ -18,6 +18,22 @@ pub fn handle_key(
             chat.textarea.insert_newline();
             Ok(false)
         }
+        (KeyCode::PageUp, _) => {
+            chat.scroll_up(chat.page_height);
+            Ok(false)
+        }
+        (KeyCode::PageDown, _) => {
+            chat.scroll_down(chat.page_height);
+            Ok(false)
+        }
+        (KeyCode::Home, _) => {
+            chat.scroll_to_top();
+            Ok(false)
+        }
+        (KeyCode::End, _) => {
+            chat.scroll_to_bottom();
+            Ok(false)
+        }
         // Input still types while a reply streams - only sending
         // waits, so what's typed is sent once the reply lands.
         (KeyCode::Enter, _) if chat.app.is_replying() => Ok(false),
@@ -29,6 +45,18 @@ pub fn handle_key(
             chat.textarea.input(key);
             Ok(false)
         }
+    }
+}
+
+/// Scroll the transcript in small steps. Mouse capture is enabled by
+/// main, because it owns the terminal rather than the presentation.
+pub fn handle_mouse(chat: &mut Chat, mouse: MouseEvent) {
+    const WHEEL_LINES: u16 = 3;
+
+    match mouse.kind {
+        MouseEventKind::ScrollUp => chat.scroll_up(WHEEL_LINES),
+        MouseEventKind::ScrollDown => chat.scroll_down(WHEEL_LINES),
+        _ => {}
     }
 }
 
