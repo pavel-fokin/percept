@@ -7,6 +7,12 @@ use crate::shared::Timestamp;
 /// goes out with no tools, so the model has to answer with text.
 const MAX_TOOL_CALLS: usize = 5;
 
+/// How many of the most recent events the model reads as prompt text.
+/// The log outgrows this; the transcript the TUI renders does not
+/// shrink. A model that cannot hold the whole log has to search it,
+/// which is what `search_events` is for.
+const CONTEXT_EVENTS: usize = 20;
+
 /// What tui needs from the app layer. Lives here, not in tui, so
 /// implementing it doesn't pull tui into app's dependencies.
 pub trait AppService {
@@ -172,8 +178,23 @@ impl App {
         Ok(())
     }
 
+    /// The transcript the model reads: the newest `CONTEXT_EVENTS`
+    /// events, less any tool result the window cut off from its call.
+    /// A conversation that opens on a result nothing asked for is not
+    /// one a provider accepts.
+    fn context(&self) -> Vec<percept::Message> {
+        let start = self.events.len().saturating_sub(CONTEXT_EVENTS);
+        let mut messages = percept::to_messages(&self.events[start..]);
+        let orphans = messages
+            .iter()
+            .take_while(|message| matches!(message, percept::Message::ToolResult { .. }))
+            .count();
+        messages.drain(..orphans);
+        messages
+    }
+
     /// The request for the next `reply`: the current time, then the
-    /// transcript, then the tools - dropped once a turn hits
+    /// windowed transcript, then the tools - dropped once a turn hits
     /// `MAX_TOOL_CALLS` or the model can't use them, so the model is
     /// forced to a text answer.
     fn build_request(&self) -> percept::ModelRequest {
@@ -181,7 +202,7 @@ impl App {
             role: Actor::System,
             content: format!("The current time is {}.", Timestamp::now()),
         }];
-        messages.extend(percept::to_messages(&self.events));
+        messages.extend(self.context());
 
         let tools = if self.chat.capabilities().tool_use && !self.tools_exhausted() {
             self.tools.iter().map(|tool| tool.spec()).collect()
@@ -352,10 +373,12 @@ mod tests {
     }
 
     /// A Model that replays one chunk script per `reply` call and
-    /// records how many tools each request carried.
+    /// records what each request carried - how many tools, and one tag
+    /// per message, since `Message` doesn't clone.
     struct Scripted {
         scripts: Mutex<std::collections::VecDeque<Vec<Chunk>>>,
         tool_counts: Mutex<Vec<usize>>,
+        message_tags: Mutex<Vec<Vec<&'static str>>>,
         tool_use: bool,
     }
 
@@ -364,8 +387,22 @@ mod tests {
             Self {
                 scripts: Mutex::new(scripts.into()),
                 tool_counts: Mutex::new(Vec::new()),
+                message_tags: Mutex::new(Vec::new()),
                 tool_use,
             }
+        }
+
+        /// The tags of the last request's messages.
+        fn last_request(&self) -> Vec<&'static str> {
+            self.message_tags.lock().unwrap().last().cloned().unwrap()
+        }
+    }
+
+    fn tag(message: &percept::Message) -> &'static str {
+        match message {
+            percept::Message::Text { .. } => "text",
+            percept::Message::ToolCall { .. } => "call",
+            percept::Message::ToolResult { .. } => "result",
         }
     }
 
@@ -380,6 +417,10 @@ mod tests {
 
         fn reply(&self, request: &percept::ModelRequest) -> percept::ReplyStream {
             self.tool_counts.lock().unwrap().push(request.tools.len());
+            self.message_tags
+                .lock()
+                .unwrap()
+                .push(request.messages.iter().map(tag).collect());
             let chunks = self.scripts.lock().unwrap().pop_front().unwrap_or_default();
             let items: Vec<Result<Chunk, Box<dyn std::error::Error + Send + Sync>>> =
                 chunks.into_iter().map(Ok).collect();
@@ -753,5 +794,69 @@ mod tests {
         let _ = app.submit("hi".to_string()).unwrap();
 
         assert_eq!(model.tool_counts.lock().unwrap()[0], 0);
+    }
+
+    fn seeded_app(events: Vec<Event>) -> (Arc<Scripted>, App) {
+        let model = Arc::new(Scripted::new(vec![], true));
+        let app = App::new(
+            model.clone(),
+            Arc::new(FakeLog::seeded(events)),
+            Vec::new(),
+            SOURCE.to_string(),
+        )
+        .unwrap();
+        (model, app)
+    }
+
+    fn filler(n: usize) -> Vec<Event> {
+        (0..n)
+            .map(|i| Event::message_received(Actor::User, i.to_string(), SOURCE.to_string(), None))
+            .collect()
+    }
+
+    #[test]
+    fn a_log_longer_than_the_window_sends_only_its_newest_events() {
+        let (model, mut app) = seeded_app(filler(25));
+
+        let _ = app.submit("now".to_string()).unwrap();
+
+        // The whole log stays in the transcript the TUI renders.
+        assert_eq!(app.events().len(), 26);
+        // The model reads the system line plus one window of events.
+        let sent = model.last_request();
+        assert_eq!(sent.len(), CONTEXT_EVENTS + 1);
+        assert!(sent.iter().all(|&tag| tag == "text"));
+    }
+
+    #[test]
+    fn a_window_opening_on_a_tool_result_drops_it() {
+        let mut events = vec![
+            Event::tool_called(
+                "search_events".to_string(),
+                "{}".to_string(),
+                SOURCE.to_string(),
+                None,
+            ),
+            Event::tool_resulted("ran".to_string(), SOURCE.to_string(), None),
+        ];
+        events.extend(filler(CONTEXT_EVENTS - 2));
+
+        // Submitting pushes the call out of the window, leaving its
+        // result as the first event the model would otherwise see.
+        let (model, mut app) = seeded_app(events);
+        let _ = app.submit("now".to_string()).unwrap();
+
+        let sent = model.last_request();
+        assert!(!sent.contains(&"result"));
+        assert_eq!(sent.len(), CONTEXT_EVENTS);
+    }
+
+    #[test]
+    fn a_log_shorter_than_the_window_sends_all_of_it() {
+        let (model, mut app) = seeded_app(filler(3));
+
+        let _ = app.submit("now".to_string()).unwrap();
+
+        assert_eq!(model.last_request().len(), 5);
     }
 }
