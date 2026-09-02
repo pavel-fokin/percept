@@ -283,6 +283,31 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   and nothing else needs the thread here, so a tool runs inline. The
   turn policy is not duplicated; it already lives in `App::begin_tool`
   and `finish_tool`, and both presentations only carry the step out.
+- 2026-09-02: a search result can be followed up, not only found. Until
+  now `search` cut every payload string to its first 120 characters and
+  the model had no way to read the rest, so "looking is cheap" held but
+  reading after a look was impossible. `content` is the event's text -
+  the one string that runs long - and every addition below is about
+  it; `tool` and `arguments` keep the head cut. A summary line whose
+  `content` was cut carries `preview` on the envelope, beside the
+  payload rather than in it, so the payload stays exactly what the log
+  stores: `len`, the whole content's length, and `match`, the
+  character offset of the earliest `contains` hit. With a hit the
+  window is cut around it instead of the head, so a line shows why it
+  matched; `EventQuery::hit` supplies the offset by the same rule
+  `matches` applies, counted on the original text since lowercasing
+  can change a character's count. `--preview N` and the tool's
+  `preview` size the window, default 120. `read_event` is the model's
+  second tool, over `EventLog::get`, and `show --range START:END` is
+  its shell twin: `content` sliced to a character range, `end`
+  exclusive and clamped, `start` past the end an error. Characters are
+  the only unit - a sentence needs a tokenizer that gets code and URLs
+  wrong, a paragraph is the writer's whim, a line means nothing in a
+  JSON string - and one number keeps the default constant-size. No
+  index still: an index would answer which events, and every addition
+  here reads the payload after that. Search-then-read spends two of a
+  turn's five tool calls per fact; whether the cap moves is decided
+  once that pattern can be seen.
 
 ## Workflow
 

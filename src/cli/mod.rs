@@ -11,7 +11,7 @@
 //! every line is JSONL, for a caller piping into `jq`, never a table or
 //! prose. `search`'s default line shortens long strings in the payload,
 //! so a caller spends tokens on the whole of one deliberately, via
-//! `--full` or `show`.
+//! `--full`, `show`, or `show --range` into one `content`.
 
 use std::io::{self, Write};
 
@@ -84,7 +84,10 @@ Examples:
   # What the model did in the last day
   percept events search --since 1d --type tool.called
 
-  # Prompts and replies naming a deploy, with full payloads
+  # Prompts and replies naming a deploy, 300 characters around each hit
+  percept events search --contains deploy --type message.received --preview 300
+
+  # The same, with full payloads
   percept events search --contains deploy --type message.received --full
 
   # Two windows that tile with no gap or overlap
