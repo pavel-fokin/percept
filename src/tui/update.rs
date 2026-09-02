@@ -14,6 +14,10 @@ pub fn handle_key(
     match (key.code, key.modifiers) {
         (KeyCode::Esc, _) => Ok(true),
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => Ok(true),
+        (KeyCode::Char('j'), KeyModifiers::CONTROL) => {
+            chat.textarea.insert_newline();
+            Ok(false)
+        }
         // Input still types while a reply streams - only sending
         // waits, so what's typed is sent once the reply lands.
         (KeyCode::Enter, _) if chat.app.is_replying() => Ok(false),
@@ -52,7 +56,7 @@ fn submit(
     chat: &mut Chat,
     reply_tx: &UnboundedSender<StreamEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let text = chat.textarea.lines()[0].trim().to_string();
+    let text = chat.textarea.lines().join("\n").trim().to_string();
     if text.is_empty() {
         return Ok(());
     }
