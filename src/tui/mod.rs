@@ -5,7 +5,7 @@ mod ui;
 mod update;
 
 pub use ui::draw;
-pub use update::{handle_key, handle_stream};
+pub use update::{handle_key, handle_mouse, handle_stream};
 
 use crate::app::AppService;
 use crate::percept::Chunk;
@@ -36,6 +36,12 @@ pub struct Chat<'a> {
     /// Which spinner frame the status row shows. Advanced by `tick`
     /// while a turn streams, so a wait with no tokens yet still moves.
     pub spinner: usize,
+    /// The first visible transcript line. It stays put while the user
+    /// reads history, even as a reply adds new lines below it.
+    pub scroll_offset: u16,
+    pub scroll_limit: u16,
+    pub page_height: u16,
+    pub follows_transcript: bool,
     pub app: Box<dyn AppService>,
     /// Why the last reply broke, shown until the next submit. Transient
     /// tui state - it never reaches the log.
@@ -56,6 +62,10 @@ impl<'a> Chat<'a> {
             error_style: Style::default().fg(Color::Red),
             hint_style: Style::default().fg(Color::DarkGray),
             spinner: 0,
+            scroll_offset: 0,
+            scroll_limit: 0,
+            page_height: 1,
+            follows_transcript: true,
             app,
             error: None,
         }
@@ -63,6 +73,39 @@ impl<'a> Chat<'a> {
 
     pub fn tick(&mut self) {
         self.spinner = self.spinner.wrapping_add(1);
+    }
+
+    pub fn update_scroll_metrics(&mut self, limit: u16, page_height: u16) {
+        self.scroll_limit = limit;
+        self.page_height = page_height.max(1);
+        if self.follows_transcript {
+            self.scroll_offset = limit;
+        } else {
+            self.scroll_offset = self.scroll_offset.min(limit);
+        }
+    }
+
+    pub fn scroll_up(&mut self, lines: u16) {
+        self.follows_transcript = false;
+        self.scroll_offset = self.scroll_offset.saturating_sub(lines);
+    }
+
+    pub fn scroll_down(&mut self, lines: u16) {
+        self.scroll_offset = self
+            .scroll_offset
+            .saturating_add(lines)
+            .min(self.scroll_limit);
+        self.follows_transcript = self.scroll_offset == self.scroll_limit;
+    }
+
+    pub fn scroll_to_top(&mut self) {
+        self.follows_transcript = false;
+        self.scroll_offset = 0;
+    }
+
+    pub fn scroll_to_bottom(&mut self) {
+        self.follows_transcript = true;
+        self.scroll_offset = self.scroll_limit;
     }
 }
 

@@ -8,7 +8,8 @@ a pty, sends timed keystrokes, and captures the frames.
     python3 scripts/drive.py --cwd /tmp/scratch 1.0='hi there<enter>' 6.0='<esc>'
 
 Each argument is DELAY=KEYS, where DELAY is seconds since launch. Keys
-take <enter>, <esc>, <ctrl-c>, <ctrl-j>, <tab>, and literal text.
+take <enter>, <esc>, <ctrl-c>, <ctrl-j>, <page-up>, <page-down>, <home>,
+<end>, <scroll-up>, <scroll-down>, <tab>, and literal text.
 
 Output is the raw byte stream. --plain turns every escape sequence into
 a space, which is what makes the rendered text greppable: ratatui moves
@@ -36,6 +37,12 @@ KEYS = {
     "<ctrl-j>": b"\x0a",
     "<tab>": b"\t",
     "<backspace>": b"\x7f",
+    "<page-up>": b"\x1b[5~",
+    "<page-down>": b"\x1b[6~",
+    "<home>": b"\x1b[H",
+    "<end>": b"\x1b[F",
+    "<scroll-up>": b"\x1b[<64;1;1M",
+    "<scroll-down>": b"\x1b[<65;1;1M",
 }
 ESCAPE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b[()][A-Z0-9]|\x1b.")
 

@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use clap::Parser;
-use crossterm::event::{Event as CtEvent, EventStream, KeyEventKind};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, Event as CtEvent, EventStream, KeyEventKind,
+};
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 
@@ -30,6 +32,23 @@ const OLLAMA_MODEL: &str = "gemma4";
 
 /// How often the status row's spinner advances while a turn streams.
 const SPINNER_TICK: std::time::Duration = std::time::Duration::from_millis(90);
+
+/// Mouse capture is outside ratatui's terminal setup, so it needs its
+/// own guard for both normal exits and unwinding.
+struct MouseCapture;
+
+impl MouseCapture {
+    fn enable() -> std::io::Result<Self> {
+        crossterm::execute!(std::io::stdout(), EnableMouseCapture)?;
+        Ok(Self)
+    }
+}
+
+impl Drop for MouseCapture {
+    fn drop(&mut self) {
+        let _ = crossterm::execute!(std::io::stdout(), DisableMouseCapture);
+    }
+}
 
 async fn run(
     terminal: &mut ratatui::DefaultTerminal,
@@ -70,6 +89,8 @@ async fn run(
                     {
                         return Ok(());
                     }
+                } else if let CtEvent::Mouse(mouse) = event {
+                    tui::handle_mouse(chat, mouse);
                 }
             }
         }
@@ -82,8 +103,16 @@ async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
     let app = App::new(Arc::new(model), log, "tui".to_string())?;
 
     let mut terminal = ratatui::init();
+    let mouse = match MouseCapture::enable() {
+        Ok(mouse) => mouse,
+        Err(err) => {
+            ratatui::restore();
+            return Err(err.into());
+        }
+    };
     let mut chat = Chat::new(Box::new(app));
     let result = run(&mut terminal, &mut chat).await;
+    drop(mouse);
     ratatui::restore();
     result
 }
