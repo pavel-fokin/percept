@@ -75,6 +75,10 @@ pub struct SearchArgs {
     /// Repeatable. An event matching any of these types passes.
     #[arg(long = "type")]
     kind: Vec<String>,
+    /// Repeatable. An event whose payload carries any of these
+    /// substrings, case-insensitively, passes.
+    #[arg(long, value_parser = non_blank)]
+    contains: Vec<String>,
     /// Keep only the N most recent matching events. Output still runs
     /// oldest first.
     #[arg(long)]
@@ -186,7 +190,7 @@ fn parse_query(args: &SearchArgs) -> Result<EventQuery, String> {
         actors,
         sources: args.source.clone(),
         kinds,
-        text: Vec::new(),
+        text: args.contains.clone(),
         size: args.size,
     })
 }
@@ -327,6 +331,7 @@ mod tests {
             source: vec!["tui".to_string(), "cli".to_string()],
             actor: vec!["user".to_string()],
             kind: vec!["tool.called".to_string()],
+            contains: vec!["deploy".to_string()],
             size: Some(3),
             since: Some("1d".to_string()),
             ..Default::default()
@@ -337,6 +342,7 @@ mod tests {
         assert_eq!(query.sources, vec!["tui", "cli"]);
         assert!(query.actors == vec![percept::Actor::User]);
         assert!(query.kinds == vec![percept::EventKind::ToolCalled]);
+        assert_eq!(query.text, vec!["deploy".to_string()]);
         assert_eq!(query.size, Some(3));
         assert!(query.since.is_some() && query.until.is_none());
     }
@@ -358,5 +364,14 @@ mod tests {
             ..Default::default()
         };
         assert!(parse_query(&args).is_err());
+    }
+
+    #[test]
+    fn a_blank_contains_value_is_rejected_at_parse() {
+        let ok = Cli::try_parse_from(["percept", "events", "search", "--contains", "deploy"]);
+        assert!(ok.is_ok());
+
+        let blank = Cli::try_parse_from(["percept", "events", "search", "--contains", " "]);
+        assert!(blank.is_err());
     }
 }
