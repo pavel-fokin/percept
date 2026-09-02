@@ -13,8 +13,9 @@ const MAX_TOOL_CALLS: usize = 5;
 /// which is what `search_events` is for.
 const CONTEXT_EVENTS: usize = 20;
 
-/// What tui needs from the app layer. Lives here, not in tui, so
-/// implementing it doesn't pull tui into app's dependencies.
+/// What a presentation needs from the app layer - `tui` and `cli::ask`
+/// both drive a turn through it. Lives here, not in either of them, so
+/// implementing it doesn't pull a presentation into app's dependencies.
 pub trait AppService {
     /// Records the user's message and returns a stream of the reply's
     /// chunks. Errs, without recording anything, if a turn is already
@@ -74,8 +75,17 @@ pub enum ToolStep {
     /// Nothing to run (the name matched no tool); `App` already
     /// recorded the result. Drain this stream to continue the turn.
     Continue(percept::ReplyStream),
-    /// The per-turn tool cap is spent and the turn has ended.
+    /// The per-turn tool cap is spent. `App` has already ended the
+    /// turn: don't drain anything, and don't end it again.
     Stop,
+}
+
+/// Runs a tool, turning its failure into the text that stands as its
+/// result. That substitution is turn policy - the string is committed
+/// as `tool.resulted` content - so it lives here rather than in each
+/// presentation that drives a turn.
+pub fn run_tool(tool: &dyn percept::Tool, arguments: &str) -> String {
+    tool.run(arguments).unwrap_or_else(|err| err.to_string())
 }
 
 /// The turn now streaming. `anchor` is what the next model events are
@@ -84,10 +94,11 @@ pub enum ToolStep {
 /// on. One value, so the chain can't outlive the buffers it belongs to.
 struct Turn {
     anchor: EventId,
-    /// The prompt that opened this turn. `anchor` moves as the tool
-    /// loop advances; this does not, so the window can always reach
-    /// back to the question being answered.
-    prompt: EventId,
+    /// Where this turn's events begin in `App::events`. `anchor` moves
+    /// as the tool loop advances; this does not, so the window can
+    /// always reach back to the question being answered. An index is
+    /// exact because the transcript is only ever appended to.
+    start: usize,
     tool_calls: usize,
     /// The `tool.called` awaiting its result, set by `begin_tool` and
     /// taken when the result commits.
@@ -183,34 +194,16 @@ impl App {
     }
 
     /// Where the model's view starts: `CONTEXT_EVENTS` back from the
-    /// end, or the turn's own prompt if that is older. A tool round
-    /// commits up to four events, so a loop that runs to
+    /// end, or the start of the turn in progress if that is older. A
+    /// tool round commits up to four events, so a loop that runs to
     /// `MAX_TOOL_CALLS` would otherwise evict the question it is
     /// answering. The turn in progress is never history.
     fn window_start(&self) -> usize {
         let tail = self.events.len().saturating_sub(CONTEXT_EVENTS);
-        let Some(turn) = self.pending.as_ref() else {
-            return tail;
-        };
-        let prompt = self
-            .events
-            .iter()
-            .rposition(|event| event.id() == turn.prompt)
-            .unwrap_or(tail);
-        tail.min(prompt)
-    }
-
-    /// The transcript the model reads: the window above, less any tool
-    /// result it cut off from its call. A conversation that opens on a
-    /// result nothing asked for is not one a provider accepts.
-    fn context(&self) -> Vec<percept::Message> {
-        let mut messages = percept::to_messages(&self.events[self.window_start()..]);
-        let orphans = messages
-            .iter()
-            .take_while(|message| matches!(message, percept::Message::ToolResult { .. }))
-            .count();
-        messages.drain(..orphans);
-        messages
+        match self.pending.as_ref() {
+            Some(turn) => tail.min(turn.start),
+            None => tail,
+        }
     }
 
     /// The request for the next `reply`: the current time, then the
@@ -222,7 +215,7 @@ impl App {
             role: Actor::System,
             content: format!("The current time is {}.", Timestamp::now()),
         }];
-        messages.extend(self.context());
+        messages.extend(percept::to_messages(&self.events[self.window_start()..]));
 
         let tools = if self.chat.capabilities().tool_use && !self.tools_exhausted() {
             self.tools.iter().map(|tool| tool.spec()).collect()
@@ -269,10 +262,11 @@ impl AppService for App {
         let event = Event::message_received(Actor::User, text, self.source.clone(), None);
         self.log.append(&event)?;
         let anchor = event.id();
+        let start = self.events.len();
         self.events.push(event);
         self.pending = Some(Turn {
             anchor,
-            prompt: anchor,
+            start,
             tool_calls: 0,
             open_call: None,
             thought: String::new(),
@@ -289,7 +283,7 @@ impl AppService for App {
         match chunk {
             percept::Chunk::Thought(text) => turn.thought.push_str(&text),
             percept::Chunk::Reply(text) => turn.reply.push_str(&text),
-            // `handle_stream` routes a tool call to `begin_tool`; it
+            // Every caller routes a tool call to `begin_tool`; it
             // never reaches here.
             percept::Chunk::ToolCall { .. } => {}
         }
@@ -372,10 +366,16 @@ fn text(buffer: Option<&String>) -> Option<&str> {
 mod tests {
     use super::*;
     use crate::percept::{Actor, Chunk, Payload};
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Mutex;
+    use crate::testing::{content, FakeLog, FakeTool, Scripted};
 
     const SOURCE: &str = "tui";
+
+    fn thought(event: &Event) -> &str {
+        match event.payload() {
+            Payload::ThoughtRecorded { content } => content,
+            _ => panic!("expected a thought.recorded event"),
+        }
+    }
 
     struct Silent;
 
@@ -390,136 +390,6 @@ mod tests {
 
         fn reply(&self, _request: &percept::ModelRequest) -> percept::ReplyStream {
             Box::pin(tokio_stream::empty())
-        }
-    }
-
-    /// A Model that replays one chunk script per `reply` call and
-    /// records what each request carried - how many tools, and one tag
-    /// per message, since `Message` doesn't clone.
-    struct Scripted {
-        scripts: Mutex<std::collections::VecDeque<Vec<Chunk>>>,
-        tool_counts: Mutex<Vec<usize>>,
-        message_tags: Mutex<Vec<Vec<String>>>,
-        tool_use: bool,
-    }
-
-    impl Scripted {
-        fn new(scripts: Vec<Vec<Chunk>>, tool_use: bool) -> Self {
-            Self {
-                scripts: Mutex::new(scripts.into()),
-                tool_counts: Mutex::new(Vec::new()),
-                message_tags: Mutex::new(Vec::new()),
-                tool_use,
-            }
-        }
-
-        /// The tags of the last request's messages.
-        fn last_request(&self) -> Vec<String> {
-            self.message_tags.lock().unwrap().last().cloned().unwrap()
-        }
-    }
-
-    /// A message as a test can assert on it: dialogue by its own text,
-    /// a tool message by its shape.
-    fn tag(message: &percept::Message) -> String {
-        match message {
-            percept::Message::Text { content, .. } => content.clone(),
-            percept::Message::ToolCall { .. } => "<call>".to_string(),
-            percept::Message::ToolResult { .. } => "<result>".to_string(),
-        }
-    }
-
-    impl percept::Model for Scripted {
-        fn capabilities(&self) -> percept::ModelCapabilities {
-            percept::ModelCapabilities {
-                input: &[percept::Modality::Text],
-                output: &[percept::Modality::Text],
-                tool_use: self.tool_use,
-            }
-        }
-
-        fn reply(&self, request: &percept::ModelRequest) -> percept::ReplyStream {
-            self.tool_counts.lock().unwrap().push(request.tools.len());
-            self.message_tags
-                .lock()
-                .unwrap()
-                .push(request.messages.iter().map(tag).collect());
-            let chunks = self.scripts.lock().unwrap().pop_front().unwrap_or_default();
-            let items: Vec<Result<Chunk, Box<dyn std::error::Error + Send + Sync>>> =
-                chunks.into_iter().map(Ok).collect();
-            Box::pin(tokio_stream::iter(items))
-        }
-    }
-
-    /// A Tool that always succeeds with the same line.
-    struct FakeTool;
-
-    impl percept::Tool for FakeTool {
-        fn spec(&self) -> percept::ToolSpec {
-            percept::ToolSpec {
-                name: "search_events",
-                description: "a fake",
-                parameters: "{}",
-            }
-        }
-
-        fn run(&self, _arguments: &str) -> Result<String, Box<dyn std::error::Error>> {
-            Ok("ran".to_string())
-        }
-    }
-
-    fn content(event: &Event) -> &str {
-        match event.payload() {
-            Payload::MessageReceived { content } => content,
-            _ => panic!("expected a message.received event"),
-        }
-    }
-
-    fn thought(event: &Event) -> &str {
-        match event.payload() {
-            Payload::ThoughtRecorded { content } => content,
-            _ => panic!("expected a thought.recorded event"),
-        }
-    }
-
-    /// An in-memory EventLog for tests. `fail_append` flips `append`
-    /// into an error without touching the filesystem, and can be
-    /// flipped mid-conversation.
-    #[derive(Default)]
-    struct FakeLog {
-        events: Mutex<Vec<Event>>,
-        fail_append: AtomicBool,
-    }
-
-    impl FakeLog {
-        fn seeded(events: Vec<Event>) -> Self {
-            Self {
-                events: Mutex::new(events),
-                ..Self::default()
-            }
-        }
-
-        fn start_failing(&self) {
-            self.fail_append.store(true, Ordering::Relaxed);
-        }
-    }
-
-    impl percept::EventLog for FakeLog {
-        fn append(&self, event: &Event) -> Result<(), Box<dyn std::error::Error>> {
-            if self.fail_append.load(Ordering::Relaxed) {
-                return Err("append failed".into());
-            }
-            self.events.lock().unwrap().push(event.clone());
-            Ok(())
-        }
-
-        fn load(&self) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
-            Ok(self.events.lock().unwrap().clone())
-        }
-
-        fn get(&self, id: percept::EventId) -> Result<Option<Event>, Box<dyn std::error::Error>> {
-            let events = self.events.lock().unwrap();
-            Ok(events.iter().find(|event| event.id() == id).cloned())
         }
     }
 
@@ -715,7 +585,7 @@ mod tests {
     fn run_one_tool(app: &mut App, name: &str, arguments: &str) {
         match app.begin_tool(name, arguments.to_string()).unwrap() {
             ToolStep::Run(tool, args) => {
-                let output = tool.run(&args).unwrap_or_else(|err| err.to_string());
+                let output = run_tool(&*tool, &args);
                 let _ = app.finish_tool(output).unwrap();
             }
             // `begin_tool` already committed the result (no such tool)
@@ -795,7 +665,7 @@ mod tests {
         }
         assert!(app.tools_exhausted());
 
-        let counts = model.tool_counts.lock().unwrap();
+        let counts = model.tool_counts();
         // submit, then one re-ask per finished tool call.
         assert_eq!(counts.len(), MAX_TOOL_CALLS + 1);
         assert!(counts[..MAX_TOOL_CALLS].iter().all(|&n| n == 1));
@@ -816,15 +686,15 @@ mod tests {
 
         let _ = app.submit("hi".to_string()).unwrap();
 
-        assert_eq!(model.tool_counts.lock().unwrap()[0], 0);
+        assert_eq!(model.tool_counts()[0], 0);
     }
 
-    fn seeded_app(events: Vec<Event>) -> (Arc<Scripted>, App) {
+    fn seeded_app(events: Vec<Event>, tools: Vec<Arc<dyn percept::Tool>>) -> (Arc<Scripted>, App) {
         let model = Arc::new(Scripted::new(vec![], true));
         let app = App::new(
             model.clone(),
             Arc::new(FakeLog::seeded(events)),
-            Vec::new(),
+            tools,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -839,16 +709,14 @@ mod tests {
 
     #[test]
     fn a_log_longer_than_the_window_sends_only_its_newest_events() {
-        let (model, mut app) = seeded_app(filler(25));
+        let (model, mut app) = seeded_app(filler(25), Vec::new());
 
         let _ = app.submit("now".to_string()).unwrap();
 
         // The whole log stays in the transcript the TUI renders.
         assert_eq!(app.events().len(), 26);
-        // The model reads the system line plus one window of events.
         let sent = model.last_request();
         assert_eq!(sent.len(), CONTEXT_EVENTS + 1);
-        // The oldest events fell out; the newest and the prompt stayed.
         assert!(!sent.contains(&"0".to_string()));
         assert!(sent.contains(&"24".to_string()));
         assert!(sent.contains(&"now".to_string()));
@@ -869,7 +737,7 @@ mod tests {
 
         // Submitting pushes the call out of the window, leaving its
         // result as the first event the model would otherwise see.
-        let (model, mut app) = seeded_app(events);
+        let (model, mut app) = seeded_app(events, Vec::new());
         let _ = app.submit("now".to_string()).unwrap();
 
         let sent = model.last_request();
@@ -879,14 +747,7 @@ mod tests {
 
     #[test]
     fn a_long_tool_loop_never_evicts_the_prompt_it_is_answering() {
-        let model = Arc::new(Scripted::new(vec![], true));
-        let mut app = App::new(
-            model.clone(),
-            Arc::new(FakeLog::default()),
-            vec![Arc::new(FakeTool)],
-            SOURCE.to_string(),
-        )
-        .unwrap();
+        let (model, mut app) = seeded_app(Vec::new(), vec![Arc::new(FakeTool)]);
 
         let _ = app.submit("the question".to_string()).unwrap();
         // Each round commits four events: thought, reply, call, result.
@@ -903,7 +764,7 @@ mod tests {
 
     #[test]
     fn a_log_shorter_than_the_window_sends_all_of_it() {
-        let (model, mut app) = seeded_app(filler(3));
+        let (model, mut app) = seeded_app(filler(3), Vec::new());
 
         let _ = app.submit("now".to_string()).unwrap();
 

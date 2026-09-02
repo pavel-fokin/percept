@@ -18,7 +18,7 @@ use std::io::{self, Write};
 use clap::{Args, Parser, Subcommand};
 use tokio_stream::StreamExt;
 
-use crate::app::{AppService, ToolStep};
+use crate::app::{run_tool, AppService, ToolStep};
 use crate::percept::{Chunk, EventId, EventLog, EventQuery, EventSearch};
 use crate::shared::Timestamp;
 use crate::store;
@@ -228,7 +228,8 @@ pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error
 /// no spawned task: unlike the TUI, nothing else needs the thread while
 /// headless, so a tool runs inline and the turn is one plain `await`
 /// loop. Each tool call and its result print to stderr as they happen,
-/// under the same `⚒` gutter the TUI uses, so stdout stays pipeable.
+/// so stdout stays pipeable. That trace is for watching a run live; the
+/// log is what a run is read back from.
 pub async fn ask(
     args: AskArgs,
     mut app: Box<dyn AppService>,
@@ -247,7 +248,7 @@ pub async fn ask(
                 stream = match app.begin_tool(&tool, arguments.clone())? {
                     ToolStep::Run(run, arguments) => {
                         eprintln!("⚒ {tool}({arguments})");
-                        let output = run.run(&arguments).unwrap_or_else(|err| err.to_string());
+                        let output = run_tool(&*run, &arguments);
                         eprintln!("⚒ {output}");
                         app.finish_tool(output)?
                     }
@@ -258,11 +259,12 @@ pub async fn ask(
                     ToolStep::Stop => break,
                 };
             }
-            Some(Ok(Chunk::Reply(text))) => {
-                reply.push_str(&text);
-                app.append_chunk(Chunk::Reply(text));
+            Some(Ok(chunk)) => {
+                if let Chunk::Reply(text) = &chunk {
+                    reply.push_str(text);
+                }
+                app.append_chunk(chunk);
             }
-            Some(Ok(chunk)) => app.append_chunk(chunk),
             // A failed reply is shown, never logged - the stream's own
             // words are this run's error. Whatever text arrived before
             // it still commits, and still prints: the words reached the
@@ -321,28 +323,9 @@ fn relative_minutes(s: &str) -> Option<i64> {
 mod tests {
     use super::*;
     use crate::app::App;
-    use crate::percept::{self, Event, Payload};
-    use std::collections::VecDeque;
-    use std::sync::{Arc, Mutex};
-
-    #[derive(Default)]
-    struct FakeLog(Mutex<Vec<Event>>);
-
-    impl EventLog for FakeLog {
-        fn append(&self, event: &Event) -> Result<(), Box<dyn std::error::Error>> {
-            self.0.lock().unwrap().push(event.clone());
-            Ok(())
-        }
-
-        fn load(&self) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
-            Ok(self.0.lock().unwrap().clone())
-        }
-
-        fn get(&self, id: EventId) -> Result<Option<Event>, Box<dyn std::error::Error>> {
-            let events = self.0.lock().unwrap();
-            Ok(events.iter().find(|event| event.id() == id).cloned())
-        }
-    }
+    use crate::percept::{self, Payload};
+    use crate::testing::{content, FakeLog, FakeTool, Scripted};
+    use std::sync::Arc;
 
     fn args(actor: &str, payload: &str) -> PublishArgs {
         PublishArgs {
@@ -460,85 +443,6 @@ mod tests {
         assert!(blank.is_err());
     }
 
-    /// A Model that replays one chunk script per `reply` call, so a test
-    /// can script a tool call and the reply that follows it.
-    struct ScriptedModel {
-        scripts: Mutex<VecDeque<Vec<percept::Chunk>>>,
-        tool_use: bool,
-    }
-
-    impl ScriptedModel {
-        fn new(scripts: Vec<Vec<percept::Chunk>>, tool_use: bool) -> Self {
-            Self {
-                scripts: Mutex::new(scripts.into()),
-                tool_use,
-            }
-        }
-    }
-
-    impl percept::Model for ScriptedModel {
-        fn capabilities(&self) -> percept::ModelCapabilities {
-            percept::ModelCapabilities {
-                input: &[percept::Modality::Text],
-                output: &[percept::Modality::Text],
-                tool_use: self.tool_use,
-            }
-        }
-
-        fn reply(&self, _request: &percept::ModelRequest) -> percept::ReplyStream {
-            let chunks = self.scripts.lock().unwrap().pop_front().unwrap_or_default();
-            let items: Vec<Result<percept::Chunk, Box<dyn std::error::Error + Send + Sync>>> =
-                chunks.into_iter().map(Ok).collect();
-            Box::pin(tokio_stream::iter(items))
-        }
-    }
-
-    /// A Model whose reply breaks mid-stream, after saying something -
-    /// exercising the "shown, never logged" error path.
-    struct FailingModel;
-
-    impl percept::Model for FailingModel {
-        fn capabilities(&self) -> percept::ModelCapabilities {
-            percept::ModelCapabilities {
-                input: &[percept::Modality::Text],
-                output: &[percept::Modality::Text],
-                tool_use: false,
-            }
-        }
-
-        fn reply(&self, _request: &percept::ModelRequest) -> percept::ReplyStream {
-            let items: Vec<Result<percept::Chunk, Box<dyn std::error::Error + Send + Sync>>> = vec![
-                Ok(percept::Chunk::Reply("partial".to_string())),
-                Err("connection dropped".into()),
-            ];
-            Box::pin(tokio_stream::iter(items))
-        }
-    }
-
-    /// A Tool that always succeeds with the same line.
-    struct FakeTool;
-
-    impl percept::Tool for FakeTool {
-        fn spec(&self) -> percept::ToolSpec {
-            percept::ToolSpec {
-                name: "search_events",
-                description: "a fake",
-                parameters: "{}",
-            }
-        }
-
-        fn run(&self, _arguments: &str) -> Result<String, Box<dyn std::error::Error>> {
-            Ok("ran".to_string())
-        }
-    }
-
-    fn message(event: &Event) -> &str {
-        match event.payload() {
-            Payload::MessageReceived { content } => content,
-            _ => panic!("expected a message.received event"),
-        }
-    }
-
     fn ask_args(prompt: &str) -> AskArgs {
         AskArgs {
             prompt: prompt.to_string(),
@@ -547,7 +451,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
-        let model = ScriptedModel::new(
+        let model = Scripted::new(
             vec![
                 vec![percept::Chunk::ToolCall {
                     tool: "search_events".to_string(),
@@ -574,25 +478,27 @@ mod tests {
             events[2].payload(),
             Payload::ToolResulted { content } if content == "ran"
         ));
-        assert_eq!(message(&events[3]), "found it");
+        assert_eq!(content(&events[3]), "found it");
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn a_stream_error_ends_the_turn_but_still_commits_partial_text() {
         let log = Arc::new(FakeLog::default());
-        let app = App::new(
-            Arc::new(FailingModel),
-            log.clone(),
-            Vec::new(),
-            "cli".to_string(),
-        )
-        .unwrap();
+        // A reply that breaks mid-stream, after saying something.
+        let model = Scripted::failing(
+            vec![vec![
+                Ok(percept::Chunk::Reply("partial".to_string())),
+                Err("connection dropped".into()),
+            ]],
+            false,
+        );
+        let app = App::new(Arc::new(model), log.clone(), Vec::new(), "cli".to_string()).unwrap();
 
         let result = ask(ask_args("hi"), Box::new(app)).await;
 
         assert!(result.is_err());
         let events = log.load().unwrap();
         assert_eq!(events.len(), 2);
-        assert_eq!(message(&events[1]), "partial");
+        assert_eq!(content(&events[1]), "partial");
     }
 }

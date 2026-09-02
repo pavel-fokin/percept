@@ -13,6 +13,8 @@ mod percept;
 mod providers;
 mod shared;
 mod store;
+#[cfg(test)]
+mod testing;
 mod tui;
 
 use app::App;
@@ -97,10 +99,8 @@ async fn run(
     }
 }
 
-/// Opens the shared log, wires it to `Ollama` and `SearchEvents`, and
-/// stamps every event the returned `App` commits with `source`. Both
-/// the TUI and `ask` build the same `App` this way, differing only in
-/// how they drive its reply stream.
+/// Both the TUI and `ask` build the same `App` this way, differing only
+/// in the `source` they stamp and in how they drive its reply stream.
 fn build_app(source: &str) -> Result<App, Box<dyn std::error::Error>> {
     let log = Arc::new(Jsonl::open(LOG_PATH)?);
     let model = Ollama::new(OLLAMA_URL.to_string(), OLLAMA_MODEL.to_string());
