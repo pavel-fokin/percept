@@ -247,6 +247,38 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   filter as `contains` - the model's only lever for finding an event by
   what it says, where a shell user has `grep`. Still no index: a
   substring scan over a log `search` already loads whole.
+- 2026-09-02: the model reads a window of the log, not all of it -
+  `CONTEXT_EVENTS`, the newest 20 events, applied in
+  `App::build_request`. Until now every event went into the prompt, so
+  `search_events` could only return what the model had already read and
+  no run could tell searching from reading. The window is what makes
+  that claim testable, and it is the primitive's premise: looking is
+  cheap, so a model looks rather than holds. `App::events` keeps the
+  whole log - the TUI renders all of it, the same split that already
+  lets a thought be shown and never replayed. The cut can fall between
+  a `tool.called` and its `tool.resulted`, so a window opening on a
+  result drops it: `Message::ToolResult` is `role: "tool"` on the wire,
+  and no provider accepts a conversation starting there. The number is
+  a `const`, not a flag, following `OLLAMA_MODEL` - one place to change
+  it. Windowing by event count rather than characters is deliberate: a
+  fact can be planted at a known depth. The model is not told its
+  history is truncated; whether saying so changes how often it searches
+  is the next thing to measure, held back so this window's effect can
+  be read on its own.
+- 2026-09-02: `percept ask "<prompt>"` runs one turn headlessly - the
+  same `AppService` policy the TUI drives, without a terminal. It exists
+  to make a turn repeatable: a chat UI is a poor instrument for running
+  one prompt many times. It stamps `source` `cli`, so a run is
+  recoverable with `percept events search --source cli`. The reply goes
+  to stdout and every tool call and result to stderr, so stdout pipes
+  clean while the loop stays watchable. `ask` accumulates the reply
+  itself rather than reading `pending_reply` at the end: `App` clears
+  that buffer at each tool call and again when the cap ends a turn, so
+  text spoken before a call would never be printed. No channel and no
+  spawned task - `tui`'s mpsc plumbing exists to keep the UI drawing,
+  and nothing else needs the thread here, so a tool runs inline. The
+  turn policy is not duplicated; it already lives in `App::begin_tool`
+  and `finish_tool`, and both presentations only carry the step out.
 
 ## Workflow
 
