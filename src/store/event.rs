@@ -87,15 +87,47 @@ pub fn encode(event: &percept::Event) -> String {
 /// Longest string kept whole in a shortened payload.
 const PREVIEW_CHARS: usize = 120;
 
+/// What a summary line says about the `content` it cut, so a caller
+/// can tell whether a second look is worth a call. Lives beside the
+/// payload, not in it: the payload stays exactly what the log stores,
+/// and these are facts about the output.
+#[derive(Serialize)]
+struct Preview {
+    /// Length of the whole `content`, in characters.
+    len: usize,
+}
+
+/// A summary line: the wire event with `preview` on the envelope when
+/// `content` was cut. Serialize-only - a stored line never carries
+/// `preview`, so `Event` stays the one decode shape.
+#[derive(Serialize)]
+struct Summary {
+    #[serde(flatten)]
+    event: Event,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    preview: Option<Preview>,
+}
+
 /// One event as a cheap line: the same shape `encode` writes, with
 /// every long string in the payload cut short. The payload stays a real
 /// object, so one `jq` expression reads both this and `encode`'s
 /// output. A caller reaches for `encode` deliberately, per the purpose
-/// rule in AGENTS.md.
+/// rule in AGENTS.md. `content` is the event's text - the one string
+/// that runs long - so a cut to it is reported under `preview`, where
+/// a cut inside `arguments` is not.
 pub fn summarize(event: &percept::Event) -> String {
     let mut wire = Event::from(event);
+    let preview = wire.payload["content"]
+        .as_str()
+        .map(|content| content.chars().count())
+        .filter(|&len| len > PREVIEW_CHARS)
+        .map(|len| Preview { len });
     wire.payload = shorten(wire.payload);
-    serde_json::to_string(&wire).expect("store::Event always serializes")
+    serde_json::to_string(&Summary {
+        event: wire,
+        preview,
+    })
+    .expect("store::Event always serializes")
 }
 
 /// Cuts every long string in `payload`, keeping its structure. Cutting
@@ -318,6 +350,53 @@ mod tests {
         let cut = short["c"].as_str().unwrap();
         assert!(std::str::from_utf8(cut.as_bytes()).is_ok());
         assert_eq!(cut.chars().count(), PREVIEW_CHARS + 1);
+    }
+
+    #[test]
+    fn a_summary_reports_the_length_of_a_cut_content_and_nothing_else() {
+        let long = message(Actor::Model, "x".repeat(500));
+        let line: Value = serde_json::from_str(&summarize(&long)).unwrap();
+        assert_eq!(line["preview"]["len"], 500);
+        assert_eq!(
+            line["payload"]["content"].as_str().unwrap().chars().count(),
+            PREVIEW_CHARS + 1
+        );
+
+        let short = message(Actor::Model, "hi".to_string());
+        let line: Value = serde_json::from_str(&summarize(&short)).unwrap();
+        assert!(line.get("preview").is_none());
+    }
+
+    #[test]
+    fn a_cut_inside_arguments_is_not_a_preview() {
+        let call = percept::Event::restore(
+            EventId::new(),
+            Actor::Model,
+            "tui".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::ToolCalled {
+                tool: "search_events".to_string(),
+                arguments: format!(r#"{{"contains":["{}"]}}"#, "y".repeat(500)),
+            },
+        );
+        let line: Value = serde_json::from_str(&summarize(&call)).unwrap();
+        assert!(line.get("preview").is_none());
+        assert!(line["payload"]["arguments"]["contains"][0]
+            .as_str()
+            .unwrap()
+            .ends_with('\u{2026}'));
+    }
+
+    fn message(actor: Actor, content: String) -> percept::Event {
+        percept::Event::restore(
+            EventId::new(),
+            actor,
+            "tui".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::MessageReceived { content },
+        )
     }
 
     #[test]
