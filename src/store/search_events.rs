@@ -43,6 +43,7 @@ const PARAMETERS: &str = r#"{
     "actors": {"type": "array", "items": {"type": "string", "enum": ["user", "model", "system"]}},
     "sources": {"type": "array", "items": {"type": "string"}, "description": "the writer that produced the event, e.g. tui or claude-code"},
     "kinds": {"type": "array", "items": {"type": "string", "enum": ["message.received", "thought.recorded", "tool.called", "tool.resulted"]}},
+    "contains": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "a substring, case-insensitive, that one of the event's payload strings must carry; any of the values matches"},
     "size": {"type": "integer", "description": "keep only the N most recent matches"}
   },
   "additionalProperties": false
@@ -56,6 +57,7 @@ struct Args {
     actors: Vec<String>,
     sources: Vec<String>,
     kinds: Vec<String>,
+    contains: Vec<String>,
     size: Option<usize>,
 }
 
@@ -84,13 +86,19 @@ impl Tool for SearchEvents {
             .map(|k| parse_kind(k))
             .collect::<Result<_, _>>()?;
 
+        // The schema says `minLength: 1`, but serde won't enforce it - a
+        // blank term would quietly match everything.
+        if let Some(term) = args.contains.iter().find(|t| t.trim().is_empty()) {
+            return Err(format!("contains term {term:?} must not be blank").into());
+        }
+
         let query = EventQuery {
             since,
             until,
             actors,
             sources: args.sources,
             kinds,
-            text: Vec::new(),
+            text: args.contains,
             size: args.size.or(Some(DEFAULT_SIZE)),
         };
 
@@ -116,6 +124,7 @@ mod tests {
     #[derive(Default)]
     struct Seen {
         actors: Vec<Actor>,
+        text: Vec<String>,
         size: Option<usize>,
     }
 
@@ -129,6 +138,7 @@ mod tests {
         fn search(&self, query: &EventQuery) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
             *self.seen.lock().unwrap() = Seen {
                 actors: query.actors.clone(),
+                text: query.text.clone(),
                 size: query.size,
             };
             Ok(query.apply(self.events.clone()))
@@ -181,10 +191,12 @@ mod tests {
         });
         let tool = SearchEvents::new(search.clone());
 
-        tool.run(r#"{"actors":["user"],"size":3}"#).unwrap();
+        tool.run(r#"{"actors":["user"],"contains":["deploy"],"size":3}"#)
+            .unwrap();
 
         let seen = search.seen.lock().unwrap();
         assert!(seen.actors == vec![Actor::User]);
+        assert_eq!(seen.text, vec!["deploy".to_string()]);
         assert_eq!(seen.size, Some(3));
     }
 
@@ -213,5 +225,20 @@ mod tests {
     #[test]
     fn a_non_iso_timestamp_is_an_error() {
         assert!(tool().run(r#"{"since":"yesterday"}"#).is_err());
+    }
+
+    #[test]
+    fn a_blank_contains_term_is_an_error() {
+        assert!(tool().run(r#"{"contains":[""]}"#).is_err());
+    }
+
+    #[test]
+    fn run_keeps_only_events_whose_payload_carries_the_term() {
+        let out = tool().run(r#"{"contains":["orl"]}"#).unwrap();
+
+        let lines: Vec<&str> = out.lines().collect();
+        assert_eq!(lines.len(), 1);
+        let line: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
+        assert_eq!(line["source"], "claude-code");
     }
 }
