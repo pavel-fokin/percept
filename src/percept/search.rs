@@ -1,4 +1,4 @@
-use super::{Actor, Event, EventKind};
+use super::{Actor, Event, EventKind, Payload};
 use crate::shared::Timestamp;
 
 /// A query over the committed log. Every field is a filter; `None`, or
@@ -16,6 +16,14 @@ pub struct EventQuery {
     pub actors: Vec<Actor>,
     pub sources: Vec<String>,
     pub kinds: Vec<EventKind>,
+    /// A term matches when one of the event's payload strings carries
+    /// it as a substring, case-insensitively; an event passes when any
+    /// term does. Payload strings are `content`, `tool`, and
+    /// `arguments` - the envelope is not searched, since `actor` and
+    /// `source` already have filters. A blank term is contained by
+    /// everything, so a boundary that can receive one rejects it before
+    /// building a query.
+    pub text: Vec<String>,
     /// Keeps only the N most recent matches, still in log order.
     pub size: Option<usize>,
 }
@@ -28,6 +36,7 @@ impl EventQuery {
             && (self.actors.is_empty() || self.actors.contains(&event.actor()))
             && (self.sources.is_empty() || self.sources.iter().any(|s| s == event.source()))
             && (self.kinds.is_empty() || self.kinds.contains(&event.kind()))
+            && (self.text.is_empty() || self.text.iter().any(|term| carries(event.payload(), term)))
     }
 
     /// The matches among `events`, which arrive in log order. `size`
@@ -39,6 +48,19 @@ impl EventQuery {
             events.drain(..events.len().saturating_sub(size));
         }
         events
+    }
+}
+
+/// Whether one of `payload`'s strings carries `term` as a
+/// case-insensitive substring.
+fn carries(payload: &Payload, term: &str) -> bool {
+    let term = term.to_lowercase();
+    let has = |s: &str| s.to_lowercase().contains(&term);
+    match payload {
+        Payload::MessageReceived { content }
+        | Payload::ThoughtRecorded { content }
+        | Payload::ToolResulted { content } => has(content),
+        Payload::ToolCalled { tool, arguments } => has(tool) || has(arguments),
     }
 }
 
@@ -72,6 +94,31 @@ mod tests {
 
     fn sources(events: &[Event]) -> Vec<String> {
         events.iter().map(|e| e.source().to_string()).collect()
+    }
+
+    /// A user message from `tui` carrying `content`, for the
+    /// text-filter tests.
+    fn message(content: &str) -> Event {
+        Event::restore(
+            EventId::new(),
+            Actor::User,
+            "tui".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::MessageReceived {
+                content: content.to_string(),
+            },
+        )
+    }
+
+    fn contents(events: &[Event]) -> Vec<String> {
+        events
+            .iter()
+            .map(|e| match e.payload() {
+                Payload::MessageReceived { content } => content.clone(),
+                _ => panic!("not a message"),
+            })
+            .collect()
     }
 
     #[test]
@@ -158,5 +205,123 @@ mod tests {
 
         assert!(query.matches(&wanted));
         assert!(!query.matches(&event_at("a", 1)));
+    }
+
+    #[test]
+    fn a_text_term_matches_a_substring_case_insensitively() {
+        let events = vec![message("Deploy the API"), message("hello")];
+
+        let kept = EventQuery {
+            text: vec!["deploy".to_string()],
+            ..Default::default()
+        }
+        .apply(events);
+
+        assert_eq!(contents(&kept), vec!["Deploy the API"]);
+    }
+
+    #[test]
+    fn a_text_term_matches_every_payload_kind() {
+        let payloads = vec![
+            Payload::MessageReceived {
+                content: "deploy it".to_string(),
+            },
+            Payload::ThoughtRecorded {
+                content: "deploy it".to_string(),
+            },
+            Payload::ToolResulted {
+                content: "deploy it".to_string(),
+            },
+            Payload::ToolCalled {
+                tool: "deploy_tool".to_string(),
+                arguments: "{}".to_string(),
+            },
+        ];
+        let query = EventQuery {
+            text: vec!["deploy".to_string()],
+            ..Default::default()
+        };
+
+        for payload in payloads {
+            let event = Event::restore(
+                EventId::new(),
+                Actor::User,
+                "tui".to_string(),
+                None,
+                Timestamp::now(),
+                payload,
+            );
+            assert!(query.matches(&event));
+        }
+    }
+
+    #[test]
+    fn a_tool_call_matches_by_tool_name_or_by_arguments() {
+        let call = Event::restore(
+            EventId::new(),
+            Actor::Model,
+            "tui".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::ToolCalled {
+                tool: "search_events".to_string(),
+                arguments: r#"{"kinds":["tool.called"]}"#.to_string(),
+            },
+        );
+
+        let by_tool = EventQuery {
+            text: vec!["search".to_string()],
+            ..Default::default()
+        };
+        let by_arguments = EventQuery {
+            text: vec!["tool.called".to_string()],
+            ..Default::default()
+        };
+
+        assert!(by_tool.matches(&call));
+        assert!(by_arguments.matches(&call));
+    }
+
+    #[test]
+    fn a_text_term_does_not_match_the_envelope() {
+        // The source is "claude-code"; the payload only says "hi".
+        let event = event_at("claude-code", 1);
+
+        let query = EventQuery {
+            text: vec!["claude".to_string()],
+            ..Default::default()
+        };
+
+        assert!(!query.matches(&event));
+    }
+
+    #[test]
+    fn text_terms_match_any_of_their_values() {
+        let events = vec![
+            message("deploy the api"),
+            message("ship it"),
+            message("hello"),
+        ];
+
+        let kept = EventQuery {
+            text: vec!["deploy".to_string(), "SHIP".to_string()],
+            ..Default::default()
+        }
+        .apply(events);
+
+        assert_eq!(contents(&kept), vec!["deploy the api", "ship it"]);
+    }
+
+    #[test]
+    fn a_blank_term_matches_everything_as_documented() {
+        let events = vec![message("a"), message("b")];
+
+        let kept = EventQuery {
+            text: vec![String::new()],
+            ..Default::default()
+        }
+        .apply(events);
+
+        assert_eq!(kept.len(), 2);
     }
 }
