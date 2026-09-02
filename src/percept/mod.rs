@@ -5,5 +5,5 @@ mod search;
 
 pub use event::{Actor, Event, EventId, EventKind, Payload};
 pub use event_log::EventLog;
-pub use model::{to_messages, Chunk, Message, Model, ReplyStream};
+pub use model::{to_messages, Chunk, Message, Modality, Model, ModelCapabilities, ReplyStream};
 pub use search::{EventQuery, EventSearch};

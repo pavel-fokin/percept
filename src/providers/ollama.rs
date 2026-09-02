@@ -6,7 +6,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
 
-use crate::percept::{Actor, Chunk, Message, Model, ReplyStream};
+use crate::percept::{Actor, Chunk, Message, Modality, Model, ModelCapabilities, ReplyStream};
 
 /// How long to wait for the server to accept a connection. Without it
 /// a host that never answers hangs on the OS TCP timeout, and the reply
@@ -151,6 +151,14 @@ fn handle_line(
 }
 
 impl Model for Ollama {
+    fn capabilities(&self) -> ModelCapabilities {
+        ModelCapabilities {
+            input: &[Modality::Text],
+            output: &[Modality::Text],
+            tool_use: false,
+        }
+    }
+
     fn reply(&self, messages: &[Message]) -> ReplyStream {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
