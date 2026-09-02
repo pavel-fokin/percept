@@ -2,6 +2,7 @@ use std::error::Error;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
@@ -59,6 +60,56 @@ struct ChatRequest {
 struct ChatMessage {
     role: &'static str,
     content: String,
+    /// A `Message::ToolCall` carries one; every other message none, so
+    /// a plain turn serializes as `{ role, content }` exactly as before.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tool_calls: Vec<ToolCallOut>,
+}
+
+#[derive(Serialize)]
+struct ToolCallOut {
+    function: ToolCallFunctionOut,
+}
+
+#[derive(Serialize)]
+struct ToolCallFunctionOut {
+    name: String,
+    /// ollama takes tool-call arguments as a JSON object, not a string.
+    arguments: Value,
+}
+
+/// One domain `Message` in ollama's `/api/chat` shape: a plain turn,
+/// the model's tool call as an `assistant` message with `tool_calls`,
+/// or a tool's output as a `tool` message.
+fn chat_message(message: &Message) -> ChatMessage {
+    match message {
+        Message::Text {
+            role: actor,
+            content,
+        } => ChatMessage {
+            role: role(*actor),
+            content: content.clone(),
+            tool_calls: Vec::new(),
+        },
+        Message::ToolCall {
+            tool, arguments, ..
+        } => ChatMessage {
+            role: "assistant",
+            content: String::new(),
+            tool_calls: vec![ToolCallOut {
+                function: ToolCallFunctionOut {
+                    name: tool.clone(),
+                    arguments: serde_json::from_str(arguments)
+                        .expect("ToolCall arguments is validated JSON"),
+                },
+            }],
+        },
+        Message::ToolResult { content, .. } => ChatMessage {
+            role: "tool",
+            content: content.clone(),
+            tool_calls: Vec::new(),
+        },
+    }
 }
 
 /// One line of `/api/chat`'s NDJSON body. Only the fields Ollama reads
@@ -166,13 +217,7 @@ impl Model for Ollama {
         let url = self.url.clone();
         let request = ChatRequest {
             model: self.model.clone(),
-            messages: messages
-                .iter()
-                .map(|m| ChatMessage {
-                    role: role(m.role),
-                    content: m.content.clone(),
-                })
-                .collect(),
+            messages: messages.iter().map(chat_message).collect(),
             stream: true,
         };
 
