@@ -29,9 +29,9 @@ struct MessageBody {
     content: String,
 }
 
-/// `arguments` is a real nested object on the wire, like `ToolUsed`'s
-/// body, so a caller can index into it with `jq`. The domain holds it
-/// as text - `From`/`TryFrom` parse and re-serialize across the seam.
+/// `arguments` is a real nested object on the wire, so a caller can
+/// index into it with `jq`. The domain holds it as text -
+/// `From`/`TryFrom` parse and re-serialize across the seam.
 #[derive(Serialize, Deserialize)]
 struct ToolCalledBody {
     tool: String,
@@ -44,16 +44,14 @@ struct ToolResultedBody {
 }
 
 const MESSAGE_RECEIVED: &str = "message.received";
-const TOOL_USED: &str = "tool.used";
 const THOUGHT_RECORDED: &str = "thought.recorded";
 const TOOL_CALLED: &str = "tool.called";
 const TOOL_RESULTED: &str = "tool.resulted";
 
 /// Every `type` the log records, for the error that lists them when a
 /// caller names one that isn't here.
-pub const KINDS: [&str; 5] = [
+pub const KINDS: [&str; 4] = [
     MESSAGE_RECEIVED,
-    TOOL_USED,
     THOUGHT_RECORDED,
     TOOL_CALLED,
     TOOL_RESULTED,
@@ -63,7 +61,6 @@ pub const KINDS: [&str; 5] = [
 fn kind(kind: EventKind) -> &'static str {
     match kind {
         EventKind::MessageReceived => MESSAGE_RECEIVED,
-        EventKind::ToolUsed => TOOL_USED,
         EventKind::ThoughtRecorded => THOUGHT_RECORDED,
         EventKind::ToolCalled => TOOL_CALLED,
         EventKind::ToolResulted => TOOL_RESULTED,
@@ -75,7 +72,6 @@ fn kind(kind: EventKind) -> &'static str {
 pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
     match s {
         MESSAGE_RECEIVED => Ok(EventKind::MessageReceived),
-        TOOL_USED => Ok(EventKind::ToolUsed),
         THOUGHT_RECORDED => Ok(EventKind::ThoughtRecorded),
         TOOL_CALLED => Ok(EventKind::ToolCalled),
         TOOL_RESULTED => Ok(EventKind::ToolResulted),
@@ -135,13 +131,9 @@ impl From<&percept::Event> for Event {
                 })
                 .expect("MessageBody always serializes")
             }
-            // `body` was validated as JSON on the way in, either by
+            // `arguments` was validated as JSON on the way in, either by
             // `decode_payload` parsing it or by `load` deserializing the
             // wire event - either way, re-parsing it here cannot fail.
-            Payload::ToolUsed { body } => {
-                serde_json::from_str(body).expect("ToolUsed body is validated JSON")
-            }
-            // `arguments` was validated as JSON the same way `body` is.
             Payload::ToolCalled { tool, arguments } => serde_json::to_value(ToolCalledBody {
                 tool: tool.clone(),
                 arguments: serde_json::from_str(arguments)
@@ -228,12 +220,6 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 content: body.content,
             })
         }
-        // Opaque: the domain never reads a tool call, so `body` keeps
-        // the canonical serialization of whatever object the source
-        // sent, unparsed.
-        EventKind::ToolUsed => Ok(Payload::ToolUsed {
-            body: serde_json::to_string(&payload).expect("Value always serializes"),
-        }),
         EventKind::ThoughtRecorded => {
             let body: MessageBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
             Ok(Payload::ThoughtRecorded {
@@ -245,8 +231,8 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 serde_json::from_value(payload).map_err(Error::BadPayload)?;
             Ok(Payload::ToolCalled {
                 tool: body.tool,
-                // Kept as text, like `ToolUsed`'s body - the domain
-                // routes by `tool` and never parses `arguments`.
+                // Kept as text - the domain routes by `tool` and never
+                // parses `arguments`.
                 arguments: serde_json::to_string(&body.arguments).expect("Value always serializes"),
             })
         }
@@ -371,37 +357,6 @@ mod tests {
         match restored.payload() {
             Payload::MessageReceived { content } => assert_eq!(content, "hello world"),
             _ => panic!("expected MessageReceived"),
-        }
-    }
-
-    #[test]
-    fn tool_used_round_trips_through_json_as_a_nested_object() {
-        let original = percept::Event::restore(
-            EventId::new(),
-            Actor::Model,
-            "claude-code".to_string(),
-            None,
-            Timestamp::now(),
-            Payload::ToolUsed {
-                body: r#"{"tool_name":"Edit","tool_input":{"file_path":"/x/y.rs"}}"#.to_string(),
-            },
-        );
-
-        let wire = Event::from(&original);
-        // The wire payload is a real nested object, not an escaped
-        // string, so a caller can index into it with a JSON tool.
-        assert_eq!(wire.payload["tool_input"]["file_path"], "/x/y.rs");
-
-        let json = serde_json::to_string(&wire).unwrap();
-        let reparsed: Event = serde_json::from_str(&json).unwrap();
-        let restored = percept::Event::try_from(reparsed).unwrap();
-
-        match restored.payload() {
-            Payload::ToolUsed { body } => {
-                let value: Value = serde_json::from_str(body).unwrap();
-                assert_eq!(value["tool_input"]["file_path"], "/x/y.rs");
-            }
-            _ => panic!("expected ToolUsed"),
         }
     }
 
