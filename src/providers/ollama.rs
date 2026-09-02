@@ -153,8 +153,8 @@ fn handle_line(
 impl Model for Ollama {
     fn capabilities(&self) -> ModelCapabilities {
         ModelCapabilities {
-            input: vec![Modality::Text],
-            output: vec![Modality::Text],
+            input: &[Modality::Text],
+            output: &[Modality::Text],
             tool_use: false,
         }
     }

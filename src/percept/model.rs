@@ -42,11 +42,13 @@ pub enum Modality {
 }
 
 /// What a model accepts and produces. `input` and `output` list its
-/// modalities; `tool_use` says whether it can call tools.
+/// modalities; `tool_use` says whether it can call tools. A provider's
+/// capabilities are static, so the modality lists are `&'static`.
 #[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModelCapabilities {
-    pub input: Vec<Modality>,
-    pub output: Vec<Modality>,
+    pub input: &'static [Modality],
+    pub output: &'static [Modality],
     pub tool_use: bool,
 }
 
@@ -56,7 +58,6 @@ pub struct ModelCapabilities {
 /// stream's first `Err` item, the same as a failure mid-reply.
 pub trait Model: Send + Sync {
     /// What this model can accept, produce, and whether it calls tools.
-    /// No caller yet - it is the vocabulary the tool-use step builds on.
     #[allow(dead_code)]
     fn capabilities(&self) -> ModelCapabilities;
 

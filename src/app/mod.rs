@@ -181,8 +181,8 @@ mod tests {
     impl percept::Model for Silent {
         fn capabilities(&self) -> percept::ModelCapabilities {
             percept::ModelCapabilities {
-                input: vec![percept::Modality::Text],
-                output: vec![percept::Modality::Text],
+                input: &[percept::Modality::Text],
+                output: &[percept::Modality::Text],
                 tool_use: false,
             }
         }
