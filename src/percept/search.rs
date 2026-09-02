@@ -51,17 +51,55 @@ impl EventQuery {
     }
 }
 
+impl EventQuery {
+    /// Where in `event`'s `content` the text filter hits: the character
+    /// offset of the earliest occurrence of any term, by the same rule
+    /// `matches` applies. `None` when the filter is off, the event has
+    /// no `content`, or no term is in it - a `tool.called` event can
+    /// match on `tool` or `arguments` and still have no hit here.
+    pub fn hit(&self, event: &Event) -> Option<usize> {
+        let content = match event.payload() {
+            Payload::MessageReceived { content }
+            | Payload::ThoughtRecorded { content }
+            | Payload::ToolResulted { content } => content,
+            Payload::ToolCalled { .. } => return None,
+        };
+        self.text
+            .iter()
+            .filter_map(|term| find(content, term))
+            .min()
+    }
+}
+
 /// Whether one of `payload`'s strings carries `term` as a
 /// case-insensitive substring.
 fn carries(payload: &Payload, term: &str) -> bool {
-    let term = term.to_lowercase();
-    let has = |s: &str| s.to_lowercase().contains(&term);
+    let has = |s: &str| find(s, term).is_some();
     match payload {
         Payload::MessageReceived { content }
         | Payload::ThoughtRecorded { content }
         | Payload::ToolResulted { content } => has(content),
         Payload::ToolCalled { tool, arguments } => has(tool) || has(arguments),
     }
+}
+
+/// The character offset in `haystack` of the first case-insensitive
+/// occurrence of `term`. Offsets are counted on the original text, not
+/// the lowercased copy: lowercasing can turn one character into
+/// several, so each lowercased character remembers which original it
+/// came from.
+fn find(haystack: &str, term: &str) -> Option<usize> {
+    let term = term.to_lowercase();
+    let mut lower = String::with_capacity(haystack.len());
+    let mut origin = Vec::with_capacity(haystack.len());
+    for (i, c) in haystack.chars().enumerate() {
+        for l in c.to_lowercase() {
+            lower.push(l);
+            origin.push(i);
+        }
+    }
+    let at = lower.find(&term)?;
+    Some(origin[lower[..at].chars().count()])
 }
 
 /// Searches the committed log - domain-owned, the way `EventLog` is a
@@ -218,6 +256,52 @@ mod tests {
         .apply(events);
 
         assert_eq!(contents(&kept), vec!["Deploy the API"]);
+    }
+
+    #[test]
+    fn a_hit_is_the_earliest_offset_of_any_term_in_content() {
+        let event = message("Ship it, then DEPLOY it, then ship again");
+        let query = EventQuery {
+            text: vec!["deploy".to_string(), "then".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(query.hit(&event), Some(9));
+
+        let off = EventQuery::default();
+        assert_eq!(off.hit(&event), None);
+    }
+
+    #[test]
+    fn a_hit_counts_characters_of_the_original_text() {
+        // `İ` lowercases to two characters; an offset taken on the
+        // lowercased copy would land one past the term.
+        let event = message("İİ deploy");
+        let query = EventQuery {
+            text: vec!["deploy".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(query.hit(&event), Some(3));
+    }
+
+    #[test]
+    fn a_tool_call_matching_on_its_tool_name_has_no_hit() {
+        let call = Event::restore(
+            EventId::new(),
+            Actor::Model,
+            "tui".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::ToolCalled {
+                tool: "search_events".to_string(),
+                arguments: "{}".to_string(),
+            },
+        );
+        let query = EventQuery {
+            text: vec!["search".to_string()],
+            ..Default::default()
+        };
+        assert!(query.matches(&call));
+        assert_eq!(query.hit(&call), None);
     }
 
     #[test]

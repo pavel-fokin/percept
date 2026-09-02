@@ -192,7 +192,7 @@ pub fn search(args: SearchArgs, log: &dyn EventSearch) -> Result<(), Box<dyn std
         let line = if args.full {
             store::encode(event)
         } else {
-            store::summarize(event)
+            store::summarize(event, query.hit(event))
         };
         if let Err(e) = writeln!(out, "{line}") {
             return stop_if_pipe_closed(e);

@@ -114,20 +114,46 @@ struct Summary {
 /// output. A caller reaches for `encode` deliberately, per the purpose
 /// rule in AGENTS.md. `content` is the event's text - the one string
 /// that runs long - so a cut to it is reported under `preview`, where
-/// a cut inside `arguments` is not.
-pub fn summarize(event: &percept::Event) -> String {
+/// a cut inside `arguments` is not. `hit` is a character offset into
+/// `content` the cut keeps in view - a search term's position - so a
+/// line explains why it matched; without one the cut keeps the head.
+pub fn summarize(event: &percept::Event, hit: Option<usize>) -> String {
     let mut wire = Event::from(event);
-    let preview = wire.payload["content"]
+    let content: Option<Vec<char>> = wire.payload["content"]
         .as_str()
-        .map(|content| content.chars().count())
-        .filter(|&len| len > PREVIEW_CHARS)
-        .map(|len| Preview { len });
+        .map(|content| content.chars().collect());
     wire.payload = shorten(wire.payload);
+    let preview = content
+        .filter(|chars| chars.len() > PREVIEW_CHARS)
+        .map(|chars| {
+            wire.payload["content"] = Value::String(window(&chars, hit.unwrap_or(0)));
+            Preview { len: chars.len() }
+        });
     serde_json::to_string(&Summary {
         event: wire,
         preview,
     })
     .expect("store::Event always serializes")
+}
+
+/// `PREVIEW_CHARS` of `chars` with `around` near the middle, pulled back
+/// to the ends of the text rather than padded, and an ellipsis on each
+/// side that was cut. Only called when `chars` is longer than the
+/// window, so some side always is.
+fn window(chars: &[char], around: usize) -> String {
+    let start = around
+        .saturating_sub(PREVIEW_CHARS / 2)
+        .min(chars.len() - PREVIEW_CHARS);
+    let end = start + PREVIEW_CHARS;
+    let mut out = String::with_capacity(end - start + 2);
+    if start > 0 {
+        out.push('\u{2026}');
+    }
+    out.extend(&chars[start..end]);
+    if end < chars.len() {
+        out.push('\u{2026}');
+    }
+    out
 }
 
 /// One event as a ranged slice: the same shape `encode` writes, with
@@ -397,7 +423,7 @@ mod tests {
     #[test]
     fn a_summary_reports_the_length_of_a_cut_content_and_nothing_else() {
         let long = message(Actor::Model, "x".repeat(500));
-        let line: Value = serde_json::from_str(&summarize(&long)).unwrap();
+        let line: Value = serde_json::from_str(&summarize(&long, None)).unwrap();
         assert_eq!(line["preview"]["len"], 500);
         assert_eq!(
             line["payload"]["content"].as_str().unwrap().chars().count(),
@@ -405,8 +431,29 @@ mod tests {
         );
 
         let short = message(Actor::Model, "hi".to_string());
-        let line: Value = serde_json::from_str(&summarize(&short)).unwrap();
+        let line: Value = serde_json::from_str(&summarize(&short, None)).unwrap();
         assert!(line.get("preview").is_none());
+    }
+
+    #[test]
+    fn a_hit_deep_in_content_sits_inside_its_preview() {
+        let text = format!("{}deploy{}", "a".repeat(400), "b".repeat(400));
+        let event = message(Actor::Model, text);
+        let line: Value = serde_json::from_str(&summarize(&event, Some(400))).unwrap();
+        let cut = line["payload"]["content"].as_str().unwrap();
+        assert!(cut.contains("deploy"));
+        assert!(cut.starts_with('\u{2026}') && cut.ends_with('\u{2026}'));
+        assert_eq!(cut.chars().count(), PREVIEW_CHARS + 2);
+    }
+
+    #[test]
+    fn a_hit_near_the_end_pulls_the_window_back_rather_than_past_it() {
+        let text = format!("{}deploy", "a".repeat(400));
+        let event = message(Actor::Model, text);
+        let line: Value = serde_json::from_str(&summarize(&event, Some(400))).unwrap();
+        let cut = line["payload"]["content"].as_str().unwrap();
+        assert!(cut.starts_with('\u{2026}') && cut.ends_with("deploy"));
+        assert_eq!(cut.chars().count(), PREVIEW_CHARS + 1);
     }
 
     #[test]
@@ -422,7 +469,7 @@ mod tests {
                 arguments: format!(r#"{{"contains":["{}"]}}"#, "y".repeat(500)),
             },
         );
-        let line: Value = serde_json::from_str(&summarize(&call)).unwrap();
+        let line: Value = serde_json::from_str(&summarize(&call, None)).unwrap();
         assert!(line.get("preview").is_none());
         assert!(line["payload"]["arguments"]["contains"][0]
             .as_str()

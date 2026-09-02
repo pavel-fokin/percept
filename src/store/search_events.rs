@@ -103,7 +103,11 @@ impl Tool for SearchEvents {
         };
 
         let events = self.log.search(&query)?;
-        Ok(events.iter().map(summarize).collect::<Vec<_>>().join("\n"))
+        Ok(events
+            .iter()
+            .map(|event| summarize(event, query.hit(event)))
+            .collect::<Vec<_>>()
+            .join("\n"))
     }
 }
 
