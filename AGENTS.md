@@ -216,10 +216,16 @@ skips it.
   small fixes land there; larger rework goes back to the subagent.
   `/code-review` and `/simplify` then run once each over the whole
   branch, before the user merges. Two passes looking for different
-  things catch more than a pass per issue.
-- **Reflect.** Close the session by proposing changes to this workflow.
-  Cutting a step counts for more than adding one. Aim for the smallest
-  process that still catches mistakes.
+  things catch more than a pass per issue. A branch that adds no
+  branches, no I/O, and no behaviour change - a vocabulary or type
+  addition, a rename, a doc edit - skips both. The main agent does one
+  inline review pass instead. The skill passes are for diffs with
+  logic in them.
+- **Reflect.** Close the session by proposing changes to this workflow,
+  but only when a step strained or missed something. A session where
+  the process fit the work needs no reflection. Cutting a step counts
+  for more than adding one. Aim for the smallest process that still
+  catches mistakes.
 
 The TUI only runs on a real terminal. `scripts/drive.py` forks a pty,
 sends timed keystrokes, and prints the frames; `--plain` strips the
