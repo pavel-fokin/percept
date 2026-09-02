@@ -82,11 +82,9 @@ pub trait Model: Send + Sync {
 }
 
 /// Converts the transcript into the form Model expects. A recorded
-/// thought is left out - it is never replayed as dialogue. `ToolUsed`
-/// is left out too: it is opaque foreign activity with no call/result
-/// shape the model could act on. Everything else maps to a `Message`,
-/// percept's own tool activity included, so a later turn sees what
-/// earlier ones tried.
+/// thought is left out - it is never replayed as dialogue. Everything
+/// else maps to a `Message`, tool calls from another writer included,
+/// so a later turn sees what earlier ones tried.
 pub fn to_messages(events: &[Event]) -> Vec<Message> {
     events
         .iter()
@@ -103,7 +101,6 @@ pub fn to_messages(events: &[Event]) -> Vec<Message> {
                 content: content.clone(),
             }),
             Payload::ThoughtRecorded { .. } => None,
-            Payload::ToolUsed { .. } => None,
         })
         .collect()
 }
@@ -117,28 +114,6 @@ mod tests {
             Message::Text { content, .. } => content,
             _ => panic!("expected a Text message"),
         }
-    }
-
-    #[test]
-    fn a_tool_used_event_is_filtered_out_while_a_neighbouring_message_survives() {
-        let events = vec![
-            Event::message_received(Actor::User, "hi".to_string(), "tui".to_string(), None),
-            Event::new(
-                Actor::Model,
-                "claude-code".to_string(),
-                None,
-                Payload::ToolUsed {
-                    body: r#"{"tool_name":"Edit"}"#.to_string(),
-                },
-            ),
-            Event::message_received(Actor::Model, "done".to_string(), "tui".to_string(), None),
-        ];
-
-        let messages = to_messages(&events);
-
-        assert_eq!(messages.len(), 2);
-        assert_eq!(text(&messages[0]), "hi");
-        assert_eq!(text(&messages[1]), "done");
     }
 
     #[test]

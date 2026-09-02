@@ -18,23 +18,21 @@ pub enum Actor {
 /// reads them - `to_messages` needs `content`, so `MessageReceived` is
 /// typed; `App` assembles a thought from streamed text, so
 /// `ThoughtRecorded` is; `App` runs the loop that emits `ToolCalled`
-/// and feeds `ToolResulted` back, so both are. `ToolUsed` stays
-/// opaque: it arrives as JSON from another writer and nothing in the
-/// domain reads it, so `body` is that raw text, unparsed.
+/// and feeds `ToolResulted` back, so both are. A `ToolCalled` from
+/// another writer has no paired result in this log, but replays as
+/// context all the same.
 #[derive(Clone)]
 pub enum Payload {
     MessageReceived {
         content: String,
     },
-    ToolUsed {
-        body: String,
-    },
     ThoughtRecorded {
         content: String,
     },
-    /// A tool call percept's own loop made. `arguments` is JSON text
-    /// the domain routes by `tool` name but never parses - the tool
-    /// owns that shape. Its `ToolResulted` names this event as cause.
+    /// A tool call. `arguments` is JSON text the domain routes by
+    /// `tool` name but never parses - the tool owns that shape. From
+    /// percept's own loop, its `ToolResulted` names this event as
+    /// cause; from another writer, no result follows in this log.
     ToolCalled {
         tool: String,
         arguments: String,
@@ -53,7 +51,6 @@ pub enum Payload {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum EventKind {
     MessageReceived,
-    ToolUsed,
     ThoughtRecorded,
     ToolCalled,
     ToolResulted,
@@ -199,7 +196,6 @@ impl Event {
     pub fn kind(&self) -> EventKind {
         match self.payload {
             Payload::MessageReceived { .. } => EventKind::MessageReceived,
-            Payload::ToolUsed { .. } => EventKind::ToolUsed,
             Payload::ThoughtRecorded { .. } => EventKind::ThoughtRecorded,
             Payload::ToolCalled { .. } => EventKind::ToolCalled,
             Payload::ToolResulted { .. } => EventKind::ToolResulted,

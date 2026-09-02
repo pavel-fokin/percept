@@ -111,15 +111,13 @@ fn push_turn(lines: &mut Vec<Line<'static>>, turn: Vec<Line<'static>>) {
 fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
     match event.payload() {
         Payload::MessageReceived { content } => actor_lines(chat, event.actor(), content, width),
-        // percept's own tool loop shows dimmed, so the reader can see
-        // what the model looked up. A foreign `tool.used` has no shape
-        // to render, and a recorded thought was already shown while it
-        // streamed.
+        // Tool activity shows dimmed, so the reader can see what the
+        // model looked up. A recorded thought was already shown while
+        // it streamed.
         Payload::ToolCalled {
             tool, arguments, ..
         } => tool_lines(chat, &format!("{tool} {}", clip(arguments)), width),
         Payload::ToolResulted { content, .. } => tool_lines(chat, &clip(content), width),
-        Payload::ToolUsed { .. } => Vec::new(),
         Payload::ThoughtRecorded { .. } => Vec::new(),
     }
 }

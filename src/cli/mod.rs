@@ -325,7 +325,7 @@ mod tests {
         let args = SearchArgs {
             source: vec!["tui".to_string(), "cli".to_string()],
             actor: vec!["user".to_string()],
-            kind: vec!["tool.used".to_string()],
+            kind: vec!["tool.called".to_string()],
             size: Some(3),
             since: Some("1d".to_string()),
             ..Default::default()
@@ -335,7 +335,7 @@ mod tests {
 
         assert_eq!(query.sources, vec!["tui", "cli"]);
         assert!(query.actors == vec![percept::Actor::User]);
-        assert!(query.kinds == vec![percept::EventKind::ToolUsed]);
+        assert!(query.kinds == vec![percept::EventKind::ToolCalled]);
         assert_eq!(query.size, Some(3));
         assert!(query.since.is_some() && query.until.is_none());
     }

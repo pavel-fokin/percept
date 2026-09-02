@@ -100,15 +100,18 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   shell append is still unprotected - and it is unreliable on network
   filesystems.
 - 2026-08-31: `Event` gains `Payload::ToolUsed { body: String }` for a
-  tool call. A `Payload` variant is typed only when the domain reads
-  it: `to_messages` needs `content`, so `MessageReceived` stays typed;
-  nothing in the domain reads a tool call, so `body` is the raw JSON
-  text its source sent, unparsed. `to_messages` now filters to
-  `message.received` - a tool call is no longer fabricated into
-  dialogue. On the wire, `payload` is a real nested object rather than
-  an escaped string, so a caller can still index into it with `jq`. A
-  known type carried opaquely is not the same as accepting arbitrary
-  types - `store::decode` still rejects a `type` it doesn't know.
+  tool call from another writer. A `Payload` variant is typed only when
+  the domain reads it: `to_messages` needs `content`, so
+  `MessageReceived` stays typed; nothing in the domain reads a tool
+  call, so `body` is the raw JSON text its source sent, unparsed.
+  `to_messages` now filters to `message.received` - a tool call is no
+  longer fabricated into dialogue. On the wire, `payload` is a real
+  nested object rather than an escaped string, so a caller can still
+  index into it with `jq`. A known type carried opaquely is not the
+  same as accepting arbitrary types - `store::decode` still rejects a
+  `type` it doesn't know. Superseded 2026-09-02: `ToolUsed` folds into
+  `ToolCalled`, so a foreign tool call carries the same typed shape
+  percept's own loop emits.
 - 2026-09-01: searching the log is a capability of its own, separate
   from persisting it. `percept::EventQuery` names a query and
   `percept::EventSearch` answers one; `store::Jsonl` implements both
@@ -168,8 +171,7 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   while it streams and never again, so a reloaded transcript is
   dialogue only. This amends the typed-variant rule: a variant is typed
   when the domain produces or reads it. `App` assembles a thought from
-  streamed text, where `ToolUsed` only passes another writer's JSON
-  through.
+  streamed text.
 - 2026-09-01: a failed reply is shown, never logged. The provider's own
   words reach a transient `error` on the TUI's `Chat`, cleared at the
   next submit. Sending them as a chunk would commit them as something
@@ -218,6 +220,18 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   `⚒` gutter and keeps them on reload - this reverses "a reloaded
   transcript is dialogue only" for tool activity, though a recorded
   thought still never replays.
+- 2026-09-02: `Payload::ToolUsed` is removed. It predates `ToolCalled`
+  and carried a foreign writer's tool call as an opaque JSON blob - the
+  domain never read it, `to_messages` filtered it out, and the TUI hid
+  it. Now one variant, `ToolCalled`, serves both: percept's own loop
+  and another writer like claude-code. Foreign writers adopt percept's
+  typed `{tool, arguments}` shape rather than their own, because it is
+  percept's log. A foreign `ToolCalled` replays to the model as
+  `Message::ToolCall` even though no `ToolResulted` follows in this
+  log - it is context, better shown than hidden. Old `tool.used` lines
+  stop loading; the log is throwaway during development, so no alias
+  or migration. The typed-variant rule stands: a variant is typed when
+  the domain produces or reads it, and `ToolCalled` already was.
 
 ## Workflow
 
