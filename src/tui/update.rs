@@ -2,8 +2,10 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKi
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::StreamExt;
 
+use std::sync::Arc;
+
 use super::{Chat, StreamEvent};
-use crate::percept::{Chunk, ReplyStream};
+use crate::percept::{Chunk, ReplyStream, Tool};
 
 /// Handle one key press. Returns true if the app should quit. Errs if
 /// submit couldn't append its event to the log - see AppService::submit.
@@ -62,9 +64,10 @@ pub fn handle_mouse(chat: &mut Chat, mouse: MouseEvent) {
 }
 
 /// Applies one stream event. Whatever the model managed to say is real
-/// and commits; a failure is only shown. A tool call is not appended -
-/// `run_tool` records it, and `resume` starts the next stream of the
-/// same turn.
+/// and commits; a failure is only shown. A tool call is not appended:
+/// `begin_tool` records it, the tool runs off-thread, and its
+/// `ToolResult` drives `finish_tool` + `resume` for the next stream of
+/// the same turn.
 pub fn handle_stream(
     chat: &mut Chat,
     event: StreamEvent,
@@ -72,7 +75,22 @@ pub fn handle_stream(
 ) -> Result<(), Box<dyn std::error::Error>> {
     match event {
         StreamEvent::Chunk(Chunk::ToolCall { tool, arguments }) => {
-            chat.app.run_tool(tool, arguments)?;
+            // Backstop for a model that keeps calling past the cap -
+            // end the turn rather than loop forever.
+            if chat.app.tools_exhausted() {
+                chat.app.end_stream()?;
+                return Ok(());
+            }
+            let unknown = format!("no such tool: {tool}");
+            match chat.app.begin_tool(tool, arguments.clone())? {
+                Some(run) => spawn_tool(run, arguments, reply_tx.clone()),
+                None => {
+                    let _ = reply_tx.send(StreamEvent::ToolResult(unknown));
+                }
+            }
+        }
+        StreamEvent::ToolResult(output) => {
+            chat.app.finish_tool(output)?;
             let stream = chat.app.resume()?;
             spawn_drain(stream, reply_tx.clone());
         }
@@ -83,6 +101,20 @@ pub fn handle_stream(
         }
     }
     Ok(())
+}
+
+/// Runs one tool on the blocking pool, off the single-threaded runtime,
+/// so a full-log scan never freezes the UI. Its output comes back as a
+/// `ToolResult` event.
+fn spawn_tool(tool: Arc<dyn Tool>, arguments: String, reply_tx: UnboundedSender<StreamEvent>) {
+    tokio::spawn(async move {
+        let output = tokio::task::spawn_blocking(move || {
+            tool.run(&arguments).unwrap_or_else(|err| err.to_string())
+        })
+        .await
+        .unwrap_or_else(|_| "the tool panicked".to_string());
+        let _ = reply_tx.send(StreamEvent::ToolResult(output));
+    });
 }
 
 /// Drains one reply stream on its own task, forwarding each chunk over

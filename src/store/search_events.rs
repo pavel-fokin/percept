@@ -22,11 +22,16 @@ impl SearchEvents {
 
 const NAME: &str = "search_events";
 
+/// Cap on matches when the caller names no `size`, so an unfiltered
+/// search can't return - or replay next turn - the whole log.
+const DEFAULT_SIZE: usize = 20;
+
 const DESCRIPTION: &str = "Search the percept event log. Every field is \
     an optional filter; omit a field to leave it off. A multi-valued \
     filter matches any of its values. Timestamps are ISO-8601. Results \
     come back oldest first, one JSON object per line, with long strings \
-    cut short.";
+    cut short. Without `size` the newest 20 matches come back; raise it \
+    deliberately when you need more.";
 
 /// JSON Schema for `run`'s `arguments`. A string, not a `Value` - the
 /// domain's `ToolSpec` is serde-free, so the provider parses this.
@@ -90,7 +95,7 @@ impl Tool for SearchEvents {
             actors,
             sources: args.sources,
             kinds,
-            size: args.size,
+            size: Some(args.size.unwrap_or(DEFAULT_SIZE)),
         };
 
         let events = self.log.search(&query)?;
@@ -188,9 +193,15 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_object_is_a_query_with_no_filters() {
-        let out = tool().run("{}").unwrap();
+    fn an_empty_object_searches_with_only_the_default_size() {
+        let search = Arc::new(FakeSearch {
+            events: vec![message("tui", "a"), message("tui", "b")],
+            ..Default::default()
+        });
+        let out = SearchEvents::new(search.clone()).run("{}").unwrap();
+
         assert_eq!(out.lines().count(), 2);
+        assert_eq!(search.seen.lock().unwrap().size, Some(DEFAULT_SIZE));
     }
 
     #[test]

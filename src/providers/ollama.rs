@@ -211,6 +211,10 @@ fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
     if !raw.message.thinking.is_empty() {
         Ok(Line::Chunk(Chunk::Thought(raw.message.thinking)))
     } else if let Some(call) = raw.message.tool_calls.into_iter().next() {
+        // One call per line handled - the loop runs tools one at a
+        // time. A model that emits several in one message gets only
+        // the first run; the log records just that, so its replayed
+        // history stays consistent.
         Ok(Line::Chunk(Chunk::ToolCall {
             tool: call.function.name,
             arguments: call.function.arguments.to_string(),

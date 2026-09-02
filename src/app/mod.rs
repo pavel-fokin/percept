@@ -21,15 +21,23 @@ pub trait AppService {
     /// from inside the task draining the stream.
     fn append_chunk(&mut self, chunk: percept::Chunk);
 
-    /// Commits the model's tool call and the tool's output as two
-    /// events - `tool.called` by the model, `tool.resulted` by the
-    /// system - so `resume` can ask again with both in the history.
-    /// Whatever the model said before the call commits first.
-    fn run_tool(
+    /// Commits the model's `tool.called` (after whatever it said
+    /// first), then hands back the named tool to run off the main loop,
+    /// or `None` if there is no such tool. Pair every call with
+    /// `finish_tool`.
+    fn begin_tool(
         &mut self,
         tool: String,
         arguments: String,
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    ) -> Result<Option<Arc<dyn percept::Tool>>, Box<dyn std::error::Error>>;
+
+    /// Commits `tool.resulted` with the tool's output (or the error it
+    /// failed with), closing the call `begin_tool` opened.
+    fn finish_tool(&mut self, output: String) -> Result<(), Box<dyn std::error::Error>>;
+
+    /// Whether this turn has hit `MAX_TOOL_CALLS`. Past it the caller
+    /// ends the turn rather than run another tool.
+    fn tools_exhausted(&self) -> bool;
 
     /// Asks the model again, the tool result now in the history.
     /// Returns the next reply stream - still the same user turn.
@@ -62,6 +70,9 @@ pub trait AppService {
 struct Turn {
     anchor: EventId,
     tool_calls: usize,
+    /// The `tool.called` awaiting its result: `(call_id, event id)`,
+    /// set by `begin_tool` and taken by `finish_tool`.
+    open_call: Option<(String, EventId)>,
     thought: String,
     reply: String,
 }
@@ -182,6 +193,7 @@ impl AppService for App {
         self.pending = Some(Turn {
             anchor,
             tool_calls: 0,
+            open_call: None,
             thought: String::new(),
             reply: String::new(),
         });
@@ -196,17 +208,19 @@ impl AppService for App {
         match chunk {
             percept::Chunk::Thought(text) => turn.thought.push_str(&text),
             percept::Chunk::Reply(text) => turn.reply.push_str(&text),
-            // `handle_stream` routes a tool call to `run_tool`; it
+            // `handle_stream` routes a tool call to `begin_tool`; it
             // never reaches here.
             percept::Chunk::ToolCall { .. } => {}
         }
     }
 
-    fn run_tool(
+    fn begin_tool(
         &mut self,
         tool: String,
         arguments: String,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<Option<Arc<dyn percept::Tool>>, Box<dyn std::error::Error>> {
+        // Whatever the model said before the call is real and commits
+        // first, so the call's cause is the text that led to it.
         self.flush_pending()?;
 
         let call_id = EventId::new().as_uuid().to_string();
@@ -214,16 +228,24 @@ impl AppService for App {
         let called = Event::tool_called(
             call_id.clone(),
             tool.clone(),
-            arguments.clone(),
+            arguments,
             self.source.clone(),
             cause,
         );
         let called_id = called.id();
         self.commit(called)?;
+        if let Some(turn) = self.pending.as_mut() {
+            turn.open_call = Some((call_id, called_id));
+        }
 
-        let output = match self.tools.iter().find(|t| t.spec().name == tool) {
-            Some(t) => t.run(&arguments).unwrap_or_else(|err| err.to_string()),
-            None => format!("unknown tool: {tool}"),
+        Ok(self.tools.iter().find(|t| t.spec().name == tool).cloned())
+    }
+
+    fn finish_tool(&mut self, output: String) -> Result<(), Box<dyn std::error::Error>> {
+        let Some((call_id, called_id)) =
+            self.pending.as_mut().and_then(|turn| turn.open_call.take())
+        else {
+            return Ok(());
         };
         let resulted = Event::tool_resulted(call_id, output, self.source.clone(), Some(called_id));
         let resulted_id = resulted.id();
@@ -236,11 +258,13 @@ impl AppService for App {
         Ok(())
     }
 
+    fn tools_exhausted(&self) -> bool {
+        self.pending
+            .as_ref()
+            .is_some_and(|turn| turn.tool_calls >= MAX_TOOL_CALLS)
+    }
+
     fn resume(&mut self) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
-        if let Some(turn) = self.pending.as_mut() {
-            turn.thought.clear();
-            turn.reply.clear();
-        }
         Ok(self.chat.reply(&self.build_request()))
     }
 
@@ -596,6 +620,21 @@ mod tests {
         assert_eq!(app.events().len(), 1);
     }
 
+    /// What tui::handle_stream does for one tool call: begin, run the
+    /// tool off-thread (here inline), finish.
+    fn run_one_tool(app: &mut App, name: &str, arguments: &str) {
+        match app
+            .begin_tool(name.to_string(), arguments.to_string())
+            .unwrap()
+        {
+            Some(tool) => {
+                let output = tool.run(arguments).unwrap_or_else(|err| err.to_string());
+                app.finish_tool(output).unwrap();
+            }
+            None => app.finish_tool(format!("no such tool: {name}")).unwrap(),
+        }
+    }
+
     #[test]
     fn a_tool_call_commits_called_then_resulted_then_the_reply() {
         let mut app = App::new(
@@ -608,8 +647,7 @@ mod tests {
 
         // The sequence tui::handle_stream drives for one tool round.
         let _ = app.submit("what happened".to_string()).unwrap();
-        app.run_tool("search_events".to_string(), "{}".to_string())
-            .unwrap();
+        run_one_tool(&mut app, "search_events", "{}");
         let _ = app.resume().unwrap();
         app.append_chunk(Chunk::Reply("found it".to_string()));
         app.end_stream().unwrap();
@@ -643,16 +681,16 @@ mod tests {
         .unwrap();
 
         let _ = app.submit("go".to_string()).unwrap();
-        app.run_tool("nope".to_string(), "{}".to_string()).unwrap();
+        run_one_tool(&mut app, "nope", "{}");
 
         match app.events()[2].payload() {
-            Payload::ToolResulted { content, .. } => assert_eq!(content, "unknown tool: nope"),
+            Payload::ToolResulted { content, .. } => assert_eq!(content, "no such tool: nope"),
             _ => panic!("expected a tool.resulted event"),
         }
     }
 
     #[test]
-    fn the_tool_call_limit_stops_tools_being_sent() {
+    fn the_tool_call_limit_stops_tools_being_sent_and_then_exhausts() {
         let model = Arc::new(Scripted::new(vec![], true));
         let mut app = App::new(
             model.clone(),
@@ -663,11 +701,12 @@ mod tests {
         .unwrap();
 
         let _ = app.submit("go".to_string()).unwrap();
+        assert!(!app.tools_exhausted());
         for _ in 0..MAX_TOOL_CALLS {
-            app.run_tool("search_events".to_string(), "{}".to_string())
-                .unwrap();
+            run_one_tool(&mut app, "search_events", "{}");
             let _ = app.resume().unwrap();
         }
+        assert!(app.tools_exhausted());
 
         let counts = model.tool_counts.lock().unwrap();
         // submit + one resume per tool call.
