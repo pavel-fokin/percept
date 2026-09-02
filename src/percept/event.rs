@@ -8,10 +8,8 @@ pub type EventId = Id<Event>;
 pub enum Actor {
     User,
     Model,
-    // No producer yet - file and tool events come later. Part of the
-    // actor vocabulary per ADR; the lint is suppressed rather than the
-    // variant removed.
-    #[allow(dead_code)]
+    /// percept itself acting - so far, feeding a tool's output back as
+    /// `tool.resulted`.
     System,
 }
 
@@ -126,6 +124,42 @@ impl Event {
             source,
             causation_id,
             Payload::ThoughtRecorded { content },
+        )
+    }
+
+    /// A `tool.called` event - always the model's action.
+    pub fn tool_called(
+        call_id: String,
+        tool: String,
+        arguments: String,
+        source: String,
+        causation_id: Option<EventId>,
+    ) -> Self {
+        Self::new(
+            Actor::Model,
+            source,
+            causation_id,
+            Payload::ToolCalled {
+                call_id,
+                tool,
+                arguments,
+            },
+        )
+    }
+
+    /// A `tool.resulted` event - always percept feeding a tool's output
+    /// back, never the model.
+    pub fn tool_resulted(
+        call_id: String,
+        content: String,
+        source: String,
+        causation_id: Option<EventId>,
+    ) -> Self {
+        Self::new(
+            Actor::System,
+            source,
+            causation_id,
+            Payload::ToolResulted { call_id, content },
         )
     }
 

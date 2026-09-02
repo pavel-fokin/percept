@@ -1,8 +1,3 @@
-// Every item here is exercised by tests but has no non-test caller
-// until `App` gains a tool loop (a later issue). Suppressed as a set
-// rather than per item, since the whole module is that one seam.
-#![allow(dead_code)]
-
 use std::sync::Arc;
 
 use serde::Deserialize;

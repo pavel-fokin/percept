@@ -13,8 +13,6 @@ pub enum Chunk {
     Thought(String),
     Reply(String),
     /// The model asked to run `tool` with `arguments` (JSON text).
-    /// Read by the `App` loop in a later issue.
-    #[allow(dead_code)]
     ToolCall {
         tool: String,
         arguments: String,
@@ -68,7 +66,6 @@ pub enum Modality {
 /// What a model accepts and produces. `input` and `output` list its
 /// modalities; `tool_use` says whether it can call tools. A provider's
 /// capabilities are static, so the modality lists are `&'static`.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModelCapabilities {
     pub input: &'static [Modality],
@@ -90,8 +87,6 @@ pub struct ModelRequest {
 /// stream's first `Err` item, the same as a failure mid-reply.
 pub trait Model: Send + Sync {
     /// What this model can accept, produce, and whether it calls tools.
-    /// The `App` loop reads `tool_use` in a later issue.
-    #[allow(dead_code)]
     fn capabilities(&self) -> ModelCapabilities;
 
     fn reply(&self, request: &ModelRequest) -> ReplyStream;

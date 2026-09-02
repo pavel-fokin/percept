@@ -1,8 +1,3 @@
-// The port and its `ToolSpec` are read by the provider and the `App`
-// loop, both of which land in later issues. Suppressed as a set until
-// then.
-#![allow(dead_code)]
-
 /// A capability the model invokes by name during a turn. The domain
 /// owns the shape; the implementation lives in `store`, the way
 /// `EventLog` is a domain port that `store` implements.
