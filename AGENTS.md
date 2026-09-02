@@ -193,6 +193,25 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   main loop, and only while a turn streams - idle, nothing moves, so
   no frame is worth redrawing. The error moves out of the transcript
   into that row, where the rest of the not-logged text already lived.
+- 2026-09-02: the model can call one tool, `search_events`, and the
+  turn loops until it stops calling. `percept::Tool` is a domain port
+  with a `ToolSpec` (name, description, a JSON-Schema string - the
+  domain stays serde-free); `store::SearchEvents` implements it,
+  turning JSON arguments into an `EventQuery` and returning `summarize`
+  lines. It lives in `store`, not a `tools` module, because it needs
+  `store`'s wire helpers and a sibling infra module would be a
+  sideways dependency. A turn commits `tool.called` (actor `Model`)
+  then `tool.resulted` (actor `System` - its first producer), the
+  result caused by the call, the next model events caused by the
+  result; `Message` grew `Text`/`ToolCall`/`ToolResult` variants so
+  the pair replays. `App` runs the loop behind `run_tool` + `resume`,
+  capped at five calls a turn - past the cap the request goes out with
+  no tools. `Model::reply` now takes a `ModelRequest` (messages plus
+  tool specs), and `App` prepends a transient system message with the
+  current time so the model resolves relative dates itself. The TUI
+  shows both tool events dimmed under a `⚒` gutter and keeps them on
+  reload - this reverses "a reloaded transcript is dialogue only" for
+  tool activity, though a recorded thought still never replays.
 
 ## Workflow
 

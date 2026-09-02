@@ -14,6 +14,10 @@ const GUTTER: &str = "  ";
 /// Braille frames, advanced by `Chat::tick` while a turn streams.
 const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
+/// Longest tool argument or result shown in the transcript. Tool
+/// activity is context, not dialogue - a peek is enough.
+const TOOL_PREVIEW: usize = 200;
+
 /// Rows the status may take. A wrapped error grows it; the cap keeps a
 /// long one from squeezing the transcript off the screen.
 const STATUS_MAX: usize = 4;
@@ -107,13 +111,32 @@ fn push_turn(lines: &mut Vec<Line<'static>>, turn: Vec<Line<'static>>) {
 fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
     match event.payload() {
         Payload::MessageReceived { content } => actor_lines(chat, event.actor(), content, width),
-        // Not dialogue - tui renders the transcript, not tool activity
-        // or a thought already shown while it streamed.
+        // percept's own tool loop shows dimmed, so the reader can see
+        // what the model looked up. A foreign `tool.used` has no shape
+        // to render, and a recorded thought was already shown while it
+        // streamed.
+        Payload::ToolCalled {
+            tool, arguments, ..
+        } => tool_lines(chat, &format!("{tool} {}", clip(arguments)), width),
+        Payload::ToolResulted { content, .. } => tool_lines(chat, &clip(content), width),
         Payload::ToolUsed { .. } => Vec::new(),
         Payload::ThoughtRecorded { .. } => Vec::new(),
-        // Rendered in the transcript once tui grows tool markers (a
-        // later issue); hidden until then.
-        Payload::ToolCalled { .. } | Payload::ToolResulted { .. } => Vec::new(),
+    }
+}
+
+/// A tool call or its result: a `⚒` gutter and dimmed body, so it
+/// reads as context beside the dialogue.
+fn tool_lines(chat: &Chat, body: &str, width: usize) -> Vec<Line<'static>> {
+    turn_lines("⚒", chat.hint_style, chat.thought_style, body, width)
+}
+
+/// One preview string: whitespace flattened so a multi-line result
+/// stays compact, then cut to `TOOL_PREVIEW` characters on a boundary.
+fn clip(text: &str) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    match flat.char_indices().nth(TOOL_PREVIEW) {
+        Some((idx, _)) => format!("{}…", &flat[..idx]),
+        None => flat,
     }
 }
 
