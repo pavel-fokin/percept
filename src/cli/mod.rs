@@ -116,6 +116,10 @@ pub struct SearchArgs {
     /// oldest first.
     #[arg(long)]
     size: Option<usize>,
+    /// How many characters of `content` a line keeps, cut around the
+    /// first `--contains` hit when there is one.
+    #[arg(long, default_value_t = store::PREVIEW_CHARS, value_parser = at_least_one)]
+    preview: usize,
     /// Print the whole wire event per line instead of the constant-size
     /// default.
     #[arg(long)]
@@ -159,6 +163,15 @@ fn parse_range(s: &str) -> Result<(usize, Option<usize>), String> {
     Ok((start, end))
 }
 
+/// A window of zero characters shows nothing and reads as a mistake.
+fn at_least_one(s: &str) -> Result<usize, String> {
+    match s.parse::<usize>() {
+        Ok(0) => Err("must be at least 1".to_string()),
+        Ok(n) => Ok(n),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 /// Rejects a blank value at parse time. A source that names nobody, a
 /// search term contained by everything, a prompt that asks nothing -
 /// each looks deliberate to a reader while meaning nothing.
@@ -192,7 +205,7 @@ pub fn search(args: SearchArgs, log: &dyn EventSearch) -> Result<(), Box<dyn std
         let line = if args.full {
             store::encode(event)
         } else {
-            store::summarize(event, query.hit(event))
+            store::summarize(event, query.hit(event), args.preview)
         };
         if let Err(e) = writeln!(out, "{line}") {
             return stop_if_pipe_closed(e);
@@ -497,6 +510,14 @@ mod tests {
 
         let blank = Cli::try_parse_from(["percept", "events", "search", "--contains", " "]);
         assert!(blank.is_err());
+    }
+
+    #[test]
+    fn a_zero_preview_is_rejected_at_parse() {
+        let zero = Cli::try_parse_from(["percept", "events", "search", "--preview", "0"]);
+        assert!(zero.is_err());
+        let ok = Cli::try_parse_from(["percept", "events", "search", "--preview", "300"]);
+        assert!(ok.is_ok());
     }
 
     #[test]

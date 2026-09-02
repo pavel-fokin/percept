@@ -12,6 +12,7 @@ mod search_events;
 pub use error::Error;
 pub use event::{
     decode, encode, excerpt, parse_actor, parse_event_id, parse_kind, summarize, Event,
+    PREVIEW_CHARS,
 };
 pub use jsonl::Jsonl;
 pub use read_event::ReadEvent;

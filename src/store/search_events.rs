@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::percept::{EventQuery, EventSearch, Tool, ToolSpec};
 use crate::shared::Timestamp;
-use crate::store::{parse_actor, parse_kind, summarize};
+use crate::store::{parse_actor, parse_kind, summarize, PREVIEW_CHARS};
 
 /// The `search_events` tool: turns the model's JSON arguments into an
 /// `EventQuery`, runs it, and returns each match as one summarized
@@ -44,7 +44,8 @@ const PARAMETERS: &str = r#"{
     "sources": {"type": "array", "items": {"type": "string"}, "description": "the writer that produced the event, e.g. tui or claude-code"},
     "kinds": {"type": "array", "items": {"type": "string", "enum": ["message.received", "thought.recorded", "tool.called", "tool.resulted"]}},
     "contains": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "a substring, case-insensitive, that one of the event's payload strings must carry; any of the values matches"},
-    "size": {"type": "integer", "description": "keep only the N most recent matches"}
+    "size": {"type": "integer", "description": "keep only the N most recent matches"},
+    "preview": {"type": "integer", "minimum": 1, "description": "how many characters of content each line keeps, cut around the first `contains` hit when there is one; default 120"}
   },
   "additionalProperties": false
 }"#;
@@ -59,6 +60,7 @@ struct Args {
     kinds: Vec<String>,
     contains: Vec<String>,
     size: Option<usize>,
+    preview: Option<usize>,
 }
 
 impl Tool for SearchEvents {
@@ -91,6 +93,10 @@ impl Tool for SearchEvents {
         if let Some(term) = args.contains.iter().find(|t| t.trim().is_empty()) {
             return Err(format!("contains term {term:?} must not be blank").into());
         }
+        let preview = args.preview.unwrap_or(PREVIEW_CHARS);
+        if preview == 0 {
+            return Err("preview must be at least 1".into());
+        }
 
         let query = EventQuery {
             since,
@@ -105,7 +111,7 @@ impl Tool for SearchEvents {
         let events = self.log.search(&query)?;
         Ok(events
             .iter()
-            .map(|event| summarize(event, query.hit(event)))
+            .map(|event| summarize(event, query.hit(event), preview))
             .collect::<Vec<_>>()
             .join("\n"))
     }
@@ -229,6 +235,14 @@ mod tests {
     #[test]
     fn a_non_iso_timestamp_is_an_error() {
         assert!(tool().run(r#"{"since":"yesterday"}"#).is_err());
+    }
+
+    #[test]
+    fn preview_sizes_the_content_window_and_zero_is_an_error() {
+        let out = tool().run(r#"{"preview":5}"#).unwrap();
+        let line: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+        assert!(line["payload"]["content"].as_str().unwrap().chars().count() <= 6);
+        assert!(tool().run(r#"{"preview":0}"#).is_err());
     }
 
     #[test]
