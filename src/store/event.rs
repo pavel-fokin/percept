@@ -90,6 +90,10 @@ pub fn encode(event: &percept::Event) -> String {
 /// window when a caller names no other.
 pub const PREVIEW_CHARS: usize = 120;
 
+/// The payload key `Payload::content` travels under - one name for the
+/// sites that cut or slice it on the wire.
+const CONTENT: &str = "content";
+
 /// What a summary line says about the `content` it cut, so a caller
 /// can tell whether a second look is worth a call, and where to take it. Lives beside the
 /// payload, not in it: the payload stays exactly what the log stores,
@@ -132,22 +136,22 @@ pub fn summarize(event: &percept::Event, hit: Option<Range<usize>>, preview: usi
     // `content` leaves the payload before `shorten` runs over the rest,
     // so it is cut once, here, at the caller's size.
     if let Some(fields) = wire.payload.as_object_mut() {
-        fields.remove("content");
+        fields.remove(CONTENT);
     }
     wire.payload = shorten(wire.payload);
     let preview = event.payload().content().and_then(|text| {
-        let chars: Vec<char> = text.chars().collect();
-        let (shown, preview) = if chars.len() > preview {
+        let len = text.chars().count();
+        let (shown, preview) = if len > preview {
             let cut = Preview {
-                len: chars.len(),
+                len,
                 hit: hit.as_ref().map(|hit| hit.start),
             };
-            let shown = window(&chars, hit.unwrap_or(0..0), preview);
-            (shown, Some(cut))
+            let chars: Vec<char> = text.chars().collect();
+            (window(&chars, hit.unwrap_or(0..0), preview), Some(cut))
         } else {
             (text.to_string(), None)
         };
-        wire.payload["content"] = Value::String(shown);
+        wire.payload[CONTENT] = Value::String(shown);
         preview
     });
     serde_json::to_string(&Summary {
@@ -208,7 +212,7 @@ pub fn excerpt(
         return Err(Error::InvertedRange { start, end });
     }
 
-    wire.payload["content"] = Value::String(chars[start..end].iter().collect());
+    wire.payload[CONTENT] = Value::String(chars[start..end].iter().collect());
 
     Ok(serde_json::to_string(&Summary {
         event: wire,
@@ -224,12 +228,11 @@ pub fn excerpt(
 fn shorten(payload: Value) -> Value {
     match payload {
         Value::String(s) => {
-            let mut chars = s.chars();
-            let kept: String = chars.by_ref().take(PREVIEW_CHARS).collect();
-            Value::String(if chars.next().is_some() {
-                format!("{kept}\u{2026}")
+            let chars: Vec<char> = s.chars().collect();
+            Value::String(if chars.len() > PREVIEW_CHARS {
+                window(&chars, 0..0, PREVIEW_CHARS)
             } else {
-                kept
+                s
             })
         }
         Value::Array(items) => Value::Array(items.into_iter().map(shorten).collect()),
@@ -604,14 +607,7 @@ mod tests {
     }
 
     fn message(actor: Actor, content: String) -> percept::Event {
-        percept::Event::restore(
-            EventId::new(),
-            actor,
-            "tui".to_string(),
-            None,
-            Timestamp::now(),
-            Payload::MessageReceived { content },
-        )
+        percept::Event::message_received(actor, content, "tui".to_string(), None)
     }
 
     #[test]

@@ -280,7 +280,7 @@ fn parse_query(args: &SearchArgs) -> Result<EventQuery, String> {
 /// means "your id was wrong". With `--range`, prints `payload.content`
 /// sliced to it instead of the whole event.
 pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
-    let (start, end) = args.range.unwrap_or((None, None));
+    let (start, end) = args.range.unwrap_or_default();
     println!("{}", store::read(log, &args.id, start, end)?);
     Ok(())
 }

@@ -1,3 +1,4 @@
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -62,7 +63,9 @@ struct Args {
     kinds: Vec<String>,
     contains: Vec<String>,
     size: Option<usize>,
-    preview: Option<usize>,
+    /// Non-zero by type, so serde refuses `0` where the schema says
+    /// `minimum: 1`.
+    preview: Option<NonZeroUsize>,
 }
 
 impl Tool for SearchEvents {
@@ -95,10 +98,7 @@ impl Tool for SearchEvents {
         if let Some(term) = args.contains.iter().find(|t| t.trim().is_empty()) {
             return Err(format!("contains term {term:?} must not be blank").into());
         }
-        let preview = args.preview.unwrap_or(PREVIEW_CHARS);
-        if preview == 0 {
-            return Err("preview must be at least 1".into());
-        }
+        let preview = args.preview.map_or(PREVIEW_CHARS, NonZeroUsize::get);
 
         let query = EventQuery {
             since,

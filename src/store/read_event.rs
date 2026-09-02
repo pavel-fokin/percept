@@ -63,11 +63,12 @@ const PARAMETERS: &str = r#"{
 }"#;
 
 /// Unknown keys are refused rather than ignored: a misspelt bound would
-/// otherwise return the whole event, the very cost a range avoids.
-#[derive(Deserialize, Default)]
-#[serde(default, deny_unknown_fields)]
+/// otherwise return the whole event, the very cost a range avoids. A
+/// missing `id` is serde's own error, since only the bounds are optional.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Args {
-    id: Option<String>,
+    id: String,
     start: Option<usize>,
     end: Option<usize>,
 }
@@ -83,9 +84,7 @@ impl Tool for ReadEvent {
 
     fn run(&self, arguments: &str) -> Result<String, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
-        // The schema says `id` is required, but serde won't enforce it.
-        let id = args.id.ok_or("read_event requires id")?;
-        read(self.log.as_ref(), &id, args.start, args.end)
+        read(self.log.as_ref(), &args.id, args.start, args.end)
     }
 }
 
@@ -97,16 +96,7 @@ mod tests {
     use crate::testing::FakeLog;
 
     fn message(content: &str) -> Event {
-        Event::restore(
-            EventId::new(),
-            Actor::User,
-            "tui".to_string(),
-            None,
-            Timestamp::now(),
-            Payload::MessageReceived {
-                content: content.to_string(),
-            },
-        )
+        Event::message_received(Actor::User, content.to_string(), "tui".to_string(), None)
     }
 
     #[test]

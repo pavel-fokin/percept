@@ -60,6 +60,9 @@ impl EventQuery {
     /// no `content`, or no term is in it - a `tool.called` event can
     /// match on `tool` or `arguments` and still have no hit here.
     pub fn hit(&self, event: &Event) -> Option<Range<usize>> {
+        if self.text.is_empty() {
+            return None;
+        }
         let content = event.payload().content()?;
         // Lowercasing can turn one character into several, so each
         // lowercased character remembers which original it came from
