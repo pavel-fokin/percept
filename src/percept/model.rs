@@ -85,6 +85,11 @@ pub trait Model: Send + Sync {
 /// thought is left out - it is never replayed as dialogue. Everything
 /// else maps to a `Message`, tool calls from another writer included,
 /// so a later turn sees what earlier ones tried.
+///
+/// Any slice replays, including one cut mid-tool-round: a leading tool
+/// result, whose call the cut left behind, is dropped. A conversation
+/// opening on a result nothing asked for is not one a provider accepts.
+/// A caller passing a whole log drops nothing.
 pub fn to_messages(events: &[Event]) -> Vec<Message> {
     events
         .iter()
@@ -102,6 +107,7 @@ pub fn to_messages(events: &[Event]) -> Vec<Message> {
             }),
             Payload::ThoughtRecorded { .. } => None,
         })
+        .skip_while(|message| matches!(message, Message::ToolResult { .. }))
         .collect()
 }
 
@@ -174,5 +180,30 @@ mod tests {
             Message::ToolResult { content } => assert_eq!(content, "3 events"),
             _ => panic!("expected a ToolResult message"),
         }
+    }
+
+    #[test]
+    fn a_slice_opening_on_a_tool_result_drops_it() {
+        let events = vec![
+            Event::new(
+                Actor::System,
+                "tui".to_string(),
+                None,
+                Payload::ToolResulted {
+                    content: "3 events".to_string(),
+                },
+            ),
+            Event::message_received(
+                Actor::Model,
+                "found it".to_string(),
+                "tui".to_string(),
+                None,
+            ),
+        ];
+
+        let messages = to_messages(&events);
+
+        assert_eq!(messages.len(), 1);
+        assert_eq!(text(&messages[0]), "found it");
     }
 }

@@ -1,8 +1,11 @@
 //! The command-line surface: `percept events publish` appends one event
-//! without opening the TUI, `percept events search` queries the log, and
-//! `percept events show` dereferences one event by id. A
-//! presentation-layer peer of `tui` - it forwards parsed input to
-//! `store` and has no chat logic of its own.
+//! without opening the TUI, `percept events search` queries the log,
+//! `percept events show` dereferences one event by id, and `percept ask`
+//! runs one full turn - including the tool loop - and prints the reply.
+//! A presentation-layer peer of `tui` - it forwards parsed input to
+//! `store` and `app`, and has no chat logic of its own: `ask` drives the
+//! same `AppService` turn policy `tui` does, just inline instead of over
+//! a channel.
 //!
 //! `search` and `show` are the query primitive a model composes with:
 //! every line is JSONL, for a caller piping into `jq`, never a table or
@@ -13,8 +16,10 @@
 use std::io::{self, Write};
 
 use clap::{Args, Parser, Subcommand};
+use tokio_stream::StreamExt;
 
-use crate::percept::{EventId, EventLog, EventQuery, EventSearch};
+use crate::app::{run_tool, AppService, ToolStep};
+use crate::percept::{Chunk, EventId, EventLog, EventQuery, EventSearch};
 use crate::shared::Timestamp;
 use crate::store;
 
@@ -32,6 +37,8 @@ pub enum Command {
         #[command(subcommand)]
         command: EventsCommand,
     },
+    /// Run one turn headlessly and print the reply.
+    Ask(AskArgs),
 }
 
 #[derive(Subcommand)]
@@ -94,8 +101,16 @@ pub struct ShowArgs {
     id: String,
 }
 
-/// Every event must name a writer. An empty string looks deliberate to
-/// a reader while naming nobody, so it is rejected at parse time.
+#[derive(Args)]
+pub struct AskArgs {
+    /// The prompt to send.
+    #[arg(value_parser = non_blank)]
+    prompt: String,
+}
+
+/// Rejects a blank value at parse time. A source that names nobody, a
+/// search term contained by everything, a prompt that asks nothing -
+/// each looks deliberate to a reader while meaning nothing.
 fn non_blank(s: &str) -> Result<String, String> {
     if s.trim().is_empty() {
         return Err("must not be blank".to_string());
@@ -208,6 +223,76 @@ pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error
     Ok(())
 }
 
+/// Runs one turn on `app` - submitting `prompt`, then draining the reply
+/// stream chunk by chunk - and prints the reply to stdout. No channel,
+/// no spawned task: unlike the TUI, nothing else needs the thread while
+/// headless, so a tool runs inline and the turn is one plain `await`
+/// loop. Each tool call and its result print to stderr as they happen,
+/// so stdout stays pipeable. That trace is for watching a run live; the
+/// log is what a run is read back from.
+pub async fn ask(
+    args: AskArgs,
+    mut app: Box<dyn AppService>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut stream = app.submit(args.prompt)?;
+    // What stdout gets. `App` clears its own reply buffer at each tool
+    // call and again when the cap ends a turn, so a turn that spoke
+    // before calling a tool would otherwise print only its last leg.
+    let mut reply = String::new();
+
+    loop {
+        match stream.next().await {
+            // Each arm echoes for itself: `App` decides what a call
+            // means, and a call it refused never happened.
+            Some(Ok(Chunk::ToolCall { tool, arguments })) => {
+                stream = match app.begin_tool(&tool, arguments.clone())? {
+                    ToolStep::Run(run, arguments) => {
+                        eprintln!("⚒ {tool}({arguments})");
+                        let output = run_tool(&*run, &arguments);
+                        eprintln!("⚒ {output}");
+                        app.finish_tool(output)?
+                    }
+                    ToolStep::Continue(stream) => {
+                        eprintln!("⚒ {tool}({arguments}) - no such tool");
+                        stream
+                    }
+                    ToolStep::Stop => break,
+                };
+            }
+            Some(Ok(chunk)) => {
+                if let Chunk::Reply(text) = &chunk {
+                    reply.push_str(text);
+                }
+                app.append_chunk(chunk);
+            }
+            // A failed reply is shown, never logged - the stream's own
+            // words are this run's error. Whatever text arrived before
+            // it still commits, and still prints: the words reached the
+            // log, so stdout is not the surface that should lose them.
+            Some(Err(err)) => {
+                app.end_stream()?;
+                print_reply(&reply)?;
+                return Err(err.to_string().into());
+            }
+            None => break,
+        }
+    }
+
+    app.end_stream()?;
+    print_reply(&reply)
+}
+
+/// Writes the reply to stdout, saying nothing when the turn produced no
+/// text. A reader that stops early is the caller's choice, not a
+/// failure - the same courtesy `search` extends.
+fn print_reply(reply: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if reply.is_empty() {
+        return Ok(());
+    }
+    let mut out = io::stdout().lock();
+    writeln!(out, "{reply}").or_else(stop_if_pipe_closed)
+}
+
 /// Parses a `--since`/`--until` value: an ISO-8601 timestamp, or a
 /// relative shorthand - `<N>d`, `<N>h`, `<N>m` - measured back from now.
 /// `flag` names the flag the value came from, so a rejected value's
@@ -237,27 +322,10 @@ fn relative_minutes(s: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percept::{self, Event};
-    use std::sync::Mutex;
-
-    #[derive(Default)]
-    struct FakeLog(Mutex<Vec<Event>>);
-
-    impl EventLog for FakeLog {
-        fn append(&self, event: &Event) -> Result<(), Box<dyn std::error::Error>> {
-            self.0.lock().unwrap().push(event.clone());
-            Ok(())
-        }
-
-        fn load(&self) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
-            Ok(self.0.lock().unwrap().clone())
-        }
-
-        fn get(&self, id: EventId) -> Result<Option<Event>, Box<dyn std::error::Error>> {
-            let events = self.0.lock().unwrap();
-            Ok(events.iter().find(|event| event.id() == id).cloned())
-        }
-    }
+    use crate::app::App;
+    use crate::percept::{self, Payload};
+    use crate::testing::{content, FakeLog, FakeTool, Scripted};
+    use std::sync::Arc;
 
     fn args(actor: &str, payload: &str) -> PublishArgs {
         PublishArgs {
@@ -373,5 +441,64 @@ mod tests {
 
         let blank = Cli::try_parse_from(["percept", "events", "search", "--contains", " "]);
         assert!(blank.is_err());
+    }
+
+    fn ask_args(prompt: &str) -> AskArgs {
+        AskArgs {
+            prompt: prompt.to_string(),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
+        let model = Scripted::new(
+            vec![
+                vec![percept::Chunk::ToolCall {
+                    tool: "search_events".to_string(),
+                    arguments: "{}".to_string(),
+                }],
+                vec![percept::Chunk::Reply("found it".to_string())],
+            ],
+            true,
+        );
+        let log = Arc::new(FakeLog::default());
+        let tools: Vec<Arc<dyn percept::Tool>> = vec![Arc::new(FakeTool)];
+        let app = App::new(Arc::new(model), log.clone(), tools, "cli".to_string()).unwrap();
+
+        ask(ask_args("what happened"), Box::new(app)).await.unwrap();
+
+        let events = log.load().unwrap();
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0].source(), "cli");
+        assert!(matches!(
+            events[1].payload(),
+            Payload::ToolCalled { tool, .. } if tool == "search_events"
+        ));
+        assert!(matches!(
+            events[2].payload(),
+            Payload::ToolResulted { content } if content == "ran"
+        ));
+        assert_eq!(content(&events[3]), "found it");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_stream_error_ends_the_turn_but_still_commits_partial_text() {
+        let log = Arc::new(FakeLog::default());
+        // A reply that breaks mid-stream, after saying something.
+        let model = Scripted::failing(
+            vec![vec![
+                Ok(percept::Chunk::Reply("partial".to_string())),
+                Err("connection dropped".into()),
+            ]],
+            false,
+        );
+        let app = App::new(Arc::new(model), log.clone(), Vec::new(), "cli".to_string()).unwrap();
+
+        let result = ask(ask_args("hi"), Box::new(app)).await;
+
+        assert!(result.is_err());
+        let events = log.load().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(content(&events[1]), "partial");
     }
 }

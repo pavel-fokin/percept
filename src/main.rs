@@ -13,6 +13,8 @@ mod percept;
 mod providers;
 mod shared;
 mod store;
+#[cfg(test)]
+mod testing;
 mod tui;
 
 use app::App;
@@ -97,11 +99,17 @@ async fn run(
     }
 }
 
-async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
+/// Both the TUI and `ask` build the same `App` this way, differing only
+/// in the `source` they stamp and in how they drive its reply stream.
+fn build_app(source: &str) -> Result<App, Box<dyn std::error::Error>> {
     let log = Arc::new(Jsonl::open(LOG_PATH)?);
     let model = Ollama::new(OLLAMA_URL.to_string(), OLLAMA_MODEL.to_string());
     let tools: Vec<Arc<dyn percept::Tool>> = vec![Arc::new(SearchEvents::new(log.clone()))];
-    let app = App::new(Arc::new(model), log, tools, "tui".to_string())?;
+    App::new(Arc::new(model), log, tools, source.to_string())
+}
+
+async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
+    let app = build_app("tui")?;
 
     let mut terminal = ratatui::init();
     let mouse = match MouseCapture::enable() {
@@ -130,6 +138,10 @@ async fn main() {
                 EventsCommand::Search(args) => cli::search(args, &log),
                 EventsCommand::Show(args) => cli::show(args, &log),
             }),
+        Some(Command::Ask(args)) => match build_app("cli") {
+            Ok(app) => cli::ask(args, Box::new(app)).await,
+            Err(err) => Err(err),
+        },
         None => try_main().await,
     };
 

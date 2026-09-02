@@ -5,7 +5,7 @@ use tokio_stream::StreamExt;
 use std::sync::Arc;
 
 use super::{Chat, StreamEvent};
-use crate::app::ToolStep;
+use crate::app::{run_tool, ToolStep};
 use crate::percept::{Chunk, ReplyStream, Tool};
 
 /// Handle one key press. Returns true if the app should quit. Errs if
@@ -100,11 +100,9 @@ pub fn handle_stream(
 /// `ToolResult` event.
 fn spawn_tool(tool: Arc<dyn Tool>, arguments: String, reply_tx: UnboundedSender<StreamEvent>) {
     tokio::spawn(async move {
-        let output = tokio::task::spawn_blocking(move || {
-            tool.run(&arguments).unwrap_or_else(|err| err.to_string())
-        })
-        .await
-        .unwrap_or_else(|_| "the tool panicked".to_string());
+        let output = tokio::task::spawn_blocking(move || run_tool(&*tool, &arguments))
+            .await
+            .unwrap_or_else(|_| "the tool panicked".to_string());
         let _ = reply_tx.send(StreamEvent::ToolResult(output));
     });
 }
