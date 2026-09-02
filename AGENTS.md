@@ -232,6 +232,21 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   stop loading; the log is throwaway during development, so no alias
   or migration. The typed-variant rule stands: a variant is typed when
   the domain produces or reads it, and `ToolCalled` already was.
+- 2026-09-02: `EventQuery` gains a text filter, closing the gap the
+  2026-09-01 search ADR left open. A term matches when one of the
+  event's payload strings - `content`, `tool`, `arguments` - carries it
+  as a case-insensitive substring; several terms match any-of, the
+  grammar every other multi-valued filter uses. The envelope is not
+  searched: `actor` and `source` already have filters, and matching
+  them under a second one would blur which filter owns what. A blank
+  term is contained by everything, so each boundary that can receive
+  one - the CLI flag, the tool's arguments - rejects it before a query
+  is built. The CLI flag is `--contains`, naming the relation where the
+  other flags name fields, because no field called `text` exists to
+  name; the domain field is `text`, and `search_events` exposes the same
+  filter as `contains` - the model's only lever for finding an event by
+  what it says, where a shell user has `grep`. Still no index: a
+  substring scan over a log `search` already loads whole.
 
 ## Workflow
 
