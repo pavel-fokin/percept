@@ -5,6 +5,7 @@ use tokio_stream::StreamExt;
 use std::sync::Arc;
 
 use super::{Chat, StreamEvent};
+use crate::app::ToolStep;
 use crate::percept::{Chunk, ReplyStream, Tool};
 
 /// Handle one key press. Returns true if the app should quit. Errs if
@@ -65,9 +66,9 @@ pub fn handle_mouse(chat: &mut Chat, mouse: MouseEvent) {
 
 /// Applies one stream event. Whatever the model managed to say is real
 /// and commits; a failure is only shown. A tool call is not appended:
-/// `begin_tool` records it, the tool runs off-thread, and its
-/// `ToolResult` drives `finish_tool` + `resume` for the next stream of
-/// the same turn.
+/// `App` decides what the call means, and this only carries the
+/// decision out - run the tool off-thread, drain the next stream, or
+/// stop.
 pub fn handle_stream(
     chat: &mut Chat,
     event: StreamEvent,
@@ -75,23 +76,14 @@ pub fn handle_stream(
 ) -> Result<(), Box<dyn std::error::Error>> {
     match event {
         StreamEvent::Chunk(Chunk::ToolCall { tool, arguments }) => {
-            // Backstop for a model that keeps calling past the cap -
-            // end the turn rather than loop forever.
-            if chat.app.tools_exhausted() {
-                chat.app.end_stream()?;
-                return Ok(());
-            }
-            let unknown = format!("no such tool: {tool}");
-            match chat.app.begin_tool(tool, arguments.clone())? {
-                Some(run) => spawn_tool(run, arguments, reply_tx.clone()),
-                None => {
-                    let _ = reply_tx.send(StreamEvent::ToolResult(unknown));
-                }
+            match chat.app.begin_tool(&tool, arguments)? {
+                ToolStep::Run(run, arguments) => spawn_tool(run, arguments, reply_tx.clone()),
+                ToolStep::Continue(stream) => spawn_drain(stream, reply_tx.clone()),
+                ToolStep::Stop => {}
             }
         }
         StreamEvent::ToolResult(output) => {
-            chat.app.finish_tool(output)?;
-            let stream = chat.app.resume()?;
+            let stream = chat.app.finish_tool(output)?;
             spawn_drain(stream, reply_tx.clone());
         }
         StreamEvent::Chunk(chunk) => chat.app.append_chunk(chunk),

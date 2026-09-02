@@ -95,18 +95,21 @@ struct ChatMessage {
     /// A `Message::ToolCall` carries one; every other message none, so
     /// a plain turn serializes as `{ role, content }` exactly as before.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    tool_calls: Vec<ToolCallOut>,
+    tool_calls: Vec<ToolCall>,
 }
 
-#[derive(Serialize)]
-struct ToolCallOut {
-    function: ToolCallFunctionOut,
+/// One tool call, the same shape ollama sends in a streamed message
+/// and accepts back in a replayed one.
+#[derive(Serialize, Deserialize)]
+struct ToolCall {
+    function: ToolCallFunction,
 }
 
-#[derive(Serialize)]
-struct ToolCallFunctionOut {
+#[derive(Serialize, Deserialize)]
+struct ToolCallFunction {
     name: String,
-    /// ollama takes tool-call arguments as a JSON object, not a string.
+    /// ollama takes and sends arguments as a JSON object; the domain
+    /// carries them as text.
     arguments: Value,
 }
 
@@ -123,20 +126,18 @@ fn chat_message(message: &Message) -> ChatMessage {
             content: content.clone(),
             tool_calls: Vec::new(),
         },
-        Message::ToolCall {
-            tool, arguments, ..
-        } => ChatMessage {
+        Message::ToolCall { tool, arguments } => ChatMessage {
             role: "assistant",
             content: String::new(),
-            tool_calls: vec![ToolCallOut {
-                function: ToolCallFunctionOut {
+            tool_calls: vec![ToolCall {
+                function: ToolCallFunction {
                     name: tool.clone(),
                     arguments: serde_json::from_str(arguments)
                         .expect("ToolCall arguments is validated JSON"),
                 },
             }],
         },
-        Message::ToolResult { content, .. } => ChatMessage {
+        Message::ToolResult { content } => ChatMessage {
             role: "tool",
             content: content.clone(),
             tool_calls: Vec::new(),
@@ -170,19 +171,7 @@ struct ChatChunkMessage {
     thinking: String,
     /// A tool call arrives whole on one line, not token by token.
     #[serde(default)]
-    tool_calls: Vec<ChatToolCall>,
-}
-
-#[derive(Deserialize)]
-struct ChatToolCall {
-    function: ChatToolCallFunction,
-}
-
-#[derive(Deserialize)]
-struct ChatToolCallFunction {
-    name: String,
-    /// ollama sends arguments as an object; the domain carries text.
-    arguments: Value,
+    tool_calls: Vec<ToolCall>,
 }
 
 /// What one parsed NDJSON line means for the stream: a chunk to

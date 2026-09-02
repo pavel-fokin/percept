@@ -33,20 +33,9 @@ pub enum Message {
     Text { role: Actor, content: String },
     /// The model asked to run a tool. Replayed so a later turn sees
     /// what an earlier one already tried. `arguments` is JSON text.
-    ToolCall {
-        /// Pairs this call to its result for a provider that matches
-        /// them by id; ollama matches by order and ignores it.
-        #[allow(dead_code)]
-        call_id: String,
-        tool: String,
-        arguments: String,
-    },
-    /// What a tool returned for the `ToolCall` with the same `call_id`.
-    ToolResult {
-        #[allow(dead_code)]
-        call_id: String,
-        content: String,
-    },
+    ToolCall { tool: String, arguments: String },
+    /// What a tool returned, in the order it followed its `ToolCall`.
+    ToolResult { content: String },
 }
 
 /// A kind of content a model reads or writes. Only the three the
@@ -106,17 +95,11 @@ pub fn to_messages(events: &[Event]) -> Vec<Message> {
                 role: e.actor(),
                 content: content.clone(),
             }),
-            Payload::ToolCalled {
-                call_id,
-                tool,
-                arguments,
-            } => Some(Message::ToolCall {
-                call_id: call_id.clone(),
+            Payload::ToolCalled { tool, arguments } => Some(Message::ToolCall {
                 tool: tool.clone(),
                 arguments: arguments.clone(),
             }),
-            Payload::ToolResulted { call_id, content } => Some(Message::ToolResult {
-                call_id: call_id.clone(),
+            Payload::ToolResulted { content } => Some(Message::ToolResult {
                 content: content.clone(),
             }),
             Payload::ThoughtRecorded { .. } => None,
@@ -187,7 +170,6 @@ mod tests {
                 "tui".to_string(),
                 None,
                 Payload::ToolCalled {
-                    call_id: "c1".to_string(),
                     tool: "search_events".to_string(),
                     arguments: r#"{"size":5}"#.to_string(),
                 },
@@ -197,7 +179,6 @@ mod tests {
                 "tui".to_string(),
                 None,
                 Payload::ToolResulted {
-                    call_id: "c1".to_string(),
                     content: "3 events".to_string(),
                 },
             ),
@@ -208,22 +189,14 @@ mod tests {
         assert_eq!(messages.len(), 3);
         assert!(matches!(messages[0], Message::Text { .. }));
         match &messages[1] {
-            Message::ToolCall {
-                call_id,
-                tool,
-                arguments,
-            } => {
-                assert_eq!(call_id, "c1");
+            Message::ToolCall { tool, arguments } => {
                 assert_eq!(tool, "search_events");
                 assert_eq!(arguments, r#"{"size":5}"#);
             }
             _ => panic!("expected a ToolCall message"),
         }
         match &messages[2] {
-            Message::ToolResult { call_id, content } => {
-                assert_eq!(call_id, "c1");
-                assert_eq!(content, "3 events");
-            }
+            Message::ToolResult { content } => assert_eq!(content, "3 events"),
             _ => panic!("expected a ToolResult message"),
         }
     }

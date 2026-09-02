@@ -48,19 +48,14 @@ const PARAMETERS: &str = r#"{
   "additionalProperties": false
 }"#;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
+#[serde(default)]
 struct Args {
-    #[serde(default)]
     since: Option<String>,
-    #[serde(default)]
     until: Option<String>,
-    #[serde(default)]
     actors: Vec<String>,
-    #[serde(default)]
     sources: Vec<String>,
-    #[serde(default)]
     kinds: Vec<String>,
-    #[serde(default)]
     size: Option<usize>,
 }
 
@@ -95,7 +90,7 @@ impl Tool for SearchEvents {
             actors,
             sources: args.sources,
             kinds,
-            size: Some(args.size.unwrap_or(DEFAULT_SIZE)),
+            size: args.size.or(Some(DEFAULT_SIZE)),
         };
 
         let events = self.log.search(&query)?;

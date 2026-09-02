@@ -34,16 +34,14 @@ pub enum Payload {
     },
     /// A tool call percept's own loop made. `arguments` is JSON text
     /// the domain routes by `tool` name but never parses - the tool
-    /// owns that shape. `call_id` ties this to its `ToolResulted`.
+    /// owns that shape. Its `ToolResulted` names this event as cause.
     ToolCalled {
-        call_id: String,
         tool: String,
         arguments: String,
     },
-    /// What percept fed back for the `ToolCalled` with the same
-    /// `call_id`: the tool's output, or its error text.
+    /// What percept fed back for a `ToolCalled` - its output or its
+    /// error text. `causation_id` points at the call.
     ToolResulted {
-        call_id: String,
         content: String,
     },
 }
@@ -129,7 +127,6 @@ impl Event {
 
     /// A `tool.called` event - always the model's action.
     pub fn tool_called(
-        call_id: String,
         tool: String,
         arguments: String,
         source: String,
@@ -139,27 +136,18 @@ impl Event {
             Actor::Model,
             source,
             causation_id,
-            Payload::ToolCalled {
-                call_id,
-                tool,
-                arguments,
-            },
+            Payload::ToolCalled { tool, arguments },
         )
     }
 
     /// A `tool.resulted` event - always percept feeding a tool's output
     /// back, never the model.
-    pub fn tool_resulted(
-        call_id: String,
-        content: String,
-        source: String,
-        causation_id: Option<EventId>,
-    ) -> Self {
+    pub fn tool_resulted(content: String, source: String, causation_id: Option<EventId>) -> Self {
         Self::new(
             Actor::System,
             source,
             causation_id,
-            Payload::ToolResulted { call_id, content },
+            Payload::ToolResulted { content },
         )
     }
 
