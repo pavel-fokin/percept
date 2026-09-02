@@ -25,6 +25,18 @@ use crate::store;
 
 #[derive(Parser)]
 #[command(name = "percept")]
+#[command(about = "Record what happens across your tools, so a model can query it.")]
+#[command(long_about = "\
+Record what happens across your tools, so a model can query it.
+
+percept keeps an append-only log of events - prompts, replies, and tool \
+calls - in percept.jsonl in the working directory. It never ranks, \
+summarises, or answers: its job is to make looking cheap and leave \
+relevance to the caller.
+
+Run with no arguments to open the TUI. Every subcommand reaches the log \
+without it: `events publish` appends one event, `events search` and \
+`events show` query it, and `ask` runs one full turn and prints the reply.")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -64,6 +76,20 @@ pub struct PublishArgs {
 }
 
 #[derive(Args, Default)]
+#[command(after_help = "\
+Examples:
+  # The 20 most recent events, printed oldest first
+  percept events search --size 20
+
+  # What the model did in the last day
+  percept events search --since 1d --type tool.called
+
+  # Prompts and replies naming a deploy, with full payloads
+  percept events search --contains deploy --type message.received --full
+
+  # Two windows that tile with no gap or overlap
+  percept events search --since 2d --until 1d
+  percept events search --since 1d")]
 pub struct SearchArgs {
     /// An ISO-8601 timestamp, or a relative shorthand measured back
     /// from now: `<N>d`, `<N>h`, `<N>m`. Inclusive.
