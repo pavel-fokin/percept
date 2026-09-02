@@ -3,14 +3,22 @@ use std::pin::Pin;
 
 use futures_core::Stream;
 
-use super::{Actor, Event, Payload};
+use super::{Actor, Event, Payload, ToolSpec};
 
 /// One piece of a streaming reply. A thinking model interleaves
 /// `Thought` chunks with its `Reply` text; a provider that never thinks
-/// simply only ever yields `Reply`.
+/// only ever yields `Reply`. A `ToolCall` ends the turn's text: the
+/// caller runs the tool and asks again.
 pub enum Chunk {
     Thought(String),
     Reply(String),
+    /// The model asked to run `tool` with `arguments` (JSON text).
+    /// Read by the `App` loop in a later issue.
+    #[allow(dead_code)]
+    ToolCall {
+        tool: String,
+        arguments: String,
+    },
 }
 
 /// A reply as it streams in, chunk by chunk. `Send` so it can cross
@@ -68,16 +76,25 @@ pub struct ModelCapabilities {
     pub tool_use: bool,
 }
 
+/// Everything Model needs for one `reply`: the conversation so far and
+/// the tools it may call. One struct so what a request carries can grow
+/// without churning the signature.
+pub struct ModelRequest {
+    pub messages: Vec<Message>,
+    pub tools: Vec<ToolSpec>,
+}
+
 /// Turns a conversation into a streamed reply - the domain's core
 /// capability, mechanism-agnostic. Returning the stream doesn't mean a
 /// connection succeeded - a failure to connect surfaces as the
 /// stream's first `Err` item, the same as a failure mid-reply.
 pub trait Model: Send + Sync {
     /// What this model can accept, produce, and whether it calls tools.
+    /// The `App` loop reads `tool_use` in a later issue.
     #[allow(dead_code)]
     fn capabilities(&self) -> ModelCapabilities;
 
-    fn reply(&self, messages: &[Message]) -> ReplyStream;
+    fn reply(&self, request: &ModelRequest) -> ReplyStream;
 }
 
 /// Converts the transcript into the form Model expects. A recorded

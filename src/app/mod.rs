@@ -103,8 +103,11 @@ impl AppService for App {
         });
         self.events.push(event);
 
-        let history = percept::to_messages(&self.events);
-        Ok(self.chat.reply(&history))
+        let request = percept::ModelRequest {
+            messages: percept::to_messages(&self.events),
+            tools: Vec::new(),
+        };
+        Ok(self.chat.reply(&request))
     }
 
     fn append_chunk(&mut self, chunk: percept::Chunk) {
@@ -114,6 +117,9 @@ impl AppService for App {
         match chunk {
             percept::Chunk::Thought(text) => turn.thought.push_str(&text),
             percept::Chunk::Reply(text) => turn.reply.push_str(&text),
+            // No tools are sent yet, so the model never asks for one.
+            // The tool loop (next issue) handles this chunk.
+            percept::Chunk::ToolCall { .. } => {}
         }
     }
 
@@ -170,7 +176,7 @@ fn text(buffer: Option<&String>) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percept::{Actor, Chunk, Message, Payload};
+    use crate::percept::{Actor, Chunk, Payload};
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::Mutex;
 
@@ -187,7 +193,7 @@ mod tests {
             }
         }
 
-        fn reply(&self, _messages: &[Message]) -> percept::ReplyStream {
+        fn reply(&self, _request: &percept::ModelRequest) -> percept::ReplyStream {
             Box::pin(tokio_stream::empty())
         }
     }

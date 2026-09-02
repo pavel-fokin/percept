@@ -7,7 +7,9 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
 
-use crate::percept::{Actor, Chunk, Message, Modality, Model, ModelCapabilities, ReplyStream};
+use crate::percept::{
+    Actor, Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream, ToolSpec,
+};
 
 /// How long to wait for the server to accept a connection. Without it
 /// a host that never answers hangs on the OS TCP timeout, and the reply
@@ -53,7 +55,37 @@ fn role(actor: Actor) -> &'static str {
 struct ChatRequest {
     model: String,
     messages: Vec<ChatMessage>,
+    /// Omitted when empty, so a plain chat request is unchanged.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tools: Vec<ToolDef>,
     stream: bool,
+}
+
+#[derive(Serialize)]
+struct ToolDef {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    function: ToolDefFunction,
+}
+
+#[derive(Serialize)]
+struct ToolDefFunction {
+    name: &'static str,
+    description: &'static str,
+    /// `ToolSpec` carries the schema as text; ollama wants an object.
+    parameters: Value,
+}
+
+fn tool_def(spec: &ToolSpec) -> ToolDef {
+    ToolDef {
+        kind: "function",
+        function: ToolDefFunction {
+            name: spec.name,
+            description: spec.description,
+            parameters: serde_json::from_str(spec.parameters)
+                .expect("ToolSpec parameters is a JSON Schema literal"),
+        },
+    }
 }
 
 #[derive(Serialize)]
@@ -136,6 +168,21 @@ struct ChatChunkMessage {
     /// `content` - present but empty on a line that carries none.
     #[serde(default)]
     thinking: String,
+    /// A tool call arrives whole on one line, not token by token.
+    #[serde(default)]
+    tool_calls: Vec<ChatToolCall>,
+}
+
+#[derive(Deserialize)]
+struct ChatToolCall {
+    function: ChatToolCallFunction,
+}
+
+#[derive(Deserialize)]
+struct ChatToolCallFunction {
+    name: String,
+    /// ollama sends arguments as an object; the domain carries text.
+    arguments: Value,
 }
 
 /// What one parsed NDJSON line means for the stream: a chunk to
@@ -163,6 +210,11 @@ fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
     // Thinking arrives first when a line ever carried both.
     if !raw.message.thinking.is_empty() {
         Ok(Line::Chunk(Chunk::Thought(raw.message.thinking)))
+    } else if let Some(call) = raw.message.tool_calls.into_iter().next() {
+        Ok(Line::Chunk(Chunk::ToolCall {
+            tool: call.function.name,
+            arguments: call.function.arguments.to_string(),
+        }))
     } else if !raw.message.content.is_empty() {
         Ok(Line::Chunk(Chunk::Reply(raw.message.content)))
     } else {
@@ -206,18 +258,19 @@ impl Model for Ollama {
         ModelCapabilities {
             input: &[Modality::Text],
             output: &[Modality::Text],
-            tool_use: false,
+            tool_use: true,
         }
     }
 
-    fn reply(&self, messages: &[Message]) -> ReplyStream {
+    fn reply(&self, request: &ModelRequest) -> ReplyStream {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
         let client = self.client.clone();
         let url = self.url.clone();
         let request = ChatRequest {
             model: self.model.clone(),
-            messages: messages.iter().map(chat_message).collect(),
+            messages: request.messages.iter().map(chat_message).collect(),
+            tools: request.tools.iter().map(tool_def).collect(),
             stream: true,
         };
 
@@ -300,6 +353,19 @@ mod tests {
         match parse_line(line).unwrap() {
             Line::Chunk(Chunk::Thought(thinking)) => assert_eq!(thinking, "Thinking"),
             _ => panic!("expected a thought chunk"),
+        }
+    }
+
+    #[test]
+    fn a_tool_call_line_parses_as_a_tool_call_chunk() {
+        let line = r#"{"model":"gemma4","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"search_events","arguments":{"size":5}}}]},"done":false}"#;
+        match parse_line(line).unwrap() {
+            Line::Chunk(Chunk::ToolCall { tool, arguments }) => {
+                assert_eq!(tool, "search_events");
+                let args: Value = serde_json::from_str(&arguments).unwrap();
+                assert_eq!(args["size"], 5);
+            }
+            _ => panic!("expected a tool call chunk"),
         }
     }
 
