@@ -285,6 +285,20 @@ The TUI only runs on a real terminal. `scripts/drive.py` forks a pty,
 sends timed keystrokes, and prints the frames; `--plain` strips the
 escapes so the rendered text can be grepped.
 
+## Code Quality
+
+Comments earn their place. Prefer a clear name to a comment. Never
+restate what the code does - comment only a complex algorithm,
+non-obvious business logic, or a "why" the code can't show.
+
+Keep it simple. Don't make a thing optional when the compiler can
+enforce it. A boolean defaults to false, never to optional. Trust
+Rust's type system rather than writing defensive checks around it.
+
+Don't pad errors. Skip `.context("Failed to X")` when the error
+already says it failed. Clean up stray logs as you find them; add a
+log only for an error or a security event.
+
 ## Git
 
 Use conventional commit messages under 72 chars. Skip the body -- subject
@@ -306,9 +320,6 @@ These rules apply to any human-readable text. Write for a specific reader.
   prose -- lists are for parallel items only.
 - Cut before you add. Most sentences fail the question
   "what breaks if this is gone?"
-- In code, that means: don't restate what a signature or an
-  identifier's name already shows. Comment only what the code can't
-  tell the reader.
 
 Target Flesch-Kincaid grade 12 or below. Treat it as a smoke test,
 not a gate -- professional terms inflate the score honestly. If
