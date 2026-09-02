@@ -24,9 +24,10 @@ pub fn draw(frame: &mut Frame, chat: &Chat) {
     let width = area.width.max(1) as usize;
 
     let status = status(chat, width);
+    let input_height = input_height(chat, area.height, status.len() as u16);
     let [transcript_area, input_area, status_area] = Layout::vertical([
         Constraint::Min(1),
-        Constraint::Length(3),
+        Constraint::Length(input_height),
         Constraint::Length(status.len().min(STATUS_MAX) as u16),
     ])
     .areas(area);
@@ -35,6 +36,14 @@ pub fn draw(frame: &mut Frame, chat: &Chat) {
     frame.render_widget(Paragraph::new(text).scroll((offset, 0)), transcript_area);
     draw_input(frame, chat, input_area);
     frame.render_widget(Paragraph::new(status), status_area);
+}
+
+/// The box has one row per entered line plus its top and bottom border.
+/// Keep one row for the transcript when the terminal is short.
+fn input_height(chat: &Chat, total_height: u16, status_height: u16) -> u16 {
+    let wanted = (chat.textarea.lines().len() as u16).saturating_add(2);
+    let available = total_height.saturating_sub(status_height).saturating_sub(1);
+    wanted.min(available).max(1)
 }
 
 /// The input, framed and prompted, so it reads as somewhere to type
@@ -160,7 +169,7 @@ fn status(chat: &Chat, width: usize) -> Vec<Line<'static>> {
         ])];
     }
     vec![Line::from(Span::styled(
-        "Enter send · Esc quit",
+        "Enter send · Ctrl+J newline · Esc quit",
         chat.hint_style,
     ))]
 }
