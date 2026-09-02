@@ -84,6 +84,10 @@ pub enum ToolStep {
 /// on. One value, so the chain can't outlive the buffers it belongs to.
 struct Turn {
     anchor: EventId,
+    /// The prompt that opened this turn. `anchor` moves as the tool
+    /// loop advances; this does not, so the window can always reach
+    /// back to the question being answered.
+    prompt: EventId,
     tool_calls: usize,
     /// The `tool.called` awaiting its result, set by `begin_tool` and
     /// taken when the result commits.
@@ -178,13 +182,29 @@ impl App {
         Ok(())
     }
 
-    /// The transcript the model reads: the newest `CONTEXT_EVENTS`
-    /// events, less any tool result the window cut off from its call.
-    /// A conversation that opens on a result nothing asked for is not
-    /// one a provider accepts.
+    /// Where the model's view starts: `CONTEXT_EVENTS` back from the
+    /// end, or the turn's own prompt if that is older. A tool round
+    /// commits up to four events, so a loop that runs to
+    /// `MAX_TOOL_CALLS` would otherwise evict the question it is
+    /// answering. The turn in progress is never history.
+    fn window_start(&self) -> usize {
+        let tail = self.events.len().saturating_sub(CONTEXT_EVENTS);
+        let Some(turn) = self.pending.as_ref() else {
+            return tail;
+        };
+        let prompt = self
+            .events
+            .iter()
+            .rposition(|event| event.id() == turn.prompt)
+            .unwrap_or(tail);
+        tail.min(prompt)
+    }
+
+    /// The transcript the model reads: the window above, less any tool
+    /// result it cut off from its call. A conversation that opens on a
+    /// result nothing asked for is not one a provider accepts.
     fn context(&self) -> Vec<percept::Message> {
-        let start = self.events.len().saturating_sub(CONTEXT_EVENTS);
-        let mut messages = percept::to_messages(&self.events[start..]);
+        let mut messages = percept::to_messages(&self.events[self.window_start()..]);
         let orphans = messages
             .iter()
             .take_while(|message| matches!(message, percept::Message::ToolResult { .. }))
@@ -252,6 +272,7 @@ impl AppService for App {
         self.events.push(event);
         self.pending = Some(Turn {
             anchor,
+            prompt: anchor,
             tool_calls: 0,
             open_call: None,
             thought: String::new(),
@@ -378,7 +399,7 @@ mod tests {
     struct Scripted {
         scripts: Mutex<std::collections::VecDeque<Vec<Chunk>>>,
         tool_counts: Mutex<Vec<usize>>,
-        message_tags: Mutex<Vec<Vec<&'static str>>>,
+        message_tags: Mutex<Vec<Vec<String>>>,
         tool_use: bool,
     }
 
@@ -393,16 +414,18 @@ mod tests {
         }
 
         /// The tags of the last request's messages.
-        fn last_request(&self) -> Vec<&'static str> {
+        fn last_request(&self) -> Vec<String> {
             self.message_tags.lock().unwrap().last().cloned().unwrap()
         }
     }
 
-    fn tag(message: &percept::Message) -> &'static str {
+    /// A message as a test can assert on it: dialogue by its own text,
+    /// a tool message by its shape.
+    fn tag(message: &percept::Message) -> String {
         match message {
-            percept::Message::Text { .. } => "text",
-            percept::Message::ToolCall { .. } => "call",
-            percept::Message::ToolResult { .. } => "result",
+            percept::Message::Text { content, .. } => content.clone(),
+            percept::Message::ToolCall { .. } => "<call>".to_string(),
+            percept::Message::ToolResult { .. } => "<result>".to_string(),
         }
     }
 
@@ -825,7 +848,10 @@ mod tests {
         // The model reads the system line plus one window of events.
         let sent = model.last_request();
         assert_eq!(sent.len(), CONTEXT_EVENTS + 1);
-        assert!(sent.iter().all(|&tag| tag == "text"));
+        // The oldest events fell out; the newest and the prompt stayed.
+        assert!(!sent.contains(&"0".to_string()));
+        assert!(sent.contains(&"24".to_string()));
+        assert!(sent.contains(&"now".to_string()));
     }
 
     #[test]
@@ -847,8 +873,32 @@ mod tests {
         let _ = app.submit("now".to_string()).unwrap();
 
         let sent = model.last_request();
-        assert!(!sent.contains(&"result"));
+        assert!(!sent.contains(&"<result>".to_string()));
         assert_eq!(sent.len(), CONTEXT_EVENTS);
+    }
+
+    #[test]
+    fn a_long_tool_loop_never_evicts_the_prompt_it_is_answering() {
+        let model = Arc::new(Scripted::new(vec![], true));
+        let mut app = App::new(
+            model.clone(),
+            Arc::new(FakeLog::default()),
+            vec![Arc::new(FakeTool)],
+            SOURCE.to_string(),
+        )
+        .unwrap();
+
+        let _ = app.submit("the question".to_string()).unwrap();
+        // Each round commits four events: thought, reply, call, result.
+        for _ in 0..MAX_TOOL_CALLS {
+            app.append_chunk(Chunk::Thought("hm".to_string()));
+            app.append_chunk(Chunk::Reply("looking".to_string()));
+            run_one_tool(&mut app, "search_events", "{}");
+        }
+
+        // The turn has outgrown the window on its own.
+        assert!(app.events().len() > CONTEXT_EVENTS);
+        assert!(model.last_request().contains(&"the question".to_string()));
     }
 
     #[test]

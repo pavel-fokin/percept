@@ -108,8 +108,9 @@ pub struct AskArgs {
     prompt: String,
 }
 
-/// Every event must name a writer. An empty string looks deliberate to
-/// a reader while naming nobody, so it is rejected at parse time.
+/// Rejects a blank value at parse time. A source that names nobody, a
+/// search term contained by everything, a prompt that asks nothing -
+/// each looks deliberate to a reader while meaning nothing.
 fn non_blank(s: &str) -> Result<String, String> {
     if s.trim().is_empty() {
         return Err("must not be blank".to_string());
@@ -240,15 +241,20 @@ pub async fn ask(
 
     loop {
         match stream.next().await {
+            // Each arm echoes for itself: `App` decides what a call
+            // means, and a call it refused never happened.
             Some(Ok(Chunk::ToolCall { tool, arguments })) => {
-                eprintln!("⚒ {tool}({arguments})");
-                stream = match app.begin_tool(&tool, arguments)? {
+                stream = match app.begin_tool(&tool, arguments.clone())? {
                     ToolStep::Run(run, arguments) => {
+                        eprintln!("⚒ {tool}({arguments})");
                         let output = run.run(&arguments).unwrap_or_else(|err| err.to_string());
                         eprintln!("⚒ {output}");
                         app.finish_tool(output)?
                     }
-                    ToolStep::Continue(stream) => stream,
+                    ToolStep::Continue(stream) => {
+                        eprintln!("⚒ {tool}({arguments}) - no such tool");
+                        stream
+                    }
                     ToolStep::Stop => break,
                 };
             }
@@ -259,9 +265,11 @@ pub async fn ask(
             Some(Ok(chunk)) => app.append_chunk(chunk),
             // A failed reply is shown, never logged - the stream's own
             // words are this run's error. Whatever text arrived before
-            // it still commits.
+            // it still commits, and still prints: the words reached the
+            // log, so stdout is not the surface that should lose them.
             Some(Err(err)) => {
                 app.end_stream()?;
+                print_reply(&reply)?;
                 return Err(err.to_string().into());
             }
             None => break,
@@ -269,10 +277,18 @@ pub async fn ask(
     }
 
     app.end_stream()?;
-    if !reply.is_empty() {
-        println!("{reply}");
+    print_reply(&reply)
+}
+
+/// Writes the reply to stdout, saying nothing when the turn produced no
+/// text. A reader that stops early is the caller's choice, not a
+/// failure - the same courtesy `search` extends.
+fn print_reply(reply: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if reply.is_empty() {
+        return Ok(());
     }
-    Ok(())
+    let mut out = io::stdout().lock();
+    writeln!(out, "{reply}").or_else(stop_if_pipe_closed)
 }
 
 /// Parses a `--since`/`--until` value: an ISO-8601 timestamp, or a

@@ -258,7 +258,11 @@ Wire concrete types together only at the entrypoint - `main` in Rust.
   lets a thought be shown and never replayed. The cut can fall between
   a `tool.called` and its `tool.resulted`, so a window opening on a
   result drops it: `Message::ToolResult` is `role: "tool"` on the wire,
-  and no provider accepts a conversation starting there. The number is
+  and no provider accepts a conversation starting there. The turn in
+  progress is never history: a round commits up to four events, so five
+  of them outgrow the window on their own and would evict the very
+  question being answered. `Turn` keeps the prompt's id where `anchor`
+  moves, and the window reaches back to it. The number is
   a `const`, not a flag, following `OLLAMA_MODEL` - one place to change
   it. Windowing by event count rather than characters is deliberate: a
   fact can be planted at a known depth. The model is not told its
