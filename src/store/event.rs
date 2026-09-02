@@ -89,13 +89,17 @@ pub fn encode(event: &percept::Event) -> String {
 pub const PREVIEW_CHARS: usize = 120;
 
 /// What a summary line says about the `content` it cut, so a caller
-/// can tell whether a second look is worth a call. Lives beside the
+/// can tell whether a second look is worth a call, and where to take it. Lives beside the
 /// payload, not in it: the payload stays exactly what the log stores,
 /// and these are facts about the output.
 #[derive(Serialize)]
 struct Preview {
     /// Length of the whole `content`, in characters.
     len: usize,
+    /// Character offset of the search hit the window was cut around,
+    /// so a caller can read on from there without guessing.
+    #[serde(rename = "match", skip_serializing_if = "Option::is_none")]
+    hit: Option<usize>,
 }
 
 /// A summary line: the wire event with `preview` on the envelope when
@@ -138,7 +142,11 @@ pub fn summarize(event: &percept::Event, hit: Option<usize>, preview: usize) -> 
         let chars: Vec<char> = text.chars().collect();
         let (shown, preview) = if chars.len() > preview {
             let shown = window(&chars, hit.unwrap_or(0), preview);
-            (shown, Some(Preview { len: chars.len() }))
+            let preview = Preview {
+                len: chars.len(),
+                hit,
+            };
+            (shown, Some(preview))
         } else {
             (text, None)
         };
@@ -207,7 +215,7 @@ pub fn excerpt(
 
     Ok(serde_json::to_string(&Summary {
         event: wire,
-        preview: Some(Preview { len }),
+        preview: Some(Preview { len, hit: None }),
     })
     .expect("store::Event always serializes"))
 }
@@ -459,6 +467,14 @@ mod tests {
         assert!(cut.contains("deploy"));
         assert!(cut.starts_with('\u{2026}') && cut.ends_with('\u{2026}'));
         assert_eq!(cut.chars().count(), PREVIEW_CHARS + 2);
+        assert_eq!(line["preview"]["match"], 400);
+    }
+
+    #[test]
+    fn a_preview_without_a_hit_carries_no_match() {
+        let event = message(Actor::Model, "x".repeat(500));
+        let line: Value = serde_json::from_str(&summarize(&event, None, PREVIEW_CHARS)).unwrap();
+        assert!(line["preview"].get("match").is_none());
     }
 
     #[test]
