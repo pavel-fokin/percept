@@ -1,20 +1,13 @@
 use std::error::Error;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tokio_stream::StreamExt;
 
+use super::{client, role, stream_lines, Line, Sender};
 use crate::percept::{
-    Actor, Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream, ToolSpec,
+    Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream, ToolSpec,
 };
-
-/// How long to wait for the server to accept a connection. Without it
-/// a host that never answers hangs on the OS TCP timeout, and the reply
-/// neither arrives nor fails.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Sends and receives with a local ollama server's `/api/chat`, which
 /// streams NDJSON: one JSON object per line, each carrying a token of
@@ -30,24 +23,8 @@ impl Ollama {
         Self {
             url: format!("{base_url}/api/chat"),
             model,
-            // Only the connect is bounded. A first token can be minutes
-            // away while ollama loads the model, so a read timeout
-            // would abort healthy replies.
-            client: reqwest::Client::builder()
-                .connect_timeout(CONNECT_TIMEOUT)
-                .build()
-                .expect("a client with no TLS backend always builds"),
+            client: client(),
         }
-    }
-}
-
-/// ollama's role vocabulary - a string, not an enum, because it's the
-/// wire's word, not the domain's.
-fn role(actor: Actor) -> &'static str {
-    match actor {
-        Actor::User => "user",
-        Actor::Model => "assistant",
-        Actor::System => "system",
     }
 }
 
@@ -61,6 +38,7 @@ struct ChatRequest {
     stream: bool,
 }
 
+/// One tool in ollama's shape, a copy of OpenAI's chat completions.
 #[derive(Serialize)]
 struct ToolDef {
     #[serde(rename = "type")]
@@ -72,7 +50,7 @@ struct ToolDef {
 struct ToolDefFunction {
     name: &'static str,
     description: &'static str,
-    /// `ToolSpec` carries the schema as text; ollama wants an object.
+    /// `ToolSpec` carries the schema as text; the wire wants an object.
     parameters: Value,
 }
 
@@ -174,16 +152,8 @@ struct ChatChunkMessage {
     tool_calls: Vec<ToolCall>,
 }
 
-/// What one parsed NDJSON line means for the stream: a chunk to
-/// forward, the sentinel that ends it, or nothing - the `done` line's
-/// `content` is always empty, and a line with neither `thinking` nor
-/// `content` yields no chunk.
-enum Line {
-    Chunk(Chunk),
-    Empty,
-    Done,
-}
-
+/// The `done` line's `content` is always empty, and a line with
+/// neither `thinking` nor `content` yields no chunk.
 fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
     if line.trim().is_empty() {
         return Ok(Line::Empty);
@@ -215,26 +185,10 @@ fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
     }
 }
 
-/// Splits newly arrived bytes on `\n`, returning each complete line and
-/// leaving an incomplete tail in `buf` for the next call - `bytes_stream`
-/// chunk boundaries don't align with NDJSON line boundaries.
-fn take_lines(buf: &mut Vec<u8>, chunk: &[u8]) -> Vec<String> {
-    buf.extend_from_slice(chunk);
-    let mut lines = Vec::new();
-    while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
-        lines.push(String::from_utf8_lossy(&buf[..pos]).into_owned());
-        buf.drain(..=pos);
-    }
-    lines
-}
-
 /// Parses and forwards one line. Returns `true` once the stream is
 /// over - the `done` sentinel, a parse failure, or the receiver having
 /// gone away - so the caller knows to stop reading the body.
-fn handle_line(
-    line: &str,
-    tx: &UnboundedSender<Result<Chunk, Box<dyn Error + Send + Sync>>>,
-) -> bool {
+fn handle_line(line: &str, tx: &Sender) -> bool {
     match parse_line(line) {
         Ok(Line::Chunk(chunk)) => tx.send(Ok(chunk)).is_err(),
         Ok(Line::Empty) => false,
@@ -268,41 +222,8 @@ impl Model for Ollama {
         };
 
         tokio::spawn(async move {
-            let response = match client.post(&url).json(&request).send().await {
-                Ok(response) => response,
-                Err(err) => {
-                    let _ = tx.send(Err(format!("request to ollama failed: {err}").into()));
-                    return;
-                }
-            };
-
-            if !response.status().is_success() {
-                let status = response.status();
-                let body = response.text().await.unwrap_or_default();
-                let _ = tx.send(Err(format!("ollama returned {status}: {body}").into()));
-                return;
-            }
-
-            let mut body = response.bytes_stream();
-            let mut buf = Vec::new();
-            while let Some(chunk) = body.next().await {
-                let chunk = match chunk {
-                    Ok(chunk) => chunk,
-                    Err(err) => {
-                        let _ = tx.send(Err(format!("ollama stream failed: {err}").into()));
-                        return;
-                    }
-                };
-                for line in take_lines(&mut buf, &chunk) {
-                    if handle_line(&line, &tx) {
-                        return;
-                    }
-                }
-            }
-
-            // Whatever the body ended on without a trailing newline is
-            // still a line; an empty tail parses as nothing.
-            handle_line(&String::from_utf8_lossy(&buf), &tx);
+            let request = client.post(&url).json(&request);
+            stream_lines(request, "ollama", &tx, |line| handle_line(line, &tx)).await;
         });
 
         Box::pin(UnboundedReceiverStream::new(rx))
@@ -312,23 +233,6 @@ impl Model for Ollama {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_line_split_across_chunks_is_carried_to_completion() {
-        let mut buf = Vec::new();
-        assert!(take_lines(&mut buf, b"{\"foo\":1").is_empty());
-        let lines = take_lines(&mut buf, b"}\n{\"bar\":2}\n");
-        assert_eq!(lines, vec!["{\"foo\":1}", "{\"bar\":2}"]);
-        assert!(buf.is_empty());
-    }
-
-    #[test]
-    fn an_unterminated_final_line_is_left_in_the_buffer() {
-        let mut buf = Vec::new();
-        let lines = take_lines(&mut buf, b"{\"foo\":1}\nunterminated");
-        assert_eq!(lines, vec!["{\"foo\":1}"]);
-        assert_eq!(buf, b"unterminated");
-    }
 
     #[test]
     fn a_content_line_parses_as_a_reply_chunk() {
@@ -398,12 +302,5 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         assert!(!handle_line("   ", &tx));
         assert!(rx.try_recv().is_err());
-    }
-
-    #[test]
-    fn roles_map_to_ollamas_vocabulary() {
-        assert_eq!(role(Actor::User), "user");
-        assert_eq!(role(Actor::Model), "assistant");
-        assert_eq!(role(Actor::System), "system");
     }
 }

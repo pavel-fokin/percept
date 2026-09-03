@@ -19,7 +19,7 @@ mod tui;
 
 use app::App;
 use cli::{Cli, Command, EventsCommand};
-use providers::Ollama;
+use providers::{Ollama, OpenAi};
 use store::{Jsonl, ReadEvent, SearchEvents};
 use tui::{Chat, StreamEvent};
 
@@ -27,10 +27,21 @@ use tui::{Chat, StreamEvent};
 /// so the transcript follows wherever the app is launched from.
 const LOG_PATH: &str = "percept.jsonl";
 
+/// Names the provider that answers: `ollama` (the default) or `openai`.
+const PROVIDER_VAR: &str = "PERCEPT_PROVIDER";
+
 /// Where the local ollama server listens.
 const OLLAMA_URL: &str = "http://localhost:11434";
 /// The model ollama serves replies with.
 const OLLAMA_MODEL: &str = "gemma4";
+
+const OPENAI_URL: &str = "https://api.openai.com/v1";
+const OPENAI_MODEL: &str = "gpt-5.6-luna";
+/// How long the model thinks before answering. Low keeps a turn quick
+/// while still letting it plan a search.
+const OPENAI_REASONING: &str = "low";
+/// Where the key is read from.
+const OPENAI_KEY_VAR: &str = "OPENAI_API_KEY";
 
 /// How often the status row's spinner advances while a turn streams.
 const SPINNER_TICK: std::time::Duration = std::time::Duration::from_millis(90);
@@ -99,16 +110,39 @@ async fn run(
     }
 }
 
+fn build_model() -> Result<Arc<dyn percept::Model>, Box<dyn std::error::Error>> {
+    let provider = std::env::var(PROVIDER_VAR).unwrap_or_else(|_| "ollama".to_string());
+    match provider.as_str() {
+        "ollama" => Ok(Arc::new(Ollama::new(
+            OLLAMA_URL.to_string(),
+            OLLAMA_MODEL.to_string(),
+        ))),
+        "openai" => {
+            let api_key = std::env::var(OPENAI_KEY_VAR)
+                .map_err(|_| format!("{OPENAI_KEY_VAR} is not set"))?;
+            Ok(Arc::new(OpenAi::new(
+                OPENAI_URL.to_string(),
+                OPENAI_MODEL.to_string(),
+                OPENAI_REASONING.to_string(),
+                api_key,
+            )))
+        }
+        other => {
+            Err(format!("{PROVIDER_VAR}={other:?} names no provider; use ollama or openai").into())
+        }
+    }
+}
+
 /// Both the TUI and `ask` build the same `App` this way, differing only
 /// in the `source` they stamp and in how they drive its reply stream.
 fn build_app(source: &str) -> Result<App, Box<dyn std::error::Error>> {
     let log = Arc::new(Jsonl::open(LOG_PATH)?);
-    let model = Ollama::new(OLLAMA_URL.to_string(), OLLAMA_MODEL.to_string());
+    let model = build_model()?;
     let tools: Vec<Arc<dyn percept::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
         Arc::new(ReadEvent::new(log.clone())),
     ];
-    App::new(Arc::new(model), log, tools, source.to_string())
+    App::new(model, log, tools, source.to_string())
 }
 
 async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
