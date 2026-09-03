@@ -1,5 +1,4 @@
 use std::error::Error;
-use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -7,14 +6,10 @@ use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
 
+use super::{client, take_lines, tool_def, ToolDef};
 use crate::percept::{
-    Actor, Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream, ToolSpec,
+    Actor, Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream,
 };
-
-/// How long to wait for the server to accept a connection. Without it
-/// a host that never answers hangs on the OS TCP timeout, and the reply
-/// neither arrives nor fails.
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Sends and receives with a local ollama server's `/api/chat`, which
 /// streams NDJSON: one JSON object per line, each carrying a token of
@@ -30,13 +25,7 @@ impl Ollama {
         Self {
             url: format!("{base_url}/api/chat"),
             model,
-            // Only the connect is bounded. A first token can be minutes
-            // away while ollama loads the model, so a read timeout
-            // would abort healthy replies.
-            client: reqwest::Client::builder()
-                .connect_timeout(CONNECT_TIMEOUT)
-                .build()
-                .expect("a client with no TLS backend always builds"),
+            client: client(),
         }
     }
 }
@@ -59,33 +48,6 @@ struct ChatRequest {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tools: Vec<ToolDef>,
     stream: bool,
-}
-
-#[derive(Serialize)]
-struct ToolDef {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    function: ToolDefFunction,
-}
-
-#[derive(Serialize)]
-struct ToolDefFunction {
-    name: &'static str,
-    description: &'static str,
-    /// `ToolSpec` carries the schema as text; ollama wants an object.
-    parameters: Value,
-}
-
-fn tool_def(spec: &ToolSpec) -> ToolDef {
-    ToolDef {
-        kind: "function",
-        function: ToolDefFunction {
-            name: spec.name,
-            description: spec.description,
-            parameters: serde_json::from_str(spec.parameters)
-                .expect("ToolSpec parameters is a JSON Schema literal"),
-        },
-    }
 }
 
 #[derive(Serialize)]
@@ -215,19 +177,6 @@ fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
     }
 }
 
-/// Splits newly arrived bytes on `\n`, returning each complete line and
-/// leaving an incomplete tail in `buf` for the next call - `bytes_stream`
-/// chunk boundaries don't align with NDJSON line boundaries.
-fn take_lines(buf: &mut Vec<u8>, chunk: &[u8]) -> Vec<String> {
-    buf.extend_from_slice(chunk);
-    let mut lines = Vec::new();
-    while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
-        lines.push(String::from_utf8_lossy(&buf[..pos]).into_owned());
-        buf.drain(..=pos);
-    }
-    lines
-}
-
 /// Parses and forwards one line. Returns `true` once the stream is
 /// over - the `done` sentinel, a parse failure, or the receiver having
 /// gone away - so the caller knows to stop reading the body.
@@ -312,23 +261,6 @@ impl Model for Ollama {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_line_split_across_chunks_is_carried_to_completion() {
-        let mut buf = Vec::new();
-        assert!(take_lines(&mut buf, b"{\"foo\":1").is_empty());
-        let lines = take_lines(&mut buf, b"}\n{\"bar\":2}\n");
-        assert_eq!(lines, vec!["{\"foo\":1}", "{\"bar\":2}"]);
-        assert!(buf.is_empty());
-    }
-
-    #[test]
-    fn an_unterminated_final_line_is_left_in_the_buffer() {
-        let mut buf = Vec::new();
-        let lines = take_lines(&mut buf, b"{\"foo\":1}\nunterminated");
-        assert_eq!(lines, vec!["{\"foo\":1}"]);
-        assert_eq!(buf, b"unterminated");
-    }
 
     #[test]
     fn a_content_line_parses_as_a_reply_chunk() {
