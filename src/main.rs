@@ -43,6 +43,15 @@ const OPENAI_REASONING: &str = "low";
 /// Where the key is read from.
 const OPENAI_KEY_VAR: &str = "OPENAI_API_KEY";
 
+/// What `percept reflect` asks the model to do. One place to change it,
+/// like the ollama settings above.
+const REFLECT_PROMPT: &str = "Revise the decisions map from recent events. \
+    Search the log for questions raised, options weighed, evidence given, \
+    and decisions taken that the map does not yet hold, then record them \
+    with revise_map, citing the event ids they came from. Remove what no \
+    longer holds, with a reason. Reply with a short summary of what \
+    changed, or say the map already held everything.";
+
 /// How often the status row's spinner advances while a turn streams.
 const SPINNER_TICK: std::time::Duration = std::time::Duration::from_millis(90);
 
@@ -188,6 +197,10 @@ async fn main() {
             }),
         Some(Command::Ask(args)) => match build_app("cli") {
             Ok(app) => cli::ask(args, Box::new(app)).await,
+            Err(err) => Err(err),
+        },
+        Some(Command::Reflect) => match build_app("cli") {
+            Ok(app) => cli::reflect(REFLECT_PROMPT, Box::new(app)).await,
             Err(err) => Err(err),
         },
         None => try_main().await,

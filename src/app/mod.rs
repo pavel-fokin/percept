@@ -20,7 +20,18 @@ pub trait AppService {
     /// Records the user's message and returns a stream of the reply's
     /// chunks. Errs, without recording anything, if a turn is already
     /// streaming or if the event can't be appended to the log.
-    fn submit(&mut self, text: String) -> Result<percept::ReplyStream, Box<dyn std::error::Error>>;
+    fn submit(&mut self, text: String) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
+        self.submit_as(Actor::User, text)
+    }
+
+    /// `submit` with the prompt attributed to `actor`: `System` when
+    /// percept itself asks, as `reflect` does, so the log never says
+    /// the user asked something they did not.
+    fn submit_as(
+        &mut self,
+        actor: Actor,
+        text: String,
+    ) -> Result<percept::ReplyStream, Box<dyn std::error::Error>>;
 
     /// Appends a chunk - thought or reply text - to the in-progress
     /// turn. Neither is an event yet - both are committed once by
@@ -298,11 +309,15 @@ impl App {
 }
 
 impl AppService for App {
-    fn submit(&mut self, text: String) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
+    fn submit_as(
+        &mut self,
+        actor: Actor,
+        text: String,
+    ) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
         if self.pending.is_some() {
             return Err("a reply is already streaming".into());
         }
-        let event = Event::message_received(Actor::User, text, self.source.clone(), None);
+        let event = Event::message_received(actor, text, self.source.clone(), None);
         self.log.append(&event)?;
         let anchor = event.id();
         let start = self.events.len();
@@ -931,6 +946,19 @@ mod tests {
         .unwrap();
 
         assert!(err.to_string().contains("no node kind \"goal\""));
+    }
+
+    #[test]
+    fn a_prompt_submitted_as_system_is_recorded_as_percepts_own() {
+        let (_, mut app) = seeded_app(Vec::new(), Vec::new());
+
+        let _ = app
+            .submit_as(Actor::System, "revise the map".to_string())
+            .unwrap();
+
+        let prompt = app.events().last().unwrap();
+        assert!(prompt.actor() == Actor::System);
+        assert_eq!(content(prompt), "revise the map");
     }
 
     #[test]

@@ -1,8 +1,9 @@
 //! The command-line surface: `percept events publish` appends one event
 //! without opening the TUI, `percept events search` queries the log,
 //! `percept events show` dereferences one event by id, `percept maps`
-//! folds a cognitive map from the log and prints it, and `percept ask`
-//! runs one full turn - including the tool loop - and prints the reply.
+//! folds a cognitive map from the log and prints it, `percept ask`
+//! runs one full turn - including the tool loop - and prints the reply,
+//! and `percept reflect` runs one asking the model to revise its maps.
 //! A presentation-layer peer of `tui` - it forwards parsed input to
 //! `store` and `app`, and has no chat logic of its own: `ask` drives the
 //! same `AppService` turn policy `tui` does, just inline instead of over
@@ -22,8 +23,8 @@ use tokio_stream::StreamExt;
 
 use crate::app::{run_tool, AppService, ToolStep};
 use crate::percept::{
-    Chunk, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload, Schema,
-    SCHEMAS,
+    Actor, Chunk, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
+    Schema, SCHEMAS,
 };
 use crate::shared::Timestamp;
 use crate::store;
@@ -43,7 +44,8 @@ relevance to the caller.
 Run with no arguments to open the TUI. Every subcommand reaches the log \
 without it: `events publish` appends one event, `events search` and \
 `events show` query it, `maps list` and `maps show` print a cognitive \
-map folded from it, and `ask` runs one full turn and prints the reply.")]
+map folded from it, `ask` runs one full turn and prints the reply, and \
+`reflect` runs one turn asking the model to revise its maps.")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -63,6 +65,8 @@ pub enum Command {
     },
     /// Run one turn headlessly and print the reply.
     Ask(AskArgs),
+    /// Run one turn asking the model to revise its maps from the log.
+    Reflect,
 }
 
 #[derive(Subcommand)]
@@ -526,18 +530,38 @@ pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error
     Ok(())
 }
 
-/// Runs one turn on `app` - submitting `prompt`, then draining the reply
-/// stream chunk by chunk - and prints the reply to stdout. No channel,
-/// no spawned task: unlike the TUI, nothing else needs the thread while
-/// headless, so a tool runs inline and the turn is one plain `await`
-/// loop. Each tool call and its result print to stderr as they happen,
-/// so stdout stays pipeable. That trace is for watching a run live; the
-/// log is what a run is read back from.
+/// Runs one turn with the user's prompt and prints the reply.
 pub async fn ask(
     args: AskArgs,
-    mut app: Box<dyn AppService>,
+    app: Box<dyn AppService>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut stream = app.submit(args.prompt)?;
+    run_turn(app, Actor::User, args.prompt).await
+}
+
+/// Runs one turn with percept's own prompt asking the model to revise
+/// its maps, and prints the reply. The prompt commits as a `system`
+/// message: percept asked, not the user, and a later search for what
+/// the user said must not find it.
+pub async fn reflect(
+    prompt: &str,
+    app: Box<dyn AppService>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    run_turn(app, Actor::System, prompt.to_string()).await
+}
+
+/// Runs one turn on `app` - submitting `prompt` as `actor`, then
+/// draining the reply stream chunk by chunk - and prints the reply to
+/// stdout. No channel, no spawned task: unlike the TUI, nothing else
+/// needs the thread while headless, so a tool runs inline and the turn
+/// is one plain `await` loop. Each tool call and its result print to
+/// stderr as they happen, so stdout stays pipeable. That trace is for
+/// watching a run live; the log is what a run is read back from.
+async fn run_turn(
+    mut app: Box<dyn AppService>,
+    actor: Actor,
+    prompt: String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut stream = app.submit_as(actor, prompt)?;
     // What stdout gets. `App` clears its own reply buffer at each tool
     // call and again when the cap ends a turn, so a turn that spoke
     // before calling a tool would otherwise print only its last leg.

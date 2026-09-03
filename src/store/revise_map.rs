@@ -228,7 +228,8 @@ impl Tool for ReviseMap {
     /// for `App` to commit. On success, `content` is one line per
     /// change, in order.
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
-        let args: Args = serde_json::from_str(arguments)?;
+        let args: Args = serde_json::from_str(arguments)
+            .map_err(|e| format!("arguments do not fit revise_map's schema: {e}"))?;
         if args.changes.is_empty() {
             return Err("changes must not be empty".into());
         }
