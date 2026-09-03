@@ -2,6 +2,9 @@
 //! over. A `Schema` says which node and edge kinds a map allows; a
 //! `Map` is folded from the map events in the log, so the log stays
 //! the one source of truth and a map is a view a reader rebuilds.
+//! `Map::apply` turns a `Mutation` into the `Payload` that records it.
+//! Every writer - the CLI, the model's tool - goes through `apply`, so
+//! one place holds the rules.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -59,10 +62,52 @@ pub struct Edge {
     pub sources: Vec<EventId>,
 }
 
-/// Why a stored event doesn't fit its map. Each names the rule and the
-/// value that broke it. Writers check these rules before they append,
-/// so a stored event that breaks one means a race between writers or
-/// a hand-edited log.
+/// Points at a node the way a writer knows it - by kind and name -
+/// rather than by id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NodeRef {
+    pub kind: String,
+    pub name: String,
+}
+
+impl fmt::Display for NodeRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {:?}", self.kind, self.name)
+    }
+}
+
+/// One change a writer asks for. Names nodes by `NodeRef`; the
+/// `Payload` that `apply` returns carries ids.
+pub enum Mutation {
+    AddNode {
+        kind: String,
+        name: String,
+        properties: BTreeMap<String, String>,
+        sources: Vec<EventId>,
+    },
+    RemoveNode {
+        node: NodeRef,
+        reason: String,
+        sources: Vec<EventId>,
+    },
+    AddEdge {
+        kind: String,
+        from: NodeRef,
+        to: NodeRef,
+        sources: Vec<EventId>,
+    },
+    RemoveEdge {
+        kind: String,
+        from: NodeRef,
+        to: NodeRef,
+        sources: Vec<EventId>,
+    },
+}
+
+/// Why a mutation, or a stored event, doesn't fit its map. Each names
+/// the rule and the value that broke it. `apply` checks a mutation
+/// before it becomes an event, so a stored event that breaks a rule
+/// means a race between writers or a hand-edited log.
 #[derive(Debug, PartialEq, Eq)]
 pub enum MapError {
     UnknownNodeKind {
@@ -77,7 +122,9 @@ pub enum MapError {
         kind: String,
         name: String,
     },
-    NoSuchNode(NodeId),
+    NoSuchNode(NodeRef),
+    /// A stored event names a node id the fold never saw.
+    NoSuchNodeId(NodeId),
     DuplicateEdge {
         kind: String,
         from: String,
@@ -111,7 +158,8 @@ impl fmt::Display for MapError {
             Self::DuplicateNode { kind, name } => {
                 write!(f, "{kind} {name:?} is already in the map")
             }
-            Self::NoSuchNode(id) => write!(f, "no node with id {}", id.as_uuid()),
+            Self::NoSuchNode(node) => write!(f, "no {node} in the map"),
+            Self::NoSuchNodeId(id) => write!(f, "no node with id {}", id.as_uuid()),
             Self::DuplicateEdge { kind, from, to } => {
                 write!(f, "{from:?} {kind} {to:?} is already in the map")
             }
@@ -300,8 +348,110 @@ impl Map {
         if self.node(id).is_some() {
             Ok(())
         } else {
-            Err(MapError::NoSuchNode(id))
+            Err(MapError::NoSuchNodeId(id))
         }
+    }
+
+    /// Checks `mutation` against the schema and the map's current
+    /// state, applies it, and returns the `Payload` that records it.
+    /// The caller commits that payload; the map is already updated, so
+    /// a batch can check each step against the ones before it.
+    pub fn apply(&mut self, mutation: Mutation) -> Result<Payload, MapError> {
+        let map = self.schema.name.to_string();
+        let payload = match mutation {
+            Mutation::AddNode {
+                kind,
+                name,
+                properties,
+                sources,
+            } => Payload::NodeAdded {
+                map,
+                node: NodeId::new(),
+                kind,
+                name,
+                properties,
+                sources,
+            },
+            Mutation::RemoveNode {
+                node,
+                reason,
+                sources,
+            } => Payload::NodeRemoved {
+                map,
+                node: self.resolve(node)?,
+                reason,
+                sources,
+            },
+            Mutation::AddEdge {
+                kind,
+                from,
+                to,
+                sources,
+            } => Payload::EdgeAdded {
+                map,
+                kind,
+                from: self.resolve(from)?,
+                to: self.resolve(to)?,
+                sources,
+            },
+            Mutation::RemoveEdge {
+                kind,
+                from,
+                to,
+                sources,
+            } => Payload::EdgeRemoved {
+                map,
+                kind,
+                from: self.resolve(from)?,
+                to: self.resolve(to)?,
+                sources,
+            },
+        };
+        self.replay(&payload)?;
+        Ok(payload)
+    }
+
+    fn resolve(&self, node: NodeRef) -> Result<NodeId, MapError> {
+        self.find(&node.kind, &node.name)
+            .map(|n| n.id)
+            .ok_or(MapError::NoSuchNode(node))
+    }
+}
+
+/// The map as text for a model to read: one line per node, then one
+/// per edge, nodes named by kind and name - the way a writer refers to
+/// them - never by id. Empty for an empty map.
+impl fmt::Display for Map {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for node in &self.nodes {
+            write!(f, "- {} {:?}", node.kind, node.name)?;
+            let mut sep = ": ";
+            for (key, value) in &node.properties {
+                write!(f, "{sep}{key}: {value}")?;
+                sep = "; ";
+            }
+            writeln!(f)?;
+        }
+        for edge in &self.edges {
+            writeln!(
+                f,
+                "- {} {} {}",
+                self.label(edge.from),
+                edge.kind,
+                self.label(edge.to)
+            )?;
+        }
+        Ok(())
+    }
+}
+
+impl Map {
+    /// A node as `Display` names it: kind and quoted name.
+    fn label(&self, id: NodeId) -> String {
+        self.node(id).map_or_else(
+            || id.as_uuid().to_string(),
+            |n| format!("{} {:?}", n.kind, n.name),
+        )
     }
 }
 
@@ -366,6 +516,31 @@ mod tests {
             edge_added("decisions", "resolves", ids[2], ids[0]),
         ];
         (ids, events)
+    }
+
+    fn node_ref(kind: &str, name: &str) -> NodeRef {
+        NodeRef {
+            kind: kind.to_string(),
+            name: name.to_string(),
+        }
+    }
+
+    fn add_node(kind: &str, name: &str) -> Mutation {
+        Mutation::AddNode {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            properties: BTreeMap::new(),
+            sources: Vec::new(),
+        }
+    }
+
+    fn add_edge(kind: &str, from: NodeRef, to: NodeRef) -> Mutation {
+        Mutation::AddEdge {
+            kind: kind.to_string(),
+            from,
+            to,
+            sources: Vec::new(),
+        }
     }
 
     fn rejected_with(err: MapError, expected: EventId) -> MapError {
@@ -491,7 +666,7 @@ mod tests {
         let err = Map::fold(&DECISIONS, &with_dangling).err().unwrap();
         assert!(matches!(
             rejected_with(err, dangling_id),
-            MapError::NoSuchNode(_)
+            MapError::NoSuchNodeId(_)
         ));
 
         let twice = edge_added("decisions", "resolves", ids[2], ids[0]);
@@ -528,6 +703,121 @@ mod tests {
             rejected_with(err, stray_id),
             MapError::NoSuchEdge { .. }
         ));
+    }
+
+    #[test]
+    fn apply_records_what_a_fold_rebuilds() {
+        let mut built = Map::empty(&DECISIONS);
+        let events: Vec<Event> = vec![
+            add_node("question", "Which language?"),
+            add_node("decision", "Rust over Go"),
+            add_edge(
+                "resolves",
+                node_ref("decision", "Rust over Go"),
+                node_ref("question", "Which language?"),
+            ),
+        ]
+        .into_iter()
+        .map(|m| committed(built.apply(m).unwrap()))
+        .collect();
+
+        let folded = Map::fold(&DECISIONS, &events).unwrap();
+
+        let decision = folded.find("decision", "Rust over Go").unwrap();
+        assert!(decision.id == built.find("decision", "Rust over Go").unwrap().id);
+        assert_eq!(folded.edges().len(), 1);
+        assert!(folded.edges()[0].from == decision.id);
+    }
+
+    #[test]
+    fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
+        let mut map = Map::empty(&DECISIONS);
+        map.apply(add_node("option", "Rust")).unwrap();
+
+        let unknown = map.apply(add_node("goal", "Ship")).err().unwrap();
+        let duplicate = map.apply(add_node("option", "Rust")).err().unwrap();
+        let missing = map
+            .apply(add_edge(
+                "supports",
+                node_ref("evidence", "Nope"),
+                node_ref("option", "Rust"),
+            ))
+            .err()
+            .unwrap();
+        let no_edge = map
+            .apply(Mutation::RemoveEdge {
+                kind: "supports".to_string(),
+                from: node_ref("option", "Rust"),
+                to: node_ref("option", "Rust"),
+                sources: Vec::new(),
+            })
+            .err()
+            .unwrap();
+
+        assert!(matches!(unknown, MapError::UnknownNodeKind { .. }));
+        assert!(matches!(duplicate, MapError::DuplicateNode { .. }));
+        assert_eq!(missing, MapError::NoSuchNode(node_ref("evidence", "Nope")));
+        assert_eq!(missing.to_string(), "no evidence \"Nope\" in the map");
+        assert!(matches!(no_edge, MapError::NoSuchEdge { .. }));
+        assert_eq!(map.nodes().len(), 1);
+        assert!(map.edges().is_empty());
+    }
+
+    #[test]
+    fn apply_removes_a_node_by_name_and_its_edges_with_it() {
+        let mut map = Map::empty(&DECISIONS);
+        map.apply(add_node("question", "Which language?")).unwrap();
+        map.apply(add_node("decision", "Rust over Go")).unwrap();
+        map.apply(add_edge(
+            "resolves",
+            node_ref("decision", "Rust over Go"),
+            node_ref("question", "Which language?"),
+        ))
+        .unwrap();
+
+        let payload = map
+            .apply(Mutation::RemoveNode {
+                node: node_ref("question", "Which language?"),
+                reason: "answered".to_string(),
+                sources: Vec::new(),
+            })
+            .unwrap();
+
+        assert!(matches!(payload, Payload::NodeRemoved { .. }));
+        assert_eq!(map.nodes().len(), 1);
+        assert!(map.edges().is_empty());
+    }
+
+    #[test]
+    fn a_map_reads_as_one_line_per_node_then_per_edge() {
+        let mut map = Map::empty(&DECISIONS);
+        map.apply(add_node("question", "Which language?")).unwrap();
+        map.apply(Mutation::AddNode {
+            kind: "evidence".to_string(),
+            name: "Built both".to_string(),
+            properties: BTreeMap::from([
+                ("summary".to_string(), "side by side".to_string()),
+                ("when".to_string(), "August".to_string()),
+            ]),
+            sources: Vec::new(),
+        })
+        .unwrap();
+        map.apply(add_node("decision", "Rust over Go")).unwrap();
+        map.apply(add_edge(
+            "resolves",
+            node_ref("decision", "Rust over Go"),
+            node_ref("question", "Which language?"),
+        ))
+        .unwrap();
+
+        assert_eq!(
+            map.to_string(),
+            "- question \"Which language?\"\n\
+             - evidence \"Built both\": summary: side by side; when: August\n\
+             - decision \"Rust over Go\"\n\
+             - decision \"Rust over Go\" resolves question \"Which language?\"\n"
+        );
+        assert_eq!(Map::empty(&DECISIONS).to_string(), "");
     }
 
     #[test]

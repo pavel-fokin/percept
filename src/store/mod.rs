@@ -16,6 +16,6 @@ pub use event::{
     PREVIEW_CHARS,
 };
 pub use jsonl::Jsonl;
-pub use map::{encode_edge, encode_map, encode_node, fold_map};
+pub use map::{encode_edge, encode_map, encode_node, fold_map, revise};
 pub use read_event::{read, ReadEvent};
 pub use search_events::SearchEvents;

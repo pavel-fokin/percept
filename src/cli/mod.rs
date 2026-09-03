@@ -14,15 +14,20 @@
 //! so a caller spends tokens on the whole of one deliberately, via
 //! `--full`, `show`, or `show --range` into one `content`.
 
+use std::collections::BTreeMap;
 use std::io::{self, Write};
 
 use clap::{Args, Parser, Subcommand};
 use tokio_stream::StreamExt;
 
 use crate::app::{run_tool, AppService, ToolStep};
-use crate::percept::{Chunk, EventLog, EventQuery, EventSearch, Map, Schema, SCHEMAS};
+use crate::percept::{
+    Chunk, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload, Schema,
+    SCHEMAS,
+};
 use crate::shared::Timestamp;
 use crate::store;
+use crate::store::Jsonl;
 
 #[derive(Parser)]
 #[command(name = "percept")]
@@ -66,12 +71,85 @@ pub enum MapsCommand {
     List,
     /// One map's nodes, then its edges, one JSON object per line.
     Show(ShowMapArgs),
+    /// Add a node to a map. Prints the minted node id.
+    AddNode(AddNodeArgs),
+    /// Add an edge between two nodes already in a map.
+    AddEdge(AddEdgeArgs),
+    /// Remove a node from a map, dropping the edges that touch it.
+    RemoveNode(RemoveNodeArgs),
+    /// Remove an edge from a map.
+    RemoveEdge(RemoveEdgeArgs),
 }
 
 #[derive(Args)]
 pub struct ShowMapArgs {
     /// The map's name, as `maps list` prints it.
     map: String,
+}
+
+#[derive(Args)]
+pub struct AddNodeArgs {
+    /// The map's name, as `maps list` prints it.
+    map: String,
+    #[arg(long, value_parser = non_blank)]
+    kind: String,
+    #[arg(long, value_parser = non_blank)]
+    name: String,
+    /// Repeatable `key=value`.
+    #[arg(long = "prop", value_parser = parse_prop)]
+    prop: Vec<(String, String)>,
+    /// Repeatable. An event this fact was drawn from.
+    #[arg(long)]
+    source: Vec<String>,
+}
+
+#[derive(Args)]
+pub struct AddEdgeArgs {
+    /// The map's name, as `maps list` prints it.
+    map: String,
+    #[arg(long, value_parser = non_blank)]
+    kind: String,
+    /// `kind:name` of the node the edge starts at.
+    #[arg(long, value_parser = parse_node_ref)]
+    from: NodeRef,
+    /// `kind:name` of the node the edge points to.
+    #[arg(long, value_parser = parse_node_ref)]
+    to: NodeRef,
+    /// Repeatable. An event this fact was drawn from.
+    #[arg(long)]
+    source: Vec<String>,
+}
+
+#[derive(Args)]
+pub struct RemoveNodeArgs {
+    /// The map's name, as `maps list` prints it.
+    map: String,
+    #[arg(long, value_parser = non_blank)]
+    kind: String,
+    #[arg(long, value_parser = non_blank)]
+    name: String,
+    #[arg(long, value_parser = non_blank)]
+    reason: String,
+    /// Repeatable. An event this fact was drawn from.
+    #[arg(long)]
+    source: Vec<String>,
+}
+
+#[derive(Args)]
+pub struct RemoveEdgeArgs {
+    /// The map's name, as `maps list` prints it.
+    map: String,
+    #[arg(long, value_parser = non_blank)]
+    kind: String,
+    /// `kind:name` of the node the edge starts at.
+    #[arg(long, value_parser = parse_node_ref)]
+    from: NodeRef,
+    /// `kind:name` of the node the edge points to.
+    #[arg(long, value_parser = parse_node_ref)]
+    to: NodeRef,
+    /// Repeatable. An event this fact was drawn from.
+    #[arg(long)]
+    source: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -204,6 +282,27 @@ fn non_blank(s: &str) -> Result<String, String> {
     Ok(s.to_string())
 }
 
+/// Parses `--prop key=value`, split on the first `=` so a value may
+/// carry one itself.
+fn parse_prop(s: &str) -> Result<(String, String), String> {
+    let (key, value) = s
+        .split_once('=')
+        .ok_or_else(|| format!("invalid --prop {s:?}, expected key=value"))?;
+    Ok((non_blank(key)?, value.to_string()))
+}
+
+/// Parses `kind:name` for `--from`/`--to`, split on the first `:` so a
+/// name may carry one itself.
+fn parse_node_ref(s: &str) -> Result<NodeRef, String> {
+    let (kind, name) = s
+        .split_once(':')
+        .ok_or_else(|| format!("invalid {s:?}, expected kind:name"))?;
+    Ok(NodeRef {
+        kind: kind.to_string(),
+        name: name.to_string(),
+    })
+}
+
 /// Appends one event built from `args` to `log`. `store` owns the
 /// decode, so the CLI only parses flags.
 pub fn publish(args: PublishArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
@@ -257,14 +356,104 @@ pub fn maps_show(
     args: ShowMapArgs,
     log: &dyn EventSearch,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let schema = Schema::named(&args.map).ok_or_else(|| {
-        let known: Vec<_> = SCHEMAS.iter().map(|schema| schema.name).collect();
-        format!("no map named {}; maps are {}", args.map, known.join(", "))
-    })?;
+    let schema = find_schema(&args.map)?;
     let map = store::fold_map(log, schema)?;
     let nodes = map.nodes().iter().map(store::encode_node);
     let edges = map.edges().iter().map(store::encode_edge);
     print_lines(nodes.chain(edges))
+}
+
+/// The schema `name` names, among the ones percept knows. A name it
+/// doesn't recognize is an error listing the ones it does - the lookup
+/// every `maps` subcommand shares.
+fn find_schema(name: &str) -> Result<&'static Schema, String> {
+    Schema::named(name).ok_or_else(|| {
+        let known: Vec<_> = SCHEMAS.iter().map(|schema| schema.name).collect();
+        format!("no map named {name}; maps are {}", known.join(", "))
+    })
+}
+
+/// Each `--source` id, parsed and checked against `log`: a typo in
+/// provenance is worse than none, so a made-up id fails here rather
+/// than being appended silently.
+fn parse_sources(ids: &[String], log: &Jsonl) -> Result<Vec<EventId>, Box<dyn std::error::Error>> {
+    ids.iter()
+        .map(|id| {
+            let parsed = store::parse_event_id(id)?;
+            log.get(parsed)?
+                .ok_or_else(|| format!("no event with id {id}"))?;
+            Ok(parsed)
+        })
+        .collect()
+}
+
+/// Adds a node to a map and prints its minted id, so a shell script can
+/// capture it.
+pub fn maps_add_node(args: AddNodeArgs, log: &Jsonl) -> Result<(), Box<dyn std::error::Error>> {
+    let schema = find_schema(&args.map)?;
+    let sources = parse_sources(&args.source, log)?;
+    let mutation = Mutation::AddNode {
+        kind: args.kind,
+        name: args.name,
+        properties: args.prop.into_iter().collect::<BTreeMap<_, _>>(),
+        sources,
+    };
+    let event = store::revise(log, schema, mutation)?;
+    let Payload::NodeAdded { node, .. } = event.payload() else {
+        unreachable!("revise(AddNode) always returns NodeAdded")
+    };
+    println!("{}", node.as_uuid());
+    Ok(())
+}
+
+/// Adds an edge between two nodes already in a map.
+pub fn maps_add_edge(args: AddEdgeArgs, log: &Jsonl) -> Result<(), Box<dyn std::error::Error>> {
+    let schema = find_schema(&args.map)?;
+    let sources = parse_sources(&args.source, log)?;
+    let mutation = Mutation::AddEdge {
+        kind: args.kind,
+        from: args.from,
+        to: args.to,
+        sources,
+    };
+    store::revise(log, schema, mutation)?;
+    Ok(())
+}
+
+/// Removes a node from a map, dropping the edges that touch it.
+pub fn maps_remove_node(
+    args: RemoveNodeArgs,
+    log: &Jsonl,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let schema = find_schema(&args.map)?;
+    let sources = parse_sources(&args.source, log)?;
+    let mutation = Mutation::RemoveNode {
+        node: NodeRef {
+            kind: args.kind,
+            name: args.name,
+        },
+        reason: args.reason,
+        sources,
+    };
+    store::revise(log, schema, mutation)?;
+    Ok(())
+}
+
+/// Removes an edge from a map.
+pub fn maps_remove_edge(
+    args: RemoveEdgeArgs,
+    log: &Jsonl,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let schema = find_schema(&args.map)?;
+    let sources = parse_sources(&args.source, log)?;
+    let mutation = Mutation::RemoveEdge {
+        kind: args.kind,
+        from: args.from,
+        to: args.to,
+        sources,
+    };
+    store::revise(log, schema, mutation)?;
+    Ok(())
 }
 
 /// A reader that stops early - `head`, or a `jq` that has seen enough -
@@ -587,6 +776,35 @@ mod tests {
     fn a_range_with_no_colon_is_rejected_at_parse() {
         let bad = Cli::try_parse_from(["percept", "events", "show", "abc", "--range", "400"]);
         assert!(bad.is_err());
+    }
+
+    #[test]
+    fn a_prop_splits_on_the_first_equals_sign() {
+        let (key, value) = parse_prop("summary=a=b").unwrap();
+        assert_eq!(key, "summary");
+        assert_eq!(value, "a=b");
+    }
+
+    #[test]
+    fn a_prop_with_no_equals_sign_is_rejected() {
+        assert!(parse_prop("summary").is_err());
+    }
+
+    #[test]
+    fn a_prop_with_a_blank_key_is_rejected() {
+        assert!(parse_prop("=value").is_err());
+    }
+
+    #[test]
+    fn a_node_ref_splits_on_the_first_colon() {
+        let node = parse_node_ref("option:Rust:the language").unwrap();
+        assert_eq!(node.kind, "option");
+        assert_eq!(node.name, "Rust:the language");
+    }
+
+    #[test]
+    fn a_node_ref_with_no_colon_is_rejected() {
+        assert!(parse_node_ref("option").is_err());
     }
 
     fn ask_args(prompt: &str) -> AskArgs {

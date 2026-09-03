@@ -1,13 +1,16 @@
-//! A cognitive map on the wire: folding one from the log and printing
-//! it as JSONL, so `maps show` pipes into `jq` the way `events search`
-//! does.
+//! A cognitive map on the wire: folding one from the log, printing it
+//! as JSONL so `maps show` pipes into `jq` the way `events search`
+//! does, and revising it - a writer's one `Mutation` folded, applied,
+//! and appended as the `Event` that records it.
 
 use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::percept::{Edge, EventKind, EventQuery, EventSearch, Map, Node, Schema};
+use crate::percept::{Actor, Edge, Event, EventKind, EventLog, EventQuery, EventSearch};
+use crate::percept::{Map, Mutation, Node, Schema};
 use crate::store::event::ids;
+use crate::store::Jsonl;
 
 /// Folds `schema`'s map from every map event in `search`.
 pub fn fold_map(
@@ -25,6 +28,23 @@ pub fn fold_map(
     };
     let events = search.search(&query)?;
     Ok(Map::fold(schema, &events)?)
+}
+
+/// Folds `schema`'s map from `log`, applies `mutation` to it, and
+/// appends the `Payload` that records the change - actor `user`,
+/// source `cli`, no cause: a shell user's own change. Every rule the
+/// mutation must pass lives in `Map::apply`, not here. The fold and
+/// the append are not one locked step, so two shells racing to add
+/// the same name can both succeed; the next fold then fails loudly.
+pub fn revise(
+    log: &Jsonl,
+    schema: &'static Schema,
+    mutation: Mutation,
+) -> Result<Event, Box<dyn std::error::Error>> {
+    let mut map = fold_map(log, schema)?;
+    let event = Event::new(Actor::User, "cli".to_string(), None, map.apply(mutation)?);
+    log.append(&event)?;
+    Ok(event)
 }
 
 #[derive(Serialize)]
@@ -85,7 +105,85 @@ pub fn encode_edge(edge: &Edge) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percept::{EventId, NodeId};
+    use crate::percept::{EventId, NodeId, Payload, Schema};
+    use std::fs;
+    use std::path::PathBuf;
+    use uuid::Uuid;
+
+    /// A log file on a temp path, removed when the test ends - a
+    /// trailing `remove_file` never runs on the failing test, which is
+    /// the one whose file you'd want gone.
+    struct TempLog {
+        path: PathBuf,
+    }
+
+    impl TempLog {
+        fn new() -> Self {
+            Self {
+                path: std::env::temp_dir().join(format!("percept-map-{}.jsonl", Uuid::now_v7())),
+            }
+        }
+
+        fn open(&self) -> Jsonl {
+            Jsonl::open(&self.path).unwrap()
+        }
+    }
+
+    impl Drop for TempLog {
+        fn drop(&mut self) {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+
+    fn decisions() -> &'static Schema {
+        Schema::named("decisions").unwrap()
+    }
+
+    fn add_node(kind: &str, name: &str) -> Mutation {
+        Mutation::AddNode {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            properties: BTreeMap::new(),
+            sources: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn revise_appends_the_event_the_mutation_produces() {
+        let temp = TempLog::new();
+        let log = temp.open();
+
+        let event = revise(&log, decisions(), add_node("option", "Rust")).unwrap();
+
+        assert!(matches!(event.payload(), Payload::NodeAdded { name, .. } if name == "Rust"));
+        let map = fold_map(&log, decisions()).unwrap();
+        assert!(map.find("option", "Rust").is_some());
+    }
+
+    #[test]
+    fn revise_folds_before_applying_so_a_second_call_sees_the_first() {
+        let temp = TempLog::new();
+        let log = temp.open();
+        revise(&log, decisions(), add_node("option", "Rust")).unwrap();
+
+        let err = revise(&log, decisions(), add_node("option", "Rust"))
+            .err()
+            .unwrap();
+
+        assert_eq!(err.to_string(), "option \"Rust\" is already in the map");
+        let map = fold_map(&log, decisions()).unwrap();
+        assert_eq!(map.nodes().len(), 1);
+    }
+
+    #[test]
+    fn a_refused_mutation_appends_nothing() {
+        let temp = TempLog::new();
+        let log = temp.open();
+
+        assert!(revise(&log, decisions(), add_node("goal", "Ship")).is_err());
+
+        assert!(fold_map(&log, decisions()).unwrap().nodes().is_empty());
+    }
 
     #[test]
     fn a_node_line_carries_its_id_and_sources_as_uuids() {

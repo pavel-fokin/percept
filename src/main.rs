@@ -180,6 +180,10 @@ async fn main() {
             .and_then(|log| match command {
                 MapsCommand::List => cli::maps_list(&log),
                 MapsCommand::Show(args) => cli::maps_show(args, &log),
+                MapsCommand::AddNode(args) => cli::maps_add_node(args, &log),
+                MapsCommand::AddEdge(args) => cli::maps_add_edge(args, &log),
+                MapsCommand::RemoveNode(args) => cli::maps_remove_node(args, &log),
+                MapsCommand::RemoveEdge(args) => cli::maps_remove_edge(args, &log),
             }),
         Some(Command::Ask(args)) => match build_app("cli") {
             Ok(app) => cli::ask(args, Box::new(app)).await,
