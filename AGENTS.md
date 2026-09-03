@@ -2,39 +2,46 @@
 
 ## Purpose
 
-`percept` is an experimental harness that aims to implement
-the following cognitive arhitecure.
+`percept` is an experimental harness for one cognitive architecture: an
+agent keeps an immutable history of experience and a mutable set of
+maps built from it. A map is an explicit external representation - a
+decision map, a task map, a glossary - and each kind makes a different
+reasoning operation cheap. The shape comes from Recursive Language
+Models (arxiv.org/abs/2512.24601), where a model holds a corpus as an
+environment and writes programs over it instead of reading it as
+prompt text.
 
-An agent has an immutable history of experience and a mutable set of explicit
-external representations constructed from that experience.
-Different representations make different reasoning operations cheap.
+    Experience Log
+           │
+           │ search
+           ▼
+          LLM
+           │
+           │ constructs / revises
+           ▼
+    ┌────────────────────┐
+    │ Maps               │
+    │   decisions        │
+    │   tasks            │
+    │   glossary         │
+    │   taxonomy         │
+    │   domain           │
+    │   ...              │
+    └────────────────────┘
+           │
+           │ commits
+           ▼
+    Cognitive History
 
-Experience Log
-       │
-       │ search
-       ▼
-      LLM
-       │
-       │ constructs / revises
-       ▼
-┌────────────────────────────┐
-│ External Representations   │
-│                            │
-│ taxonomy                   │
-│ glossary                   │
-│ decision model             │
-│ task model                 │
-│ causal model               │
-│ ...                        │
-└────────────────────────────┘
-       │
-       │ cognitive commits
-       ▼
-Cognitive History
-
-The shape comes from Recursive Language Models (arxiv.org/abs/2512.24601),
-where a model holds a corpus as an environment and writes programs over it
-instead of reading it as prompt text.
+The experience log is percept's event log. It never ranks, summarises,
+or answers: the model judges relevance, and percept's job is to make
+looking cheap, so output is constant-size per event by default. A map
+is where the model's own summaries live. Every change to a map is a
+cognitive commit - one event in the same log, citing the experience it
+was derived from. A map is folded from those commits, so the cognitive
+history rebuilds it deterministically; the experience alone does not,
+because a second pass through the model gives a different map. The
+model builds maps today. The user will build and co-own them.
 
 ## Domain
 
