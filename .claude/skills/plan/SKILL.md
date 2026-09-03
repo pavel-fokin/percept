@@ -50,8 +50,8 @@ Verify: <how to confirm the outcome>
    files, build yourself. Hand anything larger to the
    `software-developer` subagent, one issue at a time.
 3. **Review here.** Check the diff against the issue's outcome and
-   decisions. Then run `/code-review` for bugs. `/simplify` runs once
-   per branch, before it merges - not per issue.
+   decisions. `/code-review` and `/simplify` each run once per branch,
+   before it merges - not per issue.
 4. **Fix.** Small corrections: apply them yourself. Larger rework: send
    it back to `software-developer` with the specifics.
 5. **Commit.** Re-run the build and tests yourself first. One commit per

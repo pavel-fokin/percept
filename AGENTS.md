@@ -138,9 +138,11 @@ log only for an error or a security event.
 Use conventional commit messages under 72 chars. Skip the body -- subject
 line only. One commit per issue.
 
-Work happens on a branch. Merging it into main is the user's call, not
-the agent's - hand back a reviewed branch and stop there. The same holds
-for pushing.
+Work happens on a branch. Check which one is checked out before the
+first commit - a status snapshot from the start of a session can be
+stale - and branch off main if that is where you are. Merging into main
+is the user's call, not the agent's - hand back a reviewed branch and
+stop there. The same holds for pushing.
 
 ## Writing
 
