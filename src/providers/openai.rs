@@ -270,14 +270,13 @@ fn parse_line(line: &str, model: &str) -> Result<Line, Box<dyn Error + Send + Sy
     })
 }
 
-/// Tokens of context a known OpenAI model holds, matched by name prefix
-/// since a family (Sol, Terra, Luna, ...) shares one window. `None` for
-/// a name this table doesn't recognize - not a guess.
+/// Tokens of context a known OpenAI model holds - the GPT-5.6 family
+/// (Sol, Terra, Luna) all share one window. `None` for a name this
+/// table doesn't recognize - not a guess.
 fn context_window(model: &str) -> Option<u32> {
-    if model.starts_with("gpt-5.6") {
-        Some(1_050_000)
-    } else {
-        None
+    match model {
+        "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => Some(1_050_000),
+        _ => None,
     }
 }
 

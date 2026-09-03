@@ -102,7 +102,6 @@ pub trait AppService {
     /// `model.called` commits, and never before.
     fn last_usage(&self) -> Option<&percept::Usage>;
 
-    /// Tokens of context the model holds, when it's known.
     fn context_window(&self) -> Option<u32>;
 
     /// The model's own name, available before any turn asks.
@@ -192,9 +191,11 @@ pub struct App {
     map_shape: MapShape,
     /// The turn now streaming, or None between turns.
     pending: Option<Turn>,
-    /// What the most recent round trip cost - the last `model.called`
-    /// committed, not a running total.
-    last_usage: Option<percept::Usage>,
+    /// Where the most recent `model.called` landed in `events` - the
+    /// last round trip's cost, not a running total. `None` until this
+    /// session commits its first one; a reopened log's own history
+    /// doesn't set it.
+    last_usage: Option<usize>,
 }
 
 impl App {
@@ -413,10 +414,10 @@ impl App {
             self.with_pending(|turn| turn.reply.clear());
         }
         if let Some(usage) = usage {
-            let event = Event::model_called(usage.clone(), self.source.clone(), cause);
+            let event = Event::model_called(usage, self.source.clone(), cause);
             self.commit(event)?;
             self.with_pending(|turn| turn.usage = None);
-            self.last_usage = Some(usage);
+            self.last_usage = Some(self.events.len() - 1);
         }
         Ok(())
     }
@@ -531,7 +532,10 @@ impl AppService for App {
     }
 
     fn last_usage(&self) -> Option<&percept::Usage> {
-        self.last_usage.as_ref()
+        match self.events[self.last_usage?].payload() {
+            percept::Payload::ModelCalled(usage) => Some(usage),
+            _ => None,
+        }
     }
 
     fn context_window(&self) -> Option<u32> {

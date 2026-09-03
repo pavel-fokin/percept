@@ -255,17 +255,15 @@ fn status(chat: &Chat, width: usize) -> Vec<Line<'static>> {
 /// has asked it - the last round trip's input tokens against its
 /// context window, when the window is known.
 fn model_status(chat: &Chat) -> Line<'static> {
-    let name = chat.app.model_name().to_string();
-    let body = match chat.app.last_usage() {
-        None => name,
-        Some(usage) => match chat.app.context_window() {
-            Some(window) => format!(
-                "{name} · {} / {} tokens",
-                thousands(usage.input_tokens),
-                thousands(window as u64)
-            ),
-            None => format!("{name} · {} tokens", thousands(usage.input_tokens)),
-        },
+    let name = chat.app.model_name();
+    let body = match (chat.app.last_usage(), chat.app.context_window()) {
+        (None, _) => name.to_string(),
+        (Some(usage), Some(window)) => format!(
+            "{name} · {} / {} tokens",
+            thousands(usage.input_tokens),
+            thousands(window as u64)
+        ),
+        (Some(usage), None) => format!("{name} · {} tokens", thousands(usage.input_tokens)),
     };
     Line::from(Span::styled(body, chat.hint_style))
 }
