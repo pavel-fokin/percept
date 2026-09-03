@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{EventId, EventLog, EventSearch, Map, Mutation, NodeRef, Payload, Schema};
-use crate::percept::{Tool, ToolOutput, ToolSpec, SCHEMAS};
-use crate::store::{fold_map, parse_event_id};
+use crate::percept::{EventLog, Mutation, NodeRef, Payload, Schema};
+use crate::percept::{Tool, ToolOutput, ToolSpec};
+use crate::store::Snapshot;
 
 /// The `revise_map` tool: checks a batch of changes to one map against
 /// its current state, in order, and hands back the payloads to commit -
@@ -13,12 +13,11 @@ use crate::store::{fold_map, parse_event_id};
 /// tool never writes the log itself.
 pub struct ReviseMap {
     log: Arc<dyn EventLog>,
-    search: Arc<dyn EventSearch>,
 }
 
 impl ReviseMap {
-    pub fn new(log: Arc<dyn EventLog>, search: Arc<dyn EventSearch>) -> Self {
-        Self { log, search }
+    pub fn new(log: Arc<dyn EventLog>) -> Self {
+        Self { log }
     }
 }
 
@@ -189,27 +188,6 @@ struct Args {
     changes: Vec<ChangeArgs>,
 }
 
-impl ReviseMap {
-    /// Each id resolved to the event it names - `no event with id ...`
-    /// when the log doesn't carry it, the same check `read_event` makes.
-    /// A value that is not an id at all gets told where ids come from:
-    /// the transcript shows no ids, so a model that has not searched
-    /// has none to cite and tends to invent one.
-    fn resolve(&self, ids: Vec<String>) -> Result<Vec<EventId>, Box<dyn std::error::Error>> {
-        ids.iter()
-            .map(|id| {
-                let parsed = parse_event_id(id).map_err(|_| {
-                    format!("{id:?} is not an event id; cite ids from search_events results")
-                })?;
-                self.log
-                    .get(parsed)?
-                    .ok_or_else(|| format!("no event with id {id}"))?;
-                Ok(parsed)
-            })
-            .collect()
-    }
-}
-
 impl Tool for ReviseMap {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
@@ -233,26 +211,15 @@ impl Tool for ReviseMap {
         if args.changes.is_empty() {
             return Err("changes must not be empty".into());
         }
-        let schema = Schema::named(&args.map).ok_or_else(|| {
-            format!(
-                "unknown map {:?}; maps are {}",
-                args.map,
-                SCHEMAS
-                    .iter()
-                    .map(|schema| schema.name)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )
-        })?;
+        let schema = Schema::find(&args.map)?;
 
-        let mut map = fold_map(self.search.as_ref(), schema)?;
+        let mut snapshot = Snapshot::load(self.log.as_ref(), schema)?;
         let mut lines = Vec::with_capacity(args.changes.len());
         let mut commits = Vec::with_capacity(args.changes.len());
 
         for (index, change) in args.changes.into_iter().enumerate() {
-            let (line, payload) = self
-                .apply(&mut map, change)
-                .map_err(|err| format!("change {index}: {err}"))?;
+            let (line, payload) =
+                apply(&mut snapshot, change).map_err(|err| format!("change {index}: {err}"))?;
             lines.push(line);
             commits.push(payload);
         }
@@ -264,88 +231,85 @@ impl Tool for ReviseMap {
     }
 }
 
-impl ReviseMap {
-    /// Turns one `ChangeArgs` into the `Mutation` `Map::apply` checks,
-    /// and describes what it recorded - a node's minted id comes from
-    /// the `Payload` `apply` returns, since nothing else knows it yet.
-    fn apply(
-        &self,
-        map: &mut Map,
-        change: ChangeArgs,
-    ) -> Result<(String, Payload), Box<dyn std::error::Error>> {
-        match change {
-            ChangeArgs::AddNode {
+/// Turns one `ChangeArgs` into the `Mutation` `Map::apply` checks, and
+/// describes what it recorded - a node's minted id comes from the
+/// `Payload` `apply` returns, since nothing else knows it yet.
+fn apply(
+    snapshot: &mut Snapshot,
+    change: ChangeArgs,
+) -> Result<(String, Payload), Box<dyn std::error::Error>> {
+    match change {
+        ChangeArgs::AddNode {
+            kind,
+            name,
+            properties,
+            sources,
+        } => {
+            let node_ref = NodeRef {
+                kind: kind.clone(),
+                name: name.clone(),
+            };
+            let mutation = Mutation::AddNode {
                 kind,
                 name,
                 properties,
-                sources,
-            } => {
-                let node_ref = NodeRef {
-                    kind: kind.clone(),
-                    name: name.clone(),
-                };
-                let mutation = Mutation::AddNode {
-                    kind,
-                    name,
-                    properties,
-                    sources: self.resolve(sources)?,
-                };
-                let payload = map.apply(mutation)?;
-                let id = match &payload {
-                    Payload::NodeAdded { node, .. } => node.as_uuid(),
-                    _ => unreachable!("AddNode always applies to a NodeAdded payload"),
-                };
-                Ok((format!("added {node_ref} as {id}"), payload))
-            }
-            ChangeArgs::RemoveNode {
-                kind,
-                name,
+                sources: snapshot.resolve(&sources)?,
+            };
+            let payload = snapshot.map().apply(mutation)?;
+            let id = match &payload {
+                Payload::NodeAdded { node, .. } => node.as_uuid(),
+                _ => unreachable!("AddNode always applies to a NodeAdded payload"),
+            };
+            Ok((format!("added {node_ref} as {id}"), payload))
+        }
+        ChangeArgs::RemoveNode {
+            kind,
+            name,
+            reason,
+            sources,
+        } => {
+            let node_ref = NodeRef { kind, name };
+            let mutation = Mutation::RemoveNode {
+                node: node_ref.clone(),
                 reason,
-                sources,
-            } => {
-                let node_ref = NodeRef { kind, name };
-                let mutation = Mutation::RemoveNode {
-                    node: node_ref.clone(),
-                    reason,
-                    sources: self.resolve(sources)?,
-                };
-                let payload = map.apply(mutation)?;
-                Ok((format!("removed {node_ref}"), payload))
-            }
-            ChangeArgs::AddEdge {
-                kind,
-                from,
-                to,
-                sources,
-            } => {
-                let from: NodeRef = from.into();
-                let to: NodeRef = to.into();
-                let mutation = Mutation::AddEdge {
-                    kind: kind.clone(),
-                    from: from.clone(),
-                    to: to.clone(),
-                    sources: self.resolve(sources)?,
-                };
-                let payload = map.apply(mutation)?;
-                Ok((format!("added edge {from} {kind} {to}"), payload))
-            }
-            ChangeArgs::RemoveEdge {
-                kind,
-                from,
-                to,
-                sources,
-            } => {
-                let from: NodeRef = from.into();
-                let to: NodeRef = to.into();
-                let mutation = Mutation::RemoveEdge {
-                    kind: kind.clone(),
-                    from: from.clone(),
-                    to: to.clone(),
-                    sources: self.resolve(sources)?,
-                };
-                let payload = map.apply(mutation)?;
-                Ok((format!("removed edge {from} {kind} {to}"), payload))
-            }
+                sources: snapshot.resolve(&sources)?,
+            };
+            let payload = snapshot.map().apply(mutation)?;
+            Ok((format!("removed {node_ref}"), payload))
+        }
+        ChangeArgs::AddEdge {
+            kind,
+            from,
+            to,
+            sources,
+        } => {
+            let from: NodeRef = from.into();
+            let to: NodeRef = to.into();
+            let mutation = Mutation::AddEdge {
+                kind: kind.clone(),
+                from: from.clone(),
+                to: to.clone(),
+                sources: snapshot.resolve(&sources)?,
+            };
+            let payload = snapshot.map().apply(mutation)?;
+            Ok((format!("added edge {from} {kind} {to}"), payload))
+        }
+        ChangeArgs::RemoveEdge {
+            kind,
+            from,
+            to,
+            sources,
+        } => {
+            let from: NodeRef = from.into();
+            let to: NodeRef = to.into();
+            let mutation = Mutation::RemoveEdge {
+                kind: kind.clone(),
+                from: from.clone(),
+                to: to.clone(),
+                sources: snapshot.resolve(&sources)?,
+            };
+            let payload = snapshot.map().apply(mutation)?;
+            Ok((format!("removed edge {from} {kind} {to}"), payload))
         }
     }
 }
@@ -353,12 +317,12 @@ impl ReviseMap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percept::{Actor, Event};
+    use crate::percept::{Actor, Event, EventId};
     use crate::testing::FakeLog;
 
     fn tool(events: Vec<Event>) -> ReviseMap {
         let log = Arc::new(FakeLog::seeded(events));
-        ReviseMap::new(log.clone(), log)
+        ReviseMap::new(log)
     }
 
     #[test]
@@ -427,11 +391,7 @@ mod tests {
 
         assert!(err.to_string().starts_with("change 1: "), "{err}");
         assert!(
-            revise
-                .search
-                .search(&Default::default())
-                .unwrap()
-                .is_empty(),
+            revise.log.load().unwrap().is_empty(),
             "a refused batch must append nothing"
         );
     }

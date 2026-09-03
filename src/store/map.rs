@@ -3,14 +3,15 @@
 //! does, and revising it - a writer's one `Mutation` folded, applied,
 //! and appended as the `Event` that records it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 
 use serde::Serialize;
+use uuid::Uuid;
 
-use crate::percept::{Actor, Edge, Event, EventKind, EventLog, EventQuery, EventSearch};
+use crate::percept::{Actor, Edge, Event, EventId, EventKind, EventLog, EventQuery, EventSearch};
 use crate::percept::{Map, Mutation, Node, Schema};
 use crate::store::event::ids;
-use crate::store::Jsonl;
+use crate::store::parse_event_id;
 
 /// Folds `schema`'s map from every map event in `search`.
 pub fn fold_map(
@@ -30,19 +31,65 @@ pub fn fold_map(
     Ok(Map::fold(schema, &events)?)
 }
 
-/// Folds `schema`'s map from `log`, applies `mutation` to it, and
-/// appends the `Payload` that records the change - actor `user`,
-/// source `cli`, no cause: a shell user's own change. Every rule the
-/// mutation must pass lives in `Map::apply`, not here. The fold and
-/// the append are not one locked step, so two shells racing to add
-/// the same name can both succeed; the next fold then fails loudly.
+/// One writer's view of the log, loaded once: `schema`'s map folded
+/// from it, and the ids it carries, so cited sources are checked
+/// against that one read rather than the file per id.
+pub struct Snapshot {
+    map: Map,
+    ids: HashSet<Uuid>,
+}
+
+impl Snapshot {
+    pub fn load(
+        log: &dyn EventLog,
+        schema: &'static Schema,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let events = log.load()?;
+        let map = Map::fold(schema, &events)?;
+        let ids = events.iter().map(|event| event.id().as_uuid()).collect();
+        Ok(Self { map, ids })
+    }
+
+    /// Each cited id as an `EventId` the log carries. A value that is
+    /// not an id at all is told where ids come from: the transcript
+    /// shows none, so a model that has not searched has nothing to
+    /// cite and tends to invent one. An id the log lacks is an error
+    /// too - a typo in provenance is worse than none.
+    pub fn resolve(&self, ids: &[String]) -> Result<Vec<EventId>, Box<dyn std::error::Error>> {
+        ids.iter()
+            .map(|id| {
+                let parsed = parse_event_id(id).map_err(|_| {
+                    format!("{id:?} is not an event id; cite ids from search_events results")
+                })?;
+                if !self.ids.contains(&parsed.as_uuid()) {
+                    return Err(format!("no event with id {id}").into());
+                }
+                Ok(parsed)
+            })
+            .collect()
+    }
+
+    pub fn map(&mut self) -> &mut Map {
+        &mut self.map
+    }
+}
+
+/// A shell user's one change to `schema`'s map: `sources` resolved,
+/// the `Mutation` built from them applied, and its payload appended -
+/// actor `user`, source `cli`, no cause. Every rule the mutation must
+/// pass lives in `Map::apply`, not here. The load and the append are
+/// not one locked step, so two shells racing to add the same name can
+/// both succeed; the next fold then fails loudly.
 pub fn revise(
-    log: &Jsonl,
+    log: &dyn EventLog,
     schema: &'static Schema,
-    mutation: Mutation,
+    sources: &[String],
+    mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Event, Box<dyn std::error::Error>> {
-    let mut map = fold_map(log, schema)?;
-    let event = Event::new(Actor::User, "cli".to_string(), None, map.apply(mutation)?);
+    let mut snapshot = Snapshot::load(log, schema)?;
+    let sources = snapshot.resolve(sources)?;
+    let payload = snapshot.map().apply(mutation(sources))?;
+    let event = Event::new(Actor::User, "cli".to_string(), None, payload);
     log.append(&event)?;
     Ok(event)
 }
@@ -105,10 +152,10 @@ pub fn encode_edge(edge: &Edge) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percept::{EventId, NodeId, Payload, Schema};
+    use crate::percept::{NodeId, Payload};
+    use crate::store::Jsonl;
     use std::fs;
     use std::path::PathBuf;
-    use uuid::Uuid;
 
     /// A log file on a temp path, removed when the test ends - a
     /// trailing `remove_file` never runs on the failing test, which is
@@ -139,12 +186,13 @@ mod tests {
         Schema::named("decisions").unwrap()
     }
 
-    fn add_node(kind: &str, name: &str) -> Mutation {
-        Mutation::AddNode {
-            kind: kind.to_string(),
-            name: name.to_string(),
+    fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
+        let (kind, name) = (kind.to_string(), name.to_string());
+        move |sources| Mutation::AddNode {
+            kind,
+            name,
             properties: BTreeMap::new(),
-            sources: Vec::new(),
+            sources,
         }
     }
 
@@ -153,7 +201,7 @@ mod tests {
         let temp = TempLog::new();
         let log = temp.open();
 
-        let event = revise(&log, decisions(), add_node("option", "Rust")).unwrap();
+        let event = revise(&log, decisions(), &[], add_node("option", "Rust")).unwrap();
 
         assert!(matches!(event.payload(), Payload::NodeAdded { name, .. } if name == "Rust"));
         let map = fold_map(&log, decisions()).unwrap();
@@ -161,18 +209,17 @@ mod tests {
     }
 
     #[test]
-    fn revise_folds_before_applying_so_a_second_call_sees_the_first() {
+    fn revise_loads_before_applying_so_a_second_call_sees_the_first() {
         let temp = TempLog::new();
         let log = temp.open();
-        revise(&log, decisions(), add_node("option", "Rust")).unwrap();
+        revise(&log, decisions(), &[], add_node("option", "Rust")).unwrap();
 
-        let err = revise(&log, decisions(), add_node("option", "Rust"))
+        let err = revise(&log, decisions(), &[], add_node("option", "Rust"))
             .err()
             .unwrap();
 
         assert_eq!(err.to_string(), "option \"Rust\" is already in the map");
-        let map = fold_map(&log, decisions()).unwrap();
-        assert_eq!(map.nodes().len(), 1);
+        assert_eq!(fold_map(&log, decisions()).unwrap().nodes().len(), 1);
     }
 
     #[test]
@@ -180,9 +227,41 @@ mod tests {
         let temp = TempLog::new();
         let log = temp.open();
 
-        assert!(revise(&log, decisions(), add_node("goal", "Ship")).is_err());
+        assert!(revise(&log, decisions(), &[], add_node("goal", "Ship")).is_err());
 
         assert!(fold_map(&log, decisions()).unwrap().nodes().is_empty());
+    }
+
+    #[test]
+    fn a_source_is_checked_against_the_log_once_loaded() {
+        let temp = TempLog::new();
+        let log = temp.open();
+        let cited = Event::message_received(Actor::User, "hi".to_string(), "t".to_string(), None);
+        log.append(&cited).unwrap();
+        let known = cited.id().as_uuid().to_string();
+        let unknown = Uuid::now_v7().to_string();
+
+        let ok = revise(&log, decisions(), &[known], add_node("option", "Rust")).unwrap();
+        let missing = revise(
+            &log,
+            decisions(),
+            std::slice::from_ref(&unknown),
+            add_node("option", "Go"),
+        )
+        .err()
+        .unwrap();
+        let junk = revise(
+            &log,
+            decisions(),
+            &["user".to_string()],
+            add_node("option", "Go"),
+        )
+        .err()
+        .unwrap();
+
+        assert!(matches!(ok.payload(), Payload::NodeAdded { sources, .. } if sources.len() == 1));
+        assert_eq!(missing.to_string(), format!("no event with id {unknown}"));
+        assert!(junk.to_string().contains("cite ids from search_events"));
     }
 
     #[test]

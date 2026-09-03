@@ -23,12 +23,11 @@ use tokio_stream::StreamExt;
 
 use crate::app::{run_tool, AppService, ToolStep};
 use crate::percept::{
-    Actor, Chunk, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
-    Schema, SCHEMAS,
+    self, Actor, Chunk, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload, Schema,
+    SCHEMAS,
 };
 use crate::shared::Timestamp;
 use crate::store;
-use crate::store::Jsonl;
 
 #[derive(Parser)]
 #[command(name = "percept")]
@@ -302,8 +301,8 @@ fn parse_node_ref(s: &str) -> Result<NodeRef, String> {
         .split_once(':')
         .ok_or_else(|| format!("invalid {s:?}, expected kind:name"))?;
     Ok(NodeRef {
-        kind: kind.to_string(),
-        name: name.to_string(),
+        kind: non_blank(kind)?,
+        name: non_blank(name)?,
     })
 }
 
@@ -312,6 +311,16 @@ fn parse_node_ref(s: &str) -> Result<NodeRef, String> {
 pub fn publish(args: PublishArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
     let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
     let event = store::decode(&args.actor, args.source, &args.kind, payload)?;
+    // A raw map event would skip `Map::apply`, and one that breaks a
+    // rule fails every fold from then on, with no undo in an
+    // append-only log.
+    if percept::map_of(event.payload()).is_some() {
+        return Err(format!(
+            "{} is written through `percept maps`, not published raw",
+            args.kind
+        )
+        .into());
+    }
     log.append(&event)
 }
 
@@ -360,49 +369,26 @@ pub fn maps_show(
     args: ShowMapArgs,
     log: &dyn EventSearch,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let schema = find_schema(&args.map)?;
+    let schema = Schema::find(&args.map)?;
     let map = store::fold_map(log, schema)?;
     let nodes = map.nodes().iter().map(store::encode_node);
     let edges = map.edges().iter().map(store::encode_edge);
     print_lines(nodes.chain(edges))
 }
 
-/// The schema `name` names, among the ones percept knows. A name it
-/// doesn't recognize is an error listing the ones it does - the lookup
-/// every `maps` subcommand shares.
-fn find_schema(name: &str) -> Result<&'static Schema, String> {
-    Schema::named(name).ok_or_else(|| {
-        let known: Vec<_> = SCHEMAS.iter().map(|schema| schema.name).collect();
-        format!("no map named {name}; maps are {}", known.join(", "))
-    })
-}
-
-/// Each `--source` id, parsed and checked against `log`: a typo in
-/// provenance is worse than none, so a made-up id fails here rather
-/// than being appended silently.
-fn parse_sources(ids: &[String], log: &Jsonl) -> Result<Vec<EventId>, Box<dyn std::error::Error>> {
-    ids.iter()
-        .map(|id| {
-            let parsed = store::parse_event_id(id)?;
-            log.get(parsed)?
-                .ok_or_else(|| format!("no event with id {id}"))?;
-            Ok(parsed)
-        })
-        .collect()
-}
-
 /// Adds a node to a map and prints its minted id, so a shell script can
 /// capture it.
-pub fn maps_add_node(args: AddNodeArgs, log: &Jsonl) -> Result<(), Box<dyn std::error::Error>> {
-    let schema = find_schema(&args.map)?;
-    let sources = parse_sources(&args.source, log)?;
-    let mutation = Mutation::AddNode {
+pub fn maps_add_node(
+    args: AddNodeArgs,
+    log: &dyn EventLog,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let schema = Schema::find(&args.map)?;
+    let event = store::revise(log, schema, &args.source, |sources| Mutation::AddNode {
         kind: args.kind,
         name: args.name,
         properties: args.prop.into_iter().collect::<BTreeMap<_, _>>(),
         sources,
-    };
-    let event = store::revise(log, schema, mutation)?;
+    })?;
     let Payload::NodeAdded { node, .. } = event.payload() else {
         unreachable!("revise(AddNode) always returns NodeAdded")
     };
@@ -411,52 +397,49 @@ pub fn maps_add_node(args: AddNodeArgs, log: &Jsonl) -> Result<(), Box<dyn std::
 }
 
 /// Adds an edge between two nodes already in a map.
-pub fn maps_add_edge(args: AddEdgeArgs, log: &Jsonl) -> Result<(), Box<dyn std::error::Error>> {
-    let schema = find_schema(&args.map)?;
-    let sources = parse_sources(&args.source, log)?;
-    let mutation = Mutation::AddEdge {
+pub fn maps_add_edge(
+    args: AddEdgeArgs,
+    log: &dyn EventLog,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let schema = Schema::find(&args.map)?;
+    store::revise(log, schema, &args.source, |sources| Mutation::AddEdge {
         kind: args.kind,
         from: args.from,
         to: args.to,
         sources,
-    };
-    store::revise(log, schema, mutation)?;
+    })?;
     Ok(())
 }
 
 /// Removes a node from a map, dropping the edges that touch it.
 pub fn maps_remove_node(
     args: RemoveNodeArgs,
-    log: &Jsonl,
+    log: &dyn EventLog,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let schema = find_schema(&args.map)?;
-    let sources = parse_sources(&args.source, log)?;
-    let mutation = Mutation::RemoveNode {
+    let schema = Schema::find(&args.map)?;
+    store::revise(log, schema, &args.source, |sources| Mutation::RemoveNode {
         node: NodeRef {
             kind: args.kind,
             name: args.name,
         },
         reason: args.reason,
         sources,
-    };
-    store::revise(log, schema, mutation)?;
+    })?;
     Ok(())
 }
 
 /// Removes an edge from a map.
 pub fn maps_remove_edge(
     args: RemoveEdgeArgs,
-    log: &Jsonl,
+    log: &dyn EventLog,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let schema = find_schema(&args.map)?;
-    let sources = parse_sources(&args.source, log)?;
-    let mutation = Mutation::RemoveEdge {
+    let schema = Schema::find(&args.map)?;
+    store::revise(log, schema, &args.source, |sources| Mutation::RemoveEdge {
         kind: args.kind,
         from: args.from,
         to: args.to,
         sources,
-    };
-    store::revise(log, schema, mutation)?;
+    })?;
     Ok(())
 }
 
@@ -829,6 +812,12 @@ mod tests {
     #[test]
     fn a_node_ref_with_no_colon_is_rejected() {
         assert!(parse_node_ref("option").is_err());
+    }
+
+    #[test]
+    fn a_node_ref_with_a_blank_side_is_rejected() {
+        assert!(parse_node_ref(":Rust").is_err());
+        assert!(parse_node_ref("option: ").is_err());
     }
 
     fn ask_args(prompt: &str) -> AskArgs {

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::percept::{self, Actor, Event, EventId, Map, SCHEMAS};
+use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError, SCHEMAS};
 use crate::shared::Timestamp;
 
 /// Most tool calls one user turn may make. At the cap the next request
@@ -101,6 +101,11 @@ pub enum ToolStep {
 pub fn run_tool(tool: &dyn percept::Tool, arguments: &str) -> percept::ToolOutput {
     tool.run(arguments)
         .unwrap_or_else(|err| percept::ToolOutput::text(err.to_string()))
+}
+
+/// A `message.received` percept itself submitted, as `reflect` does.
+fn is_percepts_prompt(event: &Event) -> bool {
+    event.actor() == Actor::System && event.kind() == EventKind::MessageReceived
 }
 
 /// The turn now streaming. `anchor` is what the next model events are
@@ -211,17 +216,43 @@ impl App {
         let Some(called_id) = self.pending.as_mut().and_then(|turn| turn.open_call.take()) else {
             return Ok(());
         };
-        for payload in output.commits {
-            let event = Event::new(Actor::Model, self.source.clone(), Some(called_id), payload);
-            self.commit(event)?;
-        }
-        let resulted = Event::tool_resulted(output.content, self.source.clone(), Some(called_id));
+        let commits: Vec<Event> = output
+            .commits
+            .into_iter()
+            .map(|payload| Event::new(Actor::Model, self.source.clone(), Some(called_id), payload))
+            .collect();
+        // A tool checked its commits against the log file, and this
+        // transcript can be behind it - another writer since startup.
+        // Checked again here, against what the next request will fold,
+        // so a mismatch reaches the model as the call's result instead
+        // of ending the run at the next `build_request`.
+        let content = match self.fits_maps(&commits) {
+            Ok(()) => {
+                for event in commits {
+                    self.commit(event)?;
+                }
+                output.content
+            }
+            Err(err) => err.to_string(),
+        };
+        let resulted = Event::tool_resulted(content, self.source.clone(), Some(called_id));
         let resulted_id = resulted.id();
         self.commit(resulted)?;
         self.with_pending(|turn| {
             turn.anchor = resulted_id;
             turn.tool_calls += 1;
         });
+        Ok(())
+    }
+
+    /// Whether every map still folds once `new` follows the transcript.
+    fn fits_maps(&self, new: &[Event]) -> Result<(), MapError> {
+        if new.is_empty() {
+            return Ok(());
+        }
+        for schema in SCHEMAS {
+            Map::fold(schema, self.events.iter().chain(new))?;
+        }
         Ok(())
     }
 
@@ -269,7 +300,20 @@ impl App {
                 ),
             });
         }
-        messages.extend(percept::to_messages(&self.events[self.window_start()..]));
+        // Percept's own prompts - a `reflect` - are history the model
+        // need not obey. Replayed as system text they would stand as an
+        // instruction in every later turn, so before this turn they are
+        // dropped; the turn's own prompt stays.
+        let turn_start = self
+            .pending
+            .as_ref()
+            .map_or(self.events.len(), |turn| turn.start);
+        let history = self.events[self.window_start()..turn_start]
+            .iter()
+            .filter(|event| !is_percepts_prompt(event));
+        messages.extend(percept::to_messages(
+            history.chain(&self.events[turn_start..]),
+        ));
 
         let tools = if self.chat.capabilities().tool_use && !self.tools_exhausted() {
             self.tools.iter().map(|tool| tool.spec()).collect()
@@ -946,6 +990,65 @@ mod tests {
         .unwrap();
 
         assert!(err.to_string().contains("no node kind \"goal\""));
+    }
+
+    /// A tool whose commits point at nodes this app has never seen, the
+    /// way `revise_map` can when another writer moved the log on.
+    struct DanglingTool;
+
+    impl percept::Tool for DanglingTool {
+        fn spec(&self) -> percept::ToolSpec {
+            percept::ToolSpec {
+                name: "search_events",
+                description: "a fake that commits a dangling edge",
+                parameters: "{}",
+            }
+        }
+
+        fn run(&self, _arguments: &str) -> Result<percept::ToolOutput, Box<dyn std::error::Error>> {
+            Ok(percept::ToolOutput {
+                content: "added edge".to_string(),
+                commits: vec![Payload::EdgeAdded {
+                    map: "decisions".to_string(),
+                    kind: "supports".to_string(),
+                    from: percept::NodeId::new(),
+                    to: percept::NodeId::new(),
+                    sources: Vec::new(),
+                }],
+            })
+        }
+    }
+
+    #[test]
+    fn a_tool_commit_the_transcript_cannot_fold_becomes_the_result_not_a_crash() {
+        let (_, mut app) = seeded_app(Vec::new(), vec![Arc::new(DanglingTool)]);
+
+        let _ = app.submit("go".to_string()).unwrap();
+        run_one_tool(&mut app, "search_events", "{}");
+
+        let events = app.events();
+        assert_eq!(events.len(), 3);
+        assert!(matches!(
+            events[2].payload(),
+            Payload::ToolResulted { content } if content.contains("does not fit its map")
+        ));
+    }
+
+    #[test]
+    fn a_reflect_prompt_replays_in_its_own_turn_and_never_after() {
+        let (model, mut app) = seeded_app(Vec::new(), Vec::new());
+
+        let _ = app
+            .submit_as(Actor::System, "revise the map".to_string())
+            .unwrap();
+        assert!(model.last_request().contains(&"revise the map".to_string()));
+        app.end_stream().unwrap();
+
+        let _ = app.submit("what did we decide?".to_string()).unwrap();
+
+        let sent = model.last_request();
+        assert!(!sent.contains(&"revise the map".to_string()));
+        assert!(sent.contains(&"what did we decide?".to_string()));
     }
 
     #[test]

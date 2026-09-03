@@ -35,6 +35,12 @@ impl Schema {
     pub fn named(name: &str) -> Option<&'static Schema> {
         SCHEMAS.iter().copied().find(|schema| schema.name == name)
     }
+
+    /// `named`, with an unknown name as the error every boundary that
+    /// takes a map name reports.
+    pub fn find(name: &str) -> Result<&'static Schema, MapError> {
+        Self::named(name).ok_or_else(|| MapError::UnknownMap(name.to_string()))
+    }
 }
 
 /// Identifies a node in a cognitive map.
@@ -110,6 +116,7 @@ pub enum Mutation {
 /// means a race between writers or a hand-edited log.
 #[derive(Debug, PartialEq, Eq)]
 pub enum MapError {
+    UnknownMap(String),
     UnknownNodeKind {
         map: &'static str,
         kind: String,
@@ -118,6 +125,8 @@ pub enum MapError {
         map: &'static str,
         kind: String,
     },
+    /// A name that is blank would be a node nobody can point at.
+    BlankName,
     DuplicateNode {
         kind: String,
         name: String,
@@ -145,6 +154,16 @@ pub enum MapError {
 impl fmt::Display for MapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnknownMap(name) => write!(
+                f,
+                "no map named {name:?}; maps are {}",
+                SCHEMAS
+                    .iter()
+                    .map(|schema| schema.name)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Self::BlankName => write!(f, "a node's name must not be blank"),
             Self::UnknownNodeKind { map, kind } => write!(
                 f,
                 "no node kind {kind:?} in map {map:?}; kinds are {}",
@@ -200,7 +219,10 @@ impl Map {
     /// other kinds are skipped. An event that breaks a rule is an
     /// error naming it, not skipped: silently dropping it would hide
     /// that something went wrong at write time.
-    pub fn fold(schema: &'static Schema, events: &[Event]) -> Result<Self, MapError> {
+    pub fn fold<'a>(
+        schema: &'static Schema,
+        events: impl IntoIterator<Item = &'a Event>,
+    ) -> Result<Self, MapError> {
         let mut map = Self::empty(schema);
         for event in events {
             if map_of(event.payload()) != Some(schema.name) {
@@ -364,14 +386,19 @@ impl Map {
                 name,
                 properties,
                 sources,
-            } => Payload::NodeAdded {
-                map,
-                node: NodeId::new(),
-                kind,
-                name,
-                properties,
-                sources,
-            },
+            } => {
+                if name.trim().is_empty() {
+                    return Err(MapError::BlankName);
+                }
+                Payload::NodeAdded {
+                    map,
+                    node: NodeId::new(),
+                    kind,
+                    name,
+                    properties,
+                    sources,
+                }
+            }
             Mutation::RemoveNode {
                 node,
                 reason,
@@ -420,14 +447,15 @@ impl Map {
 
 /// The map as text for a model to read: one line per node, then one
 /// per edge, nodes named by kind and name - the way a writer refers to
-/// them - never by id. Empty for an empty map.
+/// them - never by id. Names and property values are quoted, so a
+/// newline inside one stays inside its line. Empty for an empty map.
 impl fmt::Display for Map {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for node in &self.nodes {
             write!(f, "- {} {:?}", node.kind, node.name)?;
             let mut sep = ": ";
             for (key, value) in &node.properties {
-                write!(f, "{sep}{key}: {value}")?;
+                write!(f, "{sep}{key}: {value:?}")?;
                 sep = "; ";
             }
             writeln!(f)?;
@@ -735,6 +763,7 @@ mod tests {
         map.apply(add_node("option", "Rust")).unwrap();
 
         let unknown = map.apply(add_node("goal", "Ship")).err().unwrap();
+        let blank = map.apply(add_node("option", "  ")).err().unwrap();
         let duplicate = map.apply(add_node("option", "Rust")).err().unwrap();
         let missing = map
             .apply(add_edge(
@@ -755,6 +784,7 @@ mod tests {
             .unwrap();
 
         assert!(matches!(unknown, MapError::UnknownNodeKind { .. }));
+        assert_eq!(blank, MapError::BlankName);
         assert!(matches!(duplicate, MapError::DuplicateNode { .. }));
         assert_eq!(missing, MapError::NoSuchNode(node_ref("evidence", "Nope")));
         assert_eq!(missing.to_string(), "no evidence \"Nope\" in the map");
@@ -796,7 +826,7 @@ mod tests {
             kind: "evidence".to_string(),
             name: "Built both".to_string(),
             properties: BTreeMap::from([
-                ("summary".to_string(), "side by side".to_string()),
+                ("summary".to_string(), "side by\nside".to_string()),
                 ("when".to_string(), "August".to_string()),
             ]),
             sources: Vec::new(),
@@ -813,7 +843,7 @@ mod tests {
         assert_eq!(
             map.to_string(),
             "- question \"Which language?\"\n\
-             - evidence \"Built both\": summary: side by side; when: August\n\
+             - evidence \"Built both\": summary: \"side by\\nside\"; when: \"August\"\n\
              - decision \"Rust over Go\"\n\
              - decision \"Rust over Go\" resolves question \"Which language?\"\n"
         );
@@ -827,5 +857,9 @@ mod tests {
             Some("decisions")
         );
         assert!(Schema::named("tasks").is_none());
+        assert_eq!(
+            Schema::find("tasks").err().unwrap().to_string(),
+            "no map named \"tasks\"; maps are decisions"
+        );
     }
 }

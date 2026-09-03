@@ -92,9 +92,9 @@ pub trait Model: Send + Sync {
 /// result, whose call the cut left behind, is dropped. A conversation
 /// opening on a result nothing asked for is not one a provider accepts.
 /// A caller passing a whole log drops nothing.
-pub fn to_messages(events: &[Event]) -> Vec<Message> {
+pub fn to_messages<'a>(events: impl IntoIterator<Item = &'a Event>) -> Vec<Message> {
     events
-        .iter()
+        .into_iter()
         .filter_map(|e| match e.payload() {
             Payload::MessageReceived { content } => Some(Message::Text {
                 role: e.actor(),

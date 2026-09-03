@@ -150,7 +150,7 @@ fn build_app(source: &str) -> Result<App, Box<dyn std::error::Error>> {
     let tools: Vec<Arc<dyn percept::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
         Arc::new(ReadEvent::new(log.clone())),
-        Arc::new(ReviseMap::new(log.clone(), log.clone())),
+        Arc::new(ReviseMap::new(log.clone())),
     ];
     App::new(model, log, tools, source.to_string())
 }
