@@ -1,16 +1,10 @@
 use std::collections::BTreeMap;
 
+use super::NodeId;
 use crate::shared::{Id, Timestamp};
 
 /// Identifies an Event.
 pub type EventId = Id<Event>;
-
-/// Marker for a node in a cognitive map - never constructed, only named
-/// by `NodeId`. Mirrors `Event` standing in for `EventId`.
-pub struct Node;
-
-/// Identifies a node in a cognitive map.
-pub type NodeId = Id<Node>;
 
 /// Who an Event is attributed to. Extend by adding a variant.
 #[derive(Clone, Copy, PartialEq, Eq)]

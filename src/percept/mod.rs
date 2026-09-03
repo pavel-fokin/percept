@@ -1,11 +1,13 @@
 mod event;
 mod event_log;
+mod map;
 mod model;
 mod search;
 mod tool;
 
-pub use event::{Actor, Event, EventId, EventKind, NodeId, Payload};
+pub use event::{Actor, Event, EventId, EventKind, Payload};
 pub use event_log::EventLog;
+pub use map::{Edge, Map, Node, NodeId, Schema, SCHEMAS};
 pub use model::{
     to_messages, Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream,
 };

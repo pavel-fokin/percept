@@ -1,6 +1,7 @@
 //! The command-line surface: `percept events publish` appends one event
 //! without opening the TUI, `percept events search` queries the log,
-//! `percept events show` dereferences one event by id, and `percept ask`
+//! `percept events show` dereferences one event by id, `percept maps`
+//! folds a cognitive map from the log and prints it, and `percept ask`
 //! runs one full turn - including the tool loop - and prints the reply.
 //! A presentation-layer peer of `tui` - it forwards parsed input to
 //! `store` and `app`, and has no chat logic of its own: `ask` drives the
@@ -19,7 +20,7 @@ use clap::{Args, Parser, Subcommand};
 use tokio_stream::StreamExt;
 
 use crate::app::{run_tool, AppService, ToolStep};
-use crate::percept::{Chunk, EventLog, EventQuery, EventSearch};
+use crate::percept::{Chunk, EventLog, EventQuery, EventSearch, Map, Schema, SCHEMAS};
 use crate::shared::Timestamp;
 use crate::store;
 
@@ -36,7 +37,8 @@ relevance to the caller.
 
 Run with no arguments to open the TUI. Every subcommand reaches the log \
 without it: `events publish` appends one event, `events search` and \
-`events show` query it, and `ask` runs one full turn and prints the reply.")]
+`events show` query it, `maps list` and `maps show` print a cognitive \
+map folded from it, and `ask` runs one full turn and prints the reply.")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -49,8 +51,27 @@ pub enum Command {
         #[command(subcommand)]
         command: EventsCommand,
     },
+    /// Read the cognitive maps folded from the log.
+    Maps {
+        #[command(subcommand)]
+        command: MapsCommand,
+    },
     /// Run one turn headlessly and print the reply.
     Ask(AskArgs),
+}
+
+#[derive(Subcommand)]
+pub enum MapsCommand {
+    /// Every map with its node and edge counts, one JSON object per line.
+    List,
+    /// One map's nodes, then its edges, one JSON object per line.
+    Show(ShowMapArgs),
+}
+
+#[derive(Args)]
+pub struct ShowMapArgs {
+    /// The map's name, as `maps list` prints it.
+    map: String,
 }
 
 #[derive(Subcommand)]
@@ -198,21 +219,52 @@ pub fn search(args: SearchArgs, log: &dyn EventSearch) -> Result<(), Box<dyn std
     let query = parse_query(&args)?;
     let events = log.search(&query)?;
 
-    // One buffered writer rather than a syscall per line: the caller is
-    // a pipe into jq, and a whole-log listing runs to thousands of
-    // lines.
-    let mut out = io::BufWriter::new(io::stdout().lock());
-    for event in &events {
-        let line = if args.full {
+    print_lines(events.iter().map(|event| {
+        if args.full {
             store::encode(event)
         } else {
             store::summarize(event, query.hit(event), args.preview)
-        };
+        }
+    }))
+}
+
+/// Prints one JSONL line per item. One buffered writer rather than a
+/// syscall per line: the caller is a pipe into jq, and a whole-log
+/// listing runs to thousands of lines.
+fn print_lines(lines: impl Iterator<Item = String>) -> Result<(), Box<dyn std::error::Error>> {
+    let mut out = io::BufWriter::new(io::stdout().lock());
+    for line in lines {
         if let Err(e) = writeln!(out, "{line}") {
             return stop_if_pipe_closed(e);
         }
     }
     out.flush().or_else(stop_if_pipe_closed)
+}
+
+/// Prints every map percept knows with its size, folding each from
+/// `log`.
+pub fn maps_list(log: &dyn EventSearch) -> Result<(), Box<dyn std::error::Error>> {
+    let maps = SCHEMAS
+        .iter()
+        .map(|schema| store::fold_map(log, schema))
+        .collect::<Result<Vec<Map>, _>>()?;
+    print_lines(maps.iter().map(store::encode_map))
+}
+
+/// Prints the map `args.map` names, nodes then edges. A name percept
+/// has no map for is an error listing the ones it has.
+pub fn maps_show(
+    args: ShowMapArgs,
+    log: &dyn EventSearch,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let schema = Schema::named(&args.map).ok_or_else(|| {
+        let known: Vec<_> = SCHEMAS.iter().map(|schema| schema.name).collect();
+        format!("no map named {}; maps are {}", args.map, known.join(", "))
+    })?;
+    let map = store::fold_map(log, schema)?;
+    let nodes = map.nodes().iter().map(store::encode_node);
+    let edges = map.edges().iter().map(store::encode_edge);
+    print_lines(nodes.chain(edges))
 }
 
 /// A reader that stops early - `head`, or a `jq` that has seen enough -

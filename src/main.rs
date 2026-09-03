@@ -18,7 +18,7 @@ mod testing;
 mod tui;
 
 use app::App;
-use cli::{Cli, Command, EventsCommand};
+use cli::{Cli, Command, EventsCommand, MapsCommand};
 use providers::{Ollama, OpenAi};
 use store::{Jsonl, ReadEvent, SearchEvents};
 use tui::{Chat, StreamEvent};
@@ -174,6 +174,12 @@ async fn main() {
                 EventsCommand::Publish(args) => cli::publish(args, &log),
                 EventsCommand::Search(args) => cli::search(args, &log),
                 EventsCommand::Show(args) => cli::show(args, &log),
+            }),
+        Some(Command::Maps { command }) => Jsonl::open(LOG_PATH)
+            .map_err(Box::<dyn std::error::Error>::from)
+            .and_then(|log| match command {
+                MapsCommand::List => cli::maps_list(&log),
+                MapsCommand::Show(args) => cli::maps_show(args, &log),
             }),
         Some(Command::Ask(args)) => match build_app("cli") {
             Ok(app) => cli::ask(args, Box::new(app)).await,

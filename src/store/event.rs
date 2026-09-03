@@ -290,7 +290,7 @@ fn shorten(payload: Value) -> Value {
 }
 
 /// `sources` on the wire - each `EventId` as its UUID string.
-fn ids(sources: &[EventId]) -> Vec<String> {
+pub(super) fn ids(sources: &[EventId]) -> Vec<String> {
     sources.iter().map(|id| id.as_uuid().to_string()).collect()
 }
 

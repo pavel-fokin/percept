@@ -1,11 +1,12 @@
 //! The JSONL event log and its serde boundary - the domain stays
 //! serde-free. `Jsonl` implements `percept::EventLog`; `SearchEvents`
 //! and `ReadEvent` implement `percept::Tool`, since both wire formats
-//! live here.
+//! live here. `map` folds a cognitive map from the log and prints it.
 
 mod error;
 mod event;
 mod jsonl;
+mod map;
 mod read_event;
 mod search_events;
 
@@ -15,5 +16,6 @@ pub use event::{
     PREVIEW_CHARS,
 };
 pub use jsonl::Jsonl;
+pub use map::{encode_edge, encode_map, encode_node, fold_map};
 pub use read_event::{read, ReadEvent};
 pub use search_events::SearchEvents;

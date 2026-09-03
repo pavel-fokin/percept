@@ -59,3 +59,9 @@ impl<T> PartialEq for Id<T> {
 }
 
 impl<T> Eq for Id<T> {}
+
+impl<T> std::fmt::Debug for Id<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.uuid)
+    }
+}
