@@ -9,7 +9,8 @@ a pty, sends timed keystrokes, and captures the frames.
 
 Each argument is DELAY=KEYS, where DELAY is seconds since launch. Keys
 take <enter>, <esc>, <ctrl-c>, <ctrl-j>, <page-up>, <page-down>, <home>,
-<end>, <scroll-up>, <scroll-down>, <tab>, and literal text.
+<end>, <scroll-up>, <scroll-down>, <tab>, <click:ROW,COL> (0-indexed,
+a left click at that terminal row and column), and literal text.
 
 Output is the raw byte stream. --plain turns every escape sequence into
 a space, which is what makes the rendered text greppable: ratatui moves
@@ -45,9 +46,14 @@ KEYS = {
     "<scroll-down>": b"\x1b[<65;1;1M",
 }
 ESCAPE = re.compile(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b[()][A-Z0-9]|\x1b.")
+CLICK = re.compile(r"<click:(\d+),(\d+)>")
 
 
 def encode(keys):
+    # SGR mouse reporting is 1-indexed on the wire, hence the +1s.
+    keys = CLICK.sub(
+        lambda m: f"\x1b[<0;{int(m.group(2)) + 1};{int(m.group(1)) + 1}M", keys
+    )
     for name, code in KEYS.items():
         keys = keys.replace(name, code.decode("latin-1"))
     return keys.encode("latin-1")

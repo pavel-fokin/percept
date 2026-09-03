@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, BorderType, Paragraph};
 use ratatui::Frame;
 
 use super::Chat;
-use crate::percept::{Actor, Event, EventKind, Payload};
+use crate::percept::{Actor, Event, EventId, EventKind, Payload};
 
 /// One marker plus a space. Every wrapped line of a turn indents past
 /// it, so the gutter stays a column of markers and nothing else.
@@ -38,8 +38,9 @@ pub fn draw(frame: &mut Frame, chat: &mut Chat) {
     ])
     .areas(area);
 
-    let (text, scroll_limit) = transcript(chat, transcript_area);
+    let (text, scroll_limit, thought_rows) = transcript(chat, transcript_area);
     chat.update_scroll_metrics(scroll_limit, transcript_area.height);
+    chat.update_thought_rows(transcript_area.y, thought_rows);
     frame.render_widget(
         Paragraph::new(text).scroll((chat.scroll_offset, 0)),
         transcript_area,
@@ -76,39 +77,58 @@ fn draw_input(frame: &mut Frame, chat: &Chat, area: Rect) {
     frame.render_widget(&chat.textarea, entry_area);
 }
 
-/// Wrapped, styled transcript lines plus the furthest valid offset.
-fn transcript(chat: &Chat, area: Rect) -> (Text<'static>, u16) {
+/// Wrapped, styled transcript lines, the furthest valid offset, and
+/// which committed thought (if any) each line belongs to - so a click
+/// can be mapped back to the event it landed on.
+fn transcript(chat: &Chat, area: Rect) -> (Text<'static>, u16, Vec<Option<EventId>>) {
     let width = area.width.max(1) as usize;
     let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut ids: Vec<Option<EventId>> = Vec::new();
     for event in chat.app.events() {
-        push_turn(&mut lines, event_lines(chat, event, width));
+        let id = matches!(event.payload(), Payload::ThoughtRecorded { .. }).then(|| event.id());
+        push_turn(&mut lines, &mut ids, id, event_lines(chat, event, width));
     }
     // Full and dimmed while it streams; once committed it renders
-    // collapsed instead, in `event_lines`.
+    // collapsed instead, in `event_lines`. Never clickable, so no id.
     if let Some(thought) = chat.app.pending_thought() {
         push_turn(
             &mut lines,
+            &mut ids,
+            None,
             turn_lines("✻", chat.thought_style, chat.thought_style, thought, width),
         );
     }
     if let Some(reply) = chat.app.pending_reply() {
-        push_turn(&mut lines, actor_lines(chat, Actor::Model, reply, width));
+        push_turn(
+            &mut lines,
+            &mut ids,
+            None,
+            actor_lines(chat, Actor::Model, reply, width),
+        );
     }
 
     let limit = lines.len().saturating_sub(area.height as usize);
-    (Text::from(lines), limit.try_into().unwrap_or(u16::MAX))
+    (Text::from(lines), limit.try_into().unwrap_or(u16::MAX), ids)
 }
 
 /// Adds one turn's lines, separated from the turn above by a blank
 /// line. Turns run together without it, which is what makes a long
-/// transcript hard to scan.
-fn push_turn(lines: &mut Vec<Line<'static>>, turn: Vec<Line<'static>>) {
+/// transcript hard to scan. `id` is the event the turn's lines - and
+/// the blank separator, if any - map back to, for `ids`.
+fn push_turn(
+    lines: &mut Vec<Line<'static>>,
+    ids: &mut Vec<Option<EventId>>,
+    id: Option<EventId>,
+    turn: Vec<Line<'static>>,
+) {
     if turn.is_empty() {
         return;
     }
     if !lines.is_empty() {
         lines.push(Line::default());
+        ids.push(None);
     }
+    ids.extend(std::iter::repeat_n(id, turn.len()));
     lines.extend(turn);
 }
 
@@ -122,7 +142,12 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
         } => tool_lines(chat, &format!("{tool} {}", clip(arguments)), width),
         Payload::ToolResulted { content, .. } => tool_lines(chat, &clip(content), width),
         Payload::ThoughtRecorded { content } => {
-            super::thought::collapsed_lines(content, chat.thought_style, chat.thought_style, width)
+            let lines = if chat.is_thought_expanded(event.id()) {
+                super::thought::expanded_lines
+            } else {
+                super::thought::collapsed_lines
+            };
+            lines(content, chat.thought_style, chat.thought_style, width)
         }
         // Bookkeeping about a round trip, not something to show.
         Payload::ModelCalled(..) => Vec::new(),
