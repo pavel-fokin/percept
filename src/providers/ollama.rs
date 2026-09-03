@@ -223,7 +223,12 @@ impl Model for Ollama {
             input: &[Modality::Text],
             output: &[Modality::Text],
             tool_use: true,
+            context_window: Some(CONTEXT_TOKENS),
         }
+    }
+
+    fn name(&self) -> &str {
+        &self.model
     }
 
     fn reply(&self, request: &ModelRequest) -> ReplyStream {

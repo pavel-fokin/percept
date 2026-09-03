@@ -545,7 +545,12 @@ mod tests {
                 input: &[percept::Modality::Text],
                 output: &[percept::Modality::Text],
                 tool_use: false,
+                context_window: None,
             }
+        }
+
+        fn name(&self) -> &str {
+            "silent"
         }
 
         fn reply(&self, _request: &percept::ModelRequest) -> percept::ReplyStream {

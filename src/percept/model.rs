@@ -74,6 +74,10 @@ pub struct ModelCapabilities {
     pub input: &'static [Modality],
     pub output: &'static [Modality],
     pub tool_use: bool,
+    /// Tokens of context the model holds, when the provider knows it.
+    /// `None` when the model isn't one the provider can size - not a
+    /// guess.
+    pub context_window: Option<u32>,
 }
 
 /// Everything Model needs for one `reply`: the conversation so far and
@@ -91,6 +95,10 @@ pub struct ModelRequest {
 pub trait Model: Send + Sync {
     /// What this model can accept, produce, and whether it calls tools.
     fn capabilities(&self) -> ModelCapabilities;
+
+    /// The model's own name, as the provider names it - what a reply's
+    /// `Usage::model` also carries, but available before any turn asks.
+    fn name(&self) -> &str;
 
     fn reply(&self, request: &ModelRequest) -> ReplyStream;
 }

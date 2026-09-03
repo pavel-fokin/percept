@@ -270,13 +270,29 @@ fn parse_line(line: &str, model: &str) -> Result<Line, Box<dyn Error + Send + Sy
     })
 }
 
+/// Tokens of context a known OpenAI model holds, matched by name prefix
+/// since a family (Sol, Terra, Luna, ...) shares one window. `None` for
+/// a name this table doesn't recognize - not a guess.
+fn context_window(model: &str) -> Option<u32> {
+    if model.starts_with("gpt-5.6") {
+        Some(1_050_000)
+    } else {
+        None
+    }
+}
+
 impl Model for OpenAi {
     fn capabilities(&self) -> ModelCapabilities {
         ModelCapabilities {
             input: &[Modality::Text],
             output: &[Modality::Text],
             tool_use: true,
+            context_window: context_window(&self.model),
         }
+    }
+
+    fn name(&self) -> &str {
+        &self.model
     }
 
     fn reply(&self, request: &ModelRequest) -> ReplyStream {

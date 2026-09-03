@@ -102,7 +102,12 @@ impl Model for Scripted {
             input: &[Modality::Text],
             output: &[Modality::Text],
             tool_use: self.tool_use,
+            context_window: Some(1000),
         }
+    }
+
+    fn name(&self) -> &str {
+        "scripted"
     }
 
     fn reply(&self, request: &ModelRequest) -> ReplyStream {
