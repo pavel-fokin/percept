@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -84,18 +86,139 @@ pub fn encode(event: &percept::Event) -> String {
     serde_json::to_string(&Event::from(event)).expect("store::Event always serializes")
 }
 
-/// Longest string kept whole in a shortened payload.
-const PREVIEW_CHARS: usize = 120;
+/// Longest string kept whole in a shortened payload, and the `content`
+/// window when a caller names no other.
+pub const PREVIEW_CHARS: usize = 120;
+
+/// The payload key `Payload::content` travels under - one name for the
+/// sites that cut or slice it on the wire.
+const CONTENT: &str = "content";
+
+/// What a summary line says about the `content` it cut, so a caller
+/// can tell whether a second look is worth a call, and where to take it. Lives beside the
+/// payload, not in it: the payload stays exactly what the log stores,
+/// and these are facts about the output.
+#[derive(Serialize)]
+struct Preview {
+    /// Length of the whole `content`, in characters.
+    len: usize,
+    /// Character offset of the search hit the window was cut around,
+    /// so a caller can read on from there without guessing.
+    #[serde(rename = "match", skip_serializing_if = "Option::is_none")]
+    hit: Option<usize>,
+}
+
+/// A summary line: the wire event with `preview` on the envelope when
+/// `content` was cut. Serialize-only - a stored line never carries
+/// `preview`, so `Event` stays the one decode shape.
+#[derive(Serialize)]
+struct Summary {
+    #[serde(flatten)]
+    event: Event,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    preview: Option<Preview>,
+}
 
 /// One event as a cheap line: the same shape `encode` writes, with
 /// every long string in the payload cut short. The payload stays a real
 /// object, so one `jq` expression reads both this and `encode`'s
 /// output. A caller reaches for `encode` deliberately, per the purpose
-/// rule in AGENTS.md.
-pub fn summarize(event: &percept::Event) -> String {
+/// rule in AGENTS.md. `content` is the event's text - the one string
+/// that runs long - so a cut to it is reported under `preview`, where
+/// a cut inside `arguments` is not. `hit` is a character range in
+/// `content` the cut keeps in view - a search term's position - so a
+/// line explains why it matched; without one the cut keeps the head.
+/// `preview` is that window's size in characters; strings other than
+/// `content` are cut at `PREVIEW_CHARS` whatever it is, since they are
+/// the model's own short arguments, not the text a caller reads.
+pub fn summarize(event: &percept::Event, hit: Option<Range<usize>>, preview: usize) -> String {
     let mut wire = Event::from(event);
+    // `content` leaves the payload before `shorten` runs over the rest,
+    // so it is cut once, here, at the caller's size.
+    if let Some(fields) = wire.payload.as_object_mut() {
+        fields.remove(CONTENT);
+    }
     wire.payload = shorten(wire.payload);
-    serde_json::to_string(&wire).expect("store::Event always serializes")
+    let preview = event.payload().content().and_then(|text| {
+        let len = text.chars().count();
+        let (shown, preview) = if len > preview {
+            let cut = Preview {
+                len,
+                hit: hit.as_ref().map(|hit| hit.start),
+            };
+            let chars: Vec<char> = text.chars().collect();
+            (window(&chars, hit.unwrap_or(0..0), preview), Some(cut))
+        } else {
+            (text.to_string(), None)
+        };
+        wire.payload[CONTENT] = Value::String(shown);
+        preview
+    });
+    serde_json::to_string(&Summary {
+        event: wire,
+        preview,
+    })
+    .expect("store::Event always serializes")
+}
+
+/// `size` of `chars` with `keep` near the middle - or, when `keep` is
+/// wider than the window, starting at it - pulled back to the ends of
+/// the text rather than padded, and an ellipsis on each side that was
+/// cut. Only called when `chars` is longer than the window, so some
+/// side always is.
+fn window(chars: &[char], keep: Range<usize>, size: usize) -> String {
+    let slack = size.saturating_sub(keep.len());
+    let start = keep.start.saturating_sub(slack / 2).min(chars.len() - size);
+    let end = start + size;
+    let mut out = String::with_capacity(end - start + 2);
+    if start > 0 {
+        out.push('\u{2026}');
+    }
+    out.extend(&chars[start..end]);
+    if end < chars.len() {
+        out.push('\u{2026}');
+    }
+    out
+}
+
+/// One event as a ranged slice: the same shape `encode` writes, with
+/// `payload.content` cut to `[start, end)` characters and `preview.len`
+/// naming the whole content's length - always, even when the slice
+/// covers it all, so a caller never has to guess whether this line was
+/// cut. `start` defaults to 0, `end` to the content's length and clamps
+/// to it. Counts characters, never bytes, so a multi-byte character is
+/// never split in half. An event whose payload carries no `content` -
+/// `tool.called` - has nothing to slice.
+pub fn excerpt(
+    event: &percept::Event,
+    start: Option<usize>,
+    end: Option<usize>,
+) -> Result<String, Error> {
+    let content = event
+        .payload()
+        .content()
+        .ok_or_else(|| Error::NoRangeableContent(kind(event.kind()).to_string()))?;
+    let mut wire = Event::from(event);
+
+    let chars: Vec<char> = content.chars().collect();
+    let len = chars.len();
+    let start = start.unwrap_or(0);
+    let end = end.unwrap_or(len).min(len);
+
+    if start > len {
+        return Err(Error::RangeStartPastEnd { start, len });
+    }
+    if start > end {
+        return Err(Error::InvertedRange { start, end });
+    }
+
+    wire.payload[CONTENT] = Value::String(chars[start..end].iter().collect());
+
+    Ok(serde_json::to_string(&Summary {
+        event: wire,
+        preview: Some(Preview { len, hit: None }),
+    })
+    .expect("store::Event always serializes"))
 }
 
 /// Cuts every long string in `payload`, keeping its structure. Cutting
@@ -105,12 +228,11 @@ pub fn summarize(event: &percept::Event) -> String {
 fn shorten(payload: Value) -> Value {
     match payload {
         Value::String(s) => {
-            let mut chars = s.chars();
-            let kept: String = chars.by_ref().take(PREVIEW_CHARS).collect();
-            Value::String(if chars.next().is_some() {
-                format!("{kept}\u{2026}")
+            let chars: Vec<char> = s.chars().collect();
+            Value::String(if chars.len() > PREVIEW_CHARS {
+                window(&chars, 0..0, PREVIEW_CHARS)
             } else {
-                kept
+                s
             })
         }
         Value::Array(items) => Value::Array(items.into_iter().map(shorten).collect()),
@@ -318,6 +440,174 @@ mod tests {
         let cut = short["c"].as_str().unwrap();
         assert!(std::str::from_utf8(cut.as_bytes()).is_ok());
         assert_eq!(cut.chars().count(), PREVIEW_CHARS + 1);
+    }
+
+    #[test]
+    fn a_summary_reports_the_length_of_a_cut_content_and_nothing_else() {
+        let long = message(Actor::Model, "x".repeat(500));
+        let line: Value = serde_json::from_str(&summarize(&long, None, PREVIEW_CHARS)).unwrap();
+        assert_eq!(line["preview"]["len"], 500);
+        assert_eq!(
+            line["payload"]["content"].as_str().unwrap().chars().count(),
+            PREVIEW_CHARS + 1
+        );
+
+        let short = message(Actor::Model, "hi".to_string());
+        let line: Value = serde_json::from_str(&summarize(&short, None, PREVIEW_CHARS)).unwrap();
+        assert!(line.get("preview").is_none());
+    }
+
+    #[test]
+    fn a_hit_deep_in_content_sits_inside_its_preview() {
+        let text = format!("{}deploy{}", "a".repeat(400), "b".repeat(400));
+        let event = message(Actor::Model, text);
+        let line: Value =
+            serde_json::from_str(&summarize(&event, Some(400..406), PREVIEW_CHARS)).unwrap();
+        let cut = line["payload"]["content"].as_str().unwrap();
+        assert!(cut.contains("deploy"));
+        assert!(cut.starts_with('\u{2026}') && cut.ends_with('\u{2026}'));
+        assert_eq!(cut.chars().count(), PREVIEW_CHARS + 2);
+        assert_eq!(line["preview"]["match"], 400);
+    }
+
+    #[test]
+    fn a_term_wider_than_half_the_window_still_fits_in_it() {
+        let text = format!("{}deployment pipeline{}", "a".repeat(400), "b".repeat(400));
+        let event = message(Actor::Model, text);
+        let line: Value = serde_json::from_str(&summarize(&event, Some(400..419), 20)).unwrap();
+        let cut = line["payload"]["content"].as_str().unwrap();
+        assert!(cut.contains("deployment pipeline"), "{cut}");
+
+        let line: Value = serde_json::from_str(&summarize(&event, Some(400..419), 10)).unwrap();
+        let cut = line["payload"]["content"].as_str().unwrap();
+        assert!(cut.contains("deployment"), "{cut}");
+    }
+
+    #[test]
+    fn a_preview_without_a_hit_carries_no_match() {
+        let event = message(Actor::Model, "x".repeat(500));
+        let line: Value = serde_json::from_str(&summarize(&event, None, PREVIEW_CHARS)).unwrap();
+        assert!(line["preview"].get("match").is_none());
+    }
+
+    #[test]
+    fn a_hit_near_the_end_pulls_the_window_back_rather_than_past_it() {
+        let text = format!("{}deploy", "a".repeat(400));
+        let event = message(Actor::Model, text);
+        let line: Value =
+            serde_json::from_str(&summarize(&event, Some(400..406), PREVIEW_CHARS)).unwrap();
+        let cut = line["payload"]["content"].as_str().unwrap();
+        assert!(cut.starts_with('\u{2026}') && cut.ends_with("deploy"));
+        assert_eq!(cut.chars().count(), PREVIEW_CHARS + 1);
+    }
+
+    #[test]
+    fn the_preview_window_is_the_callers_size() {
+        let event = message(Actor::Model, "x".repeat(500));
+        let line: Value = serde_json::from_str(&summarize(&event, None, 10)).unwrap();
+        assert_eq!(
+            line["payload"]["content"].as_str().unwrap().chars().count(),
+            11
+        );
+
+        let line: Value = serde_json::from_str(&summarize(&event, None, 1000)).unwrap();
+        assert_eq!(
+            line["payload"]["content"].as_str().unwrap().chars().count(),
+            500
+        );
+        assert!(line.get("preview").is_none());
+    }
+
+    #[test]
+    fn a_cut_inside_arguments_is_not_a_preview() {
+        let call = percept::Event::restore(
+            EventId::new(),
+            Actor::Model,
+            "tui".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::ToolCalled {
+                tool: "search_events".to_string(),
+                arguments: format!(r#"{{"contains":["{}"]}}"#, "y".repeat(500)),
+            },
+        );
+        let line: Value = serde_json::from_str(&summarize(&call, None, PREVIEW_CHARS)).unwrap();
+        assert!(line.get("preview").is_none());
+        assert!(line["payload"]["arguments"]["contains"][0]
+            .as_str()
+            .unwrap()
+            .ends_with('\u{2026}'));
+    }
+
+    #[test]
+    fn excerpt_slices_content_and_reports_the_whole_length() {
+        let event = message(Actor::Model, "hello world".to_string());
+        let line = excerpt(&event, Some(0), Some(5)).unwrap();
+        let value: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["payload"]["content"], "hello");
+        assert_eq!(value["preview"]["len"], 11);
+    }
+
+    #[test]
+    fn excerpt_never_splits_a_multi_byte_character() {
+        // "aaa" then two 3-byte euro signs - a byte slice at 4 would
+        // split the first one.
+        let event = message(Actor::Model, format!("aaa{}", "\u{20ac}\u{20ac}"));
+        let line = excerpt(&event, Some(3), Some(4)).unwrap();
+        let value: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["payload"]["content"], "\u{20ac}");
+    }
+
+    #[test]
+    fn excerpt_defaults_start_to_zero_and_end_to_the_length() {
+        let event = message(Actor::Model, "hi".to_string());
+        let line = excerpt(&event, None, None).unwrap();
+        let value: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["payload"]["content"], "hi");
+        assert_eq!(value["preview"]["len"], 2);
+    }
+
+    #[test]
+    fn excerpt_clamps_an_end_past_the_length() {
+        let event = message(Actor::Model, "hi".to_string());
+        let line = excerpt(&event, Some(0), Some(9000)).unwrap();
+        let value: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(value["payload"]["content"], "hi");
+    }
+
+    #[test]
+    fn excerpt_rejects_a_start_past_the_length_and_names_it() {
+        let event = message(Actor::Model, "hi".to_string());
+        let err = excerpt(&event, Some(9000), None).unwrap_err().to_string();
+        assert_eq!(err, "start 9000 is past the end of content (2 characters)");
+    }
+
+    #[test]
+    fn excerpt_rejects_an_inverted_range_and_names_both_ends() {
+        let event = message(Actor::Model, "hello".to_string());
+        let err = excerpt(&event, Some(4), Some(2)).unwrap_err().to_string();
+        assert_eq!(err, "start 4 is not before end 2");
+    }
+
+    #[test]
+    fn excerpt_on_a_tool_called_event_is_an_error() {
+        let call = percept::Event::restore(
+            EventId::new(),
+            Actor::Model,
+            "tui".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::ToolCalled {
+                tool: "search_events".to_string(),
+                arguments: "{}".to_string(),
+            },
+        );
+        let err = excerpt(&call, None, None).unwrap_err().to_string();
+        assert_eq!(err, "tool.called has no content to slice");
+    }
+
+    fn message(actor: Actor, content: String) -> percept::Event {
+        percept::Event::message_received(actor, content, "tui".to_string(), None)
     }
 
     #[test]

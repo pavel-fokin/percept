@@ -11,7 +11,7 @@
 //! every line is JSONL, for a caller piping into `jq`, never a table or
 //! prose. `search`'s default line shortens long strings in the payload,
 //! so a caller spends tokens on the whole of one deliberately, via
-//! `--full` or `show`.
+//! `--full`, `show`, or `show --range` into one `content`.
 
 use std::io::{self, Write};
 
@@ -19,7 +19,7 @@ use clap::{Args, Parser, Subcommand};
 use tokio_stream::StreamExt;
 
 use crate::app::{run_tool, AppService, ToolStep};
-use crate::percept::{Chunk, EventId, EventLog, EventQuery, EventSearch};
+use crate::percept::{Chunk, EventLog, EventQuery, EventSearch};
 use crate::shared::Timestamp;
 use crate::store;
 
@@ -84,7 +84,10 @@ Examples:
   # What the model did in the last day
   percept events search --since 1d --type tool.called
 
-  # Prompts and replies naming a deploy, with full payloads
+  # Prompts and replies naming a deploy, 300 characters around each hit
+  percept events search --contains deploy --type message.received --preview 300
+
+  # The same, with full payloads
   percept events search --contains deploy --type message.received --full
 
   # Two windows that tile with no gap or overlap
@@ -116,6 +119,10 @@ pub struct SearchArgs {
     /// oldest first.
     #[arg(long)]
     size: Option<usize>,
+    /// How many characters of `content` a line keeps, cut around the
+    /// first `--contains` hit when there is one.
+    #[arg(long, default_value_t = store::PREVIEW_CHARS, value_parser = at_least_one, conflicts_with = "full")]
+    preview: usize,
     /// Print the whole wire event per line instead of the constant-size
     /// default.
     #[arg(long)]
@@ -125,6 +132,12 @@ pub struct SearchArgs {
 #[derive(Args)]
 pub struct ShowArgs {
     id: String,
+    /// A character range `START:END` into `payload.content`, `END`
+    /// exclusive; omit `START` to begin at 0 and `END` to reach the end
+    /// of `content`, e.g. `400:`. Only event kinds that carry `content`
+    /// support a range.
+    #[arg(long, value_parser = parse_range)]
+    range: Option<(Option<usize>, Option<usize>)>,
 }
 
 #[derive(Args)]
@@ -132,6 +145,32 @@ pub struct AskArgs {
     /// The prompt to send.
     #[arg(value_parser = non_blank)]
     prompt: String,
+}
+
+/// Parses `--range START:END`; either side may be blank.
+fn parse_range(s: &str) -> Result<(Option<usize>, Option<usize>), String> {
+    let (start, end) = s
+        .split_once(':')
+        .ok_or_else(|| format!("invalid range {s:?}, expected START:END"))?;
+    let bound = |name: &str, text: &str| {
+        if text.is_empty() {
+            Ok(None)
+        } else {
+            text.parse()
+                .map(Some)
+                .map_err(|_| format!("invalid range {name} {text:?}"))
+        }
+    };
+    Ok((bound("start", start)?, bound("end", end)?))
+}
+
+/// A window of zero characters shows nothing and reads as a mistake.
+fn at_least_one(s: &str) -> Result<usize, String> {
+    match s.parse::<usize>() {
+        Ok(0) => Err("must be at least 1".to_string()),
+        Ok(n) => Ok(n),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// Rejects a blank value at parse time. A source that names nobody, a
@@ -167,7 +206,7 @@ pub fn search(args: SearchArgs, log: &dyn EventSearch) -> Result<(), Box<dyn std
         let line = if args.full {
             store::encode(event)
         } else {
-            store::summarize(event)
+            store::summarize(event, query.hit(event), args.preview)
         };
         if let Err(e) = writeln!(out, "{line}") {
             return stop_if_pipe_closed(e);
@@ -238,14 +277,11 @@ fn parse_query(args: &SearchArgs) -> Result<EventQuery, String> {
 
 /// Prints the one event `args.id` names. An id the log doesn't carry
 /// fails loudly rather than printing nothing, so an empty result never
-/// means "your id was wrong".
+/// means "your id was wrong". With `--range`, prints `payload.content`
+/// sliced to it instead of the whole event.
 pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
-    let wanted: EventId = store::parse_event_id(&args.id)?;
-    let event = log
-        .get(wanted)?
-        .ok_or_else(|| format!("no event with id {}", args.id))?;
-
-    println!("{}", store::encode(&event));
+    let (start, end) = args.range.unwrap_or_default();
+    println!("{}", store::read(log, &args.id, start, end)?);
     Ok(())
 }
 
@@ -467,6 +503,38 @@ mod tests {
 
         let blank = Cli::try_parse_from(["percept", "events", "search", "--contains", " "]);
         assert!(blank.is_err());
+    }
+
+    #[test]
+    fn a_zero_preview_is_rejected_at_parse() {
+        let zero = Cli::try_parse_from(["percept", "events", "search", "--preview", "0"]);
+        assert!(zero.is_err());
+        let ok = Cli::try_parse_from(["percept", "events", "search", "--preview", "300"]);
+        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn a_range_without_an_end_reaches_the_end_of_content() {
+        let ok = Cli::try_parse_from(["percept", "events", "show", "abc", "--range", "400:"]);
+        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn a_range_without_a_start_begins_at_zero() {
+        let ok = Cli::try_parse_from(["percept", "events", "show", "abc", "--range", ":50"]);
+        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn preview_and_full_are_refused_together() {
+        let both = Cli::try_parse_from(["percept", "events", "search", "--preview", "9", "--full"]);
+        assert!(both.is_err());
+    }
+
+    #[test]
+    fn a_range_with_no_colon_is_rejected_at_parse() {
+        let bad = Cli::try_parse_from(["percept", "events", "show", "abc", "--range", "400"]);
+        assert!(bad.is_err());
     }
 
     fn ask_args(prompt: &str) -> AskArgs {

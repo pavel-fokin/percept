@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use super::{Actor, Event, EventKind, Payload};
 use crate::shared::Timestamp;
 
@@ -51,17 +53,60 @@ impl EventQuery {
     }
 }
 
+impl EventQuery {
+    /// Where in `event`'s `content` the text filter hits: the character
+    /// range of the earliest occurrence of any term, by the same rule
+    /// `matches` applies. `None` when the filter is off, the event has
+    /// no `content`, or no term is in it - a `tool.called` event can
+    /// match on `tool` or `arguments` and still have no hit here.
+    pub fn hit(&self, event: &Event) -> Option<Range<usize>> {
+        if self.text.is_empty() {
+            return None;
+        }
+        let content = event.payload().content()?;
+        // Lowercasing can turn one character into several, so each
+        // lowercased character remembers which original it came from
+        // and the range is counted on the original text.
+        let mut lower = String::with_capacity(content.len());
+        let mut origin = Vec::with_capacity(content.len());
+        for (i, c) in content.chars().enumerate() {
+            for l in c.to_lowercase() {
+                lower.push(l);
+                origin.push(i);
+            }
+        }
+        let (at, term) = self
+            .text
+            .iter()
+            .map(fold)
+            .filter_map(|term| lower.find(&term).map(|at| (at, term)))
+            .min_by_key(|(at, _)| *at)?;
+        let first = lower[..at].chars().count();
+        let last = first + term.chars().count();
+        let start = origin.get(first).copied().unwrap_or(0);
+        let end = origin.get(last.saturating_sub(1)).map_or(start, |&o| o + 1);
+        Some(start..end)
+    }
+}
+
 /// Whether one of `payload`'s strings carries `term` as a
 /// case-insensitive substring.
 fn carries(payload: &Payload, term: &str) -> bool {
-    let term = term.to_lowercase();
-    let has = |s: &str| s.to_lowercase().contains(&term);
+    let term = fold(term);
+    let has = |s: &str| fold(s).contains(&term);
     match payload {
         Payload::MessageReceived { content }
         | Payload::ThoughtRecorded { content }
         | Payload::ToolResulted { content } => has(content),
         Payload::ToolCalled { tool, arguments } => has(tool) || has(arguments),
     }
+}
+
+/// Lowercases character by character - the same mapping `hit` walks -
+/// rather than `str::to_lowercase`, whose context-sensitive cases (a
+/// Greek final sigma) would make `matches` and `hit` disagree.
+fn fold(s: impl AsRef<str>) -> String {
+    s.as_ref().chars().flat_map(char::to_lowercase).collect()
 }
 
 /// Searches the committed log - domain-owned, the way `EventLog` is a
@@ -218,6 +263,84 @@ mod tests {
         .apply(events);
 
         assert_eq!(contents(&kept), vec!["Deploy the API"]);
+    }
+
+    #[test]
+    fn a_hit_is_the_earliest_offset_of_any_term_in_content() {
+        let event = message("Ship it, then DEPLOY it, then ship again");
+        let query = EventQuery {
+            text: vec!["deploy".to_string(), "then".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(query.hit(&event), Some(9..13));
+
+        let off = EventQuery::default();
+        assert_eq!(off.hit(&event), None);
+    }
+
+    #[test]
+    fn a_hit_counts_characters_of_the_original_text() {
+        // `İ` lowercases to two characters; an offset taken on the
+        // lowercased copy would land one past the term.
+        let event = message("İİ deploy");
+        let query = EventQuery {
+            text: vec!["deploy".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(query.hit(&event), Some(3..9));
+    }
+
+    #[test]
+    fn a_hit_spans_the_original_characters_of_a_term_that_expands() {
+        let event = message("say İ now");
+        let query = EventQuery {
+            text: vec!["İ".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(query.hit(&event), Some(4..5));
+    }
+
+    #[test]
+    fn a_final_sigma_matches_and_hits_alike() {
+        let event = message("ΟΔΥΣΣΕΥΣ went home");
+        let query = EventQuery {
+            text: vec!["ΟΔΥΣΣΕΥΣ".to_string()],
+            ..Default::default()
+        };
+        assert!(query.matches(&event));
+        assert_eq!(query.hit(&event), Some(0..8));
+    }
+
+    #[test]
+    fn an_empty_term_matches_empty_content_without_panicking() {
+        let event = message("");
+        let query = EventQuery {
+            text: vec![String::new()],
+            ..Default::default()
+        };
+        assert!(query.matches(&event));
+        assert_eq!(query.hit(&event), Some(0..0));
+    }
+
+    #[test]
+    fn a_tool_call_matching_on_its_tool_name_has_no_hit() {
+        let call = Event::restore(
+            EventId::new(),
+            Actor::Model,
+            "tui".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::ToolCalled {
+                tool: "search_events".to_string(),
+                arguments: "{}".to_string(),
+            },
+        );
+        let query = EventQuery {
+            text: vec!["search".to_string()],
+            ..Default::default()
+        };
+        assert!(query.matches(&call));
+        assert_eq!(query.hit(&call), None);
     }
 
     #[test]
