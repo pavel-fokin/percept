@@ -1,18 +1,16 @@
 use std::error::Error;
 
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tokio_stream::StreamExt;
 
-use super::{client, take_lines, tool_def, ToolDef};
+use super::{client, role, stream_lines, tool_def, Line, Sender, ToolDef};
 use crate::percept::{
-    Actor, Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream,
+    Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream,
 };
 
-/// Sends and receives with OpenAI's `/chat/completions`, or any server
-/// that speaks it. A streamed reply is server-sent events: one `data:`
-/// line per JSON object, ending on `data: [DONE]`.
+/// Sends and receives with OpenAI's `/chat/completions`. A streamed
+/// reply is server-sent events: one `data:` line per JSON object,
+/// ending on `data: [DONE]`.
 pub struct OpenAi {
     url: String,
     model: String,
@@ -31,16 +29,6 @@ impl OpenAi {
     }
 }
 
-/// OpenAI's role vocabulary - a string, not an enum, because it's the
-/// wire's word, not the domain's.
-fn role(actor: Actor) -> &'static str {
-    match actor {
-        Actor::User => "user",
-        Actor::Model => "assistant",
-        Actor::System => "system",
-    }
-}
-
 #[derive(Serialize)]
 struct ChatRequest {
     model: String,
@@ -53,6 +41,18 @@ struct ChatRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     parallel_tool_calls: Option<bool>,
     stream: bool,
+}
+
+impl ChatRequest {
+    fn new(model: String, request: &ModelRequest) -> Self {
+        Self {
+            model,
+            messages: chat_messages(&request.messages),
+            parallel_tool_calls: (!request.tools.is_empty()).then_some(false),
+            tools: request.tools.iter().map(tool_def).collect(),
+            stream: true,
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -86,21 +86,24 @@ struct ToolCallFunction {
 /// The domain keeps no id for a tool call, but the API ties a result
 /// to its call by one. Calls are numbered in transcript order and a
 /// result cites the call before it - `to_messages` never yields a
-/// result with no call ahead of it.
+/// result with no call ahead of it. The reverse happens: a call
+/// another writer logged has no result here, and the API refuses a
+/// call left unanswered, so it replays as the model's text instead.
 fn chat_messages(messages: &[Message]) -> Vec<ChatMessage> {
     let mut calls = 0;
-    messages
-        .iter()
-        .map(|message| match message {
+    let mut out = Vec::with_capacity(messages.len());
+    let mut messages = messages.iter().peekable();
+    while let Some(message) = messages.next() {
+        out.push(match message {
             Message::Text {
                 role: actor,
                 content,
-            } => ChatMessage {
-                role: role(*actor),
-                content: Some(content.clone()),
-                tool_calls: Vec::new(),
-                tool_call_id: None,
-            },
+            } => text(role(*actor), content.clone()),
+            Message::ToolCall { tool, arguments }
+                if !matches!(messages.peek(), Some(Message::ToolResult { .. })) =>
+            {
+                text("assistant", format!("{tool}({arguments})"))
+            }
             Message::ToolCall { tool, arguments } => {
                 calls += 1;
                 ChatMessage {
@@ -118,13 +121,21 @@ fn chat_messages(messages: &[Message]) -> Vec<ChatMessage> {
                 }
             }
             Message::ToolResult { content } => ChatMessage {
-                role: "tool",
-                content: Some(content.clone()),
-                tool_calls: Vec::new(),
                 tool_call_id: Some(format!("call_{calls}")),
+                ..text("tool", content.clone())
             },
-        })
-        .collect()
+        });
+    }
+    out
+}
+
+fn text(role: &'static str, content: String) -> ChatMessage {
+    ChatMessage {
+        role,
+        content: Some(content),
+        tool_calls: Vec::new(),
+        tool_call_id: None,
+    }
 }
 
 /// One streamed event's JSON. Only what OpenAi reads is deserialized.
@@ -134,7 +145,6 @@ struct StreamChunk {
     choices: Vec<Choice>,
     /// A failure after the headers went out arrives as an event, not a
     /// status.
-    #[serde(default)]
     error: Option<ApiError>,
 }
 
@@ -147,13 +157,11 @@ struct ApiError {
 struct Choice {
     #[serde(default)]
     delta: Delta,
-    #[serde(default)]
     finish_reason: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
 struct Delta {
-    #[serde(default)]
     content: Option<String>,
     /// A tool call arrives in pieces: the first delta names it, the
     /// rest carry fragments of its arguments.
@@ -165,35 +173,28 @@ struct Delta {
 struct ToolCallDelta {
     #[serde(default)]
     index: usize,
-    #[serde(default)]
     function: Option<FunctionDelta>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 struct FunctionDelta {
-    #[serde(default)]
     name: Option<String>,
-    #[serde(default)]
     arguments: Option<String>,
 }
 
-/// What one line means for the stream: a chunk to forward, the
-/// sentinel that ends it, or nothing - a comment, a blank, a delta with
-/// no text, a fragment of a tool call still being assembled.
-enum Line {
-    Chunk(Chunk),
-    Empty,
-    Done,
-}
-
 /// Reads the event stream line by line, assembling the one tool call
-/// the loop will run out of its deltas.
+/// the loop will run out of its deltas. A comment, a blank, a delta
+/// with no text, or a fragment of a call still being assembled is an
+/// empty line to the caller.
 #[derive(Default)]
 struct Decoder {
+    call: Option<PendingCall>,
+}
+
+#[derive(Default)]
+struct PendingCall {
     tool: String,
     arguments: String,
-    /// Whether any tool call delta has arrived this reply.
-    calling: bool,
 }
 
 impl Decoder {
@@ -220,19 +221,12 @@ impl Decoder {
         // a time. `parallel_tool_calls` is off, so a second one is a
         // server ignoring the request; the log records just the first,
         // and its replayed history stays consistent.
-        for delta in choice.delta.tool_calls {
-            if delta.index != 0 {
-                continue;
-            }
-            self.calling = true;
-            if let Some(function) = delta.function {
-                if let Some(name) = function.name {
-                    self.tool.push_str(&name);
-                }
-                if let Some(arguments) = function.arguments {
-                    self.arguments.push_str(&arguments);
-                }
-            }
+        for delta in choice.delta.tool_calls.into_iter().filter(|d| d.index == 0) {
+            let call = self.call.get_or_insert_with(Default::default);
+            let function = delta.function.unwrap_or_default();
+            call.tool.push_str(&function.name.unwrap_or_default());
+            call.arguments
+                .push_str(&function.arguments.unwrap_or_default());
         }
 
         match choice.finish_reason.as_deref() {
@@ -247,13 +241,9 @@ impl Decoder {
 
     /// The assembled call, once, if any delta started one.
     fn take_call(&mut self) -> Option<Chunk> {
-        if !self.calling {
-            return None;
-        }
-        self.calling = false;
-        Some(Chunk::ToolCall {
-            tool: std::mem::take(&mut self.tool),
-            arguments: std::mem::take(&mut self.arguments),
+        self.call.take().map(|call| Chunk::ToolCall {
+            tool: call.tool,
+            arguments: call.arguments,
         })
     }
 }
@@ -261,11 +251,7 @@ impl Decoder {
 /// Decodes and forwards one line. Returns `true` once the stream is
 /// over - the `[DONE]` sentinel, a failure, or the receiver having gone
 /// away - so the caller knows to stop reading the body.
-fn handle_line(
-    decoder: &mut Decoder,
-    line: &str,
-    tx: &UnboundedSender<Result<Chunk, Box<dyn Error + Send + Sync>>>,
-) -> bool {
+fn handle_line(decoder: &mut Decoder, line: &str, tx: &Sender) -> bool {
     match decoder.decode(line) {
         Ok(Line::Chunk(chunk)) => tx.send(Ok(chunk)).is_err(),
         Ok(Line::Empty) => false,
@@ -299,57 +285,15 @@ impl Model for OpenAi {
         let client = self.client.clone();
         let url = self.url.clone();
         let api_key = self.api_key.clone();
-        let request = ChatRequest {
-            model: self.model.clone(),
-            messages: chat_messages(&request.messages),
-            parallel_tool_calls: (!request.tools.is_empty()).then_some(false),
-            tools: request.tools.iter().map(tool_def).collect(),
-            stream: true,
-        };
+        let request = ChatRequest::new(self.model.clone(), request);
 
         tokio::spawn(async move {
-            let response = match client
-                .post(&url)
-                .bearer_auth(api_key)
-                .json(&request)
-                .send()
-                .await
-            {
-                Ok(response) => response,
-                Err(err) => {
-                    let _ = tx.send(Err(format!("request to openai failed: {err}").into()));
-                    return;
-                }
-            };
-
-            if !response.status().is_success() {
-                let status = response.status();
-                let body = response.text().await.unwrap_or_default();
-                let _ = tx.send(Err(format!("openai returned {status}: {body}").into()));
-                return;
-            }
-
+            let request = client.post(&url).bearer_auth(api_key).json(&request);
             let mut decoder = Decoder::default();
-            let mut body = response.bytes_stream();
-            let mut buf = Vec::new();
-            while let Some(chunk) = body.next().await {
-                let chunk = match chunk {
-                    Ok(chunk) => chunk,
-                    Err(err) => {
-                        let _ = tx.send(Err(format!("openai stream failed: {err}").into()));
-                        return;
-                    }
-                };
-                for line in take_lines(&mut buf, &chunk) {
-                    if handle_line(&mut decoder, &line, &tx) {
-                        return;
-                    }
-                }
-            }
-
-            // Whatever the body ended on without a trailing newline is
-            // still a line; an empty tail decodes as nothing.
-            handle_line(&mut decoder, &String::from_utf8_lossy(&buf), &tx);
+            stream_lines(request, "openai", &tx, |line| {
+                handle_line(&mut decoder, line, &tx)
+            })
+            .await;
         });
 
         Box::pin(UnboundedReceiverStream::new(rx))
@@ -361,6 +305,7 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::*;
+    use crate::percept::{Actor, ToolSpec};
 
     fn decode(decoder: &mut Decoder, line: &str) -> Line {
         decoder.decode(line).unwrap()
@@ -511,23 +456,49 @@ mod tests {
     }
 
     #[test]
-    fn parallel_tool_calls_is_only_sent_with_tools() {
-        let plain = ChatRequest {
-            model: "m".to_string(),
-            messages: Vec::new(),
-            tools: Vec::new(),
-            parallel_tool_calls: None,
-            stream: true,
-        };
-        let wire = serde_json::to_value(&plain).unwrap();
-        assert!(wire.get("parallel_tool_calls").is_none());
-        assert!(wire.get("tools").is_none());
+    fn a_call_another_writer_left_unanswered_replays_as_text() {
+        let messages = vec![
+            Message::ToolCall {
+                tool: "search_events".to_string(),
+                arguments: r#"{"size":5}"#.to_string(),
+            },
+            Message::Text {
+                role: Actor::User,
+                content: "and now?".to_string(),
+            },
+        ];
+
+        let wire = serde_json::to_value(chat_messages(&messages)).unwrap();
+
+        assert_eq!(
+            wire[0],
+            json!({"role": "assistant", "content": "search_events({\"size\":5})"})
+        );
     }
 
     #[test]
-    fn roles_map_to_openais_vocabulary() {
-        assert_eq!(role(Actor::User), "user");
-        assert_eq!(role(Actor::Model), "assistant");
-        assert_eq!(role(Actor::System), "system");
+    fn parallel_tool_calls_is_only_sent_with_tools() {
+        let tool = ToolSpec {
+            name: "search_events",
+            description: "search",
+            parameters: r#"{"type":"object"}"#,
+        };
+        let plain = ModelRequest {
+            messages: Vec::new(),
+            tools: Vec::new(),
+        };
+        let with_tools = ModelRequest {
+            messages: Vec::new(),
+            tools: vec![tool],
+        };
+
+        let plain = serde_json::to_value(ChatRequest::new("m".to_string(), &plain)).unwrap();
+        let with_tools =
+            serde_json::to_value(ChatRequest::new("m".to_string(), &with_tools)).unwrap();
+
+        assert!(plain.get("parallel_tool_calls").is_none());
+        assert!(plain.get("tools").is_none());
+        assert_eq!(with_tools["parallel_tool_calls"], false);
+        assert_eq!(with_tools["tools"][0]["function"]["name"], "search_events");
     }
 }

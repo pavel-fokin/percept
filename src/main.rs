@@ -37,7 +37,7 @@ const OLLAMA_MODEL: &str = "gemma4";
 
 const OPENAI_URL: &str = "https://api.openai.com/v1";
 const OPENAI_MODEL: &str = "gpt-5-mini";
-/// The key is the one thing that cannot be a `const`.
+/// Where the key is read from.
 const OPENAI_KEY_VAR: &str = "OPENAI_API_KEY";
 
 /// How often the status row's spinner advances while a turn streams.

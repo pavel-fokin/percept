@@ -2,13 +2,11 @@ use std::error::Error;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tokio_stream::StreamExt;
 
-use super::{client, take_lines, tool_def, ToolDef};
+use super::{client, role, stream_lines, tool_def, Line, Sender, ToolDef};
 use crate::percept::{
-    Actor, Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream,
+    Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream,
 };
 
 /// Sends and receives with a local ollama server's `/api/chat`, which
@@ -27,16 +25,6 @@ impl Ollama {
             model,
             client: client(),
         }
-    }
-}
-
-/// ollama's role vocabulary - a string, not an enum, because it's the
-/// wire's word, not the domain's.
-fn role(actor: Actor) -> &'static str {
-    match actor {
-        Actor::User => "user",
-        Actor::Model => "assistant",
-        Actor::System => "system",
     }
 }
 
@@ -136,16 +124,8 @@ struct ChatChunkMessage {
     tool_calls: Vec<ToolCall>,
 }
 
-/// What one parsed NDJSON line means for the stream: a chunk to
-/// forward, the sentinel that ends it, or nothing - the `done` line's
-/// `content` is always empty, and a line with neither `thinking` nor
-/// `content` yields no chunk.
-enum Line {
-    Chunk(Chunk),
-    Empty,
-    Done,
-}
-
+/// The `done` line's `content` is always empty, and a line with
+/// neither `thinking` nor `content` yields no chunk.
 fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
     if line.trim().is_empty() {
         return Ok(Line::Empty);
@@ -180,10 +160,7 @@ fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
 /// Parses and forwards one line. Returns `true` once the stream is
 /// over - the `done` sentinel, a parse failure, or the receiver having
 /// gone away - so the caller knows to stop reading the body.
-fn handle_line(
-    line: &str,
-    tx: &UnboundedSender<Result<Chunk, Box<dyn Error + Send + Sync>>>,
-) -> bool {
+fn handle_line(line: &str, tx: &Sender) -> bool {
     match parse_line(line) {
         Ok(Line::Chunk(chunk)) => tx.send(Ok(chunk)).is_err(),
         Ok(Line::Empty) => false,
@@ -217,41 +194,8 @@ impl Model for Ollama {
         };
 
         tokio::spawn(async move {
-            let response = match client.post(&url).json(&request).send().await {
-                Ok(response) => response,
-                Err(err) => {
-                    let _ = tx.send(Err(format!("request to ollama failed: {err}").into()));
-                    return;
-                }
-            };
-
-            if !response.status().is_success() {
-                let status = response.status();
-                let body = response.text().await.unwrap_or_default();
-                let _ = tx.send(Err(format!("ollama returned {status}: {body}").into()));
-                return;
-            }
-
-            let mut body = response.bytes_stream();
-            let mut buf = Vec::new();
-            while let Some(chunk) = body.next().await {
-                let chunk = match chunk {
-                    Ok(chunk) => chunk,
-                    Err(err) => {
-                        let _ = tx.send(Err(format!("ollama stream failed: {err}").into()));
-                        return;
-                    }
-                };
-                for line in take_lines(&mut buf, &chunk) {
-                    if handle_line(&line, &tx) {
-                        return;
-                    }
-                }
-            }
-
-            // Whatever the body ended on without a trailing newline is
-            // still a line; an empty tail parses as nothing.
-            handle_line(&String::from_utf8_lossy(&buf), &tx);
+            let request = client.post(&url).json(&request);
+            stream_lines(request, "ollama", &tx, |line| handle_line(line, &tx)).await;
         });
 
         Box::pin(UnboundedReceiverStream::new(rx))
@@ -330,12 +274,5 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         assert!(!handle_line("   ", &tx));
         assert!(rx.try_recv().is_err());
-    }
-
-    #[test]
-    fn roles_map_to_ollamas_vocabulary() {
-        assert_eq!(role(Actor::User), "user");
-        assert_eq!(role(Actor::Model), "assistant");
-        assert_eq!(role(Actor::System), "system");
     }
 }
