@@ -1,8 +1,7 @@
 //! Concrete `percept::Model` implementations.
 //!
-//! What both wire formats share lives here: ollama's `/api/chat`
-//! mirrors OpenAI's roles and tool definition, and both stream one
-//! JSON object per line over HTTP.
+//! What both wire formats share lives here: the same three role words,
+//! and a reply streamed as one JSON object per line over HTTP.
 
 mod ollama;
 mod openai;
@@ -10,12 +9,10 @@ mod openai;
 use std::error::Error;
 use std::time::Duration;
 
-use serde::Serialize;
-use serde_json::Value;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::StreamExt;
 
-use crate::percept::{Actor, Chunk, ToolSpec};
+use crate::percept::{Actor, Chunk};
 
 pub use ollama::Ollama;
 pub use openai::OpenAi;
@@ -43,34 +40,6 @@ fn role(actor: Actor) -> &'static str {
         Actor::User => "user",
         Actor::Model => "assistant",
         Actor::System => "system",
-    }
-}
-
-/// One tool as OpenAI's chat API defines it and ollama's copies.
-#[derive(Serialize)]
-struct ToolDef {
-    #[serde(rename = "type")]
-    kind: &'static str,
-    function: ToolDefFunction,
-}
-
-#[derive(Serialize)]
-struct ToolDefFunction {
-    name: &'static str,
-    description: &'static str,
-    /// `ToolSpec` carries the schema as text; the wire wants an object.
-    parameters: Value,
-}
-
-fn tool_def(spec: &ToolSpec) -> ToolDef {
-    ToolDef {
-        kind: "function",
-        function: ToolDefFunction {
-            name: spec.name,
-            description: spec.description,
-            parameters: serde_json::from_str(spec.parameters)
-                .expect("ToolSpec parameters is a JSON Schema literal"),
-        },
     }
 }
 

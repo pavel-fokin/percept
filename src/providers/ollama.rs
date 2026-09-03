@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use super::{client, role, stream_lines, tool_def, Line, Sender, ToolDef};
+use super::{client, role, stream_lines, Line, Sender};
 use crate::percept::{
-    Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream,
+    Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream, ToolSpec,
 };
 
 /// Sends and receives with a local ollama server's `/api/chat`, which
@@ -36,6 +36,34 @@ struct ChatRequest {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tools: Vec<ToolDef>,
     stream: bool,
+}
+
+/// One tool in ollama's shape, a copy of OpenAI's chat completions.
+#[derive(Serialize)]
+struct ToolDef {
+    #[serde(rename = "type")]
+    kind: &'static str,
+    function: ToolDefFunction,
+}
+
+#[derive(Serialize)]
+struct ToolDefFunction {
+    name: &'static str,
+    description: &'static str,
+    /// `ToolSpec` carries the schema as text; the wire wants an object.
+    parameters: Value,
+}
+
+fn tool_def(spec: &ToolSpec) -> ToolDef {
+    ToolDef {
+        kind: "function",
+        function: ToolDefFunction {
+            name: spec.name,
+            description: spec.description,
+            parameters: serde_json::from_str(spec.parameters)
+                .expect("ToolSpec parameters is a JSON Schema literal"),
+        },
+    }
 }
 
 #[derive(Serialize)]
