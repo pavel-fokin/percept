@@ -28,6 +28,12 @@ impl Ollama {
     }
 }
 
+/// Tokens of context asked of ollama per request. Its own default is
+/// 4096, which a request carrying a map, a search result, and a
+/// thinking model's reasoning overruns; the reply then stops mid-thought
+/// as `done_reason: length`. Sized for that, not for the model's limit.
+const CONTEXT_TOKENS: u32 = 16384;
+
 #[derive(Serialize)]
 struct ChatRequest {
     model: String,
@@ -36,6 +42,12 @@ struct ChatRequest {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tools: Vec<ToolDef>,
     stream: bool,
+    options: ChatOptions,
+}
+
+#[derive(Serialize)]
+struct ChatOptions {
+    num_ctx: u32,
 }
 
 /// One tool in ollama's shape, a copy of OpenAI's chat completions.
@@ -135,6 +147,10 @@ struct ChatChunk {
     message: ChatChunkMessage,
     #[serde(default)]
     done: bool,
+    /// Why a `done` line ended the stream: `stop` when the model
+    /// finished, `length` when the context ran out first.
+    #[serde(default)]
+    done_reason: String,
     #[serde(default)]
     error: Option<String>,
 }
@@ -164,6 +180,11 @@ fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
         return Err(format!("ollama reported: {error}").into());
     }
     if raw.done {
+        // A reply cut at the context limit would otherwise pass for a
+        // short one - or, after a long thought, for no reply at all.
+        if raw.done_reason == "length" {
+            return Err("ollama cut the reply off at its context limit".into());
+        }
         return Ok(Line::Done);
     }
     // Thinking arrives first when a line ever carried both.
@@ -219,6 +240,9 @@ impl Model for Ollama {
             messages: request.messages.iter().map(chat_message).collect(),
             tools: request.tools.iter().map(tool_def).collect(),
             stream: true,
+            options: ChatOptions {
+                num_ctx: CONTEXT_TOKENS,
+            },
         };
 
         tokio::spawn(async move {
@@ -282,6 +306,13 @@ mod tests {
             Line::Done => {}
             _ => panic!("expected done"),
         }
+    }
+
+    #[test]
+    fn a_done_line_cut_at_the_context_limit_is_an_error() {
+        let line = r#"{"model":"gemma4","message":{"role":"assistant","content":""},"done":true,"done_reason":"length"}"#;
+        let err = parse_line(line).err().unwrap();
+        assert!(err.to_string().contains("context limit"), "{err}");
     }
 
     #[test]
