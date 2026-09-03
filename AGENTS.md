@@ -116,6 +116,11 @@ The TUI only runs on a real terminal. `scripts/drive.py` forks a pty,
 sends timed keystrokes, and prints the frames; `--plain` strips the
 escapes so the rendered text can be grepped.
 
+A command the agent runs is killed after ten minutes, in the background
+too. A script that runs longer - an experiment under `experiment/` -
+is launched detached with `nohup`, writing to a log, and watched
+through that log.
+
 ## Code Quality
 
 Entity IDs use UUIDv7, each wrapped in a type specific to that entity,
