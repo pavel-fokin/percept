@@ -74,7 +74,7 @@ it, never sideways or up:
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
 | Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps`, `ask`, `reflect` - the log and its maps without the TUI. |
 | Infrastructure | `providers` | `Ollama` and `OpenAi` - implement `percept::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` carries the key. |
-| Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`, and the three tools the model calls: `search_events`, `read_event`, `revise_map`. |
+| Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`, and the four tools the model calls: `search_events`, `read_event`, `revise_map`, `read_map`. `PERCEPT_MAPS` picks how maps reach the model. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 
 Wire concrete types together only at the entrypoint - `main` in Rust.

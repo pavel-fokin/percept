@@ -592,7 +592,7 @@ fn relative_minutes(s: &str) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::App;
+    use crate::app::{App, MapShape};
     use crate::percept::{self, Payload};
     use crate::testing::{content, FakeLog, FakeTool, Scripted};
     use std::sync::Arc;
@@ -789,7 +789,14 @@ mod tests {
         );
         let log = Arc::new(FakeLog::default());
         let tools: Vec<Arc<dyn percept::Tool>> = vec![Arc::new(FakeTool)];
-        let app = App::new(Arc::new(model), log.clone(), tools, "cli".to_string()).unwrap();
+        let app = App::new(
+            Arc::new(model),
+            log.clone(),
+            tools,
+            MapShape::Prompt,
+            "cli".to_string(),
+        )
+        .unwrap();
 
         run_turn(Box::new(app), Actor::User, "what happened".to_string())
             .await
@@ -820,7 +827,14 @@ mod tests {
             ]],
             false,
         );
-        let app = App::new(Arc::new(model), log.clone(), Vec::new(), "cli".to_string()).unwrap();
+        let app = App::new(
+            Arc::new(model),
+            log.clone(),
+            Vec::new(),
+            MapShape::Prompt,
+            "cli".to_string(),
+        )
+        .unwrap();
 
         let result = run_turn(Box::new(app), Actor::User, "hi".to_string()).await;
 

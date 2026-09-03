@@ -32,10 +32,10 @@ const DESCRIPTION: &str = "Record into a named map what you have judged \
     ids the judgement came from in `sources`, as search_events returns \
     them; nothing else is an id. A node with no sources is refused: a \
     map records what the log shows, so search for the events first, \
-    even when what you are recording is in front of you. The current \
-    state of any map that holds something is already in the \
-    conversation, so do not add a node that is already there; a node \
-    is named by its kind and name, not by an id you choose.";
+    even when what you are recording is in front of you. Read the map \
+    first, from the conversation or with read_map, and do not add a \
+    node that is already there; a node is named by its kind and name, \
+    not by an id you choose.";
 
 /// JSON Schema for `run`'s `arguments`. A string, not a `Value` - the
 /// domain's `ToolSpec` is serde-free, so the provider parses this. The

@@ -19,6 +19,9 @@ pub struct Schema {
     pub name: &'static str,
     pub node_kinds: &'static [&'static str],
     pub edge_kinds: &'static [&'static str],
+    /// The node kinds worth a reader's attention without opening the
+    /// whole map - what `MapShape::Headlines` sends.
+    pub headline_kinds: &'static [&'static str],
 }
 
 /// The decision map: what was asked, what was weighed, what was chosen
@@ -27,6 +30,7 @@ pub const DECISIONS: Schema = Schema {
     name: "decisions",
     node_kinds: &["question", "option", "evidence", "decision"],
     edge_kinds: &["supports", "contradicts", "resolves"],
+    headline_kinds: &["question", "decision"],
 };
 
 /// Every map percept knows. One map per schema, named after it.

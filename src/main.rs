@@ -17,11 +17,11 @@ mod store;
 mod testing;
 mod tui;
 
-use app::App;
+use app::{App, MapShape};
 use cli::{Cli, Command, EventsCommand, MapsCommand};
 use percept::Actor;
 use providers::{Ollama, OpenAi};
-use store::{Jsonl, ReadEvent, ReviseMap, SearchEvents};
+use store::{Jsonl, ReadEvent, ReadMap, ReviseMap, SearchEvents};
 use tui::{Chat, StreamEvent};
 
 /// Where the event log lives: `percept.jsonl` in the working directory,
@@ -30,6 +30,10 @@ const LOG_PATH: &str = "percept.jsonl";
 
 /// Names the provider that answers: `ollama` (the default) or `openai`.
 const PROVIDER_VAR: &str = "PERCEPT_PROVIDER";
+
+/// Names how much of each cognitive map reaches the model each turn:
+/// `prompt` (the default, today's behaviour), `headlines`, or `tool`.
+const MAPS_VAR: &str = "PERCEPT_MAPS";
 
 /// Where the local ollama server listens.
 const OLLAMA_URL: &str = "http://localhost:11434";
@@ -145,17 +149,36 @@ fn build_model() -> Result<Arc<dyn percept::Model>, Box<dyn std::error::Error>> 
     }
 }
 
+fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
+    let shape = std::env::var(MAPS_VAR).unwrap_or_else(|_| "prompt".to_string());
+    match shape.as_str() {
+        "prompt" => Ok(MapShape::Prompt),
+        "headlines" => Ok(MapShape::Headlines),
+        "tool" => Ok(MapShape::Tool),
+        other => Err(
+            format!("{MAPS_VAR}={other:?} names no shape; use prompt, headlines or tool").into(),
+        ),
+    }
+}
+
 /// Both the TUI and `ask` build the same `App` this way, differing only
 /// in the `source` they stamp and in how they drive its reply stream.
 fn build_app(source: &str) -> Result<App, Box<dyn std::error::Error>> {
     let log = Arc::new(Jsonl::open(LOG_PATH)?);
     let model = build_model()?;
-    let tools: Vec<Arc<dyn percept::Tool>> = vec![
+    let map_shape = build_maps_shape()?;
+    let mut tools: Vec<Arc<dyn percept::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
         Arc::new(ReadEvent::new(log.clone())),
         Arc::new(ReviseMap::new(log.clone())),
     ];
-    App::new(model, log, tools, source.to_string())
+    // The whole map is already in the prompt in that shape; offering
+    // read_map too would just be a second way to see what's already
+    // in view.
+    if map_shape != MapShape::Prompt {
+        tools.push(Arc::new(ReadMap::new(log.clone())));
+    }
+    App::new(model, log, tools, map_shape, source.to_string())
 }
 
 /// One turn without the TUI: `ask` with the user's prompt, `reflect`

@@ -13,6 +13,19 @@ const MAX_TOOL_CALLS: usize = 5;
 /// which is what `search_events` is for.
 const CONTEXT_EVENTS: usize = 20;
 
+/// How much of each cognitive map `build_request` sends every turn.
+/// The map's kinds go in regardless of shape - `revise_map` needs them
+/// to check a change before it commits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MapShape {
+    /// The whole map, as today.
+    Prompt,
+    /// Only its headline nodes; `read_map` opens the rest.
+    Headlines,
+    /// Only its size; `read_map` opens it.
+    Tool,
+}
+
 /// What a presentation needs from the app layer - `tui` and `cli::ask`
 /// both drive a turn through it. Lives here, not in either of them, so
 /// implementing it doesn't pull a presentation into app's dependencies.
@@ -108,6 +121,39 @@ fn is_percepts_prompt(event: &Event) -> bool {
     event.actor() == Actor::System && event.kind() == EventKind::MessageReceived
 }
 
+/// `MapShape::Headlines`'s body: one line per headline node, in the
+/// map's node order, the way `Map`'s `Display` formats a node line, but
+/// without properties - a reader deciding whether to open the map with
+/// `read_map` doesn't need them yet.
+fn headlines_body(map: &Map) -> String {
+    let kinds = map.schema().headline_kinds;
+    let lines: Vec<String> = map
+        .nodes()
+        .iter()
+        .filter(|node| kinds.contains(&node.kind.as_str()))
+        .map(|node| format!("- {node}"))
+        .collect();
+    format!(
+        "Its {} follow; read_map shows the whole map.\n{}",
+        join_with_and(
+            &kinds
+                .iter()
+                .map(|kind| format!("{kind}s"))
+                .collect::<Vec<_>>()
+        ),
+        lines.join("\n")
+    )
+}
+
+/// Joins `words` as English prose: "a", "a and b", or "a, b and c".
+fn join_with_and(words: &[String]) -> String {
+    match words.split_last() {
+        None => String::new(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
 /// The turn now streaming. `anchor` is what the next model events are
 /// caused by: the prompt at first, then each `tool.resulted` as the
 /// loop advances. A thought and a reply share it; a tool call moves it
@@ -145,6 +191,8 @@ pub struct App {
     /// The tools the model may call, sent with each request when the
     /// model reports `tool_use`.
     tools: Vec<Arc<dyn percept::Tool>>,
+    /// How much of each map `build_request` sends every turn.
+    map_shape: MapShape,
     /// The turn now streaming, or None between turns.
     pending: Option<Turn>,
 }
@@ -158,6 +206,7 @@ impl App {
         chat: Arc<dyn percept::Model>,
         log: Arc<dyn percept::EventLog>,
         tools: Vec<Arc<dyn percept::Tool>>,
+        map_shape: MapShape,
         source: String,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let events = log.load()?;
@@ -169,6 +218,7 @@ impl App {
             chat,
             log,
             tools,
+            map_shape,
             pending: None,
         })
     }
@@ -290,7 +340,15 @@ impl App {
                 "(empty: nothing has been recorded here yet. The log may still hold what it would.)"
                     .to_string()
             } else {
-                map.to_string()
+                match self.map_shape {
+                    MapShape::Prompt => map.to_string(),
+                    MapShape::Headlines => headlines_body(&map),
+                    MapShape::Tool => format!(
+                        "It holds {} nodes and {} edges. read_map shows it.",
+                        map.nodes().len(),
+                        map.edges().len()
+                    ),
+                }
             };
             messages.push(percept::Message::Text {
                 role: Actor::System,
@@ -514,6 +572,7 @@ mod tests {
             Arc::new(Silent),
             Arc::new(FakeLog::default()),
             Vec::new(),
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -546,6 +605,7 @@ mod tests {
             Arc::new(Silent),
             Arc::new(FakeLog::default()),
             Vec::new(),
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -576,6 +636,7 @@ mod tests {
             Arc::new(Silent),
             Arc::new(FakeLog::default()),
             Vec::new(),
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -625,6 +686,7 @@ mod tests {
             Arc::new(Silent),
             Arc::new(FakeLog::default()),
             Vec::new(),
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -646,6 +708,7 @@ mod tests {
             Arc::new(Silent),
             Arc::new(FakeLog::default()),
             Vec::new(),
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -664,6 +727,7 @@ mod tests {
             Arc::new(Silent),
             Arc::new(FakeLog::default()),
             Vec::new(),
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -679,7 +743,14 @@ mod tests {
             Event::message_received(Actor::Model, "hello".to_string(), SOURCE.to_string(), None),
         ];
         let log = Arc::new(FakeLog::seeded(seeded));
-        let mut app = App::new(Arc::new(Silent), log, Vec::new(), SOURCE.to_string()).unwrap();
+        let mut app = App::new(
+            Arc::new(Silent),
+            log,
+            Vec::new(),
+            MapShape::Prompt,
+            SOURCE.to_string(),
+        )
+        .unwrap();
         assert_eq!(app.events().len(), 2);
 
         let _ = app.submit("next".to_string()).unwrap();
@@ -694,6 +765,7 @@ mod tests {
             Arc::new(Silent),
             log.clone(),
             Vec::new(),
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -709,6 +781,7 @@ mod tests {
             Arc::new(Silent),
             log.clone(),
             Vec::new(),
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -729,6 +802,7 @@ mod tests {
             Arc::new(Silent),
             log.clone(),
             Vec::new(),
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -764,6 +838,7 @@ mod tests {
             Arc::new(Scripted::new(vec![], true)),
             Arc::new(FakeLog::default()),
             vec![Arc::new(FakeTool)],
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -798,6 +873,7 @@ mod tests {
             Arc::new(Scripted::new(vec![], true)),
             Arc::new(FakeLog::default()),
             vec![Arc::new(FakeTool)],
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -826,6 +902,7 @@ mod tests {
             Arc::new(Scripted::new(vec![], true)),
             Arc::new(FakeLog::default()),
             Vec::new(),
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -873,6 +950,7 @@ mod tests {
                     content: "two".to_string(),
                 },
             ]))],
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -904,6 +982,7 @@ mod tests {
             model.clone(),
             Arc::new(FakeLog::default()),
             vec![Arc::new(FakeTool)],
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -930,6 +1009,7 @@ mod tests {
             model.clone(),
             Arc::new(FakeLog::default()),
             vec![Arc::new(FakeTool)],
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -940,11 +1020,20 @@ mod tests {
     }
 
     fn seeded_app(events: Vec<Event>, tools: Vec<Arc<dyn percept::Tool>>) -> (Arc<Scripted>, App) {
+        seeded_app_with_shape(events, tools, MapShape::Prompt)
+    }
+
+    fn seeded_app_with_shape(
+        events: Vec<Event>,
+        tools: Vec<Arc<dyn percept::Tool>>,
+        map_shape: MapShape,
+    ) -> (Arc<Scripted>, App) {
         let model = Arc::new(Scripted::new(vec![], true));
         let app = App::new(
             model.clone(),
             Arc::new(FakeLog::seeded(events)),
             tools,
+            map_shape,
             SOURCE.to_string(),
         )
         .unwrap();
@@ -1054,6 +1143,65 @@ mod tests {
         assert!(sent[1].contains("\n(empty:"), "{}", sent[1]);
     }
 
+    fn node_added(kind: &str, name: &str) -> Event {
+        Event::new(
+            Actor::User,
+            SOURCE.to_string(),
+            None,
+            percept::Payload::NodeAdded {
+                map: "decisions".to_string(),
+                node: percept::NodeId::new(),
+                kind: kind.to_string(),
+                name: name.to_string(),
+                properties: Default::default(),
+                sources: Vec::new(),
+            },
+        )
+    }
+
+    #[test]
+    fn a_headlines_map_sends_only_its_headline_nodes() {
+        let mut events = vec![
+            node_added("decision", "Rust over Go"),
+            node_added("evidence", "benchmarks"),
+        ];
+        events.extend(filler(CONTEXT_EVENTS + 5));
+        let (model, mut app) = seeded_app_with_shape(events, Vec::new(), MapShape::Headlines);
+
+        let _ = app.submit("now".to_string()).unwrap();
+
+        let sent = model.last_request();
+        assert!(sent[1].starts_with(
+            "The decisions map, built from this log. Node kinds: question, option, \
+             evidence, decision. Edge kinds: supports, contradicts, resolves.\n"
+        ));
+        assert!(
+            sent[1].contains("Its questions and decisions follow; read_map shows the whole map.\n")
+        );
+        assert!(sent[1].contains("- decision \"Rust over Go\""));
+        assert!(!sent[1].contains("benchmarks"));
+    }
+
+    #[test]
+    fn a_tool_shape_map_sends_only_its_size() {
+        let mut events = vec![
+            node_added("decision", "Rust over Go"),
+            node_added("evidence", "benchmarks"),
+        ];
+        events.extend(filler(CONTEXT_EVENTS + 5));
+        let (model, mut app) = seeded_app_with_shape(events, Vec::new(), MapShape::Tool);
+
+        let _ = app.submit("now".to_string()).unwrap();
+
+        let sent = model.last_request();
+        assert!(sent[1].starts_with(
+            "The decisions map, built from this log. Node kinds: question, option, \
+             evidence, decision. Edge kinds: supports, contradicts, resolves.\n"
+        ));
+        assert!(sent[1].contains("It holds 2 nodes and 0 edges. read_map shows it."));
+        assert!(!sent[1].contains("Rust over Go"));
+    }
+
     #[test]
     fn a_map_that_does_not_fold_fails_at_open() {
         let events = vec![Event::new(
@@ -1073,6 +1221,7 @@ mod tests {
             Arc::new(Silent),
             Arc::new(FakeLog::seeded(events)),
             Vec::new(),
+            MapShape::Prompt,
             SOURCE.to_string(),
         )
         .err()
