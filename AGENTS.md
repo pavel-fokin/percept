@@ -56,6 +56,11 @@ model builds maps today. The user will build and co-own them.
   message or event is attributed to.
 - `Model` is domain-owned, not infrastructure: `percept` needs "a reply
   given messages," never the mechanism behind it.
+- `Map` is a cognitive map: nodes and edges the model builds from the
+  log, folded from `node.added`, `node.removed`, `edge.added`, and
+  `edge.removed` events in the same log. A `Schema` names a map and
+  the node and edge kinds it allows - `decisions` today. Every change
+  goes through `Map::apply`, so the rules live once.
 
 ## Architecture
 
@@ -64,12 +69,12 @@ it, never sideways or up:
 
 | Layer | Package | Owns |
 |---|---|---|
-| Domain | `percept` | `Event`, `Message`, `Model` - entities and the capabilities they need, as interfaces. Serde-free; depends on `shared` and on `futures-core`, for the stream type its reply port returns. |
+| Domain | `percept` | `Event`, `Message`, `Model`, `Map` - entities and the capabilities they need, as interfaces. Serde-free; depends on `shared` and on `futures-core`, for the stream type its reply port returns. |
 | Application | `app` | `App` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. |
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
-| Presentation | `cli` | `percept events publish`, `search`, `show` - the log without the TUI. |
+| Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps`, `ask`, `reflect` - the log and its maps without the TUI. |
 | Infrastructure | `providers` | `Ollama` and `OpenAi` - implement `percept::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` carries the key. |
-| Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`. |
+| Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`, and the three tools the model calls: `search_events`, `read_event`, `revise_map`. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 
 Wire concrete types together only at the entrypoint - `main` in Rust.
