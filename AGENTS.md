@@ -61,7 +61,7 @@ it, never sideways or up:
 | Application | `app` | `App` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. |
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
 | Presentation | `cli` | `percept events publish`, `search`, `show` - the log without the TUI. |
-| Infrastructure | `providers` | `Ollama` today, more LLM clients later - implements `percept::Model`. |
+| Infrastructure | `providers` | `Ollama` and `OpenAi` - implement `percept::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` carries the key. |
 | Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 

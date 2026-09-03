@@ -5,6 +5,7 @@
 //! per line.
 
 mod ollama;
+mod openai;
 
 use std::time::Duration;
 
@@ -14,6 +15,7 @@ use serde_json::Value;
 use crate::percept::ToolSpec;
 
 pub use ollama::Ollama;
+pub use openai::OpenAi;
 
 /// How long to wait for the server to accept a connection. Without it
 /// a host that never answers hangs on the OS TCP timeout, and the reply
