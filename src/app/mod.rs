@@ -125,6 +125,10 @@ struct Turn {
     open_call: Option<EventId>,
     thought: String,
     reply: String,
+    /// What the round trip just streamed cost, set by `append_chunk`
+    /// and committed - and cleared - by `flush_pending`, after the
+    /// thought and the reply it paid for.
+    usage: Option<percept::Usage>,
 }
 
 /// Orchestrates a chat: turns input into events, asks Model for a
@@ -322,9 +326,10 @@ impl App {
         Ok(percept::ModelRequest { messages, tools })
     }
 
-    /// Commits the thought then the reply buffered so far, both caused
-    /// by the turn's `anchor`, and clears them. Leaves `pending` in
-    /// place - the turn may not be over.
+    /// Commits the thought then the reply buffered so far, then the
+    /// round trip's `model.called`, all caused by the turn's `anchor`,
+    /// and clears them. Leaves `pending` in place - the turn may not be
+    /// over.
     fn flush_pending(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let Some(turn) = self.pending.as_ref() else {
             return Ok(());
@@ -332,10 +337,12 @@ impl App {
         let cause = Some(turn.anchor);
         let thought = turn.thought.clone();
         let reply = turn.reply.clone();
+        let usage = turn.usage.clone();
 
         // A buffer is only cleared once its event is durable. Taking
         // the text first would leave a failed append with nothing to
-        // retry from. The thought commits before the reply.
+        // retry from. The thought commits before the reply, before the
+        // usage that paid for both.
         if !thought.is_empty() {
             let event = Event::thought_recorded(Actor::Model, thought, self.source.clone(), cause);
             self.commit(event)?;
@@ -345,6 +352,11 @@ impl App {
             let event = Event::message_received(Actor::Model, reply, self.source.clone(), cause);
             self.commit(event)?;
             self.with_pending(|turn| turn.reply.clear());
+        }
+        if let Some(usage) = usage {
+            let event = Event::model_called(usage, self.source.clone(), cause);
+            self.commit(event)?;
+            self.with_pending(|turn| turn.usage = None);
         }
         Ok(())
     }
@@ -371,6 +383,7 @@ impl AppService for App {
             open_call: None,
             thought: String::new(),
             reply: String::new(),
+            usage: None,
         });
 
         self.ask()
@@ -383,6 +396,7 @@ impl AppService for App {
         match chunk {
             percept::Chunk::Thought(text) => turn.thought.push_str(&text),
             percept::Chunk::Reply(text) => turn.reply.push_str(&text),
+            percept::Chunk::Usage(usage) => turn.usage = Some(usage),
             // Every caller routes a tool call to `begin_tool`; it
             // never reaches here.
             percept::Chunk::ToolCall { .. } => {}
@@ -557,6 +571,55 @@ mod tests {
     }
 
     #[test]
+    fn a_plain_turn_commits_thought_reply_then_model_called_in_that_order() {
+        let mut app = App::new(
+            Arc::new(Silent),
+            Arc::new(FakeLog::default()),
+            Vec::new(),
+            SOURCE.to_string(),
+        )
+        .unwrap();
+
+        let _ = app.submit("hi".to_string()).unwrap();
+        app.append_chunk(Chunk::Thought("hmm".to_string()));
+        app.append_chunk(Chunk::Reply("hello".to_string()));
+        app.append_chunk(Chunk::Usage(percept::Usage {
+            model: "gpt-5".to_string(),
+            input_tokens: 100,
+            output_tokens: 20,
+            cached_tokens: None,
+        }));
+        app.end_stream().unwrap();
+
+        let events = app.events();
+        assert_eq!(events.len(), 4);
+        assert!(matches!(
+            events[1].payload(),
+            Payload::ThoughtRecorded { .. }
+        ));
+        assert!(matches!(
+            events[2].payload(),
+            Payload::MessageReceived { .. }
+        ));
+        match events[3].payload() {
+            Payload::ModelCalled {
+                model,
+                input_tokens,
+                output_tokens,
+                cached_tokens,
+            } => {
+                assert_eq!(model, "gpt-5");
+                assert_eq!(*input_tokens, 100);
+                assert_eq!(*output_tokens, 20);
+                assert_eq!(*cached_tokens, None);
+            }
+            _ => panic!("expected a model.called event"),
+        }
+        assert!(events[3].actor() == Actor::System);
+        assert!(events[3].causation_id() == Some(events[0].id()));
+    }
+
+    #[test]
     fn a_submit_while_a_turn_streams_is_refused_and_records_nothing() {
         let mut app = App::new(
             Arc::new(Silent),
@@ -727,6 +790,34 @@ mod tests {
         // The reply chains off the tool result, not the prompt.
         assert!(events[3].causation_id() == Some(events[2].id()));
         assert_eq!(content(&events[3]), "found it");
+    }
+
+    #[test]
+    fn a_tool_round_commits_model_called_before_tool_called() {
+        let mut app = App::new(
+            Arc::new(Scripted::new(vec![], true)),
+            Arc::new(FakeLog::default()),
+            vec![Arc::new(FakeTool)],
+            SOURCE.to_string(),
+        )
+        .unwrap();
+
+        let _ = app.submit("what happened".to_string()).unwrap();
+        app.append_chunk(Chunk::Usage(percept::Usage {
+            model: "gpt-5".to_string(),
+            input_tokens: 50,
+            output_tokens: 5,
+            cached_tokens: None,
+        }));
+        run_one_tool(&mut app, "search_events", "{}");
+
+        let events = app.events();
+        assert_eq!(events.len(), 4);
+        assert!(matches!(events[1].payload(), Payload::ModelCalled { .. }));
+        assert!(events[1].actor() == Actor::System);
+        assert!(events[1].causation_id() == Some(events[0].id()));
+        assert!(matches!(events[2].payload(), Payload::ToolCalled { .. }));
+        assert!(matches!(events[3].payload(), Payload::ToolResulted { .. }));
     }
 
     #[test]
@@ -1040,5 +1131,35 @@ mod tests {
 
         // The time, the decisions map, three events, the prompt.
         assert_eq!(model.last_request().len(), 6);
+    }
+
+    #[test]
+    fn a_model_called_event_never_reaches_the_next_request() {
+        let (model, mut app) = seeded_app(Vec::new(), Vec::new());
+
+        let _ = app.submit("first".to_string()).unwrap();
+        app.append_chunk(Chunk::Reply("ok".to_string()));
+        app.append_chunk(Chunk::Usage(percept::Usage {
+            model: "gpt-5".to_string(),
+            input_tokens: 10,
+            output_tokens: 2,
+            cached_tokens: None,
+        }));
+        app.end_stream().unwrap();
+        assert!(matches!(
+            app.events()[2].payload(),
+            Payload::ModelCalled { .. }
+        ));
+
+        let _ = app.submit("second".to_string()).unwrap();
+
+        let sent = model.last_request();
+        // The time, the decisions map, "first", "ok", "second" - the
+        // model.called event between "ok" and "second" is never one of
+        // them.
+        assert_eq!(sent.len(), 5);
+        assert!(sent.contains(&"first".to_string()));
+        assert!(sent.contains(&"ok".to_string()));
+        assert!(sent.contains(&"second".to_string()));
     }
 }

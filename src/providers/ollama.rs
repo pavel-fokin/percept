@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use super::{client, role, stream_lines, Line, Sender};
+use super::{client, forward, role, stream_lines, Line, UsageCounts};
 use crate::percept::{
     Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream, ToolSpec,
 };
@@ -153,6 +153,12 @@ struct ChatChunk {
     done_reason: String,
     #[serde(default)]
     error: Option<String>,
+    /// Tokens the request carried in, on the `done` line only.
+    #[serde(default)]
+    prompt_eval_count: u64,
+    /// Tokens the reply carried out, on the `done` line only.
+    #[serde(default)]
+    eval_count: u64,
 }
 
 #[derive(Deserialize, Default)]
@@ -185,7 +191,11 @@ fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
         if raw.done_reason == "length" {
             return Err("ollama cut the reply off at its context limit".into());
         }
-        return Ok(Line::Done);
+        return Ok(Line::Done(UsageCounts {
+            input_tokens: raw.prompt_eval_count,
+            output_tokens: raw.eval_count,
+            cached_tokens: None,
+        }));
     }
     // Thinking arrives first when a line ever carried both.
     if !raw.message.thinking.is_empty() {
@@ -206,21 +216,6 @@ fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
     }
 }
 
-/// Parses and forwards one line. Returns `true` once the stream is
-/// over - the `done` sentinel, a parse failure, or the receiver having
-/// gone away - so the caller knows to stop reading the body.
-fn handle_line(line: &str, tx: &Sender) -> bool {
-    match parse_line(line) {
-        Ok(Line::Chunk(chunk)) => tx.send(Ok(chunk)).is_err(),
-        Ok(Line::Empty) => false,
-        Ok(Line::Done) => true,
-        Err(err) => {
-            let _ = tx.send(Err(err));
-            true
-        }
-    }
-}
-
 impl Model for Ollama {
     fn capabilities(&self) -> ModelCapabilities {
         ModelCapabilities {
@@ -235,6 +230,7 @@ impl Model for Ollama {
 
         let client = self.client.clone();
         let url = self.url.clone();
+        let model = self.model.clone();
         let request = ChatRequest {
             model: self.model.clone(),
             messages: request.messages.iter().map(chat_message).collect(),
@@ -247,7 +243,11 @@ impl Model for Ollama {
 
         tokio::spawn(async move {
             let request = client.post(&url).json(&request);
-            stream_lines(request, "ollama", &tx, |line| handle_line(line, &tx)).await;
+            let mut pending = None;
+            stream_lines(request, "ollama", &tx, |line| {
+                forward(parse_line(line), &tx, &model, &mut pending)
+            })
+            .await;
         });
 
         Box::pin(UnboundedReceiverStream::new(rx))
@@ -300,11 +300,15 @@ mod tests {
     }
 
     #[test]
-    fn a_done_line_ends_the_stream_without_a_trailing_chunk() {
-        let line = r#"{"model":"gemma4","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop"}"#;
+    fn a_done_line_ends_the_stream_carrying_its_token_counts() {
+        let line = r#"{"model":"gemma4","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":12,"eval_count":34}"#;
         match parse_line(line).unwrap() {
-            Line::Done => {}
-            _ => panic!("expected done"),
+            Line::Done(counts) => {
+                assert_eq!(counts.input_tokens, 12);
+                assert_eq!(counts.output_tokens, 34);
+                assert_eq!(counts.cached_tokens, None);
+            }
+            _ => panic!("expected done with counts"),
         }
     }
 
@@ -331,7 +335,51 @@ mod tests {
     #[test]
     fn a_blank_line_is_skipped_rather_than_ending_the_stream() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        assert!(!handle_line("   ", &tx));
+        let mut pending = None;
+        assert!(!forward(parse_line("   "), &tx, "gemma4", &mut pending));
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_tool_call_then_done_comes_out_as_usage_then_the_call() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut pending = None;
+        let call = r#"{"model":"gemma4","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"search_events","arguments":{"size":5}}}]},"done":false}"#;
+        let done = r#"{"model":"gemma4","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":12,"eval_count":34}"#;
+
+        assert!(!forward(parse_line(call), &tx, "gemma4", &mut pending));
+        assert!(rx.try_recv().is_err(), "the call is held, not sent yet");
+        assert!(forward(parse_line(done), &tx, "gemma4", &mut pending));
+
+        match rx.try_recv().unwrap().unwrap() {
+            Chunk::Usage(usage) => {
+                assert_eq!(usage.model, "gemma4");
+                assert_eq!(usage.input_tokens, 12);
+                assert_eq!(usage.output_tokens, 34);
+            }
+            _ => panic!("expected a usage chunk"),
+        }
+        match rx.try_recv().unwrap().unwrap() {
+            Chunk::ToolCall { tool, .. } => assert_eq!(tool, "search_events"),
+            _ => panic!("expected the held tool call"),
+        }
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_tool_call_then_a_failure_comes_out_as_just_the_error() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut pending = None;
+        let call = r#"{"model":"gemma4","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"search_events","arguments":{"size":5}}}]},"done":false}"#;
+        let error = r#"{"error":"model 'nope' not found"}"#;
+
+        assert!(!forward(parse_line(call), &tx, "gemma4", &mut pending));
+        assert!(forward(parse_line(error), &tx, "gemma4", &mut pending));
+
+        let Err(err) = rx.try_recv().unwrap() else {
+            panic!("expected an error")
+        };
+        assert!(err.to_string().contains("model 'nope' not found"));
+        assert!(rx.try_recv().is_err(), "the held call is dropped");
     }
 }

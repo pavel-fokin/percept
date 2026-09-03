@@ -119,6 +119,8 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
         } => tool_lines(chat, &format!("{tool} {}", clip(arguments)), width),
         Payload::ToolResulted { content, .. } => tool_lines(chat, &clip(content), width),
         Payload::ThoughtRecorded { .. } => Vec::new(),
+        // Bookkeeping about a round trip, not something to show.
+        Payload::ModelCalled { .. } => Vec::new(),
         // A map change shows dimmed too - it's context the model built,
         // not dialogue.
         Payload::NodeAdded {

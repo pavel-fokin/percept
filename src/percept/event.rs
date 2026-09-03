@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use super::NodeId;
+use super::{NodeId, Usage};
 use crate::shared::{Id, Timestamp};
 
 /// Identifies an Event.
@@ -79,6 +79,15 @@ pub enum Payload {
         to: NodeId,
         sources: Vec<EventId>,
     },
+    /// One round trip to the model - always `System`, never replayed as
+    /// dialogue. Caused by the turn's anchor, the same event a thought
+    /// or a reply from that round trip is caused by.
+    ModelCalled {
+        model: String,
+        input_tokens: u64,
+        output_tokens: u64,
+        cached_tokens: Option<u64>,
+    },
 }
 
 impl Payload {
@@ -95,7 +104,8 @@ impl Payload {
             | Self::NodeAdded { .. }
             | Self::NodeRemoved { .. }
             | Self::EdgeAdded { .. }
-            | Self::EdgeRemoved { .. } => None,
+            | Self::EdgeRemoved { .. }
+            | Self::ModelCalled { .. } => None,
         }
     }
 }
@@ -114,6 +124,7 @@ pub enum EventKind {
     NodeRemoved,
     EdgeAdded,
     EdgeRemoved,
+    ModelCalled,
 }
 
 /// One recorded fact in the conversation log. Append-only: a committed
@@ -208,6 +219,22 @@ impl Event {
         )
     }
 
+    /// A `model.called` event - always percept recording what one round
+    /// trip to the model cost, never the model's own words.
+    pub fn model_called(usage: Usage, source: String, causation_id: Option<EventId>) -> Self {
+        Self::new(
+            Actor::System,
+            source,
+            causation_id,
+            Payload::ModelCalled {
+                model: usage.model,
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cached_tokens: usage.cached_tokens,
+            },
+        )
+    }
+
     /// Rebuilds an Event from stored fields - the persistence boundary,
     /// where `id` and `created_at` come from storage rather than being
     /// minted fresh.
@@ -263,6 +290,7 @@ impl Event {
             Payload::NodeRemoved { .. } => EventKind::NodeRemoved,
             Payload::EdgeAdded { .. } => EventKind::EdgeAdded,
             Payload::EdgeRemoved { .. } => EventKind::EdgeRemoved,
+            Payload::ModelCalled { .. } => EventKind::ModelCalled,
         }
     }
 }

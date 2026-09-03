@@ -12,7 +12,7 @@ use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::StreamExt;
 
-use crate::percept::{Actor, Chunk};
+use crate::percept::{Actor, Chunk, Usage};
 
 pub use ollama::Ollama;
 pub use openai::OpenAi;
@@ -44,11 +44,62 @@ fn role(actor: Actor) -> &'static str {
 }
 
 /// What one line of a streamed reply means: a chunk to forward, the
-/// sentinel that ends the stream, or nothing.
+/// sentinel that ends the stream, carrying the reply's token counts,
+/// or nothing.
 enum Line {
     Chunk(Chunk),
     Empty,
-    Done,
+    Done(UsageCounts),
+}
+
+/// Token counts as a provider's own wire shape reports them, before
+/// `model` - which the free `parse_line` function never sees - turns
+/// them into a `Usage`.
+struct UsageCounts {
+    input_tokens: u64,
+    output_tokens: u64,
+    cached_tokens: Option<u64>,
+}
+
+/// Forwards what one line parsed to. Returns `true` once the stream is
+/// over - the sentinel, a parse failure, or the receiver having gone
+/// away - so the caller knows to stop reading the body. A tool call is
+/// held in `pending` rather than sent straight away: its counts arrive
+/// on the line that ends the stream, and `Usage` has to reach the
+/// caller before the `ToolCall` that ends its turn.
+fn forward(
+    parsed: Result<Line, Box<dyn Error + Send + Sync>>,
+    tx: &Sender,
+    model: &str,
+    pending: &mut Option<Chunk>,
+) -> bool {
+    match parsed {
+        Ok(Line::Chunk(chunk @ Chunk::ToolCall { .. })) => {
+            *pending = Some(chunk);
+            false
+        }
+        Ok(Line::Chunk(chunk)) => tx.send(Ok(chunk)).is_err(),
+        Ok(Line::Empty) => false,
+        Ok(Line::Done(counts)) => {
+            let usage = Usage {
+                model: model.to_string(),
+                input_tokens: counts.input_tokens,
+                output_tokens: counts.output_tokens,
+                cached_tokens: counts.cached_tokens,
+            };
+            if tx.send(Ok(Chunk::Usage(usage))).is_err() {
+                return true;
+            }
+            if let Some(call) = pending.take() {
+                let _ = tx.send(Ok(call));
+            }
+            true
+        }
+        Err(err) => {
+            let _ = tx.send(Err(err));
+            true
+        }
+    }
 }
 
 /// Sends `request` and feeds every line of the streamed body to

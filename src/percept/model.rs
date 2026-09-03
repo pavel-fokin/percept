@@ -8,7 +8,10 @@ use super::{Actor, Event, Payload, ToolSpec};
 /// One piece of a streaming reply. A thinking model interleaves
 /// `Thought` chunks with its `Reply` text; a provider that never thinks
 /// only ever yields `Reply`. A `ToolCall` ends the turn's text: the
-/// caller runs the tool and asks again.
+/// caller runs the tool and asks again. A provider yields `Usage` once
+/// per reply, and yields it BEFORE any `ToolCall` - a `ToolCall` ends
+/// the round for the caller, which stops reading the stream and runs
+/// the tool, so `Usage` has to arrive first or it is never seen.
 pub enum Chunk {
     Thought(String),
     Reply(String),
@@ -17,6 +20,17 @@ pub enum Chunk {
         tool: String,
         arguments: String,
     },
+    Usage(Usage),
+}
+
+/// Token counts for one round trip to the model. `cached_tokens` is
+/// `None` when the provider does not report it.
+#[derive(Clone)]
+pub struct Usage {
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_tokens: Option<u64>,
 }
 
 /// A reply as it streams in, chunk by chunk. `Send` so it can cross
@@ -84,9 +98,10 @@ pub trait Model: Send + Sync {
 /// Converts the transcript into the form Model expects. A recorded
 /// thought is left out - it is never replayed as dialogue. A change to
 /// a cognitive map is left out too: it is a fact about the map, not
-/// something said. Everything else maps to a `Message`, tool calls from
-/// another writer included, so a later turn sees what earlier ones
-/// tried.
+/// something said. A `model.called` event is left out the same way: it
+/// is bookkeeping about a round trip, not something anyone said.
+/// Everything else maps to a `Message`, tool calls from another writer
+/// included, so a later turn sees what earlier ones tried.
 ///
 /// Any slice replays, including one cut mid-tool-round: a leading tool
 /// result, whose call the cut left behind, is dropped. A conversation
@@ -111,7 +126,8 @@ pub fn to_messages<'a>(events: impl IntoIterator<Item = &'a Event>) -> Vec<Messa
             | Payload::NodeAdded { .. }
             | Payload::NodeRemoved { .. }
             | Payload::EdgeAdded { .. }
-            | Payload::EdgeRemoved { .. } => None,
+            | Payload::EdgeRemoved { .. }
+            | Payload::ModelCalled { .. } => None,
         })
         .skip_while(|message| matches!(message, Message::ToolResult { .. }))
         .collect()
@@ -138,6 +154,27 @@ mod tests {
                 "tui".to_string(),
                 None,
             ),
+            Event::message_received(Actor::Model, "done".to_string(), "tui".to_string(), None),
+        ];
+
+        let messages = to_messages(&events);
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(text(&messages[0]), "hi");
+        assert_eq!(text(&messages[1]), "done");
+    }
+
+    #[test]
+    fn a_model_called_event_is_filtered_out_while_a_neighbouring_message_survives() {
+        let usage = Usage {
+            model: "gpt-5".to_string(),
+            input_tokens: 100,
+            output_tokens: 20,
+            cached_tokens: None,
+        };
+        let events = vec![
+            Event::message_received(Actor::User, "hi".to_string(), "tui".to_string(), None),
+            Event::model_called(usage, "tui".to_string(), None),
             Event::message_received(Actor::Model, "done".to_string(), "tui".to_string(), None),
         ];
 

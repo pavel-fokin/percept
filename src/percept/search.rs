@@ -21,11 +21,12 @@ pub struct EventQuery {
     /// A term matches when one of the event's payload strings carries
     /// it as a substring, case-insensitively; an event passes when any
     /// term does. Payload strings are `content`, `tool`, and
-    /// `arguments`, and on a map change `map`, `kind`, `name`, `reason`,
-    /// and property values - the envelope is not searched, since
-    /// `actor` and `source` already have filters. A blank term is contained by
-    /// everything, so a boundary that can receive one rejects it before
-    /// building a query.
+    /// `arguments`, on a map change `map`, `kind`, `name`, `reason`, and
+    /// property values, and on a `model.called` event its `model` name.
+    /// The envelope is not searched, since `actor` and `source` already
+    /// have filters. A blank term is contained by everything, so a
+    /// boundary that can receive one rejects it before building a
+    /// query.
     pub text: Vec<String>,
     /// Keeps only the N most recent matches, still in log order.
     pub size: Option<usize>,
@@ -111,6 +112,7 @@ fn carries(payload: &Payload, term: &str) -> bool {
         Payload::EdgeAdded { map, kind, .. } | Payload::EdgeRemoved { map, kind, .. } => {
             has(map) || has(kind)
         }
+        Payload::ModelCalled { model, .. } => has(model),
     }
 }
 

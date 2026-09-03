@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use super::{client, role, stream_lines, Line, Sender};
+use super::{client, forward, role, stream_lines, Line, UsageCounts};
 use crate::percept::{
     Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream, ToolSpec,
 };
@@ -173,7 +173,7 @@ enum StreamEvent {
     #[serde(rename = "response.output_item.done")]
     ItemDone { item: OutputItem },
     #[serde(rename = "response.completed")]
-    Completed,
+    Completed { response: CompletedResponse },
     #[serde(rename = "response.incomplete")]
     Incomplete { response: IncompleteResponse },
     #[serde(rename = "response.failed")]
@@ -191,6 +191,23 @@ enum OutputItem {
     FunctionCall { name: String, arguments: String },
     #[serde(other)]
     Other,
+}
+
+#[derive(Deserialize)]
+struct CompletedResponse {
+    usage: ResponseUsage,
+}
+
+#[derive(Deserialize)]
+struct ResponseUsage {
+    input_tokens: u64,
+    output_tokens: u64,
+    input_tokens_details: InputTokensDetails,
+}
+
+#[derive(Deserialize)]
+struct InputTokensDetails {
+    cached_tokens: u64,
 }
 
 #[derive(Deserialize)]
@@ -233,7 +250,11 @@ fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
             arguments,
         }),
         StreamEvent::ItemDone { .. } | StreamEvent::Other => Line::Empty,
-        StreamEvent::Completed => Line::Done,
+        StreamEvent::Completed { response } => Line::Done(UsageCounts {
+            input_tokens: response.usage.input_tokens,
+            output_tokens: response.usage.output_tokens,
+            cached_tokens: Some(response.usage.input_tokens_details.cached_tokens),
+        }),
         StreamEvent::Incomplete { response } => {
             return Err(format!(
                 "openai cut the reply off: {}",
@@ -246,21 +267,6 @@ fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
         }
         StreamEvent::Error { message } => return Err(format!("openai reported: {message}").into()),
     })
-}
-
-/// Parses and forwards one line. Returns `true` once the stream is
-/// over - the reply completed, a failure, or the receiver having gone
-/// away - so the caller knows to stop reading the body.
-fn handle_line(line: &str, tx: &Sender) -> bool {
-    match parse_line(line) {
-        Ok(Line::Chunk(chunk)) => tx.send(Ok(chunk)).is_err(),
-        Ok(Line::Empty) => false,
-        Ok(Line::Done) => true,
-        Err(err) => {
-            let _ = tx.send(Err(err));
-            true
-        }
-    }
 }
 
 impl Model for OpenAi {
@@ -278,11 +284,16 @@ impl Model for OpenAi {
         let client = self.client.clone();
         let url = self.url.clone();
         let api_key = self.api_key.clone();
+        let model = self.model.clone();
         let request = Request::new(self.model.clone(), self.reasoning_effort.clone(), request);
 
         tokio::spawn(async move {
             let request = client.post(&url).bearer_auth(api_key).json(&request);
-            stream_lines(request, "openai", &tx, |line| handle_line(line, &tx)).await;
+            let mut pending = None;
+            stream_lines(request, "openai", &tx, |line| {
+                forward(parse_line(line), &tx, &model, &mut pending)
+            })
+            .await;
         });
 
         Box::pin(UnboundedReceiverStream::new(rx))
@@ -342,9 +353,16 @@ mod tests {
     }
 
     #[test]
-    fn a_completed_event_ends_the_stream() {
-        let line = r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed"},"sequence_number":20}"#;
-        assert!(matches!(parse_line(line).unwrap(), Line::Done));
+    fn a_completed_event_ends_the_stream_carrying_its_token_counts() {
+        let line = r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":12,"output_tokens":34,"input_tokens_details":{"cached_tokens":5}}},"sequence_number":20}"#;
+        match parse_line(line).unwrap() {
+            Line::Done(counts) => {
+                assert_eq!(counts.input_tokens, 12);
+                assert_eq!(counts.output_tokens, 34);
+                assert_eq!(counts.cached_tokens, Some(5));
+            }
+            _ => panic!("expected done with counts"),
+        }
     }
 
     #[test]
@@ -385,6 +403,50 @@ mod tests {
     #[test]
     fn a_malformed_event_is_an_error() {
         assert!(parse_line("data: not json").is_err());
+    }
+
+    #[test]
+    fn a_tool_call_then_completed_comes_out_as_usage_then_the_call() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut pending = None;
+        let call = r#"data: {"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call","status":"completed","arguments":"{\"size\":5}","call_id":"call_x","name":"search_events"},"output_index":0,"sequence_number":17}"#;
+        let completed = r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":12,"output_tokens":34,"input_tokens_details":{"cached_tokens":5}}},"sequence_number":20}"#;
+
+        assert!(!forward(parse_line(call), &tx, "gpt-5", &mut pending));
+        assert!(rx.try_recv().is_err(), "the call is held, not sent yet");
+        assert!(forward(parse_line(completed), &tx, "gpt-5", &mut pending));
+
+        match rx.try_recv().unwrap().unwrap() {
+            Chunk::Usage(usage) => {
+                assert_eq!(usage.model, "gpt-5");
+                assert_eq!(usage.input_tokens, 12);
+                assert_eq!(usage.output_tokens, 34);
+                assert_eq!(usage.cached_tokens, Some(5));
+            }
+            _ => panic!("expected a usage chunk"),
+        }
+        match rx.try_recv().unwrap().unwrap() {
+            Chunk::ToolCall { tool, .. } => assert_eq!(tool, "search_events"),
+            _ => panic!("expected the held tool call"),
+        }
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_tool_call_then_a_failure_comes_out_as_just_the_error() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut pending = None;
+        let call = r#"data: {"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call","status":"completed","arguments":"{\"size\":5}","call_id":"call_x","name":"search_events"},"output_index":0,"sequence_number":17}"#;
+        let failed = r#"data: {"type":"response.failed","response":{"id":"resp_1","status":"failed","error":{"code":"server_error","message":"upstream broke"}},"sequence_number":8}"#;
+
+        assert!(!forward(parse_line(call), &tx, "gpt-5", &mut pending));
+        assert!(forward(parse_line(failed), &tx, "gpt-5", &mut pending));
+
+        let Err(err) = rx.try_recv().unwrap() else {
+            panic!("expected an error")
+        };
+        assert!(err.to_string().contains("upstream broke"));
+        assert!(rx.try_recv().is_err(), "the held call is dropped");
     }
 
     #[test]

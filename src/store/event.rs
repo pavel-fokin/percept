@@ -75,6 +75,15 @@ struct EdgeBody {
     sources: Vec<String>,
 }
 
+#[derive(Serialize, Deserialize)]
+struct ModelCalledBody {
+    model: String,
+    input_tokens: u64,
+    output_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cached_tokens: Option<u64>,
+}
+
 const MESSAGE_RECEIVED: &str = "message.received";
 const THOUGHT_RECORDED: &str = "thought.recorded";
 const TOOL_CALLED: &str = "tool.called";
@@ -83,10 +92,11 @@ const NODE_ADDED: &str = "node.added";
 const NODE_REMOVED: &str = "node.removed";
 const EDGE_ADDED: &str = "edge.added";
 const EDGE_REMOVED: &str = "edge.removed";
+const MODEL_CALLED: &str = "model.called";
 
 /// Every `type` the log records, for the error that lists them when a
 /// caller names one that isn't here.
-pub const KINDS: [&str; 8] = [
+pub const KINDS: [&str; 9] = [
     MESSAGE_RECEIVED,
     THOUGHT_RECORDED,
     TOOL_CALLED,
@@ -95,6 +105,7 @@ pub const KINDS: [&str; 8] = [
     NODE_REMOVED,
     EDGE_ADDED,
     EDGE_REMOVED,
+    MODEL_CALLED,
 ];
 
 /// The wire `type` a kind serializes as.
@@ -108,6 +119,7 @@ fn kind(kind: EventKind) -> &'static str {
         EventKind::NodeRemoved => NODE_REMOVED,
         EventKind::EdgeAdded => EDGE_ADDED,
         EventKind::EdgeRemoved => EDGE_REMOVED,
+        EventKind::ModelCalled => MODEL_CALLED,
     }
 }
 
@@ -123,6 +135,7 @@ pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
         NODE_REMOVED => Ok(EventKind::NodeRemoved),
         EDGE_ADDED => Ok(EventKind::EdgeAdded),
         EDGE_REMOVED => Ok(EventKind::EdgeRemoved),
+        MODEL_CALLED => Ok(EventKind::ModelCalled),
         other => Err(Error::UnknownEventType(other.to_string())),
     }
 }
@@ -366,6 +379,18 @@ impl From<&percept::Event> for Event {
                 sources: ids(sources),
             })
             .expect("EdgeBody always serializes"),
+            Payload::ModelCalled {
+                model,
+                input_tokens,
+                output_tokens,
+                cached_tokens,
+            } => serde_json::to_value(ModelCalledBody {
+                model: model.clone(),
+                input_tokens: *input_tokens,
+                output_tokens: *output_tokens,
+                cached_tokens: *cached_tokens,
+            })
+            .expect("ModelCalledBody always serializes"),
         };
 
         Self {
@@ -508,6 +533,16 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                     to,
                     sources,
                 }
+            })
+        }
+        EventKind::ModelCalled => {
+            let body: ModelCalledBody =
+                serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::ModelCalled {
+                model: body.model,
+                input_tokens: body.input_tokens,
+                output_tokens: body.output_tokens,
+                cached_tokens: body.cached_tokens,
             })
         }
     }
@@ -892,6 +927,73 @@ mod tests {
     }
 
     #[test]
+    fn model_called_round_trips_through_json() {
+        let cause = EventId::new();
+        let original = percept::Event::restore(
+            EventId::new(),
+            Actor::System,
+            "tui".to_string(),
+            Some(cause),
+            Timestamp::now(),
+            Payload::ModelCalled {
+                model: "gpt-5".to_string(),
+                input_tokens: 100,
+                output_tokens: 20,
+                cached_tokens: Some(40),
+            },
+        );
+
+        let json = serde_json::to_string(&Event::from(&original)).unwrap();
+        let wire: Event = serde_json::from_str(&json).unwrap();
+        assert_eq!(wire.kind, "model.called");
+        assert_eq!(wire.actor, "system");
+        let restored = percept::Event::try_from(wire).unwrap();
+
+        assert!(restored.actor() == Actor::System);
+        assert!(restored.causation_id() == Some(cause));
+        match restored.payload() {
+            Payload::ModelCalled {
+                model,
+                input_tokens,
+                output_tokens,
+                cached_tokens,
+            } => {
+                assert_eq!(model, "gpt-5");
+                assert_eq!(*input_tokens, 100);
+                assert_eq!(*output_tokens, 20);
+                assert_eq!(*cached_tokens, Some(40));
+            }
+            _ => panic!("expected ModelCalled"),
+        }
+    }
+
+    #[test]
+    fn model_called_with_no_cached_tokens_omits_the_field_on_the_wire() {
+        let original = percept::Event::restore(
+            EventId::new(),
+            Actor::System,
+            "tui".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::ModelCalled {
+                model: "llama".to_string(),
+                input_tokens: 10,
+                output_tokens: 5,
+                cached_tokens: None,
+            },
+        );
+
+        let wire = Event::from(&original);
+        assert!(wire.payload.get("cached_tokens").is_none());
+
+        let restored = percept::Event::try_from(wire).unwrap();
+        match restored.payload() {
+            Payload::ModelCalled { cached_tokens, .. } => assert_eq!(*cached_tokens, None),
+            _ => panic!("expected ModelCalled"),
+        }
+    }
+
+    #[test]
     fn node_added_round_trips_through_json() {
         let source = EventId::new();
         let node = NodeId::new();
@@ -1061,6 +1163,28 @@ mod tests {
         let line: Value = serde_json::from_str(&summarize(&event, None, PREVIEW_CHARS)).unwrap();
         assert!(line.get("preview").is_none());
         assert_eq!(line["payload"]["name"], "Both built in parallel");
+    }
+
+    #[test]
+    fn a_model_called_summary_carries_no_preview() {
+        let event = percept::Event::restore(
+            EventId::new(),
+            Actor::System,
+            "tui".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::ModelCalled {
+                model: "gpt-5".to_string(),
+                input_tokens: 100,
+                output_tokens: 20,
+                cached_tokens: None,
+            },
+        );
+
+        let line: Value = serde_json::from_str(&summarize(&event, None, PREVIEW_CHARS)).unwrap();
+        assert!(line.get("preview").is_none());
+        assert_eq!(line["payload"]["model"], "gpt-5");
+        assert_eq!(line["payload"]["input_tokens"], 100);
     }
 
     #[test]
