@@ -47,11 +47,13 @@ const OPENAI_KEY_VAR: &str = "OPENAI_API_KEY";
 /// What `percept reflect` asks the model to do. One place to change it,
 /// like the ollama settings above.
 const REFLECT_PROMPT: &str = "Revise the decisions map from recent events. \
-    Search the log for questions raised, options weighed, evidence given, \
-    and decisions taken that the map does not yet hold, then record them \
-    with revise_map, citing the event ids they came from. Remove what no \
-    longer holds, with a reason. Reply with a short summary of what \
-    changed, or say the map already held everything.";
+    First call search_events for questions raised, options weighed, \
+    evidence given, and decisions taken that the map does not yet hold; \
+    only its results carry event ids. Then record them with revise_map, \
+    citing those ids in each node's sources - a node without one is \
+    refused. Remove what no longer holds, with a reason. Reply with a \
+    short summary of what changed, or say the map already held \
+    everything.";
 
 /// How often the status row's spinner advances while a turn streams.
 const SPINNER_TICK: std::time::Duration = std::time::Duration::from_millis(90);

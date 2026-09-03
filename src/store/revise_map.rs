@@ -30,10 +30,12 @@ const DESCRIPTION: &str = "Record into a named map what you have judged \
     committed only if every change passes - a later change may refer to \
     a node an earlier one in the same batch just added. Cite the event \
     ids the judgement came from in `sources`, as search_events returns \
-    them; nothing else is an id. The current state of any \
-    map that holds something is already in the conversation, so do not \
-    add a node that is already there; a node is named by its kind and \
-    name, not by an id you choose.";
+    them; nothing else is an id. A node with no sources is refused: a \
+    map records what the log shows, so search for the events first, \
+    even when what you are recording is in front of you. The current \
+    state of any map that holds something is already in the \
+    conversation, so do not add a node that is already there; a node \
+    is named by its kind and name, not by an id you choose.";
 
 /// JSON Schema for `run`'s `arguments`. A string, not a `Value` - the
 /// domain's `ToolSpec` is serde-free, so the provider parses this. The
@@ -56,9 +58,9 @@ const PARAMETERS: &str = r#"{
               "kind": {"type": "string"},
               "name": {"type": "string"},
               "properties": {"type": "object", "additionalProperties": {"type": "string"}},
-              "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"}
+              "sources": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "event ids the judgement came from; at least one"}
             },
-            "required": ["op", "kind", "name"],
+            "required": ["op", "kind", "name", "sources"],
             "additionalProperties": false
           },
           {
@@ -246,6 +248,16 @@ fn apply(
             properties,
             sources,
         } => {
+            // The model is held to the design's rule that a cognitive
+            // commit cites experience; the shell is not, so the check is
+            // here and not in `Map::apply`. An edge joins two cited
+            // nodes and inherits their provenance.
+            if sources.is_empty() {
+                return Err(format!(
+                    "{kind} {name:?} cites no sources; a node needs at least one event id, as search_events returns them"
+                )
+                .into());
+            }
             let line = format!("added {kind} {name:?}");
             let mutation = Mutation::AddNode {
                 kind,
@@ -375,22 +387,42 @@ mod tests {
 
     #[test]
     fn a_failing_change_names_its_index_and_commits_nothing() {
-        let revise = tool(Vec::new());
+        let cited =
+            Event::message_received(Actor::User, "Rust".to_string(), "tui".to_string(), None);
+        let id = cited.id().as_uuid().to_string();
+        let revise = tool(vec![cited]);
 
         let err = revise
-            .run(
-                r#"{"map":"decisions","changes":[
-                    {"op":"add_node","kind":"option","name":"Rust","sources":[]},
-                    {"op":"add_node","kind":"goal","name":"Ship","sources":[]}
-                ]}"#,
-            )
+            .run(&format!(
+                r#"{{"map":"decisions","changes":[
+                    {{"op":"add_node","kind":"option","name":"Rust","sources":["{id}"]}},
+                    {{"op":"add_node","kind":"goal","name":"Ship","sources":["{id}"]}}
+                ]}}"#
+            ))
             .err()
             .unwrap();
 
         assert!(err.to_string().starts_with("change 1: "), "{err}");
-        assert!(
-            revise.log.load().unwrap().is_empty(),
+        assert_eq!(
+            revise.log.load().unwrap().len(),
+            1,
             "a refused batch must append nothing"
+        );
+    }
+
+    #[test]
+    fn a_node_with_no_sources_is_refused_and_the_error_names_the_rule() {
+        let revise = tool(Vec::new());
+
+        let err = revise
+            .run(r#"{"map":"decisions","changes":[{"op":"add_node","kind":"option","name":"Rust","sources":[]}]}"#)
+            .err()
+            .unwrap();
+
+        assert!(err.to_string().contains("cites no sources"), "{err}");
+        assert!(
+            revise.run(r#"{"map":"decisions","changes":[{"op":"add_node","kind":"option","name":"Rust"}]}"#).is_err(),
+            "an omitted sources list is as empty as an empty one"
         );
     }
 
@@ -430,16 +462,19 @@ mod tests {
 
     #[test]
     fn a_change_can_reference_a_node_an_earlier_change_just_added() {
-        let revise = tool(Vec::new());
+        let cited =
+            Event::message_received(Actor::User, "Rust".to_string(), "tui".to_string(), None);
+        let id = cited.id().as_uuid().to_string();
+        let revise = tool(vec![cited]);
 
         let output = revise
-            .run(
-                r#"{"map":"decisions","changes":[
-                    {"op":"add_node","kind":"question","name":"Which language?","sources":[]},
-                    {"op":"add_node","kind":"decision","name":"Rust over Go","sources":[]},
-                    {"op":"add_edge","kind":"resolves","from":{"kind":"decision","name":"Rust over Go"},"to":{"kind":"question","name":"Which language?"},"sources":[]}
-                ]}"#,
-            )
+            .run(&format!(
+                r#"{{"map":"decisions","changes":[
+                    {{"op":"add_node","kind":"question","name":"Which language?","sources":["{id}"]}},
+                    {{"op":"add_node","kind":"decision","name":"Rust over Go","sources":["{id}"]}},
+                    {{"op":"add_edge","kind":"resolves","from":{{"kind":"decision","name":"Rust over Go"}},"to":{{"kind":"question","name":"Which language?"}},"sources":[]}}
+                ]}}"#
+            ))
             .unwrap();
 
         assert_eq!(output.commits.len(), 3);
