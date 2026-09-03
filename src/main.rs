@@ -36,7 +36,11 @@ const OLLAMA_URL: &str = "http://localhost:11434";
 const OLLAMA_MODEL: &str = "gemma4";
 
 const OPENAI_URL: &str = "https://api.openai.com/v1";
-const OPENAI_MODEL: &str = "gpt-5-mini";
+const OPENAI_MODEL: &str = "gpt-5.6-luna";
+/// How long the model thinks before answering. `none`: the chat API
+/// only takes tools from this model with reasoning off, and a turn
+/// that reasons is slower.
+const OPENAI_REASONING: &str = "none";
 /// Where the key is read from.
 const OPENAI_KEY_VAR: &str = "OPENAI_API_KEY";
 
@@ -120,6 +124,7 @@ fn build_model() -> Result<Arc<dyn percept::Model>, Box<dyn std::error::Error>> 
             Ok(Arc::new(OpenAi::new(
                 OPENAI_URL.to_string(),
                 OPENAI_MODEL.to_string(),
+                OPENAI_REASONING.to_string(),
                 api_key,
             )))
         }

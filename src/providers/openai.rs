@@ -14,15 +14,19 @@ use crate::percept::{
 pub struct OpenAi {
     url: String,
     model: String,
+    reasoning_effort: String,
     api_key: String,
     client: reqwest::Client,
 }
 
 impl OpenAi {
-    pub fn new(base_url: String, model: String, api_key: String) -> Self {
+    /// `reasoning_effort` is the API's word - `none`, `low`, `medium`,
+    /// `high` - for how long the model thinks before it answers.
+    pub fn new(base_url: String, model: String, reasoning_effort: String, api_key: String) -> Self {
         Self {
             url: format!("{base_url}/chat/completions"),
             model,
+            reasoning_effort,
             api_key,
             client: client(),
         }
@@ -32,6 +36,7 @@ impl OpenAi {
 #[derive(Serialize)]
 struct ChatRequest {
     model: String,
+    reasoning_effort: String,
     messages: Vec<ChatMessage>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     tools: Vec<ToolDef>,
@@ -44,9 +49,10 @@ struct ChatRequest {
 }
 
 impl ChatRequest {
-    fn new(model: String, request: &ModelRequest) -> Self {
+    fn new(model: String, reasoning_effort: String, request: &ModelRequest) -> Self {
         Self {
             model,
+            reasoning_effort,
             messages: chat_messages(&request.messages),
             parallel_tool_calls: (!request.tools.is_empty()).then_some(false),
             tools: request.tools.iter().map(tool_def).collect(),
@@ -285,7 +291,7 @@ impl Model for OpenAi {
         let client = self.client.clone();
         let url = self.url.clone();
         let api_key = self.api_key.clone();
-        let request = ChatRequest::new(self.model.clone(), request);
+        let request = ChatRequest::new(self.model.clone(), self.reasoning_effort.clone(), request);
 
         tokio::spawn(async move {
             let request = client.post(&url).bearer_auth(api_key).json(&request);
@@ -492,9 +498,15 @@ mod tests {
             tools: vec![tool],
         };
 
-        let plain = serde_json::to_value(ChatRequest::new("m".to_string(), &plain)).unwrap();
-        let with_tools =
-            serde_json::to_value(ChatRequest::new("m".to_string(), &with_tools)).unwrap();
+        let plain =
+            serde_json::to_value(ChatRequest::new("m".to_string(), "low".to_string(), &plain))
+                .unwrap();
+        let with_tools = serde_json::to_value(ChatRequest::new(
+            "m".to_string(),
+            "low".to_string(),
+            &with_tools,
+        ))
+        .unwrap();
 
         assert!(plain.get("parallel_tool_calls").is_none());
         assert!(plain.get("tools").is_none());
