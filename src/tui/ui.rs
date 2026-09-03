@@ -28,11 +28,13 @@ pub fn draw(frame: &mut Frame, chat: &mut Chat) {
     let width = area.width.max(1) as usize;
 
     let status = status(chat, width);
-    let input_height = input_height(chat, area.height, status.len() as u16);
-    let [transcript_area, input_area, status_area] = Layout::vertical([
+    let status_height = status.len().min(STATUS_MAX) as u16;
+    let input_height = input_height(chat, area.height, status_height + 1);
+    let [transcript_area, input_area, status_area, model_area] = Layout::vertical([
         Constraint::Min(1),
         Constraint::Length(input_height),
-        Constraint::Length(status.len().min(STATUS_MAX) as u16),
+        Constraint::Length(status_height),
+        Constraint::Length(1),
     ])
     .areas(area);
 
@@ -44,13 +46,15 @@ pub fn draw(frame: &mut Frame, chat: &mut Chat) {
     );
     draw_input(frame, chat, input_area);
     frame.render_widget(Paragraph::new(status), status_area);
+    frame.render_widget(Paragraph::new(model_status(chat)), model_area);
 }
 
 /// The box has one row per entered line plus its top and bottom border.
 /// Keep one row for the transcript when the terminal is short.
-fn input_height(chat: &Chat, total_height: u16, status_height: u16) -> u16 {
+/// `below_height` is the status row plus the model row beneath it.
+fn input_height(chat: &Chat, total_height: u16, below_height: u16) -> u16 {
     let wanted = (chat.textarea.lines().len() as u16).saturating_add(2);
-    let available = total_height.saturating_sub(status_height).saturating_sub(1);
+    let available = total_height.saturating_sub(below_height).saturating_sub(1);
     wanted.min(available).max(1)
 }
 
@@ -245,4 +249,36 @@ fn status(chat: &Chat, width: usize) -> Vec<Line<'static>> {
         "Enter send · Ctrl+J newline · PgUp/PgDn scroll · Esc quit",
         chat.hint_style,
     ))]
+}
+
+/// The row under the status row: the model's name, and - once a turn
+/// has asked it - the last round trip's input tokens against its
+/// context window, when the window is known.
+fn model_status(chat: &Chat) -> Line<'static> {
+    let name = chat.app.model_name().to_string();
+    let body = match chat.app.last_usage() {
+        None => name,
+        Some(usage) => match chat.app.context_window() {
+            Some(window) => format!(
+                "{name} · {} / {} tokens",
+                thousands(usage.input_tokens),
+                thousands(window as u64)
+            ),
+            None => format!("{name} · {} tokens", thousands(usage.input_tokens)),
+        },
+    };
+    Line::from(Span::styled(body, chat.hint_style))
+}
+
+/// `12345` as `"12,345"` - ratatui has no number formatting of its own.
+fn thousands(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, ch) in digits.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out.chars().rev().collect()
 }

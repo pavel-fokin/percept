@@ -104,6 +104,9 @@ pub trait AppService {
 
     /// Tokens of context the model holds, when it's known.
     fn context_window(&self) -> Option<u32>;
+
+    /// The model's own name, available before any turn asks.
+    fn model_name(&self) -> &str;
 }
 
 /// What the caller should do after `begin_tool`. The decision - run,
@@ -533,6 +536,10 @@ impl AppService for App {
 
     fn context_window(&self) -> Option<u32> {
         self.chat.capabilities().context_window
+    }
+
+    fn model_name(&self) -> &str {
+        self.chat.name()
     }
 }
 
