@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, BorderType, Paragraph};
 use ratatui::Frame;
 
 use super::Chat;
-use crate::percept::{Actor, Event, Payload};
+use crate::percept::{Actor, Event, EventKind, Payload};
 
 /// One marker plus a space. Every wrapped line of a turn indents past
 /// it, so the gutter stays a column of markers and nothing else.
@@ -123,12 +123,12 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
         // not dialogue.
         Payload::NodeAdded {
             map, kind, name, ..
-        } => tool_lines(chat, &format!("node.added {map} {kind} {name:?}"), width),
+        } => tool_lines(chat, &format!("{map}: added {kind} {name:?}"), width),
         Payload::NodeRemoved {
             map, node, reason, ..
         } => tool_lines(
             chat,
-            &format!("node.removed {map} {} {reason:?}", node.as_uuid()),
+            &format!("{map}: removed node {} - {reason}", node.as_uuid()),
             width,
         ),
         Payload::EdgeAdded {
@@ -137,30 +137,28 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
             from,
             to,
             ..
-        } => tool_lines(
-            chat,
-            &format!(
-                "edge.added {map} {kind} {} \u{2192} {}",
-                from.as_uuid(),
-                to.as_uuid()
-            ),
-            width,
-        ),
-        Payload::EdgeRemoved {
+        }
+        | Payload::EdgeRemoved {
             map,
             kind,
             from,
             to,
             ..
-        } => tool_lines(
-            chat,
-            &format!(
-                "edge.removed {map} {kind} {} \u{2192} {}",
-                from.as_uuid(),
-                to.as_uuid()
-            ),
-            width,
-        ),
+        } => {
+            let verb = match event.kind() {
+                EventKind::EdgeAdded => "added",
+                _ => "removed",
+            };
+            tool_lines(
+                chat,
+                &format!(
+                    "{map}: {verb} edge {kind} {} \u{2192} {}",
+                    from.as_uuid(),
+                    to.as_uuid()
+                ),
+                width,
+            )
+        }
     }
 }
 

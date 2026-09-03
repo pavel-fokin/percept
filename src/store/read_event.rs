@@ -164,7 +164,8 @@ mod tests {
                 r#"{{"id":"{}","range":"0:2"}}"#,
                 event.id().as_uuid()
             ))
-            .unwrap_err()
+            .err()
+            .unwrap()
             .to_string();
         assert!(err.contains("range"), "{err}");
     }

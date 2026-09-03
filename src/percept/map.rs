@@ -14,6 +14,7 @@ use crate::shared::Id;
 
 /// Which node and edge kinds a map allows. Data, not an enum: adding a
 /// map is adding a value.
+#[derive(Debug, PartialEq, Eq)]
 pub struct Schema {
     pub name: &'static str,
     pub node_kinds: &'static [&'static str],
@@ -32,14 +33,14 @@ pub const DECISIONS: Schema = Schema {
 pub const SCHEMAS: &[&Schema] = &[&DECISIONS];
 
 impl Schema {
-    pub fn named(name: &str) -> Option<&'static Schema> {
-        SCHEMAS.iter().copied().find(|schema| schema.name == name)
-    }
-
-    /// `named`, with an unknown name as the error every boundary that
-    /// takes a map name reports.
+    /// The schema `name` names, or the error every boundary that takes
+    /// a map name reports.
     pub fn find(name: &str) -> Result<&'static Schema, MapError> {
-        Self::named(name).ok_or_else(|| MapError::UnknownMap(name.to_string()))
+        SCHEMAS
+            .iter()
+            .copied()
+            .find(|schema| schema.name == name)
+            .ok_or_else(|| MapError::UnknownMap(name.to_string()))
     }
 }
 
@@ -56,6 +57,13 @@ pub struct Node {
     pub name: String,
     pub properties: BTreeMap<String, String>,
     pub sources: Vec<EventId>,
+}
+
+/// A node as a writer names it: kind and quoted name, never the id.
+impl fmt::Display for Node {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {:?}", self.kind, self.name)
+    }
 }
 
 /// One edge of a map. Carries no id: `kind`, `from`, and `to` identify
@@ -113,16 +121,17 @@ pub enum Mutation {
 /// Why a mutation, or a stored event, doesn't fit its map. Each names
 /// the rule and the value that broke it. `apply` checks a mutation
 /// before it becomes an event, so a stored event that breaks a rule
-/// means a race between writers or a hand-edited log.
+/// means a race between writers or a hand-edited log. Edge ends are
+/// carried as labels - kind and name - the way a reader knows them.
 #[derive(Debug, PartialEq, Eq)]
 pub enum MapError {
     UnknownMap(String),
     UnknownNodeKind {
-        map: &'static str,
+        map: &'static Schema,
         kind: String,
     },
     UnknownEdgeKind {
-        map: &'static str,
+        map: &'static Schema,
         kind: String,
     },
     /// A name that is blank would be a node nobody can point at.
@@ -163,26 +172,28 @@ impl fmt::Display for MapError {
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            Self::BlankName => write!(f, "a node's name must not be blank"),
             Self::UnknownNodeKind { map, kind } => write!(
                 f,
-                "no node kind {kind:?} in map {map:?}; kinds are {}",
-                allowed(map, |schema| schema.node_kinds)
+                "no node kind {kind:?} in map {:?}; kinds are {}",
+                map.name,
+                map.node_kinds.join(", ")
             ),
             Self::UnknownEdgeKind { map, kind } => write!(
                 f,
-                "no edge kind {kind:?} in map {map:?}; kinds are {}",
-                allowed(map, |schema| schema.edge_kinds)
+                "no edge kind {kind:?} in map {:?}; kinds are {}",
+                map.name,
+                map.edge_kinds.join(", ")
             ),
+            Self::BlankName => write!(f, "a node's name must not be blank"),
             Self::DuplicateNode { kind, name } => {
                 write!(f, "{kind} {name:?} is already in the map")
             }
             Self::NoSuchNode(node) => write!(f, "no {node} in the map"),
             Self::NoSuchNodeId(id) => write!(f, "no node with id {}", id.as_uuid()),
             Self::DuplicateEdge { kind, from, to } => {
-                write!(f, "{from:?} {kind} {to:?} is already in the map")
+                write!(f, "{from} {kind} {to} is already in the map")
             }
-            Self::NoSuchEdge { kind, from, to } => write!(f, "no edge {from:?} {kind} {to:?}"),
+            Self::NoSuchEdge { kind, from, to } => write!(f, "no edge {from} {kind} {to}"),
             Self::Rejected { event, error } => {
                 write!(f, "event {} does not fit its map: {error}", event.as_uuid())
             }
@@ -191,11 +202,6 @@ impl fmt::Display for MapError {
 }
 
 impl std::error::Error for MapError {}
-
-/// The kinds a map allows, for an error naming one it doesn't.
-fn allowed(map: &str, kinds: fn(&Schema) -> &'static [&'static str]) -> String {
-    Schema::named(map).map_or_else(String::new, |schema| kinds(schema).join(", "))
-}
 
 /// A map folded from the log. Holds every node and edge still present;
 /// what was removed lives only in the events.
@@ -237,6 +243,16 @@ impl Map {
         Ok(map)
     }
 
+    /// Every map percept knows, folded from `events`.
+    pub fn fold_all<'a>(
+        events: impl IntoIterator<Item = &'a Event> + Clone,
+    ) -> Result<Vec<Self>, MapError> {
+        SCHEMAS
+            .iter()
+            .map(|schema| Self::fold(schema, events.clone()))
+            .collect()
+    }
+
     pub fn schema(&self) -> &'static Schema {
         self.schema
     }
@@ -259,121 +275,6 @@ impl Map {
             .find(|node| node.kind == kind && node.name == name)
     }
 
-    /// Applies one recorded change. Removing a node drops the edges
-    /// that touch it: an edge to nothing is not a fact.
-    fn replay(&mut self, payload: &Payload) -> Result<(), MapError> {
-        match payload {
-            Payload::NodeAdded {
-                node,
-                kind,
-                name,
-                properties,
-                sources,
-                ..
-            } => {
-                self.check_node_kind(kind)?;
-                if self.find(kind, name).is_some() {
-                    return Err(MapError::DuplicateNode {
-                        kind: kind.clone(),
-                        name: name.clone(),
-                    });
-                }
-                self.nodes.push(Node {
-                    id: *node,
-                    kind: kind.clone(),
-                    name: name.clone(),
-                    properties: properties.clone(),
-                    sources: sources.clone(),
-                });
-            }
-            Payload::NodeRemoved { node, .. } => {
-                self.check_node_id(*node)?;
-                self.nodes.retain(|n| n.id != *node);
-                self.edges.retain(|e| e.from != *node && e.to != *node);
-            }
-            Payload::EdgeAdded {
-                kind,
-                from,
-                to,
-                sources,
-                ..
-            } => {
-                self.check_edge_kind(kind)?;
-                self.check_node_id(*from)?;
-                self.check_node_id(*to)?;
-                if self.edge(kind, *from, *to).is_some() {
-                    return Err(MapError::DuplicateEdge {
-                        kind: kind.clone(),
-                        from: self.name_of(*from),
-                        to: self.name_of(*to),
-                    });
-                }
-                self.edges.push(Edge {
-                    kind: kind.clone(),
-                    from: *from,
-                    to: *to,
-                    sources: sources.clone(),
-                });
-            }
-            Payload::EdgeRemoved { kind, from, to, .. } => {
-                if self.edge(kind, *from, *to).is_none() {
-                    return Err(MapError::NoSuchEdge {
-                        kind: kind.clone(),
-                        from: self.name_of(*from),
-                        to: self.name_of(*to),
-                    });
-                }
-                self.edges
-                    .retain(|e| !(e.kind == *kind && e.from == *from && e.to == *to));
-            }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    fn edge(&self, kind: &str, from: NodeId, to: NodeId) -> Option<&Edge> {
-        self.edges
-            .iter()
-            .find(|e| e.kind == kind && e.from == from && e.to == to)
-    }
-
-    /// A node's name for an error message; the id when the map has no
-    /// such node.
-    fn name_of(&self, id: NodeId) -> String {
-        self.node(id)
-            .map_or_else(|| id.as_uuid().to_string(), |n| n.name.clone())
-    }
-
-    fn check_node_kind(&self, kind: &str) -> Result<(), MapError> {
-        if self.schema.node_kinds.contains(&kind) {
-            Ok(())
-        } else {
-            Err(MapError::UnknownNodeKind {
-                map: self.schema.name,
-                kind: kind.to_string(),
-            })
-        }
-    }
-
-    fn check_edge_kind(&self, kind: &str) -> Result<(), MapError> {
-        if self.schema.edge_kinds.contains(&kind) {
-            Ok(())
-        } else {
-            Err(MapError::UnknownEdgeKind {
-                map: self.schema.name,
-                kind: kind.to_string(),
-            })
-        }
-    }
-
-    fn check_node_id(&self, id: NodeId) -> Result<(), MapError> {
-        if self.node(id).is_some() {
-            Ok(())
-        } else {
-            Err(MapError::NoSuchNodeId(id))
-        }
-    }
-
     /// Checks `mutation` against the schema and the map's current
     /// state, applies it, and returns the `Payload` that records it.
     /// The caller commits that payload; the map is already updated, so
@@ -386,19 +287,14 @@ impl Map {
                 name,
                 properties,
                 sources,
-            } => {
-                if name.trim().is_empty() {
-                    return Err(MapError::BlankName);
-                }
-                Payload::NodeAdded {
-                    map,
-                    node: NodeId::new(),
-                    kind,
-                    name,
-                    properties,
-                    sources,
-                }
-            }
+            } => Payload::NodeAdded {
+                map,
+                node: NodeId::new(),
+                kind,
+                name,
+                properties,
+                sources,
+            },
             Mutation::RemoveNode {
                 node,
                 reason,
@@ -438,10 +334,129 @@ impl Map {
         Ok(payload)
     }
 
+    /// Applies one recorded change - every rule a map enforces lives
+    /// here, so a fold and `apply` agree. Removing a node drops the
+    /// edges that touch it: an edge to nothing is not a fact.
+    fn replay(&mut self, payload: &Payload) -> Result<(), MapError> {
+        match payload {
+            Payload::NodeAdded {
+                node,
+                kind,
+                name,
+                properties,
+                sources,
+                ..
+            } => {
+                self.check_node_kind(kind)?;
+                if name.trim().is_empty() {
+                    return Err(MapError::BlankName);
+                }
+                if self.find(kind, name).is_some() {
+                    return Err(MapError::DuplicateNode {
+                        kind: kind.clone(),
+                        name: name.clone(),
+                    });
+                }
+                self.nodes.push(Node {
+                    id: *node,
+                    kind: kind.clone(),
+                    name: name.clone(),
+                    properties: properties.clone(),
+                    sources: sources.clone(),
+                });
+            }
+            Payload::NodeRemoved { node, .. } => {
+                self.check_node_id(*node)?;
+                self.nodes.retain(|n| n.id != *node);
+                self.edges.retain(|e| e.from != *node && e.to != *node);
+            }
+            Payload::EdgeAdded {
+                kind,
+                from,
+                to,
+                sources,
+                ..
+            } => {
+                self.check_edge_kind(kind)?;
+                self.check_node_id(*from)?;
+                self.check_node_id(*to)?;
+                if self.edge(kind, *from, *to).is_some() {
+                    return Err(MapError::DuplicateEdge {
+                        kind: kind.clone(),
+                        from: self.label(*from),
+                        to: self.label(*to),
+                    });
+                }
+                self.edges.push(Edge {
+                    kind: kind.clone(),
+                    from: *from,
+                    to: *to,
+                    sources: sources.clone(),
+                });
+            }
+            Payload::EdgeRemoved { kind, from, to, .. } => {
+                if self.edge(kind, *from, *to).is_none() {
+                    return Err(MapError::NoSuchEdge {
+                        kind: kind.clone(),
+                        from: self.label(*from),
+                        to: self.label(*to),
+                    });
+                }
+                self.edges
+                    .retain(|e| !(e.kind == *kind && e.from == *from && e.to == *to));
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn resolve(&self, node: NodeRef) -> Result<NodeId, MapError> {
         self.find(&node.kind, &node.name)
             .map(|n| n.id)
             .ok_or(MapError::NoSuchNode(node))
+    }
+
+    fn edge(&self, kind: &str, from: NodeId, to: NodeId) -> Option<&Edge> {
+        self.edges
+            .iter()
+            .find(|e| e.kind == kind && e.from == from && e.to == to)
+    }
+
+    /// A node as `Display` names it; the id when the map has no such
+    /// node.
+    fn label(&self, id: NodeId) -> String {
+        self.node(id)
+            .map_or_else(|| id.as_uuid().to_string(), Node::to_string)
+    }
+
+    fn check_node_kind(&self, kind: &str) -> Result<(), MapError> {
+        if self.schema.node_kinds.contains(&kind) {
+            Ok(())
+        } else {
+            Err(MapError::UnknownNodeKind {
+                map: self.schema,
+                kind: kind.to_string(),
+            })
+        }
+    }
+
+    fn check_edge_kind(&self, kind: &str) -> Result<(), MapError> {
+        if self.schema.edge_kinds.contains(&kind) {
+            Ok(())
+        } else {
+            Err(MapError::UnknownEdgeKind {
+                map: self.schema,
+                kind: kind.to_string(),
+            })
+        }
+    }
+
+    fn check_node_id(&self, id: NodeId) -> Result<(), MapError> {
+        if self.node(id).is_some() {
+            Ok(())
+        } else {
+            Err(MapError::NoSuchNodeId(id))
+        }
     }
 }
 
@@ -452,7 +467,7 @@ impl Map {
 impl fmt::Display for Map {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for node in &self.nodes {
-            write!(f, "- {} {:?}", node.kind, node.name)?;
+            write!(f, "- {node}")?;
             let mut sep = ": ";
             for (key, value) in &node.properties {
                 write!(f, "{sep}{key}: {value:?}")?;
@@ -470,16 +485,6 @@ impl fmt::Display for Map {
             )?;
         }
         Ok(())
-    }
-}
-
-impl Map {
-    /// A node as `Display` names it: kind and quoted name.
-    fn label(&self, id: NodeId) -> String {
-        self.node(id).map_or_else(
-            || id.as_uuid().to_string(),
-            |n| format!("{} {:?}", n.kind, n.name),
-        )
     }
 }
 
@@ -645,18 +650,28 @@ mod tests {
         assert_eq!(
             rejected_with(err, stray_id),
             MapError::UnknownNodeKind {
-                map: "decisions",
+                map: &DECISIONS,
                 kind: "goal".to_string()
             }
         );
         assert_eq!(
             MapError::UnknownNodeKind {
-                map: "decisions",
+                map: &DECISIONS,
                 kind: "goal".to_string()
             }
             .to_string(),
             "no node kind \"goal\" in map \"decisions\"; kinds are question, option, evidence, decision"
         );
+    }
+
+    #[test]
+    fn a_blank_name_fails_the_fold() {
+        let stray = node_added("decisions", NodeId::new(), "option", " ");
+        let stray_id = stray.id();
+
+        let err = Map::fold(&DECISIONS, &[stray]).err().unwrap();
+
+        assert_eq!(rejected_with(err, stray_id), MapError::BlankName);
     }
 
     #[test]
@@ -706,8 +721,8 @@ mod tests {
             rejected_with(err, twice_id),
             MapError::DuplicateEdge {
                 kind: "resolves".to_string(),
-                from: "Rust over Go".to_string(),
-                to: "Which language?".to_string()
+                from: "decision \"Rust over Go\"".to_string(),
+                to: "question \"Which language?\"".to_string()
             }
         );
     }
@@ -852,11 +867,7 @@ mod tests {
 
     #[test]
     fn a_schema_is_found_by_name() {
-        assert_eq!(
-            Schema::named("decisions").map(|s| s.name),
-            Some("decisions")
-        );
-        assert!(Schema::named("tasks").is_none());
+        assert_eq!(Schema::find("decisions").unwrap().name, "decisions");
         assert_eq!(
             Schema::find("tasks").err().unwrap().to_string(),
             "no map named \"tasks\"; maps are decisions"

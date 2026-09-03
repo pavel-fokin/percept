@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::percept::{
-    self, Chunk, Event, EventId, EventQuery, EventSearch, Modality, Model, ModelCapabilities,
-    ModelRequest, Payload, ReplyStream, Tool, ToolOutput, ToolSpec,
+    self, Chunk, Event, EventId, Modality, Model, ModelCapabilities, ModelRequest, Payload,
+    ReplyStream, Tool, ToolOutput, ToolSpec,
 };
 
 /// An in-memory EventLog. `start_failing` flips `append` into an error
@@ -48,12 +48,6 @@ impl percept::EventLog for FakeLog {
     fn get(&self, id: EventId) -> Result<Option<Event>, Box<dyn std::error::Error>> {
         let events = self.events.lock().unwrap();
         Ok(events.iter().find(|event| event.id() == id).cloned())
-    }
-}
-
-impl EventSearch for FakeLog {
-    fn search(&self, query: &EventQuery) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
-        Ok(query.apply(self.events.lock().unwrap().clone()))
     }
 }
 

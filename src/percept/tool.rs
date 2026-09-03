@@ -20,7 +20,6 @@ pub trait Tool: Send + Sync {
 /// What a tool hands back: the text fed to the model as the result,
 /// and any events the call produced, which `App` commits caused by the
 /// call. Most tools commit nothing.
-#[derive(Debug)]
 pub struct ToolOutput {
     pub content: String,
     pub commits: Vec<Payload>,

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{EventLog, Mutation, NodeRef, Payload, Schema};
+use crate::percept::{EventLog, Mutation, NodeRef, Payload};
 use crate::percept::{Tool, ToolOutput, ToolSpec};
 use crate::store::Snapshot;
 
@@ -29,7 +29,8 @@ const DESCRIPTION: &str = "Record into a named map what you have judged \
     batch of changes to one map, checked together in order and \
     committed only if every change passes - a later change may refer to \
     a node an earlier one in the same batch just added. Cite the event \
-    ids the judgement came from in `sources`. The current state of any \
+    ids the judgement came from in `sources`, as search_events returns \
+    them; nothing else is an id. The current state of any \
     map that holds something is already in the conversation, so do not \
     add a node that is already there; a node is named by its kind and \
     name, not by an id you choose.";
@@ -211,9 +212,7 @@ impl Tool for ReviseMap {
         if args.changes.is_empty() {
             return Err("changes must not be empty".into());
         }
-        let schema = Schema::find(&args.map)?;
-
-        let mut snapshot = Snapshot::load(self.log.as_ref(), schema)?;
+        let mut snapshot = Snapshot::load(self.log.as_ref(), &args.map)?;
         let mut lines = Vec::with_capacity(args.changes.len());
         let mut commits = Vec::with_capacity(args.changes.len());
 
@@ -231,36 +230,30 @@ impl Tool for ReviseMap {
     }
 }
 
-/// Turns one `ChangeArgs` into the `Mutation` `Map::apply` checks, and
-/// describes what it recorded - a node's minted id comes from the
-/// `Payload` `apply` returns, since nothing else knows it yet.
+/// Turns one `ChangeArgs` into the `Mutation` `Map::apply` checks,
+/// applies it, and describes what was recorded. A node's minted id
+/// comes from the `Payload` `apply` returns, since nothing else knows
+/// it yet.
 fn apply(
     snapshot: &mut Snapshot,
     change: ChangeArgs,
 ) -> Result<(String, Payload), Box<dyn std::error::Error>> {
-    match change {
+    let adding_edge = matches!(change, ChangeArgs::AddEdge { .. });
+    let (mutation, line) = match change {
         ChangeArgs::AddNode {
             kind,
             name,
             properties,
             sources,
         } => {
-            let node_ref = NodeRef {
-                kind: kind.clone(),
-                name: name.clone(),
-            };
+            let line = format!("added {kind} {name:?}");
             let mutation = Mutation::AddNode {
                 kind,
                 name,
                 properties,
                 sources: snapshot.resolve(&sources)?,
             };
-            let payload = snapshot.map().apply(mutation)?;
-            let id = match &payload {
-                Payload::NodeAdded { node, .. } => node.as_uuid(),
-                _ => unreachable!("AddNode always applies to a NodeAdded payload"),
-            };
-            Ok((format!("added {node_ref} as {id}"), payload))
+            (mutation, line)
         }
         ChangeArgs::RemoveNode {
             kind,
@@ -268,50 +261,55 @@ fn apply(
             reason,
             sources,
         } => {
-            let node_ref = NodeRef { kind, name };
+            let node = NodeRef { kind, name };
+            let line = format!("removed {node}");
             let mutation = Mutation::RemoveNode {
-                node: node_ref.clone(),
+                node,
                 reason,
                 sources: snapshot.resolve(&sources)?,
             };
-            let payload = snapshot.map().apply(mutation)?;
-            Ok((format!("removed {node_ref}"), payload))
+            (mutation, line)
         }
         ChangeArgs::AddEdge {
             kind,
             from,
             to,
             sources,
-        } => {
-            let from: NodeRef = from.into();
-            let to: NodeRef = to.into();
-            let mutation = Mutation::AddEdge {
-                kind: kind.clone(),
-                from: from.clone(),
-                to: to.clone(),
-                sources: snapshot.resolve(&sources)?,
-            };
-            let payload = snapshot.map().apply(mutation)?;
-            Ok((format!("added edge {from} {kind} {to}"), payload))
         }
-        ChangeArgs::RemoveEdge {
+        | ChangeArgs::RemoveEdge {
             kind,
             from,
             to,
             sources,
         } => {
-            let from: NodeRef = from.into();
-            let to: NodeRef = to.into();
-            let mutation = Mutation::RemoveEdge {
-                kind: kind.clone(),
-                from: from.clone(),
-                to: to.clone(),
-                sources: snapshot.resolve(&sources)?,
+            let (from, to): (NodeRef, NodeRef) = (from.into(), to.into());
+            let sources = snapshot.resolve(&sources)?;
+            let verb = if adding_edge { "added" } else { "removed" };
+            let line = format!("{verb} edge {from} {kind} {to}");
+            let mutation = if adding_edge {
+                Mutation::AddEdge {
+                    kind,
+                    from,
+                    to,
+                    sources,
+                }
+            } else {
+                Mutation::RemoveEdge {
+                    kind,
+                    from,
+                    to,
+                    sources,
+                }
             };
-            let payload = snapshot.map().apply(mutation)?;
-            Ok((format!("removed edge {from} {kind} {to}"), payload))
+            (mutation, line)
         }
-    }
+    };
+    let payload = snapshot.apply(mutation)?;
+    let line = match &payload {
+        Payload::NodeAdded { node, .. } => format!("{line} as {}", node.as_uuid()),
+        _ => line,
+    };
+    Ok((line, payload))
 }
 
 #[cfg(test)]

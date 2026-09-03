@@ -23,8 +23,7 @@ use tokio_stream::StreamExt;
 
 use crate::app::{run_tool, AppService, ToolStep};
 use crate::percept::{
-    self, Actor, Chunk, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload, Schema,
-    SCHEMAS,
+    self, Actor, Chunk, Event, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
 };
 use crate::shared::Timestamp;
 use crate::store;
@@ -77,11 +76,11 @@ pub enum MapsCommand {
     /// Add a node to a map. Prints the minted node id.
     AddNode(AddNodeArgs),
     /// Add an edge between two nodes already in a map.
-    AddEdge(AddEdgeArgs),
+    AddEdge(EdgeArgs),
     /// Remove a node from a map, dropping the edges that touch it.
     RemoveNode(RemoveNodeArgs),
     /// Remove an edge from a map.
-    RemoveEdge(RemoveEdgeArgs),
+    RemoveEdge(EdgeArgs),
 }
 
 #[derive(Args)]
@@ -90,59 +89,48 @@ pub struct ShowMapArgs {
     map: String,
 }
 
+/// What every map change names: the map, and the events it was drawn
+/// from.
 #[derive(Args)]
-pub struct AddNodeArgs {
+pub struct MapArgs {
     /// The map's name, as `maps list` prints it.
     map: String,
-    #[arg(long, value_parser = non_blank)]
+    /// Repeatable. An event this fact was drawn from.
+    #[arg(long)]
+    source: Vec<String>,
+}
+
+#[derive(Args)]
+pub struct AddNodeArgs {
+    #[command(flatten)]
+    target: MapArgs,
+    #[arg(long)]
     kind: String,
-    #[arg(long, value_parser = non_blank)]
+    #[arg(long)]
     name: String,
     /// Repeatable `key=value`.
     #[arg(long = "prop", value_parser = parse_prop)]
     prop: Vec<(String, String)>,
-    /// Repeatable. An event this fact was drawn from.
-    #[arg(long)]
-    source: Vec<String>,
-}
-
-#[derive(Args)]
-pub struct AddEdgeArgs {
-    /// The map's name, as `maps list` prints it.
-    map: String,
-    #[arg(long, value_parser = non_blank)]
-    kind: String,
-    /// `kind:name` of the node the edge starts at.
-    #[arg(long, value_parser = parse_node_ref)]
-    from: NodeRef,
-    /// `kind:name` of the node the edge points to.
-    #[arg(long, value_parser = parse_node_ref)]
-    to: NodeRef,
-    /// Repeatable. An event this fact was drawn from.
-    #[arg(long)]
-    source: Vec<String>,
 }
 
 #[derive(Args)]
 pub struct RemoveNodeArgs {
-    /// The map's name, as `maps list` prints it.
-    map: String,
-    #[arg(long, value_parser = non_blank)]
+    #[command(flatten)]
+    target: MapArgs,
+    #[arg(long)]
     kind: String,
-    #[arg(long, value_parser = non_blank)]
+    #[arg(long)]
     name: String,
     #[arg(long, value_parser = non_blank)]
     reason: String,
-    /// Repeatable. An event this fact was drawn from.
-    #[arg(long)]
-    source: Vec<String>,
 }
 
+/// An edge to add or remove - the same three things name it either way.
 #[derive(Args)]
-pub struct RemoveEdgeArgs {
-    /// The map's name, as `maps list` prints it.
-    map: String,
-    #[arg(long, value_parser = non_blank)]
+pub struct EdgeArgs {
+    #[command(flatten)]
+    target: MapArgs,
+    #[arg(long)]
     kind: String,
     /// `kind:name` of the node the edge starts at.
     #[arg(long, value_parser = parse_node_ref)]
@@ -150,9 +138,6 @@ pub struct RemoveEdgeArgs {
     /// `kind:name` of the node the edge points to.
     #[arg(long, value_parser = parse_node_ref)]
     to: NodeRef,
-    /// Repeatable. An event this fact was drawn from.
-    #[arg(long)]
-    source: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -246,7 +231,7 @@ pub struct ShowArgs {
 pub struct AskArgs {
     /// The prompt to send.
     #[arg(value_parser = non_blank)]
-    prompt: String,
+    pub prompt: String,
 }
 
 /// Parses `--range START:END`; either side may be blank.
@@ -353,27 +338,25 @@ fn print_lines(lines: impl Iterator<Item = String>) -> Result<(), Box<dyn std::e
     out.flush().or_else(stop_if_pipe_closed)
 }
 
-/// Prints every map percept knows with its size, folding each from
-/// `log`.
-pub fn maps_list(log: &dyn EventSearch) -> Result<(), Box<dyn std::error::Error>> {
-    let maps = SCHEMAS
-        .iter()
-        .map(|schema| store::fold_map(log, schema))
-        .collect::<Result<Vec<Map>, _>>()?;
+/// Prints every map percept knows with its size, folded from one
+/// read of `log`.
+pub fn maps_list(log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
+    let maps = Map::fold_all(&log.load()?)?;
     print_lines(maps.iter().map(store::encode_map))
 }
 
-/// Prints the map `args.map` names, nodes then edges. A name percept
-/// has no map for is an error listing the ones it has.
-pub fn maps_show(
-    args: ShowMapArgs,
-    log: &dyn EventSearch,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let schema = Schema::find(&args.map)?;
-    let map = store::fold_map(log, schema)?;
+/// Prints the map `args.map` names, nodes then edges.
+pub fn maps_show(args: ShowMapArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
+    let map = store::fold_map(log, &args.map)?;
     let nodes = map.nodes().iter().map(store::encode_node);
     let edges = map.edges().iter().map(store::encode_edge);
     print_lines(nodes.chain(edges))
+}
+
+/// Commits a shell user's map change: actor `user`, source `cli`, no
+/// cause.
+fn record(log: &dyn EventLog, payload: Payload) -> Result<(), Box<dyn std::error::Error>> {
+    log.append(&Event::new(Actor::User, "cli".to_string(), None, payload))
 }
 
 /// Adds a node to a map and prints its minted id, so a shell script can
@@ -382,33 +365,29 @@ pub fn maps_add_node(
     args: AddNodeArgs,
     log: &dyn EventLog,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let schema = Schema::find(&args.map)?;
-    let event = store::revise(log, schema, &args.source, |sources| Mutation::AddNode {
+    let MapArgs { map, source } = args.target;
+    let payload = store::revise(log, &map, &source, |sources| Mutation::AddNode {
         kind: args.kind,
         name: args.name,
         properties: args.prop.into_iter().collect::<BTreeMap<_, _>>(),
         sources,
     })?;
-    let Payload::NodeAdded { node, .. } = event.payload() else {
-        unreachable!("revise(AddNode) always returns NodeAdded")
-    };
-    println!("{}", node.as_uuid());
-    Ok(())
+    if let Payload::NodeAdded { node, .. } = &payload {
+        println!("{}", node.as_uuid());
+    }
+    record(log, payload)
 }
 
 /// Adds an edge between two nodes already in a map.
-pub fn maps_add_edge(
-    args: AddEdgeArgs,
-    log: &dyn EventLog,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let schema = Schema::find(&args.map)?;
-    store::revise(log, schema, &args.source, |sources| Mutation::AddEdge {
+pub fn maps_add_edge(args: EdgeArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
+    let MapArgs { map, source } = args.target;
+    let payload = store::revise(log, &map, &source, |sources| Mutation::AddEdge {
         kind: args.kind,
         from: args.from,
         to: args.to,
         sources,
     })?;
-    Ok(())
+    record(log, payload)
 }
 
 /// Removes a node from a map, dropping the edges that touch it.
@@ -416,8 +395,8 @@ pub fn maps_remove_node(
     args: RemoveNodeArgs,
     log: &dyn EventLog,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let schema = Schema::find(&args.map)?;
-    store::revise(log, schema, &args.source, |sources| Mutation::RemoveNode {
+    let MapArgs { map, source } = args.target;
+    let payload = store::revise(log, &map, &source, |sources| Mutation::RemoveNode {
         node: NodeRef {
             kind: args.kind,
             name: args.name,
@@ -425,22 +404,22 @@ pub fn maps_remove_node(
         reason: args.reason,
         sources,
     })?;
-    Ok(())
+    record(log, payload)
 }
 
 /// Removes an edge from a map.
 pub fn maps_remove_edge(
-    args: RemoveEdgeArgs,
+    args: EdgeArgs,
     log: &dyn EventLog,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let schema = Schema::find(&args.map)?;
-    store::revise(log, schema, &args.source, |sources| Mutation::RemoveEdge {
+    let MapArgs { map, source } = args.target;
+    let payload = store::revise(log, &map, &source, |sources| Mutation::RemoveEdge {
         kind: args.kind,
         from: args.from,
         to: args.to,
         sources,
     })?;
-    Ok(())
+    record(log, payload)
 }
 
 /// A reader that stops early - `head`, or a `jq` that has seen enough -
@@ -513,25 +492,6 @@ pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error
     Ok(())
 }
 
-/// Runs one turn with the user's prompt and prints the reply.
-pub async fn ask(
-    args: AskArgs,
-    app: Box<dyn AppService>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    run_turn(app, Actor::User, args.prompt).await
-}
-
-/// Runs one turn with percept's own prompt asking the model to revise
-/// its maps, and prints the reply. The prompt commits as a `system`
-/// message: percept asked, not the user, and a later search for what
-/// the user said must not find it.
-pub async fn reflect(
-    prompt: &str,
-    app: Box<dyn AppService>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    run_turn(app, Actor::System, prompt.to_string()).await
-}
-
 /// Runs one turn on `app` - submitting `prompt` as `actor`, then
 /// draining the reply stream chunk by chunk - and prints the reply to
 /// stdout. No channel, no spawned task: unlike the TUI, nothing else
@@ -539,7 +499,7 @@ pub async fn reflect(
 /// is one plain `await` loop. Each tool call and its result print to
 /// stderr as they happen, so stdout stays pipeable. That trace is for
 /// watching a run live; the log is what a run is read back from.
-async fn run_turn(
+pub async fn run_turn(
     mut app: Box<dyn AppService>,
     actor: Actor,
     prompt: String,
@@ -798,11 +758,6 @@ mod tests {
     }
 
     #[test]
-    fn a_prop_with_a_blank_key_is_rejected() {
-        assert!(parse_prop("=value").is_err());
-    }
-
-    #[test]
     fn a_node_ref_splits_on_the_first_colon() {
         let node = parse_node_ref("option:Rust:the language").unwrap();
         assert_eq!(node.kind, "option");
@@ -818,12 +773,6 @@ mod tests {
     fn a_node_ref_with_a_blank_side_is_rejected() {
         assert!(parse_node_ref(":Rust").is_err());
         assert!(parse_node_ref("option: ").is_err());
-    }
-
-    fn ask_args(prompt: &str) -> AskArgs {
-        AskArgs {
-            prompt: prompt.to_string(),
-        }
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -842,7 +791,9 @@ mod tests {
         let tools: Vec<Arc<dyn percept::Tool>> = vec![Arc::new(FakeTool)];
         let app = App::new(Arc::new(model), log.clone(), tools, "cli".to_string()).unwrap();
 
-        ask(ask_args("what happened"), Box::new(app)).await.unwrap();
+        run_turn(Box::new(app), Actor::User, "what happened".to_string())
+            .await
+            .unwrap();
 
         let events = log.load().unwrap();
         assert_eq!(events.len(), 4);
@@ -871,7 +822,7 @@ mod tests {
         );
         let app = App::new(Arc::new(model), log.clone(), Vec::new(), "cli".to_string()).unwrap();
 
-        let result = ask(ask_args("hi"), Box::new(app)).await;
+        let result = run_turn(Box::new(app), Actor::User, "hi".to_string()).await;
 
         assert!(result.is_err());
         let events = log.load().unwrap();

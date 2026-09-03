@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError, SCHEMAS};
+use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError};
 use crate::shared::Timestamp;
 
 /// Most tool calls one user turn may make. At the cap the next request
@@ -157,9 +157,7 @@ impl App {
         source: String,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let events = log.load()?;
-        for schema in SCHEMAS {
-            Map::fold(schema, &events)?;
-        }
+        Map::fold_all(&events)?;
 
         Ok(Self {
             events,
@@ -250,10 +248,7 @@ impl App {
         if new.is_empty() {
             return Ok(());
         }
-        for schema in SCHEMAS {
-            Map::fold(schema, self.events.iter().chain(new))?;
-        }
-        Ok(())
+        Map::fold_all(self.events.iter().chain(new)).map(drop)
     }
 
     /// Where the model's view starts: `CONTEXT_EVENTS` back from the
@@ -283,8 +278,8 @@ impl App {
             role: Actor::System,
             content: format!("The current time is {}.", Timestamp::now()),
         }];
-        for schema in SCHEMAS {
-            let map = Map::fold(schema, &self.events)?;
+        for map in Map::fold_all(&self.events)? {
+            let schema = map.schema();
             let body = if map.nodes().is_empty() {
                 "(empty)".to_string()
             } else {
@@ -752,28 +747,21 @@ mod tests {
 
     /// A tool whose output carries commits of its own, the way
     /// `revise_map` records what it judged from the log.
-    struct RecordingTool;
+    struct Committing(Vec<Payload>);
 
-    impl percept::Tool for RecordingTool {
+    impl percept::Tool for Committing {
         fn spec(&self) -> percept::ToolSpec {
             percept::ToolSpec {
                 name: "search_events",
-                description: "a fake that records two events",
+                description: "a fake that commits what it was given",
                 parameters: "{}",
             }
         }
 
         fn run(&self, _arguments: &str) -> Result<percept::ToolOutput, Box<dyn std::error::Error>> {
             Ok(percept::ToolOutput {
-                content: "recorded two".to_string(),
-                commits: vec![
-                    Payload::MessageReceived {
-                        content: "one".to_string(),
-                    },
-                    Payload::MessageReceived {
-                        content: "two".to_string(),
-                    },
-                ],
+                content: "recorded".to_string(),
+                commits: self.0.clone(),
             })
         }
     }
@@ -783,7 +771,14 @@ mod tests {
         let mut app = App::new(
             Arc::new(Scripted::new(vec![], true)),
             Arc::new(FakeLog::default()),
-            vec![Arc::new(RecordingTool)],
+            vec![Arc::new(Committing(vec![
+                Payload::MessageReceived {
+                    content: "one".to_string(),
+                },
+                Payload::MessageReceived {
+                    content: "two".to_string(),
+                },
+            ]))],
             SOURCE.to_string(),
         )
         .unwrap();
@@ -803,7 +798,7 @@ mod tests {
         assert!(events[3].causation_id() == Some(called_id));
         assert!(matches!(
             events[4].payload(),
-            Payload::ToolResulted { content } if content == "recorded two"
+            Payload::ToolResulted { content } if content == "recorded"
         ));
         assert!(events[4].causation_id() == Some(called_id));
     }
@@ -992,36 +987,16 @@ mod tests {
         assert!(err.to_string().contains("no node kind \"goal\""));
     }
 
-    /// A tool whose commits point at nodes this app has never seen, the
-    /// way `revise_map` can when another writer moved the log on.
-    struct DanglingTool;
-
-    impl percept::Tool for DanglingTool {
-        fn spec(&self) -> percept::ToolSpec {
-            percept::ToolSpec {
-                name: "search_events",
-                description: "a fake that commits a dangling edge",
-                parameters: "{}",
-            }
-        }
-
-        fn run(&self, _arguments: &str) -> Result<percept::ToolOutput, Box<dyn std::error::Error>> {
-            Ok(percept::ToolOutput {
-                content: "added edge".to_string(),
-                commits: vec![Payload::EdgeAdded {
-                    map: "decisions".to_string(),
-                    kind: "supports".to_string(),
-                    from: percept::NodeId::new(),
-                    to: percept::NodeId::new(),
-                    sources: Vec::new(),
-                }],
-            })
-        }
-    }
-
     #[test]
     fn a_tool_commit_the_transcript_cannot_fold_becomes_the_result_not_a_crash() {
-        let (_, mut app) = seeded_app(Vec::new(), vec![Arc::new(DanglingTool)]);
+        let dangling = Payload::EdgeAdded {
+            map: "decisions".to_string(),
+            kind: "supports".to_string(),
+            from: percept::NodeId::new(),
+            to: percept::NodeId::new(),
+            sources: Vec::new(),
+        };
+        let (_, mut app) = seeded_app(Vec::new(), vec![Arc::new(Committing(vec![dangling]))]);
 
         let _ = app.submit("go".to_string()).unwrap();
         run_one_tool(&mut app, "search_events", "{}");
@@ -1041,6 +1016,9 @@ mod tests {
         let _ = app
             .submit_as(Actor::System, "revise the map".to_string())
             .unwrap();
+        let prompt = app.events().last().unwrap();
+        assert!(prompt.actor() == Actor::System);
+        assert_eq!(content(prompt), "revise the map");
         assert!(model.last_request().contains(&"revise the map".to_string()));
         app.end_stream().unwrap();
 
@@ -1049,19 +1027,6 @@ mod tests {
         let sent = model.last_request();
         assert!(!sent.contains(&"revise the map".to_string()));
         assert!(sent.contains(&"what did we decide?".to_string()));
-    }
-
-    #[test]
-    fn a_prompt_submitted_as_system_is_recorded_as_percepts_own() {
-        let (_, mut app) = seeded_app(Vec::new(), Vec::new());
-
-        let _ = app
-            .submit_as(Actor::System, "revise the map".to_string())
-            .unwrap();
-
-        let prompt = app.events().last().unwrap();
-        assert!(prompt.actor() == Actor::System);
-        assert_eq!(content(prompt), "revise the map");
     }
 
     #[test]

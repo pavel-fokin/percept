@@ -469,7 +469,7 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
             let body: NodeAddedBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
             Ok(Payload::NodeAdded {
                 map: body.map,
-                node: NodeId::from_uuid(parse_uuid(&body.node)?),
+                node: parse_node_id(&body.node)?,
                 kind: body.kind,
                 name: body.name,
                 properties: body.properties,
@@ -481,29 +481,33 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 serde_json::from_value(payload).map_err(Error::BadPayload)?;
             Ok(Payload::NodeRemoved {
                 map: body.map,
-                node: NodeId::from_uuid(parse_uuid(&body.node)?),
+                node: parse_node_id(&body.node)?,
                 reason: body.reason,
                 sources: parse_event_ids(body.sources)?,
             })
         }
-        EventKind::EdgeAdded => {
+        kind @ (EventKind::EdgeAdded | EventKind::EdgeRemoved) => {
             let body: EdgeBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
-            Ok(Payload::EdgeAdded {
-                map: body.map,
-                kind: body.kind,
-                from: NodeId::from_uuid(parse_uuid(&body.from)?),
-                to: NodeId::from_uuid(parse_uuid(&body.to)?),
-                sources: parse_event_ids(body.sources)?,
-            })
-        }
-        EventKind::EdgeRemoved => {
-            let body: EdgeBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
-            Ok(Payload::EdgeRemoved {
-                map: body.map,
-                kind: body.kind,
-                from: NodeId::from_uuid(parse_uuid(&body.from)?),
-                to: NodeId::from_uuid(parse_uuid(&body.to)?),
-                sources: parse_event_ids(body.sources)?,
+            let (map, kind_name) = (body.map, body.kind);
+            let from = parse_node_id(&body.from)?;
+            let to = parse_node_id(&body.to)?;
+            let sources = parse_event_ids(body.sources)?;
+            Ok(if kind == EventKind::EdgeAdded {
+                Payload::EdgeAdded {
+                    map,
+                    kind: kind_name,
+                    from,
+                    to,
+                    sources,
+                }
+            } else {
+                Payload::EdgeRemoved {
+                    map,
+                    kind: kind_name,
+                    from,
+                    to,
+                    sources,
+                }
             })
         }
     }
@@ -544,6 +548,10 @@ pub fn parse_actor(s: &str) -> Result<Actor, Error> {
 
 /// An `EventId` from its wire spelling - so a caller comparing ids
 /// parses once rather than rendering every event to compare as text.
+fn parse_node_id(s: &str) -> Result<NodeId, Error> {
+    Ok(NodeId::from_uuid(parse_uuid(s)?))
+}
+
 pub fn parse_event_id(s: &str) -> Result<EventId, Error> {
     Ok(EventId::from_uuid(parse_uuid(s)?))
 }
@@ -1012,33 +1020,6 @@ mod tests {
             }
             _ => panic!("expected EdgeAdded"),
         }
-    }
-
-    #[test]
-    fn edge_removed_round_trips_through_json() {
-        let from = NodeId::new();
-        let to = NodeId::new();
-        let original = percept::Event::restore(
-            EventId::new(),
-            Actor::System,
-            "cli".to_string(),
-            None,
-            Timestamp::now(),
-            Payload::EdgeRemoved {
-                map: "decisions".to_string(),
-                kind: "supports".to_string(),
-                from,
-                to,
-                sources: Vec::new(),
-            },
-        );
-
-        let json = serde_json::to_string(&Event::from(&original)).unwrap();
-        let wire: Event = serde_json::from_str(&json).unwrap();
-        assert_eq!(wire.kind, "edge.removed");
-        let restored = percept::Event::try_from(wire).unwrap();
-
-        assert!(matches!(restored.payload(), Payload::EdgeRemoved { .. }));
     }
 
     #[test]

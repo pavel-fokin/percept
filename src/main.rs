@@ -19,6 +19,7 @@ mod tui;
 
 use app::App;
 use cli::{Cli, Command, EventsCommand, MapsCommand};
+use percept::Actor;
 use providers::{Ollama, OpenAi};
 use store::{Jsonl, ReadEvent, ReviseMap, SearchEvents};
 use tui::{Chat, StreamEvent};
@@ -155,6 +156,13 @@ fn build_app(source: &str) -> Result<App, Box<dyn std::error::Error>> {
     App::new(model, log, tools, source.to_string())
 }
 
+/// One turn without the TUI: `ask` with the user's prompt, `reflect`
+/// with percept's own.
+async fn headless_turn(actor: Actor, prompt: String) -> Result<(), Box<dyn std::error::Error>> {
+    let app = build_app("cli")?;
+    cli::run_turn(Box::new(app), actor, prompt).await
+}
+
 async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
     let app = build_app("tui")?;
 
@@ -195,14 +203,8 @@ async fn main() {
                 MapsCommand::RemoveNode(args) => cli::maps_remove_node(args, &log),
                 MapsCommand::RemoveEdge(args) => cli::maps_remove_edge(args, &log),
             }),
-        Some(Command::Ask(args)) => match build_app("cli") {
-            Ok(app) => cli::ask(args, Box::new(app)).await,
-            Err(err) => Err(err),
-        },
-        Some(Command::Reflect) => match build_app("cli") {
-            Ok(app) => cli::reflect(REFLECT_PROMPT, Box::new(app)).await,
-            Err(err) => Err(err),
-        },
+        Some(Command::Ask(args)) => headless_turn(Actor::User, args.prompt).await,
+        Some(Command::Reflect) => headless_turn(Actor::System, REFLECT_PROMPT.to_string()).await,
         None => try_main().await,
     };
 
