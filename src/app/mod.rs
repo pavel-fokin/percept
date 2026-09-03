@@ -26,6 +26,13 @@ pub enum MapShape {
     Tool,
 }
 
+impl MapShape {
+    /// Whether the model needs `read_map` to see a whole map.
+    pub fn opens_by_tool(self) -> bool {
+        matches!(self, Self::Headlines | Self::Tool)
+    }
+}
+
 /// What a presentation needs from the app layer - `tui` and `cli::ask`
 /// both drive a turn through it. Lives here, not in either of them, so
 /// implementing it doesn't pull a presentation into app's dependencies.
@@ -121,37 +128,17 @@ fn is_percepts_prompt(event: &Event) -> bool {
     event.actor() == Actor::System && event.kind() == EventKind::MessageReceived
 }
 
-/// `MapShape::Headlines`'s body: one line per headline node, in the
-/// map's node order, the way `Map`'s `Display` formats a node line, but
-/// without properties - a reader deciding whether to open the map with
-/// `read_map` doesn't need them yet.
+/// `MapShape::Headlines`'s body: the headline nodes as `Map`'s
+/// `Display` formats a node line, without properties - a reader
+/// deciding whether to open the map with `read_map` doesn't need them
+/// yet.
 fn headlines_body(map: &Map) -> String {
-    let kinds = map.schema().headline_kinds;
-    let lines: Vec<String> = map
-        .nodes()
-        .iter()
-        .filter(|node| kinds.contains(&node.kind.as_str()))
-        .map(|node| format!("- {node}"))
-        .collect();
+    let lines: Vec<String> = map.headlines().map(|node| format!("- {node}")).collect();
     format!(
-        "Its {} follow; read_map shows the whole map.\n{}",
-        join_with_and(
-            &kinds
-                .iter()
-                .map(|kind| format!("{kind}s"))
-                .collect::<Vec<_>>()
-        ),
+        "Its {} nodes follow; read_map shows the whole map.\n{}",
+        map.schema().headline_kinds.join(" and "),
         lines.join("\n")
     )
-}
-
-/// Joins `words` as English prose: "a", "a and b", or "a, b and c".
-fn join_with_and(words: &[String]) -> String {
-    match words.split_last() {
-        None => String::new(),
-        Some((last, [])) => last.clone(),
-        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
-    }
 }
 
 /// The turn now streaming. `anchor` is what the next model events are
@@ -539,7 +526,7 @@ fn text(buffer: Option<&String>) -> Option<&str> {
 mod tests {
     use super::*;
     use crate::percept::{Actor, Chunk, Payload};
-    use crate::testing::{content, FakeLog, FakeTool, Scripted};
+    use crate::testing::{content, node_added, usage, FakeLog, FakeTool, Scripted};
 
     const SOURCE: &str = "tui";
 
@@ -644,12 +631,7 @@ mod tests {
         let _ = app.submit("hi".to_string()).unwrap();
         app.append_chunk(Chunk::Thought("hmm".to_string()));
         app.append_chunk(Chunk::Reply("hello".to_string()));
-        app.append_chunk(Chunk::Usage(percept::Usage {
-            model: "gpt-5".to_string(),
-            input_tokens: 100,
-            output_tokens: 20,
-            cached_tokens: None,
-        }));
+        app.append_chunk(Chunk::Usage(usage()));
         app.end_stream().unwrap();
 
         let events = app.events();
@@ -663,17 +645,7 @@ mod tests {
             Payload::MessageReceived { .. }
         ));
         match events[3].payload() {
-            Payload::ModelCalled {
-                model,
-                input_tokens,
-                output_tokens,
-                cached_tokens,
-            } => {
-                assert_eq!(model, "gpt-5");
-                assert_eq!(*input_tokens, 100);
-                assert_eq!(*output_tokens, 20);
-                assert_eq!(*cached_tokens, None);
-            }
+            Payload::ModelCalled(recorded) => assert_eq!(recorded, &usage()),
             _ => panic!("expected a model.called event"),
         }
         assert!(events[3].actor() == Actor::System);
@@ -879,17 +851,12 @@ mod tests {
         .unwrap();
 
         let _ = app.submit("what happened".to_string()).unwrap();
-        app.append_chunk(Chunk::Usage(percept::Usage {
-            model: "gpt-5".to_string(),
-            input_tokens: 50,
-            output_tokens: 5,
-            cached_tokens: None,
-        }));
+        app.append_chunk(Chunk::Usage(usage()));
         run_one_tool(&mut app, "search_events", "{}");
 
         let events = app.events();
         assert_eq!(events.len(), 4);
-        assert!(matches!(events[1].payload(), Payload::ModelCalled { .. }));
+        assert!(matches!(events[1].payload(), Payload::ModelCalled(..)));
         assert!(events[1].actor() == Actor::System);
         assert!(events[1].causation_id() == Some(events[0].id()));
         assert!(matches!(events[2].payload(), Payload::ToolCalled { .. }));
@@ -1143,22 +1110,6 @@ mod tests {
         assert!(sent[1].contains("\n(empty:"), "{}", sent[1]);
     }
 
-    fn node_added(kind: &str, name: &str) -> Event {
-        Event::new(
-            Actor::User,
-            SOURCE.to_string(),
-            None,
-            percept::Payload::NodeAdded {
-                map: "decisions".to_string(),
-                node: percept::NodeId::new(),
-                kind: kind.to_string(),
-                name: name.to_string(),
-                properties: Default::default(),
-                sources: Vec::new(),
-            },
-        )
-    }
-
     #[test]
     fn a_headlines_map_sends_only_its_headline_nodes() {
         let mut events = vec![
@@ -1175,9 +1126,8 @@ mod tests {
             "The decisions map, built from this log. Node kinds: question, option, \
              evidence, decision. Edge kinds: supports, contradicts, resolves.\n"
         ));
-        assert!(
-            sent[1].contains("Its questions and decisions follow; read_map shows the whole map.\n")
-        );
+        assert!(sent[1]
+            .contains("Its question and decision nodes follow; read_map shows the whole map.\n"));
         assert!(sent[1].contains("- decision \"Rust over Go\""));
         assert!(!sent[1].contains("benchmarks"));
     }
@@ -1288,17 +1238,8 @@ mod tests {
 
         let _ = app.submit("first".to_string()).unwrap();
         app.append_chunk(Chunk::Reply("ok".to_string()));
-        app.append_chunk(Chunk::Usage(percept::Usage {
-            model: "gpt-5".to_string(),
-            input_tokens: 10,
-            output_tokens: 2,
-            cached_tokens: None,
-        }));
+        app.append_chunk(Chunk::Usage(usage()));
         app.end_stream().unwrap();
-        assert!(matches!(
-            app.events()[2].payload(),
-            Payload::ModelCalled { .. }
-        ));
 
         let _ = app.submit("second".to_string()).unwrap();
 

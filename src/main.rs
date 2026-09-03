@@ -172,10 +172,7 @@ fn build_app(source: &str) -> Result<App, Box<dyn std::error::Error>> {
         Arc::new(ReadEvent::new(log.clone())),
         Arc::new(ReviseMap::new(log.clone())),
     ];
-    // The whole map is already in the prompt in that shape; offering
-    // read_map too would just be a second way to see what's already
-    // in view.
-    if map_shape != MapShape::Prompt {
+    if map_shape.opens_by_tool() {
         tools.push(Arc::new(ReadMap::new(log.clone())));
     }
     App::new(model, log, tools, map_shape, source.to_string())

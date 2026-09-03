@@ -80,8 +80,13 @@ impl Tool for SearchEvents {
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
 
-        let since = args.since.as_deref().and_then(bound).transpose()?;
-        let until = args.until.as_deref().and_then(bound).transpose()?;
+        // An empty bound is no bound: a model that fills every field the
+        // schema offers sends one for a bound it does not want, and
+        // refusing it cost a call per turn.
+        let since = args.since.as_deref().filter(|s| !s.is_empty());
+        let until = args.until.as_deref().filter(|s| !s.is_empty());
+        let since = since.map(parse_time).transpose()?;
+        let until = until.map(parse_time).transpose()?;
         let actors = args
             .actors
             .iter()
@@ -123,17 +128,9 @@ impl Tool for SearchEvents {
 
 /// ISO-8601 only - the model is told the current time and works out
 /// absolute bounds itself, so no relative shorthand and no clock here.
-/// An empty string is no bound: a model that fills every field the
-/// schema offers sends one for a bound it does not want, and refusing
-/// it cost a call per turn.
-fn bound(s: &str) -> Option<Result<Timestamp, Box<dyn std::error::Error>>> {
-    if s.is_empty() {
-        return None;
-    }
-    Some(
-        s.parse()
-            .map_err(|_| format!("invalid timestamp {s:?}, expected ISO-8601").into()),
-    )
+fn parse_time(s: &str) -> Result<Timestamp, Box<dyn std::error::Error>> {
+    s.parse()
+        .map_err(|_| format!("invalid timestamp {s:?}, expected ISO-8601").into())
 }
 
 #[cfg(test)]

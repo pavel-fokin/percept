@@ -265,6 +265,15 @@ impl Map {
         &self.nodes
     }
 
+    /// The nodes of the schema's headline kinds, in map order - what a
+    /// reader sees of the map before opening it.
+    pub fn headlines(&self) -> impl Iterator<Item = &Node> {
+        let kinds = self.schema.headline_kinds;
+        self.nodes
+            .iter()
+            .filter(move |node| kinds.contains(&node.kind.as_str()))
+    }
+
     pub fn edges(&self) -> &[Edge] {
         &self.edges
     }
@@ -510,6 +519,18 @@ mod tests {
 
     fn committed(payload: Payload) -> Event {
         Event::new(Actor::User, "test".to_string(), None, payload)
+    }
+
+    #[test]
+    fn headlines_are_the_schema_s_headline_kinds_in_map_order() {
+        let events = [
+            node_added("decisions", NodeId::new(), "option", "Go"),
+            node_added("decisions", NodeId::new(), "question", "Which language?"),
+            node_added("decisions", NodeId::new(), "decision", "Rust"),
+        ];
+        let map = Map::fold(&DECISIONS, &events).unwrap();
+        let names: Vec<&str> = map.headlines().map(|node| node.name.as_str()).collect();
+        assert_eq!(names, ["Which language?", "Rust"]);
     }
 
     fn node_added(map: &str, node: NodeId, kind: &str, name: &str) -> Event {

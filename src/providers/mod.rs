@@ -44,21 +44,12 @@ fn role(actor: Actor) -> &'static str {
 }
 
 /// What one line of a streamed reply means: a chunk to forward, the
-/// sentinel that ends the stream, carrying the reply's token counts,
-/// or nothing.
+/// sentinel that ends the stream, carrying what the reply cost, or
+/// nothing.
 enum Line {
     Chunk(Chunk),
     Empty,
-    Done(UsageCounts),
-}
-
-/// Token counts as a provider's own wire shape reports them, before
-/// `model` - which the free `parse_line` function never sees - turns
-/// them into a `Usage`.
-struct UsageCounts {
-    input_tokens: u64,
-    output_tokens: u64,
-    cached_tokens: Option<u64>,
+    Done(Usage),
 }
 
 /// Forwards what one line parsed to. Returns `true` once the stream is
@@ -70,7 +61,6 @@ struct UsageCounts {
 fn forward(
     parsed: Result<Line, Box<dyn Error + Send + Sync>>,
     tx: &Sender,
-    model: &str,
     pending: &mut Option<Chunk>,
 ) -> bool {
     match parsed {
@@ -80,13 +70,7 @@ fn forward(
         }
         Ok(Line::Chunk(chunk)) => tx.send(Ok(chunk)).is_err(),
         Ok(Line::Empty) => false,
-        Ok(Line::Done(counts)) => {
-            let usage = Usage {
-                model: model.to_string(),
-                input_tokens: counts.input_tokens,
-                output_tokens: counts.output_tokens,
-                cached_tokens: counts.cached_tokens,
-            };
+        Ok(Line::Done(usage)) => {
             if tx.send(Ok(Chunk::Usage(usage))).is_err() {
                 return true;
             }
@@ -165,6 +149,49 @@ fn take_lines(buf: &mut Vec<u8>, chunk: &[u8]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::usage;
+
+    fn call() -> Chunk {
+        Chunk::ToolCall {
+            tool: "search_events".to_string(),
+            arguments: "{}".to_string(),
+        }
+    }
+
+    #[test]
+    fn a_tool_call_then_done_comes_out_as_usage_then_the_call() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut pending = None;
+
+        assert!(!forward(Ok(Line::Chunk(call())), &tx, &mut pending));
+        assert!(rx.try_recv().is_err(), "the call is held, not sent yet");
+        assert!(forward(Ok(Line::Done(usage())), &tx, &mut pending));
+
+        match rx.try_recv().unwrap().unwrap() {
+            Chunk::Usage(sent) => assert_eq!(sent, usage()),
+            _ => panic!("expected a usage chunk"),
+        }
+        match rx.try_recv().unwrap().unwrap() {
+            Chunk::ToolCall { tool, .. } => assert_eq!(tool, "search_events"),
+            _ => panic!("expected the held tool call"),
+        }
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_tool_call_then_a_failure_comes_out_as_just_the_error() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut pending = None;
+
+        assert!(!forward(Ok(Line::Chunk(call())), &tx, &mut pending));
+        assert!(forward(Err("upstream broke".into()), &tx, &mut pending));
+
+        let Err(err) = rx.try_recv().unwrap() else {
+            panic!("expected an error")
+        };
+        assert!(err.to_string().contains("upstream broke"));
+        assert!(rx.try_recv().is_err(), "the held call is dropped");
+    }
 
     #[test]
     fn a_line_split_across_chunks_is_carried_to_completion() {

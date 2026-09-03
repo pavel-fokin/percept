@@ -70,11 +70,11 @@ it, never sideways or up:
 | Layer | Package | Owns |
 |---|---|---|
 | Domain | `percept` | `Event`, `Message`, `Model`, `Map` - entities and the capabilities they need, as interfaces. Serde-free; depends on `shared` and on `futures-core`, for the stream type its reply port returns. |
-| Application | `app` | `App` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. |
+| Application | `app` | `App` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. `MapShape` says how much of each map the prompt carries; `PERCEPT_MAPS` sets it at the entrypoint. |
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
 | Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps`, `ask`, `reflect` - the log and its maps without the TUI. |
 | Infrastructure | `providers` | `Ollama` and `OpenAi` - implement `percept::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` carries the key. |
-| Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`, and the four tools the model calls: `search_events`, `read_event`, `revise_map`, `read_map`. `PERCEPT_MAPS` picks how maps reach the model. |
+| Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`, and the four tools the model calls: `search_events`, `read_event`, `revise_map`, `read_map`. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 
 Wire concrete types together only at the entrypoint - `main` in Rust.

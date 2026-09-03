@@ -82,12 +82,7 @@ pub enum Payload {
     /// One round trip to the model - always `System`, never replayed as
     /// dialogue. Caused by the turn's anchor, the same event a thought
     /// or a reply from that round trip is caused by.
-    ModelCalled {
-        model: String,
-        input_tokens: u64,
-        output_tokens: u64,
-        cached_tokens: Option<u64>,
-    },
+    ModelCalled(Usage),
 }
 
 impl Payload {
@@ -105,7 +100,7 @@ impl Payload {
             | Self::NodeRemoved { .. }
             | Self::EdgeAdded { .. }
             | Self::EdgeRemoved { .. }
-            | Self::ModelCalled { .. } => None,
+            | Self::ModelCalled(..) => None,
         }
     }
 }
@@ -226,12 +221,7 @@ impl Event {
             Actor::System,
             source,
             causation_id,
-            Payload::ModelCalled {
-                model: usage.model,
-                input_tokens: usage.input_tokens,
-                output_tokens: usage.output_tokens,
-                cached_tokens: usage.cached_tokens,
-            },
+            Payload::ModelCalled(usage),
         )
     }
 
@@ -290,7 +280,7 @@ impl Event {
             Payload::NodeRemoved { .. } => EventKind::NodeRemoved,
             Payload::EdgeAdded { .. } => EventKind::EdgeAdded,
             Payload::EdgeRemoved { .. } => EventKind::EdgeRemoved,
-            Payload::ModelCalled { .. } => EventKind::ModelCalled,
+            Payload::ModelCalled(..) => EventKind::ModelCalled,
         }
     }
 }

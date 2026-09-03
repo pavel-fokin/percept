@@ -2,13 +2,13 @@
 //! and nothing more, so it sits at the domain's level and every layer
 //! above can depend on it without bending the dependency direction.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::percept::{
-    self, Chunk, Event, EventId, Modality, Model, ModelCapabilities, ModelRequest, Payload,
-    ReplyStream, Tool, ToolOutput, ToolSpec,
+    self, Actor, Chunk, Event, EventId, Modality, Model, ModelCapabilities, ModelRequest, NodeId,
+    Payload, ReplyStream, Tool, ToolOutput, ToolSpec, Usage,
 };
 
 /// An in-memory EventLog. `start_failing` flips `append` into an error
@@ -150,4 +150,33 @@ pub fn content(event: &Event) -> &str {
         Payload::MessageReceived { content } => content,
         _ => panic!("expected a message.received event"),
     }
+}
+
+/// One round trip's counts, for tests that record or replay a
+/// `model.called` event and only care that it is the same one.
+pub fn usage() -> Usage {
+    Usage {
+        model: "gpt-5".to_string(),
+        input_tokens: 100,
+        output_tokens: 20,
+        cached_tokens: None,
+    }
+}
+
+/// A node on the decisions map, cited from one event, for tests that
+/// need a map with something in it.
+pub fn node_added(kind: &str, name: &str) -> Event {
+    Event::new(
+        Actor::User,
+        "test".to_string(),
+        None,
+        Payload::NodeAdded {
+            map: "decisions".to_string(),
+            node: NodeId::new(),
+            kind: kind.to_string(),
+            name: name.to_string(),
+            properties: BTreeMap::new(),
+            sources: vec![EventId::new()],
+        },
+    )
 }

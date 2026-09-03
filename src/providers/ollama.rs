@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use super::{client, forward, role, stream_lines, Line, UsageCounts};
+use super::{client, forward, role, stream_lines, Line};
 use crate::percept::{
-    Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream, ToolSpec,
+    Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream, ToolSpec, Usage,
 };
 
 /// Sends and receives with a local ollama server's `/api/chat`, which
@@ -176,7 +176,7 @@ struct ChatChunkMessage {
 
 /// The `done` line's `content` is always empty, and a line with
 /// neither `thinking` nor `content` yields no chunk.
-fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
+fn parse_line(line: &str, model: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
     if line.trim().is_empty() {
         return Ok(Line::Empty);
     }
@@ -191,7 +191,8 @@ fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
         if raw.done_reason == "length" {
             return Err("ollama cut the reply off at its context limit".into());
         }
-        return Ok(Line::Done(UsageCounts {
+        return Ok(Line::Done(Usage {
+            model: model.to_string(),
             input_tokens: raw.prompt_eval_count,
             output_tokens: raw.eval_count,
             cached_tokens: None,
@@ -245,7 +246,7 @@ impl Model for Ollama {
             let request = client.post(&url).json(&request);
             let mut pending = None;
             stream_lines(request, "ollama", &tx, |line| {
-                forward(parse_line(line), &tx, &model, &mut pending)
+                forward(parse_line(line, &model), &tx, &mut pending)
             })
             .await;
         });
@@ -262,7 +263,7 @@ mod tests {
     fn a_content_line_parses_as_a_reply_chunk() {
         let line =
             r#"{"model":"gemma4","message":{"role":"assistant","content":"Hi"},"done":false}"#;
-        match parse_line(line).unwrap() {
+        match parse_line(line, "gemma4").unwrap() {
             Line::Chunk(Chunk::Reply(content)) => assert_eq!(content, "Hi"),
             _ => panic!("expected a reply chunk"),
         }
@@ -271,7 +272,7 @@ mod tests {
     #[test]
     fn a_thinking_line_parses_as_a_thought_chunk() {
         let line = r#"{"model":"gemma4","message":{"role":"assistant","content":"","thinking":"Thinking"},"done":false}"#;
-        match parse_line(line).unwrap() {
+        match parse_line(line, "gemma4").unwrap() {
             Line::Chunk(Chunk::Thought(thinking)) => assert_eq!(thinking, "Thinking"),
             _ => panic!("expected a thought chunk"),
         }
@@ -280,7 +281,7 @@ mod tests {
     #[test]
     fn a_tool_call_line_parses_as_a_tool_call_chunk() {
         let line = r#"{"model":"gemma4","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"search_events","arguments":{"size":5}}}]},"done":false}"#;
-        match parse_line(line).unwrap() {
+        match parse_line(line, "gemma4").unwrap() {
             Line::Chunk(Chunk::ToolCall { tool, arguments }) => {
                 assert_eq!(tool, "search_events");
                 let args: Value = serde_json::from_str(&arguments).unwrap();
@@ -293,7 +294,7 @@ mod tests {
     #[test]
     fn a_line_with_neither_thinking_nor_content_yields_no_chunk() {
         let line = r#"{"model":"gemma4","message":{"role":"assistant","content":""},"done":false}"#;
-        match parse_line(line).unwrap() {
+        match parse_line(line, "gemma4").unwrap() {
             Line::Empty => {}
             _ => panic!("expected no chunk"),
         }
@@ -302,11 +303,12 @@ mod tests {
     #[test]
     fn a_done_line_ends_the_stream_carrying_its_token_counts() {
         let line = r#"{"model":"gemma4","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":12,"eval_count":34}"#;
-        match parse_line(line).unwrap() {
-            Line::Done(counts) => {
-                assert_eq!(counts.input_tokens, 12);
-                assert_eq!(counts.output_tokens, 34);
-                assert_eq!(counts.cached_tokens, None);
+        match parse_line(line, "gemma4").unwrap() {
+            Line::Done(usage) => {
+                assert_eq!(usage.model, "gemma4");
+                assert_eq!(usage.input_tokens, 12);
+                assert_eq!(usage.output_tokens, 34);
+                assert_eq!(usage.cached_tokens, None);
             }
             _ => panic!("expected done with counts"),
         }
@@ -315,18 +317,18 @@ mod tests {
     #[test]
     fn a_done_line_cut_at_the_context_limit_is_an_error() {
         let line = r#"{"model":"gemma4","message":{"role":"assistant","content":""},"done":true,"done_reason":"length"}"#;
-        let err = parse_line(line).err().unwrap();
+        let err = parse_line(line, "gemma4").err().unwrap();
         assert!(err.to_string().contains("context limit"), "{err}");
     }
 
     #[test]
     fn a_malformed_line_is_an_error() {
-        assert!(parse_line("not json").is_err());
+        assert!(parse_line("not json", "gemma4").is_err());
     }
 
     #[test]
     fn an_error_line_surfaces_what_the_server_said() {
-        let Err(err) = parse_line(r#"{"error":"model 'nope' not found"}"#) else {
+        let Err(err) = parse_line(r#"{"error":"model 'nope' not found"}"#, "gemma4") else {
             panic!("expected an error")
         };
         assert!(err.to_string().contains("model 'nope' not found"));
@@ -336,50 +338,7 @@ mod tests {
     fn a_blank_line_is_skipped_rather_than_ending_the_stream() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let mut pending = None;
-        assert!(!forward(parse_line("   "), &tx, "gemma4", &mut pending));
+        assert!(!forward(parse_line("   ", "gemma4"), &tx, &mut pending));
         assert!(rx.try_recv().is_err());
-    }
-
-    #[test]
-    fn a_tool_call_then_done_comes_out_as_usage_then_the_call() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut pending = None;
-        let call = r#"{"model":"gemma4","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"search_events","arguments":{"size":5}}}]},"done":false}"#;
-        let done = r#"{"model":"gemma4","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","prompt_eval_count":12,"eval_count":34}"#;
-
-        assert!(!forward(parse_line(call), &tx, "gemma4", &mut pending));
-        assert!(rx.try_recv().is_err(), "the call is held, not sent yet");
-        assert!(forward(parse_line(done), &tx, "gemma4", &mut pending));
-
-        match rx.try_recv().unwrap().unwrap() {
-            Chunk::Usage(usage) => {
-                assert_eq!(usage.model, "gemma4");
-                assert_eq!(usage.input_tokens, 12);
-                assert_eq!(usage.output_tokens, 34);
-            }
-            _ => panic!("expected a usage chunk"),
-        }
-        match rx.try_recv().unwrap().unwrap() {
-            Chunk::ToolCall { tool, .. } => assert_eq!(tool, "search_events"),
-            _ => panic!("expected the held tool call"),
-        }
-        assert!(rx.try_recv().is_err());
-    }
-
-    #[test]
-    fn a_tool_call_then_a_failure_comes_out_as_just_the_error() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut pending = None;
-        let call = r#"{"model":"gemma4","message":{"role":"assistant","content":"","tool_calls":[{"function":{"name":"search_events","arguments":{"size":5}}}]},"done":false}"#;
-        let error = r#"{"error":"model 'nope' not found"}"#;
-
-        assert!(!forward(parse_line(call), &tx, "gemma4", &mut pending));
-        assert!(forward(parse_line(error), &tx, "gemma4", &mut pending));
-
-        let Err(err) = rx.try_recv().unwrap() else {
-            panic!("expected an error")
-        };
-        assert!(err.to_string().contains("model 'nope' not found"));
-        assert!(rx.try_recv().is_err(), "the held call is dropped");
     }
 }

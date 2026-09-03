@@ -25,7 +25,7 @@ pub enum Chunk {
 
 /// Token counts for one round trip to the model. `cached_tokens` is
 /// `None` when the provider does not report it.
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Usage {
     pub model: String,
     pub input_tokens: u64,
@@ -127,7 +127,7 @@ pub fn to_messages<'a>(events: impl IntoIterator<Item = &'a Event>) -> Vec<Messa
             | Payload::NodeRemoved { .. }
             | Payload::EdgeAdded { .. }
             | Payload::EdgeRemoved { .. }
-            | Payload::ModelCalled { .. } => None,
+            | Payload::ModelCalled(..) => None,
         })
         .skip_while(|message| matches!(message, Message::ToolResult { .. }))
         .collect()
@@ -136,6 +136,7 @@ pub fn to_messages<'a>(events: impl IntoIterator<Item = &'a Event>) -> Vec<Messa
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::usage;
 
     fn text(message: &Message) -> &str {
         match message {
@@ -166,12 +167,7 @@ mod tests {
 
     #[test]
     fn a_model_called_event_is_filtered_out_while_a_neighbouring_message_survives() {
-        let usage = Usage {
-            model: "gpt-5".to_string(),
-            input_tokens: 100,
-            output_tokens: 20,
-            cached_tokens: None,
-        };
+        let usage = usage();
         let events = vec![
             Event::message_received(Actor::User, "hi".to_string(), "tui".to_string(), None),
             Event::model_called(usage, "tui".to_string(), None),

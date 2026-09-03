@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::percept::{self, Actor, EventId, EventKind, NodeId, Payload};
+use crate::percept::{self, Actor, EventId, EventKind, NodeId, Payload, Usage};
 use crate::shared::Timestamp;
 use crate::store::Error;
 
@@ -379,16 +379,11 @@ impl From<&percept::Event> for Event {
                 sources: ids(sources),
             })
             .expect("EdgeBody always serializes"),
-            Payload::ModelCalled {
-                model,
-                input_tokens,
-                output_tokens,
-                cached_tokens,
-            } => serde_json::to_value(ModelCalledBody {
-                model: model.clone(),
-                input_tokens: *input_tokens,
-                output_tokens: *output_tokens,
-                cached_tokens: *cached_tokens,
+            Payload::ModelCalled(usage) => serde_json::to_value(ModelCalledBody {
+                model: usage.model.clone(),
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                cached_tokens: usage.cached_tokens,
             })
             .expect("ModelCalledBody always serializes"),
         };
@@ -538,12 +533,12 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
         EventKind::ModelCalled => {
             let body: ModelCalledBody =
                 serde_json::from_value(payload).map_err(Error::BadPayload)?;
-            Ok(Payload::ModelCalled {
+            Ok(Payload::ModelCalled(Usage {
                 model: body.model,
                 input_tokens: body.input_tokens,
                 output_tokens: body.output_tokens,
                 cached_tokens: body.cached_tokens,
-            })
+            }))
         }
     }
 }
@@ -598,6 +593,7 @@ fn parse_uuid(s: &str) -> Result<Uuid, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::usage;
 
     #[test]
     fn a_short_payload_is_left_alone() {
@@ -935,60 +931,22 @@ mod tests {
             "tui".to_string(),
             Some(cause),
             Timestamp::now(),
-            Payload::ModelCalled {
-                model: "gpt-5".to_string(),
-                input_tokens: 100,
-                output_tokens: 20,
-                cached_tokens: Some(40),
-            },
+            Payload::ModelCalled(usage()),
         );
 
         let json = serde_json::to_string(&Event::from(&original)).unwrap();
         let wire: Event = serde_json::from_str(&json).unwrap();
         assert_eq!(wire.kind, "model.called");
         assert_eq!(wire.actor, "system");
+        // Unreported cached tokens are left off the wire, not written
+        // as null.
+        assert!(wire.payload.get("cached_tokens").is_none());
         let restored = percept::Event::try_from(wire).unwrap();
 
         assert!(restored.actor() == Actor::System);
         assert!(restored.causation_id() == Some(cause));
         match restored.payload() {
-            Payload::ModelCalled {
-                model,
-                input_tokens,
-                output_tokens,
-                cached_tokens,
-            } => {
-                assert_eq!(model, "gpt-5");
-                assert_eq!(*input_tokens, 100);
-                assert_eq!(*output_tokens, 20);
-                assert_eq!(*cached_tokens, Some(40));
-            }
-            _ => panic!("expected ModelCalled"),
-        }
-    }
-
-    #[test]
-    fn model_called_with_no_cached_tokens_omits_the_field_on_the_wire() {
-        let original = percept::Event::restore(
-            EventId::new(),
-            Actor::System,
-            "tui".to_string(),
-            None,
-            Timestamp::now(),
-            Payload::ModelCalled {
-                model: "llama".to_string(),
-                input_tokens: 10,
-                output_tokens: 5,
-                cached_tokens: None,
-            },
-        );
-
-        let wire = Event::from(&original);
-        assert!(wire.payload.get("cached_tokens").is_none());
-
-        let restored = percept::Event::try_from(wire).unwrap();
-        match restored.payload() {
-            Payload::ModelCalled { cached_tokens, .. } => assert_eq!(*cached_tokens, None),
+            Payload::ModelCalled(restored) => assert_eq!(restored, &usage()),
             _ => panic!("expected ModelCalled"),
         }
     }
@@ -1173,12 +1131,7 @@ mod tests {
             "tui".to_string(),
             None,
             Timestamp::now(),
-            Payload::ModelCalled {
-                model: "gpt-5".to_string(),
-                input_tokens: 100,
-                output_tokens: 20,
-                cached_tokens: None,
-            },
+            Payload::ModelCalled(usage()),
         );
 
         let line: Value = serde_json::from_str(&summarize(&event, None, PREVIEW_CHARS)).unwrap();

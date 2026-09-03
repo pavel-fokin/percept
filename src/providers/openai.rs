@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
-use super::{client, forward, role, stream_lines, Line, UsageCounts};
+use super::{client, forward, role, stream_lines, Line};
 use crate::percept::{
-    Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream, ToolSpec,
+    Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream, ToolSpec, Usage,
 };
 
 /// Sends and receives with OpenAI's `/responses`. A streamed reply is
@@ -230,7 +230,7 @@ struct ApiError {
     message: String,
 }
 
-fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
+fn parse_line(line: &str, model: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
     let Some(data) = line.trim_end_matches('\r').strip_prefix("data:") else {
         // The `event:` line naming what the next `data:` carries, a
         // comment, or the blank between events.
@@ -250,7 +250,8 @@ fn parse_line(line: &str) -> Result<Line, Box<dyn Error + Send + Sync>> {
             arguments,
         }),
         StreamEvent::ItemDone { .. } | StreamEvent::Other => Line::Empty,
-        StreamEvent::Completed { response } => Line::Done(UsageCounts {
+        StreamEvent::Completed { response } => Line::Done(Usage {
+            model: model.to_string(),
             input_tokens: response.usage.input_tokens,
             output_tokens: response.usage.output_tokens,
             cached_tokens: Some(response.usage.input_tokens_details.cached_tokens),
@@ -291,7 +292,7 @@ impl Model for OpenAi {
             let request = client.post(&url).bearer_auth(api_key).json(&request);
             let mut pending = None;
             stream_lines(request, "openai", &tx, |line| {
-                forward(parse_line(line), &tx, &model, &mut pending)
+                forward(parse_line(line, &model), &tx, &mut pending)
             })
             .await;
         });
@@ -310,7 +311,7 @@ mod tests {
     #[test]
     fn a_text_delta_parses_as_a_reply_chunk() {
         let line = r#"data: {"type":"response.output_text.delta","content_index":0,"delta":"Hi","item_id":"msg_1","output_index":0,"sequence_number":4}"#;
-        match parse_line(line).unwrap() {
+        match parse_line(line, "gpt-5").unwrap() {
             Line::Chunk(Chunk::Reply(content)) => assert_eq!(content, "Hi"),
             _ => panic!("expected a reply chunk"),
         }
@@ -319,7 +320,7 @@ mod tests {
     #[test]
     fn a_reasoning_summary_delta_parses_as_a_thought_chunk() {
         let line = r#"data: {"type":"response.reasoning_summary_text.delta","delta":"Weighing","item_id":"rs_1","output_index":0,"summary_index":0,"sequence_number":2}"#;
-        match parse_line(line).unwrap() {
+        match parse_line(line, "gpt-5").unwrap() {
             Line::Chunk(Chunk::Thought(thought)) => assert_eq!(thought, "Weighing"),
             _ => panic!("expected a thought chunk"),
         }
@@ -328,7 +329,7 @@ mod tests {
     #[test]
     fn a_finished_function_call_item_parses_as_a_tool_call_chunk() {
         let line = r#"data: {"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call","status":"completed","arguments":"{\"size\":5}","call_id":"call_x","name":"search_events"},"output_index":0,"sequence_number":17}"#;
-        match parse_line(line).unwrap() {
+        match parse_line(line, "gpt-5").unwrap() {
             Line::Chunk(Chunk::ToolCall { tool, arguments }) => {
                 assert_eq!(tool, "search_events");
                 assert_eq!(
@@ -348,18 +349,22 @@ mod tests {
             r#"data: {"type":"response.created","response":{"id":"resp_1","status":"in_progress"},"sequence_number":0}"#,
         ];
         for line in lines {
-            assert!(matches!(parse_line(line).unwrap(), Line::Empty), "{line}");
+            assert!(
+                matches!(parse_line(line, "gpt-5").unwrap(), Line::Empty),
+                "{line}"
+            );
         }
     }
 
     #[test]
     fn a_completed_event_ends_the_stream_carrying_its_token_counts() {
         let line = r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":12,"output_tokens":34,"input_tokens_details":{"cached_tokens":5}}},"sequence_number":20}"#;
-        match parse_line(line).unwrap() {
-            Line::Done(counts) => {
-                assert_eq!(counts.input_tokens, 12);
-                assert_eq!(counts.output_tokens, 34);
-                assert_eq!(counts.cached_tokens, Some(5));
+        match parse_line(line, "gpt-5").unwrap() {
+            Line::Done(usage) => {
+                assert_eq!(usage.model, "gpt-5");
+                assert_eq!(usage.input_tokens, 12);
+                assert_eq!(usage.output_tokens, 34);
+                assert_eq!(usage.cached_tokens, Some(5));
             }
             _ => panic!("expected done with counts"),
         }
@@ -373,14 +378,17 @@ mod tests {
             "",
             "\r",
         ] {
-            assert!(matches!(parse_line(line).unwrap(), Line::Empty), "{line:?}");
+            assert!(
+                matches!(parse_line(line, "gpt-5").unwrap(), Line::Empty),
+                "{line:?}"
+            );
         }
     }
 
     #[test]
     fn an_incomplete_reply_is_an_error_naming_the_reason() {
         let line = r#"data: {"type":"response.incomplete","response":{"id":"resp_1","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}},"sequence_number":8}"#;
-        let Err(err) = parse_line(line) else {
+        let Err(err) = parse_line(line, "gpt-5") else {
             panic!("expected an error")
         };
         assert!(err.to_string().contains("max_output_tokens"));
@@ -389,12 +397,12 @@ mod tests {
     #[test]
     fn a_failed_reply_and_an_error_event_surface_what_the_server_said() {
         let failed = r#"data: {"type":"response.failed","response":{"id":"resp_1","status":"failed","error":{"code":"server_error","message":"upstream broke"}},"sequence_number":8}"#;
-        let Err(err) = parse_line(failed) else {
+        let Err(err) = parse_line(failed, "gpt-5") else {
             panic!("expected an error")
         };
         assert!(err.to_string().contains("upstream broke"));
         let error = r#"data: {"type":"error","code":"rate_limit","message":"slow down","param":null,"sequence_number":1}"#;
-        let Err(err) = parse_line(error) else {
+        let Err(err) = parse_line(error, "gpt-5") else {
             panic!("expected an error")
         };
         assert!(err.to_string().contains("slow down"));
@@ -402,51 +410,7 @@ mod tests {
 
     #[test]
     fn a_malformed_event_is_an_error() {
-        assert!(parse_line("data: not json").is_err());
-    }
-
-    #[test]
-    fn a_tool_call_then_completed_comes_out_as_usage_then_the_call() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut pending = None;
-        let call = r#"data: {"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call","status":"completed","arguments":"{\"size\":5}","call_id":"call_x","name":"search_events"},"output_index":0,"sequence_number":17}"#;
-        let completed = r#"data: {"type":"response.completed","response":{"id":"resp_1","status":"completed","usage":{"input_tokens":12,"output_tokens":34,"input_tokens_details":{"cached_tokens":5}}},"sequence_number":20}"#;
-
-        assert!(!forward(parse_line(call), &tx, "gpt-5", &mut pending));
-        assert!(rx.try_recv().is_err(), "the call is held, not sent yet");
-        assert!(forward(parse_line(completed), &tx, "gpt-5", &mut pending));
-
-        match rx.try_recv().unwrap().unwrap() {
-            Chunk::Usage(usage) => {
-                assert_eq!(usage.model, "gpt-5");
-                assert_eq!(usage.input_tokens, 12);
-                assert_eq!(usage.output_tokens, 34);
-                assert_eq!(usage.cached_tokens, Some(5));
-            }
-            _ => panic!("expected a usage chunk"),
-        }
-        match rx.try_recv().unwrap().unwrap() {
-            Chunk::ToolCall { tool, .. } => assert_eq!(tool, "search_events"),
-            _ => panic!("expected the held tool call"),
-        }
-        assert!(rx.try_recv().is_err());
-    }
-
-    #[test]
-    fn a_tool_call_then_a_failure_comes_out_as_just_the_error() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut pending = None;
-        let call = r#"data: {"type":"response.output_item.done","item":{"id":"fc_1","type":"function_call","status":"completed","arguments":"{\"size\":5}","call_id":"call_x","name":"search_events"},"output_index":0,"sequence_number":17}"#;
-        let failed = r#"data: {"type":"response.failed","response":{"id":"resp_1","status":"failed","error":{"code":"server_error","message":"upstream broke"}},"sequence_number":8}"#;
-
-        assert!(!forward(parse_line(call), &tx, "gpt-5", &mut pending));
-        assert!(forward(parse_line(failed), &tx, "gpt-5", &mut pending));
-
-        let Err(err) = rx.try_recv().unwrap() else {
-            panic!("expected an error")
-        };
-        assert!(err.to_string().contains("upstream broke"));
-        assert!(rx.try_recv().is_err(), "the held call is dropped");
+        assert!(parse_line("data: not json", "gpt-5").is_err());
     }
 
     #[test]

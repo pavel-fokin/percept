@@ -57,7 +57,8 @@ impl Tool for ReadMap {
         let map = fold_map(self.log.as_ref(), &args.map)?;
         if map.nodes().is_empty() {
             return Ok(ToolOutput::text(format!(
-                "the {} map is empty: nothing has been recorded here yet",
+                "the {} map is empty: nothing has been recorded here yet. \
+                 The log may still hold what it would.",
                 args.map
             )));
         }
@@ -68,25 +69,7 @@ impl Tool for ReadMap {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percept::{Actor, Event, EventId, Payload};
-    use crate::testing::FakeLog;
-    use std::collections::BTreeMap;
-
-    fn node_added(kind: &str, name: &str) -> Event {
-        Event::new(
-            Actor::User,
-            "tui".to_string(),
-            None,
-            Payload::NodeAdded {
-                map: "decisions".to_string(),
-                node: crate::percept::NodeId::new(),
-                kind: kind.to_string(),
-                name: name.to_string(),
-                properties: BTreeMap::new(),
-                sources: vec![EventId::new()],
-            },
-        )
-    }
+    use crate::testing::{node_added, FakeLog};
 
     #[test]
     fn spec_names_the_tool_and_carries_valid_schema_json() {

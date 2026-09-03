@@ -112,7 +112,7 @@ fn carries(payload: &Payload, term: &str) -> bool {
         Payload::EdgeAdded { map, kind, .. } | Payload::EdgeRemoved { map, kind, .. } => {
             has(map) || has(kind)
         }
-        Payload::ModelCalled { model, .. } => has(model),
+        Payload::ModelCalled(usage) => has(&usage.model),
     }
 }
 
