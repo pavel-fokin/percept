@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::StreamExt;
 
@@ -52,14 +52,20 @@ pub fn handle_key(
     }
 }
 
-/// Scroll the transcript in small steps. Mouse capture is enabled by
-/// main, because it owns the terminal rather than the presentation.
+/// Scroll the transcript in small steps, or toggle a committed thought
+/// clicked on. Mouse capture is enabled by main, because it owns the
+/// terminal rather than the presentation.
 pub fn handle_mouse(chat: &mut Chat, mouse: MouseEvent) {
     const WHEEL_LINES: u16 = 3;
 
     match mouse.kind {
         MouseEventKind::ScrollUp => chat.scroll_up(WHEEL_LINES),
         MouseEventKind::ScrollDown => chat.scroll_down(WHEEL_LINES),
+        MouseEventKind::Down(MouseButton::Left) => {
+            if let Some(id) = chat.thought_at(mouse.row) {
+                chat.toggle_thought(id);
+            }
+        }
         _ => {}
     }
 }

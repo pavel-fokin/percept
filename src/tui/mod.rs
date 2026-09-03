@@ -1,6 +1,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui_textarea::TextArea;
 
+mod thought;
 mod ui;
 mod update;
 
@@ -8,7 +9,7 @@ pub use ui::draw;
 pub use update::{handle_key, handle_mouse, handle_stream};
 
 use crate::app::AppService;
-use crate::percept::{Chunk, ToolOutput};
+use crate::percept::{Chunk, EventId, ToolOutput};
 
 /// Adapts the reply stream onto tokio's mpsc channel, so the main
 /// select! loop can drive it alongside terminal events. Local to tui -
@@ -50,6 +51,17 @@ pub struct Chat<'a> {
     /// Why the last reply broke, shown until the next submit. Transient
     /// tui state - it never reaches the log.
     pub error: Option<String>,
+    /// Committed thoughts a click has expanded. Small and short-lived,
+    /// so a linear scan beats giving `EventId` a `Hash` impl just for
+    /// this.
+    expanded_thoughts: Vec<EventId>,
+    /// Last frame's transcript rows, one entry per line: the thought
+    /// that line belongs to, or `None`. Lets a click map a screen row
+    /// back to the event it landed on.
+    thought_rows: Vec<Option<EventId>>,
+    /// The transcript area's top row, so `thought_at` can turn a
+    /// terminal-absolute mouse row into an offset into `thought_rows`.
+    thought_rows_top: u16,
 }
 
 impl<'a> Chat<'a> {
@@ -72,6 +84,9 @@ impl<'a> Chat<'a> {
             follows_transcript: true,
             app,
             error: None,
+            expanded_thoughts: Vec::new(),
+            thought_rows: Vec::new(),
+            thought_rows_top: 0,
         }
     }
 
@@ -110,6 +125,35 @@ impl<'a> Chat<'a> {
     pub fn scroll_to_bottom(&mut self) {
         self.follows_transcript = true;
         self.scroll_offset = self.scroll_limit;
+    }
+
+    pub fn update_thought_rows(&mut self, top: u16, rows: Vec<Option<EventId>>) {
+        self.thought_rows_top = top;
+        self.thought_rows = rows;
+    }
+
+    pub fn is_thought_expanded(&self, id: EventId) -> bool {
+        self.expanded_thoughts.contains(&id)
+    }
+
+    pub fn toggle_thought(&mut self, id: EventId) {
+        if self.expanded_thoughts.contains(&id) {
+            self.expanded_thoughts.retain(|existing| *existing != id);
+        } else {
+            self.expanded_thoughts.push(id);
+        }
+    }
+
+    /// The thought, if any, whose transcript line a click at `row`
+    /// landed on. `row` is terminal-absolute, so it's first brought
+    /// back to a transcript-relative row, then offset by how far the
+    /// view has scrolled.
+    pub fn thought_at(&self, row: u16) -> Option<EventId> {
+        let content_row = self.scroll_offset + row.saturating_sub(self.thought_rows_top);
+        self.thought_rows
+            .get(content_row as usize)
+            .copied()
+            .flatten()
     }
 }
 
