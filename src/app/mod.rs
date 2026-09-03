@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::percept::{self, Actor, Event, EventId};
+use crate::percept::{self, Actor, Event, EventId, Map, SCHEMAS};
 use crate::shared::Timestamp;
 
 /// Most tool calls one user turn may make. At the cap the next request
@@ -127,7 +127,9 @@ pub struct App {
 
 impl App {
     /// Opens on whatever `log` already holds, so the transcript
-    /// survives a restart.
+    /// survives a restart. A map that does not fold fails here, at
+    /// open, the way a log line that does not decode does - not on the
+    /// first turn.
     pub fn new(
         chat: Arc<dyn percept::Model>,
         log: Arc<dyn percept::EventLog>,
@@ -135,6 +137,9 @@ impl App {
         source: String,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let events = log.load()?;
+        for schema in SCHEMAS {
+            Map::fold(schema, &events)?;
+        }
 
         Ok(Self {
             events,
@@ -165,8 +170,10 @@ impl App {
     }
 
     /// Starts the next reply stream for the current request state.
-    fn ask(&self) -> percept::ReplyStream {
-        self.chat.reply(&self.build_request())
+    /// Errs only when a map in the log does not fold - which is a
+    /// corrupt log, not a bad turn.
+    fn ask(&self) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
+        Ok(self.chat.reply(&self.build_request()?))
     }
 
     /// Whether this turn has made `MAX_TOOL_CALLS`. Past it the request
@@ -206,15 +213,27 @@ impl App {
         }
     }
 
-    /// The request for the next `reply`: the current time, then the
-    /// windowed transcript, then the tools - dropped once a turn hits
-    /// `MAX_TOOL_CALLS` or the model can't use them, so the model is
-    /// forced to a text answer.
-    fn build_request(&self) -> percept::ModelRequest {
+    /// The request for the next `reply`: the current time, then each
+    /// map that holds anything, then the windowed transcript, then the
+    /// tools - dropped once a turn hits `MAX_TOOL_CALLS` or the model
+    /// can't use them, so the model is forced to a text answer. The
+    /// maps sit outside the window on purpose: they are what the model
+    /// built so it need not hold the log, so they are always in view.
+    fn build_request(&self) -> Result<percept::ModelRequest, Box<dyn std::error::Error>> {
         let mut messages = vec![percept::Message::Text {
             role: Actor::System,
             content: format!("The current time is {}.", Timestamp::now()),
         }];
+        for schema in SCHEMAS {
+            let map = Map::fold(schema, &self.events)?;
+            if map.nodes().is_empty() {
+                continue;
+            }
+            messages.push(percept::Message::Text {
+                role: Actor::System,
+                content: format!("The {} map, built from this log:\n{map}", schema.name),
+            });
+        }
         messages.extend(percept::to_messages(&self.events[self.window_start()..]));
 
         let tools = if self.chat.capabilities().tool_use && !self.tools_exhausted() {
@@ -223,7 +242,7 @@ impl App {
             Vec::new()
         };
 
-        percept::ModelRequest { messages, tools }
+        Ok(percept::ModelRequest { messages, tools })
     }
 
     /// Commits the thought then the reply buffered so far, both caused
@@ -273,7 +292,7 @@ impl AppService for App {
             reply: String::new(),
         });
 
-        Ok(self.ask())
+        self.ask()
     }
 
     fn append_chunk(&mut self, chunk: percept::Chunk) {
@@ -320,7 +339,7 @@ impl AppService for App {
             Some(run) => Ok(ToolStep::Run(run, arguments)),
             None => {
                 self.commit_tool_result(format!("no such tool: {tool}"))?;
-                Ok(ToolStep::Continue(self.ask()))
+                Ok(ToolStep::Continue(self.ask()?))
             }
         }
     }
@@ -330,7 +349,7 @@ impl AppService for App {
         output: String,
     ) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
         self.commit_tool_result(output)?;
-        Ok(self.ask())
+        self.ask()
     }
 
     fn end_stream(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -760,6 +779,68 @@ mod tests {
         // The turn has outgrown the window on its own.
         assert!(app.events().len() > CONTEXT_EVENTS);
         assert!(model.last_request().contains(&"the question".to_string()));
+    }
+
+    #[test]
+    fn a_map_in_the_log_is_sent_ahead_of_the_transcript_and_outside_the_window() {
+        let mut events = vec![Event::new(
+            Actor::User,
+            SOURCE.to_string(),
+            None,
+            percept::Payload::NodeAdded {
+                map: "decisions".to_string(),
+                node: percept::NodeId::new(),
+                kind: "decision".to_string(),
+                name: "Rust over Go".to_string(),
+                properties: Default::default(),
+                sources: Vec::new(),
+            },
+        )];
+        events.extend(filler(CONTEXT_EVENTS + 5));
+        let (model, mut app) = seeded_app(events, Vec::new());
+
+        let _ = app.submit("now".to_string()).unwrap();
+
+        let sent = model.last_request();
+        assert_eq!(sent.len(), CONTEXT_EVENTS + 2);
+        assert!(sent[1].starts_with("The decisions map, built from this log:\n"));
+        assert!(sent[1].contains("- decision \"Rust over Go\""));
+    }
+
+    #[test]
+    fn an_empty_map_adds_no_message() {
+        let (model, mut app) = seeded_app(Vec::new(), Vec::new());
+
+        let _ = app.submit("now".to_string()).unwrap();
+
+        assert_eq!(model.last_request().len(), 2);
+    }
+
+    #[test]
+    fn a_map_that_does_not_fold_fails_at_open() {
+        let events = vec![Event::new(
+            Actor::User,
+            SOURCE.to_string(),
+            None,
+            percept::Payload::NodeAdded {
+                map: "decisions".to_string(),
+                node: percept::NodeId::new(),
+                kind: "goal".to_string(),
+                name: "Ship".to_string(),
+                properties: Default::default(),
+                sources: Vec::new(),
+            },
+        )];
+        let err = App::new(
+            Arc::new(Silent),
+            Arc::new(FakeLog::seeded(events)),
+            Vec::new(),
+            SOURCE.to_string(),
+        )
+        .err()
+        .unwrap();
+
+        assert!(err.to_string().contains("no node kind \"goal\""));
     }
 
     #[test]
