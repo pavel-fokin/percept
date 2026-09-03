@@ -272,7 +272,9 @@ impl App {
     /// purpose: they are what the model built so it need not hold the
     /// log, so they are always in view. An empty map still goes in,
     /// with its kinds: without them the model guesses at what a node
-    /// may be called and every `revise_map` call fails.
+    /// may be called and every `revise_map` call fails. It says so in
+    /// words that keep the log in play: the model read a bare
+    /// "(empty)" as "nothing was ever decided" and stopped searching.
     fn build_request(&self) -> Result<percept::ModelRequest, Box<dyn std::error::Error>> {
         let mut messages = vec![percept::Message::Text {
             role: Actor::System,
@@ -281,7 +283,8 @@ impl App {
         for map in Map::fold_all(&self.events)? {
             let schema = map.schema();
             let body = if map.nodes().is_empty() {
-                "(empty)".to_string()
+                "(empty: nothing has been recorded here yet. The log may still hold what it would.)"
+                    .to_string()
             } else {
                 map.to_string()
             };
@@ -957,7 +960,7 @@ mod tests {
         let sent = model.last_request();
         assert_eq!(sent.len(), 3);
         assert!(sent[1].contains("Node kinds: question, option, evidence, decision."));
-        assert!(sent[1].ends_with("\n(empty)"));
+        assert!(sent[1].contains("\n(empty:"), "{}", sent[1]);
     }
 
     #[test]
