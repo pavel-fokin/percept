@@ -97,6 +97,15 @@ pub trait AppService {
     /// ends would overwrite the first turn's cause and fuse both
     /// replies into one event, and an append-only log keeps the damage.
     fn is_replying(&self) -> bool;
+
+    /// What the most recent round trip cost - set once the first
+    /// `model.called` commits, and never before.
+    fn last_usage(&self) -> Option<&percept::Usage>;
+
+    fn context_window(&self) -> Option<u32>;
+
+    /// The model's own name, available before any turn asks.
+    fn model_name(&self) -> &str;
 }
 
 /// What the caller should do after `begin_tool`. The decision - run,
@@ -126,6 +135,14 @@ pub fn run_tool(tool: &dyn percept::Tool, arguments: &str) -> percept::ToolOutpu
 /// A `message.received` percept itself submitted, as `reflect` does.
 fn is_percepts_prompt(event: &Event) -> bool {
     event.actor() == Actor::System && event.kind() == EventKind::MessageReceived
+}
+
+/// The index of the last `model.called` in `events`, so a reopened log
+/// shows what its last round trip cost instead of reading as unasked.
+fn last_model_called(events: &[Event]) -> Option<usize> {
+    events
+        .iter()
+        .rposition(|event| event.kind() == EventKind::ModelCalled)
 }
 
 /// `MapShape::Headlines`'s body: the headline nodes as `Map`'s
@@ -182,6 +199,11 @@ pub struct App {
     map_shape: MapShape,
     /// The turn now streaming, or None between turns.
     pending: Option<Turn>,
+    /// Where the most recent `model.called` landed in `events` - the
+    /// last round trip's cost, not a running total. Set from the loaded
+    /// log at `new`, same as a turn committed this session would set
+    /// it; `None` only when the log holds no `model.called` at all.
+    last_usage: Option<usize>,
 }
 
 impl App {
@@ -198,6 +220,7 @@ impl App {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let events = log.load()?;
         Map::fold_all(&events)?;
+        let last_usage = last_model_called(&events);
 
         Ok(Self {
             events,
@@ -207,6 +230,7 @@ impl App {
             tools,
             map_shape,
             pending: None,
+            last_usage,
         })
     }
 
@@ -402,6 +426,7 @@ impl App {
             let event = Event::model_called(usage, self.source.clone(), cause);
             self.commit(event)?;
             self.with_pending(|turn| turn.usage = None);
+            self.last_usage = Some(self.events.len() - 1);
         }
         Ok(())
     }
@@ -514,6 +539,21 @@ impl AppService for App {
     fn is_replying(&self) -> bool {
         self.pending.is_some()
     }
+
+    fn last_usage(&self) -> Option<&percept::Usage> {
+        match self.events[self.last_usage?].payload() {
+            percept::Payload::ModelCalled(usage) => Some(usage),
+            _ => None,
+        }
+    }
+
+    fn context_window(&self) -> Option<u32> {
+        self.chat.capabilities().context_window
+    }
+
+    fn model_name(&self) -> &str {
+        self.chat.name()
+    }
 }
 
 /// A buffer that has taken no chunks yet reads as nothing streaming,
@@ -545,7 +585,12 @@ mod tests {
                 input: &[percept::Modality::Text],
                 output: &[percept::Modality::Text],
                 tool_use: false,
+                context_window: None,
             }
+        }
+
+        fn name(&self) -> &str {
+            "silent"
         }
 
         fn reply(&self, _request: &percept::ModelRequest) -> percept::ReplyStream {
@@ -727,6 +772,46 @@ mod tests {
 
         let _ = app.submit("next".to_string()).unwrap();
         assert_eq!(app.events().len(), 3);
+    }
+
+    #[test]
+    fn a_reopened_log_s_last_model_called_seeds_last_usage() {
+        let seeded = vec![
+            Event::message_received(Actor::User, "hi".to_string(), SOURCE.to_string(), None),
+            Event::model_called(usage(), SOURCE.to_string(), None),
+        ];
+        let log = Arc::new(FakeLog::seeded(seeded));
+        let app = App::new(
+            Arc::new(Silent),
+            log,
+            Vec::new(),
+            MapShape::Prompt,
+            SOURCE.to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(app.last_usage().unwrap(), &usage());
+    }
+
+    #[test]
+    fn a_log_with_no_model_called_leaves_last_usage_unset() {
+        let seeded = vec![Event::message_received(
+            Actor::User,
+            "hi".to_string(),
+            SOURCE.to_string(),
+            None,
+        )];
+        let log = Arc::new(FakeLog::seeded(seeded));
+        let app = App::new(
+            Arc::new(Silent),
+            log,
+            Vec::new(),
+            MapShape::Prompt,
+            SOURCE.to_string(),
+        )
+        .unwrap();
+
+        assert!(app.last_usage().is_none());
     }
 
     #[test]
@@ -1251,5 +1336,34 @@ mod tests {
         assert!(sent.contains(&"first".to_string()));
         assert!(sent.contains(&"ok".to_string()));
         assert!(sent.contains(&"second".to_string()));
+    }
+
+    #[test]
+    fn last_usage_is_the_most_recent_round_trip_not_a_sum() {
+        let mut app = App::new(
+            Arc::new(Scripted::new(vec![], true)),
+            Arc::new(FakeLog::default()),
+            Vec::new(),
+            MapShape::Prompt,
+            SOURCE.to_string(),
+        )
+        .unwrap();
+        assert!(app.last_usage().is_none());
+
+        let _ = app.submit("first".to_string()).unwrap();
+        app.append_chunk(Chunk::Usage(percept::Usage {
+            input_tokens: 100,
+            ..usage()
+        }));
+        app.end_stream().unwrap();
+        assert_eq!(app.last_usage().unwrap().input_tokens, 100);
+
+        let _ = app.submit("second".to_string()).unwrap();
+        app.append_chunk(Chunk::Usage(percept::Usage {
+            input_tokens: 250,
+            ..usage()
+        }));
+        app.end_stream().unwrap();
+        assert_eq!(app.last_usage().unwrap().input_tokens, 250);
     }
 }
