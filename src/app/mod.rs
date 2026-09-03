@@ -97,6 +97,13 @@ pub trait AppService {
     /// ends would overwrite the first turn's cause and fuse both
     /// replies into one event, and an append-only log keeps the damage.
     fn is_replying(&self) -> bool;
+
+    /// What the most recent round trip cost - set once the first
+    /// `model.called` commits, and never before.
+    fn last_usage(&self) -> Option<&percept::Usage>;
+
+    /// Tokens of context the model holds, when it's known.
+    fn context_window(&self) -> Option<u32>;
 }
 
 /// What the caller should do after `begin_tool`. The decision - run,
@@ -182,6 +189,9 @@ pub struct App {
     map_shape: MapShape,
     /// The turn now streaming, or None between turns.
     pending: Option<Turn>,
+    /// What the most recent round trip cost - the last `model.called`
+    /// committed, not a running total.
+    last_usage: Option<percept::Usage>,
 }
 
 impl App {
@@ -207,6 +217,7 @@ impl App {
             tools,
             map_shape,
             pending: None,
+            last_usage: None,
         })
     }
 
@@ -399,9 +410,10 @@ impl App {
             self.with_pending(|turn| turn.reply.clear());
         }
         if let Some(usage) = usage {
-            let event = Event::model_called(usage, self.source.clone(), cause);
+            let event = Event::model_called(usage.clone(), self.source.clone(), cause);
             self.commit(event)?;
             self.with_pending(|turn| turn.usage = None);
+            self.last_usage = Some(usage);
         }
         Ok(())
     }
@@ -513,6 +525,14 @@ impl AppService for App {
 
     fn is_replying(&self) -> bool {
         self.pending.is_some()
+    }
+
+    fn last_usage(&self) -> Option<&percept::Usage> {
+        self.last_usage.as_ref()
+    }
+
+    fn context_window(&self) -> Option<u32> {
+        self.chat.capabilities().context_window
     }
 }
 
@@ -1256,5 +1276,34 @@ mod tests {
         assert!(sent.contains(&"first".to_string()));
         assert!(sent.contains(&"ok".to_string()));
         assert!(sent.contains(&"second".to_string()));
+    }
+
+    #[test]
+    fn last_usage_is_the_most_recent_round_trip_not_a_sum() {
+        let mut app = App::new(
+            Arc::new(Scripted::new(vec![], true)),
+            Arc::new(FakeLog::default()),
+            Vec::new(),
+            MapShape::Prompt,
+            SOURCE.to_string(),
+        )
+        .unwrap();
+        assert!(app.last_usage().is_none());
+
+        let _ = app.submit("first".to_string()).unwrap();
+        app.append_chunk(Chunk::Usage(percept::Usage {
+            input_tokens: 100,
+            ..usage()
+        }));
+        app.end_stream().unwrap();
+        assert_eq!(app.last_usage().unwrap().input_tokens, 100);
+
+        let _ = app.submit("second".to_string()).unwrap();
+        app.append_chunk(Chunk::Usage(percept::Usage {
+            input_tokens: 250,
+            ..usage()
+        }));
+        app.end_stream().unwrap();
+        assert_eq!(app.last_usage().unwrap().input_tokens, 250);
     }
 }
