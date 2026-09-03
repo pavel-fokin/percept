@@ -137,6 +137,14 @@ fn is_percepts_prompt(event: &Event) -> bool {
     event.actor() == Actor::System && event.kind() == EventKind::MessageReceived
 }
 
+/// The index of the last `model.called` in `events`, so a reopened log
+/// shows what its last round trip cost instead of reading as unasked.
+fn last_model_called(events: &[Event]) -> Option<usize> {
+    events
+        .iter()
+        .rposition(|event| event.kind() == EventKind::ModelCalled)
+}
+
 /// `MapShape::Headlines`'s body: the headline nodes as `Map`'s
 /// `Display` formats a node line, without properties - a reader
 /// deciding whether to open the map with `read_map` doesn't need them
@@ -192,9 +200,9 @@ pub struct App {
     /// The turn now streaming, or None between turns.
     pending: Option<Turn>,
     /// Where the most recent `model.called` landed in `events` - the
-    /// last round trip's cost, not a running total. `None` until this
-    /// session commits its first one; a reopened log's own history
-    /// doesn't set it.
+    /// last round trip's cost, not a running total. Set from the loaded
+    /// log at `new`, same as a turn committed this session would set
+    /// it; `None` only when the log holds no `model.called` at all.
     last_usage: Option<usize>,
 }
 
@@ -212,6 +220,7 @@ impl App {
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let events = log.load()?;
         Map::fold_all(&events)?;
+        let last_usage = last_model_called(&events);
 
         Ok(Self {
             events,
@@ -221,7 +230,7 @@ impl App {
             tools,
             map_shape,
             pending: None,
-            last_usage: None,
+            last_usage,
         })
     }
 
@@ -763,6 +772,46 @@ mod tests {
 
         let _ = app.submit("next".to_string()).unwrap();
         assert_eq!(app.events().len(), 3);
+    }
+
+    #[test]
+    fn a_reopened_log_s_last_model_called_seeds_last_usage() {
+        let seeded = vec![
+            Event::message_received(Actor::User, "hi".to_string(), SOURCE.to_string(), None),
+            Event::model_called(usage(), SOURCE.to_string(), None),
+        ];
+        let log = Arc::new(FakeLog::seeded(seeded));
+        let app = App::new(
+            Arc::new(Silent),
+            log,
+            Vec::new(),
+            MapShape::Prompt,
+            SOURCE.to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(app.last_usage().unwrap(), &usage());
+    }
+
+    #[test]
+    fn a_log_with_no_model_called_leaves_last_usage_unset() {
+        let seeded = vec![Event::message_received(
+            Actor::User,
+            "hi".to_string(),
+            SOURCE.to_string(),
+            None,
+        )];
+        let log = Arc::new(FakeLog::seeded(seeded));
+        let app = App::new(
+            Arc::new(Silent),
+            log,
+            Vec::new(),
+            MapShape::Prompt,
+            SOURCE.to_string(),
+        )
+        .unwrap();
+
+        assert!(app.last_usage().is_none());
     }
 
     #[test]

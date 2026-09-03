@@ -251,19 +251,20 @@ fn status(chat: &Chat, width: usize) -> Vec<Line<'static>> {
     ))]
 }
 
-/// The row under the status row: the model's name, and - once a turn
-/// has asked it - the last round trip's input tokens against its
-/// context window, when the window is known.
+/// The row under the status row: the model's name and the last round
+/// trip's input tokens against its context window, when the window is
+/// known. No round trip yet - this session's or an earlier one's, from
+/// the log it opened on - reads as zero, not as nothing.
 fn model_status(chat: &Chat) -> Line<'static> {
     let name = chat.app.model_name();
-    let body = match (chat.app.last_usage(), chat.app.context_window()) {
-        (None, _) => name.to_string(),
-        (Some(usage), Some(window)) => format!(
+    let used = chat.app.last_usage().map_or(0, |usage| usage.input_tokens);
+    let body = match chat.app.context_window() {
+        Some(window) => format!(
             "{name} · {} / {} tokens",
-            thousands(usage.input_tokens),
+            thousands(used),
             thousands(window as u64)
         ),
-        (Some(usage), None) => format!("{name} · {} tokens", thousands(usage.input_tokens)),
+        None => format!("{name} · {} tokens", thousands(used)),
     };
     Line::from(Span::styled(body, chat.hint_style))
 }
