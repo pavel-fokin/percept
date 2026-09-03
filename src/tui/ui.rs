@@ -83,8 +83,8 @@ fn transcript(chat: &Chat, area: Rect) -> (Text<'static>, u16) {
     for event in chat.app.events() {
         push_turn(&mut lines, event_lines(chat, event, width));
     }
-    // Dimmed, and gone once the thought commits - a recorded thought
-    // isn't dialogue, so a reloaded transcript never shows it.
+    // Full and dimmed while it streams; once committed it renders
+    // collapsed instead, in `event_lines`.
     if let Some(thought) = chat.app.pending_thought() {
         push_turn(
             &mut lines,
@@ -116,13 +116,14 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
     match event.payload() {
         Payload::MessageReceived { content } => actor_lines(chat, event.actor(), content, width),
         // Tool activity shows dimmed, so the reader can see what the
-        // model looked up. A recorded thought was already shown while
-        // it streamed.
+        // model looked up.
         Payload::ToolCalled {
             tool, arguments, ..
         } => tool_lines(chat, &format!("{tool} {}", clip(arguments)), width),
         Payload::ToolResulted { content, .. } => tool_lines(chat, &clip(content), width),
-        Payload::ThoughtRecorded { .. } => Vec::new(),
+        Payload::ThoughtRecorded { content } => {
+            super::thought::collapsed_lines(content, chat.thought_style, chat.thought_style, width)
+        }
         // Bookkeeping about a round trip, not something to show.
         Payload::ModelCalled(..) => Vec::new(),
         // A map change shows dimmed too - it's context the model built,
@@ -176,7 +177,7 @@ fn tool_lines(chat: &Chat, body: &str, width: usize) -> Vec<Line<'static>> {
 
 /// One preview string: whitespace flattened so a multi-line result
 /// stays compact, then cut to `TOOL_PREVIEW` characters on a boundary.
-fn clip(text: &str) -> String {
+pub(super) fn clip(text: &str) -> String {
     let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
     match flat.char_indices().nth(TOOL_PREVIEW) {
         Some((idx, _)) => format!("{}…", &flat[..idx]),
@@ -195,7 +196,7 @@ fn actor_lines(chat: &Chat, actor: Actor, content: &str, width: usize) -> Vec<Li
 
 /// One turn: its marker in the gutter, its text wrapped and hanging
 /// under itself.
-fn turn_lines(
+pub(super) fn turn_lines(
     marker: &str,
     marker_style: Style,
     body_style: Style,

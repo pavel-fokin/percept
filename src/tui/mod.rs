@@ -1,6 +1,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui_textarea::TextArea;
 
+mod thought;
 mod ui;
 mod update;
 
