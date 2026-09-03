@@ -82,9 +82,11 @@ pub trait Model: Send + Sync {
 }
 
 /// Converts the transcript into the form Model expects. A recorded
-/// thought is left out - it is never replayed as dialogue. Everything
-/// else maps to a `Message`, tool calls from another writer included,
-/// so a later turn sees what earlier ones tried.
+/// thought is left out - it is never replayed as dialogue. A change to
+/// a cognitive map is left out too: it is a fact about the map, not
+/// something said. Everything else maps to a `Message`, tool calls from
+/// another writer included, so a later turn sees what earlier ones
+/// tried.
 ///
 /// Any slice replays, including one cut mid-tool-round: a leading tool
 /// result, whose call the cut left behind, is dropped. A conversation
@@ -105,7 +107,11 @@ pub fn to_messages(events: &[Event]) -> Vec<Message> {
             Payload::ToolResulted { content } => Some(Message::ToolResult {
                 content: content.clone(),
             }),
-            Payload::ThoughtRecorded { .. } => None,
+            Payload::ThoughtRecorded { .. }
+            | Payload::NodeAdded { .. }
+            | Payload::NodeRemoved { .. }
+            | Payload::EdgeAdded { .. }
+            | Payload::EdgeRemoved { .. } => None,
         })
         .skip_while(|message| matches!(message, Message::ToolResult { .. }))
         .collect()
@@ -131,6 +137,49 @@ mod tests {
                 "let me think".to_string(),
                 "tui".to_string(),
                 None,
+            ),
+            Event::message_received(Actor::Model, "done".to_string(), "tui".to_string(), None),
+        ];
+
+        let messages = to_messages(&events);
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(text(&messages[0]), "hi");
+        assert_eq!(text(&messages[1]), "done");
+    }
+
+    #[test]
+    fn a_map_change_is_filtered_out_while_a_neighbouring_message_survives() {
+        use crate::percept::{EventId, NodeId};
+        use std::collections::BTreeMap;
+
+        let node = NodeId::new();
+        let events = vec![
+            Event::message_received(Actor::User, "hi".to_string(), "tui".to_string(), None),
+            Event::new(
+                Actor::System,
+                "tui".to_string(),
+                None,
+                Payload::NodeAdded {
+                    map: "decisions".to_string(),
+                    node,
+                    kind: "evidence".to_string(),
+                    name: "Both built in parallel".to_string(),
+                    properties: BTreeMap::new(),
+                    sources: vec![EventId::new()],
+                },
+            ),
+            Event::new(
+                Actor::System,
+                "tui".to_string(),
+                None,
+                Payload::EdgeAdded {
+                    map: "decisions".to_string(),
+                    kind: "supports".to_string(),
+                    from: node,
+                    to: node,
+                    sources: Vec::new(),
+                },
             ),
             Event::message_received(Actor::Model, "done".to_string(), "tui".to_string(), None),
         ];

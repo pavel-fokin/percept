@@ -119,6 +119,48 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
         } => tool_lines(chat, &format!("{tool} {}", clip(arguments)), width),
         Payload::ToolResulted { content, .. } => tool_lines(chat, &clip(content), width),
         Payload::ThoughtRecorded { .. } => Vec::new(),
+        // A map change shows dimmed too - it's context the model built,
+        // not dialogue.
+        Payload::NodeAdded {
+            map, kind, name, ..
+        } => tool_lines(chat, &format!("node.added {map} {kind} {name:?}"), width),
+        Payload::NodeRemoved {
+            map, node, reason, ..
+        } => tool_lines(
+            chat,
+            &format!("node.removed {map} {} {reason:?}", node.as_uuid()),
+            width,
+        ),
+        Payload::EdgeAdded {
+            map,
+            kind,
+            from,
+            to,
+            ..
+        } => tool_lines(
+            chat,
+            &format!(
+                "edge.added {map} {kind} {} \u{2192} {}",
+                from.as_uuid(),
+                to.as_uuid()
+            ),
+            width,
+        ),
+        Payload::EdgeRemoved {
+            map,
+            kind,
+            from,
+            to,
+            ..
+        } => tool_lines(
+            chat,
+            &format!(
+                "edge.removed {map} {kind} {} \u{2192} {}",
+                from.as_uuid(),
+                to.as_uuid()
+            ),
+            width,
+        ),
     }
 }
 

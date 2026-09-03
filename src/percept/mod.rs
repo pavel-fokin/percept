@@ -4,7 +4,7 @@ mod model;
 mod search;
 mod tool;
 
-pub use event::{Actor, Event, EventId, EventKind, Payload};
+pub use event::{Actor, Event, EventId, EventKind, NodeId, Payload};
 pub use event_log::EventLog;
 pub use model::{
     to_messages, Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream,

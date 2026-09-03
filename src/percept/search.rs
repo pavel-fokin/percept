@@ -21,8 +21,9 @@ pub struct EventQuery {
     /// A term matches when one of the event's payload strings carries
     /// it as a substring, case-insensitively; an event passes when any
     /// term does. Payload strings are `content`, `tool`, and
-    /// `arguments` - the envelope is not searched, since `actor` and
-    /// `source` already have filters. A blank term is contained by
+    /// `arguments`, and on a map change `map`, `kind`, `name`, `reason`,
+    /// and property values - the envelope is not searched, since
+    /// `actor` and `source` already have filters. A blank term is contained by
     /// everything, so a boundary that can receive one rejects it before
     /// building a query.
     pub text: Vec<String>,
@@ -99,6 +100,17 @@ fn carries(payload: &Payload, term: &str) -> bool {
         | Payload::ThoughtRecorded { content }
         | Payload::ToolResulted { content } => has(content),
         Payload::ToolCalled { tool, arguments } => has(tool) || has(arguments),
+        Payload::NodeAdded {
+            map,
+            kind,
+            name,
+            properties,
+            ..
+        } => has(map) || has(kind) || has(name) || properties.values().any(|v| has(v)),
+        Payload::NodeRemoved { map, reason, .. } => has(map) || has(reason),
+        Payload::EdgeAdded { map, kind, .. } | Payload::EdgeRemoved { map, kind, .. } => {
+            has(map) || has(kind)
+        }
     }
 }
 
@@ -121,7 +133,9 @@ pub trait EventSearch: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::percept::{EventId, Payload};
+    use std::collections::BTreeMap;
+
+    use crate::percept::{EventId, NodeId, Payload};
 
     /// A message from `source`, timestamped `offset_minutes` back.
     fn event_at(source: &str, offset_minutes: i64) -> Event {
@@ -358,6 +372,42 @@ mod tests {
             Payload::ToolCalled {
                 tool: "deploy_tool".to_string(),
                 arguments: "{}".to_string(),
+            },
+            Payload::NodeAdded {
+                map: "tasks".to_string(),
+                node: NodeId::new(),
+                kind: "goal".to_string(),
+                name: "Deploy by Friday".to_string(),
+                properties: BTreeMap::new(),
+                sources: Vec::new(),
+            },
+            Payload::NodeAdded {
+                map: "tasks".to_string(),
+                node: NodeId::new(),
+                kind: "goal".to_string(),
+                name: "Ship".to_string(),
+                properties: BTreeMap::from([("note".to_string(), "deploy first".to_string())]),
+                sources: Vec::new(),
+            },
+            Payload::NodeRemoved {
+                map: "tasks".to_string(),
+                node: NodeId::new(),
+                reason: "deployed already".to_string(),
+                sources: Vec::new(),
+            },
+            Payload::EdgeAdded {
+                map: "deploys".to_string(),
+                kind: "blocks".to_string(),
+                from: NodeId::new(),
+                to: NodeId::new(),
+                sources: Vec::new(),
+            },
+            Payload::EdgeRemoved {
+                map: "tasks".to_string(),
+                kind: "deploys_to".to_string(),
+                from: NodeId::new(),
+                to: NodeId::new(),
+                sources: Vec::new(),
             },
         ];
         let query = EventQuery {

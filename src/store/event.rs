@@ -1,10 +1,11 @@
+use std::collections::BTreeMap;
 use std::ops::Range;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::percept::{self, Actor, EventId, EventKind, Payload};
+use crate::percept::{self, Actor, EventId, EventKind, NodeId, Payload};
 use crate::shared::Timestamp;
 use crate::store::Error;
 
@@ -45,18 +46,55 @@ struct ToolResultedBody {
     content: String,
 }
 
+#[derive(Serialize, Deserialize)]
+struct NodeAddedBody {
+    map: String,
+    node: String,
+    kind: String,
+    name: String,
+    properties: BTreeMap<String, String>,
+    sources: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct NodeRemovedBody {
+    map: String,
+    node: String,
+    reason: String,
+    sources: Vec<String>,
+}
+
+/// The shared shape of `EdgeAdded` and `EdgeRemoved` - an edge carries
+/// no id of its own, so `kind`, `from`, and `to` are all either needs.
+#[derive(Serialize, Deserialize)]
+struct EdgeBody {
+    map: String,
+    kind: String,
+    from: String,
+    to: String,
+    sources: Vec<String>,
+}
+
 const MESSAGE_RECEIVED: &str = "message.received";
 const THOUGHT_RECORDED: &str = "thought.recorded";
 const TOOL_CALLED: &str = "tool.called";
 const TOOL_RESULTED: &str = "tool.resulted";
+const NODE_ADDED: &str = "node.added";
+const NODE_REMOVED: &str = "node.removed";
+const EDGE_ADDED: &str = "edge.added";
+const EDGE_REMOVED: &str = "edge.removed";
 
 /// Every `type` the log records, for the error that lists them when a
 /// caller names one that isn't here.
-pub const KINDS: [&str; 4] = [
+pub const KINDS: [&str; 8] = [
     MESSAGE_RECEIVED,
     THOUGHT_RECORDED,
     TOOL_CALLED,
     TOOL_RESULTED,
+    NODE_ADDED,
+    NODE_REMOVED,
+    EDGE_ADDED,
+    EDGE_REMOVED,
 ];
 
 /// The wire `type` a kind serializes as.
@@ -66,6 +104,10 @@ fn kind(kind: EventKind) -> &'static str {
         EventKind::ThoughtRecorded => THOUGHT_RECORDED,
         EventKind::ToolCalled => TOOL_CALLED,
         EventKind::ToolResulted => TOOL_RESULTED,
+        EventKind::NodeAdded => NODE_ADDED,
+        EventKind::NodeRemoved => NODE_REMOVED,
+        EventKind::EdgeAdded => EDGE_ADDED,
+        EventKind::EdgeRemoved => EDGE_REMOVED,
     }
 }
 
@@ -77,6 +119,10 @@ pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
         THOUGHT_RECORDED => Ok(EventKind::ThoughtRecorded),
         TOOL_CALLED => Ok(EventKind::ToolCalled),
         TOOL_RESULTED => Ok(EventKind::ToolResulted),
+        NODE_ADDED => Ok(EventKind::NodeAdded),
+        NODE_REMOVED => Ok(EventKind::NodeRemoved),
+        EDGE_ADDED => Ok(EventKind::EdgeAdded),
+        EDGE_REMOVED => Ok(EventKind::EdgeRemoved),
         other => Err(Error::UnknownEventType(other.to_string())),
     }
 }
@@ -243,6 +289,11 @@ fn shorten(payload: Value) -> Value {
     }
 }
 
+/// `sources` on the wire - each `EventId` as its UUID string.
+fn ids(sources: &[EventId]) -> Vec<String> {
+    sources.iter().map(|id| id.as_uuid().to_string()).collect()
+}
+
 impl From<&percept::Event> for Event {
     fn from(event: &percept::Event) -> Self {
         let payload = match event.payload() {
@@ -266,6 +317,55 @@ impl From<&percept::Event> for Event {
                 content: content.clone(),
             })
             .expect("ToolResultedBody always serializes"),
+            Payload::NodeAdded {
+                map,
+                node,
+                kind,
+                name,
+                properties,
+                sources,
+            } => serde_json::to_value(NodeAddedBody {
+                map: map.clone(),
+                node: node.as_uuid().to_string(),
+                kind: kind.clone(),
+                name: name.clone(),
+                properties: properties.clone(),
+                sources: ids(sources),
+            })
+            .expect("NodeAddedBody always serializes"),
+            Payload::NodeRemoved {
+                map,
+                node,
+                reason,
+                sources,
+            } => serde_json::to_value(NodeRemovedBody {
+                map: map.clone(),
+                node: node.as_uuid().to_string(),
+                reason: reason.clone(),
+                sources: ids(sources),
+            })
+            .expect("NodeRemovedBody always serializes"),
+            Payload::EdgeAdded {
+                map,
+                kind,
+                from,
+                to,
+                sources,
+            }
+            | Payload::EdgeRemoved {
+                map,
+                kind,
+                from,
+                to,
+                sources,
+            } => serde_json::to_value(EdgeBody {
+                map: map.clone(),
+                kind: kind.clone(),
+                from: from.as_uuid().to_string(),
+                to: to.as_uuid().to_string(),
+                sources: ids(sources),
+            })
+            .expect("EdgeBody always serializes"),
         };
 
         Self {
@@ -365,7 +465,55 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 content: body.content,
             })
         }
+        EventKind::NodeAdded => {
+            let body: NodeAddedBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::NodeAdded {
+                map: body.map,
+                node: NodeId::from_uuid(parse_uuid(&body.node)?),
+                kind: body.kind,
+                name: body.name,
+                properties: body.properties,
+                sources: parse_event_ids(body.sources)?,
+            })
+        }
+        EventKind::NodeRemoved => {
+            let body: NodeRemovedBody =
+                serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::NodeRemoved {
+                map: body.map,
+                node: NodeId::from_uuid(parse_uuid(&body.node)?),
+                reason: body.reason,
+                sources: parse_event_ids(body.sources)?,
+            })
+        }
+        EventKind::EdgeAdded => {
+            let body: EdgeBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::EdgeAdded {
+                map: body.map,
+                kind: body.kind,
+                from: NodeId::from_uuid(parse_uuid(&body.from)?),
+                to: NodeId::from_uuid(parse_uuid(&body.to)?),
+                sources: parse_event_ids(body.sources)?,
+            })
+        }
+        EventKind::EdgeRemoved => {
+            let body: EdgeBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::EdgeRemoved {
+                map: body.map,
+                kind: body.kind,
+                from: NodeId::from_uuid(parse_uuid(&body.from)?),
+                to: NodeId::from_uuid(parse_uuid(&body.to)?),
+                sources: parse_event_ids(body.sources)?,
+            })
+        }
     }
+}
+
+/// `sources` off the wire - each UUID string parsed to an `EventId`, so
+/// one malformed entry fails the whole payload rather than being
+/// dropped silently.
+fn parse_event_ids(sources: Vec<String>) -> Result<Vec<EventId>, Error> {
+    sources.iter().map(|s| parse_event_id(s)).collect()
 }
 
 /// Every event names a writer. A line that leaves `source` absent,
@@ -733,6 +881,205 @@ mod tests {
             Payload::ToolResulted { content } => assert_eq!(content, "3 events"),
             _ => panic!("expected ToolResulted"),
         }
+    }
+
+    #[test]
+    fn node_added_round_trips_through_json() {
+        let source = EventId::new();
+        let node = NodeId::new();
+        let mut properties = BTreeMap::new();
+        properties.insert(
+            "summary".to_string(),
+            "Same features on both stacks".to_string(),
+        );
+        let original = percept::Event::restore(
+            EventId::new(),
+            Actor::User,
+            "cli".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::NodeAdded {
+                map: "decisions".to_string(),
+                node,
+                kind: "evidence".to_string(),
+                name: "Both built in parallel".to_string(),
+                properties: properties.clone(),
+                sources: vec![source],
+            },
+        );
+
+        let json = serde_json::to_string(&Event::from(&original)).unwrap();
+        let wire: Event = serde_json::from_str(&json).unwrap();
+        assert_eq!(wire.kind, "node.added");
+        let restored = percept::Event::try_from(wire).unwrap();
+
+        match restored.payload() {
+            Payload::NodeAdded {
+                map,
+                node: restored_node,
+                kind,
+                name,
+                properties: restored_properties,
+                sources,
+            } => {
+                assert_eq!(map, "decisions");
+                assert!(*restored_node == node);
+                assert_eq!(kind, "evidence");
+                assert_eq!(name, "Both built in parallel");
+                assert_eq!(*restored_properties, properties);
+                assert!(sources == &vec![source]);
+            }
+            _ => panic!("expected NodeAdded"),
+        }
+    }
+
+    #[test]
+    fn node_removed_round_trips_through_json() {
+        let node = NodeId::new();
+        let original = percept::Event::restore(
+            EventId::new(),
+            Actor::System,
+            "cli".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::NodeRemoved {
+                map: "decisions".to_string(),
+                node,
+                reason: "superseded".to_string(),
+                sources: Vec::new(),
+            },
+        );
+
+        let json = serde_json::to_string(&Event::from(&original)).unwrap();
+        let wire: Event = serde_json::from_str(&json).unwrap();
+        assert_eq!(wire.kind, "node.removed");
+        // Empty `sources` encodes as `[]`, never omitted.
+        assert_eq!(wire.payload["sources"], serde_json::json!([]));
+        let restored = percept::Event::try_from(wire).unwrap();
+
+        match restored.payload() {
+            Payload::NodeRemoved {
+                map,
+                node: restored_node,
+                reason,
+                sources,
+            } => {
+                assert_eq!(map, "decisions");
+                assert!(*restored_node == node);
+                assert_eq!(reason, "superseded");
+                assert!(sources.is_empty());
+            }
+            _ => panic!("expected NodeRemoved"),
+        }
+    }
+
+    #[test]
+    fn edge_added_round_trips_through_json() {
+        let from = NodeId::new();
+        let to = NodeId::new();
+        let original = percept::Event::restore(
+            EventId::new(),
+            Actor::System,
+            "cli".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::EdgeAdded {
+                map: "decisions".to_string(),
+                kind: "supports".to_string(),
+                from,
+                to,
+                sources: Vec::new(),
+            },
+        );
+
+        let json = serde_json::to_string(&Event::from(&original)).unwrap();
+        let wire: Event = serde_json::from_str(&json).unwrap();
+        assert_eq!(wire.kind, "edge.added");
+        let restored = percept::Event::try_from(wire).unwrap();
+
+        match restored.payload() {
+            Payload::EdgeAdded {
+                map,
+                kind,
+                from: restored_from,
+                to: restored_to,
+                ..
+            } => {
+                assert_eq!(map, "decisions");
+                assert_eq!(kind, "supports");
+                assert!(*restored_from == from);
+                assert!(*restored_to == to);
+            }
+            _ => panic!("expected EdgeAdded"),
+        }
+    }
+
+    #[test]
+    fn edge_removed_round_trips_through_json() {
+        let from = NodeId::new();
+        let to = NodeId::new();
+        let original = percept::Event::restore(
+            EventId::new(),
+            Actor::System,
+            "cli".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::EdgeRemoved {
+                map: "decisions".to_string(),
+                kind: "supports".to_string(),
+                from,
+                to,
+                sources: Vec::new(),
+            },
+        );
+
+        let json = serde_json::to_string(&Event::from(&original)).unwrap();
+        let wire: Event = serde_json::from_str(&json).unwrap();
+        assert_eq!(wire.kind, "edge.removed");
+        let restored = percept::Event::try_from(wire).unwrap();
+
+        assert!(matches!(restored.payload(), Payload::EdgeRemoved { .. }));
+    }
+
+    #[test]
+    fn a_malformed_source_in_a_node_added_payload_is_an_error() {
+        let payload = serde_json::json!({
+            "map": "decisions",
+            "node": NodeId::new().as_uuid().to_string(),
+            "kind": "evidence",
+            "name": "x",
+            "properties": {},
+            "sources": ["not-a-uuid"],
+        });
+
+        let err = match decode("user", "cli".to_string(), "node.added", payload) {
+            Err(e) => e,
+            Ok(_) => panic!("expected a malformed source to be rejected"),
+        };
+        assert!(matches!(err, Error::BadUuid(s) if s == "not-a-uuid"));
+    }
+
+    #[test]
+    fn a_map_events_summary_carries_no_preview() {
+        let event = percept::Event::restore(
+            EventId::new(),
+            Actor::User,
+            "cli".to_string(),
+            None,
+            Timestamp::now(),
+            Payload::NodeAdded {
+                map: "decisions".to_string(),
+                node: NodeId::new(),
+                kind: "evidence".to_string(),
+                name: "Both built in parallel".to_string(),
+                properties: BTreeMap::new(),
+                sources: Vec::new(),
+            },
+        );
+
+        let line: Value = serde_json::from_str(&summarize(&event, None, PREVIEW_CHARS)).unwrap();
+        assert!(line.get("preview").is_none());
+        assert_eq!(line["payload"]["name"], "Both built in parallel");
     }
 
     #[test]

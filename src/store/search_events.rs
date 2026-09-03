@@ -43,7 +43,7 @@ const PARAMETERS: &str = r#"{
     "until": {"type": "string", "description": "ISO-8601 upper bound, exclusive"},
     "actors": {"type": "array", "items": {"type": "string", "enum": ["user", "model", "system"]}},
     "sources": {"type": "array", "items": {"type": "string"}, "description": "the writer that produced the event, e.g. tui or claude-code"},
-    "kinds": {"type": "array", "items": {"type": "string", "enum": ["message.received", "thought.recorded", "tool.called", "tool.resulted"]}},
+    "kinds": {"type": "array", "items": {"type": "string", "enum": ["message.received", "thought.recorded", "tool.called", "tool.resulted", "node.added", "node.removed", "edge.added", "edge.removed"]}},
     "contains": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "a substring, case-insensitive, that one of the event's payload strings must carry; any of the values matches"},
     "size": {"type": "integer", "description": "keep only the N most recent matches"},
     "preview": {"type": "integer", "minimum": 1, "description": "how many characters of content each line keeps, cut around the first `contains` hit when there is one; default 120"}

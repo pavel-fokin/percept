@@ -1,7 +1,16 @@
+use std::collections::BTreeMap;
+
 use crate::shared::{Id, Timestamp};
 
 /// Identifies an Event.
 pub type EventId = Id<Event>;
+
+/// Marker for a node in a cognitive map - never constructed, only named
+/// by `NodeId`. Mirrors `Event` standing in for `EventId`.
+pub struct Node;
+
+/// Identifies a node in a cognitive map.
+pub type NodeId = Id<Node>;
 
 /// Who an Event is attributed to. Extend by adding a variant.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -42,18 +51,57 @@ pub enum Payload {
     ToolResulted {
         content: String,
     },
+    /// A node added to a cognitive map. `sources` names the events the
+    /// node was folded from.
+    NodeAdded {
+        map: String,
+        node: NodeId,
+        kind: String,
+        name: String,
+        properties: BTreeMap<String, String>,
+        sources: Vec<EventId>,
+    },
+    /// A node removed from a cognitive map, with why.
+    NodeRemoved {
+        map: String,
+        node: NodeId,
+        reason: String,
+        sources: Vec<EventId>,
+    },
+    /// An edge added to a cognitive map. Carries no id of its own -
+    /// `kind`, `from`, and `to` identify one.
+    EdgeAdded {
+        map: String,
+        kind: String,
+        from: NodeId,
+        to: NodeId,
+        sources: Vec<EventId>,
+    },
+    /// An edge removed from a cognitive map.
+    EdgeRemoved {
+        map: String,
+        kind: String,
+        from: NodeId,
+        to: NodeId,
+        sources: Vec<EventId>,
+    },
 }
 
 impl Payload {
     /// The event's text - the one string that runs long, and the one a
     /// reader wants to see more of. A tool call carries none: its
-    /// `tool` and `arguments` are the model's own short strings.
+    /// `tool` and `arguments` are the model's own short strings. Nor
+    /// does a map change: its fields are all short.
     pub fn content(&self) -> Option<&str> {
         match self {
             Self::MessageReceived { content }
             | Self::ThoughtRecorded { content }
             | Self::ToolResulted { content } => Some(content),
-            Self::ToolCalled { .. } => None,
+            Self::ToolCalled { .. }
+            | Self::NodeAdded { .. }
+            | Self::NodeRemoved { .. }
+            | Self::EdgeAdded { .. }
+            | Self::EdgeRemoved { .. } => None,
         }
     }
 }
@@ -68,6 +116,10 @@ pub enum EventKind {
     ThoughtRecorded,
     ToolCalled,
     ToolResulted,
+    NodeAdded,
+    NodeRemoved,
+    EdgeAdded,
+    EdgeRemoved,
 }
 
 /// One recorded fact in the conversation log. Append-only: a committed
@@ -213,6 +265,10 @@ impl Event {
             Payload::ThoughtRecorded { .. } => EventKind::ThoughtRecorded,
             Payload::ToolCalled { .. } => EventKind::ToolCalled,
             Payload::ToolResulted { .. } => EventKind::ToolResulted,
+            Payload::NodeAdded { .. } => EventKind::NodeAdded,
+            Payload::NodeRemoved { .. } => EventKind::NodeRemoved,
+            Payload::EdgeAdded { .. } => EventKind::EdgeAdded,
+            Payload::EdgeRemoved { .. } => EventKind::EdgeRemoved,
         }
     }
 }
