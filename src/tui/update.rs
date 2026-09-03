@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use super::{Chat, StreamEvent};
 use crate::app::{run_tool, ToolStep};
-use crate::percept::{Chunk, ReplyStream, Tool};
+use crate::percept::{Chunk, ReplyStream, Tool, ToolOutput};
 
 /// Handle one key press. Returns true if the app should quit. Errs if
 /// submit couldn't append its event to the log - see AppService::submit.
@@ -102,7 +102,7 @@ fn spawn_tool(tool: Arc<dyn Tool>, arguments: String, reply_tx: UnboundedSender<
     tokio::spawn(async move {
         let output = tokio::task::spawn_blocking(move || run_tool(&*tool, &arguments))
             .await
-            .unwrap_or_else(|_| "the tool panicked".to_string());
+            .unwrap_or_else(|_| ToolOutput::text("the tool panicked"));
         let _ = reply_tx.send(StreamEvent::ToolResult(output));
     });
 }

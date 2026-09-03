@@ -38,12 +38,14 @@ pub trait AppService {
         arguments: String,
     ) -> Result<ToolStep, Box<dyn std::error::Error>>;
 
-    /// Commits `tool.resulted` with a tool's output (or the error it
-    /// failed with), then asks the model again with it in the history.
-    /// Returns the next reply stream - still the same user turn.
+    /// Commits whatever a tool call produced - the payloads it asked to
+    /// record, then `tool.resulted` with its text (or the error it
+    /// failed with) - then asks the model again with it in the
+    /// history. Returns the next reply stream - still the same user
+    /// turn.
     fn finish_tool(
         &mut self,
-        output: String,
+        output: percept::ToolOutput,
     ) -> Result<percept::ReplyStream, Box<dyn std::error::Error>>;
 
     /// Commits the streamed thought, if any, then the streamed reply, if
@@ -83,9 +85,11 @@ pub enum ToolStep {
 /// Runs a tool, turning its failure into the text that stands as its
 /// result. That substitution is turn policy - the string is committed
 /// as `tool.resulted` content - so it lives here rather than in each
-/// presentation that drives a turn.
-pub fn run_tool(tool: &dyn percept::Tool, arguments: &str) -> String {
-    tool.run(arguments).unwrap_or_else(|err| err.to_string())
+/// presentation that drives a turn. A failure commits nothing, the
+/// same as `ToolOutput::text`'s empty `commits`.
+pub fn run_tool(tool: &dyn percept::Tool, arguments: &str) -> percept::ToolOutput {
+    tool.run(arguments)
+        .unwrap_or_else(|err| percept::ToolOutput::text(err.to_string()))
 }
 
 /// The turn now streaming. `anchor` is what the next model events are
@@ -184,13 +188,23 @@ impl App {
             .is_some_and(|turn| turn.tool_calls >= MAX_TOOL_CALLS)
     }
 
-    /// Commits `tool.resulted` for the open call, caused by it, and
-    /// advances the chain past it. No open call is a no-op.
-    fn commit_tool_result(&mut self, output: String) -> Result<(), Box<dyn std::error::Error>> {
+    /// Commits each of `output.commits`, caused by the open call and
+    /// attributed to the model - what the tool judged, before the
+    /// result that reports it - then `tool.resulted` for the call
+    /// itself, also caused by it, and advances the chain past it. No
+    /// open call is a no-op.
+    fn commit_tool_result(
+        &mut self,
+        output: percept::ToolOutput,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let Some(called_id) = self.pending.as_mut().and_then(|turn| turn.open_call.take()) else {
             return Ok(());
         };
-        let resulted = Event::tool_resulted(output, self.source.clone(), Some(called_id));
+        for payload in output.commits {
+            let event = Event::new(Actor::Model, self.source.clone(), Some(called_id), payload);
+            self.commit(event)?;
+        }
+        let resulted = Event::tool_resulted(output.content, self.source.clone(), Some(called_id));
         let resulted_id = resulted.id();
         self.commit(resulted)?;
         self.with_pending(|turn| {
@@ -214,11 +228,14 @@ impl App {
     }
 
     /// The request for the next `reply`: the current time, then each
-    /// map that holds anything, then the windowed transcript, then the
-    /// tools - dropped once a turn hits `MAX_TOOL_CALLS` or the model
-    /// can't use them, so the model is forced to a text answer. The
-    /// maps sit outside the window on purpose: they are what the model
-    /// built so it need not hold the log, so they are always in view.
+    /// map with the kinds its schema allows, then the windowed
+    /// transcript, then the tools - dropped once a turn hits
+    /// `MAX_TOOL_CALLS` or the model can't use them, so the model is
+    /// forced to a text answer. The maps sit outside the window on
+    /// purpose: they are what the model built so it need not hold the
+    /// log, so they are always in view. An empty map still goes in,
+    /// with its kinds: without them the model guesses at what a node
+    /// may be called and every `revise_map` call fails.
     fn build_request(&self) -> Result<percept::ModelRequest, Box<dyn std::error::Error>> {
         let mut messages = vec![percept::Message::Text {
             role: Actor::System,
@@ -226,12 +243,19 @@ impl App {
         }];
         for schema in SCHEMAS {
             let map = Map::fold(schema, &self.events)?;
-            if map.nodes().is_empty() {
-                continue;
-            }
+            let body = if map.nodes().is_empty() {
+                "(empty)".to_string()
+            } else {
+                map.to_string()
+            };
             messages.push(percept::Message::Text {
                 role: Actor::System,
-                content: format!("The {} map, built from this log:\n{map}", schema.name),
+                content: format!(
+                    "The {} map, built from this log. Node kinds: {}. Edge kinds: {}.\n{body}",
+                    schema.name,
+                    schema.node_kinds.join(", "),
+                    schema.edge_kinds.join(", ")
+                ),
             });
         }
         messages.extend(percept::to_messages(&self.events[self.window_start()..]));
@@ -338,7 +362,8 @@ impl AppService for App {
         match self.tools.iter().find(|t| t.spec().name == tool).cloned() {
             Some(run) => Ok(ToolStep::Run(run, arguments)),
             None => {
-                self.commit_tool_result(format!("no such tool: {tool}"))?;
+                let output = percept::ToolOutput::text(format!("no such tool: {tool}"));
+                self.commit_tool_result(output)?;
                 Ok(ToolStep::Continue(self.ask()?))
             }
         }
@@ -346,7 +371,7 @@ impl AppService for App {
 
     fn finish_tool(
         &mut self,
-        output: String,
+        output: percept::ToolOutput,
     ) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
         self.commit_tool_result(output)?;
         self.ask()
@@ -666,6 +691,64 @@ mod tests {
         }
     }
 
+    /// A tool whose output carries commits of its own, the way
+    /// `revise_map` records what it judged from the log.
+    struct RecordingTool;
+
+    impl percept::Tool for RecordingTool {
+        fn spec(&self) -> percept::ToolSpec {
+            percept::ToolSpec {
+                name: "search_events",
+                description: "a fake that records two events",
+                parameters: "{}",
+            }
+        }
+
+        fn run(&self, _arguments: &str) -> Result<percept::ToolOutput, Box<dyn std::error::Error>> {
+            Ok(percept::ToolOutput {
+                content: "recorded two".to_string(),
+                commits: vec![
+                    Payload::MessageReceived {
+                        content: "one".to_string(),
+                    },
+                    Payload::MessageReceived {
+                        content: "two".to_string(),
+                    },
+                ],
+            })
+        }
+    }
+
+    #[test]
+    fn a_tool_s_commits_land_between_the_call_and_the_result_caused_by_it() {
+        let mut app = App::new(
+            Arc::new(Scripted::new(vec![], true)),
+            Arc::new(FakeLog::default()),
+            vec![Arc::new(RecordingTool)],
+            SOURCE.to_string(),
+        )
+        .unwrap();
+
+        let _ = app.submit("go".to_string()).unwrap();
+        run_one_tool(&mut app, "search_events", "{}");
+
+        let events = app.events();
+        assert_eq!(events.len(), 5);
+        let called_id = events[1].id();
+        assert!(matches!(events[1].payload(), Payload::ToolCalled { .. }));
+        assert!(events[2].actor() == Actor::Model);
+        assert_eq!(content(&events[2]), "one");
+        assert!(events[2].causation_id() == Some(called_id));
+        assert!(events[3].actor() == Actor::Model);
+        assert_eq!(content(&events[3]), "two");
+        assert!(events[3].causation_id() == Some(called_id));
+        assert!(matches!(
+            events[4].payload(),
+            Payload::ToolResulted { content } if content == "recorded two"
+        ));
+        assert!(events[4].causation_id() == Some(called_id));
+    }
+
     #[test]
     fn the_tool_call_limit_stops_tools_being_sent_and_then_exhausts() {
         let model = Arc::new(Scripted::new(vec![], true));
@@ -735,7 +818,8 @@ mod tests {
         // The whole log stays in the transcript the TUI renders.
         assert_eq!(app.events().len(), 26);
         let sent = model.last_request();
-        assert_eq!(sent.len(), CONTEXT_EVENTS + 1);
+        // The time, the decisions map, then the window.
+        assert_eq!(sent.len(), CONTEXT_EVENTS + 2);
         assert!(!sent.contains(&"0".to_string()));
         assert!(sent.contains(&"24".to_string()));
         assert!(sent.contains(&"now".to_string()));
@@ -761,7 +845,7 @@ mod tests {
 
         let sent = model.last_request();
         assert!(!sent.contains(&"<result>".to_string()));
-        assert_eq!(sent.len(), CONTEXT_EVENTS);
+        assert_eq!(sent.len(), CONTEXT_EVENTS + 1);
     }
 
     #[test]
@@ -782,7 +866,7 @@ mod tests {
     }
 
     #[test]
-    fn a_map_in_the_log_is_sent_ahead_of_the_transcript_and_outside_the_window() {
+    fn a_map_is_sent_with_its_kinds_ahead_of_the_transcript_and_outside_the_window() {
         let mut events = vec![Event::new(
             Actor::User,
             SOURCE.to_string(),
@@ -803,17 +887,23 @@ mod tests {
 
         let sent = model.last_request();
         assert_eq!(sent.len(), CONTEXT_EVENTS + 2);
-        assert!(sent[1].starts_with("The decisions map, built from this log:\n"));
+        assert!(sent[1].starts_with(
+            "The decisions map, built from this log. Node kinds: question, option, \
+             evidence, decision. Edge kinds: supports, contradicts, resolves.\n"
+        ));
         assert!(sent[1].contains("- decision \"Rust over Go\""));
     }
 
     #[test]
-    fn an_empty_map_adds_no_message() {
+    fn an_empty_map_is_still_sent_with_its_kinds() {
         let (model, mut app) = seeded_app(Vec::new(), Vec::new());
 
         let _ = app.submit("now".to_string()).unwrap();
 
-        assert_eq!(model.last_request().len(), 2);
+        let sent = model.last_request();
+        assert_eq!(sent.len(), 3);
+        assert!(sent[1].contains("Node kinds: question, option, evidence, decision."));
+        assert!(sent[1].ends_with("\n(empty)"));
     }
 
     #[test]
@@ -849,6 +939,7 @@ mod tests {
 
         let _ = app.submit("now".to_string()).unwrap();
 
-        assert_eq!(model.last_request().len(), 5);
+        // The time, the decisions map, three events, the prompt.
+        assert_eq!(model.last_request().len(), 6);
     }
 }

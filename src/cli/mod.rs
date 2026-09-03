@@ -552,7 +552,7 @@ pub async fn ask(
                     ToolStep::Run(run, arguments) => {
                         eprintln!("⚒ {tool}({arguments})");
                         let output = run_tool(&*run, &arguments);
-                        eprintln!("⚒ {output}");
+                        eprintln!("⚒ {}", output.content);
                         app.finish_tool(output)?
                     }
                     ToolStep::Continue(stream) => {

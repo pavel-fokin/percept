@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{EventLog, Tool, ToolSpec};
+use crate::percept::{EventLog, Tool, ToolOutput, ToolSpec};
 use crate::store::{encode, excerpt, parse_event_id};
 
 /// One event by its wire id, as `encode` prints it, or with `content`
@@ -82,9 +82,14 @@ impl Tool for ReadEvent {
         }
     }
 
-    fn run(&self, arguments: &str) -> Result<String, Box<dyn std::error::Error>> {
+    fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
-        read(self.log.as_ref(), &args.id, args.start, args.end)
+        Ok(ToolOutput::text(read(
+            self.log.as_ref(),
+            &args.id,
+            args.start,
+            args.end,
+        )?))
     }
 }
 
@@ -130,7 +135,7 @@ mod tests {
         let out = tool
             .run(&format!(r#"{{"id":"{}"}}"#, event.id().as_uuid()))
             .unwrap();
-        assert_eq!(out, encode(&event));
+        assert_eq!(out.content, encode(&event));
     }
 
     #[test]
@@ -145,7 +150,7 @@ mod tests {
                 event.id().as_uuid()
             ))
             .unwrap();
-        let line: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let line: serde_json::Value = serde_json::from_str(&out.content).unwrap();
         assert_eq!(line["payload"]["content"], "hi");
         assert_eq!(line["preview"]["len"], 2);
     }

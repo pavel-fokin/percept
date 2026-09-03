@@ -24,7 +24,7 @@ pub enum Actor {
 /// and feeds `ToolResulted` back, so both are. A `ToolCalled` from
 /// another writer has no paired result in this log, but replays as
 /// context all the same.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Payload {
     MessageReceived {
         content: String,

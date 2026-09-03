@@ -20,7 +20,7 @@ mod tui;
 use app::App;
 use cli::{Cli, Command, EventsCommand, MapsCommand};
 use providers::{Ollama, OpenAi};
-use store::{Jsonl, ReadEvent, SearchEvents};
+use store::{Jsonl, ReadEvent, ReviseMap, SearchEvents};
 use tui::{Chat, StreamEvent};
 
 /// Where the event log lives: `percept.jsonl` in the working directory,
@@ -141,6 +141,7 @@ fn build_app(source: &str) -> Result<App, Box<dyn std::error::Error>> {
     let tools: Vec<Arc<dyn percept::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
         Arc::new(ReadEvent::new(log.clone())),
+        Arc::new(ReviseMap::new(log.clone(), log.clone())),
     ];
     App::new(model, log, tools, source.to_string())
 }

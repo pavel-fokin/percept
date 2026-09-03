@@ -12,4 +12,4 @@ pub use model::{
     to_messages, Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream,
 };
 pub use search::{EventQuery, EventSearch};
-pub use tool::{Tool, ToolSpec};
+pub use tool::{Tool, ToolOutput, ToolSpec};

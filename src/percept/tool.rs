@@ -1,3 +1,5 @@
+use super::Payload;
+
 /// A capability the model invokes by name during a turn. The domain
 /// owns the shape; the implementation lives in `store`, the way
 /// `EventLog` is a domain port that `store` implements.
@@ -7,10 +9,31 @@ pub trait Tool: Send + Sync {
     fn spec(&self) -> ToolSpec;
 
     /// Runs the tool against `arguments` - JSON text the model
-    /// produced, matching `spec().parameters`. `Ok` is the text fed
-    /// back as the result; an `Err`'s message becomes that text
-    /// instead, so a bad call still gives the model something to read.
-    fn run(&self, arguments: &str) -> Result<String, Box<dyn std::error::Error>>;
+    /// produced, matching `spec().parameters`. `Ok` carries the text
+    /// fed back as the result and any events the call produced, for
+    /// `App` to commit; an `Err`'s message becomes that text instead,
+    /// so a bad call still gives the model something to read, and
+    /// commits nothing.
+    fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>>;
+}
+
+/// What a tool hands back: the text fed to the model as the result,
+/// and any events the call produced, which `App` commits caused by the
+/// call. Most tools commit nothing.
+#[derive(Debug)]
+pub struct ToolOutput {
+    pub content: String,
+    pub commits: Vec<Payload>,
+}
+
+impl ToolOutput {
+    /// The common case: text with nothing to commit.
+    pub fn text(content: impl Into<String>) -> Self {
+        Self {
+            content: content.into(),
+            commits: Vec::new(),
+        }
+    }
 }
 
 /// What the model is told about a `Tool`. `parameters` is a JSON Schema

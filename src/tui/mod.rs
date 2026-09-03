@@ -8,17 +8,17 @@ pub use ui::draw;
 pub use update::{handle_key, handle_mouse, handle_stream};
 
 use crate::app::AppService;
-use crate::percept::Chunk;
+use crate::percept::{Chunk, ToolOutput};
 
 /// Adapts the reply stream onto tokio's mpsc channel, so the main
 /// select! loop can drive it alongside terminal events. Local to tui -
 /// `app` never sees this type.
 pub enum StreamEvent {
     Chunk(Chunk),
-    /// A tool finished off-thread; the string is what to feed back.
+    /// A tool finished off-thread; this is what to feed back.
     /// `App::finish_tool` takes it. On its own event so the blocking
     /// `Tool::run` never sits on the main loop.
-    ToolResult(String),
+    ToolResult(ToolOutput),
     /// The turn is over. `Some` carries why it broke, in the provider's
     /// own words, so "ollama isn't running" and "the model isn't
     /// pulled" read differently. Never a Chunk - a chunk becomes a

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{EventQuery, EventSearch, Tool, ToolSpec};
+use crate::percept::{EventQuery, EventSearch, Tool, ToolOutput, ToolSpec};
 use crate::shared::Timestamp;
 use crate::store::{parse_actor, parse_kind, summarize, PREVIEW_CHARS};
 
@@ -77,7 +77,7 @@ impl Tool for SearchEvents {
         }
     }
 
-    fn run(&self, arguments: &str) -> Result<String, Box<dyn std::error::Error>> {
+    fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
 
         let since = args.since.as_deref().map(parse_time).transpose()?;
@@ -111,11 +111,13 @@ impl Tool for SearchEvents {
         };
 
         let events = self.log.search(&query)?;
-        Ok(events
-            .iter()
-            .map(|event| summarize(event, query.hit(event), preview))
-            .collect::<Vec<_>>()
-            .join("\n"))
+        Ok(ToolOutput::text(
+            events
+                .iter()
+                .map(|event| summarize(event, query.hit(event), preview))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        ))
     }
 }
 
@@ -188,7 +190,7 @@ mod tests {
     #[test]
     fn run_returns_one_summarized_line_per_match() {
         let out = tool().run(r#"{"sources":["tui"]}"#).unwrap();
-        let lines: Vec<&str> = out.lines().collect();
+        let lines: Vec<&str> = out.content.lines().collect();
         assert_eq!(lines.len(), 1);
         let line: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
         assert_eq!(line["source"], "tui");
@@ -220,7 +222,7 @@ mod tests {
         });
         let out = SearchEvents::new(search.clone()).run("{}").unwrap();
 
-        assert_eq!(out.lines().count(), 2);
+        assert_eq!(out.content.lines().count(), 2);
         assert_eq!(search.seen.lock().unwrap().size, Some(DEFAULT_SIZE));
     }
 
@@ -242,7 +244,8 @@ mod tests {
     #[test]
     fn preview_sizes_the_content_window_and_zero_is_an_error() {
         let out = tool().run(r#"{"preview":2}"#).unwrap();
-        let line: serde_json::Value = serde_json::from_str(out.lines().next().unwrap()).unwrap();
+        let line: serde_json::Value =
+            serde_json::from_str(out.content.lines().next().unwrap()).unwrap();
         assert_eq!(line["payload"]["content"], "he\u{2026}");
         assert_eq!(line["preview"]["len"], 5);
         assert!(tool().run(r#"{"preview":0}"#).is_err());
@@ -262,7 +265,7 @@ mod tests {
     fn run_keeps_only_events_whose_payload_carries_the_term() {
         let out = tool().run(r#"{"contains":["orl"]}"#).unwrap();
 
-        let lines: Vec<&str> = out.lines().collect();
+        let lines: Vec<&str> = out.content.lines().collect();
         assert_eq!(lines.len(), 1);
         let line: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
         assert_eq!(line["source"], "claude-code");
