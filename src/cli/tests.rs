@@ -10,7 +10,30 @@ fn args(actor: &str, payload: &str) -> PublishArgs {
         source: "claude-code".to_string(),
         kind: "message.received".to_string(),
         payload: payload.to_string(),
+        causation: None,
     }
+}
+
+#[test]
+fn a_publish_citing_a_cause_records_it() {
+    let log = FakeLog::default();
+    publish(args("user", r#"{"content":"hi"}"#), &log).unwrap();
+    let cause = log.load().unwrap()[0].id();
+
+    let mut reply = args("model", r#"{"content":"hello"}"#);
+    reply.causation = Some(cause.as_uuid().to_string());
+    publish(reply, &log).unwrap();
+
+    assert!(log.load().unwrap()[1].causation_id() == Some(cause));
+}
+
+#[test]
+fn a_publish_citing_a_cause_the_log_lacks_is_rejected() {
+    let log = FakeLog::default();
+    let mut orphan = args("model", r#"{"content":"hello"}"#);
+    orphan.causation = Some(percept::EventId::new().as_uuid().to_string());
+    assert!(publish(orphan, &log).is_err());
+    assert!(log.load().unwrap().is_empty());
 }
 
 #[test]

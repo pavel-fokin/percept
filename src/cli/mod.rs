@@ -185,6 +185,9 @@ pub struct PublishArgs {
     kind: String,
     #[arg(long)]
     payload: String,
+    /// The id of the event this one follows from.
+    #[arg(long)]
+    causation: Option<String>,
 }
 
 #[derive(Args, Default)]
@@ -318,9 +321,17 @@ fn parse_node_ref(s: &str) -> Result<NodeRef, String> {
 
 /// Appends one event built from `args` to `log`. `store` owns the
 /// decode, so the CLI only parses flags.
+/// Appends one event and prints its id, so a writer can cite it as the
+/// `--causation` of the next. A cause the log lacks is an error: a typo
+/// in provenance is worse than none.
 pub fn publish(args: PublishArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
+    let causation_id = args
+        .causation
+        .as_deref()
+        .map(|id| known_event_id(id, log))
+        .transpose()?;
     let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
-    let event = store::decode(&args.actor, args.source, &args.kind, payload)?;
+    let event = store::decode(&args.actor, args.source, &args.kind, causation_id, payload)?;
     // A raw map event would skip `Map::apply`, and one that breaks a
     // rule fails every fold from then on, with no undo in an
     // append-only log.
@@ -331,7 +342,19 @@ pub fn publish(args: PublishArgs, log: &dyn EventLog) -> Result<(), Box<dyn std:
         )
         .into());
     }
-    log.append(&event)
+    log.append(&event)?;
+    print_lines(std::iter::once(event.id().as_uuid().to_string()))
+}
+
+fn known_event_id(
+    id: &str,
+    log: &dyn EventLog,
+) -> Result<percept::EventId, Box<dyn std::error::Error>> {
+    let parsed = store::parse_event_id(id)?;
+    if log.get(parsed)?.is_none() {
+        return Err(format!("no event with id {id}").into());
+    }
+    Ok(parsed)
 }
 
 /// Searches `log` for events matching `args`, printing one JSON object
