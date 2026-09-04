@@ -41,35 +41,6 @@ pub struct Imports {
     pub modules: Vec<String>,
 }
 
-/// Parses `source` once and reads both its imports and its symbols -
-/// the pair `code::build` wants per file, since the parse is the
-/// expensive step and a file gets only one. A file with syntax errors
-/// still parses, around error nodes; `None` only when tree-sitter
-/// gives up on the parse itself.
-pub fn read(source: &str) -> Option<(Imports, Vec<Symbol>)> {
-    let tree = parse(source)?;
-    let root = tree.root_node();
-    Some((read_imports(root, source), read_symbols(root, source)))
-}
-
-fn read_imports(root: Node, source: &str) -> Imports {
-    let query = query();
-    let mut cursor = QueryCursor::new();
-    let mut captures = cursor.captures(query, root, source.as_bytes());
-    let names = query.capture_names();
-
-    let mut result = Imports::default();
-    while let Some((m, index)) = captures.next() {
-        let capture = m.captures()[*index];
-        match names[capture.index as usize] {
-            "import.source" => result.paths.extend(expand(capture.node, source)),
-            "module.decl" => result.modules.push(text(capture.node, source)),
-            _ => {}
-        }
-    }
-    result
-}
-
 /// One module-level function or type, or one method in a module-level
 /// `impl` block, read from a file.
 pub struct Symbol {
@@ -82,62 +53,73 @@ pub struct Symbol {
     pub line: usize,
 }
 
-fn read_symbols(root: Node, source: &str) -> Vec<Symbol> {
+/// What one query match captured of a symbol, before it is a `Symbol`.
+#[derive(Default)]
+struct Captured<'a> {
+    def: Option<Node<'a>>,
+    name: Option<Node<'a>>,
+    public: bool,
+    impl_type: Option<Node<'a>>,
+    impl_trait: Option<Node<'a>>,
+}
+
+/// Parses `source` once and runs the query once over it, reading both
+/// what the file imports and the symbols it defines, in source order.
+/// A file with syntax errors still parses, around error nodes; `None`
+/// only when tree-sitter gives up on the parse itself. Two symbols
+/// with one name - `cfg`-gated twins - keep the first: a map names a
+/// node once.
+pub fn read(source: &str) -> Option<(Imports, Vec<Symbol>)> {
+    let tree = parse(source)?;
     let query = query();
     let mut cursor = QueryCursor::new();
-    let mut matches = cursor.matches(query, root, source.as_bytes());
+    let mut matches = cursor.matches(query, tree.root_node(), source.as_bytes());
     let names = query.capture_names();
 
-    let mut symbols = Vec::new();
+    let mut imports = Imports::default();
+    let mut symbols: Vec<Symbol> = Vec::new();
+    let mut seen = HashSet::new();
     while let Some(m) = matches.next() {
-        let mut function_def = None;
-        let mut function_name = None;
-        let mut function_public = false;
-        let mut type_def = None;
-        let mut type_name = None;
-        let mut type_public = false;
-        let mut impl_type = None;
-        let mut impl_trait = None;
-
+        let mut captured = Captured::default();
         for capture in m.captures() {
+            let node = capture.node;
             match names[capture.index as usize] {
-                "function.def" => function_def = Some(capture.node),
-                "function.name" => function_name = Some(capture.node),
-                "function.visibility" => function_public = true,
-                "type.def" => type_def = Some(capture.node),
-                "type.name" => type_name = Some(capture.node),
-                "type.visibility" => type_public = true,
-                "impl.type" => impl_type = Some(capture.node),
-                "impl.trait" => impl_trait = Some(capture.node),
+                "import.source" => imports.paths.extend(expand(node, source)),
+                "module.decl" => imports.modules.push(text(node, source)),
+                "symbol.def" => captured.def = Some(node),
+                "symbol.name" => captured.name = Some(node),
+                "symbol.visibility" => captured.public = true,
+                "impl.type" => captured.impl_type = Some(node),
+                "impl.trait" => captured.impl_trait = Some(node),
                 _ => {}
             }
         }
-
-        if let (Some(def), Some(name)) = (function_def, function_name) {
-            let mut path: Vec<String> = impl_type
-                .map(|node| base_name(node, source))
-                .into_iter()
-                .chain(impl_trait.map(|node| trait_name(node, source)))
-                .collect();
-            path.push(text(name, source));
+        let (Some(def), Some(name)) = (captured.def, captured.name) else {
+            continue;
+        };
+        let kind = if def.kind() == "function_item" {
+            "function"
+        } else {
+            "type"
+        };
+        let path: Vec<String> = captured
+            .impl_type
+            .map(|node| base_name(node, source))
+            .into_iter()
+            .chain(captured.impl_trait.map(|node| trait_name(node, source)))
+            .chain([text(name, source)])
+            .collect();
+        if seen.insert((kind, path.clone())) {
             symbols.push(Symbol {
-                kind: "function",
+                kind,
                 path,
-                public: function_public,
-                line: def.start_position().row + 1,
-            });
-        } else if let (Some(def), Some(name)) = (type_def, type_name) {
-            symbols.push(Symbol {
-                kind: "type",
-                path: vec![text(name, source)],
-                public: type_public,
+                public: captured.public,
                 line: def.start_position().row + 1,
             });
         }
     }
-
     symbols.sort_by_key(|symbol| symbol.line);
-    symbols
+    Some((imports, symbols))
 }
 
 /// A type as written on an `impl` block, with its generics, path, and
@@ -255,6 +237,7 @@ fn prefix_paths(node: Node, source: &str) -> Vec<Vec<String>> {
 
 /// What a resolved import points at: another file in the walk, or a
 /// package outside it.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Target {
     File(String),
     Package(String),
@@ -284,12 +267,8 @@ pub fn resolve_path(
             let base = own_module_dir(file);
             resolve_beside(&base, rest, known).map(Target::File)
         }
-        name if declared.contains(head) => {
-            let base = own_module_dir(file);
-            let segments: Vec<String> = std::iter::once(name.to_string())
-                .chain(rest.iter().cloned())
-                .collect();
-            resolve_beside(&base, &segments, known).map(Target::File)
+        _ if declared.contains(head) => {
+            resolve_beside(&own_module_dir(file), path, known).map(Target::File)
         }
         "super" => {
             let mut base = parent_module_dir(file)?;
@@ -406,9 +385,6 @@ fn crate_root(file: &str) -> Option<String> {
             return Some(dir);
         }
         dir = parent_dir(&dir)?;
-        if dir.is_empty() {
-            return None;
-        }
     }
 }
 

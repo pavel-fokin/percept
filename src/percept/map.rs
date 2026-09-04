@@ -6,7 +6,7 @@
 //! Every writer - the CLI, the model's tool - goes through `apply`, so
 //! one place holds the rules.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
 use super::{Event, EventId, Payload};
@@ -238,14 +238,37 @@ pub struct Map {
     schema: &'static Schema,
     nodes: Vec<Node>,
     edges: Vec<Edge>,
+    // Indexes over `nodes` and `edges`, kept in step by `replay`, so a
+    // lookup by id, by name, or by edge is a hash rather than a scan:
+    // every `apply` looks up its ends, and a code map applies tens of
+    // thousands of them.
+    by_id: HashMap<NodeId, usize>,
+    by_name: HashMap<(String, String), NodeId>,
+    edge_keys: HashSet<(String, NodeId, NodeId)>,
 }
 
 impl Map {
     pub fn empty(schema: &'static Schema) -> Self {
+        Self::from_parts(schema, Vec::new(), Vec::new())
+    }
+
+    fn from_parts(schema: &'static Schema, nodes: Vec<Node>, edges: Vec<Edge>) -> Self {
+        let by_id = nodes.iter().enumerate().map(|(i, n)| (n.id, i)).collect();
+        let by_name = nodes
+            .iter()
+            .map(|n| ((n.kind.clone(), n.name.clone()), n.id))
+            .collect();
+        let edge_keys = edges
+            .iter()
+            .map(|e| (e.kind.clone(), e.from, e.to))
+            .collect();
         Self {
             schema,
-            nodes: Vec::new(),
-            edges: Vec::new(),
+            nodes,
+            edges,
+            by_id,
+            by_name,
+            edge_keys,
         }
     }
 
@@ -304,13 +327,12 @@ impl Map {
     }
 
     pub fn node(&self, id: NodeId) -> Option<&Node> {
-        self.nodes.iter().find(|node| node.id == id)
+        self.by_id.get(&id).map(|&i| &self.nodes[i])
     }
 
     pub fn find(&self, kind: &str, name: &str) -> Option<&Node> {
-        self.nodes
-            .iter()
-            .find(|node| node.kind == kind && node.name == name)
+        let id = self.by_name.get(&(kind.to_string(), name.to_string()))?;
+        self.node(*id)
     }
 
     /// The map cut to nodes of `kinds`, keeping only the edges whose
@@ -333,23 +355,17 @@ impl Map {
     /// it, following edges both ways: what is around a file is what it
     /// imports and what imports it. Depth zero is the node alone.
     pub fn around(&self, node: &NodeRef, depth: usize) -> Result<Self, MapError> {
-        let start = self
-            .find(&node.kind, &node.name)
-            .map(|n| n.id)
-            .ok_or_else(|| MapError::NoSuchNode(node.clone()))?;
+        let start = self.resolve(node.clone())?;
         let mut reached: HashSet<NodeId> = HashSet::from([start]);
-        let mut frontier = vec![start];
+        let mut frontier: HashSet<NodeId> = HashSet::from([start]);
         for _ in 0..depth {
-            let mut next = Vec::new();
+            let mut next = HashSet::new();
             for edge in &self.edges {
                 for (near, far) in [(edge.from, edge.to), (edge.to, edge.from)] {
                     if frontier.contains(&near) && reached.insert(far) {
-                        next.push(far);
+                        next.insert(far);
                     }
                 }
-            }
-            if next.is_empty() {
-                break;
             }
             frontier = next;
         }
@@ -372,11 +388,7 @@ impl Map {
             .filter(|edge| kept.contains(&edge.from) && kept.contains(&edge.to))
             .cloned()
             .collect();
-        Self {
-            schema: self.schema,
-            nodes,
-            edges,
-        }
+        Self::from_parts(self.schema, nodes, edges)
     }
 
     /// Checks `mutation` against the schema and the map's current
@@ -461,6 +473,8 @@ impl Map {
                         name: name.clone(),
                     });
                 }
+                self.by_id.insert(*node, self.nodes.len());
+                self.by_name.insert((kind.clone(), name.clone()), *node);
                 self.nodes.push(Node {
                     id: *node,
                     kind: kind.clone(),
@@ -470,9 +484,19 @@ impl Map {
                 });
             }
             Payload::NodeRemoved { node, .. } => {
-                self.check_node_id(*node)?;
+                let removed = self.node(*node).ok_or(MapError::NoSuchNodeId(*node))?;
+                let key = (removed.kind.clone(), removed.name.clone());
+                self.by_name.remove(&key);
                 self.nodes.retain(|n| n.id != *node);
+                self.by_id = self
+                    .nodes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, n)| (n.id, i))
+                    .collect();
                 self.edges.retain(|e| e.from != *node && e.to != *node);
+                self.edge_keys
+                    .retain(|(_, from, to)| from != node && to != node);
             }
             Payload::EdgeAdded {
                 kind,
@@ -484,7 +508,7 @@ impl Map {
                 self.check_edge_kind(kind)?;
                 self.check_node_id(*from)?;
                 self.check_node_id(*to)?;
-                if self.edge(kind, *from, *to).is_some() {
+                if !self.edge_keys.insert((kind.clone(), *from, *to)) {
                     return Err(MapError::DuplicateEdge {
                         kind: kind.clone(),
                         from: self.label(*from),
@@ -499,7 +523,7 @@ impl Map {
                 });
             }
             Payload::EdgeRemoved { kind, from, to, .. } => {
-                if self.edge(kind, *from, *to).is_none() {
+                if !self.edge_keys.remove(&(kind.clone(), *from, *to)) {
                     return Err(MapError::NoSuchEdge {
                         kind: kind.clone(),
                         from: self.label(*from),
@@ -518,12 +542,6 @@ impl Map {
         self.find(&node.kind, &node.name)
             .map(|n| n.id)
             .ok_or(MapError::NoSuchNode(node))
-    }
-
-    fn edge(&self, kind: &str, from: NodeId, to: NodeId) -> Option<&Edge> {
-        self.edges
-            .iter()
-            .find(|e| e.kind == kind && e.from == from && e.to == to)
     }
 
     /// A node as `Display` names it; the id when the map has no such

@@ -2,13 +2,15 @@ use super::*;
 use std::collections::HashSet;
 
 fn imports(source: &str) -> Option<Imports> {
-    let tree = parse(source)?;
-    Some(read_imports(tree.root_node(), source))
+    read(source).map(|(imports, _)| imports)
 }
 
 fn symbols(source: &str) -> Option<Vec<Symbol>> {
-    let tree = parse(source)?;
-    Some(read_symbols(tree.root_node(), source))
+    read(source).map(|(_, symbols)| symbols)
+}
+
+fn file(name: &str) -> Target {
+    Target::File(name.to_string())
 }
 
 fn known(files: &[&str]) -> HashSet<String> {
@@ -17,13 +19,6 @@ fn known(files: &[&str]) -> HashSet<String> {
 
 fn path(segments: &[&str]) -> Vec<String> {
     segments.iter().map(|s| s.to_string()).collect()
-}
-
-fn target_name(target: Target) -> String {
-    match target {
-        Target::File(name) => name,
-        Target::Package(name) => name,
-    }
 }
 
 #[test]
@@ -59,48 +54,56 @@ fn a_module_declaration_with_no_body_is_captured() {
 #[test]
 fn crate_path_resolves_to_the_longest_existing_prefix() {
     let known = known(&["src/main.rs", "src/percept/map.rs", "src/percept/mod.rs"]);
-    let target = resolve_path(
-        "src/main.rs",
-        &path(&["crate", "percept", "map", "Map"]),
-        &[],
-        &known,
-    )
-    .unwrap();
-    assert_eq!(target_name(target), "src/percept/map.rs");
+    assert_eq!(
+        resolve_path(
+            "src/main.rs",
+            &path(&["crate", "percept", "map", "Map"]),
+            &[],
+            &known,
+        ),
+        Some(file("src/percept/map.rs"))
+    );
 }
 
 #[test]
 fn crate_path_resolves_to_a_mod_rs_directory() {
     let known = known(&["src/main.rs", "src/store/mod.rs", "src/store/event.rs"]);
-    let target = resolve_path(
-        "src/main.rs",
-        &path(&["crate", "store", "Jsonl"]),
-        &[],
-        &known,
-    )
-    .unwrap();
-    assert_eq!(target_name(target), "src/store/mod.rs");
+    assert_eq!(
+        resolve_path(
+            "src/main.rs",
+            &path(&["crate", "store", "Jsonl"]),
+            &[],
+            &known,
+        ),
+        Some(file("src/store/mod.rs"))
+    );
 }
 
 #[test]
 fn mod_x_resolves_beside_the_file() {
     let known = known(&["src/main.rs", "src/app.rs"]);
-    let target = resolve_module("src/main.rs", "app", &known).unwrap();
-    assert_eq!(target_name(target), "src/app.rs");
+    assert_eq!(
+        resolve_module("src/main.rs", "app", &known),
+        Some(file("src/app.rs"))
+    );
 }
 
 #[test]
 fn mod_x_resolves_to_a_directory_beside_a_mod_rs() {
     let known = known(&["src/foo/mod.rs", "src/foo/bar/mod.rs"]);
-    let target = resolve_module("src/foo/mod.rs", "bar", &known).unwrap();
-    assert_eq!(target_name(target), "src/foo/bar/mod.rs");
+    assert_eq!(
+        resolve_module("src/foo/mod.rs", "bar", &known),
+        Some(file("src/foo/bar/mod.rs"))
+    );
 }
 
 #[test]
 fn mod_x_resolves_to_a_directory_beside_a_plain_file() {
     let known = known(&["src/percept/map.rs", "src/percept/map/tests.rs"]);
-    let target = resolve_module("src/percept/map.rs", "tests", &known).unwrap();
-    assert_eq!(target_name(target), "src/percept/map/tests.rs");
+    assert_eq!(
+        resolve_module("src/percept/map.rs", "tests", &known),
+        Some(file("src/percept/map/tests.rs"))
+    );
 }
 
 #[test]
@@ -115,21 +118,22 @@ fn super_resolves_from_the_parent_module() {
     assert!(target.is_none(), "no percept/event.rs in the known set");
 
     let sibling = known(&["src/percept/map.rs", "src/percept/event.rs"]);
-    let target = resolve_path(
-        "src/percept/map.rs",
-        &path(&["super", "event"]),
-        &[],
-        &sibling,
-    )
-    .unwrap();
-    assert_eq!(target_name(target), "src/percept/event.rs");
+    assert_eq!(
+        resolve_path(
+            "src/percept/map.rs",
+            &path(&["super", "event"]),
+            &[],
+            &sibling,
+        ),
+        Some(file("src/percept/event.rs"))
+    );
 }
 
 #[test]
 fn an_external_crate_becomes_a_package() {
     let known = known(&["src/main.rs"]);
-    let target = resolve_path("src/main.rs", &path(&["clap", "Parser"]), &[], &known).unwrap();
-    assert!(matches!(target, Target::Package(name) if name == "clap"));
+    let target = resolve_path("src/main.rs", &path(&["clap", "Parser"]), &[], &known);
+    assert_eq!(target, Some(Target::Package("clap".to_string())));
 }
 
 #[test]
@@ -142,11 +146,13 @@ fn a_crate_path_with_no_root_file_is_none() {
 fn a_bare_name_the_file_declares_as_a_module_resolves_beside_it() {
     let known = known(&["src/main.rs", "src/app/mod.rs"]);
     let declared = path(&["app"]);
-    let target = resolve_path("src/main.rs", &path(&["app", "App"]), &declared, &known).unwrap();
-    assert_eq!(target_name(target), "src/app/mod.rs");
+    assert_eq!(
+        resolve_path("src/main.rs", &path(&["app", "App"]), &declared, &known),
+        Some(file("src/app/mod.rs"))
+    );
 
-    let undeclared = resolve_path("src/main.rs", &path(&["app", "App"]), &[], &known).unwrap();
-    assert!(matches!(undeclared, Target::Package(name) if name == "app"));
+    let undeclared = resolve_path("src/main.rs", &path(&["app", "App"]), &[], &known);
+    assert_eq!(undeclared, Some(Target::Package("app".to_string())));
 }
 
 fn function_paths(symbols: &[Symbol]) -> Vec<String> {
@@ -242,22 +248,24 @@ fn a_glob_import_names_the_path_before_the_star() {
 #[test]
 fn an_item_in_the_parent_module_resolves_to_the_parent_s_file() {
     let known = known(&["src/percept/mod.rs", "src/percept/map.rs"]);
-    let target = resolve_path(
-        "src/percept/map.rs",
-        &path(&["super", "Event"]),
-        &[],
-        &known,
-    )
-    .unwrap();
-    assert_eq!(target_name(target), "src/percept/mod.rs");
+    assert_eq!(
+        resolve_path(
+            "src/percept/map.rs",
+            &path(&["super", "Event"]),
+            &[],
+            &known,
+        ),
+        Some(file("src/percept/mod.rs"))
+    );
 }
 
 #[test]
 fn an_item_in_the_crate_root_resolves_to_main_rs() {
     let known = known(&["src/main.rs", "src/cli/mod.rs"]);
-    let target =
-        resolve_path("src/cli/mod.rs", &path(&["crate", "LOG_PATH"]), &[], &known).unwrap();
-    assert_eq!(target_name(target), "src/main.rs");
+    assert_eq!(
+        resolve_path("src/cli/mod.rs", &path(&["crate", "LOG_PATH"]), &[], &known),
+        Some(file("src/main.rs"))
+    );
 }
 
 #[test]

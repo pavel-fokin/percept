@@ -9,6 +9,8 @@
 
 mod rust;
 
+use rust::Target;
+
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 
@@ -27,6 +29,7 @@ pub fn build(root: &Path) -> Result<Map, MapError> {
     let known: HashSet<String> = files.iter().cloned().collect();
 
     let mut map = Map::empty(&CODE);
+    let mut packages = HashSet::new();
     for file in &files {
         map.apply(Mutation::AddNode {
             kind: "file".to_string(),
@@ -40,7 +43,8 @@ pub fn build(root: &Path) -> Result<Map, MapError> {
         // A file that can't be read is not a fact of the map. Say so
         // and carry on: one bad file must not cost the other hundred.
         let source = match std::fs::read(root.join(file)) {
-            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Ok(bytes) => String::from_utf8(bytes)
+                .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned()),
             Err(e) => {
                 eprintln!("percept: skipping {file}: {e}");
                 continue;
@@ -50,84 +54,77 @@ pub fn build(root: &Path) -> Result<Map, MapError> {
             continue;
         };
 
+        let this = NodeRef {
+            kind: "file".to_string(),
+            name: file.clone(),
+        };
+
         for symbol in symbols {
-            let name = format!("{file}::{}", symbol.path.join("::"));
-            let properties = BTreeMap::from([
-                ("public".to_string(), symbol.public.to_string()),
-                ("line".to_string(), symbol.line.to_string()),
-            ]);
-            match map.apply(Mutation::AddNode {
+            let node = NodeRef {
                 kind: symbol.kind.to_string(),
-                name: name.clone(),
-                properties,
+                name: format!("{file}::{}", symbol.path.join("::")),
+            };
+            map.apply(Mutation::AddNode {
+                kind: node.kind.clone(),
+                name: node.name.clone(),
+                properties: BTreeMap::from([
+                    ("public".to_string(), symbol.public.to_string()),
+                    ("line".to_string(), symbol.line.to_string()),
+                ]),
                 sources: Vec::new(),
-            }) {
-                Ok(_) => {}
-                Err(MapError::DuplicateNode { .. }) => continue,
-                Err(e) => return Err(e),
-            }
+            })?;
             map.apply(Mutation::AddEdge {
                 kind: "contains".to_string(),
-                from: NodeRef {
-                    kind: "file".to_string(),
-                    name: file.clone(),
-                },
-                to: NodeRef {
-                    kind: symbol.kind.to_string(),
-                    name,
-                },
+                from: this.clone(),
+                to: node,
                 sources: Vec::new(),
             })?;
         }
 
-        let mut targets = BTreeSet::new();
-        for path in &imports.paths {
-            if let Some(target) = rust::resolve_path(file, path, &imports.modules, &known) {
-                targets.insert(name_of(target));
-            }
-        }
-        for module in &imports.modules {
-            if let Some(target) = rust::resolve_module(file, module, &known) {
-                targets.insert(name_of(target));
-            }
-        }
+        let paths = imports
+            .paths
+            .iter()
+            .filter_map(|path| rust::resolve_path(file, path, &imports.modules, &known));
+        let modules = imports
+            .modules
+            .iter()
+            .filter_map(|module| rust::resolve_module(file, module, &known));
+        let targets: BTreeSet<Target> = paths.chain(modules).collect();
 
-        for (kind, name) in targets {
-            // `use self::Item` names the file itself: no edge, a file
-            // does not import itself.
-            if kind == "file" && &name == file {
-                continue;
-            }
-            if kind == "package" && map.find(&kind, &name).is_none() {
-                map.apply(Mutation::AddNode {
-                    kind: "package".to_string(),
-                    name: name.clone(),
-                    properties: BTreeMap::new(),
-                    sources: Vec::new(),
-                })?;
-            }
+        for target in targets {
+            let to = match target {
+                // `use self::Item` names the file itself: no edge, a
+                // file does not import itself.
+                Target::File(name) if name == *file => continue,
+                Target::File(name) => NodeRef {
+                    kind: "file".to_string(),
+                    name,
+                },
+                Target::Package(name) => {
+                    if packages.insert(name.clone()) {
+                        map.apply(Mutation::AddNode {
+                            kind: "package".to_string(),
+                            name: name.clone(),
+                            properties: BTreeMap::new(),
+                            sources: Vec::new(),
+                        })?;
+                    }
+                    NodeRef {
+                        kind: "package".to_string(),
+                        name,
+                    }
+                }
+            };
             map.apply(Mutation::AddEdge {
                 kind: "imports".to_string(),
-                from: NodeRef {
-                    kind: "file".to_string(),
-                    name: file.clone(),
-                },
-                to: NodeRef { kind, name },
+                from: this.clone(),
+                to,
                 sources: Vec::new(),
             })?;
         }
     }
 
     Ok(map)
-}
-
-/// `target`'s node kind and name, so a batch of them can be
-/// deduplicated by both before minting a package node or an edge.
-fn name_of(target: rust::Target) -> (String, String) {
-    match target {
-        rust::Target::File(name) => ("file".to_string(), name),
-        rust::Target::Package(name) => ("package".to_string(), name),
-    }
 }
 
 /// Every `.rs` file under `root`, gitignore-aware whether or not `root`

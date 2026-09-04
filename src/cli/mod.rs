@@ -18,6 +18,7 @@
 
 use std::collections::BTreeMap;
 use std::io::{self, Write};
+use std::path::Path;
 
 use clap::{Args, Parser, Subcommand};
 use tokio_stream::StreamExt;
@@ -365,9 +366,9 @@ fn print_lines(lines: impl Iterator<Item = String>) -> Result<(), Box<dyn std::e
 /// Prints every map percept knows with its size: the log's maps, folded
 /// from one read of `log`, then the code map, walked fresh from the
 /// working directory.
-pub fn maps_list(log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
+pub fn maps_list(log: &dyn EventLog, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let mut maps = Map::fold_all(&log.load()?)?;
-    maps.push(code::build(&std::env::current_dir()?)?);
+    maps.push(code::build(root)?);
     print_lines(maps.iter().map(store::encode_map))
 }
 
@@ -379,11 +380,11 @@ pub fn maps_show(args: ShowMapArgs, log: &dyn EventLog) -> Result<(), Box<dyn st
     print_map(map, &args)
 }
 
-/// Prints the code map, walked fresh from the working directory - never
-/// the log, so this runs in a directory with no `percept.jsonl`.
-pub fn maps_show_code(args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let map = code::build(&std::env::current_dir()?)?;
-    print_map(map, args)
+/// Prints the code map, walked fresh from `root` - never the log, so
+/// this runs in a directory with no `percept.jsonl`.
+pub fn maps_show_code(args: ShowMapArgs, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let map = code::build(root)?;
+    print_map(map, &args)
 }
 
 /// `maps_show` and `maps_show_code`'s shared tail: cut `map` to
