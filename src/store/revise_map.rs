@@ -439,6 +439,21 @@ mod tests {
     }
 
     #[test]
+    fn the_code_map_is_refused_the_same_as_the_cli() {
+        let revise = tool(Vec::new());
+
+        let err = revise
+            .run(r#"{"map":"code","changes":[{"op":"add_node","kind":"file","name":"src/main.rs","sources":[]}]}"#)
+            .err()
+            .unwrap();
+
+        assert!(
+            err.to_string().contains("derived from the working tree"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn an_empty_changes_list_is_an_error() {
         let revise = tool(Vec::new());
 

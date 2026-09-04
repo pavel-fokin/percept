@@ -60,7 +60,9 @@ model builds maps today. The user will build and co-own them.
   log, folded from `node.added`, `node.removed`, `edge.added`, and
   `edge.removed` events in the same log. A `Schema` names a map and
   the node and edge kinds it allows - `decisions` today. Every change
-  goes through `Map::apply`, so the rules live once.
+  goes through `Map::apply`, so the rules live once. `code` is a `Map`
+  too, but folded from the working tree instead of the log - see
+  `code` below.
 
 ## Architecture
 
@@ -75,6 +77,7 @@ it, never sideways or up:
 | Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps`, `ask`, `reflect` - the log and its maps without the TUI. |
 | Infrastructure | `providers` | `Ollama` and `OpenAi` - implement `percept::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` carries the key. |
 | Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`, and the four tools the model calls: `search_events`, `read_event`, `revise_map`, `read_map`. |
+| Infrastructure | `code` | The `code` map: walks the working tree with `ignore`, parses each file with `tree-sitter`, and builds a `Map` of `file`, `function`, `type`, and `package` nodes - `maps list` and `maps show` read it, but it is never folded from the log and never reaches the model's prompt. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 
 Wire concrete types together only at the entrypoint - `main` in Rust.

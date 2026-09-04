@@ -176,6 +176,20 @@ mod tests {
     }
 
     #[test]
+    fn revising_the_code_map_is_refused() {
+        let err = revise(
+            &FakeLog::default(),
+            "code",
+            &[],
+            add_node("file", "src/main.rs"),
+        )
+        .err()
+        .unwrap();
+
+        assert!(err.to_string().starts_with("\"code\" is derived"), "{err}");
+    }
+
+    #[test]
     fn an_unknown_map_is_an_error() {
         let err = fold_map(&FakeLog::default(), "tasks").err().unwrap();
 

@@ -288,3 +288,51 @@ fn depth_is_refused_without_around() {
     ]);
     assert!(with.is_ok());
 }
+
+#[test]
+fn every_write_verb_refuses_the_code_map() {
+    let log = FakeLog::default();
+    let target = || MapArgs {
+        map: "code".to_string(),
+        source: Vec::new(),
+    };
+
+    let add_node = maps_add_node(
+        AddNodeArgs {
+            target: target(),
+            kind: "file".to_string(),
+            name: "src/main.rs".to_string(),
+            prop: Vec::new(),
+        },
+        &log,
+    );
+    let remove_node = maps_remove_node(
+        RemoveNodeArgs {
+            target: target(),
+            kind: "file".to_string(),
+            name: "src/main.rs".to_string(),
+            reason: "gone".to_string(),
+        },
+        &log,
+    );
+    let edge_args = || EdgeArgs {
+        target: target(),
+        kind: "imports".to_string(),
+        from: NodeRef {
+            kind: "file".to_string(),
+            name: "src/main.rs".to_string(),
+        },
+        to: NodeRef {
+            kind: "file".to_string(),
+            name: "src/app/mod.rs".to_string(),
+        },
+    };
+    let add_edge = maps_add_edge(edge_args(), &log);
+    let remove_edge = maps_remove_edge(edge_args(), &log);
+
+    for result in [add_node, remove_node, add_edge, remove_edge] {
+        let err = result.err().unwrap();
+        assert!(err.to_string().starts_with("\"code\" is derived"), "{err}");
+    }
+    assert!(log.load().unwrap().is_empty());
+}

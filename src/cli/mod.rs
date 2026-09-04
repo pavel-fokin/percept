@@ -1,10 +1,11 @@
 //! The command-line surface: `percept events publish` appends one event
 //! without opening the TUI, `percept events search` queries the log,
 //! `percept events show` dereferences one event by id, `percept maps`
-//! folds a cognitive map from the log and prints it, `percept ask`
-//! runs one full turn - including the tool loop - and prints the reply,
-//! and `percept reflect` runs one asking the model to revise its maps.
-//! A presentation-layer peer of `tui` - it forwards parsed input to
+//! folds a cognitive map from the log and prints it - except `code`,
+//! walked fresh from the working tree - `percept ask` runs one full
+//! turn - including the tool loop - and prints the reply, and `percept
+//! reflect` runs one asking the model to revise its maps. A
+//! presentation-layer peer of `tui` - it forwards parsed input to
 //! `store` and `app`, and has no chat logic of its own: `ask` drives the
 //! same `AppService` turn policy `tui` does, just inline instead of over
 //! a channel.
@@ -22,6 +23,7 @@ use clap::{Args, Parser, Subcommand};
 use tokio_stream::StreamExt;
 
 use crate::app::{run_tool, AppService, ToolStep};
+use crate::code;
 use crate::percept::{
     self, Actor, Chunk, Event, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
 };
@@ -42,8 +44,10 @@ relevance to the caller.
 Run with no arguments to open the TUI. Every subcommand reaches the log \
 without it: `events publish` appends one event, `events search` and \
 `events show` query it, `maps list` and `maps show` print a cognitive \
-map folded from it, `ask` runs one full turn and prints the reply, and \
-`reflect` runs one turn asking the model to revise its maps.")]
+map folded from it - `code`, the map of files and imports, is walked \
+fresh from the working tree instead - `ask` runs one full turn and \
+prints the reply, and `reflect` runs one turn asking the model to \
+revise its maps.")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -56,7 +60,8 @@ pub enum Command {
         #[command(subcommand)]
         command: EventsCommand,
     },
-    /// Read the cognitive maps folded from the log.
+    /// Read percept's maps - the cognitive ones folded from the log,
+    /// and `code`, walked fresh from the working tree.
     Maps {
         #[command(subcommand)]
         command: MapsCommand,
@@ -98,6 +103,14 @@ pub struct ShowMapArgs {
     /// How many edges out `--around` reaches; 0 is the node alone.
     #[arg(long, default_value_t = 1, requires = "around")]
     depth: usize,
+}
+
+impl ShowMapArgs {
+    /// Whether this names the code map - derived from the working tree,
+    /// so dispatch never opens the log to find out.
+    pub fn is_code(&self) -> bool {
+        self.map == percept::CODE.name
+    }
 }
 
 /// What every map change names: the map, and the events it was drawn
@@ -349,10 +362,12 @@ fn print_lines(lines: impl Iterator<Item = String>) -> Result<(), Box<dyn std::e
     out.flush().or_else(stop_if_pipe_closed)
 }
 
-/// Prints every map percept knows with its size, folded from one
-/// read of `log`.
+/// Prints every map percept knows with its size: the log's maps, folded
+/// from one read of `log`, then the code map, walked fresh from the
+/// working directory.
 pub fn maps_list(log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
-    let maps = Map::fold_all(&log.load()?)?;
+    let mut maps = Map::fold_all(&log.load()?)?;
+    maps.push(code::build(&std::env::current_dir()?)?);
     print_lines(maps.iter().map(store::encode_map))
 }
 
@@ -360,7 +375,20 @@ pub fn maps_list(log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
 /// it to a neighbourhood first, then `--kind` cuts that to its kinds,
 /// so a node of another kind still counts as a step on the way.
 pub fn maps_show(args: ShowMapArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
-    let mut map = store::fold_map(log, &args.map)?;
+    let map = store::fold_map(log, &args.map)?;
+    print_map(map, &args)
+}
+
+/// Prints the code map, walked fresh from the working directory - never
+/// the log, so this runs in a directory with no `percept.jsonl`.
+pub fn maps_show_code(args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let map = code::build(&std::env::current_dir()?)?;
+    print_map(map, args)
+}
+
+/// `maps_show` and `maps_show_code`'s shared tail: cut `map` to
+/// `args`'s filters, then print it nodes-then-edges.
+fn print_map(mut map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(node) = &args.around {
         map = map.around(node, args.depth)?;
     }

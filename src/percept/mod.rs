@@ -7,7 +7,7 @@ mod tool;
 
 pub use event::{Actor, Event, EventId, EventKind, Payload};
 pub use event_log::EventLog;
-pub use map::{map_of, Edge, Map, MapError, Mutation, Node, NodeId, NodeRef, Schema};
+pub use map::{map_of, Edge, Map, MapError, Mutation, Node, NodeId, NodeRef, Schema, CODE};
 pub use model::{
     to_messages, Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream,
     Usage,

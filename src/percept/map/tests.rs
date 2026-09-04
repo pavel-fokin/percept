@@ -464,3 +464,12 @@ fn around_a_node_the_map_lacks_is_an_error() {
         .unwrap();
     assert_eq!(err, MapError::NoSuchNode(node_ref("option", "Rust")));
 }
+
+#[test]
+fn a_derived_map_is_found_by_neither_fold_nor_write() {
+    let err = Schema::find("code").err().unwrap();
+    assert_eq!(err, MapError::Derived("code".to_string()));
+    assert!(err
+        .to_string()
+        .starts_with("\"code\" is derived from the working tree"));
+}

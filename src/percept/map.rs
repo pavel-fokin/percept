@@ -33,13 +33,31 @@ pub const DECISIONS: Schema = Schema {
     headline_kinds: &["question", "decision"],
 };
 
-/// Every map percept knows. One map per schema, named after it.
+/// The code map: a codebase's files, the symbols they define, and what
+/// imports what. Derived from the working tree, never folded from the
+/// log, so it is in `DERIVED` and not `SCHEMAS`.
+pub const CODE: Schema = Schema {
+    name: "code",
+    node_kinds: &["file", "function", "type", "package"],
+    edge_kinds: &["contains", "imports"],
+    headline_kinds: &["file"],
+};
+
+/// Every map folded from the log. One map per schema, named after it.
 pub const SCHEMAS: &[&Schema] = &[&DECISIONS];
 
+/// Every map derived from something other than the log. A reader
+/// builds one fresh; no writer commits to it.
+pub const DERIVED: &[&Schema] = &[&CODE];
+
 impl Schema {
-    /// The schema `name` names, or the error every boundary that takes
-    /// a map name reports.
+    /// The log-folded schema `name` names, or the error every boundary
+    /// that folds or writes a map by name reports. A derived map is its
+    /// own error: it exists, and this is the wrong door to it.
     pub fn find(name: &str) -> Result<&'static Schema, MapError> {
+        if DERIVED.iter().any(|schema| schema.name == name) {
+            return Err(MapError::Derived(name.to_string()));
+        }
         SCHEMAS
             .iter()
             .copied()
@@ -130,6 +148,8 @@ pub enum Mutation {
 #[derive(Debug, PartialEq, Eq)]
 pub enum MapError {
     UnknownMap(String),
+    /// A map in `DERIVED`, named where only a log-folded map fits.
+    Derived(String),
     UnknownNodeKind {
         map: &'static Schema,
         kind: String,
@@ -175,6 +195,10 @@ impl fmt::Display for MapError {
                     .map(|schema| schema.name)
                     .collect::<Vec<_>>()
                     .join(", ")
+            ),
+            Self::Derived(name) => write!(
+                f,
+                "{name:?} is derived from the working tree, not folded from the log or written"
             ),
             Self::UnknownNodeKind { map, kind } => write!(
                 f,

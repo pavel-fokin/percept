@@ -9,6 +9,7 @@ use tokio_stream::StreamExt;
 
 mod app;
 mod cli;
+mod code;
 mod percept;
 mod providers;
 mod shared;
@@ -215,6 +216,12 @@ async fn main() {
                 EventsCommand::Search(args) => cli::search(args, &log),
                 EventsCommand::Show(args) => cli::show(args, &log),
             }),
+        // `maps show code` is walked fresh from the working tree, never
+        // the log, so it must not even open `percept.jsonl` - a
+        // directory with no log still gets a code map.
+        Some(Command::Maps {
+            command: MapsCommand::Show(args),
+        }) if args.is_code() => cli::maps_show_code(&args),
         Some(Command::Maps { command }) => Jsonl::open(LOG_PATH)
             .map_err(Box::<dyn std::error::Error>::from)
             .and_then(|log| match command {
