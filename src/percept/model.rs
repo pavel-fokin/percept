@@ -1,5 +1,7 @@
 use std::error::Error;
+use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use futures_core::Stream;
 
@@ -101,6 +103,29 @@ pub trait Model: Send + Sync {
     fn name(&self) -> &str;
 
     fn reply(&self, request: &ModelRequest) -> ReplyStream;
+}
+
+/// Names one model a catalog can build - which provider serves it, and
+/// the provider's own name for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelDescriptor {
+    pub provider: String,
+    pub model: String,
+}
+
+/// Listed and built, so a caller can offer every model available
+/// across providers without knowing how to reach any of them. `list`
+/// is async because it queries a provider's server; `build` is not -
+/// building a `Model` is just construction, no round trip.
+pub type ModelListing = Pin<Box<dyn Future<Output = Vec<ModelDescriptor>> + Send>>;
+
+pub trait ModelCatalog: Send + Sync {
+    /// Every model available across providers. A provider a request
+    /// can't reach is left out rather than failing the whole listing.
+    fn list(&self) -> ModelListing;
+
+    /// Builds the concrete `Model` `descriptor` names.
+    fn build(&self, descriptor: &ModelDescriptor) -> Result<Arc<dyn Model>, Box<dyn Error>>;
 }
 
 /// Converts the transcript into the form Model expects. A recorded

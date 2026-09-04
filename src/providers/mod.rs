@@ -3,6 +3,7 @@
 //! What both wire formats share lives here: the same three role words,
 //! and a reply streamed as one JSON object per line over HTTP.
 
+mod catalog;
 mod ollama;
 mod openai;
 
@@ -14,6 +15,7 @@ use tokio_stream::StreamExt;
 
 use crate::percept::{Actor, Chunk, Usage};
 
+pub use catalog::Catalog;
 pub use ollama::Ollama;
 pub use openai::OpenAi;
 
