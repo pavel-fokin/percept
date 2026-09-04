@@ -1,5 +1,5 @@
 use super::*;
-use crate::percept::{Actor, Event, NodeId};
+use crate::percept::{Actor, Event, NodeId, NodeRef};
 use crate::testing::FakeLog;
 
 fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
@@ -119,17 +119,36 @@ fn a_node_line_carries_its_id_and_sources_as_uuids() {
 }
 
 #[test]
-fn an_edge_line_names_its_kind_under_edge() {
-    let edge = Edge {
-        kind: "supports".to_string(),
-        from: NodeId::new(),
-        to: NodeId::new(),
+fn an_edge_line_names_its_ends_as_kind_and_name() {
+    let mut map = Map::empty(&crate::percept::CODE);
+    for (kind, name) in [("file", "src/main.rs"), ("package", "clap")] {
+        map.apply(Mutation::AddNode {
+            kind: kind.to_string(),
+            name: name.to_string(),
+            properties: BTreeMap::new(),
+            sources: Vec::new(),
+        })
+        .unwrap();
+    }
+    map.apply(Mutation::AddEdge {
+        kind: "imports".to_string(),
+        from: NodeRef {
+            kind: "file".to_string(),
+            name: "src/main.rs".to_string(),
+        },
+        to: NodeRef {
+            kind: "package".to_string(),
+            name: "clap".to_string(),
+        },
         sources: Vec::new(),
-    };
+    })
+    .unwrap();
 
-    let line: serde_json::Value = serde_json::from_str(&encode_edge(&edge)).unwrap();
+    let line: serde_json::Value =
+        serde_json::from_str(&encode_edge(&map, &map.edges()[0])).unwrap();
 
-    assert_eq!(line["edge"], "supports");
-    assert_eq!(line["from"], edge.from.as_uuid().to_string());
+    assert_eq!(line["edge"], "imports");
+    assert_eq!(line["from"], "file:src/main.rs");
+    assert_eq!(line["to"], "package:clap");
     assert_eq!(line["sources"], serde_json::json!([]));
 }

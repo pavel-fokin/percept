@@ -8,7 +8,9 @@ use std::collections::{BTreeMap, HashSet};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::percept::{Edge, EventId, EventLog, Map, MapError, Mutation, Node, Payload, Schema};
+use crate::percept::{
+    Edge, EventId, EventLog, Map, MapError, Mutation, Node, NodeId, Payload, Schema,
+};
 use crate::store::event::ids;
 use crate::store::parse_event_id;
 
@@ -116,14 +118,22 @@ pub fn encode_node(node: &Node) -> String {
     .expect("NodeLine always serializes")
 }
 
-pub fn encode_edge(edge: &Edge) -> String {
+/// One line per edge, its ends named `kind:name` - the way `--around`
+/// and `--from` take a node - so the line reads on its own instead of
+/// through a join on the node lines above it.
+pub fn encode_edge(map: &Map, edge: &Edge) -> String {
     serde_json::to_string(&EdgeLine {
         edge: &edge.kind,
-        from: edge.from.as_uuid().to_string(),
-        to: edge.to.as_uuid().to_string(),
+        from: node_ref(map, edge.from),
+        to: node_ref(map, edge.to),
         sources: ids(&edge.sources),
     })
     .expect("EdgeLine always serializes")
+}
+
+fn node_ref(map: &Map, id: NodeId) -> String {
+    let node = map.node(id).expect("an edge's ends are nodes of its map");
+    format!("{}:{}", node.kind, node.name)
 }
 
 #[cfg(test)]

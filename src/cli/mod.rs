@@ -397,7 +397,10 @@ fn print_map(mut map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error:
         map = map.keep_kinds(&args.kind)?;
     }
     let nodes = map.nodes().iter().map(store::encode_node);
-    let edges = map.edges().iter().map(store::encode_edge);
+    let edges = map
+        .edges()
+        .iter()
+        .map(|edge| store::encode_edge(&map, edge));
     print_lines(nodes.chain(edges))
 }
 
