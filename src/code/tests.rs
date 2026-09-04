@@ -8,13 +8,10 @@ struct Fixture {
 }
 
 impl Fixture {
-    /// `ignore` only reads `.gitignore` files inside an actual git
-    /// (or jj) repository, so a fixture that wants one respected needs
-    /// a `.git` directory too, empty though it is here.
     fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
-        fs::create_dir_all(dir.path().join(".git")).unwrap();
-        Self { dir }
+        Self {
+            dir: tempfile::tempdir().unwrap(),
+        }
     }
 
     /// Writes `content` at `path`, relative to the fixture's root,
@@ -240,4 +237,78 @@ fn a_use_of_a_module_the_file_declares_is_a_file_edge_not_a_package() {
         "imports",
         ("file", "src/app/mod.rs"),
     ));
+}
+
+#[test]
+fn a_gitignore_is_honoured_outside_a_git_checkout() {
+    let fixture = Fixture::new();
+    fixture
+        .write(".gitignore", "target\n")
+        .write("src/main.rs", "")
+        .write("target/debug/build/gen.rs", "pub fn gen() {}\n");
+
+    let map = fixture.build();
+
+    assert!(map.find("file", "target/debug/build/gen.rs").is_none());
+}
+
+#[test]
+fn a_use_inside_an_inline_module_is_not_the_file_s_import() {
+    let fixture = Fixture::new();
+    fixture.write("src/helper.rs", "").write(
+        "src/store/mod.rs",
+        "#[cfg(test)]\nmod tests {\n    use super::helper::h;\n}\n",
+    );
+
+    let map = fixture.build();
+
+    assert!(map.edges().is_empty());
+}
+
+#[test]
+fn a_use_of_the_file_s_own_item_makes_no_edge() {
+    let fixture = Fixture::new();
+    fixture.write("src/foo/mod.rs", "pub struct Bar;\nuse crate::foo::Bar;\n");
+
+    let map = fixture.build();
+
+    assert!(map.edges().iter().all(|edge| edge.kind != "imports"));
+}
+
+#[test]
+fn a_glob_import_of_the_parent_is_an_edge_to_the_parent_s_file() {
+    let fixture = Fixture::new();
+    fixture
+        .write(
+            "src/percept/map.rs",
+            "pub struct Map;\n#[cfg(test)]\nmod tests;\n",
+        )
+        .write("src/percept/map/tests.rs", "use super::*;\n");
+
+    let map = fixture.build();
+
+    assert!(has_edge(
+        &map,
+        ("file", "src/percept/map/tests.rs"),
+        "imports",
+        ("file", "src/percept/map.rs"),
+    ));
+}
+
+#[test]
+fn two_impls_of_one_generic_trait_keep_their_methods_apart() {
+    let fixture = Fixture::new();
+    fixture.write(
+        "src/main.rs",
+        "struct E;\nimpl From<A> for E { fn from(a: A) -> E { E } }\nimpl From<B> for E { fn from(b: B) -> E { E } }\n",
+    );
+
+    let map = fixture.build();
+
+    assert!(map
+        .find("function", "src/main.rs::E::From<A>::from")
+        .is_some());
+    assert!(map
+        .find("function", "src/main.rs::E::From<B>::from")
+        .is_some());
 }

@@ -133,9 +133,9 @@ fn an_external_crate_becomes_a_package() {
 }
 
 #[test]
-fn an_unresolved_crate_path_is_none() {
-    let known = known(&["src/main.rs"]);
-    assert!(resolve_path("src/main.rs", &path(&["crate", "nope"]), &[], &known).is_none());
+fn a_crate_path_with_no_root_file_is_none() {
+    let known = known(&["src/cli/mod.rs"]);
+    assert!(resolve_path("src/cli/mod.rs", &path(&["crate", "nope"]), &[], &known).is_none());
 }
 
 #[test]
@@ -231,4 +231,40 @@ fn a_symbols_line_is_the_items_first_token() {
     let source = "\n\npub fn greet() {}\n";
     let symbols = symbols(source).unwrap();
     assert_eq!(symbols[0].line, 3);
+}
+
+#[test]
+fn a_glob_import_names_the_path_before_the_star() {
+    let imports = imports("use super::*;\nuse crate::a::*;").unwrap();
+    assert_eq!(imports.paths, vec![path(&["super"]), path(&["crate", "a"])]);
+}
+
+#[test]
+fn an_item_in_the_parent_module_resolves_to_the_parent_s_file() {
+    let known = known(&["src/percept/mod.rs", "src/percept/map.rs"]);
+    let target = resolve_path(
+        "src/percept/map.rs",
+        &path(&["super", "Event"]),
+        &[],
+        &known,
+    )
+    .unwrap();
+    assert_eq!(target_name(target), "src/percept/mod.rs");
+}
+
+#[test]
+fn an_item_in_the_crate_root_resolves_to_main_rs() {
+    let known = known(&["src/main.rs", "src/cli/mod.rs"]);
+    let target =
+        resolve_path("src/cli/mod.rs", &path(&["crate", "LOG_PATH"]), &[], &known).unwrap();
+    assert_eq!(target_name(target), "src/main.rs");
+}
+
+#[test]
+fn a_trait_impl_keeps_the_trait_s_arguments_and_drops_its_path() {
+    let source = "impl std::convert::From<io::Error> for E { fn from(e: io::Error) -> E { E } }\n\
+                  impl fmt::Display for &E { fn fmt(&self) {} }";
+    let symbols = symbols(source).unwrap();
+    let paths: Vec<String> = symbols.iter().map(|s| s.path.join("::")).collect();
+    assert_eq!(paths, ["E::From<io::Error>::from", "E::Display::fmt"]);
 }

@@ -379,7 +379,7 @@ fn a_schema_is_found_by_name() {
     assert_eq!(Schema::find("decisions").unwrap().name, "decisions");
     assert_eq!(
         Schema::find("tasks").err().unwrap().to_string(),
-        "no map named \"tasks\"; maps are decisions"
+        "no map named \"tasks\"; maps are decisions, code"
     );
 }
 

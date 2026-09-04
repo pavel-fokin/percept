@@ -115,9 +115,9 @@ fn read_symbols(root: Node, source: &str) -> Vec<Symbol> {
 
         if let (Some(def), Some(name)) = (function_def, function_name) {
             let mut path: Vec<String> = impl_type
-                .into_iter()
-                .chain(impl_trait)
                 .map(|node| base_name(node, source))
+                .into_iter()
+                .chain(impl_trait.map(|node| trait_name(node, source)))
                 .collect();
             path.push(text(name, source));
             symbols.push(Symbol {
@@ -140,8 +140,9 @@ fn read_symbols(root: Node, source: &str) -> Vec<Symbol> {
     symbols
 }
 
-/// A type or trait as written on an `impl` block, with its generics and
-/// path dropped: `Id<T>` is `Id`, `fmt::Display` is `Display`.
+/// A type as written on an `impl` block, with its generics, path, and
+/// reference dropped: `Id<T>` is `Id`, `fmt::Display` is `Display`,
+/// `&Foo` is `Foo`.
 fn base_name(node: Node, source: &str) -> String {
     match node.kind() {
         "generic_type" => node
@@ -150,7 +151,23 @@ fn base_name(node: Node, source: &str) -> String {
         "scoped_type_identifier" | "scoped_identifier" => node
             .child_by_field_name("name")
             .map_or_else(String::new, |inner| text(inner, source)),
+        "reference_type" => node
+            .child_by_field_name("type")
+            .map_or_else(String::new, |inner| base_name(inner, source)),
         _ => text(node, source),
+    }
+}
+
+/// A trait as written on an `impl` block, with its path dropped but
+/// its arguments kept: `fmt::Display` is `Display`, `From<io::Error>`
+/// stays as it is, because `impl From<A> for T` and `impl From<B> for
+/// T` are two impls whose methods must not share a name.
+fn trait_name(node: Node, source: &str) -> String {
+    match (node.kind(), node.child_by_field_name("type_arguments")) {
+        ("generic_type", Some(arguments)) => {
+            format!("{}{}", base_name(node, source), text(arguments, source))
+        }
+        _ => base_name(node, source),
     }
 }
 
@@ -215,7 +232,13 @@ fn expand(node: Node, source: &str) -> Vec<Vec<String>> {
                 .flat_map(|child| expand(child, source))
                 .collect()
         }
-        "use_wildcard" | "use_as_clause" => prefix_paths(node, source),
+        "use_as_clause" => prefix_paths(node, source),
+        // `use a::b::*` - the grammar gives the wildcard's path no
+        // field name, so it is the first named child.
+        "use_wildcard" => match node.named_child(0) {
+            Some(path) => expand(path, source),
+            None => vec![Vec::new()],
+        },
         _ => Vec::new(),
     }
 }
@@ -292,7 +315,9 @@ pub fn resolve_module(file: &str, name: &str, known: &HashSet<String>) -> Option
 /// The longest prefix of `segments`, joined onto `base`, that names a
 /// file `known` holds - `base/a/b.rs` or `base/a/b/mod.rs` before
 /// `base/a.rs` or `base/a/mod.rs`. A trailing segment that names an
-/// item rather than a module is what the shorter prefixes are for.
+/// item rather than a module is what the shorter prefixes are for;
+/// when no segment names a file the item lives in `base`'s own module,
+/// so the answer is the file that speaks for it.
 fn resolve_beside(base: &str, segments: &[String], known: &HashSet<String>) -> Option<String> {
     for end in (1..=segments.len()).rev() {
         let joined = join(base, &segments[..end]);
@@ -305,7 +330,21 @@ fn resolve_beside(base: &str, segments: &[String], known: &HashSet<String>) -> O
             return Some(as_mod);
         }
     }
-    None
+    module_file(base, known)
+}
+
+/// The file that speaks for the module whose children live in `base`:
+/// `base/mod.rs`, `base.rs`, or for the crate root `base/main.rs` or
+/// `base/lib.rs`.
+fn module_file(base: &str, known: &HashSet<String>) -> Option<String> {
+    [
+        format!("{base}/mod.rs"),
+        format!("{base}.rs"),
+        format!("{base}/main.rs"),
+        format!("{base}/lib.rs"),
+    ]
+    .into_iter()
+    .find(|file| known.contains(file))
 }
 
 fn join(base: &str, segments: &[String]) -> String {

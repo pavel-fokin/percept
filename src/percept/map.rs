@@ -192,6 +192,7 @@ impl fmt::Display for MapError {
                 "no map named {name:?}; maps are {}",
                 SCHEMAS
                     .iter()
+                    .chain(DERIVED)
                     .map(|schema| schema.name)
                     .collect::<Vec<_>>()
                     .join(", ")

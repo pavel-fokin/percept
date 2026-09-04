@@ -4,13 +4,19 @@
 ; a module-level function or an `impl` method, `@type.def` a
 ; module-level struct, enum, trait, or type alias, and
 ; `@impl.type`/`@impl.trait` the `impl` block a method sits in.
+;
+; Every pattern is anchored under `source_file`: an item inside an
+; inline `mod x { }` belongs to that module, not the file, and a `use`
+; there would resolve against the wrong base.
 
-(use_declaration
-  argument: (_) @import.source)
+(source_file
+  (use_declaration
+    argument: (_) @import.source))
 
-(mod_item
-  !body
-  name: (identifier) @module.decl)
+(source_file
+  (mod_item
+    !body
+    name: (identifier) @module.decl))
 
 (source_file
   (function_item

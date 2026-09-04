@@ -10,59 +10,20 @@
 mod rust;
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
-use std::fmt;
 use std::path::Path;
 
 use ignore::WalkBuilder;
 
 use crate::percept::{Map, MapError, Mutation, NodeRef, CODE};
 
-/// Why the code map couldn't be built: the walk or a read hit an I/O
-/// error, or - this should not happen, since every kind here is one
-/// `CODE` declares - a mutation broke the schema.
-#[derive(Debug)]
-pub enum Error {
-    Walk(ignore::Error),
-    Io(std::io::Error),
-    Map(MapError),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Walk(e) => write!(f, "{e}"),
-            Self::Io(e) => write!(f, "{e}"),
-            Self::Map(e) => write!(f, "{e}"),
-        }
-    }
-}
-
-impl std::error::Error for Error {}
-
-impl From<ignore::Error> for Error {
-    fn from(e: ignore::Error) -> Self {
-        Self::Walk(e)
-    }
-}
-
-impl From<std::io::Error> for Error {
-    fn from(e: std::io::Error) -> Self {
-        Self::Io(e)
-    }
-}
-
-impl From<MapError> for Error {
-    fn from(e: MapError) -> Self {
-        Self::Map(e)
-    }
-}
-
 /// Builds the code map from every `.rs` file under `root`, gitignore
 /// rules applied the way `ignore` applies them for any tool. Node ids
 /// are minted fresh by `Map::apply`; nothing here keeps them, and
-/// nothing here opens the event log.
-pub fn build(root: &Path) -> Result<Map, Error> {
-    let files = rust_files(root)?;
+/// nothing here opens the event log. The only error is a mutation the
+/// schema refuses, which every kind here being one `CODE` declares
+/// should make impossible.
+pub fn build(root: &Path) -> Result<Map, MapError> {
+    let files = rust_files(root);
     let known: HashSet<String> = files.iter().cloned().collect();
 
     let mut map = Map::empty(&CODE);
@@ -76,7 +37,15 @@ pub fn build(root: &Path) -> Result<Map, Error> {
     }
 
     for file in &files {
-        let source = std::fs::read_to_string(root.join(file))?;
+        // A file that can't be read is not a fact of the map. Say so
+        // and carry on: one bad file must not cost the other hundred.
+        let source = match std::fs::read(root.join(file)) {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(e) => {
+                eprintln!("percept: skipping {file}: {e}");
+                continue;
+            }
+        };
         let Some((imports, symbols)) = rust::read(&source) else {
             continue;
         };
@@ -95,7 +64,7 @@ pub fn build(root: &Path) -> Result<Map, Error> {
             }) {
                 Ok(_) => {}
                 Err(MapError::DuplicateNode { .. }) => continue,
-                Err(e) => return Err(e.into()),
+                Err(e) => return Err(e),
             }
             map.apply(Mutation::AddEdge {
                 kind: "contains".to_string(),
@@ -124,6 +93,11 @@ pub fn build(root: &Path) -> Result<Map, Error> {
         }
 
         for (kind, name) in targets {
+            // `use self::Item` names the file itself: no edge, a file
+            // does not import itself.
+            if kind == "file" && &name == file {
+                continue;
+            }
             if kind == "package" && map.find(&kind, &name).is_none() {
                 map.apply(Mutation::AddNode {
                     kind: "package".to_string(),
@@ -156,12 +130,21 @@ fn name_of(target: rust::Target) -> (String, String) {
     }
 }
 
-/// Every `.rs` file under `root`, gitignore-aware, as paths relative to
-/// `root` with `/` separators - the form a `file` node is named by.
-fn rust_files(root: &Path) -> Result<Vec<String>, Error> {
+/// Every `.rs` file under `root`, gitignore-aware whether or not `root`
+/// is a git checkout - an exported tree keeps its `.gitignore` and its
+/// `target/` - as paths relative to `root` with `/` separators, the
+/// form a `file` node is named by. An entry the walk can't open is
+/// reported and skipped, not the end of the map.
+fn rust_files(root: &Path) -> Vec<String> {
     let mut files = Vec::new();
-    for entry in WalkBuilder::new(root).build() {
-        let entry = entry?;
+    for entry in WalkBuilder::new(root).require_git(false).build() {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(e) => {
+                eprintln!("percept: skipping: {e}");
+                continue;
+            }
+        };
         let is_rust_file = entry.file_type().is_some_and(|t| t.is_file())
             && entry.path().extension().is_some_and(|ext| ext == "rs");
         if !is_rust_file {
@@ -171,7 +154,7 @@ fn rust_files(root: &Path) -> Result<Vec<String>, Error> {
         files.push(to_slash(relative));
     }
     files.sort();
-    Ok(files)
+    files
 }
 
 fn to_slash(path: &Path) -> String {
