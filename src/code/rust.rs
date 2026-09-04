@@ -1,13 +1,14 @@
 //! Rust support for the code map: a tree-sitter query pulls every `use`
-//! path and `mod x;` declaration out of one file's source; the
-//! functions below turn each into the file or package it names. What a
-//! query cannot express - how an import path resolves to a file - is
-//! this module's job, and a second language adds one more like it.
+//! path, `mod x;` declaration, function, and type out of one file's
+//! source; the functions below turn each into the node or edge it
+//! names. What a query cannot express - how an import path resolves to
+//! a file, what a generic or trait impl's type is called - is this
+//! module's job, and a second language adds one more like it.
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
-use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator};
+use tree_sitter::{Node, Parser, Query, QueryCursor, StreamingIterator, Tree};
 
 const QUERY_SRC: &str = include_str!("rust.scm");
 
@@ -17,6 +18,14 @@ fn query() -> &'static Query {
         Query::new(&tree_sitter_rust::LANGUAGE.into(), QUERY_SRC)
             .expect("rust.scm is valid tree-sitter query syntax")
     })
+}
+
+fn parse(source: &str) -> Option<Tree> {
+    let mut parser = Parser::new();
+    parser
+        .set_language(&tree_sitter_rust::LANGUAGE.into())
+        .expect("tree-sitter-rust's language loads");
+    parser.parse(source, None)
 }
 
 /// What one file's `use` and `mod` statements name, before any of it is
@@ -32,19 +41,21 @@ pub struct Imports {
     pub modules: Vec<String>,
 }
 
-/// Parses `source` and reads its imports through the query. A file with
-/// syntax errors still parses, around error nodes; `None` only when
-/// tree-sitter gives up on the parse itself.
-pub fn imports(source: &str) -> Option<Imports> {
-    let mut parser = Parser::new();
-    parser
-        .set_language(&tree_sitter_rust::LANGUAGE.into())
-        .expect("tree-sitter-rust's language loads");
-    let tree = parser.parse(source, None)?;
+/// Parses `source` once and reads both its imports and its symbols -
+/// the pair `code::build` wants per file, since the parse is the
+/// expensive step and a file gets only one. A file with syntax errors
+/// still parses, around error nodes; `None` only when tree-sitter
+/// gives up on the parse itself.
+pub fn read(source: &str) -> Option<(Imports, Vec<Symbol>)> {
+    let tree = parse(source)?;
+    let root = tree.root_node();
+    Some((read_imports(root, source), read_symbols(root, source)))
+}
 
+fn read_imports(root: Node, source: &str) -> Imports {
     let query = query();
     let mut cursor = QueryCursor::new();
-    let mut captures = cursor.captures(query, tree.root_node(), source.as_bytes());
+    let mut captures = cursor.captures(query, root, source.as_bytes());
     let names = query.capture_names();
 
     let mut result = Imports::default();
@@ -56,7 +67,91 @@ pub fn imports(source: &str) -> Option<Imports> {
             _ => {}
         }
     }
-    Some(result)
+    result
+}
+
+/// One module-level function or type, or one method in a module-level
+/// `impl` block, read from a file.
+pub struct Symbol {
+    pub kind: &'static str,
+    /// The name's segments after the file, first-to-last: `["map_of"]`
+    /// for a free function, `["Map", "apply"]` for an inherent method,
+    /// `["Node", "Display", "fmt"]` for a trait impl method.
+    pub path: Vec<String>,
+    pub public: bool,
+    pub line: usize,
+}
+
+fn read_symbols(root: Node, source: &str) -> Vec<Symbol> {
+    let query = query();
+    let mut cursor = QueryCursor::new();
+    let mut matches = cursor.matches(query, root, source.as_bytes());
+    let names = query.capture_names();
+
+    let mut symbols = Vec::new();
+    while let Some(m) = matches.next() {
+        let mut function_def = None;
+        let mut function_name = None;
+        let mut function_public = false;
+        let mut type_def = None;
+        let mut type_name = None;
+        let mut type_public = false;
+        let mut impl_type = None;
+        let mut impl_trait = None;
+
+        for capture in m.captures() {
+            match names[capture.index as usize] {
+                "function.def" => function_def = Some(capture.node),
+                "function.name" => function_name = Some(capture.node),
+                "function.visibility" => function_public = true,
+                "type.def" => type_def = Some(capture.node),
+                "type.name" => type_name = Some(capture.node),
+                "type.visibility" => type_public = true,
+                "impl.type" => impl_type = Some(capture.node),
+                "impl.trait" => impl_trait = Some(capture.node),
+                _ => {}
+            }
+        }
+
+        if let (Some(def), Some(name)) = (function_def, function_name) {
+            let mut path: Vec<String> = impl_type
+                .into_iter()
+                .chain(impl_trait)
+                .map(|node| base_name(node, source))
+                .collect();
+            path.push(text(name, source));
+            symbols.push(Symbol {
+                kind: "function",
+                path,
+                public: function_public,
+                line: def.start_position().row + 1,
+            });
+        } else if let (Some(def), Some(name)) = (type_def, type_name) {
+            symbols.push(Symbol {
+                kind: "type",
+                path: vec![text(name, source)],
+                public: type_public,
+                line: def.start_position().row + 1,
+            });
+        }
+    }
+
+    symbols.sort_by_key(|symbol| symbol.line);
+    symbols
+}
+
+/// A type or trait as written on an `impl` block, with its generics and
+/// path dropped: `Id<T>` is `Id`, `fmt::Display` is `Display`.
+fn base_name(node: Node, source: &str) -> String {
+    match node.kind() {
+        "generic_type" => node
+            .child_by_field_name("type")
+            .map_or_else(String::new, |inner| base_name(inner, source)),
+        "scoped_type_identifier" | "scoped_identifier" => node
+            .child_by_field_name("name")
+            .map_or_else(String::new, |inner| text(inner, source)),
+        _ => text(node, source),
+    }
 }
 
 fn text(node: Node, source: &str) -> String {

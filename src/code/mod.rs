@@ -17,9 +17,9 @@ use ignore::WalkBuilder;
 
 use crate::percept::{Map, MapError, Mutation, NodeRef, CODE};
 
-/// Why the code map couldn't be built: the walk hit an I/O error, or -
-/// this should not happen, since every kind and edge here comes from
-/// this module's own constants - a mutation broke the schema.
+/// Why the code map couldn't be built: the walk or a read hit an I/O
+/// error, or - this should not happen, since every kind here is one
+/// `CODE` declares - a mutation broke the schema.
 #[derive(Debug)]
 pub enum Error {
     Walk(ignore::Error),
@@ -77,9 +77,39 @@ pub fn build(root: &Path) -> Result<Map, Error> {
 
     for file in &files {
         let source = std::fs::read_to_string(root.join(file))?;
-        let Some(imports) = rust::imports(&source) else {
+        let Some((imports, symbols)) = rust::read(&source) else {
             continue;
         };
+
+        for symbol in symbols {
+            let name = format!("{file}::{}", symbol.path.join("::"));
+            let properties = BTreeMap::from([
+                ("public".to_string(), symbol.public.to_string()),
+                ("line".to_string(), symbol.line.to_string()),
+            ]);
+            match map.apply(Mutation::AddNode {
+                kind: symbol.kind.to_string(),
+                name: name.clone(),
+                properties,
+                sources: Vec::new(),
+            }) {
+                Ok(_) => {}
+                Err(MapError::DuplicateNode { .. }) => continue,
+                Err(e) => return Err(e.into()),
+            }
+            map.apply(Mutation::AddEdge {
+                kind: "contains".to_string(),
+                from: NodeRef {
+                    kind: "file".to_string(),
+                    name: file.clone(),
+                },
+                to: NodeRef {
+                    kind: symbol.kind.to_string(),
+                    name,
+                },
+                sources: Vec::new(),
+            })?;
+        }
 
         let mut targets = BTreeSet::new();
         for path in &imports.paths {

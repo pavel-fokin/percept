@@ -186,6 +186,45 @@ fn a_gitignored_file_is_skipped() {
 }
 
 #[test]
+fn a_functions_symbol_carries_public_and_line_and_is_contained_by_its_file() {
+    let fixture = Fixture::new();
+    fixture.write("src/main.rs", "\npub fn greet() {}\n");
+
+    let map = fixture.build();
+
+    let node = map.find("function", "src/main.rs::greet").unwrap();
+    assert_eq!(
+        node.properties.get("public").map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(node.properties.get("line").map(String::as_str), Some("2"));
+    assert!(has_edge(
+        &map,
+        ("file", "src/main.rs"),
+        "contains",
+        ("function", "src/main.rs::greet"),
+    ));
+}
+
+#[test]
+fn a_cfg_gated_duplicate_name_skips_rather_than_fails() {
+    let fixture = Fixture::new();
+    fixture.write(
+        "src/main.rs",
+        "#[cfg(unix)]\nfn greet() {}\n#[cfg(windows)]\nfn greet() {}\n",
+    );
+
+    let map = fixture.build();
+
+    let symbols: Vec<_> = map
+        .nodes()
+        .iter()
+        .filter(|node| node.kind == "function" && node.name == "src/main.rs::greet")
+        .collect();
+    assert_eq!(symbols.len(), 1);
+}
+
+#[test]
 fn a_use_of_a_module_the_file_declares_is_a_file_edge_not_a_package() {
     let fixture = Fixture::new();
     fixture

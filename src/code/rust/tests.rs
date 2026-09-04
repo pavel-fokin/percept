@@ -1,6 +1,16 @@
 use super::*;
 use std::collections::HashSet;
 
+fn imports(source: &str) -> Option<Imports> {
+    let tree = parse(source)?;
+    Some(read_imports(tree.root_node(), source))
+}
+
+fn symbols(source: &str) -> Option<Vec<Symbol>> {
+    let tree = parse(source)?;
+    Some(read_symbols(tree.root_node(), source))
+}
+
 fn known(files: &[&str]) -> HashSet<String> {
     files.iter().map(|f| f.to_string()).collect()
 }
@@ -137,4 +147,88 @@ fn a_bare_name_the_file_declares_as_a_module_resolves_beside_it() {
 
     let undeclared = resolve_path("src/main.rs", &path(&["app", "App"]), &[], &known).unwrap();
     assert!(matches!(undeclared, Target::Package(name) if name == "app"));
+}
+
+fn function_paths(symbols: &[Symbol]) -> Vec<String> {
+    symbols
+        .iter()
+        .filter(|s| s.kind == "function")
+        .map(|s| s.path.join("::"))
+        .collect()
+}
+
+fn type_paths(symbols: &[Symbol]) -> Vec<String> {
+    symbols
+        .iter()
+        .filter(|s| s.kind == "type")
+        .map(|s| s.path.join("::"))
+        .collect()
+}
+
+#[test]
+fn a_free_function_is_a_symbol_named_by_itself() {
+    let symbols = symbols("fn greet() {}").unwrap();
+    assert_eq!(function_paths(&symbols), vec!["greet"]);
+}
+
+#[test]
+fn a_pub_function_is_public_and_a_private_one_is_not() {
+    let symbols = symbols("pub fn greet() {}\nfn helper() {}").unwrap();
+    let public: Vec<bool> = symbols.iter().map(|s| s.public).collect();
+    assert_eq!(public, vec![true, false]);
+}
+
+#[test]
+fn a_pub_crate_function_is_public() {
+    let symbols = symbols("pub(crate) fn greet() {}").unwrap();
+    assert!(symbols[0].public);
+}
+
+#[test]
+fn an_inherent_method_is_qualified_by_its_type() {
+    let source = "struct Map;\nimpl Map {\n    fn apply(&self) {}\n}\n";
+    let symbols = symbols(source).unwrap();
+    assert_eq!(function_paths(&symbols), vec!["Map::apply"]);
+}
+
+#[test]
+fn a_trait_impl_method_is_qualified_by_its_type_and_trait() {
+    let source = "struct Node;\nimpl std::fmt::Display for Node {\n    fn fmt(&self) {}\n}\n";
+    let symbols = symbols(source).unwrap();
+    assert_eq!(function_paths(&symbols), vec!["Node::Display::fmt"]);
+}
+
+#[test]
+fn a_generic_impl_drops_the_type_parameter() {
+    let source = "struct Id<T>(T);\nimpl<T> Clone for Id<T> {\n    fn clone(&self) -> Self {}\n}\n";
+    let symbols = symbols(source).unwrap();
+    assert_eq!(function_paths(&symbols), vec!["Id::Clone::clone"]);
+}
+
+#[test]
+fn struct_enum_trait_and_alias_are_type_symbols() {
+    let source = "struct A;\nenum B {}\ntrait C {}\ntype D = A;\n";
+    let symbols = symbols(source).unwrap();
+    assert_eq!(type_paths(&symbols), vec!["A", "B", "C", "D"]);
+}
+
+#[test]
+fn contents_of_an_inline_module_are_skipped() {
+    let source = "mod tests {\n    fn helper() {}\n    struct Fixture;\n}\n";
+    let symbols = symbols(source).unwrap();
+    assert!(symbols.is_empty());
+}
+
+#[test]
+fn a_function_nested_in_a_function_body_is_skipped() {
+    let source = "fn outer() {\n    fn inner() {}\n}\n";
+    let symbols = symbols(source).unwrap();
+    assert_eq!(function_paths(&symbols), vec!["outer"]);
+}
+
+#[test]
+fn a_symbols_line_is_the_items_first_token() {
+    let source = "\n\npub fn greet() {}\n";
+    let symbols = symbols(source).unwrap();
+    assert_eq!(symbols[0].line, 3);
 }
