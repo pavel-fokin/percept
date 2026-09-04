@@ -106,6 +106,18 @@ pub trait AppService {
 
     /// The model's own name, available before any turn asks.
     fn model_name(&self) -> &str;
+
+    /// Every model the catalog can reach, across providers.
+    fn available_models(&self) -> percept::ModelListing;
+
+    /// Swaps the live model for the one `descriptor` names. Session-only:
+    /// nothing is committed to the log. Refuses, leaving the current
+    /// model in place, while a turn is streaming - a switch can never
+    /// land mid-turn.
+    fn set_model(
+        &mut self,
+        descriptor: &percept::ModelDescriptor,
+    ) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 /// What the caller should do after `begin_tool`. The decision - run,
@@ -191,6 +203,7 @@ pub struct App {
     /// commits, so the log can tell its events from other writers'.
     source: String,
     chat: Arc<dyn percept::Model>,
+    catalog: Arc<dyn percept::ModelCatalog>,
     log: Arc<dyn percept::EventLog>,
     /// The tools the model may call, sent with each request when the
     /// model reports `tool_use`.
@@ -213,6 +226,7 @@ impl App {
     /// first turn.
     pub fn new(
         chat: Arc<dyn percept::Model>,
+        catalog: Arc<dyn percept::ModelCatalog>,
         log: Arc<dyn percept::EventLog>,
         tools: Vec<Arc<dyn percept::Tool>>,
         map_shape: MapShape,
@@ -226,6 +240,7 @@ impl App {
             events,
             source,
             chat,
+            catalog,
             log,
             tools,
             map_shape,
@@ -553,6 +568,21 @@ impl AppService for App {
 
     fn model_name(&self) -> &str {
         self.chat.name()
+    }
+
+    fn available_models(&self) -> percept::ModelListing {
+        self.catalog.list()
+    }
+
+    fn set_model(
+        &mut self,
+        descriptor: &percept::ModelDescriptor,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.is_replying() {
+            return Err("a reply is already streaming".into());
+        }
+        self.chat = self.catalog.build(descriptor)?;
+        Ok(())
     }
 }
 
