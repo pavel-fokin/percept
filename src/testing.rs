@@ -172,7 +172,9 @@ pub fn usage() -> Usage {
 /// A ModelCatalog that lists whatever it was given and builds whatever
 /// model was registered against a descriptor, without reaching a
 /// provider. `build` errs for any descriptor it wasn't given a model
-/// for.
+/// for. `default` lists and builds nothing, for a caller that only
+/// needs `App::new` to compile.
+#[derive(Default)]
 pub struct FakeCatalog {
     listing: Vec<ModelDescriptor>,
     models: Vec<(ModelDescriptor, Arc<dyn Model>)>,

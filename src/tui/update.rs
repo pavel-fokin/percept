@@ -18,13 +18,18 @@ pub fn handle_key(
     key: KeyEvent,
     reply_tx: &UnboundedSender<StreamEvent>,
 ) -> Result<bool, Box<dyn std::error::Error>> {
+    // A hard quit, unlike Esc, which closes the popup instead while
+    // it's open - so it has to win over the popup diversion below, not
+    // just the ordinary bindings past it.
+    if (key.code, key.modifiers) == (KeyCode::Char('c'), KeyModifiers::CONTROL) {
+        return Ok(true);
+    }
     if chat.models_menu.is_some() {
         handle_models_menu_key(chat, key);
         return Ok(false);
     }
     match (key.code, key.modifiers) {
         (KeyCode::Esc, _) => Ok(true),
-        (KeyCode::Char('c'), KeyModifiers::CONTROL) => Ok(true),
         (KeyCode::Char('j'), KeyModifiers::CONTROL) => {
             chat.textarea.insert_newline();
             Ok(false)
@@ -80,8 +85,9 @@ fn current_text(chat: &Chat) -> String {
 fn open_models_menu(chat: &mut Chat, reply_tx: &UnboundedSender<StreamEvent>) {
     chat.textarea.clear();
     chat.error = None;
-    chat.models_menu = Some(ModelsMenu::loading());
-    spawn_models(chat.app.available_models(), reply_tx.clone());
+    let token = chat.new_models_token();
+    chat.models_menu = Some(ModelsMenu::loading(token));
+    spawn_models(chat.app.available_models(), token, reply_tx.clone());
 }
 
 /// Key handling while the `/models` popup is open. Every other key is
@@ -97,7 +103,10 @@ fn handle_models_menu_key(chat: &mut Chat, key: KeyEvent) {
         KeyCode::Enter => {
             if let Some(descriptor) = menu.selected().cloned() {
                 match chat.app.set_model(&descriptor) {
-                    Ok(()) => chat.models_menu = None,
+                    Ok(()) => {
+                        chat.models_menu = None;
+                        chat.error = None;
+                    }
                     Err(err) => chat.error = Some(err.to_string()),
                 }
             }
@@ -152,11 +161,15 @@ pub fn handle_stream(
             chat.app.end_stream()?;
             chat.error = error;
         }
-        // The popup may have been closed (Esc) before the fetch landed -
-        // nothing to populate then.
-        StreamEvent::ModelsListed(descriptors) => {
+        // The popup may have been closed (Esc) before the fetch landed,
+        // or closed and reopened since - either way, a token that
+        // doesn't match the open menu's own means this fetch is stale
+        // and its result is silently dropped.
+        StreamEvent::ModelsListed(token, descriptors) => {
             if let Some(menu) = chat.models_menu.as_mut() {
-                menu.populate(descriptors);
+                if menu.token() == token {
+                    menu.populate(descriptors);
+                }
             }
         }
     }
@@ -176,11 +189,13 @@ fn spawn_tool(tool: Arc<dyn Tool>, arguments: String, reply_tx: UnboundedSender<
 }
 
 /// Fetches the model catalog on its own task, so a slow provider never
-/// freezes the UI. Its result comes back as a `ModelsListed` event.
-fn spawn_models(listing: ModelListing, reply_tx: UnboundedSender<StreamEvent>) {
+/// freezes the UI. Its result comes back as a `ModelsListed` event,
+/// carrying `token` so a stale fetch can be told from the menu it
+/// started for.
+fn spawn_models(listing: ModelListing, token: u32, reply_tx: UnboundedSender<StreamEvent>) {
     tokio::spawn(async move {
         let descriptors = listing.await;
-        let _ = reply_tx.send(StreamEvent::ModelsListed(descriptors));
+        let _ = reply_tx.send(StreamEvent::ModelsListed(token, descriptors));
     });
 }
 

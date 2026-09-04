@@ -4,17 +4,13 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use super::{client, Ollama, OpenAi};
-use crate::percept::{Model, ModelCatalog, ModelDescriptor, ModelListing};
-
-/// The provider name `ModelDescriptor` and `Catalog::build` agree on
-/// for each provider.
-const OLLAMA: &str = "ollama";
-const OPENAI: &str = "openai";
+use crate::percept::{Model, ModelCatalog, ModelDescriptor, ModelListing, Provider};
 
 /// OpenAI models the catalog offers - a short static list, since
-/// OpenAI has no listing endpoint worth querying. One entry today,
-/// the model `OpenAi` currently hardcodes elsewhere.
-const OPENAI_MODELS: &[&str] = &["gpt-5.6-luna"];
+/// OpenAI has no listing endpoint worth querying. One entry today, the
+/// model `main` builds with when `PERCEPT_PROVIDER=openai`.
+pub const OPENAI_MODEL: &str = "gpt-5.6-luna";
+const OPENAI_MODELS: &[&str] = &[OPENAI_MODEL];
 
 /// Every model a run of `percept` can reach: ollama's, listed live from
 /// its server, and OpenAI's, from a static list. Holds what building
@@ -25,6 +21,7 @@ pub struct Catalog {
     openai_url: String,
     openai_api_key: String,
     openai_reasoning_effort: String,
+    client: reqwest::Client,
 }
 
 impl Catalog {
@@ -39,6 +36,7 @@ impl Catalog {
             openai_url,
             openai_api_key,
             openai_reasoning_effort,
+            client: client(),
         }
     }
 }
@@ -61,7 +59,7 @@ fn parse_tags(body: &str) -> Result<Vec<ModelDescriptor>, Box<dyn Error + Send +
         .models
         .into_iter()
         .map(|model| ModelDescriptor {
-            provider: OLLAMA.to_string(),
+            provider: Provider::Ollama,
             model: model.name,
         })
         .collect())
@@ -71,7 +69,7 @@ fn openai_descriptors() -> Vec<ModelDescriptor> {
     OPENAI_MODELS
         .iter()
         .map(|model| ModelDescriptor {
-            provider: OPENAI.to_string(),
+            provider: Provider::OpenAi,
             model: model.to_string(),
         })
         .collect()
@@ -79,35 +77,38 @@ fn openai_descriptors() -> Vec<ModelDescriptor> {
 
 impl ModelCatalog for Catalog {
     fn list(&self) -> ModelListing {
+        let client = self.client.clone();
         let url = format!("{}/api/tags", self.ollama_url);
         Box::pin(async move {
             // A provider a request can't reach is left out, not
             // failed on - the catalog still shows what it can.
-            let mut descriptors = fetch_tags(&url).await.unwrap_or_default();
+            let mut descriptors = fetch_tags(&client, &url).await.unwrap_or_default();
             descriptors.extend(openai_descriptors());
             descriptors
         })
     }
 
     fn build(&self, descriptor: &ModelDescriptor) -> Result<Arc<dyn Model>, Box<dyn Error>> {
-        match descriptor.provider.as_str() {
-            OLLAMA => Ok(Arc::new(Ollama::new(
+        match descriptor.provider {
+            Provider::Ollama => Ok(Arc::new(Ollama::new(
                 self.ollama_url.clone(),
                 descriptor.model.clone(),
             ))),
-            OPENAI => Ok(Arc::new(OpenAi::new(
+            Provider::OpenAi => Ok(Arc::new(OpenAi::new(
                 self.openai_url.clone(),
                 descriptor.model.clone(),
                 self.openai_reasoning_effort.clone(),
                 self.openai_api_key.clone(),
             ))),
-            other => Err(format!("{other:?} names no provider; use ollama or openai").into()),
         }
     }
 }
 
-async fn fetch_tags(url: &str) -> Result<Vec<ModelDescriptor>, Box<dyn Error + Send + Sync>> {
-    let body = client().get(url).send().await?.text().await?;
+async fn fetch_tags(
+    client: &reqwest::Client,
+    url: &str,
+) -> Result<Vec<ModelDescriptor>, Box<dyn Error + Send + Sync>> {
+    let body = client.get(url).send().await?.text().await?;
     parse_tags(&body)
 }
 

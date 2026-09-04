@@ -10,7 +10,7 @@ pub use event_log::EventLog;
 pub use map::{map_of, Edge, Map, MapError, Mutation, Node, NodeId, NodeRef, Schema, CODE};
 pub use model::{
     to_messages, Chunk, Message, Modality, Model, ModelCapabilities, ModelCatalog, ModelDescriptor,
-    ModelListing, ModelRequest, ReplyStream, Usage,
+    ModelListing, ModelRequest, Provider, ReplyStream, Usage,
 };
 pub use search::{EventQuery, EventSearch};
 pub use tool::{Tool, ToolOutput, ToolSpec};

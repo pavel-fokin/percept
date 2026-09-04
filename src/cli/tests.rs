@@ -221,7 +221,7 @@ async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
     let tools: Vec<Arc<dyn percept::Tool>> = vec![Arc::new(FakeTool)];
     let app = App::new(
         Arc::new(model),
-        Arc::new(FakeCatalog::new(Vec::new(), Vec::new())),
+        Arc::new(FakeCatalog::default()),
         log.clone(),
         tools,
         MapShape::Prompt,
@@ -260,7 +260,7 @@ async fn a_stream_error_ends_the_turn_but_still_commits_partial_text() {
     );
     let app = App::new(
         Arc::new(model),
-        Arc::new(FakeCatalog::new(Vec::new(), Vec::new())),
+        Arc::new(FakeCatalog::default()),
         log.clone(),
         Vec::new(),
         MapShape::Prompt,

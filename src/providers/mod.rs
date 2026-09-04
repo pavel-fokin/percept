@@ -15,7 +15,7 @@ use tokio_stream::StreamExt;
 
 use crate::percept::{Actor, Chunk, Usage};
 
-pub use catalog::Catalog;
+pub use catalog::{Catalog, OPENAI_MODEL};
 pub use ollama::Ollama;
 pub use openai::OpenAi;
 

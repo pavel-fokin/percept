@@ -12,7 +12,7 @@ fn catalog() -> Catalog {
 #[test]
 fn an_ollama_descriptor_builds_an_ollama_model() {
     let descriptor = ModelDescriptor {
-        provider: OLLAMA.to_string(),
+        provider: Provider::Ollama,
         model: "gemma4".to_string(),
     };
 
@@ -24,27 +24,13 @@ fn an_ollama_descriptor_builds_an_ollama_model() {
 #[test]
 fn an_openai_descriptor_builds_an_openai_model() {
     let descriptor = ModelDescriptor {
-        provider: OPENAI.to_string(),
+        provider: Provider::OpenAi,
         model: "gpt-5.6-luna".to_string(),
     };
 
     let model = catalog().build(&descriptor).unwrap();
 
     assert_eq!(model.name(), "gpt-5.6-luna");
-}
-
-#[test]
-fn an_unknown_provider_errs_naming_it() {
-    let descriptor = ModelDescriptor {
-        provider: "anthropic".to_string(),
-        model: "claude".to_string(),
-    };
-
-    let Err(err) = catalog().build(&descriptor) else {
-        panic!("expected an error")
-    };
-
-    assert!(err.to_string().contains("anthropic"), "{err}");
 }
 
 #[test]
@@ -57,11 +43,11 @@ fn tags_response_parses_into_ollama_descriptors() {
         descriptors,
         vec![
             ModelDescriptor {
-                provider: OLLAMA.to_string(),
+                provider: Provider::Ollama,
                 model: "gemma4:latest".to_string(),
             },
             ModelDescriptor {
-                provider: OLLAMA.to_string(),
+                provider: Provider::Ollama,
                 model: "llama3".to_string(),
             },
         ]

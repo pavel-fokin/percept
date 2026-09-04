@@ -582,6 +582,7 @@ impl AppService for App {
             return Err("a reply is already streaming".into());
         }
         self.chat = self.catalog.build(descriptor)?;
+        self.last_usage = None;
         Ok(())
     }
 }

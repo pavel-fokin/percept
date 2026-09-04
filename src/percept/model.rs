@@ -105,11 +105,29 @@ pub trait Model: Send + Sync {
     fn reply(&self, request: &ModelRequest) -> ReplyStream;
 }
 
+/// The providers a `Catalog` can build a model from - closed, unlike
+/// `source`, which is open by design.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provider {
+    Ollama,
+    OpenAi,
+}
+
+impl std::fmt::Display for Provider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Provider::Ollama => "ollama",
+            Provider::OpenAi => "openai",
+        };
+        f.write_str(name)
+    }
+}
+
 /// Names one model a catalog can build - which provider serves it, and
 /// the provider's own name for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelDescriptor {
-    pub provider: String,
+    pub provider: Provider,
     pub model: String,
 }
 

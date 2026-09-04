@@ -27,8 +27,10 @@ pub enum StreamEvent {
     /// not what failed while asking.
     Ended(Option<String>),
     /// `/models`'s fetch landed. On its own event because `available_models`
-    /// queries every provider and can't block the main loop.
-    ModelsListed(Vec<ModelDescriptor>),
+    /// queries every provider and can't block the main loop. Carries the
+    /// token of the menu the fetch was started for, so a fetch from a
+    /// popup the user already closed and reopened lands on neither.
+    ModelsListed(u32, Vec<ModelDescriptor>),
 }
 
 /// Chat is tui's own state - textarea, styling - plus whatever fulfills
@@ -57,6 +59,10 @@ pub struct Chat<'a> {
     /// Open while the `/models` popup shows - `None` the rest of the
     /// time, when keys reach the textarea as usual.
     pub models_menu: Option<ModelsMenu>,
+    /// Counted up each time `/models` opens, so the `ModelsMenu` it
+    /// opens can be told apart from one closed and reopened since - see
+    /// `ModelsMenu::token`.
+    next_models_token: u32,
     /// Committed thoughts a click has expanded. Small and short-lived,
     /// so a linear scan beats giving `EventId` a `Hash` impl just for
     /// this.
@@ -91,6 +97,7 @@ impl<'a> Chat<'a> {
             app,
             error: None,
             models_menu: None,
+            next_models_token: 0,
             expanded_thoughts: Vec::new(),
             thought_rows: Vec::new(),
             thought_rows_top: 0,
@@ -99,6 +106,13 @@ impl<'a> Chat<'a> {
 
     pub fn tick(&mut self) {
         self.spinner = self.spinner.wrapping_add(1);
+    }
+
+    /// A token no earlier `/models` open holds, for a menu about to
+    /// open.
+    pub fn new_models_token(&mut self) -> u32 {
+        self.next_models_token = self.next_models_token.wrapping_add(1);
+        self.next_models_token
     }
 
     pub fn update_scroll_metrics(&mut self, limit: u16, page_height: u16) {
@@ -171,17 +185,26 @@ impl<'a> Chat<'a> {
 pub struct ModelsMenu {
     descriptors: Option<Vec<ModelDescriptor>>,
     selected: usize,
+    /// Ties this menu to the fetch `open_models_menu` started for it -
+    /// see `StreamEvent::ModelsListed`.
+    token: u32,
 }
 
 impl ModelsMenu {
-    pub fn loading() -> Self {
+    pub fn loading(token: u32) -> Self {
         Self {
             descriptors: None,
             selected: 0,
+            token,
         }
     }
 
+    pub fn token(&self) -> u32 {
+        self.token
+    }
+
     pub fn populate(&mut self, descriptors: Vec<ModelDescriptor>) {
+        self.selected = self.selected.min(descriptors.len().saturating_sub(1));
         self.descriptors = Some(descriptors);
     }
 
