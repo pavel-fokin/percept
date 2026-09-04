@@ -9,7 +9,7 @@ pub use ui::draw;
 pub use update::{handle_key, handle_mouse, handle_stream};
 
 use crate::app::AppService;
-use crate::percept::{Chunk, EventId, ToolOutput};
+use crate::percept::{Chunk, EventId, ModelDescriptor, ToolOutput};
 
 /// Adapts the reply stream onto tokio's mpsc channel, so the main
 /// select! loop can drive it alongside terminal events. Local to tui -
@@ -26,6 +26,9 @@ pub enum StreamEvent {
     /// committed model turn, and the log records what the model said,
     /// not what failed while asking.
     Ended(Option<String>),
+    /// `/models`'s fetch landed. On its own event because `available_models`
+    /// queries every provider and can't block the main loop.
+    ModelsListed(Vec<ModelDescriptor>),
 }
 
 /// Chat is tui's own state - textarea, styling - plus whatever fulfills
@@ -51,6 +54,9 @@ pub struct Chat<'a> {
     /// Why the last reply broke, shown until the next submit. Transient
     /// tui state - it never reaches the log.
     pub error: Option<String>,
+    /// Open while the `/models` popup shows - `None` the rest of the
+    /// time, when keys reach the textarea as usual.
+    pub models_menu: Option<ModelsMenu>,
     /// Committed thoughts a click has expanded. Small and short-lived,
     /// so a linear scan beats giving `EventId` a `Hash` impl just for
     /// this.
@@ -84,6 +90,7 @@ impl<'a> Chat<'a> {
             follows_transcript: true,
             app,
             error: None,
+            models_menu: None,
             expanded_thoughts: Vec::new(),
             thought_rows: Vec::new(),
             thought_rows_top: 0,
@@ -157,6 +164,51 @@ impl<'a> Chat<'a> {
     }
 }
 
+/// The `/models` popup's state: the fetched list, once it lands, and
+/// which row is selected. `descriptors` is `None` while the fetch is
+/// still in flight, so a still-loading popup reads differently from
+/// one that loaded and found nothing.
+pub struct ModelsMenu {
+    descriptors: Option<Vec<ModelDescriptor>>,
+    selected: usize,
+}
+
+impl ModelsMenu {
+    pub fn loading() -> Self {
+        Self {
+            descriptors: None,
+            selected: 0,
+        }
+    }
+
+    pub fn populate(&mut self, descriptors: Vec<ModelDescriptor>) {
+        self.descriptors = Some(descriptors);
+    }
+
+    pub fn descriptors(&self) -> Option<&[ModelDescriptor]> {
+        self.descriptors.as_deref()
+    }
+
+    pub fn selected_index(&self) -> usize {
+        self.selected
+    }
+
+    pub fn selected(&self) -> Option<&ModelDescriptor> {
+        self.descriptors()?.get(self.selected)
+    }
+
+    pub fn move_up(&mut self) {
+        self.selected = self.selected.saturating_sub(1);
+    }
+
+    pub fn move_down(&mut self) {
+        let len = self.descriptors().map_or(0, <[ModelDescriptor]>::len);
+        if self.selected + 1 < len {
+            self.selected += 1;
+        }
+    }
+}
+
 fn new_textarea<'a>() -> TextArea<'a> {
     let mut textarea = TextArea::default();
     textarea.set_placeholder_text("Send a message…");
@@ -164,3 +216,6 @@ fn new_textarea<'a>() -> TextArea<'a> {
     textarea.set_placeholder_style(Style::default().fg(Color::DarkGray));
     textarea
 }
+
+#[cfg(test)]
+mod tests;
