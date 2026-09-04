@@ -138,6 +138,29 @@ Don't pad errors. Skip `.context("Failed to X")` when the error
 already says it failed. Clean up stray logs as you find them; add a
 log only for an error or a security event.
 
+## Testing
+
+Tests live in the crate, beside the code they cover. `percept` is a
+binary with no library target, so a top-level `tests/` directory would
+see nothing internal. A test reaches private items by nesting under the
+module it tests, as `mod tests { use super::* }`.
+
+Every `mod tests` sits in its own file, never inline. The
+implementation file keeps `#[cfg(test)] mod tests;`; the cases move to
+a sibling `tests.rs` nested under that module - `src/app/mod.rs` beside
+`src/app/tests.rs`, `src/percept/map.rs` beside
+`src/percept/map/tests.rs`. A file and its same-named directory
+coexist, so the implementation file keeps its name and needs no
+`#[path]`. Split an inline module the next time you touch its tests,
+not before.
+
+Shared fakes go in `src/testing.rs`. Each implements one `percept` port
+and nothing more, so it sits at the domain's level and every layer
+above can use it without bending the dependency direction.
+
+One behaviour per test. The name states the behaviour, not the method -
+`streamed_reply_commits_one_event_caused_by_the_prompt`.
+
 ## Git
 
 Use conventional commit messages under 72 chars. Skip the body -- subject
