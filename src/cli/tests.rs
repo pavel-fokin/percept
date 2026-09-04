@@ -250,3 +250,24 @@ async fn a_stream_error_ends_the_turn_but_still_commits_partial_text() {
     assert_eq!(events.len(), 2);
     assert_eq!(content(&events[1]), "partial");
 }
+
+#[test]
+fn maps_show_kind_is_repeatable() {
+    let cli = Cli::try_parse_from([
+        "percept",
+        "maps",
+        "show",
+        "decisions",
+        "--kind",
+        "question",
+        "--kind",
+        "decision",
+    ])
+    .unwrap();
+    match cli.command {
+        Some(Command::Maps {
+            command: MapsCommand::Show(args),
+        }) => assert_eq!(args.kind, ["question", "decision"]),
+        _ => panic!("expected maps show"),
+    }
+}

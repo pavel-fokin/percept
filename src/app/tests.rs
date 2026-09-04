@@ -645,8 +645,9 @@ fn a_headlines_map_sends_only_its_headline_nodes() {
         "The decisions map, built from this log. Node kinds: question, option, \
          evidence, decision. Edge kinds: supports, contradicts, resolves.\n"
     ));
-    assert!(sent[1]
-        .contains("Its question and decision nodes follow; read_map shows the whole map.\n"));
+    assert!(
+        sent[1].contains("Its question and decision nodes follow; read_map shows the whole map.\n")
+    );
     assert!(sent[1].contains("- decision \"Rust over Go\""));
     assert!(!sent[1].contains("benchmarks"));
 }

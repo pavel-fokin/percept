@@ -87,6 +87,10 @@ pub enum MapsCommand {
 pub struct ShowMapArgs {
     /// The map's name, as `maps list` prints it.
     map: String,
+    /// Repeatable. Keep only nodes of any of these kinds, and the edges
+    /// between them.
+    #[arg(long)]
+    kind: Vec<String>,
 }
 
 /// What every map change names: the map, and the events it was drawn
@@ -345,9 +349,13 @@ pub fn maps_list(log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
     print_lines(maps.iter().map(store::encode_map))
 }
 
-/// Prints the map `args.map` names, nodes then edges.
+/// Prints the map `args.map` names, nodes then edges, cut to `--kind`
+/// when given.
 pub fn maps_show(args: ShowMapArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
-    let map = store::fold_map(log, &args.map)?;
+    let mut map = store::fold_map(log, &args.map)?;
+    if !args.kind.is_empty() {
+        map = map.keep_kinds(&args.kind)?;
+    }
     let nodes = map.nodes().iter().map(store::encode_node);
     let edges = map.edges().iter().map(store::encode_edge);
     print_lines(nodes.chain(edges))

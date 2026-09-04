@@ -382,3 +382,27 @@ fn a_schema_is_found_by_name() {
         "no map named \"tasks\"; maps are decisions"
     );
 }
+
+#[test]
+fn keeping_kinds_drops_other_nodes_and_the_edges_that_touched_them() {
+    let (_, events) = rust_over_go();
+    let map = Map::fold(&DECISIONS, &events).unwrap();
+
+    let cut = map.keep_kinds(&["decision".to_string()]).unwrap();
+    assert_eq!(cut.nodes().len(), 1);
+    assert!(cut.edges().is_empty());
+
+    let both = map
+        .keep_kinds(&["decision".to_string(), "question".to_string()])
+        .unwrap();
+    assert_eq!(both.nodes().len(), 2);
+    assert_eq!(both.edges().len(), 1);
+    assert_eq!(map.nodes().len(), 3, "the cut is a copy");
+}
+
+#[test]
+fn keeping_a_kind_the_schema_lacks_is_an_error() {
+    let map = Map::empty(&DECISIONS);
+    let err = map.keep_kinds(&["goal".to_string()]).err().unwrap();
+    assert!(matches!(err, MapError::UnknownNodeKind { .. }));
+}

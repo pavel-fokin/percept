@@ -6,7 +6,7 @@
 //! Every writer - the CLI, the model's tool - goes through `apply`, so
 //! one place holds the rules.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 
 use super::{Event, EventId, Payload};
@@ -286,6 +286,39 @@ impl Map {
         self.nodes
             .iter()
             .find(|node| node.kind == kind && node.name == name)
+    }
+
+    /// The map cut to nodes of `kinds`, keeping only the edges whose
+    /// both ends survived. A kind the schema lacks is an error, so an
+    /// empty result means the map holds none of that kind.
+    pub fn keep_kinds(&self, kinds: &[String]) -> Result<Self, MapError> {
+        for kind in kinds {
+            self.check_node_kind(kind)?;
+        }
+        let nodes: Vec<Node> = self
+            .nodes
+            .iter()
+            .filter(|node| kinds.contains(&node.kind))
+            .cloned()
+            .collect();
+        Ok(self.cut_to(nodes))
+    }
+
+    /// A copy holding `nodes` and only the edges that join two of them.
+    /// An edge to a node outside the cut is not a fact of the cut.
+    fn cut_to(&self, nodes: Vec<Node>) -> Self {
+        let kept: HashSet<NodeId> = nodes.iter().map(|node| node.id).collect();
+        let edges = self
+            .edges
+            .iter()
+            .filter(|edge| kept.contains(&edge.from) && kept.contains(&edge.to))
+            .cloned()
+            .collect();
+        Self {
+            schema: self.schema,
+            nodes,
+            edges,
+        }
     }
 
     /// Checks `mutation` against the schema and the map's current
