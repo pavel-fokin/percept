@@ -99,7 +99,10 @@ skips it.
   files, the main agent builds itself. Anything larger goes to the
   `software-developer` subagent, which follows this file, writes the
   code, runs the build and tests, and reports back. It does not design,
-  choose scope, commit, or push.
+  choose scope, commit, or push. Explore the project's code structure -
+  what a file imports, defines, or depends on - with `percept maps show
+  code` (see `.claude/skills/percept/SKILL.md` for query patterns), not
+  ad hoc `grep`.
 - **Review.** The main agent checks each diff against its issue, and
   small fixes land there; larger rework goes back to the subagent.
   `/code-review` and `/simplify` then run once each over the whole
