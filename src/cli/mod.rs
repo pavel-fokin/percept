@@ -1,10 +1,11 @@
 //! The command-line surface: `percept events publish` appends one event
 //! without opening the TUI, `percept events search` queries the log,
 //! `percept events show` dereferences one event by id, `percept maps`
-//! folds a cognitive map from the log and prints it, `percept ask`
-//! runs one full turn - including the tool loop - and prints the reply,
-//! and `percept reflect` runs one asking the model to revise its maps.
-//! A presentation-layer peer of `tui` - it forwards parsed input to
+//! folds a cognitive map from the log and prints it - except `code`,
+//! walked fresh from the working tree - `percept ask` runs one full
+//! turn - including the tool loop - and prints the reply, and `percept
+//! reflect` runs one asking the model to revise its maps. A
+//! presentation-layer peer of `tui` - it forwards parsed input to
 //! `store` and `app`, and has no chat logic of its own: `ask` drives the
 //! same `AppService` turn policy `tui` does, just inline instead of over
 //! a channel.
@@ -17,11 +18,13 @@
 
 use std::collections::BTreeMap;
 use std::io::{self, Write};
+use std::path::Path;
 
 use clap::{Args, Parser, Subcommand};
 use tokio_stream::StreamExt;
 
 use crate::app::{run_tool, AppService, ToolStep};
+use crate::code;
 use crate::percept::{
     self, Actor, Chunk, Event, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
 };
@@ -42,8 +45,10 @@ relevance to the caller.
 Run with no arguments to open the TUI. Every subcommand reaches the log \
 without it: `events publish` appends one event, `events search` and \
 `events show` query it, `maps list` and `maps show` print a cognitive \
-map folded from it, `ask` runs one full turn and prints the reply, and \
-`reflect` runs one turn asking the model to revise its maps.")]
+map folded from it - `code`, the map of files and imports, is walked \
+fresh from the working tree instead - `ask` runs one full turn and \
+prints the reply, and `reflect` runs one turn asking the model to \
+revise its maps.")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -56,7 +61,8 @@ pub enum Command {
         #[command(subcommand)]
         command: EventsCommand,
     },
-    /// Read the cognitive maps folded from the log.
+    /// Read percept's maps - the cognitive ones folded from the log,
+    /// and `code`, walked fresh from the working tree.
     Maps {
         #[command(subcommand)]
         command: MapsCommand,
@@ -87,6 +93,25 @@ pub enum MapsCommand {
 pub struct ShowMapArgs {
     /// The map's name, as `maps list` prints it.
     map: String,
+    /// Repeatable. Keep only nodes of any of these kinds, and the edges
+    /// between them.
+    #[arg(long)]
+    kind: Vec<String>,
+    /// `kind:name` of a node. Keep only it and its neighbourhood,
+    /// reached along edges in either direction.
+    #[arg(long, value_parser = parse_node_ref)]
+    around: Option<NodeRef>,
+    /// How many edges out `--around` reaches; 0 is the node alone.
+    #[arg(long, default_value_t = 1, requires = "around")]
+    depth: usize,
+}
+
+impl ShowMapArgs {
+    /// Whether this names the code map - derived from the working tree,
+    /// so dispatch never opens the log to find out.
+    pub fn is_code(&self) -> bool {
+        self.map == percept::CODE.name
+    }
 }
 
 /// What every map change names: the map, and the events it was drawn
@@ -160,6 +185,9 @@ pub struct PublishArgs {
     kind: String,
     #[arg(long)]
     payload: String,
+    /// The id of the event this one follows from.
+    #[arg(long)]
+    causation: Option<String>,
 }
 
 #[derive(Args, Default)]
@@ -293,9 +321,17 @@ fn parse_node_ref(s: &str) -> Result<NodeRef, String> {
 
 /// Appends one event built from `args` to `log`. `store` owns the
 /// decode, so the CLI only parses flags.
+/// Appends one event and prints its id, so a writer can cite it as the
+/// `--causation` of the next. A cause the log lacks is an error: a typo
+/// in provenance is worse than none.
 pub fn publish(args: PublishArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
+    let causation_id = args
+        .causation
+        .as_deref()
+        .map(|id| known_event_id(id, log))
+        .transpose()?;
     let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
-    let event = store::decode(&args.actor, args.source, &args.kind, payload)?;
+    let event = store::decode(&args.actor, args.source, &args.kind, causation_id, payload)?;
     // A raw map event would skip `Map::apply`, and one that breaks a
     // rule fails every fold from then on, with no undo in an
     // append-only log.
@@ -306,7 +342,19 @@ pub fn publish(args: PublishArgs, log: &dyn EventLog) -> Result<(), Box<dyn std:
         )
         .into());
     }
-    log.append(&event)
+    log.append(&event)?;
+    print_lines(std::iter::once(event.id().as_uuid().to_string()))
+}
+
+fn known_event_id(
+    id: &str,
+    log: &dyn EventLog,
+) -> Result<percept::EventId, Box<dyn std::error::Error>> {
+    let parsed = store::parse_event_id(id)?;
+    if log.get(parsed)?.is_none() {
+        return Err(format!("no event with id {id}").into());
+    }
+    Ok(parsed)
 }
 
 /// Searches `log` for events matching `args`, printing one JSON object
@@ -338,18 +386,44 @@ fn print_lines(lines: impl Iterator<Item = String>) -> Result<(), Box<dyn std::e
     out.flush().or_else(stop_if_pipe_closed)
 }
 
-/// Prints every map percept knows with its size, folded from one
-/// read of `log`.
-pub fn maps_list(log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
-    let maps = Map::fold_all(&log.load()?)?;
+/// Prints every map percept knows with its size: the log's maps, folded
+/// from one read of `log`, then the code map, walked fresh from the
+/// working directory.
+pub fn maps_list(log: &dyn EventLog, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let mut maps = Map::fold_all(&log.load()?)?;
+    maps.push(code::build(root)?);
     print_lines(maps.iter().map(store::encode_map))
 }
 
-/// Prints the map `args.map` names, nodes then edges.
+/// Prints the map `args.map` names, nodes then edges. `--around` cuts
+/// it to a neighbourhood first, then `--kind` cuts that to its kinds,
+/// so a node of another kind still counts as a step on the way.
 pub fn maps_show(args: ShowMapArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
     let map = store::fold_map(log, &args.map)?;
+    print_map(map, &args)
+}
+
+/// Prints the code map, walked fresh from `root` - never the log, so
+/// this runs in a directory with no `percept.jsonl`.
+pub fn maps_show_code(args: ShowMapArgs, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let map = code::build(root)?;
+    print_map(map, &args)
+}
+
+/// `maps_show` and `maps_show_code`'s shared tail: cut `map` to
+/// `args`'s filters, then print it nodes-then-edges.
+fn print_map(mut map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(node) = &args.around {
+        map = map.around(node, args.depth)?;
+    }
+    if !args.kind.is_empty() {
+        map = map.keep_kinds(&args.kind)?;
+    }
     let nodes = map.nodes().iter().map(store::encode_node);
-    let edges = map.edges().iter().map(store::encode_edge);
+    let edges = map
+        .edges()
+        .iter()
+        .map(|edge| store::encode_edge(&map, edge));
     print_lines(nodes.chain(edges))
 }
 
@@ -590,257 +664,4 @@ fn relative_minutes(s: &str) -> Option<i64> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::app::{App, MapShape};
-    use crate::percept::{self, Payload};
-    use crate::testing::{content, FakeLog, FakeTool, Scripted};
-    use std::sync::Arc;
-
-    fn args(actor: &str, payload: &str) -> PublishArgs {
-        PublishArgs {
-            actor: actor.to_string(),
-            source: "claude-code".to_string(),
-            kind: "message.received".to_string(),
-            payload: payload.to_string(),
-        }
-    }
-
-    #[test]
-    fn a_valid_publish_appends_one_event_carrying_its_source() {
-        let log = FakeLog::default();
-        publish(args("user", r#"{"content":"hi"}"#), &log).unwrap();
-
-        let events = log.load().unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].source(), "claude-code");
-        assert!(events[0].actor() == percept::Actor::User);
-    }
-
-    #[test]
-    fn a_payload_field_the_type_does_not_record_is_rejected() {
-        let log = FakeLog::default();
-        let extra = r#"{"content":"hi","meta":{"thread":42}}"#;
-        assert!(publish(args("user", extra), &log).is_err());
-        assert!(log.load().unwrap().is_empty());
-    }
-
-    #[test]
-    fn a_rejected_event_appends_nothing() {
-        let log = FakeLog::default();
-        assert!(publish(args("robot", r#"{"content":"hi"}"#), &log).is_err());
-        assert!(publish(args("user", "not json"), &log).is_err());
-        assert!(log.load().unwrap().is_empty());
-    }
-
-    #[test]
-    fn parse_time_parses_an_iso8601_timestamp() {
-        let parsed = parse_time("since", "2026-01-01T00:00:00Z").unwrap();
-        assert_eq!(parsed.to_string(), "2026-01-01T00:00:00Z");
-    }
-
-    #[test]
-    fn parse_time_parses_relative_shorthand_as_a_time_in_the_past() {
-        let now = Timestamp::now();
-        for shorthand in ["1d", "2h", "30m"] {
-            let parsed = parse_time("until", shorthand).unwrap();
-            assert!(parsed < now, "{shorthand} should parse to before now");
-        }
-    }
-
-    #[test]
-    fn parse_time_rejects_an_unparseable_value_and_names_its_flag() {
-        let err = parse_time("until", "3x").err().unwrap();
-        assert_eq!(err, "invalid --until value 3x");
-    }
-
-    #[test]
-    fn an_unknown_type_filter_is_rejected_rather_than_matching_nothing() {
-        let args = SearchArgs {
-            kind: vec!["message.recieved".to_string()],
-            ..Default::default()
-        };
-        assert!(parse_query(&args).is_err());
-    }
-
-    #[test]
-    fn every_flag_reaches_the_query_it_builds() {
-        let args = SearchArgs {
-            source: vec!["tui".to_string(), "cli".to_string()],
-            actor: vec!["user".to_string()],
-            kind: vec!["tool.called".to_string()],
-            contains: vec!["deploy".to_string()],
-            size: Some(3),
-            since: Some("1d".to_string()),
-            ..Default::default()
-        };
-
-        let query = parse_query(&args).unwrap();
-
-        assert_eq!(query.sources, vec!["tui", "cli"]);
-        assert!(query.actors == vec![percept::Actor::User]);
-        assert!(query.kinds == vec![percept::EventKind::ToolCalled]);
-        assert_eq!(query.text, vec!["deploy".to_string()]);
-        assert_eq!(query.size, Some(3));
-        assert!(query.since.is_some() && query.until.is_none());
-    }
-
-    #[test]
-    fn a_window_that_ends_before_it_starts_is_rejected() {
-        let args = SearchArgs {
-            since: Some("1h".to_string()),
-            until: Some("2h".to_string()),
-            ..Default::default()
-        };
-        assert!(parse_query(&args).is_err());
-    }
-
-    #[test]
-    fn an_unknown_actor_filter_is_rejected_rather_than_matching_nothing() {
-        let args = SearchArgs {
-            actor: vec!["User".to_string()],
-            ..Default::default()
-        };
-        assert!(parse_query(&args).is_err());
-    }
-
-    #[test]
-    fn a_blank_contains_value_is_rejected_at_parse() {
-        let ok = Cli::try_parse_from(["percept", "events", "search", "--contains", "deploy"]);
-        assert!(ok.is_ok());
-
-        let blank = Cli::try_parse_from(["percept", "events", "search", "--contains", " "]);
-        assert!(blank.is_err());
-    }
-
-    #[test]
-    fn a_zero_preview_is_rejected_at_parse() {
-        let zero = Cli::try_parse_from(["percept", "events", "search", "--preview", "0"]);
-        assert!(zero.is_err());
-        let ok = Cli::try_parse_from(["percept", "events", "search", "--preview", "300"]);
-        assert!(ok.is_ok());
-    }
-
-    #[test]
-    fn a_range_without_an_end_reaches_the_end_of_content() {
-        let ok = Cli::try_parse_from(["percept", "events", "show", "abc", "--range", "400:"]);
-        assert!(ok.is_ok());
-    }
-
-    #[test]
-    fn a_range_without_a_start_begins_at_zero() {
-        let ok = Cli::try_parse_from(["percept", "events", "show", "abc", "--range", ":50"]);
-        assert!(ok.is_ok());
-    }
-
-    #[test]
-    fn preview_and_full_are_refused_together() {
-        let both = Cli::try_parse_from(["percept", "events", "search", "--preview", "9", "--full"]);
-        assert!(both.is_err());
-    }
-
-    #[test]
-    fn a_range_with_no_colon_is_rejected_at_parse() {
-        let bad = Cli::try_parse_from(["percept", "events", "show", "abc", "--range", "400"]);
-        assert!(bad.is_err());
-    }
-
-    #[test]
-    fn a_prop_splits_on_the_first_equals_sign() {
-        let (key, value) = parse_prop("summary=a=b").unwrap();
-        assert_eq!(key, "summary");
-        assert_eq!(value, "a=b");
-    }
-
-    #[test]
-    fn a_prop_with_no_equals_sign_is_rejected() {
-        assert!(parse_prop("summary").is_err());
-    }
-
-    #[test]
-    fn a_node_ref_splits_on_the_first_colon() {
-        let node = parse_node_ref("option:Rust:the language").unwrap();
-        assert_eq!(node.kind, "option");
-        assert_eq!(node.name, "Rust:the language");
-    }
-
-    #[test]
-    fn a_node_ref_with_no_colon_is_rejected() {
-        assert!(parse_node_ref("option").is_err());
-    }
-
-    #[test]
-    fn a_node_ref_with_a_blank_side_is_rejected() {
-        assert!(parse_node_ref(":Rust").is_err());
-        assert!(parse_node_ref("option: ").is_err());
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
-        let model = Scripted::new(
-            vec![
-                vec![percept::Chunk::ToolCall {
-                    tool: "search_events".to_string(),
-                    arguments: "{}".to_string(),
-                }],
-                vec![percept::Chunk::Reply("found it".to_string())],
-            ],
-            true,
-        );
-        let log = Arc::new(FakeLog::default());
-        let tools: Vec<Arc<dyn percept::Tool>> = vec![Arc::new(FakeTool)];
-        let app = App::new(
-            Arc::new(model),
-            log.clone(),
-            tools,
-            MapShape::Prompt,
-            "cli".to_string(),
-        )
-        .unwrap();
-
-        run_turn(Box::new(app), Actor::User, "what happened".to_string())
-            .await
-            .unwrap();
-
-        let events = log.load().unwrap();
-        assert_eq!(events.len(), 4);
-        assert_eq!(events[0].source(), "cli");
-        assert!(matches!(
-            events[1].payload(),
-            Payload::ToolCalled { tool, .. } if tool == "search_events"
-        ));
-        assert!(matches!(
-            events[2].payload(),
-            Payload::ToolResulted { content } if content == "ran"
-        ));
-        assert_eq!(content(&events[3]), "found it");
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn a_stream_error_ends_the_turn_but_still_commits_partial_text() {
-        let log = Arc::new(FakeLog::default());
-        // A reply that breaks mid-stream, after saying something.
-        let model = Scripted::failing(
-            vec![vec![
-                Ok(percept::Chunk::Reply("partial".to_string())),
-                Err("connection dropped".into()),
-            ]],
-            false,
-        );
-        let app = App::new(
-            Arc::new(model),
-            log.clone(),
-            Vec::new(),
-            MapShape::Prompt,
-            "cli".to_string(),
-        )
-        .unwrap();
-
-        let result = run_turn(Box::new(app), Actor::User, "hi".to_string()).await;
-
-        assert!(result.is_err());
-        let events = log.load().unwrap();
-        assert_eq!(events.len(), 2);
-        assert_eq!(content(&events[1]), "partial");
-    }
-}
+mod tests;

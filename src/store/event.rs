@@ -436,12 +436,13 @@ pub fn decode(
     actor: &str,
     source: String,
     kind: &str,
+    causation_id: Option<EventId>,
     payload: Value,
 ) -> Result<percept::Event, Error> {
     let event = percept::Event::new(
         parse_actor(actor)?,
         source,
-        None,
+        causation_id,
         decode_payload(kind, payload.clone())?,
     );
 
@@ -1093,7 +1094,7 @@ mod tests {
             "sources": ["not-a-uuid"],
         });
 
-        let err = match decode("user", "cli".to_string(), "node.added", payload) {
+        let err = match decode("user", "cli".to_string(), "node.added", None, payload) {
             Err(e) => e,
             Ok(_) => panic!("expected a malformed source to be rejected"),
         };

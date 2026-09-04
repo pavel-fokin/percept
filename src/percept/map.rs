@@ -6,7 +6,7 @@
 //! Every writer - the CLI, the model's tool - goes through `apply`, so
 //! one place holds the rules.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 
 use super::{Event, EventId, Payload};
@@ -33,13 +33,31 @@ pub const DECISIONS: Schema = Schema {
     headline_kinds: &["question", "decision"],
 };
 
-/// Every map percept knows. One map per schema, named after it.
+/// The code map: a codebase's files, the symbols they define, and what
+/// imports what. Derived from the working tree, never folded from the
+/// log, so it is in `DERIVED` and not `SCHEMAS`.
+pub const CODE: Schema = Schema {
+    name: "code",
+    node_kinds: &["file", "function", "type", "package"],
+    edge_kinds: &["contains", "imports"],
+    headline_kinds: &["file"],
+};
+
+/// Every map folded from the log. One map per schema, named after it.
 pub const SCHEMAS: &[&Schema] = &[&DECISIONS];
 
+/// Every map derived from something other than the log. A reader
+/// builds one fresh; no writer commits to it.
+pub const DERIVED: &[&Schema] = &[&CODE];
+
 impl Schema {
-    /// The schema `name` names, or the error every boundary that takes
-    /// a map name reports.
+    /// The log-folded schema `name` names, or the error every boundary
+    /// that folds or writes a map by name reports. A derived map is its
+    /// own error: it exists, and this is the wrong door to it.
     pub fn find(name: &str) -> Result<&'static Schema, MapError> {
+        if DERIVED.iter().any(|schema| schema.name == name) {
+            return Err(MapError::Derived(name.to_string()));
+        }
         SCHEMAS
             .iter()
             .copied()
@@ -130,6 +148,8 @@ pub enum Mutation {
 #[derive(Debug, PartialEq, Eq)]
 pub enum MapError {
     UnknownMap(String),
+    /// A map in `DERIVED`, named where only a log-folded map fits.
+    Derived(String),
     UnknownNodeKind {
         map: &'static Schema,
         kind: String,
@@ -172,9 +192,14 @@ impl fmt::Display for MapError {
                 "no map named {name:?}; maps are {}",
                 SCHEMAS
                     .iter()
+                    .chain(DERIVED)
                     .map(|schema| schema.name)
                     .collect::<Vec<_>>()
                     .join(", ")
+            ),
+            Self::Derived(name) => write!(
+                f,
+                "{name:?} is derived from the working tree, not folded from the log or written"
             ),
             Self::UnknownNodeKind { map, kind } => write!(
                 f,
@@ -213,14 +238,37 @@ pub struct Map {
     schema: &'static Schema,
     nodes: Vec<Node>,
     edges: Vec<Edge>,
+    // Indexes over `nodes` and `edges`, kept in step by `replay`, so a
+    // lookup by id, by name, or by edge is a hash rather than a scan:
+    // every `apply` looks up its ends, and a code map applies tens of
+    // thousands of them.
+    by_id: HashMap<NodeId, usize>,
+    by_name: HashMap<(String, String), NodeId>,
+    edge_keys: HashSet<(String, NodeId, NodeId)>,
 }
 
 impl Map {
     pub fn empty(schema: &'static Schema) -> Self {
+        Self::from_parts(schema, Vec::new(), Vec::new())
+    }
+
+    fn from_parts(schema: &'static Schema, nodes: Vec<Node>, edges: Vec<Edge>) -> Self {
+        let by_id = nodes.iter().enumerate().map(|(i, n)| (n.id, i)).collect();
+        let by_name = nodes
+            .iter()
+            .map(|n| ((n.kind.clone(), n.name.clone()), n.id))
+            .collect();
+        let edge_keys = edges
+            .iter()
+            .map(|e| (e.kind.clone(), e.from, e.to))
+            .collect();
         Self {
             schema,
-            nodes: Vec::new(),
-            edges: Vec::new(),
+            nodes,
+            edges,
+            by_id,
+            by_name,
+            edge_keys,
         }
     }
 
@@ -279,13 +327,68 @@ impl Map {
     }
 
     pub fn node(&self, id: NodeId) -> Option<&Node> {
-        self.nodes.iter().find(|node| node.id == id)
+        self.by_id.get(&id).map(|&i| &self.nodes[i])
     }
 
     pub fn find(&self, kind: &str, name: &str) -> Option<&Node> {
-        self.nodes
+        let id = self.by_name.get(&(kind.to_string(), name.to_string()))?;
+        self.node(*id)
+    }
+
+    /// The map cut to nodes of `kinds`, keeping only the edges whose
+    /// both ends survived. A kind the schema lacks is an error, so an
+    /// empty result means the map holds none of that kind.
+    pub fn keep_kinds(&self, kinds: &[String]) -> Result<Self, MapError> {
+        for kind in kinds {
+            self.check_node_kind(kind)?;
+        }
+        let nodes: Vec<Node> = self
+            .nodes
             .iter()
-            .find(|node| node.kind == kind && node.name == name)
+            .filter(|node| kinds.contains(&node.kind))
+            .cloned()
+            .collect();
+        Ok(self.cut_to(nodes))
+    }
+
+    /// The map cut to `node` and every node within `depth` edges of
+    /// it, following edges both ways: what is around a file is what it
+    /// imports and what imports it. Depth zero is the node alone.
+    pub fn around(&self, node: &NodeRef, depth: usize) -> Result<Self, MapError> {
+        let start = self.resolve(node.clone())?;
+        let mut reached: HashSet<NodeId> = HashSet::from([start]);
+        let mut frontier: HashSet<NodeId> = HashSet::from([start]);
+        for _ in 0..depth {
+            let mut next = HashSet::new();
+            for edge in &self.edges {
+                for (near, far) in [(edge.from, edge.to), (edge.to, edge.from)] {
+                    if frontier.contains(&near) && reached.insert(far) {
+                        next.insert(far);
+                    }
+                }
+            }
+            frontier = next;
+        }
+        let nodes = self
+            .nodes
+            .iter()
+            .filter(|node| reached.contains(&node.id))
+            .cloned()
+            .collect();
+        Ok(self.cut_to(nodes))
+    }
+
+    /// A copy holding `nodes` and only the edges that join two of them.
+    /// An edge to a node outside the cut is not a fact of the cut.
+    fn cut_to(&self, nodes: Vec<Node>) -> Self {
+        let kept: HashSet<NodeId> = nodes.iter().map(|node| node.id).collect();
+        let edges = self
+            .edges
+            .iter()
+            .filter(|edge| kept.contains(&edge.from) && kept.contains(&edge.to))
+            .cloned()
+            .collect();
+        Self::from_parts(self.schema, nodes, edges)
     }
 
     /// Checks `mutation` against the schema and the map's current
@@ -370,6 +473,8 @@ impl Map {
                         name: name.clone(),
                     });
                 }
+                self.by_id.insert(*node, self.nodes.len());
+                self.by_name.insert((kind.clone(), name.clone()), *node);
                 self.nodes.push(Node {
                     id: *node,
                     kind: kind.clone(),
@@ -379,9 +484,19 @@ impl Map {
                 });
             }
             Payload::NodeRemoved { node, .. } => {
-                self.check_node_id(*node)?;
+                let removed = self.node(*node).ok_or(MapError::NoSuchNodeId(*node))?;
+                let key = (removed.kind.clone(), removed.name.clone());
+                self.by_name.remove(&key);
                 self.nodes.retain(|n| n.id != *node);
+                self.by_id = self
+                    .nodes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, n)| (n.id, i))
+                    .collect();
                 self.edges.retain(|e| e.from != *node && e.to != *node);
+                self.edge_keys
+                    .retain(|(_, from, to)| from != node && to != node);
             }
             Payload::EdgeAdded {
                 kind,
@@ -393,7 +508,7 @@ impl Map {
                 self.check_edge_kind(kind)?;
                 self.check_node_id(*from)?;
                 self.check_node_id(*to)?;
-                if self.edge(kind, *from, *to).is_some() {
+                if !self.edge_keys.insert((kind.clone(), *from, *to)) {
                     return Err(MapError::DuplicateEdge {
                         kind: kind.clone(),
                         from: self.label(*from),
@@ -408,7 +523,7 @@ impl Map {
                 });
             }
             Payload::EdgeRemoved { kind, from, to, .. } => {
-                if self.edge(kind, *from, *to).is_none() {
+                if !self.edge_keys.remove(&(kind.clone(), *from, *to)) {
                     return Err(MapError::NoSuchEdge {
                         kind: kind.clone(),
                         from: self.label(*from),
@@ -427,12 +542,6 @@ impl Map {
         self.find(&node.kind, &node.name)
             .map(|n| n.id)
             .ok_or(MapError::NoSuchNode(node))
-    }
-
-    fn edge(&self, kind: &str, from: NodeId, to: NodeId) -> Option<&Edge> {
-        self.edges
-            .iter()
-            .find(|e| e.kind == kind && e.from == from && e.to == to)
     }
 
     /// A node as `Display` names it; the id when the map has no such
@@ -513,389 +622,4 @@ pub fn map_of(payload: &Payload) -> Option<&str> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::percept::Actor;
-
-    fn committed(payload: Payload) -> Event {
-        Event::new(Actor::User, "test".to_string(), None, payload)
-    }
-
-    #[test]
-    fn headlines_are_the_schema_s_headline_kinds_in_map_order() {
-        let events = [
-            node_added("decisions", NodeId::new(), "option", "Go"),
-            node_added("decisions", NodeId::new(), "question", "Which language?"),
-            node_added("decisions", NodeId::new(), "decision", "Rust"),
-        ];
-        let map = Map::fold(&DECISIONS, &events).unwrap();
-        let names: Vec<&str> = map.headlines().map(|node| node.name.as_str()).collect();
-        assert_eq!(names, ["Which language?", "Rust"]);
-    }
-
-    fn node_added(map: &str, node: NodeId, kind: &str, name: &str) -> Event {
-        committed(Payload::NodeAdded {
-            map: map.to_string(),
-            node,
-            kind: kind.to_string(),
-            name: name.to_string(),
-            properties: BTreeMap::new(),
-            sources: Vec::new(),
-        })
-    }
-
-    fn edge_added(map: &str, kind: &str, from: NodeId, to: NodeId) -> Event {
-        committed(Payload::EdgeAdded {
-            map: map.to_string(),
-            kind: kind.to_string(),
-            from,
-            to,
-            sources: Vec::new(),
-        })
-    }
-
-    fn node_removed(map: &str, node: NodeId) -> Event {
-        committed(Payload::NodeRemoved {
-            map: map.to_string(),
-            node,
-            reason: "gone".to_string(),
-            sources: Vec::new(),
-        })
-    }
-
-    /// The decision from the ADR: a question, an option, a decision,
-    /// and the edge that resolves the question.
-    fn rust_over_go() -> ([NodeId; 3], Vec<Event>) {
-        let ids = [NodeId::new(), NodeId::new(), NodeId::new()];
-        let events = vec![
-            node_added("decisions", ids[0], "question", "Which language?"),
-            node_added("decisions", ids[1], "option", "Rust"),
-            node_added("decisions", ids[2], "decision", "Rust over Go"),
-            edge_added("decisions", "resolves", ids[2], ids[0]),
-        ];
-        (ids, events)
-    }
-
-    fn node_ref(kind: &str, name: &str) -> NodeRef {
-        NodeRef {
-            kind: kind.to_string(),
-            name: name.to_string(),
-        }
-    }
-
-    fn add_node(kind: &str, name: &str) -> Mutation {
-        Mutation::AddNode {
-            kind: kind.to_string(),
-            name: name.to_string(),
-            properties: BTreeMap::new(),
-            sources: Vec::new(),
-        }
-    }
-
-    fn add_edge(kind: &str, from: NodeRef, to: NodeRef) -> Mutation {
-        Mutation::AddEdge {
-            kind: kind.to_string(),
-            from,
-            to,
-            sources: Vec::new(),
-        }
-    }
-
-    fn rejected_with(err: MapError, expected: EventId) -> MapError {
-        match err {
-            MapError::Rejected { event, error } => {
-                assert!(event == expected);
-                *error
-            }
-            other => panic!("expected Rejected, got {other}"),
-        }
-    }
-
-    #[test]
-    fn a_fold_holds_every_node_and_edge_still_present() {
-        let (ids, events) = rust_over_go();
-
-        let map = Map::fold(&DECISIONS, &events).unwrap();
-
-        assert_eq!(map.nodes().len(), 3);
-        assert_eq!(map.edges().len(), 1);
-        assert!(map.find("decision", "Rust over Go").unwrap().id == ids[2]);
-        assert!(map.edges()[0].from == ids[2]);
-        assert!(map.edges()[0].to == ids[0]);
-    }
-
-    #[test]
-    fn a_fold_skips_other_maps_and_other_kinds() {
-        let (_, mut events) = rust_over_go();
-        events.push(committed(Payload::MessageReceived {
-            content: "hi".to_string(),
-        }));
-        events.push(node_added("tasks", NodeId::new(), "goal", "Ship"));
-
-        let map = Map::fold(&DECISIONS, &events).unwrap();
-
-        assert_eq!(map.nodes().len(), 3);
-    }
-
-    #[test]
-    fn removing_a_node_drops_its_edges() {
-        let (ids, mut events) = rust_over_go();
-        events.push(node_removed("decisions", ids[0]));
-
-        let map = Map::fold(&DECISIONS, &events).unwrap();
-
-        assert_eq!(map.nodes().len(), 2);
-        assert!(map.edges().is_empty());
-    }
-
-    #[test]
-    fn removing_an_edge_leaves_its_nodes() {
-        let (ids, mut events) = rust_over_go();
-        events.push(committed(Payload::EdgeRemoved {
-            map: "decisions".to_string(),
-            kind: "resolves".to_string(),
-            from: ids[2],
-            to: ids[0],
-            sources: Vec::new(),
-        }));
-
-        let map = Map::fold(&DECISIONS, &events).unwrap();
-
-        assert_eq!(map.nodes().len(), 3);
-        assert!(map.edges().is_empty());
-    }
-
-    #[test]
-    fn an_unknown_kind_fails_the_fold() {
-        let stray = node_added("decisions", NodeId::new(), "goal", "Ship");
-        let stray_id = stray.id();
-
-        let err = Map::fold(&DECISIONS, &[stray]).err().unwrap();
-
-        assert_eq!(
-            rejected_with(err, stray_id),
-            MapError::UnknownNodeKind {
-                map: &DECISIONS,
-                kind: "goal".to_string()
-            }
-        );
-        assert_eq!(
-            MapError::UnknownNodeKind {
-                map: &DECISIONS,
-                kind: "goal".to_string()
-            }
-            .to_string(),
-            "no node kind \"goal\" in map \"decisions\"; kinds are question, option, evidence, decision"
-        );
-    }
-
-    #[test]
-    fn a_blank_name_fails_the_fold() {
-        let stray = node_added("decisions", NodeId::new(), "option", " ");
-        let stray_id = stray.id();
-
-        let err = Map::fold(&DECISIONS, &[stray]).err().unwrap();
-
-        assert_eq!(rejected_with(err, stray_id), MapError::BlankName);
-    }
-
-    #[test]
-    fn a_name_is_unique_within_its_kind_only() {
-        let events = vec![
-            node_added("decisions", NodeId::new(), "option", "Rust"),
-            node_added("decisions", NodeId::new(), "decision", "Rust"),
-        ];
-        assert_eq!(Map::fold(&DECISIONS, &events).unwrap().nodes().len(), 2);
-
-        let twice = node_added("decisions", NodeId::new(), "option", "Rust");
-        let twice_id = twice.id();
-        let mut events = events;
-        events.push(twice);
-
-        let err = Map::fold(&DECISIONS, &events).err().unwrap();
-
-        assert_eq!(
-            rejected_with(err, twice_id),
-            MapError::DuplicateNode {
-                kind: "option".to_string(),
-                name: "Rust".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn an_edge_needs_both_ends_and_is_stated_once() {
-        let (ids, mut events) = rust_over_go();
-        let dangling = edge_added("decisions", "supports", NodeId::new(), ids[1]);
-        let dangling_id = dangling.id();
-        let mut with_dangling = events.clone();
-        with_dangling.push(dangling);
-
-        let err = Map::fold(&DECISIONS, &with_dangling).err().unwrap();
-        assert!(matches!(
-            rejected_with(err, dangling_id),
-            MapError::NoSuchNodeId(_)
-        ));
-
-        let twice = edge_added("decisions", "resolves", ids[2], ids[0]);
-        let twice_id = twice.id();
-        events.push(twice);
-
-        let err = Map::fold(&DECISIONS, &events).err().unwrap();
-        assert_eq!(
-            rejected_with(err, twice_id),
-            MapError::DuplicateEdge {
-                kind: "resolves".to_string(),
-                from: "decision \"Rust over Go\"".to_string(),
-                to: "question \"Which language?\"".to_string()
-            }
-        );
-    }
-
-    #[test]
-    fn removing_an_edge_that_is_not_there_fails_the_fold() {
-        let (ids, mut events) = rust_over_go();
-        let stray = committed(Payload::EdgeRemoved {
-            map: "decisions".to_string(),
-            kind: "supports".to_string(),
-            from: ids[1],
-            to: ids[0],
-            sources: Vec::new(),
-        });
-        let stray_id = stray.id();
-        events.push(stray);
-
-        let err = Map::fold(&DECISIONS, &events).err().unwrap();
-
-        assert!(matches!(
-            rejected_with(err, stray_id),
-            MapError::NoSuchEdge { .. }
-        ));
-    }
-
-    #[test]
-    fn apply_records_what_a_fold_rebuilds() {
-        let mut built = Map::empty(&DECISIONS);
-        let events: Vec<Event> = vec![
-            add_node("question", "Which language?"),
-            add_node("decision", "Rust over Go"),
-            add_edge(
-                "resolves",
-                node_ref("decision", "Rust over Go"),
-                node_ref("question", "Which language?"),
-            ),
-        ]
-        .into_iter()
-        .map(|m| committed(built.apply(m).unwrap()))
-        .collect();
-
-        let folded = Map::fold(&DECISIONS, &events).unwrap();
-
-        let decision = folded.find("decision", "Rust over Go").unwrap();
-        assert!(decision.id == built.find("decision", "Rust over Go").unwrap().id);
-        assert_eq!(folded.edges().len(), 1);
-        assert!(folded.edges()[0].from == decision.id);
-    }
-
-    #[test]
-    fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
-        let mut map = Map::empty(&DECISIONS);
-        map.apply(add_node("option", "Rust")).unwrap();
-
-        let unknown = map.apply(add_node("goal", "Ship")).err().unwrap();
-        let blank = map.apply(add_node("option", "  ")).err().unwrap();
-        let duplicate = map.apply(add_node("option", "Rust")).err().unwrap();
-        let missing = map
-            .apply(add_edge(
-                "supports",
-                node_ref("evidence", "Nope"),
-                node_ref("option", "Rust"),
-            ))
-            .err()
-            .unwrap();
-        let no_edge = map
-            .apply(Mutation::RemoveEdge {
-                kind: "supports".to_string(),
-                from: node_ref("option", "Rust"),
-                to: node_ref("option", "Rust"),
-                sources: Vec::new(),
-            })
-            .err()
-            .unwrap();
-
-        assert!(matches!(unknown, MapError::UnknownNodeKind { .. }));
-        assert_eq!(blank, MapError::BlankName);
-        assert!(matches!(duplicate, MapError::DuplicateNode { .. }));
-        assert_eq!(missing, MapError::NoSuchNode(node_ref("evidence", "Nope")));
-        assert_eq!(missing.to_string(), "no evidence \"Nope\" in the map");
-        assert!(matches!(no_edge, MapError::NoSuchEdge { .. }));
-        assert_eq!(map.nodes().len(), 1);
-        assert!(map.edges().is_empty());
-    }
-
-    #[test]
-    fn apply_removes_a_node_by_name_and_its_edges_with_it() {
-        let mut map = Map::empty(&DECISIONS);
-        map.apply(add_node("question", "Which language?")).unwrap();
-        map.apply(add_node("decision", "Rust over Go")).unwrap();
-        map.apply(add_edge(
-            "resolves",
-            node_ref("decision", "Rust over Go"),
-            node_ref("question", "Which language?"),
-        ))
-        .unwrap();
-
-        let payload = map
-            .apply(Mutation::RemoveNode {
-                node: node_ref("question", "Which language?"),
-                reason: "answered".to_string(),
-                sources: Vec::new(),
-            })
-            .unwrap();
-
-        assert!(matches!(payload, Payload::NodeRemoved { .. }));
-        assert_eq!(map.nodes().len(), 1);
-        assert!(map.edges().is_empty());
-    }
-
-    #[test]
-    fn a_map_reads_as_one_line_per_node_then_per_edge() {
-        let mut map = Map::empty(&DECISIONS);
-        map.apply(add_node("question", "Which language?")).unwrap();
-        map.apply(Mutation::AddNode {
-            kind: "evidence".to_string(),
-            name: "Built both".to_string(),
-            properties: BTreeMap::from([
-                ("summary".to_string(), "side by\nside".to_string()),
-                ("when".to_string(), "August".to_string()),
-            ]),
-            sources: Vec::new(),
-        })
-        .unwrap();
-        map.apply(add_node("decision", "Rust over Go")).unwrap();
-        map.apply(add_edge(
-            "resolves",
-            node_ref("decision", "Rust over Go"),
-            node_ref("question", "Which language?"),
-        ))
-        .unwrap();
-
-        assert_eq!(
-            map.to_string(),
-            "- question \"Which language?\"\n\
-             - evidence \"Built both\": summary: \"side by\\nside\"; when: \"August\"\n\
-             - decision \"Rust over Go\"\n\
-             - decision \"Rust over Go\" resolves question \"Which language?\"\n"
-        );
-        assert_eq!(Map::empty(&DECISIONS).to_string(), "");
-    }
-
-    #[test]
-    fn a_schema_is_found_by_name() {
-        assert_eq!(Schema::find("decisions").unwrap().name, "decisions");
-        assert_eq!(
-            Schema::find("tasks").err().unwrap().to_string(),
-            "no map named \"tasks\"; maps are decisions"
-        );
-    }
-}
+mod tests;

@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use clap::Parser;
@@ -9,6 +10,7 @@ use tokio_stream::StreamExt;
 
 mod app;
 mod cli;
+mod code;
 mod percept;
 mod providers;
 mod shared;
@@ -27,6 +29,10 @@ use tui::{Chat, StreamEvent};
 /// Where the event log lives: `percept.jsonl` in the working directory,
 /// so the transcript follows wherever the app is launched from.
 const LOG_PATH: &str = "percept.jsonl";
+
+/// Where the code map is walked from: the working directory, so the
+/// map follows the app the way the log does.
+const CODE_ROOT: &str = ".";
 
 /// Names the provider that answers: `ollama` (the default) or `openai`.
 const PROVIDER_VAR: &str = "PERCEPT_PROVIDER";
@@ -215,10 +221,16 @@ async fn main() {
                 EventsCommand::Search(args) => cli::search(args, &log),
                 EventsCommand::Show(args) => cli::show(args, &log),
             }),
+        // `maps show code` is walked fresh from the working tree, never
+        // the log, so it must not even open `percept.jsonl` - a
+        // directory with no log still gets a code map.
+        Some(Command::Maps {
+            command: MapsCommand::Show(args),
+        }) if args.is_code() => cli::maps_show_code(args, Path::new(CODE_ROOT)),
         Some(Command::Maps { command }) => Jsonl::open(LOG_PATH)
             .map_err(Box::<dyn std::error::Error>::from)
             .and_then(|log| match command {
-                MapsCommand::List => cli::maps_list(&log),
+                MapsCommand::List => cli::maps_list(&log, Path::new(CODE_ROOT)),
                 MapsCommand::Show(args) => cli::maps_show(args, &log),
                 MapsCommand::AddNode(args) => cli::maps_add_node(args, &log),
                 MapsCommand::AddEdge(args) => cli::maps_add_edge(args, &log),

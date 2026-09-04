@@ -60,6 +60,12 @@ impl<T> PartialEq for Id<T> {
 
 impl<T> Eq for Id<T> {}
 
+impl<T> std::hash::Hash for Id<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.uuid.hash(state);
+    }
+}
+
 impl<T> std::fmt::Debug for Id<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.uuid)
