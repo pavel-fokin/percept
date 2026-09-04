@@ -271,3 +271,20 @@ fn maps_show_kind_is_repeatable() {
         _ => panic!("expected maps show"),
     }
 }
+
+#[test]
+fn depth_is_refused_without_around() {
+    let alone = Cli::try_parse_from(["percept", "maps", "show", "decisions", "--depth", "2"]);
+    assert!(alone.is_err());
+    let with = Cli::try_parse_from([
+        "percept",
+        "maps",
+        "show",
+        "decisions",
+        "--around",
+        "question:Why?",
+        "--depth",
+        "2",
+    ]);
+    assert!(with.is_ok());
+}

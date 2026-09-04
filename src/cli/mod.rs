@@ -91,6 +91,13 @@ pub struct ShowMapArgs {
     /// between them.
     #[arg(long)]
     kind: Vec<String>,
+    /// `kind:name` of a node. Keep only it and its neighbourhood,
+    /// reached along edges in either direction.
+    #[arg(long, value_parser = parse_node_ref)]
+    around: Option<NodeRef>,
+    /// How many edges out `--around` reaches; 0 is the node alone.
+    #[arg(long, default_value_t = 1, requires = "around")]
+    depth: usize,
 }
 
 /// What every map change names: the map, and the events it was drawn
@@ -349,10 +356,14 @@ pub fn maps_list(log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
     print_lines(maps.iter().map(store::encode_map))
 }
 
-/// Prints the map `args.map` names, nodes then edges, cut to `--kind`
-/// when given.
+/// Prints the map `args.map` names, nodes then edges. `--around` cuts
+/// it to a neighbourhood first, then `--kind` cuts that to its kinds,
+/// so a node of another kind still counts as a step on the way.
 pub fn maps_show(args: ShowMapArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
     let mut map = store::fold_map(log, &args.map)?;
+    if let Some(node) = &args.around {
+        map = map.around(node, args.depth)?;
+    }
     if !args.kind.is_empty() {
         map = map.keep_kinds(&args.kind)?;
     }

@@ -304,6 +304,39 @@ impl Map {
         Ok(self.cut_to(nodes))
     }
 
+    /// The map cut to `node` and every node within `depth` edges of
+    /// it, following edges both ways: what is around a file is what it
+    /// imports and what imports it. Depth zero is the node alone.
+    pub fn around(&self, node: &NodeRef, depth: usize) -> Result<Self, MapError> {
+        let start = self
+            .find(&node.kind, &node.name)
+            .map(|n| n.id)
+            .ok_or_else(|| MapError::NoSuchNode(node.clone()))?;
+        let mut reached: HashSet<NodeId> = HashSet::from([start]);
+        let mut frontier = vec![start];
+        for _ in 0..depth {
+            let mut next = Vec::new();
+            for edge in &self.edges {
+                for (near, far) in [(edge.from, edge.to), (edge.to, edge.from)] {
+                    if frontier.contains(&near) && reached.insert(far) {
+                        next.push(far);
+                    }
+                }
+            }
+            if next.is_empty() {
+                break;
+            }
+            frontier = next;
+        }
+        let nodes = self
+            .nodes
+            .iter()
+            .filter(|node| reached.contains(&node.id))
+            .cloned()
+            .collect();
+        Ok(self.cut_to(nodes))
+    }
+
     /// A copy holding `nodes` and only the edges that join two of them.
     /// An edge to a node outside the cut is not a fact of the cut.
     fn cut_to(&self, nodes: Vec<Node>) -> Self {

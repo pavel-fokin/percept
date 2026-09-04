@@ -406,3 +406,61 @@ fn keeping_a_kind_the_schema_lacks_is_an_error() {
     let err = map.keep_kinds(&["goal".to_string()]).err().unwrap();
     assert!(matches!(err, MapError::UnknownNodeKind { .. }));
 }
+
+/// A chain: question <- decision <- evidence, so depth walks one
+/// step at a time and against the edge direction.
+fn chain() -> Map {
+    let mut map = Map::empty(&DECISIONS);
+    map.apply(add_node("question", "Which language?")).unwrap();
+    map.apply(add_node("decision", "Rust over Go")).unwrap();
+    map.apply(add_node("evidence", "Built both")).unwrap();
+    map.apply(add_node("option", "Go")).unwrap();
+    map.apply(add_edge(
+        "resolves",
+        node_ref("decision", "Rust over Go"),
+        node_ref("question", "Which language?"),
+    ))
+    .unwrap();
+    map.apply(add_edge(
+        "supports",
+        node_ref("evidence", "Built both"),
+        node_ref("decision", "Rust over Go"),
+    ))
+    .unwrap();
+    map
+}
+
+#[test]
+fn around_at_depth_zero_is_the_node_alone() {
+    let cut = chain()
+        .around(&node_ref("decision", "Rust over Go"), 0)
+        .unwrap();
+    assert_eq!(cut.nodes().len(), 1);
+    assert!(cut.edges().is_empty());
+}
+
+#[test]
+fn around_follows_edges_both_ways_one_step_per_depth() {
+    let map = chain();
+    let one = map
+        .around(&node_ref("question", "Which language?"), 1)
+        .unwrap();
+    let names: Vec<&str> = one.nodes().iter().map(|n| n.name.as_str()).collect();
+    assert_eq!(names, ["Which language?", "Rust over Go"]);
+    assert_eq!(one.edges().len(), 1);
+
+    let two = map
+        .around(&node_ref("question", "Which language?"), 2)
+        .unwrap();
+    assert_eq!(two.nodes().len(), 3, "the unlinked option stays out");
+    assert_eq!(two.edges().len(), 2);
+}
+
+#[test]
+fn around_a_node_the_map_lacks_is_an_error() {
+    let err = chain()
+        .around(&node_ref("option", "Rust"), 1)
+        .err()
+        .unwrap();
+    assert_eq!(err, MapError::NoSuchNode(node_ref("option", "Rust")));
+}
