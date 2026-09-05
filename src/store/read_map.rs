@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{EventLog, Tool, ToolOutput, ToolSpec};
+use crate::percept::{EventLog, Scope, Tool, ToolOutput, ToolSpec};
 use crate::store::fold_map;
 
 /// The `read_map` tool: prints one map by name, the same text the
@@ -11,11 +11,12 @@ use crate::store::fold_map;
 /// map every turn.
 pub struct ReadMap {
     log: Arc<dyn EventLog>,
+    scope: Scope,
 }
 
 impl ReadMap {
-    pub fn new(log: Arc<dyn EventLog>) -> Self {
-        Self { log }
+    pub fn new(log: Arc<dyn EventLog>, scope: Scope) -> Self {
+        Self { log, scope }
     }
 }
 
@@ -54,7 +55,7 @@ impl Tool for ReadMap {
 
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
-        let map = fold_map(self.log.as_ref(), &args.map)?;
+        let map = fold_map(self.log.as_ref(), &args.map, &self.scope)?;
         if map.nodes().is_empty() {
             return Ok(ToolOutput::text(format!(
                 "the {} map is empty: nothing has been recorded here yet. \
@@ -68,12 +69,20 @@ impl Tool for ReadMap {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
-    use crate::testing::{node_added, FakeLog};
+    use crate::testing::{node_added, node_added_at, FakeLog};
+
+    /// The scope every fixture in this file's events falls inside:
+    /// `testing::node_added` and `source("test")` both stamp `/test`.
+    fn scope() -> Scope {
+        Scope::Project(PathBuf::from("/test"))
+    }
 
     #[test]
     fn spec_names_the_tool_and_carries_valid_schema_json() {
-        let tool = ReadMap::new(Arc::new(FakeLog::default()));
+        let tool = ReadMap::new(Arc::new(FakeLog::default()), scope());
         let spec = tool.spec();
         assert_eq!(spec.name, "read_map");
         let schema: serde_json::Value = serde_json::from_str(spec.parameters).unwrap();
@@ -83,7 +92,7 @@ mod tests {
     #[test]
     fn a_map_reads_as_its_nodes_and_edges() {
         let log = FakeLog::seeded(vec![node_added("decision", "JSONL for the log")]);
-        let out = ReadMap::new(Arc::new(log))
+        let out = ReadMap::new(Arc::new(log), scope())
             .run(r#"{"map":"decisions"}"#)
             .unwrap();
         assert!(out.content.contains("decision"));
@@ -93,7 +102,20 @@ mod tests {
 
     #[test]
     fn an_empty_map_says_so() {
-        let out = ReadMap::new(Arc::new(FakeLog::default()))
+        let out = ReadMap::new(Arc::new(FakeLog::default()), scope())
+            .run(r#"{"map":"decisions"}"#)
+            .unwrap();
+        assert!(out.content.contains("empty"));
+    }
+
+    #[test]
+    fn a_node_from_another_project_never_reaches_the_read() {
+        let log = FakeLog::seeded(vec![node_added_at(
+            "/other",
+            "decision",
+            "Not this project's",
+        )]);
+        let out = ReadMap::new(Arc::new(log), scope())
             .run(r#"{"map":"decisions"}"#)
             .unwrap();
         assert!(out.content.contains("empty"));
@@ -101,7 +123,7 @@ mod tests {
 
     #[test]
     fn an_unknown_map_is_an_error() {
-        let tool = ReadMap::new(Arc::new(FakeLog::default()));
+        let tool = ReadMap::new(Arc::new(FakeLog::default()), scope());
         let Err(err) = tool.run(r#"{"map":"plans"}"#) else {
             panic!("expected an error")
         };
@@ -110,7 +132,7 @@ mod tests {
 
     #[test]
     fn a_missing_name_is_an_error() {
-        let tool = ReadMap::new(Arc::new(FakeLog::default()));
+        let tool = ReadMap::new(Arc::new(FakeLog::default()), scope());
         assert!(tool.run("{}").is_err());
     }
 }

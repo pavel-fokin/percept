@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Parser;
@@ -33,10 +33,6 @@ const HOME_VAR: &str = "PERCEPT_HOME";
 /// The event log's file name under `PERCEPT_HOME`. One log for every
 /// project: an event's `source.path` says which one it came from.
 const LOG_FILE: &str = "percept.jsonl";
-
-/// Where the code map is walked from: the working directory, so the
-/// map follows the app the way the log does.
-const CODE_ROOT: &str = ".";
 
 /// Names the provider that answers: `ollama` (the default) or `openai`.
 const PROVIDER_VAR: &str = "PERCEPT_PROVIDER";
@@ -231,13 +227,14 @@ fn build_app(source: percept::Source) -> Result<App, Box<dyn std::error::Error>>
     let catalog: Arc<dyn percept::ModelCatalog> = Arc::new(build_catalog());
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
+    let scope = percept::Scope::Project(source.path.clone());
     let mut tools: Vec<Arc<dyn percept::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
         Arc::new(ReadEvent::new(log.clone())),
-        Arc::new(ReviseMap::new(log.clone())),
+        Arc::new(ReviseMap::new(log.clone(), scope.clone())),
     ];
     if map_shape.opens_by_tool() {
-        tools.push(Arc::new(ReadMap::new(log.clone())));
+        tools.push(Arc::new(ReadMap::new(log.clone(), scope)));
     }
     App::new(model, catalog, log, tools, map_shape, source)
 }
@@ -299,12 +296,12 @@ async fn main() {
         // the log, so it must not even open the log.
         Some(Command::Maps {
             command: MapsCommand::Show(args),
-        }) if args.is_code() => cli::maps_show_code(args, Path::new(CODE_ROOT)),
+        }) if args.is_code() => cli::maps_show_code(args, &root),
         Some(Command::Maps { command }) => log_path()
             .and_then(|path| Ok(Jsonl::open(path)?))
             .and_then(|log| match command {
-                MapsCommand::List => cli::maps_list(&log, Path::new(CODE_ROOT)),
-                MapsCommand::Show(args) => cli::maps_show(args, &log),
+                MapsCommand::List(args) => cli::maps_list(args, &log, &root),
+                MapsCommand::Show(args) => cli::maps_show(args, &log, &root),
                 MapsCommand::AddNode(args) => cli::maps_add_node(args, &log, &cli_source),
                 MapsCommand::AddEdge(args) => cli::maps_add_edge(args, &log, &cli_source),
                 MapsCommand::RemoveNode(args) => cli::maps_remove_node(args, &log, &cli_source),

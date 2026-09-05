@@ -77,7 +77,7 @@ pub enum Command {
 #[derive(Subcommand)]
 pub enum MapsCommand {
     /// Every map with its node and edge counts, one JSON object per line.
-    List,
+    List(ListMapsArgs),
     /// One map's nodes, then its edges, one JSON object per line.
     Show(ShowMapArgs),
     /// Add a node to a map. Prints the minted node id.
@@ -105,6 +105,10 @@ pub struct ShowMapArgs {
     /// How many edges out `--around` reaches; 0 is the node alone.
     #[arg(long, default_value_t = 1, requires = "around")]
     depth: usize,
+    /// Fold every project's events instead of only this one's. Ignored
+    /// for the code map, which is never folded from the log.
+    #[arg(long)]
+    all_projects: bool,
 }
 
 impl ShowMapArgs {
@@ -113,6 +117,13 @@ impl ShowMapArgs {
     pub fn is_code(&self) -> bool {
         self.map == percept::CODE.name
     }
+}
+
+#[derive(Args)]
+pub struct ListMapsArgs {
+    /// Fold every project's events instead of only this one's.
+    #[arg(long)]
+    all_projects: bool,
 }
 
 /// What every map change names: the map, and the events it was drawn
@@ -397,11 +408,25 @@ fn print_lines(lines: impl Iterator<Item = String>) -> Result<(), Box<dyn std::e
     out.flush().or_else(stop_if_pipe_closed)
 }
 
+/// The scope `maps list` and `maps show` fold: every project's events
+/// with `--all-projects`, else only `root`'s.
+fn scope(all_projects: bool, root: &Path) -> percept::Scope {
+    if all_projects {
+        percept::Scope::All
+    } else {
+        percept::Scope::Project(root.to_path_buf())
+    }
+}
+
 /// Prints every map percept knows with its size: the log's maps, folded
-/// from one read of `log`, then the code map, walked fresh from the
-/// working directory.
-pub fn maps_list(log: &dyn EventLog, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let mut maps = Map::fold_all(&log.load()?)?;
+/// from one read of `log` and scoped by `args`, then the code map,
+/// walked fresh from the working directory.
+pub fn maps_list(
+    args: ListMapsArgs,
+    log: &dyn EventLog,
+    root: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut maps = Map::fold_all(&scope(args.all_projects, root), &log.load()?)?;
     maps.push(code::build(root)?);
     print_lines(maps.iter().map(store::encode_map))
 }
@@ -409,8 +434,12 @@ pub fn maps_list(log: &dyn EventLog, root: &Path) -> Result<(), Box<dyn std::err
 /// Prints the map `args.map` names, nodes then edges. `--around` cuts
 /// it to a neighbourhood first, then `--kind` cuts that to its kinds,
 /// so a node of another kind still counts as a step on the way.
-pub fn maps_show(args: ShowMapArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
-    let map = store::fold_map(log, &args.map)?;
+pub fn maps_show(
+    args: ShowMapArgs,
+    log: &dyn EventLog,
+    root: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let map = store::fold_map(log, &args.map, &scope(args.all_projects, root))?;
     print_map(map, &args)
 }
 
@@ -455,7 +484,8 @@ pub fn maps_add_node(
     source: &percept::Source,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let MapArgs { map, source: cited } = args.target;
-    let payload = store::revise(log, &map, &cited, |sources| Mutation::AddNode {
+    let scope = percept::Scope::Project(source.path.clone());
+    let payload = store::revise(log, &map, &scope, &cited, |sources| Mutation::AddNode {
         kind: args.kind,
         name: args.name,
         properties: args.prop.into_iter().collect::<BTreeMap<_, _>>(),
@@ -474,7 +504,8 @@ pub fn maps_add_edge(
     source: &percept::Source,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let MapArgs { map, source: cited } = args.target;
-    let payload = store::revise(log, &map, &cited, |sources| Mutation::AddEdge {
+    let scope = percept::Scope::Project(source.path.clone());
+    let payload = store::revise(log, &map, &scope, &cited, |sources| Mutation::AddEdge {
         kind: args.kind,
         from: args.from,
         to: args.to,
@@ -490,7 +521,8 @@ pub fn maps_remove_node(
     source: &percept::Source,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let MapArgs { map, source: cited } = args.target;
-    let payload = store::revise(log, &map, &cited, |sources| Mutation::RemoveNode {
+    let scope = percept::Scope::Project(source.path.clone());
+    let payload = store::revise(log, &map, &scope, &cited, |sources| Mutation::RemoveNode {
         node: NodeRef {
             kind: args.kind,
             name: args.name,
@@ -508,7 +540,8 @@ pub fn maps_remove_edge(
     source: &percept::Source,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let MapArgs { map, source: cited } = args.target;
-    let payload = store::revise(log, &map, &cited, |sources| Mutation::RemoveEdge {
+    let scope = percept::Scope::Project(source.path.clone());
+    let payload = store::revise(log, &map, &scope, &cited, |sources| Mutation::RemoveEdge {
         kind: args.kind,
         from: args.from,
         to: args.to,

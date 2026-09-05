@@ -16,9 +16,15 @@ use crate::percept::{
 /// A `Source` for tests that don't care about the path - a fixed one
 /// under `/test`, so a caller only names the writer.
 pub fn source(name: &str) -> Source {
+    source_at(name, "/test")
+}
+
+/// A `Source` under `path`, for a test that needs events from more
+/// than one project.
+pub fn source_at(name: &str, path: &str) -> Source {
     Source {
         name: name.to_string(),
-        path: PathBuf::from("/test"),
+        path: PathBuf::from(path),
     }
 }
 
@@ -220,9 +226,15 @@ impl ModelCatalog for FakeCatalog {
 /// A node on the decisions map, cited from one event, for tests that
 /// need a map with something in it.
 pub fn node_added(kind: &str, name: &str) -> Event {
+    node_added_at("/test", kind, name)
+}
+
+/// `node_added`, from a project other than `/test` - for a test that
+/// checks a map scoped to one project skips another's.
+pub fn node_added_at(path: &str, kind: &str, name: &str) -> Event {
     Event::new(
         Actor::User,
-        source("test"),
+        source_at("test", path),
         None,
         Payload::NodeAdded {
             map: "decisions".to_string(),

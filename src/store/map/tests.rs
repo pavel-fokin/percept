@@ -1,6 +1,14 @@
+use std::path::PathBuf;
+
 use super::*;
 use crate::percept::{Actor, Event, NodeId, NodeRef};
-use crate::testing::{source, FakeLog};
+use crate::testing::{source, source_at, FakeLog};
+
+/// The scope `source("cli")` and `source("t")` fall inside - both stamp
+/// `/test`.
+fn scope() -> Scope {
+    Scope::Project(PathBuf::from("/test"))
+}
 
 fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
     let (kind, name) = (kind.to_string(), name.to_string());
@@ -14,19 +22,30 @@ fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
 
 /// Commits what `revise` returns the way the CLI does.
 fn record(log: &FakeLog, payload: Payload) {
-    log.append(&Event::new(Actor::User, source("cli"), None, payload))
-        .unwrap();
+    record_at(log, "/test", payload);
+}
+
+/// `record`, stamping the commit as coming from `path` - for a test
+/// that revises the same map from more than one project.
+fn record_at(log: &FakeLog, path: &str, payload: Payload) {
+    log.append(&Event::new(
+        Actor::User,
+        source_at("cli", path),
+        None,
+        payload,
+    ))
+    .unwrap();
 }
 
 #[test]
 fn revise_returns_the_payload_that_records_the_mutation() {
     let log = FakeLog::default();
 
-    let payload = revise(&log, "decisions", &[], add_node("option", "Rust")).unwrap();
+    let payload = revise(&log, "decisions", &scope(), &[], add_node("option", "Rust")).unwrap();
 
     assert!(matches!(&payload, Payload::NodeAdded { name, .. } if name == "Rust"));
     record(&log, payload);
-    assert!(fold_map(&log, "decisions")
+    assert!(fold_map(&log, "decisions", &scope())
         .unwrap()
         .find("option", "Rust")
         .is_some());
@@ -35,10 +54,10 @@ fn revise_returns_the_payload_that_records_the_mutation() {
 #[test]
 fn revise_loads_the_log_so_a_second_call_sees_the_first() {
     let log = FakeLog::default();
-    let first = revise(&log, "decisions", &[], add_node("option", "Rust")).unwrap();
+    let first = revise(&log, "decisions", &scope(), &[], add_node("option", "Rust")).unwrap();
     record(&log, first);
 
-    let err = revise(&log, "decisions", &[], add_node("option", "Rust"))
+    let err = revise(&log, "decisions", &scope(), &[], add_node("option", "Rust"))
         .err()
         .unwrap();
 
@@ -46,10 +65,37 @@ fn revise_loads_the_log_so_a_second_call_sees_the_first() {
 }
 
 #[test]
+fn revise_allows_the_same_name_under_a_different_project_s_path() {
+    let log = FakeLog::default();
+    let here = Scope::Project(PathBuf::from("/here"));
+    let there = Scope::Project(PathBuf::from("/there"));
+
+    let first = revise(&log, "decisions", &here, &[], add_node("option", "Rust")).unwrap();
+    record_at(&log, "/here", first);
+
+    let duplicate = revise(&log, "decisions", &here, &[], add_node("option", "Rust"))
+        .err()
+        .unwrap();
+    assert_eq!(
+        duplicate.to_string(),
+        "option \"Rust\" is already in the map"
+    );
+
+    let elsewhere = revise(&log, "decisions", &there, &[], add_node("option", "Rust")).unwrap();
+    record_at(&log, "/there", elsewhere);
+
+    assert!(fold_map(&log, "decisions", &there)
+        .unwrap()
+        .find("option", "Rust")
+        .is_some());
+}
+
+#[test]
 fn revising_the_code_map_is_refused() {
     let err = revise(
         &FakeLog::default(),
         "code",
+        &scope(),
         &[],
         add_node("file", "src/main.rs"),
     )
@@ -61,7 +107,9 @@ fn revising_the_code_map_is_refused() {
 
 #[test]
 fn an_unknown_map_is_an_error() {
-    let err = fold_map(&FakeLog::default(), "tasks").err().unwrap();
+    let err = fold_map(&FakeLog::default(), "tasks", &scope())
+        .err()
+        .unwrap();
 
     assert_eq!(
         err.to_string(),
@@ -76,10 +124,18 @@ fn a_source_is_checked_against_the_loaded_log() {
     let log = FakeLog::seeded(vec![cited]);
     let unknown = Uuid::now_v7().to_string();
 
-    let ok = revise(&log, "decisions", &[known], add_node("option", "Rust")).unwrap();
+    let ok = revise(
+        &log,
+        "decisions",
+        &scope(),
+        &[known],
+        add_node("option", "Rust"),
+    )
+    .unwrap();
     let missing = revise(
         &log,
         "decisions",
+        &scope(),
         std::slice::from_ref(&unknown),
         add_node("option", "Go"),
     )
@@ -88,6 +144,7 @@ fn a_source_is_checked_against_the_loaded_log() {
     let junk = revise(
         &log,
         "decisions",
+        &scope(),
         &["user".to_string()],
         add_node("option", "Go"),
     )

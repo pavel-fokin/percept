@@ -9,14 +9,19 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::percept::{
-    Edge, EventId, EventLog, Map, MapError, Mutation, Node, NodeId, Payload, Schema,
+    Edge, EventId, EventLog, Map, MapError, Mutation, Node, NodeId, Payload, Schema, Scope,
 };
 use crate::store::event::ids;
 use crate::store::parse_event_id;
 
-/// The map `name` names, folded from every event in `log`.
-pub fn fold_map(log: &dyn EventLog, name: &str) -> Result<Map, Box<dyn std::error::Error>> {
-    Ok(Map::fold(Schema::find(name)?, &log.load()?)?)
+/// The map `name` names, folded from every event in `log` that falls
+/// inside `scope`.
+pub fn fold_map(
+    log: &dyn EventLog,
+    name: &str,
+    scope: &Scope,
+) -> Result<Map, Box<dyn std::error::Error>> {
+    Ok(Map::fold(Schema::find(name)?, scope, &log.load()?)?)
 }
 
 /// One writer's view of the log, loaded once: a map folded from it,
@@ -28,10 +33,14 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    pub fn load(log: &dyn EventLog, name: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn load(
+        log: &dyn EventLog,
+        name: &str,
+        scope: &Scope,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let schema = Schema::find(name)?;
         let events = log.load()?;
-        let map = Map::fold(schema, &events)?;
+        let map = Map::fold(schema, scope, &events)?;
         let ids = events.iter().map(|event| event.id().as_uuid()).collect();
         Ok(Self { map, ids })
     }
@@ -65,10 +74,11 @@ impl Snapshot {
 pub fn revise(
     log: &dyn EventLog,
     name: &str,
+    scope: &Scope,
     sources: &[String],
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
-    let mut snapshot = Snapshot::load(log, name)?;
+    let mut snapshot = Snapshot::load(log, name, scope)?;
     let sources = snapshot.resolve(sources)?;
     Ok(snapshot.apply(mutation(sources))?)
 }

@@ -1,10 +1,12 @@
+use std::path::PathBuf;
+
 use super::*;
 use crate::percept::{Actor, Event, EventId};
 use crate::testing::{source, FakeLog};
 
 fn tool(events: Vec<Event>) -> ReviseMap {
     let log = Arc::new(FakeLog::seeded(events));
-    ReviseMap::new(log)
+    ReviseMap::new(log, Scope::Project(PathBuf::from("/test")))
 }
 
 #[test]

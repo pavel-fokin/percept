@@ -8,9 +8,31 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
+use std::path::PathBuf;
 
 use super::{Event, EventId, Payload};
 use crate::shared::Id;
+
+/// Which events a fold may draw from: one project's alone, or every
+/// project's. The log is shared by every project that writes to it;
+/// `Project` is the default a reader wants, `All` the escape hatch.
+/// Never touches `Snapshot::resolve` - a node may cite an event from
+/// any project, whichever map it ends up in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Scope {
+    Project(PathBuf),
+    All,
+}
+
+impl Scope {
+    /// Whether `event` falls inside this scope.
+    pub fn admits(&self, event: &Event) -> bool {
+        match self {
+            Self::Project(path) => event.source().path == *path,
+            Self::All => true,
+        }
+    }
+}
 
 /// Which node and edge kinds a map allows. Data, not an enum: adding a
 /// map is adding a value.
@@ -272,17 +294,22 @@ impl Map {
         }
     }
 
-    /// Folds the events that belong to `schema`'s map, in the order
-    /// given, which must be log order. Events for other maps and of
-    /// other kinds are skipped. An event that breaks a rule is an
-    /// error naming it, not skipped: silently dropping it would hide
-    /// that something went wrong at write time.
+    /// Folds the events that belong to `schema`'s map and fall inside
+    /// `scope`, in the order given, which must be log order. Events for
+    /// other maps, of other kinds, or outside `scope` are skipped. An
+    /// event that breaks a rule is an error naming it, not skipped:
+    /// silently dropping it would hide that something went wrong at
+    /// write time.
     pub fn fold<'a>(
         schema: &'static Schema,
+        scope: &Scope,
         events: impl IntoIterator<Item = &'a Event>,
     ) -> Result<Self, MapError> {
         let mut map = Self::empty(schema);
         for event in events {
+            if !scope.admits(event) {
+                continue;
+            }
             if map_of(event.payload()) != Some(schema.name) {
                 continue;
             }
@@ -295,13 +322,14 @@ impl Map {
         Ok(map)
     }
 
-    /// Every map percept knows, folded from `events`.
+    /// Every map percept knows, folded from `events` within `scope`.
     pub fn fold_all<'a>(
+        scope: &Scope,
         events: impl IntoIterator<Item = &'a Event> + Clone,
     ) -> Result<Vec<Self>, MapError> {
         SCHEMAS
             .iter()
-            .map(|schema| Self::fold(schema, events.clone()))
+            .map(|schema| Self::fold(schema, scope, events.clone()))
             .collect()
     }
 
