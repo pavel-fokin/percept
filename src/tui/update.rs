@@ -5,6 +5,8 @@ use tokio_stream::StreamExt;
 use std::sync::Arc;
 
 use super::commands;
+#[cfg(test)]
+use super::type_str;
 use super::{Chat, ModelsMenu, StreamEvent};
 use crate::app::{run_tool, ToolStep};
 use crate::percept::{Chunk, ModelListing, ReplyStream, Tool, ToolOutput};
@@ -26,10 +28,8 @@ pub fn handle_key(
         handle_models_menu_key(chat, key);
         return Ok(false);
     }
-    if !chat.command_suggestions.is_empty() {
-        if let Some(quit) = handle_command_suggestion_key(chat, key) {
-            return Ok(quit);
-        }
+    if handle_command_suggestion_key(chat, key) {
+        return Ok(false);
     }
     match (key.code, key.modifiers) {
         (KeyCode::Esc, _) => Ok(true),
@@ -57,7 +57,7 @@ pub fn handle_key(
         // waits, so what's typed is sent once the reply lands. Applies
         // to /models too: a switch can never land mid-turn.
         (KeyCode::Enter, _) if chat.app.is_replying() => Ok(false),
-        (KeyCode::Enter, _) if is_models_command(&current_text(chat)) => {
+        (KeyCode::Enter, _) if is_models_command(&chat.current_text()) => {
             open_models_menu(chat, reply_tx);
             Ok(false)
         }
@@ -80,10 +80,6 @@ fn is_models_command(text: &str) -> bool {
     text.trim() == commands::MODELS
 }
 
-fn current_text(chat: &Chat) -> String {
-    chat.textarea.lines().join("\n")
-}
-
 /// Clears the input, opens the popup in its loading state, and kicks
 /// off the fetch. The list arrives later as a `ModelsListed` event.
 fn open_models_menu(chat: &mut Chat, reply_tx: &UnboundedSender<StreamEvent>) {
@@ -96,30 +92,22 @@ fn open_models_menu(chat: &mut Chat, reply_tx: &UnboundedSender<StreamEvent>) {
 }
 
 /// Key handling while the command dropdown is showing suggestions.
-/// `None` means the key isn't one of the dropdown's own bindings, so
-/// `handle_key` falls through to its ordinary handling - Enter still
-/// submits or runs `/models` either way. Esc closes just the dropdown,
-/// rather than quitting the app.
-fn handle_command_suggestion_key(chat: &mut Chat, key: KeyEvent) -> Option<bool> {
-    match key.code {
-        KeyCode::Up => {
-            chat.move_command_selection_up();
-            Some(false)
-        }
-        KeyCode::Down => {
-            chat.move_command_selection_down();
-            Some(false)
-        }
-        KeyCode::Tab => {
-            chat.accept_command_suggestion();
-            Some(false)
-        }
-        KeyCode::Esc => {
-            chat.command_suggestions = Vec::new();
-            Some(false)
-        }
-        _ => None,
+/// `false` means the key isn't one of the dropdown's own bindings (or
+/// the dropdown isn't open), so `handle_key` falls through to its
+/// ordinary handling - Enter still submits or runs `/models` either
+/// way. Esc closes just the dropdown, rather than quitting the app.
+fn handle_command_suggestion_key(chat: &mut Chat, key: KeyEvent) -> bool {
+    if chat.command_suggestions.is_empty() {
+        return false;
     }
+    match key.code {
+        KeyCode::Up => chat.move_command_selection_up(),
+        KeyCode::Down => chat.move_command_selection_down(),
+        KeyCode::Tab => chat.accept_command_suggestion(),
+        KeyCode::Esc => chat.close_command_suggestions(),
+        _ => return false,
+    }
+    true
 }
 
 /// Key handling while the `/models` popup is open. Every other key is
@@ -264,7 +252,7 @@ fn submit(
     chat: &mut Chat,
     reply_tx: &UnboundedSender<StreamEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let text = chat.textarea.lines().join("\n").trim().to_string();
+    let text = chat.current_text().trim().to_string();
     if text.is_empty() {
         return Ok(());
     }

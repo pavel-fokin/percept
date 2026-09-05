@@ -123,13 +123,6 @@ fn a_models_listed_event_whose_token_does_not_match_the_open_menu_is_dropped() {
     assert!(chat.models_menu.unwrap().descriptors().is_none());
 }
 
-fn type_str(chat: &mut Chat, text: &str) {
-    for ch in text.chars() {
-        chat.textarea.insert_char(ch);
-    }
-    chat.recompute_command_suggestions();
-}
-
 const FIRST: commands::Command = commands::Command {
     name: "/aaa",
     description: "a",

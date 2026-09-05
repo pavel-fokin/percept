@@ -127,6 +127,13 @@ impl<'a> Chat<'a> {
         self.spinner = self.spinner.wrapping_add(1);
     }
 
+    /// The textarea's lines joined back into one string - a slash
+    /// command is always single-line, but the textarea itself doesn't
+    /// know that.
+    pub fn current_text(&self) -> String {
+        self.textarea.lines().join("\n")
+    }
+
     /// Refilters `command_suggestions` from the textarea's current
     /// line: every `Command` whose name starts with it, while the
     /// trimmed line itself starts with `/`. Empty otherwise, so a line
@@ -134,7 +141,7 @@ impl<'a> Chat<'a> {
     /// list. The highlighted row resets to the top - a narrower or
     /// wider match makes the old row meaningless.
     pub fn recompute_command_suggestions(&mut self) {
-        let text = self.textarea.lines().join("\n");
+        let text = self.current_text();
         let prefix = text.trim();
         self.command_suggestions = if prefix.starts_with('/') {
             commands::COMMANDS
@@ -171,6 +178,12 @@ impl<'a> Chat<'a> {
             self.textarea.clear();
             self.textarea.insert_str(name);
         }
+        self.close_command_suggestions();
+    }
+
+    /// Hides the command dropdown and resets which row was highlighted,
+    /// so it doesn't carry over into the next time it opens.
+    pub fn close_command_suggestions(&mut self) {
         self.command_suggestions = Vec::new();
         self.command_selected = 0;
     }
@@ -305,6 +318,18 @@ fn new_textarea<'a>() -> TextArea<'a> {
     textarea.set_cursor_line_style(Style::default());
     textarea.set_placeholder_style(Style::default().fg(Color::DarkGray));
     textarea
+}
+
+/// Types `text` into `chat`'s textarea one character at a time and
+/// refilters its command suggestions, the way `handle_key`'s catch-all
+/// arm does for real input. Shared by `tui::tests` and
+/// `tui::update::tests`.
+#[cfg(test)]
+fn type_str(chat: &mut Chat, text: &str) {
+    for ch in text.chars() {
+        chat.textarea.insert_char(ch);
+    }
+    chat.recompute_command_suggestions();
 }
 
 #[cfg(test)]

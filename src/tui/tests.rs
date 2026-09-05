@@ -81,13 +81,6 @@ fn chat() -> Chat<'static> {
     Chat::new(Box::new(app))
 }
 
-fn type_str(chat: &mut Chat, text: &str) {
-    for ch in text.chars() {
-        chat.textarea.insert_char(ch);
-    }
-    chat.recompute_command_suggestions();
-}
-
 #[test]
 fn typing_a_slash_shows_every_matching_command() {
     let mut chat = chat();
