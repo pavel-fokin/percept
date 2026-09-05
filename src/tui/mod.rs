@@ -66,6 +66,11 @@ pub struct Chat<'a> {
     /// Open while the `/models` popup shows - `None` the rest of the
     /// time, when keys reach the textarea as usual.
     pub models_menu: Option<ModelsMenu>,
+    /// Commands whose name starts with the input line's prefix, while
+    /// it starts with `/`. Empty otherwise, so the anchored list above
+    /// the input reserves no space. Recomputed from the textarea after
+    /// every keystroke that reaches it - not yet wired to selection.
+    pub command_suggestions: Vec<&'static commands::Command>,
     /// Counted up each time `/models` opens, so the `ModelsMenu` it
     /// opens can be told apart from one closed and reopened since - see
     /// `ModelsMenu::token`.
@@ -105,6 +110,7 @@ impl<'a> Chat<'a> {
             app,
             error: None,
             models_menu: None,
+            command_suggestions: Vec::new(),
             next_models_token: 0,
             expanded_thoughts: Vec::new(),
             thought_rows: Vec::new(),
@@ -114,6 +120,24 @@ impl<'a> Chat<'a> {
 
     pub fn tick(&mut self) {
         self.spinner = self.spinner.wrapping_add(1);
+    }
+
+    /// Refilters `command_suggestions` from the textarea's current
+    /// line: every `Command` whose name starts with it, while the
+    /// trimmed line itself starts with `/`. Empty otherwise, so a line
+    /// that no longer starts with `/`, or matches nothing, hides the
+    /// list.
+    pub fn recompute_command_suggestions(&mut self) {
+        let text = self.textarea.lines().join("\n");
+        let prefix = text.trim();
+        self.command_suggestions = if prefix.starts_with('/') {
+            commands::COMMANDS
+                .iter()
+                .filter(|command| command.name.starts_with(prefix))
+                .collect()
+        } else {
+            Vec::new()
+        };
     }
 
     /// A token no earlier `/models` open holds, for a menu about to

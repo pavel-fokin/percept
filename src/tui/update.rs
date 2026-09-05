@@ -62,6 +62,7 @@ pub fn handle_key(
         }
         _ => {
             chat.textarea.input(key);
+            chat.recompute_command_suggestions();
             Ok(false)
         }
     }
@@ -82,6 +83,7 @@ fn current_text(chat: &Chat) -> String {
 /// off the fetch. The list arrives later as a `ModelsListed` event.
 fn open_models_menu(chat: &mut Chat, reply_tx: &UnboundedSender<StreamEvent>) {
     chat.textarea.clear();
+    chat.recompute_command_suggestions();
     chat.error = None;
     let token = chat.new_models_token();
     chat.models_menu = Some(ModelsMenu::loading(token));
@@ -235,6 +237,7 @@ fn submit(
         return Ok(());
     }
     chat.textarea.clear();
+    chat.recompute_command_suggestions();
     chat.error = None;
     chat.thinking_started = Some(std::time::Instant::now());
 
