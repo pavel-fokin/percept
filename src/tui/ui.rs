@@ -120,7 +120,10 @@ fn draw_command_suggestions(frame: &mut Frame, chat: &Chat, area: Rect) {
             ]))
         })
         .collect();
-    frame.render_widget(List::new(items), area);
+    let list = List::new(items).highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    let mut state = ListState::default();
+    state.select(Some(chat.command_selected));
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 /// A `width` by `height` rect centered inside `area`, clamped so it

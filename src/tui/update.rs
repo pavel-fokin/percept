@@ -26,6 +26,11 @@ pub fn handle_key(
         handle_models_menu_key(chat, key);
         return Ok(false);
     }
+    if !chat.command_suggestions.is_empty() {
+        if let Some(quit) = handle_command_suggestion_key(chat, key) {
+            return Ok(quit);
+        }
+    }
     match (key.code, key.modifiers) {
         (KeyCode::Esc, _) => Ok(true),
         (KeyCode::Char('j'), KeyModifiers::CONTROL) => {
@@ -88,6 +93,33 @@ fn open_models_menu(chat: &mut Chat, reply_tx: &UnboundedSender<StreamEvent>) {
     let token = chat.new_models_token();
     chat.models_menu = Some(ModelsMenu::loading(token));
     spawn_models(chat.app.available_models(), token, reply_tx.clone());
+}
+
+/// Key handling while the command dropdown is showing suggestions.
+/// `None` means the key isn't one of the dropdown's own bindings, so
+/// `handle_key` falls through to its ordinary handling - Enter still
+/// submits or runs `/models` either way. Esc closes just the dropdown,
+/// rather than quitting the app.
+fn handle_command_suggestion_key(chat: &mut Chat, key: KeyEvent) -> Option<bool> {
+    match key.code {
+        KeyCode::Up => {
+            chat.move_command_selection_up();
+            Some(false)
+        }
+        KeyCode::Down => {
+            chat.move_command_selection_down();
+            Some(false)
+        }
+        KeyCode::Tab => {
+            chat.accept_command_suggestion();
+            Some(false)
+        }
+        KeyCode::Esc => {
+            chat.command_suggestions = Vec::new();
+            Some(false)
+        }
+        _ => None,
+    }
 }
 
 /// Key handling while the `/models` popup is open. Every other key is

@@ -69,8 +69,12 @@ pub struct Chat<'a> {
     /// Commands whose name starts with the input line's prefix, while
     /// it starts with `/`. Empty otherwise, so the anchored list above
     /// the input reserves no space. Recomputed from the textarea after
-    /// every keystroke that reaches it - not yet wired to selection.
+    /// every keystroke that reaches it.
     pub command_suggestions: Vec<&'static commands::Command>,
+    /// Which row of `command_suggestions` is highlighted. Reset to 0
+    /// whenever the list is recomputed, since a narrower or wider match
+    /// makes an old row meaningless.
+    pub command_selected: usize,
     /// Counted up each time `/models` opens, so the `ModelsMenu` it
     /// opens can be told apart from one closed and reopened since - see
     /// `ModelsMenu::token`.
@@ -111,6 +115,7 @@ impl<'a> Chat<'a> {
             error: None,
             models_menu: None,
             command_suggestions: Vec::new(),
+            command_selected: 0,
             next_models_token: 0,
             expanded_thoughts: Vec::new(),
             thought_rows: Vec::new(),
@@ -126,7 +131,8 @@ impl<'a> Chat<'a> {
     /// line: every `Command` whose name starts with it, while the
     /// trimmed line itself starts with `/`. Empty otherwise, so a line
     /// that no longer starts with `/`, or matches nothing, hides the
-    /// list.
+    /// list. The highlighted row resets to the top - a narrower or
+    /// wider match makes the old row meaningless.
     pub fn recompute_command_suggestions(&mut self) {
         let text = self.textarea.lines().join("\n");
         let prefix = text.trim();
@@ -138,6 +144,35 @@ impl<'a> Chat<'a> {
         } else {
             Vec::new()
         };
+        self.command_selected = 0;
+    }
+
+    /// Moves the highlighted suggestion up one row, clamped at the
+    /// first - same style as `ModelsMenu::move_up`.
+    pub fn move_command_selection_up(&mut self) {
+        self.command_selected = self.command_selected.saturating_sub(1);
+    }
+
+    /// Moves the highlighted suggestion down one row, clamped at the
+    /// last - same style as `ModelsMenu::move_down`.
+    pub fn move_command_selection_down(&mut self) {
+        if self.command_selected + 1 < self.command_suggestions.len() {
+            self.command_selected += 1;
+        }
+    }
+
+    /// Replaces the textarea's line with the highlighted suggestion's
+    /// name, then hides the dropdown. The user just accepted their
+    /// choice; showing it again a frame later, still matching itself as
+    /// a prefix, would have nothing left to narrow.
+    pub fn accept_command_suggestion(&mut self) {
+        if let Some(command) = self.command_suggestions.get(self.command_selected) {
+            let name = command.name;
+            self.textarea.clear();
+            self.textarea.insert_str(name);
+        }
+        self.command_suggestions = Vec::new();
+        self.command_selected = 0;
     }
 
     /// A token no earlier `/models` open holds, for a menu about to
