@@ -4,12 +4,12 @@ use tokio_stream::StreamExt;
 
 use std::sync::Arc;
 
+use super::commands;
+#[cfg(test)]
+use super::type_str;
 use super::{Chat, ModelsMenu, StreamEvent};
 use crate::app::{run_tool, ToolStep};
 use crate::percept::{Chunk, ModelListing, ReplyStream, Tool, ToolOutput};
-
-/// The one slash command wired up today - exact match, no arguments.
-const MODELS_COMMAND: &str = "/models";
 
 /// Handle one key press. Returns true if the app should quit. Errs if
 /// submit couldn't append its event to the log - see AppService::submit.
@@ -28,10 +28,14 @@ pub fn handle_key(
         handle_models_menu_key(chat, key);
         return Ok(false);
     }
+    if handle_command_suggestion_key(chat, key) {
+        return Ok(false);
+    }
     match (key.code, key.modifiers) {
         (KeyCode::Esc, _) => Ok(true),
         (KeyCode::Char('j'), KeyModifiers::CONTROL) => {
             chat.textarea.insert_newline();
+            chat.recompute_command_suggestions();
             Ok(false)
         }
         (KeyCode::PageUp, _) => {
@@ -54,7 +58,7 @@ pub fn handle_key(
         // waits, so what's typed is sent once the reply lands. Applies
         // to /models too: a switch can never land mid-turn.
         (KeyCode::Enter, _) if chat.app.is_replying() => Ok(false),
-        (KeyCode::Enter, _) if is_models_command(&current_text(chat)) => {
+        (KeyCode::Enter, _) if is_models_command(&chat.current_text()) => {
             open_models_menu(chat, reply_tx);
             Ok(false)
         }
@@ -64,6 +68,7 @@ pub fn handle_key(
         }
         _ => {
             chat.textarea.input(key);
+            chat.recompute_command_suggestions();
             Ok(false)
         }
     }
@@ -73,21 +78,37 @@ pub fn handle_key(
 /// command today. Anything else starting with `/` is ordinary chat
 /// text, so a message that happens to start with `/` is never swallowed.
 fn is_models_command(text: &str) -> bool {
-    text.trim() == MODELS_COMMAND
-}
-
-fn current_text(chat: &Chat) -> String {
-    chat.textarea.lines().join("\n")
+    text.trim() == commands::MODELS
 }
 
 /// Clears the input, opens the popup in its loading state, and kicks
 /// off the fetch. The list arrives later as a `ModelsListed` event.
 fn open_models_menu(chat: &mut Chat, reply_tx: &UnboundedSender<StreamEvent>) {
     chat.textarea.clear();
+    chat.recompute_command_suggestions();
     chat.error = None;
     let token = chat.new_models_token();
     chat.models_menu = Some(ModelsMenu::loading(token));
     spawn_models(chat.app.available_models(), token, reply_tx.clone());
+}
+
+/// Key handling while the command dropdown is showing suggestions.
+/// `false` means the key isn't one of the dropdown's own bindings (or
+/// the dropdown isn't open), so `handle_key` falls through to its
+/// ordinary handling - Enter still submits or runs `/models` either
+/// way. Esc closes just the dropdown, rather than quitting the app.
+fn handle_command_suggestion_key(chat: &mut Chat, key: KeyEvent) -> bool {
+    if chat.command_suggestions.is_empty() {
+        return false;
+    }
+    match key.code {
+        KeyCode::Up => chat.move_command_selection_up(),
+        KeyCode::Down => chat.move_command_selection_down(),
+        KeyCode::Tab => chat.accept_command_suggestion(),
+        KeyCode::Esc => chat.close_command_suggestions(),
+        _ => return false,
+    }
+    true
 }
 
 /// Key handling while the `/models` popup is open. Every other key is
@@ -232,11 +253,12 @@ fn submit(
     chat: &mut Chat,
     reply_tx: &UnboundedSender<StreamEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let text = chat.textarea.lines().join("\n").trim().to_string();
+    let text = chat.current_text().trim().to_string();
     if text.is_empty() {
         return Ok(());
     }
     chat.textarea.clear();
+    chat.recompute_command_suggestions();
     chat.error = None;
     chat.thinking_started = Some(std::time::Instant::now());
 

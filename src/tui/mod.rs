@@ -3,6 +3,7 @@ use std::time::Instant;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui_textarea::TextArea;
 
+mod commands;
 mod thought;
 mod ui;
 mod update;
@@ -65,6 +66,15 @@ pub struct Chat<'a> {
     /// Open while the `/models` popup shows - `None` the rest of the
     /// time, when keys reach the textarea as usual.
     pub models_menu: Option<ModelsMenu>,
+    /// Commands whose name starts with the input line's prefix, while
+    /// it starts with `/`. Empty otherwise, so the anchored list above
+    /// the input reserves no space. Recomputed from the textarea after
+    /// every keystroke that reaches it.
+    pub command_suggestions: Vec<&'static commands::Command>,
+    /// Which row of `command_suggestions` is highlighted. Reset to 0
+    /// whenever the list is recomputed, since a narrower or wider match
+    /// makes an old row meaningless.
+    pub command_selected: usize,
     /// Counted up each time `/models` opens, so the `ModelsMenu` it
     /// opens can be told apart from one closed and reopened since - see
     /// `ModelsMenu::token`.
@@ -104,6 +114,8 @@ impl<'a> Chat<'a> {
             app,
             error: None,
             models_menu: None,
+            command_suggestions: Vec::new(),
+            command_selected: 0,
             next_models_token: 0,
             expanded_thoughts: Vec::new(),
             thought_rows: Vec::new(),
@@ -113,6 +125,67 @@ impl<'a> Chat<'a> {
 
     pub fn tick(&mut self) {
         self.spinner = self.spinner.wrapping_add(1);
+    }
+
+    /// The textarea's lines joined back into one string - a slash
+    /// command is always single-line, but the textarea itself doesn't
+    /// know that.
+    pub fn current_text(&self) -> String {
+        self.textarea.lines().join("\n")
+    }
+
+    /// Refilters `command_suggestions` from the textarea's trimmed
+    /// content: every `Command` whose name starts with it, while the
+    /// content itself starts with `/`. Empty otherwise, so content that
+    /// no longer starts with `/`, or matches nothing, hides the list.
+    /// The highlighted row resets to the top - a narrower or wider
+    /// match makes the old row meaningless.
+    pub fn recompute_command_suggestions(&mut self) {
+        let text = self.current_text();
+        let prefix = text.trim();
+        self.command_suggestions = if prefix.starts_with('/') {
+            commands::COMMANDS
+                .iter()
+                .filter(|command| command.name.starts_with(prefix))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        self.command_selected = 0;
+    }
+
+    /// Moves the highlighted suggestion up one row, clamped at the
+    /// first - same style as `ModelsMenu::move_up`.
+    pub fn move_command_selection_up(&mut self) {
+        self.command_selected = self.command_selected.saturating_sub(1);
+    }
+
+    /// Moves the highlighted suggestion down one row, clamped at the
+    /// last - same style as `ModelsMenu::move_down`.
+    pub fn move_command_selection_down(&mut self) {
+        if self.command_selected + 1 < self.command_suggestions.len() {
+            self.command_selected += 1;
+        }
+    }
+
+    /// Replaces the textarea's line with the highlighted suggestion's
+    /// name, then hides the dropdown. The user just accepted their
+    /// choice; showing it again a frame later, still matching itself as
+    /// a prefix, would have nothing left to narrow.
+    pub fn accept_command_suggestion(&mut self) {
+        if let Some(command) = self.command_suggestions.get(self.command_selected) {
+            let name = command.name;
+            self.textarea.clear();
+            self.textarea.insert_str(name);
+        }
+        self.close_command_suggestions();
+    }
+
+    /// Hides the command dropdown and resets which row was highlighted,
+    /// so it doesn't carry over into the next time it opens.
+    pub fn close_command_suggestions(&mut self) {
+        self.command_suggestions = Vec::new();
+        self.command_selected = 0;
     }
 
     /// A token no earlier `/models` open holds, for a menu about to
@@ -245,6 +318,18 @@ fn new_textarea<'a>() -> TextArea<'a> {
     textarea.set_cursor_line_style(Style::default());
     textarea.set_placeholder_style(Style::default().fg(Color::DarkGray));
     textarea
+}
+
+/// Types `text` into `chat`'s textarea one character at a time and
+/// refilters its command suggestions, the way `handle_key`'s catch-all
+/// arm does for real input. Shared by `tui::tests` and
+/// `tui::update::tests`.
+#[cfg(test)]
+fn type_str(chat: &mut Chat, text: &str) {
+    for ch in text.chars() {
+        chat.textarea.insert_char(ch);
+    }
+    chat.recompute_command_suggestions();
 }
 
 #[cfg(test)]

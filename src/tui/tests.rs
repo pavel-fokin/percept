@@ -62,3 +62,50 @@ fn a_loading_menu_carries_the_token_it_opened_with() {
     let menu = ModelsMenu::loading(7);
     assert_eq!(menu.token(), 7);
 }
+
+fn chat() -> Chat<'static> {
+    use crate::app::{App, MapShape};
+    use crate::testing::{source, FakeCatalog, FakeLog, FakeRenderer, Scripted};
+    use std::sync::Arc;
+
+    let app = App::new(
+        Arc::new(Scripted::new(vec![], false)),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        Vec::new(),
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source("test"),
+    )
+    .unwrap();
+    Chat::new(Box::new(app))
+}
+
+#[test]
+fn typing_a_slash_shows_every_matching_command() {
+    let mut chat = chat();
+    type_str(&mut chat, "/");
+    assert_eq!(chat.command_suggestions.len(), commands::COMMANDS.len());
+}
+
+#[test]
+fn typing_past_every_matching_prefix_hides_suggestions() {
+    let mut chat = chat();
+    type_str(&mut chat, "/modelsx");
+    assert!(chat.command_suggestions.is_empty());
+}
+
+#[test]
+fn plain_text_not_starting_with_slash_shows_no_suggestions() {
+    let mut chat = chat();
+    type_str(&mut chat, "hello");
+    assert!(chat.command_suggestions.is_empty());
+}
+
+#[test]
+fn a_narrower_prefix_still_matching_shows_the_matching_command() {
+    let mut chat = chat();
+    type_str(&mut chat, "/model");
+    assert_eq!(chat.command_suggestions.len(), 1);
+    assert_eq!(chat.command_suggestions[0].name, commands::MODELS);
+}

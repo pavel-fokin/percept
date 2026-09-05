@@ -22,6 +22,10 @@ const TOOL_PREVIEW: usize = 200;
 /// keeps a long one from squeezing the transcript off the screen.
 const ACTIVITY_MAX: usize = 4;
 
+/// Rows the command suggestion list may take. Caps a long prefix match
+/// - `/` alone, say - from squeezing the transcript off the screen.
+const SUGGESTIONS_MAX: usize = 8;
+
 pub fn draw(frame: &mut Frame, chat: &mut Chat) {
     // One blank column each side, so text never touches the edge.
     let area = frame.area().inner(Margin::new(1, 0));
@@ -29,17 +33,25 @@ pub fn draw(frame: &mut Frame, chat: &mut Chat) {
 
     let activity_lines = activity(chat, width);
     let activity_height = activity_lines.len().min(ACTIVITY_MAX) as u16;
-    // Reserved rows other than the transcript and the input itself:
-    // the activity row above it, the hint and model rows below.
-    let input_height = input_height(chat, area.height, activity_height + 2);
-    let [transcript_area, activity_area, input_area, hint_area, model_area] = Layout::vertical([
-        Constraint::Min(1),
-        Constraint::Length(activity_height),
-        Constraint::Length(input_height),
-        Constraint::Length(1),
-        Constraint::Length(1),
-    ])
-    .areas(area);
+    let suggestions_height = chat.command_suggestions.len().min(SUGGESTIONS_MAX) as u16;
+    // Reserved rows other than the transcript and the input itself: the
+    // activity and suggestion rows above it, the hint and model rows
+    // below.
+    let input_height = input_height(
+        chat,
+        area.height,
+        activity_height + suggestions_height + 2,
+    );
+    let [transcript_area, activity_area, suggestions_area, input_area, hint_area, model_area] =
+        Layout::vertical([
+            Constraint::Min(1),
+            Constraint::Length(activity_height),
+            Constraint::Length(suggestions_height),
+            Constraint::Length(input_height),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .areas(area);
 
     let (text, scroll_limit, thought_rows) = transcript(chat, transcript_area);
     chat.update_scroll_metrics(scroll_limit, transcript_area.height);
@@ -49,6 +61,7 @@ pub fn draw(frame: &mut Frame, chat: &mut Chat) {
         transcript_area,
     );
     frame.render_widget(Paragraph::new(activity_lines), activity_area);
+    draw_command_suggestions(frame, chat, suggestions_area);
     draw_input(frame, chat, input_area);
     frame.render_widget(Paragraph::new(hint(chat)), hint_area);
     frame.render_widget(Paragraph::new(model_status(chat)), model_area);
@@ -79,13 +92,41 @@ fn draw_models_menu(frame: &mut Frame, area: Rect, menu: &ModelsMenu) {
             .map(|d| ListItem::new(format!("{}/{}", d.provider, d.model)))
             .collect(),
     };
-    let list = List::new(items).highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    let selected = menu.descriptors().is_some_and(|d| !d.is_empty()).then(|| menu.selected_index());
+    render_selectable_list(frame, inner, items, selected);
+}
 
-    let mut state = ListState::default();
-    if menu.descriptors().is_some_and(|d| !d.is_empty()) {
-        state.select(Some(menu.selected_index()));
+/// The commands matching what's typed so far, anchored directly above
+/// the input rather than centered like `draw_models_menu` - it's a
+/// live filter, not a popup, so it never takes focus from the
+/// textarea.
+fn draw_command_suggestions(frame: &mut Frame, chat: &Chat, area: Rect) {
+    if chat.command_suggestions.is_empty() {
+        return;
     }
-    frame.render_stateful_widget(list, inner, &mut state);
+    let items: Vec<ListItem> = chat
+        .command_suggestions
+        .iter()
+        .map(|command| {
+            ListItem::new(Line::from(vec![
+                Span::styled(command.name, chat.user_style),
+                Span::raw("  "),
+                Span::styled(command.description, chat.hint_style),
+            ]))
+        })
+        .collect();
+    render_selectable_list(frame, area, items, Some(chat.command_selected));
+}
+
+/// A `List` with the row `selected` highlighted, reversed - the one
+/// look every popup or dropdown with a highlighted row shares.
+/// `selected: None` renders the list with nothing highlighted, for a
+/// popup still loading with no row to pick yet.
+fn render_selectable_list(frame: &mut Frame, area: Rect, items: Vec<ListItem>, selected: Option<usize>) {
+    let list = List::new(items).highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    let mut state = ListState::default();
+    state.select(selected);
+    frame.render_stateful_widget(list, area, &mut state);
 }
 
 /// A `width` by `height` rect centered inside `area`, clamped so it
