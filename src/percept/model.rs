@@ -54,18 +54,18 @@ pub enum Message {
     ToolResult { content: String },
 }
 
-/// A kind of content a model reads or writes. Only the three the
-/// current model shapes call for - a model that needs video or
-/// embeddings adds its variant then.
-//
-// No reader yet: the tool-use step is the first consumer. Lint
-// suppressed rather than the vocabulary deferred.
-#[allow(dead_code)]
+/// A kind of content a model reads or writes. `Thought` is the content
+/// of a `Chunk::Thought` - a model that never streams one leaves it out
+/// of `output`. A model that needs video or embeddings adds its variant
+/// then.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Modality {
     Text,
+    #[allow(dead_code)]
     Image,
+    #[allow(dead_code)]
     Audio,
+    Thought,
 }
 
 /// What a model accepts and produces. `input` and `output` list its
