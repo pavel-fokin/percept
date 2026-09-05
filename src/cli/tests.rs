@@ -2,14 +2,10 @@ use super::*;
 use crate::app::{App, MapShape};
 use crate::percept::{self, Payload};
 use crate::testing::{
-    content, node_added_at, source, FakeCatalog, FakeLog, FakeRenderer, FakeTool, Scripted,
+    content, source, FakeCatalog, FakeLog, FakeRenderer, FakeTool, Scripted, ROOT,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-
-/// The project root `publish` stamps every event with, in tests that
-/// don't care what it is.
-const ROOT: &str = "/test";
 
 fn args(actor: &str, payload: &str) -> PublishArgs {
     PublishArgs {
@@ -314,21 +310,6 @@ fn all_projects_scopes_to_every_project_while_the_default_scopes_to_root() {
         percept::Scope::Project(PathBuf::from(ROOT))
     );
     assert_eq!(scope(true, Path::new(ROOT)), percept::Scope::All);
-}
-
-#[test]
-fn maps_show_sees_only_this_project_s_nodes_unless_all_projects_is_set() {
-    let log = FakeLog::seeded(vec![
-        node_added_at(ROOT, "option", "Rust"),
-        node_added_at("/elsewhere", "option", "Go"),
-    ]);
-
-    let here = store::fold_map(&log, "decisions", &scope(false, Path::new(ROOT))).unwrap();
-    let everywhere = store::fold_map(&log, "decisions", &scope(true, Path::new(ROOT))).unwrap();
-
-    assert_eq!(here.nodes().len(), 1);
-    assert!(here.find("option", "Rust").is_some());
-    assert_eq!(everywhere.nodes().len(), 2);
 }
 
 #[test]

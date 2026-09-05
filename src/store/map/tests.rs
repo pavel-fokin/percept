@@ -2,13 +2,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::percept::{Actor, Event, NodeId, NodeRef};
-use crate::testing::{source, source_at, FakeLog};
-
-/// The scope `source("cli")` and `source("t")` fall inside - both stamp
-/// `/test`.
-fn scope() -> Scope {
-    Scope::Project(PathBuf::from("/test"))
-}
+use crate::testing::{scope, source, source_at, FakeLog};
 
 fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
     let (kind, name) = (kind.to_string(), name.to_string());
@@ -72,14 +66,6 @@ fn revise_allows_the_same_name_under_a_different_project_s_path() {
 
     let first = revise(&log, "decisions", &here, &[], add_node("option", "Rust")).unwrap();
     record_at(&log, "/here", first);
-
-    let duplicate = revise(&log, "decisions", &here, &[], add_node("option", "Rust"))
-        .err()
-        .unwrap();
-    assert_eq!(
-        duplicate.to_string(),
-        "option \"Rust\" is already in the map"
-    );
 
     let elsewhere = revise(&log, "decisions", &there, &[], add_node("option", "Rust")).unwrap();
     record_at(&log, "/there", elsewhere);

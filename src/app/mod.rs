@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError, Scope, Source};
+use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError, Source};
 use crate::shared::Timestamp;
 
 /// Most tool calls one user turn may make. At the cap the next request
@@ -150,12 +150,6 @@ fn is_percepts_prompt(event: &Event) -> bool {
     event.actor() == Actor::System && event.kind() == EventKind::MessageReceived
 }
 
-/// The scope every fold in `App` uses: only `source`'s project, never
-/// another writer's.
-fn scope(source: &Source) -> Scope {
-    Scope::Project(source.path.clone())
-}
-
 /// The index of the last `model.called` in `events`, so a reopened log
 /// shows what its last round trip cost instead of reading as unasked.
 fn last_model_called(events: &[Event]) -> Option<usize> {
@@ -245,7 +239,7 @@ impl App {
         map_shape: MapShape,
         source: Source,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let scope = scope(&source);
+        let scope = source.scope();
         let events: Vec<Event> = log
             .load()?
             .into_iter()
@@ -359,10 +353,10 @@ impl App {
             return Ok(());
         }
         let events = self.log.load()?;
-        for map in Map::fold_all(&scope(&self.source), &events)? {
-            if changed.contains(map.schema().name) {
-                self.renderer.render(&map)?;
-            }
+        let scope = self.source.scope();
+        for name in changed {
+            let map = Map::fold(percept::Schema::find(name)?, &scope, &events)?;
+            self.renderer.render(&map)?;
         }
         Ok(())
     }
@@ -372,7 +366,7 @@ impl App {
         if new.is_empty() {
             return Ok(());
         }
-        Map::fold_all(&scope(&self.source), self.events.iter().chain(new)).map(drop)
+        Map::fold_all(&self.source.scope(), self.events.iter().chain(new)).map(drop)
     }
 
     /// Where the model's view starts: `CONTEXT_EVENTS` back from the
@@ -404,7 +398,7 @@ impl App {
             role: Actor::System,
             content: format!("The current time is {}.", Timestamp::now()),
         }];
-        for map in Map::fold_all(&scope(&self.source), &self.events)? {
+        for map in Map::fold_all(&self.source.scope(), &self.events)? {
             let schema = map.schema();
             let body = if map.nodes().is_empty() {
                 "(empty: nothing has been recorded here yet. The log may still hold what it would.)"

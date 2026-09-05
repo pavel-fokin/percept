@@ -7,10 +7,10 @@
 //! one place holds the rules.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::path::PathBuf;
 
-use super::{Event, EventId, Payload};
+use super::{Event, EventId, Payload, Source};
 use crate::shared::Id;
 
 /// Which events a fold may draw from: one project's alone, or every
@@ -31,6 +31,14 @@ impl Scope {
             Self::Project(path) => event.source().path == *path,
             Self::All => true,
         }
+    }
+}
+
+impl Source {
+    /// The scope of this writer's own project - what every fold on its
+    /// behalf reads.
+    pub fn scope(&self) -> Scope {
+        Scope::Project(self.path.clone())
     }
 }
 
@@ -617,24 +625,41 @@ impl Map {
 impl fmt::Display for Map {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for node in &self.nodes {
-            write!(f, "- {node}")?;
-            let mut sep = ": ";
-            for (key, value) in &node.properties {
-                write!(f, "{sep}{key}: {value:?}")?;
-                sep = "; ";
-            }
-            writeln!(f)?;
+            writeln!(f, "- {node}{}", node.properties_line())?;
         }
         for edge in &self.edges {
-            writeln!(
-                f,
-                "- {} {} {}",
-                self.label(edge.from),
-                edge.kind,
-                self.label(edge.to)
-            )?;
+            writeln!(f, "- {}", self.edge_line(edge))?;
         }
         Ok(())
+    }
+}
+
+impl Node {
+    /// The tail of a node's line, wherever one is printed: `: key:
+    /// "value"; key: "value"` over its properties, empty when it has
+    /// none. Values are quoted, so a newline inside one stays inside
+    /// its line.
+    pub fn properties_line(&self) -> String {
+        let mut out = String::new();
+        let mut sep = ": ";
+        for (key, value) in &self.properties {
+            let _ = write!(out, "{sep}{key}: {value:?}");
+            sep = "; ";
+        }
+        out
+    }
+}
+
+impl Map {
+    /// An edge as a line - `from kind to`, each end named the way a
+    /// writer refers to it.
+    pub fn edge_line(&self, edge: &Edge) -> String {
+        format!(
+            "{} {} {}",
+            self.label(edge.from),
+            edge.kind,
+            self.label(edge.to)
+        )
     }
 }
 

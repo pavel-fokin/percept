@@ -157,6 +157,11 @@ fn log_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
     Ok(home.join(LOG_FILE))
 }
 
+/// The shared log, opened where `log_path` says.
+fn open_log() -> Result<Jsonl, Box<dyn std::error::Error>> {
+    Ok(Jsonl::open(log_path()?)?)
+}
+
 /// The checkout the current directory is in: walks up looking for a
 /// `.git` entry - the closest thing to a repository root without
 /// shelling out to git. Falls back to the current directory when none
@@ -256,11 +261,11 @@ fn build_app(
     source: percept::Source,
     renderer: Arc<dyn percept::MapRenderer>,
 ) -> Result<App, Box<dyn std::error::Error>> {
-    let log = Arc::new(Jsonl::open(log_path()?)?);
+    let log = Arc::new(open_log()?);
     let catalog: Arc<dyn percept::ModelCatalog> = Arc::new(build_catalog());
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
-    let scope = percept::Scope::Project(source.path.clone());
+    let scope = source.scope();
     let mut tools: Vec<Arc<dyn percept::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
         Arc::new(ReadEvent::new(log.clone())),
@@ -329,36 +334,32 @@ async fn main() {
         Arc::new(store::MarkdownFiles::new(checkout.join(MAPS_DIR)));
 
     let result = match cli.command {
-        Some(Command::Events { command }) => log_path()
-            .and_then(|path| Ok(Jsonl::open(path)?))
-            .and_then(|log| match command {
-                EventsCommand::Publish(args) => cli::publish(args, &log, &root),
-                EventsCommand::Search(args) => cli::search(args, &log),
-                EventsCommand::Show(args) => cli::show(args, &log),
-            }),
+        Some(Command::Events { command }) => open_log().and_then(|log| match command {
+            EventsCommand::Publish(args) => cli::publish(args, &log, &root),
+            EventsCommand::Search(args) => cli::search(args, &log),
+            EventsCommand::Show(args) => cli::show(args, &log),
+        }),
         // `maps show code` is walked fresh from the working tree, never
         // the log, so it must not even open the log.
         Some(Command::Maps {
             command: MapsCommand::Show(args),
         }) if args.is_code() => cli::maps_show_code(args, &checkout),
-        Some(Command::Maps { command }) => log_path()
-            .and_then(|path| Ok(Jsonl::open(path)?))
-            .and_then(|log| match command {
-                MapsCommand::List(args) => cli::maps_list(args, &log, &root, &checkout),
-                MapsCommand::Show(args) => cli::maps_show(args, &log, &root),
-                MapsCommand::AddNode(args) => {
-                    cli::maps_add_node(args, &log, &cli_source, renderer.as_ref())
-                }
-                MapsCommand::AddEdge(args) => {
-                    cli::maps_add_edge(args, &log, &cli_source, renderer.as_ref())
-                }
-                MapsCommand::RemoveNode(args) => {
-                    cli::maps_remove_node(args, &log, &cli_source, renderer.as_ref())
-                }
-                MapsCommand::RemoveEdge(args) => {
-                    cli::maps_remove_edge(args, &log, &cli_source, renderer.as_ref())
-                }
-            }),
+        Some(Command::Maps { command }) => open_log().and_then(|log| match command {
+            MapsCommand::List(args) => cli::maps_list(args, &log, &root, &checkout),
+            MapsCommand::Show(args) => cli::maps_show(args, &log, &root),
+            MapsCommand::AddNode(args) => {
+                cli::maps_add_node(args, &log, &cli_source, renderer.as_ref())
+            }
+            MapsCommand::AddEdge(args) => {
+                cli::maps_add_edge(args, &log, &cli_source, renderer.as_ref())
+            }
+            MapsCommand::RemoveNode(args) => {
+                cli::maps_remove_node(args, &log, &cli_source, renderer.as_ref())
+            }
+            MapsCommand::RemoveEdge(args) => {
+                cli::maps_remove_edge(args, &log, &cli_source, renderer.as_ref())
+            }
+        }),
         Some(Command::Ask(args)) => {
             headless_turn(Actor::User, args.prompt, cli_source, renderer).await
         }

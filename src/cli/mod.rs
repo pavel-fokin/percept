@@ -26,7 +26,8 @@ use tokio_stream::StreamExt;
 use crate::app::{run_tool, AppService, ToolStep};
 use crate::code;
 use crate::percept::{
-    self, Actor, Chunk, Event, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
+    self, Actor, Chunk, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef,
+    Payload,
 };
 use crate::shared::Timestamp;
 use crate::store;
@@ -469,20 +470,29 @@ fn print_map(mut map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error:
     print_lines(nodes.chain(edges))
 }
 
-/// Commits a shell user's map change - actor `user`, no cause - then
-/// rerenders the map it just changed, folded fresh from the log.
-fn record(
+/// One map change from the shell: `target`'s cited events resolved and
+/// `mutation` checked and applied through `store::revise`, the payload
+/// committed as actor `user` with no cause, then the map rerendered,
+/// folded fresh from the log so another writer's changes are kept.
+/// Returns the payload, for `add-node` to print the minted id.
+fn write(
+    target: MapArgs,
     log: &dyn EventLog,
     source: &percept::Source,
-    payload: Payload,
     renderer: &dyn percept::MapRenderer,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let map = percept::map_of(&payload)
-        .expect("record only ever takes a map payload")
-        .to_string();
-    log.append(&Event::new(Actor::User, source.clone(), None, payload))?;
-    let scope = percept::Scope::Project(source.path.clone());
-    renderer.render(&store::fold_map(log, &map, &scope)?)
+    mutation: impl FnOnce(Vec<EventId>) -> Mutation,
+) -> Result<Payload, Box<dyn std::error::Error>> {
+    let MapArgs { map, source: cited } = target;
+    let scope = source.scope();
+    let payload = store::revise(log, &map, &scope, &cited, mutation)?;
+    log.append(&Event::new(
+        Actor::User,
+        source.clone(),
+        None,
+        payload.clone(),
+    ))?;
+    renderer.render(&store::fold_map(log, &map, &scope)?)?;
+    Ok(payload)
 }
 
 /// Adds a node to a map and prints its minted id, so a shell script can
@@ -493,18 +503,18 @@ pub fn maps_add_node(
     source: &percept::Source,
     renderer: &dyn percept::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let MapArgs { map, source: cited } = args.target;
-    let scope = percept::Scope::Project(source.path.clone());
-    let payload = store::revise(log, &map, &scope, &cited, |sources| Mutation::AddNode {
-        kind: args.kind,
-        name: args.name,
-        properties: args.prop.into_iter().collect::<BTreeMap<_, _>>(),
-        sources,
+    let payload = write(args.target, log, source, renderer, |sources| {
+        Mutation::AddNode {
+            kind: args.kind,
+            name: args.name,
+            properties: args.prop.into_iter().collect::<BTreeMap<_, _>>(),
+            sources,
+        }
     })?;
     if let Payload::NodeAdded { node, .. } = &payload {
         println!("{}", node.as_uuid());
     }
-    record(log, source, payload, renderer)
+    Ok(())
 }
 
 /// Adds an edge between two nodes already in a map.
@@ -514,15 +524,15 @@ pub fn maps_add_edge(
     source: &percept::Source,
     renderer: &dyn percept::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let MapArgs { map, source: cited } = args.target;
-    let scope = percept::Scope::Project(source.path.clone());
-    let payload = store::revise(log, &map, &scope, &cited, |sources| Mutation::AddEdge {
-        kind: args.kind,
-        from: args.from,
-        to: args.to,
-        sources,
-    })?;
-    record(log, source, payload, renderer)
+    write(args.target, log, source, renderer, |sources| {
+        Mutation::AddEdge {
+            kind: args.kind,
+            from: args.from,
+            to: args.to,
+            sources,
+        }
+    })
+    .map(drop)
 }
 
 /// Removes a node from a map, dropping the edges that touch it.
@@ -532,17 +542,17 @@ pub fn maps_remove_node(
     source: &percept::Source,
     renderer: &dyn percept::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let MapArgs { map, source: cited } = args.target;
-    let scope = percept::Scope::Project(source.path.clone());
-    let payload = store::revise(log, &map, &scope, &cited, |sources| Mutation::RemoveNode {
-        node: NodeRef {
-            kind: args.kind,
-            name: args.name,
-        },
-        reason: args.reason,
-        sources,
-    })?;
-    record(log, source, payload, renderer)
+    write(args.target, log, source, renderer, |sources| {
+        Mutation::RemoveNode {
+            node: NodeRef {
+                kind: args.kind,
+                name: args.name,
+            },
+            reason: args.reason,
+            sources,
+        }
+    })
+    .map(drop)
 }
 
 /// Removes an edge from a map.
@@ -552,15 +562,15 @@ pub fn maps_remove_edge(
     source: &percept::Source,
     renderer: &dyn percept::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let MapArgs { map, source: cited } = args.target;
-    let scope = percept::Scope::Project(source.path.clone());
-    let payload = store::revise(log, &map, &scope, &cited, |sources| Mutation::RemoveEdge {
-        kind: args.kind,
-        from: args.from,
-        to: args.to,
-        sources,
-    })?;
-    record(log, source, payload, renderer)
+    write(args.target, log, source, renderer, |sources| {
+        Mutation::RemoveEdge {
+            kind: args.kind,
+            from: args.from,
+            to: args.to,
+            sources,
+        }
+    })
+    .map(drop)
 }
 
 /// A reader that stops early - `head`, or a `jq` that has seen enough -

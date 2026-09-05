@@ -1,24 +1,12 @@
 use std::collections::BTreeMap;
 
-use uuid::Uuid;
-
 use super::*;
-use crate::percept::{EventId, Mutation, NodeRef, Schema};
-
-fn decisions() -> &'static Schema {
-    Schema::find("decisions").unwrap()
-}
-
-fn node_ref(kind: &str, name: &str) -> NodeRef {
-    NodeRef {
-        kind: kind.to_string(),
-        name: name.to_string(),
-    }
-}
+use crate::percept::{EventId, Mutation, DECISIONS};
+use crate::testing::node_ref;
 
 #[test]
 fn an_empty_map_renders_the_heading_the_preamble_and_the_empty_notice() {
-    let text = markdown(&Map::empty(decisions()));
+    let text = markdown(&Map::empty(&DECISIONS));
 
     assert_eq!(
         text,
@@ -33,7 +21,7 @@ fn an_empty_map_renders_the_heading_the_preamble_and_the_empty_notice() {
 
 #[test]
 fn a_map_with_headlines_a_property_a_source_and_an_edge_renders_in_sections() {
-    let mut map = Map::empty(decisions());
+    let mut map = Map::empty(&DECISIONS);
     map.apply(Mutation::AddNode {
         kind: "question".to_string(),
         name: "Which language?".to_string(),
@@ -88,36 +76,15 @@ fn a_map_with_headlines_a_property_a_source_and_an_edge_renders_in_sections() {
     assert_eq!(markdown(&map), expected);
 }
 
-/// A directory under the system temp dir, removed when the test ends -
-/// a trailing `remove_dir_all` never runs on a failing test, which is
-/// the one whose files you'd want left in place.
-struct TempDir {
-    path: PathBuf,
-}
-
-impl TempDir {
-    fn new() -> Self {
-        Self {
-            path: std::env::temp_dir().join(format!("percept-render-{}", Uuid::now_v7())),
-        }
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.path);
-    }
-}
-
 #[test]
 fn markdown_files_writes_the_map_named_file_in_its_directory_creating_it() {
-    let dir = TempDir::new();
-    assert!(!dir.path.exists());
-    let renderer = MarkdownFiles::new(&dir.path);
-    let map = Map::empty(decisions());
+    let temp = tempfile::tempdir().unwrap();
+    let dir = temp.path().join("maps");
+    let renderer = MarkdownFiles::new(&dir);
+    let map = Map::empty(&DECISIONS);
 
     renderer.render(&map).unwrap();
 
-    let written = fs::read_to_string(dir.path.join("decisions.md")).unwrap();
+    let written = fs::read_to_string(dir.join("decisions.md")).unwrap();
     assert_eq!(written, markdown(&map));
 }

@@ -3,6 +3,7 @@
 //! without touching a filesystem. `MarkdownFiles` implements
 //! `percept::MapRenderer`.
 
+use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
@@ -47,12 +48,7 @@ pub fn markdown(map: &Map) -> String {
     if !map.edges().is_empty() {
         out.push_str("\n## edges\n");
         for edge in map.edges() {
-            out.push_str(&format!(
-                "- {} {} {}\n",
-                map.label(edge.from),
-                edge.kind,
-                map.label(edge.to)
-            ));
+            let _ = writeln!(out, "- {}", map.edge_line(edge));
         }
     }
 
@@ -72,26 +68,18 @@ fn ordered_kinds(schema: &'static Schema) -> Vec<&'static str> {
     kinds
 }
 
-/// One node's bullet - its name and properties the way `Map`'s
-/// `Display` writes a node line, minus the leading kind - then, on its
-/// own indented line, the sources it cites, when it cites any.
+/// One node's bullet - its name and properties, the kind being the
+/// section's - then, on its own indented line, the sources it cites,
+/// when it cites any.
 fn push_node(out: &mut String, node: &Node) {
-    out.push_str(&format!("- {:?}", node.name));
-    let mut sep = ": ";
-    for (key, value) in &node.properties {
-        out.push_str(&format!("{sep}{key}: {value:?}"));
-        sep = "; ";
-    }
-    out.push('\n');
+    let _ = writeln!(out, "- {:?}{}", node.name, node.properties_line());
     if !node.sources.is_empty() {
-        out.push_str("  sources: ");
-        out.push_str(&ids(&node.sources).join(", "));
-        out.push('\n');
+        let _ = writeln!(out, "  sources: {}", ids(&node.sources).join(", "));
     }
 }
 
 /// Renders a map to `<dir>/<schema name>.md`, replacing whatever was
-/// there. Implements `percept::MapRenderer`.
+/// there.
 pub struct MarkdownFiles {
     dir: PathBuf,
 }
@@ -103,8 +91,6 @@ impl MarkdownFiles {
 }
 
 impl MapRenderer for MarkdownFiles {
-    /// Creates `dir` if it is missing, so the first write to a fresh
-    /// project doesn't need `mkdir -p .percept` first.
     fn render(&self, map: &Map) -> Result<(), Box<dyn std::error::Error>> {
         fs::create_dir_all(&self.dir)?;
         fs::write(

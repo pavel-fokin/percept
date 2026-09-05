@@ -8,6 +8,8 @@ mod tool;
 
 pub use event::{Actor, Event, EventId, EventKind, Payload, Source};
 pub use event_log::EventLog;
+#[cfg(test)]
+pub use map::DECISIONS;
 pub use map::{map_of, Edge, Map, MapError, Mutation, Node, NodeId, NodeRef, Schema, Scope, CODE};
 pub use model::{
     to_messages, Chunk, Message, Modality, Model, ModelCapabilities, ModelCatalog, ModelDescriptor,

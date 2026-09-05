@@ -1,17 +1,9 @@
-use std::path::PathBuf;
-
 use super::*;
 use crate::percept::Actor;
-use crate::testing::{source, source_at};
+use crate::testing::{node_added_at, scope, source, ROOT};
 
 fn committed(payload: Payload) -> Event {
     Event::new(Actor::User, source("test"), None, payload)
-}
-
-/// The scope `committed`'s events fall inside - `source("test")` stamps
-/// `/test`.
-fn scope() -> Scope {
-    Scope::Project(PathBuf::from("/test"))
 }
 
 #[test]
@@ -130,50 +122,19 @@ fn a_fold_skips_other_maps_and_other_kinds() {
     assert_eq!(map.nodes().len(), 3);
 }
 
-/// The decisions map out of `Map::fold_all`'s result - the only schema
-/// these tests seed.
-fn decisions(maps: &[Map]) -> &Map {
-    maps.iter()
-        .find(|map| map.schema().name == DECISIONS.name)
-        .unwrap()
-}
-
 #[test]
-fn fold_all_scoped_to_a_project_skips_a_node_added_under_another_path() {
-    let here = Event::new(
-        Actor::User,
-        source("test"),
-        None,
-        Payload::NodeAdded {
-            map: "decisions".to_string(),
-            node: NodeId::new(),
-            kind: "option".to_string(),
-            name: "Rust".to_string(),
-            properties: BTreeMap::new(),
-            sources: Vec::new(),
-        },
-    );
-    let there = Event::new(
-        Actor::User,
-        source_at("test", "/other"),
-        None,
-        Payload::NodeAdded {
-            map: "decisions".to_string(),
-            node: NodeId::new(),
-            kind: "option".to_string(),
-            name: "Go".to_string(),
-            properties: BTreeMap::new(),
-            sources: Vec::new(),
-        },
-    );
-    let events = vec![here, there];
+fn a_fold_scoped_to_a_project_skips_a_node_added_under_another_path() {
+    let events = [
+        node_added_at(ROOT, "option", "Rust"),
+        node_added_at("/other", "option", "Go"),
+    ];
 
-    let scoped = Map::fold_all(&scope(), &events).unwrap();
-    assert_eq!(decisions(&scoped).nodes().len(), 1);
-    assert!(decisions(&scoped).find("option", "Rust").is_some());
+    let scoped = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    assert_eq!(scoped.nodes().len(), 1);
+    assert!(scoped.find("option", "Rust").is_some());
 
-    let all = Map::fold_all(&Scope::All, &events).unwrap();
-    assert_eq!(decisions(&all).nodes().len(), 2);
+    let all = Map::fold(&DECISIONS, &Scope::All, &events).unwrap();
+    assert_eq!(all.nodes().len(), 2);
 }
 
 #[test]

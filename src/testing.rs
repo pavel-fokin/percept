@@ -9,14 +9,29 @@ use std::sync::{Arc, Mutex};
 
 use crate::percept::{
     self, Actor, Chunk, Event, EventId, Map, MapRenderer, Modality, Model, ModelCapabilities,
-    ModelCatalog, ModelDescriptor, ModelListing, ModelRequest, NodeId, Payload, ReplyStream,
-    Source, Tool, ToolOutput, ToolSpec, Usage,
+    ModelCatalog, ModelDescriptor, ModelListing, ModelRequest, NodeId, NodeRef, Payload,
+    ReplyStream, Scope, Source, Tool, ToolOutput, ToolSpec, Usage,
 };
 
+/// The project root `source` stamps, for a test that compares paths.
+pub const ROOT: &str = "/test";
+
 /// A `Source` for tests that don't care about the path - a fixed one
-/// under `/test`, so a caller only names the writer.
+/// under `ROOT`, so a caller only names the writer.
 pub fn source(name: &str) -> Source {
-    source_at(name, "/test")
+    source_at(name, ROOT)
+}
+
+/// The scope `source`'s events fall inside.
+pub fn scope() -> Scope {
+    Scope::Project(PathBuf::from(ROOT))
+}
+
+pub fn node_ref(kind: &str, name: &str) -> NodeRef {
+    NodeRef {
+        kind: kind.to_string(),
+        name: name.to_string(),
+    }
 }
 
 /// A `Source` under `path`, for a test that needs events from more
