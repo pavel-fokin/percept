@@ -194,7 +194,12 @@ pub enum MapError {
         kind: String,
         name: String,
     },
-    NoSuchNode(NodeRef),
+    NoSuchNode {
+        node: NodeRef,
+        /// Nodes of the same kind whose name overlaps `node.name`, as
+        /// `kind:name` a reader can paste back. Empty when none do.
+        suggestions: Vec<String>,
+    },
     /// A stored event names a node id the fold never saw.
     NoSuchNodeId(NodeId),
     DuplicateEdge {
@@ -247,7 +252,13 @@ impl fmt::Display for MapError {
             Self::DuplicateNode { kind, name } => {
                 write!(f, "{kind} {name:?} is already in the map")
             }
-            Self::NoSuchNode(node) => write!(f, "no {node} in the map"),
+            Self::NoSuchNode { node, suggestions } => {
+                write!(f, "no {node} in the map")?;
+                if !suggestions.is_empty() {
+                    write!(f, "; did you mean {}", suggestions.join(", "))?;
+                }
+                Ok(())
+            }
             Self::NoSuchNodeId(id) => write!(f, "no node with id {}", id.as_uuid()),
             Self::DuplicateEdge { kind, from, to } => {
                 write!(f, "{from} {kind} {to} is already in the map")
@@ -575,9 +586,38 @@ impl Map {
     }
 
     fn resolve(&self, node: NodeRef) -> Result<NodeId, MapError> {
-        self.find(&node.kind, &node.name)
-            .map(|n| n.id)
-            .ok_or(MapError::NoSuchNode(node))
+        match self.find(&node.kind, &node.name) {
+            Some(n) => Ok(n.id),
+            None => {
+                let suggestions = self.suggestions_for(&node);
+                Err(MapError::NoSuchNode { node, suggestions })
+            }
+        }
+    }
+
+    /// Up to five nodes of the same kind as `node` that share at least
+    /// two `/`, `::`, or whitespace segments of its name, most overlap
+    /// first. Two is the floor: one shared word is noise in a prose
+    /// name - every `decision` shares "the" - and a weak hint in a
+    /// path. A wrong kind or an unrelated name gets no guesses.
+    fn suggestions_for(&self, node: &NodeRef) -> Vec<String> {
+        let wanted: HashSet<&str> = segments(&node.name).collect();
+        let mut scored: Vec<(usize, &str)> = self
+            .nodes
+            .iter()
+            .filter(|n| n.kind == node.kind)
+            .filter_map(|n| {
+                let have: HashSet<&str> = segments(&n.name).collect();
+                let shared = wanted.intersection(&have).count();
+                (shared >= 2).then_some((shared, n.name.as_str()))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+        scored
+            .into_iter()
+            .take(5)
+            .map(|(_, name)| format!("{}:{name}", node.kind))
+            .collect()
     }
 
     /// A node as `Display` names it; the id when the map has no such
@@ -661,6 +701,14 @@ impl Map {
             self.label(edge.to)
         )
     }
+}
+
+/// A name split into the parts that make node names comparable: path
+/// components, `::`-separated symbol parts, and words. Empty parts drop
+/// out, so `src/providers/mod.rs` yields `src`, `providers`, `mod.rs`.
+fn segments(name: &str) -> impl Iterator<Item = &str> {
+    name.split(|c: char| c == '/' || c == ':' || c.is_whitespace())
+        .filter(|part| !part.is_empty())
 }
 
 /// Which map a payload changes, if it changes one.
