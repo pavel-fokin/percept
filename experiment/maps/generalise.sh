@@ -73,7 +73,9 @@ if [ "$provider" = ollama ] && ! curl -s -m 2 localhost:11434/api/tags >/dev/nul
 fi
 command -v jq >/dev/null || { echo "jq is required" >&2; exit 1; }
 
-say() { "$percept" events publish --actor user --source experiment --type message.received --payload "$(printf '{"content":%s}' "$(jq -Rn --arg c "$1" '$c')")"; }
+# `publish` prints the new event's id; quiet here, so `plant` captures
+# exactly one id per fact from its search and `bury` prints nothing.
+say() { "$percept" events publish --actor user --source experiment --type message.received --payload "$(printf '{"content":%s}' "$(jq -Rn --arg c "$1" '$c')")" >/dev/null; }
 
 # Plants every fact; prints the planted events' ids, one per line, in
 # the order of `facts`.
@@ -158,6 +160,9 @@ shell_map() {
 run_one() {
   local condition=$1 q=$2 n=$3 dir="$out/$condition/$q/run$n"
   mkdir -p "$dir"
+  # Its own repository, so percept takes the run directory as the
+  # project and renders maps there, never into this repo's .percept/.
+  git init -q "$dir"
   pushd "$dir" >/dev/null
   # A fresh log per run: percept writes to $PERCEPT_HOME, not the cwd.
   export PERCEPT_HOME="$dir"

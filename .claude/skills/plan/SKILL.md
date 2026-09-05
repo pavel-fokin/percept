@@ -72,8 +72,18 @@ challenges them. The user can say "record this" for anything else.
 
 The source to cite is the user's message that settled it. The
 `UserPromptSubmit` hook prints `percept event <id>` into the context
-after each prompt; use that id. Without it, the latest prompt is
-`~/.percept/bin/percept events search --source claude-code --actor user --size 1`.
+after each prompt; use that id. Without it, the latest prompt from
+this project is
+
+```
+~/.percept/bin/percept events search --source claude-code --actor user \
+  | jq -r --arg root "$(git rev-parse --show-toplevel)" \
+      'select(.source.path == $root) | .id' | tail -1
+```
+
+The log is shared by every project, and `events search` filters by
+source name only, so the path filter is what keeps a foreign project's
+prompt out of this map's sources.
 
 One decision, with `P=~/.percept/bin/percept` and `$id` the prompt:
 

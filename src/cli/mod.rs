@@ -419,15 +419,17 @@ fn scope(all_projects: bool, root: &Path) -> percept::Scope {
 }
 
 /// Prints every map percept knows with its size: the log's maps, folded
-/// from one read of `log` and scoped by `args`, then the code map,
-/// walked fresh from the working directory.
+/// from one read of `log` and scoped to `project` unless `args` says
+/// otherwise, then the code map, walked fresh from `tree` - the
+/// checkout, which in a worktree is not the project's path.
 pub fn maps_list(
     args: ListMapsArgs,
     log: &dyn EventLog,
-    root: &Path,
+    project: &Path,
+    tree: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut maps = Map::fold_all(&scope(args.all_projects, root), &log.load()?)?;
-    maps.push(code::build(root)?);
+    let mut maps = Map::fold_all(&scope(args.all_projects, project), &log.load()?)?;
+    maps.push(code::build(tree)?);
     print_lines(maps.iter().map(store::encode_map))
 }
 

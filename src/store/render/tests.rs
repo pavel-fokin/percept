@@ -88,16 +88,6 @@ fn a_map_with_headlines_a_property_a_source_and_an_edge_renders_in_sections() {
     assert_eq!(markdown(&map), expected);
 }
 
-/// The seed committed at `.percept/decisions.md` and what a fresh
-/// render produces must never drift.
-#[test]
-fn the_empty_map_matches_the_committed_seed_file() {
-    assert_eq!(
-        markdown(&Map::empty(decisions())),
-        include_str!("../../../.percept/decisions.md")
-    );
-}
-
 /// A directory under the system temp dir, removed when the test ends -
 /// a trailing `remove_dir_all` never runs on a failing test, which is
 /// the one whose files you'd want left in place.

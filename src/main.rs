@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::Parser;
@@ -144,10 +144,11 @@ async fn run(
 }
 
 /// `$PERCEPT_HOME/percept.jsonl`, or `~/.percept/percept.jsonl` when the
-/// variable is unset. `HOME` unset is an error: there is nowhere to put
-/// the log, and a relative default would scatter logs per directory.
+/// variable is unset or empty. `HOME` unset is an error: there is
+/// nowhere to put the log, and a relative default would scatter logs
+/// per directory.
 fn log_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let home = match std::env::var_os(HOME_VAR) {
+    let home = match std::env::var_os(HOME_VAR).filter(|home| !home.is_empty()) {
         Some(home) => PathBuf::from(home),
         None => std::env::var_os("HOME")
             .map(|home| PathBuf::from(home).join(".percept"))
@@ -156,12 +157,13 @@ fn log_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
     Ok(home.join(LOG_FILE))
 }
 
-/// Walks up from the current directory looking for a `.git` entry - the
-/// closest thing to a project root without shelling out to git. Falls
-/// back to the current directory when none is found. Canonicalized
-/// either way, so a `Source` always names an absolute path, and two
-/// writers started from a symlinked path still stamp the same one.
-fn project_root() -> std::io::Result<PathBuf> {
+/// The checkout the current directory is in: walks up looking for a
+/// `.git` entry - the closest thing to a repository root without
+/// shelling out to git. Falls back to the current directory when none
+/// is found. Canonicalized either way, so a path always comes out
+/// absolute, and two writers started from a symlinked path get the
+/// same one.
+fn checkout_root() -> std::io::Result<PathBuf> {
     let cwd = std::env::current_dir()?;
     let mut dir = cwd.as_path();
     loop {
@@ -173,6 +175,29 @@ fn project_root() -> std::io::Result<PathBuf> {
             None => return cwd.canonicalize(),
         }
     }
+}
+
+/// The project a checkout belongs to - what a `Source` names and a
+/// `Scope` compares. A linked worktree's `.git` is a file pointing at
+/// the main checkout's `.git/worktrees/<name>`; the project is that
+/// main checkout, so every worktree of one repository shares one map
+/// instead of each starting empty. A second clone at another path is
+/// another project: the path is the identity, and nothing here reads
+/// remotes to say otherwise.
+fn project_of(checkout: &Path) -> PathBuf {
+    let Ok(text) = std::fs::read_to_string(checkout.join(".git")) else {
+        return checkout.to_path_buf();
+    };
+    text.strip_prefix("gitdir:")
+        .map(|gitdir| Path::new(gitdir.trim()))
+        .and_then(|gitdir| {
+            gitdir
+                .ancestors()
+                .find(|dir| dir.file_name().is_some_and(|name| name == ".git"))
+        })
+        .and_then(Path::parent)
+        .and_then(|main| main.canonicalize().ok())
+        .unwrap_or_else(|| checkout.to_path_buf())
 }
 
 /// Builds the model `PERCEPT_PROVIDER` names through `catalog`, so the
@@ -284,19 +309,24 @@ async fn try_main(
 async fn main() {
     let cli = Cli::parse();
 
-    let root = match project_root() {
-        Ok(root) => root,
+    // `root` is the project a `Source` names and a `Scope` compares;
+    // `checkout` is where the files are. They differ only in a linked
+    // worktree, where the map is shared but its render, and the code
+    // map, belong to the checkout being worked in.
+    let checkout = match checkout_root() {
+        Ok(checkout) => checkout,
         Err(err) => {
             eprintln!("percept: {err}");
             std::process::exit(1);
         }
     };
+    let root = project_of(&checkout);
     let cli_source = percept::Source {
         name: CLI_SOURCE_NAME.to_string(),
         path: root.clone(),
     };
     let renderer: Arc<dyn percept::MapRenderer> =
-        Arc::new(store::MarkdownFiles::new(root.join(MAPS_DIR)));
+        Arc::new(store::MarkdownFiles::new(checkout.join(MAPS_DIR)));
 
     let result = match cli.command {
         Some(Command::Events { command }) => log_path()
@@ -310,11 +340,11 @@ async fn main() {
         // the log, so it must not even open the log.
         Some(Command::Maps {
             command: MapsCommand::Show(args),
-        }) if args.is_code() => cli::maps_show_code(args, &root),
+        }) if args.is_code() => cli::maps_show_code(args, &checkout),
         Some(Command::Maps { command }) => log_path()
             .and_then(|path| Ok(Jsonl::open(path)?))
             .and_then(|log| match command {
-                MapsCommand::List(args) => cli::maps_list(args, &log, &root),
+                MapsCommand::List(args) => cli::maps_list(args, &log, &root, &checkout),
                 MapsCommand::Show(args) => cli::maps_show(args, &log, &root),
                 MapsCommand::AddNode(args) => {
                     cli::maps_add_node(args, &log, &cli_source, renderer.as_ref())
