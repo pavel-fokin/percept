@@ -98,10 +98,10 @@ mod tests {
     use super::*;
     use crate::percept::{Actor, Event, EventId, Payload};
     use crate::shared::Timestamp;
-    use crate::testing::FakeLog;
+    use crate::testing::{source, FakeLog};
 
     fn message(content: &str) -> Event {
-        Event::message_received(Actor::User, content.to_string(), "tui".to_string(), None)
+        Event::message_received(Actor::User, content.to_string(), source("tui"), None)
     }
 
     #[test]
@@ -189,7 +189,7 @@ mod tests {
         let call = Event::restore(
             EventId::new(),
             Actor::Model,
-            "tui".to_string(),
+            source("tui"),
             None,
             Timestamp::now(),
             Payload::ToolCalled {

@@ -187,7 +187,7 @@ pub fn to_messages<'a>(events: impl IntoIterator<Item = &'a Event>) -> Vec<Messa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::usage;
+    use crate::testing::{source, usage};
 
     fn text(message: &Message) -> &str {
         match message {
@@ -199,14 +199,14 @@ mod tests {
     #[test]
     fn a_thought_recorded_event_is_filtered_out_while_a_neighbouring_message_survives() {
         let events = vec![
-            Event::message_received(Actor::User, "hi".to_string(), "tui".to_string(), None),
+            Event::message_received(Actor::User, "hi".to_string(), source("tui"), None),
             Event::thought_recorded(
                 Actor::Model,
                 "let me think".to_string(),
-                "tui".to_string(),
+                source("tui"),
                 None,
             ),
-            Event::message_received(Actor::Model, "done".to_string(), "tui".to_string(), None),
+            Event::message_received(Actor::Model, "done".to_string(), source("tui"), None),
         ];
 
         let messages = to_messages(&events);
@@ -220,9 +220,9 @@ mod tests {
     fn a_model_called_event_is_filtered_out_while_a_neighbouring_message_survives() {
         let usage = usage();
         let events = vec![
-            Event::message_received(Actor::User, "hi".to_string(), "tui".to_string(), None),
-            Event::model_called(usage, "tui".to_string(), None),
-            Event::message_received(Actor::Model, "done".to_string(), "tui".to_string(), None),
+            Event::message_received(Actor::User, "hi".to_string(), source("tui"), None),
+            Event::model_called(usage, source("tui"), None),
+            Event::message_received(Actor::Model, "done".to_string(), source("tui"), None),
         ];
 
         let messages = to_messages(&events);
@@ -239,10 +239,10 @@ mod tests {
 
         let node = NodeId::new();
         let events = vec![
-            Event::message_received(Actor::User, "hi".to_string(), "tui".to_string(), None),
+            Event::message_received(Actor::User, "hi".to_string(), source("tui"), None),
             Event::new(
                 Actor::System,
-                "tui".to_string(),
+                source("tui"),
                 None,
                 Payload::NodeAdded {
                     map: "decisions".to_string(),
@@ -255,7 +255,7 @@ mod tests {
             ),
             Event::new(
                 Actor::System,
-                "tui".to_string(),
+                source("tui"),
                 None,
                 Payload::EdgeAdded {
                     map: "decisions".to_string(),
@@ -265,7 +265,7 @@ mod tests {
                     sources: Vec::new(),
                 },
             ),
-            Event::message_received(Actor::Model, "done".to_string(), "tui".to_string(), None),
+            Event::message_received(Actor::Model, "done".to_string(), source("tui"), None),
         ];
 
         let messages = to_messages(&events);
@@ -278,10 +278,10 @@ mod tests {
     #[test]
     fn a_tool_call_and_its_result_replay_as_tool_messages() {
         let events = vec![
-            Event::message_received(Actor::User, "search".to_string(), "tui".to_string(), None),
+            Event::message_received(Actor::User, "search".to_string(), source("tui"), None),
             Event::new(
                 Actor::Model,
-                "tui".to_string(),
+                source("tui"),
                 None,
                 Payload::ToolCalled {
                     tool: "search_events".to_string(),
@@ -290,7 +290,7 @@ mod tests {
             ),
             Event::new(
                 Actor::System,
-                "tui".to_string(),
+                source("tui"),
                 None,
                 Payload::ToolResulted {
                     content: "3 events".to_string(),
@@ -320,18 +320,13 @@ mod tests {
         let events = vec![
             Event::new(
                 Actor::System,
-                "tui".to_string(),
+                source("tui"),
                 None,
                 Payload::ToolResulted {
                     content: "3 events".to_string(),
                 },
             ),
-            Event::message_received(
-                Actor::Model,
-                "found it".to_string(),
-                "tui".to_string(),
-                None,
-            ),
+            Event::message_received(Actor::Model, "found it".to_string(), source("tui"), None),
         ];
 
         let messages = to_messages(&events);

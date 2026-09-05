@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError};
+use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError, Source};
 use crate::shared::Timestamp;
 
 /// Most tool calls one user turn may make. At the cap the next request
@@ -201,7 +201,7 @@ pub struct App {
     events: Vec<Event>,
     /// The writer this app records as - stamped on every event it
     /// commits, so the log can tell its events from other writers'.
-    source: String,
+    source: Source,
     chat: Arc<dyn percept::Model>,
     catalog: Arc<dyn percept::ModelCatalog>,
     log: Arc<dyn percept::EventLog>,
@@ -230,7 +230,7 @@ impl App {
         log: Arc<dyn percept::EventLog>,
         tools: Vec<Arc<dyn percept::Tool>>,
         map_shape: MapShape,
-        source: String,
+        source: Source,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let events = log.load()?;
         Map::fold_all(&events)?;

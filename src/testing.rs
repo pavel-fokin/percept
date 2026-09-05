@@ -3,14 +3,24 @@
 //! above can depend on it without bending the dependency direction.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::percept::{
     self, Actor, Chunk, Event, EventId, Modality, Model, ModelCapabilities, ModelCatalog,
-    ModelDescriptor, ModelListing, ModelRequest, NodeId, Payload, ReplyStream, Tool, ToolOutput,
-    ToolSpec, Usage,
+    ModelDescriptor, ModelListing, ModelRequest, NodeId, Payload, ReplyStream, Source, Tool,
+    ToolOutput, ToolSpec, Usage,
 };
+
+/// A `Source` for tests that don't care about the path - a fixed one
+/// under `/test`, so a caller only names the writer.
+pub fn source(name: &str) -> Source {
+    Source {
+        name: name.to_string(),
+        path: PathBuf::from("/test"),
+    }
+}
 
 /// An in-memory EventLog. `start_failing` flips `append` into an error
 /// without touching the filesystem, and can be flipped mid-conversation.
@@ -212,7 +222,7 @@ impl ModelCatalog for FakeCatalog {
 pub fn node_added(kind: &str, name: &str) -> Event {
     Event::new(
         Actor::User,
-        "test".to_string(),
+        source("test"),
         None,
         Payload::NodeAdded {
             map: "decisions".to_string(),

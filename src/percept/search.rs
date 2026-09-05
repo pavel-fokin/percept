@@ -38,7 +38,7 @@ impl EventQuery {
         self.since.is_none_or(|since| event.created_at() >= since)
             && self.until.is_none_or(|until| event.created_at() < until)
             && (self.actors.is_empty() || self.actors.contains(&event.actor()))
-            && (self.sources.is_empty() || self.sources.iter().any(|s| s == event.source()))
+            && (self.sources.is_empty() || self.sources.iter().any(|s| s == &event.source().name))
             && (self.kinds.is_empty() || self.kinds.contains(&event.kind()))
             && (self.text.is_empty() || self.text.iter().any(|term| carries(event.payload(), term)))
     }
@@ -138,13 +138,14 @@ mod tests {
     use std::collections::BTreeMap;
 
     use crate::percept::{EventId, NodeId, Payload};
+    use crate::testing::source;
 
-    /// A message from `source`, timestamped `offset_minutes` back.
-    fn event_at(source: &str, offset_minutes: i64) -> Event {
+    /// A message from `name`, timestamped `offset_minutes` back.
+    fn event_at(name: &str, offset_minutes: i64) -> Event {
         Event::restore(
             EventId::new(),
             Actor::User,
-            source.to_string(),
+            source(name),
             None,
             Timestamp::now().minus_minutes(offset_minutes).unwrap(),
             Payload::MessageReceived {
@@ -154,7 +155,7 @@ mod tests {
     }
 
     fn sources(events: &[Event]) -> Vec<String> {
-        events.iter().map(|e| e.source().to_string()).collect()
+        events.iter().map(|e| e.source().name.clone()).collect()
     }
 
     /// A user message from `tui` carrying `content`, for the
@@ -163,7 +164,7 @@ mod tests {
         Event::restore(
             EventId::new(),
             Actor::User,
-            "tui".to_string(),
+            source("tui"),
             None,
             Timestamp::now(),
             Payload::MessageReceived {
@@ -250,7 +251,7 @@ mod tests {
         wanted = Event::restore(
             wanted.id(),
             Actor::Model,
-            "a".to_string(),
+            source("a"),
             None,
             wanted.created_at(),
             Payload::MessageReceived {
@@ -343,7 +344,7 @@ mod tests {
         let call = Event::restore(
             EventId::new(),
             Actor::Model,
-            "tui".to_string(),
+            source("tui"),
             None,
             Timestamp::now(),
             Payload::ToolCalled {
@@ -421,7 +422,7 @@ mod tests {
             let event = Event::restore(
                 EventId::new(),
                 Actor::User,
-                "tui".to_string(),
+                source("tui"),
                 None,
                 Timestamp::now(),
                 payload,
@@ -435,7 +436,7 @@ mod tests {
         let call = Event::restore(
             EventId::new(),
             Actor::Model,
-            "tui".to_string(),
+            source("tui"),
             None,
             Timestamp::now(),
             Payload::ToolCalled {

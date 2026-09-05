@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -9,6 +10,15 @@ use crate::percept::{self, Actor, EventId, EventKind, NodeId, Payload, Usage};
 use crate::shared::Timestamp;
 use crate::store::Error;
 
+/// `source` on the wire - the writer's name and its project root. No
+/// migration for the string sources an older build wrote: a line
+/// carrying one, or none at all, fails to load as a bad line.
+#[derive(Serialize, Deserialize)]
+pub struct Source {
+    pub name: String,
+    pub path: PathBuf,
+}
+
 /// A `percept::Event` as it travels over the wire. Flat JSON:
 /// `{ id, actor, source, type, causation_id, created_at, payload }`.
 /// `payload` shape depends on `type`.
@@ -16,10 +26,7 @@ use crate::store::Error;
 pub struct Event {
     pub id: String,
     pub actor: String,
-    /// Absent, null, or blank - a line written before the field
-    /// existed, or by a writer that leaves it unset - loads as
-    /// `"unknown"`.
-    pub source: Option<String>,
+    pub source: Source,
     #[serde(rename = "type")]
     pub kind: String,
     pub causation_id: Option<String>,
@@ -391,7 +398,10 @@ impl From<&percept::Event> for Event {
         Self {
             id: event.id().as_uuid().to_string(),
             actor: actor_name(event.actor()).to_string(),
-            source: Some(event.source().to_string()),
+            source: Source {
+                name: event.source().name.clone(),
+                path: event.source().path.clone(),
+            },
             kind: kind(event.kind()).to_string(),
             causation_id: event.causation_id().map(|id| id.as_uuid().to_string()),
             created_at: event.created_at().to_string(),
@@ -420,7 +430,10 @@ impl TryFrom<Event> for percept::Event {
         Ok(percept::Event::restore(
             id,
             actor,
-            named_source(event.source),
+            percept::Source {
+                name: event.source.name,
+                path: event.source.path,
+            },
             causation_id,
             created_at,
             payload,
@@ -434,7 +447,7 @@ impl TryFrom<Event> for percept::Event {
 /// payload of each type may hold.
 pub fn decode(
     actor: &str,
-    source: String,
+    source: percept::Source,
     kind: &str,
     causation_id: Option<EventId>,
     payload: Value,
@@ -551,15 +564,6 @@ fn parse_event_ids(sources: Vec<String>) -> Result<Vec<EventId>, Error> {
     sources.iter().map(|s| parse_event_id(s)).collect()
 }
 
-/// Every event names a writer. A line that leaves `source` absent,
-/// null, or blank names nobody, so it reads as `unknown` rather than
-/// as a writer whose name happens to be empty.
-fn named_source(source: Option<String>) -> String {
-    source
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "unknown".to_string())
-}
-
 fn actor_name(actor: Actor) -> &'static str {
     match actor {
         Actor::User => "user",
@@ -594,7 +598,7 @@ fn parse_uuid(s: &str) -> Result<Uuid, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::usage;
+    use crate::testing::{source, usage};
 
     #[test]
     fn a_short_payload_is_left_alone() {
@@ -711,7 +715,7 @@ mod tests {
         let call = percept::Event::restore(
             EventId::new(),
             Actor::Model,
-            "tui".to_string(),
+            source("tui"),
             None,
             Timestamp::now(),
             Payload::ToolCalled {
@@ -782,7 +786,7 @@ mod tests {
         let call = percept::Event::restore(
             EventId::new(),
             Actor::Model,
-            "tui".to_string(),
+            source("tui"),
             None,
             Timestamp::now(),
             Payload::ToolCalled {
@@ -795,7 +799,7 @@ mod tests {
     }
 
     fn message(actor: Actor, content: String) -> percept::Event {
-        percept::Event::message_received(actor, content, "tui".to_string(), None)
+        percept::Event::message_received(actor, content, source("tui"), None)
     }
 
     #[test]
@@ -815,7 +819,7 @@ mod tests {
         let original = percept::Event::restore(
             EventId::new(),
             Actor::Model,
-            "tui".to_string(),
+            source("tui"),
             Some(cause),
             Timestamp::now(),
             Payload::MessageReceived {
@@ -843,7 +847,7 @@ mod tests {
         let original = percept::Event::restore(
             EventId::new(),
             Actor::Model,
-            "tui".to_string(),
+            source("tui"),
             None,
             Timestamp::now(),
             Payload::ThoughtRecorded {
@@ -867,7 +871,7 @@ mod tests {
         let original = percept::Event::restore(
             EventId::new(),
             Actor::Model,
-            "tui".to_string(),
+            source("tui"),
             None,
             Timestamp::now(),
             Payload::ToolCalled {
@@ -901,7 +905,7 @@ mod tests {
         let original = percept::Event::restore(
             EventId::new(),
             Actor::System,
-            "tui".to_string(),
+            source("tui"),
             Some(cause),
             Timestamp::now(),
             Payload::ToolResulted {
@@ -929,7 +933,7 @@ mod tests {
         let original = percept::Event::restore(
             EventId::new(),
             Actor::System,
-            "tui".to_string(),
+            source("tui"),
             Some(cause),
             Timestamp::now(),
             Payload::ModelCalled(usage()),
@@ -954,7 +958,7 @@ mod tests {
 
     #[test]
     fn node_added_round_trips_through_json() {
-        let source = EventId::new();
+        let cited = EventId::new();
         let node = NodeId::new();
         let mut properties = BTreeMap::new();
         properties.insert(
@@ -964,7 +968,7 @@ mod tests {
         let original = percept::Event::restore(
             EventId::new(),
             Actor::User,
-            "cli".to_string(),
+            source("cli"),
             None,
             Timestamp::now(),
             Payload::NodeAdded {
@@ -973,7 +977,7 @@ mod tests {
                 kind: "evidence".to_string(),
                 name: "Both built in parallel".to_string(),
                 properties: properties.clone(),
-                sources: vec![source],
+                sources: vec![cited],
             },
         );
 
@@ -996,7 +1000,7 @@ mod tests {
                 assert_eq!(kind, "evidence");
                 assert_eq!(name, "Both built in parallel");
                 assert_eq!(*restored_properties, properties);
-                assert!(sources == &vec![source]);
+                assert!(sources == &vec![cited]);
             }
             _ => panic!("expected NodeAdded"),
         }
@@ -1008,7 +1012,7 @@ mod tests {
         let original = percept::Event::restore(
             EventId::new(),
             Actor::System,
-            "cli".to_string(),
+            source("cli"),
             None,
             Timestamp::now(),
             Payload::NodeRemoved {
@@ -1049,7 +1053,7 @@ mod tests {
         let original = percept::Event::restore(
             EventId::new(),
             Actor::System,
-            "cli".to_string(),
+            source("cli"),
             None,
             Timestamp::now(),
             Payload::EdgeAdded {
@@ -1094,7 +1098,7 @@ mod tests {
             "sources": ["not-a-uuid"],
         });
 
-        let err = match decode("user", "cli".to_string(), "node.added", None, payload) {
+        let err = match decode("user", source("cli"), "node.added", None, payload) {
             Err(e) => e,
             Ok(_) => panic!("expected a malformed source to be rejected"),
         };
@@ -1106,7 +1110,7 @@ mod tests {
         let event = percept::Event::restore(
             EventId::new(),
             Actor::User,
-            "cli".to_string(),
+            source("cli"),
             None,
             Timestamp::now(),
             Payload::NodeAdded {
@@ -1129,7 +1133,7 @@ mod tests {
         let event = percept::Event::restore(
             EventId::new(),
             Actor::System,
-            "tui".to_string(),
+            source("tui"),
             None,
             Timestamp::now(),
             Payload::ModelCalled(usage()),
@@ -1147,6 +1151,7 @@ mod tests {
             "id": "0192d1f0-1111-7000-8000-000000000000",
             "seq": 1,
             "actor": "user",
+            "source": {"name": "tui", "path": "/test"},
             "type": "file.registered",
             "causation_id": null,
             "created_at": "2026-08-30T00:00:00Z",
@@ -1161,7 +1166,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_null_source_and_absent_causation_id_load() {
+    fn a_null_source_fails_to_deserialize() {
         let json = r#"{
             "id": "0192d1f0-1111-7000-8000-000000000000",
             "actor": "user",
@@ -1171,14 +1176,26 @@ mod tests {
             "payload": { "content": "hi" }
         }"#;
 
-        let wire: Event = serde_json::from_str(json).expect("wire event deserializes");
-        let event = percept::Event::try_from(wire).expect("known event type restores");
-        assert_eq!(event.source(), "unknown");
-        assert!(event.causation_id().is_none());
+        assert!(serde_json::from_str::<Event>(json).is_err());
     }
 
     #[test]
-    fn legacy_line_with_seq_and_no_source_loads_as_unknown_source() {
+    fn a_bare_string_source_fails_to_deserialize() {
+        let json = r#"{
+            "id": "0192d1f0-1111-7000-8000-000000000000",
+            "actor": "user",
+            "source": "tui",
+            "type": "message.received",
+            "causation_id": null,
+            "created_at": "2026-08-30T00:00:00Z",
+            "payload": { "content": "hi" }
+        }"#;
+
+        assert!(serde_json::from_str::<Event>(json).is_err());
+    }
+
+    #[test]
+    fn a_missing_source_fails_to_deserialize() {
         let json = r#"{
             "id": "0192d1f0-1111-7000-8000-000000000000",
             "seq": 1,
@@ -1189,8 +1206,6 @@ mod tests {
             "payload": { "content": "hi" }
         }"#;
 
-        let wire: Event = serde_json::from_str(json).expect("wire event deserializes");
-        let event = percept::Event::try_from(wire).expect("known event type restores");
-        assert_eq!(event.source(), "unknown");
+        assert!(serde_json::from_str::<Event>(json).is_err());
     }
 }

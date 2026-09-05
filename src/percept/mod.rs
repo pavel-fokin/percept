@@ -5,7 +5,7 @@ mod model;
 mod search;
 mod tool;
 
-pub use event::{Actor, Event, EventId, EventKind, Payload};
+pub use event::{Actor, Event, EventId, EventKind, Payload, Source};
 pub use event_log::EventLog;
 pub use map::{map_of, Edge, Map, MapError, Mutation, Node, NodeId, NodeRef, Schema, CODE};
 pub use model::{

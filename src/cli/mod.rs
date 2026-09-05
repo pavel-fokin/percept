@@ -320,18 +320,28 @@ fn parse_node_ref(s: &str) -> Result<NodeRef, String> {
 }
 
 /// Appends one event built from `args` to `log`. `store` owns the
-/// decode, so the CLI only parses flags.
+/// decode, so the CLI only parses flags. `root` is the writer's project
+/// root, resolved once in `main`; `args.source` only names the writer,
+/// so `publish` pairs the two into the `Source` the event carries.
 /// Appends one event and prints its id, so a writer can cite it as the
 /// `--causation` of the next. A cause the log lacks is an error: a typo
 /// in provenance is worse than none.
-pub fn publish(args: PublishArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
+pub fn publish(
+    args: PublishArgs,
+    log: &dyn EventLog,
+    root: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let causation_id = args
         .causation
         .as_deref()
         .map(|id| known_event_id(id, log))
         .transpose()?;
     let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
-    let event = store::decode(&args.actor, args.source, &args.kind, causation_id, payload)?;
+    let source = percept::Source {
+        name: args.source,
+        path: root.to_path_buf(),
+    };
+    let event = store::decode(&args.actor, source, &args.kind, causation_id, payload)?;
     // A raw map event would skip `Map::apply`, and one that breaks a
     // rule fails every fold from then on, with no undo in an
     // append-only log.
@@ -427,10 +437,13 @@ fn print_map(mut map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error:
     print_lines(nodes.chain(edges))
 }
 
-/// Commits a shell user's map change: actor `user`, source `cli`, no
-/// cause.
-fn record(log: &dyn EventLog, payload: Payload) -> Result<(), Box<dyn std::error::Error>> {
-    log.append(&Event::new(Actor::User, "cli".to_string(), None, payload))
+/// Commits a shell user's map change: actor `user`, no cause.
+fn record(
+    log: &dyn EventLog,
+    source: &percept::Source,
+    payload: Payload,
+) -> Result<(), Box<dyn std::error::Error>> {
+    log.append(&Event::new(Actor::User, source.clone(), None, payload))
 }
 
 /// Adds a node to a map and prints its minted id, so a shell script can
@@ -438,9 +451,10 @@ fn record(log: &dyn EventLog, payload: Payload) -> Result<(), Box<dyn std::error
 pub fn maps_add_node(
     args: AddNodeArgs,
     log: &dyn EventLog,
+    source: &percept::Source,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let MapArgs { map, source } = args.target;
-    let payload = store::revise(log, &map, &source, |sources| Mutation::AddNode {
+    let MapArgs { map, source: cited } = args.target;
+    let payload = store::revise(log, &map, &cited, |sources| Mutation::AddNode {
         kind: args.kind,
         name: args.name,
         properties: args.prop.into_iter().collect::<BTreeMap<_, _>>(),
@@ -449,28 +463,33 @@ pub fn maps_add_node(
     if let Payload::NodeAdded { node, .. } = &payload {
         println!("{}", node.as_uuid());
     }
-    record(log, payload)
+    record(log, source, payload)
 }
 
 /// Adds an edge between two nodes already in a map.
-pub fn maps_add_edge(args: EdgeArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
-    let MapArgs { map, source } = args.target;
-    let payload = store::revise(log, &map, &source, |sources| Mutation::AddEdge {
+pub fn maps_add_edge(
+    args: EdgeArgs,
+    log: &dyn EventLog,
+    source: &percept::Source,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let MapArgs { map, source: cited } = args.target;
+    let payload = store::revise(log, &map, &cited, |sources| Mutation::AddEdge {
         kind: args.kind,
         from: args.from,
         to: args.to,
         sources,
     })?;
-    record(log, payload)
+    record(log, source, payload)
 }
 
 /// Removes a node from a map, dropping the edges that touch it.
 pub fn maps_remove_node(
     args: RemoveNodeArgs,
     log: &dyn EventLog,
+    source: &percept::Source,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let MapArgs { map, source } = args.target;
-    let payload = store::revise(log, &map, &source, |sources| Mutation::RemoveNode {
+    let MapArgs { map, source: cited } = args.target;
+    let payload = store::revise(log, &map, &cited, |sources| Mutation::RemoveNode {
         node: NodeRef {
             kind: args.kind,
             name: args.name,
@@ -478,22 +497,23 @@ pub fn maps_remove_node(
         reason: args.reason,
         sources,
     })?;
-    record(log, payload)
+    record(log, source, payload)
 }
 
 /// Removes an edge from a map.
 pub fn maps_remove_edge(
     args: EdgeArgs,
     log: &dyn EventLog,
+    source: &percept::Source,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let MapArgs { map, source } = args.target;
-    let payload = store::revise(log, &map, &source, |sources| Mutation::RemoveEdge {
+    let MapArgs { map, source: cited } = args.target;
+    let payload = store::revise(log, &map, &cited, |sources| Mutation::RemoveEdge {
         kind: args.kind,
         from: args.from,
         to: args.to,
         sources,
     })?;
-    record(log, payload)
+    record(log, source, payload)
 }
 
 /// A reader that stops early - `head`, or a `jq` that has seen enough -

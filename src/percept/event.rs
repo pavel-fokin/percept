@@ -1,10 +1,21 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use super::{NodeId, Usage};
 use crate::shared::{Id, Timestamp};
 
 /// Identifies an Event.
 pub type EventId = Id<Event>;
+
+/// The writer that produced an event - `percept-tui`, `percept-cli`,
+/// `claude-code` - and where it ran from. `path` is that writer's
+/// project root, so two projects using the same tool are still told
+/// apart, and a search can filter by `name` alone.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Source {
+    pub name: String,
+    pub path: PathBuf,
+}
 
 /// Who an Event is attributed to. Extend by adding a variant.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -131,7 +142,7 @@ pub enum EventKind {
 pub struct Event {
     id: EventId,
     actor: Actor,
-    source: String,
+    source: Source,
     causation_id: Option<EventId>,
     created_at: Timestamp,
     payload: Payload,
@@ -144,7 +155,7 @@ impl Event {
     /// `causation_id`.
     pub fn new(
         actor: Actor,
-        source: String,
+        source: Source,
         causation_id: Option<EventId>,
         payload: Payload,
     ) -> Self {
@@ -162,7 +173,7 @@ impl Event {
     pub fn message_received(
         actor: Actor,
         content: String,
-        source: String,
+        source: Source,
         causation_id: Option<EventId>,
     ) -> Self {
         Self::new(
@@ -177,7 +188,7 @@ impl Event {
     pub fn thought_recorded(
         actor: Actor,
         content: String,
-        source: String,
+        source: Source,
         causation_id: Option<EventId>,
     ) -> Self {
         Self::new(
@@ -192,7 +203,7 @@ impl Event {
     pub fn tool_called(
         tool: String,
         arguments: String,
-        source: String,
+        source: Source,
         causation_id: Option<EventId>,
     ) -> Self {
         Self::new(
@@ -205,7 +216,7 @@ impl Event {
 
     /// A `tool.resulted` event - always percept feeding a tool's output
     /// back, never the model.
-    pub fn tool_resulted(content: String, source: String, causation_id: Option<EventId>) -> Self {
+    pub fn tool_resulted(content: String, source: Source, causation_id: Option<EventId>) -> Self {
         Self::new(
             Actor::System,
             source,
@@ -216,7 +227,7 @@ impl Event {
 
     /// A `model.called` event - always percept recording what one round
     /// trip to the model cost, never the model's own words.
-    pub fn model_called(usage: Usage, source: String, causation_id: Option<EventId>) -> Self {
+    pub fn model_called(usage: Usage, source: Source, causation_id: Option<EventId>) -> Self {
         Self::new(
             Actor::System,
             source,
@@ -231,7 +242,7 @@ impl Event {
     pub fn restore(
         id: EventId,
         actor: Actor,
-        source: String,
+        source: Source,
         causation_id: Option<EventId>,
         created_at: Timestamp,
         payload: Payload,
@@ -254,7 +265,7 @@ impl Event {
         self.actor
     }
 
-    pub fn source(&self) -> &str {
+    pub fn source(&self) -> &Source {
         &self.source
     }
 

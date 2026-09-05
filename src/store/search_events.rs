@@ -42,7 +42,7 @@ const PARAMETERS: &str = r#"{
     "since": {"type": "string", "description": "ISO-8601 lower bound, inclusive"},
     "until": {"type": "string", "description": "ISO-8601 upper bound, exclusive"},
     "actors": {"type": "array", "items": {"type": "string", "enum": ["user", "model", "system"]}},
-    "sources": {"type": "array", "items": {"type": "string"}, "description": "the writer that produced the event, e.g. tui or claude-code"},
+    "sources": {"type": "array", "items": {"type": "string"}, "description": "the writer that produced the event, e.g. percept-tui or claude-code"},
     "kinds": {"type": "array", "items": {"type": "string", "enum": ["message.received", "thought.recorded", "tool.called", "tool.resulted", "node.added", "node.removed", "edge.added", "edge.removed", "model.called"]}},
     "contains": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "a substring, case-insensitive, that one of the event's payload strings must carry; any of the values matches"},
     "size": {"type": "integer", "description": "keep only the N most recent matches"},
@@ -137,6 +137,7 @@ fn parse_time(s: &str) -> Result<Timestamp, Box<dyn std::error::Error>> {
 mod tests {
     use super::*;
     use crate::percept::{Actor, Event, EventId, Payload};
+    use crate::testing::source;
     use std::sync::Mutex;
 
     /// The filters a test asserts `run` translated correctly.
@@ -164,11 +165,11 @@ mod tests {
         }
     }
 
-    fn message(source: &str, content: &str) -> Event {
+    fn message(name: &str, content: &str) -> Event {
         Event::restore(
             EventId::new(),
             Actor::User,
-            source.to_string(),
+            source(name),
             None,
             Timestamp::now(),
             Payload::MessageReceived {
@@ -198,7 +199,7 @@ mod tests {
         let lines: Vec<&str> = out.content.lines().collect();
         assert_eq!(lines.len(), 1);
         let line: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
-        assert_eq!(line["source"], "tui");
+        assert_eq!(line["source"]["name"], "tui");
         assert_eq!(line["payload"]["content"], "hello");
     }
 
@@ -279,6 +280,6 @@ mod tests {
         let lines: Vec<&str> = out.content.lines().collect();
         assert_eq!(lines.len(), 1);
         let line: serde_json::Value = serde_json::from_str(lines[0]).unwrap();
-        assert_eq!(line["source"], "claude-code");
+        assert_eq!(line["source"]["name"], "claude-code");
     }
 }

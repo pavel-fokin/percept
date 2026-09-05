@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::Parser;
@@ -36,6 +36,13 @@ const CODE_ROOT: &str = ".";
 
 /// Names the provider that answers: `ollama` (the default) or `openai`.
 const PROVIDER_VAR: &str = "PERCEPT_PROVIDER";
+
+/// Source name the TUI stamps on every event it commits.
+const TUI_SOURCE_NAME: &str = "percept-tui";
+
+/// Source name the headless `ask`/`reflect` turns and the `maps` write
+/// verbs stamp.
+const CLI_SOURCE_NAME: &str = "percept-cli";
 
 /// Names how much of each cognitive map reaches the model each turn:
 /// `prompt` (the default, today's behaviour), `headlines`, or `tool`.
@@ -131,6 +138,25 @@ async fn run(
     }
 }
 
+/// Walks up from the current directory looking for a `.git` entry - the
+/// closest thing to a project root without shelling out to git. Falls
+/// back to the current directory when none is found. Canonicalized
+/// either way, so a `Source` always names an absolute path, and two
+/// writers started from a symlinked path still stamp the same one.
+fn project_root() -> std::io::Result<PathBuf> {
+    let cwd = std::env::current_dir()?;
+    let mut dir = cwd.as_path();
+    loop {
+        if dir.join(".git").exists() {
+            return dir.canonicalize();
+        }
+        match dir.parent() {
+            Some(parent) => dir = parent,
+            None => return cwd.canonicalize(),
+        }
+    }
+}
+
 /// Builds the model `PERCEPT_PROVIDER` names through `catalog`, so the
 /// provider dispatch lives once. Still checks `OPENAI_KEY_VAR` here,
 /// eagerly, unlike `catalog` itself: a run that starts with
@@ -182,8 +208,8 @@ fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
 }
 
 /// Both the TUI and `ask` build the same `App` this way, differing only
-/// in the `source` they stamp and in how they drive its reply stream.
-fn build_app(source: &str) -> Result<App, Box<dyn std::error::Error>> {
+/// in the `Source` they stamp and in how they drive its reply stream.
+fn build_app(source: percept::Source) -> Result<App, Box<dyn std::error::Error>> {
     let log = Arc::new(Jsonl::open(LOG_PATH)?);
     let catalog: Arc<dyn percept::ModelCatalog> = Arc::new(build_catalog());
     let model = build_model(&*catalog)?;
@@ -196,18 +222,22 @@ fn build_app(source: &str) -> Result<App, Box<dyn std::error::Error>> {
     if map_shape.opens_by_tool() {
         tools.push(Arc::new(ReadMap::new(log.clone())));
     }
-    App::new(model, catalog, log, tools, map_shape, source.to_string())
+    App::new(model, catalog, log, tools, map_shape, source)
 }
 
 /// One turn without the TUI: `ask` with the user's prompt, `reflect`
 /// with percept's own.
-async fn headless_turn(actor: Actor, prompt: String) -> Result<(), Box<dyn std::error::Error>> {
-    let app = build_app("cli")?;
+async fn headless_turn(
+    actor: Actor,
+    prompt: String,
+    source: percept::Source,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let app = build_app(source)?;
     cli::run_turn(Box::new(app), actor, prompt).await
 }
 
-async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
-    let app = build_app("tui")?;
+async fn try_main(source: percept::Source) -> Result<(), Box<dyn std::error::Error>> {
+    let app = build_app(source)?;
 
     let mut terminal = ratatui::init();
     let mouse = match MouseCapture::enable() {
@@ -228,11 +258,23 @@ async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
 async fn main() {
     let cli = Cli::parse();
 
+    let root = match project_root() {
+        Ok(root) => root,
+        Err(err) => {
+            eprintln!("percept: {err}");
+            std::process::exit(1);
+        }
+    };
+    let cli_source = percept::Source {
+        name: CLI_SOURCE_NAME.to_string(),
+        path: root.clone(),
+    };
+
     let result = match cli.command {
         Some(Command::Events { command }) => Jsonl::open(LOG_PATH)
             .map_err(Box::<dyn std::error::Error>::from)
             .and_then(|log| match command {
-                EventsCommand::Publish(args) => cli::publish(args, &log),
+                EventsCommand::Publish(args) => cli::publish(args, &log, &root),
                 EventsCommand::Search(args) => cli::search(args, &log),
                 EventsCommand::Show(args) => cli::show(args, &log),
             }),
@@ -247,14 +289,22 @@ async fn main() {
             .and_then(|log| match command {
                 MapsCommand::List => cli::maps_list(&log, Path::new(CODE_ROOT)),
                 MapsCommand::Show(args) => cli::maps_show(args, &log),
-                MapsCommand::AddNode(args) => cli::maps_add_node(args, &log),
-                MapsCommand::AddEdge(args) => cli::maps_add_edge(args, &log),
-                MapsCommand::RemoveNode(args) => cli::maps_remove_node(args, &log),
-                MapsCommand::RemoveEdge(args) => cli::maps_remove_edge(args, &log),
+                MapsCommand::AddNode(args) => cli::maps_add_node(args, &log, &cli_source),
+                MapsCommand::AddEdge(args) => cli::maps_add_edge(args, &log, &cli_source),
+                MapsCommand::RemoveNode(args) => cli::maps_remove_node(args, &log, &cli_source),
+                MapsCommand::RemoveEdge(args) => cli::maps_remove_edge(args, &log, &cli_source),
             }),
-        Some(Command::Ask(args)) => headless_turn(Actor::User, args.prompt).await,
-        Some(Command::Reflect) => headless_turn(Actor::System, REFLECT_PROMPT.to_string()).await,
-        None => try_main().await,
+        Some(Command::Ask(args)) => headless_turn(Actor::User, args.prompt, cli_source).await,
+        Some(Command::Reflect) => {
+            headless_turn(Actor::System, REFLECT_PROMPT.to_string(), cli_source).await
+        }
+        None => {
+            try_main(percept::Source {
+                name: TUI_SOURCE_NAME.to_string(),
+                path: root,
+            })
+            .await
+        }
     };
 
     if let Err(err) = result {

@@ -1,8 +1,9 @@
 use super::*;
 use crate::percept::Actor;
+use crate::testing::source;
 
 fn committed(payload: Payload) -> Event {
-    Event::new(Actor::User, "test".to_string(), None, payload)
+    Event::new(Actor::User, source("test"), None, payload)
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use super::*;
 use crate::percept::{Actor, Event, NodeId, NodeRef};
-use crate::testing::FakeLog;
+use crate::testing::{source, FakeLog};
 
 fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
     let (kind, name) = (kind.to_string(), name.to_string());
@@ -14,7 +14,7 @@ fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
 
 /// Commits what `revise` returns the way the CLI does.
 fn record(log: &FakeLog, payload: Payload) {
-    log.append(&Event::new(Actor::User, "cli".to_string(), None, payload))
+    log.append(&Event::new(Actor::User, source("cli"), None, payload))
         .unwrap();
 }
 
@@ -71,7 +71,7 @@ fn an_unknown_map_is_an_error() {
 
 #[test]
 fn a_source_is_checked_against_the_loaded_log() {
-    let cited = Event::message_received(Actor::User, "hi".to_string(), "t".to_string(), None);
+    let cited = Event::message_received(Actor::User, "hi".to_string(), source("t"), None);
     let known = cited.id().as_uuid().to_string();
     let log = FakeLog::seeded(vec![cited]);
     let unknown = Uuid::now_v7().to_string();

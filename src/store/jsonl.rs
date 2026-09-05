@@ -276,6 +276,7 @@ fn last_line_end(mut file: &File, len: u64) -> Result<u64, Error> {
 mod tests {
     use super::*;
     use crate::percept::{Actor, EventQuery, Payload};
+    use crate::testing::source;
     use std::path::PathBuf;
     use uuid::Uuid;
 
@@ -318,7 +319,7 @@ mod tests {
     }
 
     fn message(actor: Actor, content: &str) -> percept::Event {
-        percept::Event::message_received(actor, content.to_string(), "tui".to_string(), None)
+        percept::Event::message_received(actor, content.to_string(), source("tui"), None)
     }
 
     fn line(event: &percept::Event) -> String {
@@ -427,6 +428,53 @@ mod tests {
             }
             _ => panic!("expected Error::AtLine, got {err}"),
         }
+    }
+
+    #[test]
+    fn a_line_whose_source_is_a_bare_string_is_rejected_as_a_bad_line() {
+        let temp = TempLog::new();
+        let log = temp.open();
+
+        log.append(&message(Actor::User, "first")).unwrap();
+        temp.write_raw(
+            r#"{"id":"0192d1f0-1111-7000-8000-000000000000","actor":"user","source":"tui","type":"message.received","causation_id":null,"created_at":"2026-08-30T00:00:00Z","payload":{"content":"hi"}}
+"#,
+        );
+
+        let Err(err) = log.load() else {
+            panic!("a bare string source must fail the load");
+        };
+        match err.downcast_ref::<Error>() {
+            Some(Error::AtLine { line, source }) => {
+                assert_eq!(*line, 2);
+                assert!(matches!(**source, Error::BadLine(_)));
+            }
+            _ => panic!("expected Error::AtLine, got {err}"),
+        }
+    }
+
+    #[test]
+    fn an_events_source_name_and_path_round_trip_through_the_store() {
+        let temp = TempLog::new();
+        let log = temp.open();
+
+        let written = percept::Event::message_received(
+            Actor::User,
+            "hi".to_string(),
+            percept::Source {
+                name: "claude-code".to_string(),
+                path: PathBuf::from("/home/pavel/project"),
+            },
+            None,
+        );
+        log.append(&written).unwrap();
+
+        let loaded = log.load().unwrap();
+        assert_eq!(loaded[0].source().name, "claude-code");
+        assert_eq!(
+            loaded[0].source().path,
+            PathBuf::from("/home/pavel/project")
+        );
     }
 
     #[test]
