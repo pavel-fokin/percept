@@ -2,4 +2,5 @@
 /docs
 /target
 /percept.jsonl
+/.percept/percept.jsonl
 /.claude/skills/percept/

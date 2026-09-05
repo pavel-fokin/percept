@@ -143,18 +143,35 @@ async fn run(
     }
 }
 
-/// `$PERCEPT_HOME/percept.jsonl`, or `~/.percept/percept.jsonl` when the
-/// variable is unset or empty. `HOME` unset is an error: there is
-/// nowhere to put the log, and a relative default would scatter logs
-/// per directory.
+/// `$PERCEPT_HOME/percept.jsonl` when set. Otherwise, a binary running
+/// from `target/debug` or `target/release` - a checkout being built and
+/// run with `cargo`, not `scripts/install.sh`'s output - logs under the
+/// checkout's own `.percept/` instead, so iterating on percept doesn't
+/// mix test events into the shared log. Any other binary, installed or
+/// not, falls back to `~/.percept/percept.jsonl`. `HOME` unset is an
+/// error there: there is nowhere to put the log, and a relative default
+/// would scatter logs per directory.
 fn log_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
-    let home = match std::env::var_os(HOME_VAR).filter(|home| !home.is_empty()) {
-        Some(home) => PathBuf::from(home),
-        None => std::env::var_os("HOME")
-            .map(|home| PathBuf::from(home).join(".percept"))
-            .ok_or(format!("neither {HOME_VAR} nor HOME is set"))?,
-    };
+    if let Some(home) = std::env::var_os(HOME_VAR).filter(|home| !home.is_empty()) {
+        return Ok(PathBuf::from(home).join(LOG_FILE));
+    }
+    if std::env::current_exe().is_ok_and(|exe| is_dev_build(&exe)) {
+        return Ok(checkout_root()?.join(MAPS_DIR).join(LOG_FILE));
+    }
+    let home = std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join(".percept"))
+        .ok_or(format!("neither {HOME_VAR} nor HOME is set"))?;
     Ok(home.join(LOG_FILE))
+}
+
+/// Whether `exe` sits under a `target/debug` or `target/release` -
+/// `cargo build`'s output directories - rather than wherever
+/// `scripts/install.sh` or a package manager put the binary.
+fn is_dev_build(exe: &Path) -> bool {
+    exe.ancestors().any(|dir| {
+        matches!(dir.file_name().and_then(|name| name.to_str()), Some("debug" | "release"))
+            && dir.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new("target"))
+    })
 }
 
 /// The shared log, opened where `log_path` says.
