@@ -1,10 +1,10 @@
 use super::*;
 use crate::percept::{Actor, Event, EventId};
-use crate::testing::FakeLog;
+use crate::testing::{scope, source, FakeLog};
 
 fn tool(events: Vec<Event>) -> ReviseMap {
     let log = Arc::new(FakeLog::seeded(events));
-    ReviseMap::new(log)
+    ReviseMap::new(log, scope())
 }
 
 #[test]
@@ -17,12 +17,8 @@ fn spec_names_the_tool_and_carries_valid_schema_json() {
 
 #[test]
 fn a_valid_batch_returns_the_payloads_and_content() {
-    let cited = Event::message_received(
-        Actor::User,
-        "Go or Rust?".to_string(),
-        "tui".to_string(),
-        None,
-    );
+    let cited =
+        Event::message_received(Actor::User, "Go or Rust?".to_string(), source("tui"), None);
     let cited_id = cited.id();
     let revise = tool(vec![cited]);
 
@@ -59,7 +55,7 @@ fn a_valid_batch_returns_the_payloads_and_content() {
 
 #[test]
 fn a_failing_change_names_its_index_and_commits_nothing() {
-    let cited = Event::message_received(Actor::User, "Rust".to_string(), "tui".to_string(), None);
+    let cited = Event::message_received(Actor::User, "Rust".to_string(), source("tui"), None);
     let id = cited.id().as_uuid().to_string();
     let revise = tool(vec![cited]);
 
@@ -152,7 +148,7 @@ fn a_sources_id_the_log_lacks_is_an_error() {
 
 #[test]
 fn a_change_can_reference_a_node_an_earlier_change_just_added() {
-    let cited = Event::message_received(Actor::User, "Rust".to_string(), "tui".to_string(), None);
+    let cited = Event::message_received(Actor::User, "Rust".to_string(), source("tui"), None);
     let id = cited.id().as_uuid().to_string();
     let revise = tool(vec![cited]);
 

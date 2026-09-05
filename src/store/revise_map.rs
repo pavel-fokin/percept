@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{EventLog, Mutation, NodeRef, Payload};
+use crate::percept::{EventLog, Mutation, NodeRef, Payload, Scope};
 use crate::percept::{Tool, ToolOutput, ToolSpec};
 use crate::store::Snapshot;
 
@@ -13,11 +13,12 @@ use crate::store::Snapshot;
 /// tool never writes the log itself.
 pub struct ReviseMap {
     log: Arc<dyn EventLog>,
+    scope: Scope,
 }
 
 impl ReviseMap {
-    pub fn new(log: Arc<dyn EventLog>) -> Self {
-        Self { log }
+    pub fn new(log: Arc<dyn EventLog>, scope: Scope) -> Self {
+        Self { log, scope }
     }
 }
 
@@ -214,7 +215,7 @@ impl Tool for ReviseMap {
         if args.changes.is_empty() {
             return Err("changes must not be empty".into());
         }
-        let mut snapshot = Snapshot::load(self.log.as_ref(), &args.map)?;
+        let mut snapshot = Snapshot::load(self.log.as_ref(), &args.map, &self.scope)?;
         let mut lines = Vec::with_capacity(args.changes.len());
         let mut commits = Vec::with_capacity(args.changes.len());
 

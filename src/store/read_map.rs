@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{EventLog, Tool, ToolOutput, ToolSpec};
+use crate::percept::{EventLog, Scope, Tool, ToolOutput, ToolSpec};
 use crate::store::fold_map;
 
 /// The `read_map` tool: prints one map by name, the same text the
@@ -11,11 +11,12 @@ use crate::store::fold_map;
 /// map every turn.
 pub struct ReadMap {
     log: Arc<dyn EventLog>,
+    scope: Scope,
 }
 
 impl ReadMap {
-    pub fn new(log: Arc<dyn EventLog>) -> Self {
-        Self { log }
+    pub fn new(log: Arc<dyn EventLog>, scope: Scope) -> Self {
+        Self { log, scope }
     }
 }
 
@@ -54,7 +55,7 @@ impl Tool for ReadMap {
 
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
-        let map = fold_map(self.log.as_ref(), &args.map)?;
+        let map = fold_map(self.log.as_ref(), &args.map, &self.scope)?;
         if map.nodes().is_empty() {
             return Ok(ToolOutput::text(format!(
                 "the {} map is empty: nothing has been recorded here yet. \
@@ -67,50 +68,4 @@ impl Tool for ReadMap {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::testing::{node_added, FakeLog};
-
-    #[test]
-    fn spec_names_the_tool_and_carries_valid_schema_json() {
-        let tool = ReadMap::new(Arc::new(FakeLog::default()));
-        let spec = tool.spec();
-        assert_eq!(spec.name, "read_map");
-        let schema: serde_json::Value = serde_json::from_str(spec.parameters).unwrap();
-        assert_eq!(schema["type"], "object");
-    }
-
-    #[test]
-    fn a_map_reads_as_its_nodes_and_edges() {
-        let log = FakeLog::seeded(vec![node_added("decision", "JSONL for the log")]);
-        let out = ReadMap::new(Arc::new(log))
-            .run(r#"{"map":"decisions"}"#)
-            .unwrap();
-        assert!(out.content.contains("decision"));
-        assert!(out.content.contains("JSONL for the log"));
-        assert!(out.commits.is_empty());
-    }
-
-    #[test]
-    fn an_empty_map_says_so() {
-        let out = ReadMap::new(Arc::new(FakeLog::default()))
-            .run(r#"{"map":"decisions"}"#)
-            .unwrap();
-        assert!(out.content.contains("empty"));
-    }
-
-    #[test]
-    fn an_unknown_map_is_an_error() {
-        let tool = ReadMap::new(Arc::new(FakeLog::default()));
-        let Err(err) = tool.run(r#"{"map":"plans"}"#) else {
-            panic!("expected an error")
-        };
-        assert!(err.to_string().contains("no map named"));
-    }
-
-    #[test]
-    fn a_missing_name_is_an_error() {
-        let tool = ReadMap::new(Arc::new(FakeLog::default()));
-        assert!(tool.run("{}").is_err());
-    }
-}
+mod tests;

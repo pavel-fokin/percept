@@ -1,6 +1,7 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError};
+use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError, Source};
 use crate::shared::Timestamp;
 
 /// Most tool calls one user turn may make. At the cap the next request
@@ -201,13 +202,16 @@ pub struct App {
     events: Vec<Event>,
     /// The writer this app records as - stamped on every event it
     /// commits, so the log can tell its events from other writers'.
-    source: String,
+    source: Source,
     chat: Arc<dyn percept::Model>,
     catalog: Arc<dyn percept::ModelCatalog>,
     log: Arc<dyn percept::EventLog>,
     /// The tools the model may call, sent with each request when the
     /// model reports `tool_use`.
     tools: Vec<Arc<dyn percept::Tool>>,
+    /// Rerenders a map after a tool's commits change it - see
+    /// `commit_tool_result`.
+    renderer: Arc<dyn percept::MapRenderer>,
     /// How much of each map `build_request` sends every turn.
     map_shape: MapShape,
     /// The turn now streaming, or None between turns.
@@ -220,20 +224,28 @@ pub struct App {
 }
 
 impl App {
-    /// Opens on whatever `log` already holds, so the transcript
-    /// survives a restart. A map that does not fold fails here, at
-    /// open, the way a log line that does not decode does - not on the
-    /// first turn.
+    /// Opens on what `log` already holds for this project, so the
+    /// transcript survives a restart. The log is shared by every
+    /// project; another project's events stay in it and out of this
+    /// transcript, though the search tools still reach them. A map
+    /// that does not fold fails here, at open, the way a log line that
+    /// does not decode does - not on the first turn.
     pub fn new(
         chat: Arc<dyn percept::Model>,
         catalog: Arc<dyn percept::ModelCatalog>,
         log: Arc<dyn percept::EventLog>,
         tools: Vec<Arc<dyn percept::Tool>>,
+        renderer: Arc<dyn percept::MapRenderer>,
         map_shape: MapShape,
-        source: String,
+        source: Source,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let events = log.load()?;
-        Map::fold_all(&events)?;
+        let scope = source.scope();
+        let events: Vec<Event> = log
+            .load()?
+            .into_iter()
+            .filter(|event| scope.admits(event))
+            .collect();
+        Map::fold_all(&scope, &events)?;
         let last_usage = last_model_called(&events);
 
         Ok(Self {
@@ -243,6 +255,7 @@ impl App {
             catalog,
             log,
             tools,
+            renderer,
             map_shape,
             pending: None,
             last_usage,
@@ -304,14 +317,19 @@ impl App {
         // Checked again here, against what the next request will fold,
         // so a mismatch reaches the model as the call's result instead
         // of ending the run at the next `build_request`.
-        let content = match self.fits_maps(&commits) {
+        let (content, changed) = match self.fits_maps(&commits) {
             Ok(()) => {
+                let changed: HashSet<String> = commits
+                    .iter()
+                    .filter_map(|event| percept::map_of(event.payload()))
+                    .map(str::to_string)
+                    .collect();
                 for event in commits {
                     self.commit(event)?;
                 }
-                output.content
+                (output.content, changed)
             }
-            Err(err) => err.to_string(),
+            Err(err) => (err.to_string(), HashSet::new()),
         };
         let resulted = Event::tool_resulted(content, self.source.clone(), Some(called_id));
         let resulted_id = resulted.id();
@@ -320,6 +338,26 @@ impl App {
             turn.anchor = resulted_id;
             turn.tool_calls += 1;
         });
+        self.render_changed(&changed)
+    }
+
+    /// Rerenders every map named in `changed`. Runs once `tool.resulted`
+    /// is committed, so a render that fails leaves the log whole: the
+    /// map is in the log, and only its view is stale. Folds from the
+    /// log file, not this transcript, because another writer may have
+    /// appended since startup and the render must not lose what it
+    /// wrote. A tool round that touched no map folds and renders
+    /// nothing.
+    fn render_changed(&self, changed: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
+        if changed.is_empty() {
+            return Ok(());
+        }
+        let events = self.log.load()?;
+        let scope = self.source.scope();
+        for name in changed {
+            let map = Map::fold(percept::Schema::find(name)?, &scope, &events)?;
+            self.renderer.render(&map)?;
+        }
         Ok(())
     }
 
@@ -328,7 +366,7 @@ impl App {
         if new.is_empty() {
             return Ok(());
         }
-        Map::fold_all(self.events.iter().chain(new)).map(drop)
+        Map::fold_all(&self.source.scope(), self.events.iter().chain(new)).map(drop)
     }
 
     /// Where the model's view starts: `CONTEXT_EVENTS` back from the
@@ -360,7 +398,7 @@ impl App {
             role: Actor::System,
             content: format!("The current time is {}.", Timestamp::now()),
         }];
-        for map in Map::fold_all(&self.events)? {
+        for map in Map::fold_all(&self.source.scope(), &self.events)? {
             let schema = map.schema();
             let body = if map.nodes().is_empty() {
                 "(empty: nothing has been recorded here yet. The log may still hold what it would.)"

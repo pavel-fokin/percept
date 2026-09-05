@@ -26,7 +26,8 @@ use tokio_stream::StreamExt;
 use crate::app::{run_tool, AppService, ToolStep};
 use crate::code;
 use crate::percept::{
-    self, Actor, Chunk, Event, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
+    self, Actor, Chunk, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef,
+    Payload,
 };
 use crate::shared::Timestamp;
 use crate::store;
@@ -38,9 +39,10 @@ use crate::store;
 Record what happens across your tools, so a model can query it.
 
 percept keeps an append-only log of events - prompts, replies, and tool \
-calls - in percept.jsonl in the working directory. It never ranks, \
-summarises, or answers: its job is to make looking cheap and leave \
-relevance to the caller.
+calls - in $PERCEPT_HOME/percept.jsonl, ~/.percept by default, shared \
+by every project; each event names the project it came from. It never \
+ranks, summarises, or answers: its job is to make looking cheap and \
+leave relevance to the caller.
 
 Run with no arguments to open the TUI. Every subcommand reaches the log \
 without it: `events publish` appends one event, `events search` and \
@@ -76,7 +78,7 @@ pub enum Command {
 #[derive(Subcommand)]
 pub enum MapsCommand {
     /// Every map with its node and edge counts, one JSON object per line.
-    List,
+    List(ListMapsArgs),
     /// One map's nodes, then its edges, one JSON object per line.
     Show(ShowMapArgs),
     /// Add a node to a map. Prints the minted node id.
@@ -104,6 +106,10 @@ pub struct ShowMapArgs {
     /// How many edges out `--around` reaches; 0 is the node alone.
     #[arg(long, default_value_t = 1, requires = "around")]
     depth: usize,
+    /// Fold every project's events instead of only this one's. Ignored
+    /// for the code map, which is never folded from the log.
+    #[arg(long)]
+    all_projects: bool,
 }
 
 impl ShowMapArgs {
@@ -112,6 +118,13 @@ impl ShowMapArgs {
     pub fn is_code(&self) -> bool {
         self.map == percept::CODE.name
     }
+}
+
+#[derive(Args)]
+pub struct ListMapsArgs {
+    /// Fold every project's events instead of only this one's.
+    #[arg(long)]
+    all_projects: bool,
 }
 
 /// What every map change names: the map, and the events it was drawn
@@ -320,18 +333,28 @@ fn parse_node_ref(s: &str) -> Result<NodeRef, String> {
 }
 
 /// Appends one event built from `args` to `log`. `store` owns the
-/// decode, so the CLI only parses flags.
+/// decode, so the CLI only parses flags. `root` is the writer's project
+/// root, resolved once in `main`; `args.source` only names the writer,
+/// so `publish` pairs the two into the `Source` the event carries.
 /// Appends one event and prints its id, so a writer can cite it as the
 /// `--causation` of the next. A cause the log lacks is an error: a typo
 /// in provenance is worse than none.
-pub fn publish(args: PublishArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
+pub fn publish(
+    args: PublishArgs,
+    log: &dyn EventLog,
+    root: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
     let causation_id = args
         .causation
         .as_deref()
         .map(|id| known_event_id(id, log))
         .transpose()?;
     let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
-    let event = store::decode(&args.actor, args.source, &args.kind, causation_id, payload)?;
+    let source = percept::Source {
+        name: args.source,
+        path: root.to_path_buf(),
+    };
+    let event = store::decode(&args.actor, source, &args.kind, causation_id, payload)?;
     // A raw map event would skip `Map::apply`, and one that breaks a
     // rule fails every fold from then on, with no undo in an
     // append-only log.
@@ -386,20 +409,40 @@ fn print_lines(lines: impl Iterator<Item = String>) -> Result<(), Box<dyn std::e
     out.flush().or_else(stop_if_pipe_closed)
 }
 
+/// The scope `maps list` and `maps show` fold: every project's events
+/// with `--all-projects`, else only `root`'s.
+fn scope(all_projects: bool, root: &Path) -> percept::Scope {
+    if all_projects {
+        percept::Scope::All
+    } else {
+        percept::Scope::Project(root.to_path_buf())
+    }
+}
+
 /// Prints every map percept knows with its size: the log's maps, folded
-/// from one read of `log`, then the code map, walked fresh from the
-/// working directory.
-pub fn maps_list(log: &dyn EventLog, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let mut maps = Map::fold_all(&log.load()?)?;
-    maps.push(code::build(root)?);
+/// from one read of `log` and scoped to `project` unless `args` says
+/// otherwise, then the code map, walked fresh from `tree` - the
+/// checkout, which in a worktree is not the project's path.
+pub fn maps_list(
+    args: ListMapsArgs,
+    log: &dyn EventLog,
+    project: &Path,
+    tree: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut maps = Map::fold_all(&scope(args.all_projects, project), &log.load()?)?;
+    maps.push(code::build(tree)?);
     print_lines(maps.iter().map(store::encode_map))
 }
 
 /// Prints the map `args.map` names, nodes then edges. `--around` cuts
 /// it to a neighbourhood first, then `--kind` cuts that to its kinds,
 /// so a node of another kind still counts as a step on the way.
-pub fn maps_show(args: ShowMapArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
-    let map = store::fold_map(log, &args.map)?;
+pub fn maps_show(
+    args: ShowMapArgs,
+    log: &dyn EventLog,
+    root: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let map = store::fold_map(log, &args.map, &scope(args.all_projects, root))?;
     print_map(map, &args)
 }
 
@@ -427,10 +470,29 @@ fn print_map(mut map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error:
     print_lines(nodes.chain(edges))
 }
 
-/// Commits a shell user's map change: actor `user`, source `cli`, no
-/// cause.
-fn record(log: &dyn EventLog, payload: Payload) -> Result<(), Box<dyn std::error::Error>> {
-    log.append(&Event::new(Actor::User, "cli".to_string(), None, payload))
+/// One map change from the shell: `target`'s cited events resolved and
+/// `mutation` checked and applied through `store::revise`, the payload
+/// committed as actor `user` with no cause, then the map rerendered,
+/// folded fresh from the log so another writer's changes are kept.
+/// Returns the payload, for `add-node` to print the minted id.
+fn write(
+    target: MapArgs,
+    log: &dyn EventLog,
+    source: &percept::Source,
+    renderer: &dyn percept::MapRenderer,
+    mutation: impl FnOnce(Vec<EventId>) -> Mutation,
+) -> Result<Payload, Box<dyn std::error::Error>> {
+    let MapArgs { map, source: cited } = target;
+    let scope = source.scope();
+    let payload = store::revise(log, &map, &scope, &cited, mutation)?;
+    log.append(&Event::new(
+        Actor::User,
+        source.clone(),
+        None,
+        payload.clone(),
+    ))?;
+    renderer.render(&store::fold_map(log, &map, &scope)?)?;
+    Ok(payload)
 }
 
 /// Adds a node to a map and prints its minted id, so a shell script can
@@ -438,62 +500,77 @@ fn record(log: &dyn EventLog, payload: Payload) -> Result<(), Box<dyn std::error
 pub fn maps_add_node(
     args: AddNodeArgs,
     log: &dyn EventLog,
+    source: &percept::Source,
+    renderer: &dyn percept::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let MapArgs { map, source } = args.target;
-    let payload = store::revise(log, &map, &source, |sources| Mutation::AddNode {
-        kind: args.kind,
-        name: args.name,
-        properties: args.prop.into_iter().collect::<BTreeMap<_, _>>(),
-        sources,
+    let payload = write(args.target, log, source, renderer, |sources| {
+        Mutation::AddNode {
+            kind: args.kind,
+            name: args.name,
+            properties: args.prop.into_iter().collect::<BTreeMap<_, _>>(),
+            sources,
+        }
     })?;
     if let Payload::NodeAdded { node, .. } = &payload {
         println!("{}", node.as_uuid());
     }
-    record(log, payload)
+    Ok(())
 }
 
 /// Adds an edge between two nodes already in a map.
-pub fn maps_add_edge(args: EdgeArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
-    let MapArgs { map, source } = args.target;
-    let payload = store::revise(log, &map, &source, |sources| Mutation::AddEdge {
-        kind: args.kind,
-        from: args.from,
-        to: args.to,
-        sources,
-    })?;
-    record(log, payload)
+pub fn maps_add_edge(
+    args: EdgeArgs,
+    log: &dyn EventLog,
+    source: &percept::Source,
+    renderer: &dyn percept::MapRenderer,
+) -> Result<(), Box<dyn std::error::Error>> {
+    write(args.target, log, source, renderer, |sources| {
+        Mutation::AddEdge {
+            kind: args.kind,
+            from: args.from,
+            to: args.to,
+            sources,
+        }
+    })
+    .map(drop)
 }
 
 /// Removes a node from a map, dropping the edges that touch it.
 pub fn maps_remove_node(
     args: RemoveNodeArgs,
     log: &dyn EventLog,
+    source: &percept::Source,
+    renderer: &dyn percept::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let MapArgs { map, source } = args.target;
-    let payload = store::revise(log, &map, &source, |sources| Mutation::RemoveNode {
-        node: NodeRef {
-            kind: args.kind,
-            name: args.name,
-        },
-        reason: args.reason,
-        sources,
-    })?;
-    record(log, payload)
+    write(args.target, log, source, renderer, |sources| {
+        Mutation::RemoveNode {
+            node: NodeRef {
+                kind: args.kind,
+                name: args.name,
+            },
+            reason: args.reason,
+            sources,
+        }
+    })
+    .map(drop)
 }
 
 /// Removes an edge from a map.
 pub fn maps_remove_edge(
     args: EdgeArgs,
     log: &dyn EventLog,
+    source: &percept::Source,
+    renderer: &dyn percept::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let MapArgs { map, source } = args.target;
-    let payload = store::revise(log, &map, &source, |sources| Mutation::RemoveEdge {
-        kind: args.kind,
-        from: args.from,
-        to: args.to,
-        sources,
-    })?;
-    record(log, payload)
+    write(args.target, log, source, renderer, |sources| {
+        Mutation::RemoveEdge {
+            kind: args.kind,
+            from: args.from,
+            to: args.to,
+            sources,
+        }
+    })
+    .map(drop)
 }
 
 /// A reader that stops early - `head`, or a `jq` that has seen enough -

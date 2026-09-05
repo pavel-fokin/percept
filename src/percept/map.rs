@@ -7,10 +7,40 @@
 //! one place holds the rules.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::fmt;
+use std::fmt::{self, Write as _};
+use std::path::PathBuf;
 
-use super::{Event, EventId, Payload};
+use super::{Event, EventId, Payload, Source};
 use crate::shared::Id;
+
+/// Which events a fold may draw from: one project's alone, or every
+/// project's. The log is shared by every project that writes to it;
+/// `Project` is the default a reader wants, `All` the escape hatch.
+/// Never touches `Snapshot::resolve` - a node may cite an event from
+/// any project, whichever map it ends up in.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Scope {
+    Project(PathBuf),
+    All,
+}
+
+impl Scope {
+    /// Whether `event` falls inside this scope.
+    pub fn admits(&self, event: &Event) -> bool {
+        match self {
+            Self::Project(path) => event.source().path == *path,
+            Self::All => true,
+        }
+    }
+}
+
+impl Source {
+    /// The scope of this writer's own project - what every fold on its
+    /// behalf reads.
+    pub fn scope(&self) -> Scope {
+        Scope::Project(self.path.clone())
+    }
+}
 
 /// Which node and edge kinds a map allows. Data, not an enum: adding a
 /// map is adding a value.
@@ -272,17 +302,22 @@ impl Map {
         }
     }
 
-    /// Folds the events that belong to `schema`'s map, in the order
-    /// given, which must be log order. Events for other maps and of
-    /// other kinds are skipped. An event that breaks a rule is an
-    /// error naming it, not skipped: silently dropping it would hide
-    /// that something went wrong at write time.
+    /// Folds the events that belong to `schema`'s map and fall inside
+    /// `scope`, in the order given, which must be log order. Events for
+    /// other maps, of other kinds, or outside `scope` are skipped. An
+    /// event that breaks a rule is an error naming it, not skipped:
+    /// silently dropping it would hide that something went wrong at
+    /// write time.
     pub fn fold<'a>(
         schema: &'static Schema,
+        scope: &Scope,
         events: impl IntoIterator<Item = &'a Event>,
     ) -> Result<Self, MapError> {
         let mut map = Self::empty(schema);
         for event in events {
+            if !scope.admits(event) {
+                continue;
+            }
             if map_of(event.payload()) != Some(schema.name) {
                 continue;
             }
@@ -295,13 +330,14 @@ impl Map {
         Ok(map)
     }
 
-    /// Every map percept knows, folded from `events`.
+    /// Every map percept knows, folded from `events` within `scope`.
     pub fn fold_all<'a>(
+        scope: &Scope,
         events: impl IntoIterator<Item = &'a Event> + Clone,
     ) -> Result<Vec<Self>, MapError> {
         SCHEMAS
             .iter()
-            .map(|schema| Self::fold(schema, events.clone()))
+            .map(|schema| Self::fold(schema, scope, events.clone()))
             .collect()
     }
 
@@ -546,7 +582,7 @@ impl Map {
 
     /// A node as `Display` names it; the id when the map has no such
     /// node.
-    fn label(&self, id: NodeId) -> String {
+    pub fn label(&self, id: NodeId) -> String {
         self.node(id)
             .map_or_else(|| id.as_uuid().to_string(), Node::to_string)
     }
@@ -589,24 +625,41 @@ impl Map {
 impl fmt::Display for Map {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for node in &self.nodes {
-            write!(f, "- {node}")?;
-            let mut sep = ": ";
-            for (key, value) in &node.properties {
-                write!(f, "{sep}{key}: {value:?}")?;
-                sep = "; ";
-            }
-            writeln!(f)?;
+            writeln!(f, "- {node}{}", node.properties_line())?;
         }
         for edge in &self.edges {
-            writeln!(
-                f,
-                "- {} {} {}",
-                self.label(edge.from),
-                edge.kind,
-                self.label(edge.to)
-            )?;
+            writeln!(f, "- {}", self.edge_line(edge))?;
         }
         Ok(())
+    }
+}
+
+impl Node {
+    /// The tail of a node's line, wherever one is printed: `: key:
+    /// "value"; key: "value"` over its properties, empty when it has
+    /// none. Values are quoted, so a newline inside one stays inside
+    /// its line.
+    pub fn properties_line(&self) -> String {
+        let mut out = String::new();
+        let mut sep = ": ";
+        for (key, value) in &self.properties {
+            let _ = write!(out, "{sep}{key}: {value:?}");
+            sep = "; ";
+        }
+        out
+    }
+}
+
+impl Map {
+    /// An edge as a line - `from kind to`, each end named the way a
+    /// writer refers to it.
+    pub fn edge_line(&self, edge: &Edge) -> String {
+        format!(
+            "{} {} {}",
+            self.label(edge.from),
+            edge.kind,
+            self.label(edge.to)
+        )
     }
 }
 

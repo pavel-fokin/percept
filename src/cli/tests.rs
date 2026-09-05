@@ -1,7 +1,10 @@
 use super::*;
 use crate::app::{App, MapShape};
 use crate::percept::{self, Payload};
-use crate::testing::{content, FakeCatalog, FakeLog, FakeTool, Scripted};
+use crate::testing::{
+    content, source, FakeCatalog, FakeLog, FakeRenderer, FakeTool, Scripted, ROOT,
+};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 fn args(actor: &str, payload: &str) -> PublishArgs {
@@ -17,12 +20,12 @@ fn args(actor: &str, payload: &str) -> PublishArgs {
 #[test]
 fn a_publish_citing_a_cause_records_it() {
     let log = FakeLog::default();
-    publish(args("user", r#"{"content":"hi"}"#), &log).unwrap();
+    publish(args("user", r#"{"content":"hi"}"#), &log, Path::new(ROOT)).unwrap();
     let cause = log.load().unwrap()[0].id();
 
     let mut reply = args("model", r#"{"content":"hello"}"#);
     reply.causation = Some(cause.as_uuid().to_string());
-    publish(reply, &log).unwrap();
+    publish(reply, &log, Path::new(ROOT)).unwrap();
 
     assert!(log.load().unwrap()[1].causation_id() == Some(cause));
 }
@@ -32,18 +35,19 @@ fn a_publish_citing_a_cause_the_log_lacks_is_rejected() {
     let log = FakeLog::default();
     let mut orphan = args("model", r#"{"content":"hello"}"#);
     orphan.causation = Some(percept::EventId::new().as_uuid().to_string());
-    assert!(publish(orphan, &log).is_err());
+    assert!(publish(orphan, &log, Path::new(ROOT)).is_err());
     assert!(log.load().unwrap().is_empty());
 }
 
 #[test]
 fn a_valid_publish_appends_one_event_carrying_its_source() {
     let log = FakeLog::default();
-    publish(args("user", r#"{"content":"hi"}"#), &log).unwrap();
+    publish(args("user", r#"{"content":"hi"}"#), &log, Path::new(ROOT)).unwrap();
 
     let events = log.load().unwrap();
     assert_eq!(events.len(), 1);
-    assert_eq!(events[0].source(), "claude-code");
+    assert_eq!(events[0].source().name, "claude-code");
+    assert_eq!(events[0].source().path, Path::new(ROOT));
     assert!(events[0].actor() == percept::Actor::User);
 }
 
@@ -51,15 +55,15 @@ fn a_valid_publish_appends_one_event_carrying_its_source() {
 fn a_payload_field_the_type_does_not_record_is_rejected() {
     let log = FakeLog::default();
     let extra = r#"{"content":"hi","meta":{"thread":42}}"#;
-    assert!(publish(args("user", extra), &log).is_err());
+    assert!(publish(args("user", extra), &log, Path::new(ROOT)).is_err());
     assert!(log.load().unwrap().is_empty());
 }
 
 #[test]
 fn a_rejected_event_appends_nothing() {
     let log = FakeLog::default();
-    assert!(publish(args("robot", r#"{"content":"hi"}"#), &log).is_err());
-    assert!(publish(args("user", "not json"), &log).is_err());
+    assert!(publish(args("robot", r#"{"content":"hi"}"#), &log, Path::new(ROOT)).is_err());
+    assert!(publish(args("user", "not json"), &log, Path::new(ROOT)).is_err());
     assert!(log.load().unwrap().is_empty());
 }
 
@@ -224,8 +228,9 @@ async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
         Arc::new(FakeCatalog::default()),
         log.clone(),
         tools,
+        Arc::new(FakeRenderer::default()),
         MapShape::Prompt,
-        "cli".to_string(),
+        source("cli"),
     )
     .unwrap();
 
@@ -235,7 +240,7 @@ async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
 
     let events = log.load().unwrap();
     assert_eq!(events.len(), 4);
-    assert_eq!(events[0].source(), "cli");
+    assert_eq!(events[0].source().name, "cli");
     assert!(matches!(
         events[1].payload(),
         Payload::ToolCalled { tool, .. } if tool == "search_events"
@@ -263,8 +268,9 @@ async fn a_stream_error_ends_the_turn_but_still_commits_partial_text() {
         Arc::new(FakeCatalog::default()),
         log.clone(),
         Vec::new(),
+        Arc::new(FakeRenderer::default()),
         MapShape::Prompt,
-        "cli".to_string(),
+        source("cli"),
     )
     .unwrap();
 
@@ -298,6 +304,15 @@ fn maps_show_kind_is_repeatable() {
 }
 
 #[test]
+fn all_projects_scopes_to_every_project_while_the_default_scopes_to_root() {
+    assert_eq!(
+        scope(false, Path::new(ROOT)),
+        percept::Scope::Project(PathBuf::from(ROOT))
+    );
+    assert_eq!(scope(true, Path::new(ROOT)), percept::Scope::All);
+}
+
+#[test]
 fn depth_is_refused_without_around() {
     let alone = Cli::try_parse_from(["percept", "maps", "show", "decisions", "--depth", "2"]);
     assert!(alone.is_err());
@@ -317,11 +332,13 @@ fn depth_is_refused_without_around() {
 #[test]
 fn every_write_verb_refuses_the_code_map() {
     let log = FakeLog::default();
+    let renderer = FakeRenderer::default();
     let target = || MapArgs {
         map: "code".to_string(),
         source: Vec::new(),
     };
 
+    let cli_source = source("cli");
     let add_node = maps_add_node(
         AddNodeArgs {
             target: target(),
@@ -330,6 +347,8 @@ fn every_write_verb_refuses_the_code_map() {
             prop: Vec::new(),
         },
         &log,
+        &cli_source,
+        &renderer,
     );
     let remove_node = maps_remove_node(
         RemoveNodeArgs {
@@ -339,6 +358,8 @@ fn every_write_verb_refuses_the_code_map() {
             reason: "gone".to_string(),
         },
         &log,
+        &cli_source,
+        &renderer,
     );
     let edge_args = || EdgeArgs {
         target: target(),
@@ -352,12 +373,36 @@ fn every_write_verb_refuses_the_code_map() {
             name: "src/app/mod.rs".to_string(),
         },
     };
-    let add_edge = maps_add_edge(edge_args(), &log);
-    let remove_edge = maps_remove_edge(edge_args(), &log);
+    let add_edge = maps_add_edge(edge_args(), &log, &cli_source, &renderer);
+    let remove_edge = maps_remove_edge(edge_args(), &log, &cli_source, &renderer);
 
     for result in [add_node, remove_node, add_edge, remove_edge] {
         let err = result.err().unwrap();
         assert!(err.to_string().starts_with("\"code\" is derived"), "{err}");
     }
     assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
+fn maps_add_node_renders_the_map_it_changed_once() {
+    let log = FakeLog::default();
+    let renderer = FakeRenderer::default();
+
+    maps_add_node(
+        AddNodeArgs {
+            target: MapArgs {
+                map: "decisions".to_string(),
+                source: Vec::new(),
+            },
+            kind: "decision".to_string(),
+            name: "Rust over Go".to_string(),
+            prop: Vec::new(),
+        },
+        &log,
+        &source("cli"),
+        &renderer,
+    )
+    .unwrap();
+
+    assert_eq!(renderer.rendered(), vec!["decisions".to_string()]);
 }

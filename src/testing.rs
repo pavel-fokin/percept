@@ -3,14 +3,45 @@
 //! above can depend on it without bending the dependency direction.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::percept::{
-    self, Actor, Chunk, Event, EventId, Modality, Model, ModelCapabilities, ModelCatalog,
-    ModelDescriptor, ModelListing, ModelRequest, NodeId, Payload, ReplyStream, Tool, ToolOutput,
-    ToolSpec, Usage,
+    self, Actor, Chunk, Event, EventId, Map, MapRenderer, Modality, Model, ModelCapabilities,
+    ModelCatalog, ModelDescriptor, ModelListing, ModelRequest, NodeId, NodeRef, Payload,
+    ReplyStream, Scope, Source, Tool, ToolOutput, ToolSpec, Usage,
 };
+
+/// The project root `source` stamps, for a test that compares paths.
+pub const ROOT: &str = "/test";
+
+/// A `Source` for tests that don't care about the path - a fixed one
+/// under `ROOT`, so a caller only names the writer.
+pub fn source(name: &str) -> Source {
+    source_at(name, ROOT)
+}
+
+/// The scope `source`'s events fall inside.
+pub fn scope() -> Scope {
+    Scope::Project(PathBuf::from(ROOT))
+}
+
+pub fn node_ref(kind: &str, name: &str) -> NodeRef {
+    NodeRef {
+        kind: kind.to_string(),
+        name: name.to_string(),
+    }
+}
+
+/// A `Source` under `path`, for a test that needs events from more
+/// than one project.
+pub fn source_at(name: &str, path: &str) -> Source {
+    Source {
+        name: name.to_string(),
+        path: PathBuf::from(path),
+    }
+}
 
 /// An in-memory EventLog. `start_failing` flips `append` into an error
 /// without touching the filesystem, and can be flipped mid-conversation.
@@ -132,6 +163,30 @@ fn tag(message: &percept::Message) -> String {
     }
 }
 
+/// A MapRenderer that records the name of every map it was asked to
+/// render, in order, so a test can assert what got rerendered without
+/// touching a filesystem.
+#[derive(Default)]
+pub struct FakeRenderer {
+    rendered: Mutex<Vec<String>>,
+}
+
+impl FakeRenderer {
+    pub fn rendered(&self) -> Vec<String> {
+        self.rendered.lock().unwrap().clone()
+    }
+}
+
+impl MapRenderer for FakeRenderer {
+    fn render(&self, map: &Map) -> Result<(), Box<dyn std::error::Error>> {
+        self.rendered
+            .lock()
+            .unwrap()
+            .push(map.schema().name.to_string());
+        Ok(())
+    }
+}
+
 /// A Tool that always succeeds with the same line.
 pub struct FakeTool;
 
@@ -210,9 +265,15 @@ impl ModelCatalog for FakeCatalog {
 /// A node on the decisions map, cited from one event, for tests that
 /// need a map with something in it.
 pub fn node_added(kind: &str, name: &str) -> Event {
+    node_added_at("/test", kind, name)
+}
+
+/// `node_added`, from a project other than `/test` - for a test that
+/// checks a map scoped to one project skips another's.
+pub fn node_added_at(path: &str, kind: &str, name: &str) -> Event {
     Event::new(
         Actor::User,
-        "test".to_string(),
+        source_at("test", path),
         None,
         Payload::NodeAdded {
             map: "decisions".to_string(),

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::Parser;
@@ -26,20 +26,32 @@ use providers::{Catalog, OPENAI_MODEL};
 use store::{Jsonl, ReadEvent, ReadMap, ReviseMap, SearchEvents};
 use tui::{Chat, StreamEvent};
 
-/// Where the event log lives: `percept.jsonl` in the working directory,
-/// so the transcript follows wherever the app is launched from.
-const LOG_PATH: &str = "percept.jsonl";
+/// Names the directory percept keeps its state in - the event log, and
+/// the installed binary. Defaults to `~/.percept`.
+const HOME_VAR: &str = "PERCEPT_HOME";
 
-/// Where the code map is walked from: the working directory, so the
-/// map follows the app the way the log does.
-const CODE_ROOT: &str = ".";
+/// The event log's file name under `PERCEPT_HOME`. One log for every
+/// project: an event's `source.path` says which one it came from.
+const LOG_FILE: &str = "percept.jsonl";
 
 /// Names the provider that answers: `ollama` (the default) or `openai`.
 const PROVIDER_VAR: &str = "PERCEPT_PROVIDER";
 
+/// Source name the TUI stamps on every event it commits.
+const TUI_SOURCE_NAME: &str = "percept-tui";
+
+/// Source name the headless `ask`/`reflect` turns and the `maps` write
+/// verbs stamp.
+const CLI_SOURCE_NAME: &str = "percept-cli";
+
 /// Names how much of each cognitive map reaches the model each turn:
 /// `prompt` (the default, today's behaviour), `headlines`, or `tool`.
 const MAPS_VAR: &str = "PERCEPT_MAPS";
+
+/// Where a project's maps are rendered as Markdown, under its root -
+/// rerendered on every write, so a reader who never runs `percept`
+/// still sees the latest fold.
+const MAPS_DIR: &str = ".percept";
 
 /// Where the local ollama server listens.
 const OLLAMA_URL: &str = "http://localhost:11434";
@@ -131,6 +143,68 @@ async fn run(
     }
 }
 
+/// `$PERCEPT_HOME/percept.jsonl`, or `~/.percept/percept.jsonl` when the
+/// variable is unset or empty. `HOME` unset is an error: there is
+/// nowhere to put the log, and a relative default would scatter logs
+/// per directory.
+fn log_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let home = match std::env::var_os(HOME_VAR).filter(|home| !home.is_empty()) {
+        Some(home) => PathBuf::from(home),
+        None => std::env::var_os("HOME")
+            .map(|home| PathBuf::from(home).join(".percept"))
+            .ok_or(format!("neither {HOME_VAR} nor HOME is set"))?,
+    };
+    Ok(home.join(LOG_FILE))
+}
+
+/// The shared log, opened where `log_path` says.
+fn open_log() -> Result<Jsonl, Box<dyn std::error::Error>> {
+    Ok(Jsonl::open(log_path()?)?)
+}
+
+/// The checkout the current directory is in: walks up looking for a
+/// `.git` entry - the closest thing to a repository root without
+/// shelling out to git. Falls back to the current directory when none
+/// is found. Canonicalized either way, so a path always comes out
+/// absolute, and two writers started from a symlinked path get the
+/// same one.
+fn checkout_root() -> std::io::Result<PathBuf> {
+    let cwd = std::env::current_dir()?;
+    let mut dir = cwd.as_path();
+    loop {
+        if dir.join(".git").exists() {
+            return dir.canonicalize();
+        }
+        match dir.parent() {
+            Some(parent) => dir = parent,
+            None => return cwd.canonicalize(),
+        }
+    }
+}
+
+/// The project a checkout belongs to - what a `Source` names and a
+/// `Scope` compares. A linked worktree's `.git` is a file pointing at
+/// the main checkout's `.git/worktrees/<name>`; the project is that
+/// main checkout, so every worktree of one repository shares one map
+/// instead of each starting empty. A second clone at another path is
+/// another project: the path is the identity, and nothing here reads
+/// remotes to say otherwise.
+fn project_of(checkout: &Path) -> PathBuf {
+    let Ok(text) = std::fs::read_to_string(checkout.join(".git")) else {
+        return checkout.to_path_buf();
+    };
+    text.strip_prefix("gitdir:")
+        .map(|gitdir| Path::new(gitdir.trim()))
+        .and_then(|gitdir| {
+            gitdir
+                .ancestors()
+                .find(|dir| dir.file_name().is_some_and(|name| name == ".git"))
+        })
+        .and_then(Path::parent)
+        .and_then(|main| main.canonicalize().ok())
+        .unwrap_or_else(|| checkout.to_path_buf())
+}
+
 /// Builds the model `PERCEPT_PROVIDER` names through `catalog`, so the
 /// provider dispatch lives once. Still checks `OPENAI_KEY_VAR` here,
 /// eagerly, unlike `catalog` itself: a run that starts with
@@ -182,32 +256,44 @@ fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
 }
 
 /// Both the TUI and `ask` build the same `App` this way, differing only
-/// in the `source` they stamp and in how they drive its reply stream.
-fn build_app(source: &str) -> Result<App, Box<dyn std::error::Error>> {
-    let log = Arc::new(Jsonl::open(LOG_PATH)?);
+/// in the `Source` they stamp and in how they drive its reply stream.
+fn build_app(
+    source: percept::Source,
+    renderer: Arc<dyn percept::MapRenderer>,
+) -> Result<App, Box<dyn std::error::Error>> {
+    let log = Arc::new(open_log()?);
     let catalog: Arc<dyn percept::ModelCatalog> = Arc::new(build_catalog());
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
+    let scope = source.scope();
     let mut tools: Vec<Arc<dyn percept::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
         Arc::new(ReadEvent::new(log.clone())),
-        Arc::new(ReviseMap::new(log.clone())),
+        Arc::new(ReviseMap::new(log.clone(), scope.clone())),
     ];
     if map_shape.opens_by_tool() {
-        tools.push(Arc::new(ReadMap::new(log.clone())));
+        tools.push(Arc::new(ReadMap::new(log.clone(), scope)));
     }
-    App::new(model, catalog, log, tools, map_shape, source.to_string())
+    App::new(model, catalog, log, tools, renderer, map_shape, source)
 }
 
 /// One turn without the TUI: `ask` with the user's prompt, `reflect`
 /// with percept's own.
-async fn headless_turn(actor: Actor, prompt: String) -> Result<(), Box<dyn std::error::Error>> {
-    let app = build_app("cli")?;
+async fn headless_turn(
+    actor: Actor,
+    prompt: String,
+    source: percept::Source,
+    renderer: Arc<dyn percept::MapRenderer>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let app = build_app(source, renderer)?;
     cli::run_turn(Box::new(app), actor, prompt).await
 }
 
-async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
-    let app = build_app("tui")?;
+async fn try_main(
+    source: percept::Source,
+    renderer: Arc<dyn percept::MapRenderer>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let app = build_app(source, renderer)?;
 
     let mut terminal = ratatui::init();
     let mouse = match MouseCapture::enable() {
@@ -228,33 +314,74 @@ async fn try_main() -> Result<(), Box<dyn std::error::Error>> {
 async fn main() {
     let cli = Cli::parse();
 
+    // `root` is the project a `Source` names and a `Scope` compares;
+    // `checkout` is where the files are. They differ only in a linked
+    // worktree, where the map is shared but its render, and the code
+    // map, belong to the checkout being worked in.
+    let checkout = match checkout_root() {
+        Ok(checkout) => checkout,
+        Err(err) => {
+            eprintln!("percept: {err}");
+            std::process::exit(1);
+        }
+    };
+    let root = project_of(&checkout);
+    let cli_source = percept::Source {
+        name: CLI_SOURCE_NAME.to_string(),
+        path: root.clone(),
+    };
+    let renderer: Arc<dyn percept::MapRenderer> =
+        Arc::new(store::MarkdownFiles::new(checkout.join(MAPS_DIR)));
+
     let result = match cli.command {
-        Some(Command::Events { command }) => Jsonl::open(LOG_PATH)
-            .map_err(Box::<dyn std::error::Error>::from)
-            .and_then(|log| match command {
-                EventsCommand::Publish(args) => cli::publish(args, &log),
-                EventsCommand::Search(args) => cli::search(args, &log),
-                EventsCommand::Show(args) => cli::show(args, &log),
-            }),
+        Some(Command::Events { command }) => open_log().and_then(|log| match command {
+            EventsCommand::Publish(args) => cli::publish(args, &log, &root),
+            EventsCommand::Search(args) => cli::search(args, &log),
+            EventsCommand::Show(args) => cli::show(args, &log),
+        }),
         // `maps show code` is walked fresh from the working tree, never
-        // the log, so it must not even open `percept.jsonl` - a
-        // directory with no log still gets a code map.
+        // the log, so it must not even open the log.
         Some(Command::Maps {
             command: MapsCommand::Show(args),
-        }) if args.is_code() => cli::maps_show_code(args, Path::new(CODE_ROOT)),
-        Some(Command::Maps { command }) => Jsonl::open(LOG_PATH)
-            .map_err(Box::<dyn std::error::Error>::from)
-            .and_then(|log| match command {
-                MapsCommand::List => cli::maps_list(&log, Path::new(CODE_ROOT)),
-                MapsCommand::Show(args) => cli::maps_show(args, &log),
-                MapsCommand::AddNode(args) => cli::maps_add_node(args, &log),
-                MapsCommand::AddEdge(args) => cli::maps_add_edge(args, &log),
-                MapsCommand::RemoveNode(args) => cli::maps_remove_node(args, &log),
-                MapsCommand::RemoveEdge(args) => cli::maps_remove_edge(args, &log),
-            }),
-        Some(Command::Ask(args)) => headless_turn(Actor::User, args.prompt).await,
-        Some(Command::Reflect) => headless_turn(Actor::System, REFLECT_PROMPT.to_string()).await,
-        None => try_main().await,
+        }) if args.is_code() => cli::maps_show_code(args, &checkout),
+        Some(Command::Maps { command }) => open_log().and_then(|log| match command {
+            MapsCommand::List(args) => cli::maps_list(args, &log, &root, &checkout),
+            MapsCommand::Show(args) => cli::maps_show(args, &log, &root),
+            MapsCommand::AddNode(args) => {
+                cli::maps_add_node(args, &log, &cli_source, renderer.as_ref())
+            }
+            MapsCommand::AddEdge(args) => {
+                cli::maps_add_edge(args, &log, &cli_source, renderer.as_ref())
+            }
+            MapsCommand::RemoveNode(args) => {
+                cli::maps_remove_node(args, &log, &cli_source, renderer.as_ref())
+            }
+            MapsCommand::RemoveEdge(args) => {
+                cli::maps_remove_edge(args, &log, &cli_source, renderer.as_ref())
+            }
+        }),
+        Some(Command::Ask(args)) => {
+            headless_turn(Actor::User, args.prompt, cli_source, renderer).await
+        }
+        Some(Command::Reflect) => {
+            headless_turn(
+                Actor::System,
+                REFLECT_PROMPT.to_string(),
+                cli_source,
+                renderer,
+            )
+            .await
+        }
+        None => {
+            try_main(
+                percept::Source {
+                    name: TUI_SOURCE_NAME.to_string(),
+                    path: root,
+                },
+                renderer,
+            )
+            .await
+        }
     };
 
     if let Err(err) = result {

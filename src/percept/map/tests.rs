@@ -1,8 +1,9 @@
 use super::*;
 use crate::percept::Actor;
+use crate::testing::{node_added_at, scope, source, ROOT};
 
 fn committed(payload: Payload) -> Event {
-    Event::new(Actor::User, "test".to_string(), None, payload)
+    Event::new(Actor::User, source("test"), None, payload)
 }
 
 #[test]
@@ -12,7 +13,7 @@ fn headlines_are_the_schema_s_headline_kinds_in_map_order() {
         node_added("decisions", NodeId::new(), "question", "Which language?"),
         node_added("decisions", NodeId::new(), "decision", "Rust"),
     ];
-    let map = Map::fold(&DECISIONS, &events).unwrap();
+    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
     let names: Vec<&str> = map.headlines().map(|node| node.name.as_str()).collect();
     assert_eq!(names, ["Which language?", "Rust"]);
 }
@@ -99,7 +100,7 @@ fn rejected_with(err: MapError, expected: EventId) -> MapError {
 fn a_fold_holds_every_node_and_edge_still_present() {
     let (ids, events) = rust_over_go();
 
-    let map = Map::fold(&DECISIONS, &events).unwrap();
+    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
 
     assert_eq!(map.nodes().len(), 3);
     assert_eq!(map.edges().len(), 1);
@@ -116,9 +117,24 @@ fn a_fold_skips_other_maps_and_other_kinds() {
     }));
     events.push(node_added("tasks", NodeId::new(), "goal", "Ship"));
 
-    let map = Map::fold(&DECISIONS, &events).unwrap();
+    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
 
     assert_eq!(map.nodes().len(), 3);
+}
+
+#[test]
+fn a_fold_scoped_to_a_project_skips_a_node_added_under_another_path() {
+    let events = [
+        node_added_at(ROOT, "option", "Rust"),
+        node_added_at("/other", "option", "Go"),
+    ];
+
+    let scoped = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    assert_eq!(scoped.nodes().len(), 1);
+    assert!(scoped.find("option", "Rust").is_some());
+
+    let all = Map::fold(&DECISIONS, &Scope::All, &events).unwrap();
+    assert_eq!(all.nodes().len(), 2);
 }
 
 #[test]
@@ -126,7 +142,7 @@ fn removing_a_node_drops_its_edges() {
     let (ids, mut events) = rust_over_go();
     events.push(node_removed("decisions", ids[0]));
 
-    let map = Map::fold(&DECISIONS, &events).unwrap();
+    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
 
     assert_eq!(map.nodes().len(), 2);
     assert!(map.edges().is_empty());
@@ -143,7 +159,7 @@ fn removing_an_edge_leaves_its_nodes() {
         sources: Vec::new(),
     }));
 
-    let map = Map::fold(&DECISIONS, &events).unwrap();
+    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
 
     assert_eq!(map.nodes().len(), 3);
     assert!(map.edges().is_empty());
@@ -154,7 +170,7 @@ fn an_unknown_kind_fails_the_fold() {
     let stray = node_added("decisions", NodeId::new(), "goal", "Ship");
     let stray_id = stray.id();
 
-    let err = Map::fold(&DECISIONS, &[stray]).err().unwrap();
+    let err = Map::fold(&DECISIONS, &scope(), &[stray]).err().unwrap();
 
     assert_eq!(
         rejected_with(err, stray_id),
@@ -178,7 +194,7 @@ fn a_blank_name_fails_the_fold() {
     let stray = node_added("decisions", NodeId::new(), "option", " ");
     let stray_id = stray.id();
 
-    let err = Map::fold(&DECISIONS, &[stray]).err().unwrap();
+    let err = Map::fold(&DECISIONS, &scope(), &[stray]).err().unwrap();
 
     assert_eq!(rejected_with(err, stray_id), MapError::BlankName);
 }
@@ -189,14 +205,20 @@ fn a_name_is_unique_within_its_kind_only() {
         node_added("decisions", NodeId::new(), "option", "Rust"),
         node_added("decisions", NodeId::new(), "decision", "Rust"),
     ];
-    assert_eq!(Map::fold(&DECISIONS, &events).unwrap().nodes().len(), 2);
+    assert_eq!(
+        Map::fold(&DECISIONS, &scope(), &events)
+            .unwrap()
+            .nodes()
+            .len(),
+        2
+    );
 
     let twice = node_added("decisions", NodeId::new(), "option", "Rust");
     let twice_id = twice.id();
     let mut events = events;
     events.push(twice);
 
-    let err = Map::fold(&DECISIONS, &events).err().unwrap();
+    let err = Map::fold(&DECISIONS, &scope(), &events).err().unwrap();
 
     assert_eq!(
         rejected_with(err, twice_id),
@@ -215,7 +237,9 @@ fn an_edge_needs_both_ends_and_is_stated_once() {
     let mut with_dangling = events.clone();
     with_dangling.push(dangling);
 
-    let err = Map::fold(&DECISIONS, &with_dangling).err().unwrap();
+    let err = Map::fold(&DECISIONS, &scope(), &with_dangling)
+        .err()
+        .unwrap();
     assert!(matches!(
         rejected_with(err, dangling_id),
         MapError::NoSuchNodeId(_)
@@ -225,7 +249,7 @@ fn an_edge_needs_both_ends_and_is_stated_once() {
     let twice_id = twice.id();
     events.push(twice);
 
-    let err = Map::fold(&DECISIONS, &events).err().unwrap();
+    let err = Map::fold(&DECISIONS, &scope(), &events).err().unwrap();
     assert_eq!(
         rejected_with(err, twice_id),
         MapError::DuplicateEdge {
@@ -249,7 +273,7 @@ fn removing_an_edge_that_is_not_there_fails_the_fold() {
     let stray_id = stray.id();
     events.push(stray);
 
-    let err = Map::fold(&DECISIONS, &events).err().unwrap();
+    let err = Map::fold(&DECISIONS, &scope(), &events).err().unwrap();
 
     assert!(matches!(
         rejected_with(err, stray_id),
@@ -273,7 +297,7 @@ fn apply_records_what_a_fold_rebuilds() {
     .map(|m| committed(built.apply(m).unwrap()))
     .collect();
 
-    let folded = Map::fold(&DECISIONS, &events).unwrap();
+    let folded = Map::fold(&DECISIONS, &scope(), &events).unwrap();
 
     let decision = folded.find("decision", "Rust over Go").unwrap();
     assert!(decision.id == built.find("decision", "Rust over Go").unwrap().id);
@@ -386,7 +410,7 @@ fn a_schema_is_found_by_name() {
 #[test]
 fn keeping_kinds_drops_other_nodes_and_the_edges_that_touched_them() {
     let (_, events) = rust_over_go();
-    let map = Map::fold(&DECISIONS, &events).unwrap();
+    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
 
     let cut = map.keep_kinds(&["decision".to_string()]).unwrap();
     assert_eq!(cut.nodes().len(), 1);
