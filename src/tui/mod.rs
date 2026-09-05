@@ -3,6 +3,7 @@ use std::time::Instant;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui_textarea::TextArea;
 
+mod commands;
 mod thought;
 mod ui;
 mod update;

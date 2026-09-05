@@ -4,12 +4,10 @@ use tokio_stream::StreamExt;
 
 use std::sync::Arc;
 
+use super::commands;
 use super::{Chat, ModelsMenu, StreamEvent};
 use crate::app::{run_tool, ToolStep};
 use crate::percept::{Chunk, ModelListing, ReplyStream, Tool, ToolOutput};
-
-/// The one slash command wired up today - exact match, no arguments.
-const MODELS_COMMAND: &str = "/models";
 
 /// Handle one key press. Returns true if the app should quit. Errs if
 /// submit couldn't append its event to the log - see AppService::submit.
@@ -73,7 +71,7 @@ pub fn handle_key(
 /// command today. Anything else starting with `/` is ordinary chat
 /// text, so a message that happens to start with `/` is never swallowed.
 fn is_models_command(text: &str) -> bool {
-    text.trim() == MODELS_COMMAND
+    text.trim() == commands::MODELS
 }
 
 fn current_text(chat: &Chat) -> String {
