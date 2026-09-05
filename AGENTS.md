@@ -110,7 +110,9 @@ skips it.
   flags, defaults - are settled with them before the build, never
   assumed. Where a function or a rule sits inside the code is not one
   of those: the builder proposes it, and review challenges it. The user
-  agrees the set before any code.
+  agrees the set before any code. Each settled decision is then recorded
+  in the decisions map, citing the prompt that settled it, so the next
+  session does not reopen it.
 - **Build.** An issue with no design left in it, touching one or two
   files, the main agent builds itself. Anything larger goes to the
   `software-developer` subagent, which follows this file, writes the
@@ -132,7 +134,9 @@ skips it.
   but only when a step strained or missed something. A session where
   the process fit the work needs no reflection. Cutting a step counts
   for more than adding one. Aim for the smallest process that still
-  catches mistakes.
+  catches mistakes. An approach the session tried and abandoned goes
+  into the decisions map as evidence, so no later session tries it
+  again.
 
 The TUI only runs on a real terminal. `scripts/drive.py` forks a pty,
 sends timed keystrokes, and prints the frames; `--plain` strips the
