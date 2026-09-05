@@ -3,9 +3,15 @@ use super::*;
 fn catalog() -> Catalog {
     Catalog::new(
         "http://localhost:11434".to_string(),
-        "https://api.openai.com/v1".to_string(),
-        "sk-test".to_string(),
+        ProviderConfig {
+            url: "https://api.openai.com/v1".to_string(),
+            api_key: "sk-test".to_string(),
+        },
         "low".to_string(),
+        ProviderConfig {
+            url: "https://api.fireworks.ai/inference/v1".to_string(),
+            api_key: "fw-test".to_string(),
+        },
     )
 }
 
@@ -31,6 +37,18 @@ fn an_openai_descriptor_builds_an_openai_model() {
     let model = catalog().build(&descriptor).unwrap();
 
     assert_eq!(model.name(), "gpt-5.6-luna");
+}
+
+#[test]
+fn a_fireworks_descriptor_builds_a_fireworks_model() {
+    let descriptor = ModelDescriptor {
+        provider: Provider::Fireworks,
+        model: FIREWORKS_MODEL.to_string(),
+    };
+
+    let model = catalog().build(&descriptor).unwrap();
+
+    assert_eq!(model.name(), FIREWORKS_MODEL);
 }
 
 #[test]
@@ -64,12 +82,20 @@ async fn listing_falls_back_to_openai_entries_when_ollama_is_unreachable() {
     // No server listens on this port, so the request fails outright.
     let unreachable = Catalog::new(
         "http://127.0.0.1:1".to_string(),
-        "https://api.openai.com/v1".to_string(),
-        "sk-test".to_string(),
+        ProviderConfig {
+            url: "https://api.openai.com/v1".to_string(),
+            api_key: "sk-test".to_string(),
+        },
         "low".to_string(),
+        ProviderConfig {
+            url: "https://api.fireworks.ai/inference/v1".to_string(),
+            api_key: "fw-test".to_string(),
+        },
     );
 
     let descriptors = unreachable.list().await;
 
-    assert_eq!(descriptors, openai_descriptors());
+    let mut expected = static_descriptors(Provider::OpenAi, OPENAI_MODELS);
+    expected.extend(static_descriptors(Provider::Fireworks, FIREWORKS_MODELS));
+    assert_eq!(descriptors, expected);
 }

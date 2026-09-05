@@ -16,7 +16,7 @@ use tokio_stream::StreamExt;
 
 use crate::percept::{Actor, Chunk, Usage};
 
-pub use catalog::{Catalog, FIREWORKS_MODEL, OPENAI_MODEL};
+pub use catalog::{Catalog, ProviderConfig, FIREWORKS_MODEL, OPENAI_MODEL};
 pub use fireworks::Fireworks;
 pub use ollama::Ollama;
 pub use openai::OpenAi;

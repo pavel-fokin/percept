@@ -111,6 +111,7 @@ pub trait Model: Send + Sync {
 pub enum Provider {
     Ollama,
     OpenAi,
+    Fireworks,
 }
 
 impl std::fmt::Display for Provider {
@@ -118,6 +119,7 @@ impl std::fmt::Display for Provider {
         let name = match self {
             Provider::Ollama => "ollama",
             Provider::OpenAi => "openai",
+            Provider::Fireworks => "fireworks",
         };
         f.write_str(name)
     }
