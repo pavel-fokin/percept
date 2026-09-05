@@ -1,6 +1,6 @@
 use super::*;
 use crate::percept::{Actor, Chunk, Payload};
-use crate::testing::{content, node_added, usage, FakeLog, FakeTool, Scripted};
+use crate::testing::{content, node_added, usage, FakeCatalog, FakeLog, FakeTool, Scripted};
 
 const SOURCE: &str = "tui";
 
@@ -36,6 +36,7 @@ impl percept::Model for Silent {
 fn streamed_reply_commits_one_event_caused_by_the_prompt() {
     let mut app = App::new(
         Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
         Vec::new(),
         MapShape::Prompt,
@@ -69,6 +70,7 @@ fn streamed_reply_commits_one_event_caused_by_the_prompt() {
 fn a_thought_and_a_reply_commit_as_two_model_events_thought_first() {
     let mut app = App::new(
         Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
         Vec::new(),
         MapShape::Prompt,
@@ -100,6 +102,7 @@ fn a_thought_and_a_reply_commit_as_two_model_events_thought_first() {
 fn a_plain_turn_commits_thought_reply_then_model_called_in_that_order() {
     let mut app = App::new(
         Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
         Vec::new(),
         MapShape::Prompt,
@@ -135,6 +138,7 @@ fn a_plain_turn_commits_thought_reply_then_model_called_in_that_order() {
 fn a_submit_while_a_turn_streams_is_refused_and_records_nothing() {
     let mut app = App::new(
         Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
         Vec::new(),
         MapShape::Prompt,
@@ -157,6 +161,7 @@ fn a_submit_while_a_turn_streams_is_refused_and_records_nothing() {
 fn a_turn_with_a_thought_and_no_reply_still_ends() {
     let mut app = App::new(
         Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
         Vec::new(),
         MapShape::Prompt,
@@ -176,6 +181,7 @@ fn a_turn_with_a_thought_and_no_reply_still_ends() {
 fn empty_reply_commits_nothing() {
     let mut app = App::new(
         Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
         Vec::new(),
         MapShape::Prompt,
@@ -196,6 +202,7 @@ fn preseeded_log_becomes_the_opening_transcript() {
     let log = Arc::new(FakeLog::seeded(seeded));
     let mut app = App::new(
         Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
         log,
         Vec::new(),
         MapShape::Prompt,
@@ -217,6 +224,7 @@ fn a_reopened_log_s_last_model_called_seeds_last_usage() {
     let log = Arc::new(FakeLog::seeded(seeded));
     let app = App::new(
         Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
         log,
         Vec::new(),
         MapShape::Prompt,
@@ -238,6 +246,7 @@ fn a_log_with_no_model_called_leaves_last_usage_unset() {
     let log = Arc::new(FakeLog::seeded(seeded));
     let app = App::new(
         Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
         log,
         Vec::new(),
         MapShape::Prompt,
@@ -254,6 +263,7 @@ fn append_failure_surfaces_as_err_and_leaves_transcript_unchanged() {
     log.start_failing();
     let mut app = App::new(
         Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
         log.clone(),
         Vec::new(),
         MapShape::Prompt,
@@ -270,6 +280,7 @@ fn a_failed_reply_append_leaves_the_reply_pending() {
     let log = Arc::new(FakeLog::default());
     let mut app = App::new(
         Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
         log.clone(),
         Vec::new(),
         MapShape::Prompt,
@@ -291,6 +302,7 @@ fn a_failed_thought_append_leaves_the_reply_unattempted() {
     let log = Arc::new(FakeLog::default());
     let mut app = App::new(
         Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
         log.clone(),
         Vec::new(),
         MapShape::Prompt,
@@ -327,6 +339,7 @@ fn run_one_tool(app: &mut App, name: &str, arguments: &str) {
 fn a_tool_call_commits_called_then_resulted_then_the_reply() {
     let mut app = App::new(
         Arc::new(Scripted::new(vec![], true)),
+        Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
         vec![Arc::new(FakeTool)],
         MapShape::Prompt,
@@ -362,6 +375,7 @@ fn a_tool_call_commits_called_then_resulted_then_the_reply() {
 fn a_tool_round_commits_model_called_before_tool_called() {
     let mut app = App::new(
         Arc::new(Scripted::new(vec![], true)),
+        Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
         vec![Arc::new(FakeTool)],
         MapShape::Prompt,
@@ -386,6 +400,7 @@ fn a_tool_round_commits_model_called_before_tool_called() {
 fn an_unknown_tool_name_becomes_the_result_content() {
     let mut app = App::new(
         Arc::new(Scripted::new(vec![], true)),
+        Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
         Vec::new(),
         MapShape::Prompt,
@@ -427,6 +442,7 @@ impl percept::Tool for Committing {
 fn a_tool_s_commits_land_between_the_call_and_the_result_caused_by_it() {
     let mut app = App::new(
         Arc::new(Scripted::new(vec![], true)),
+        Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
         vec![Arc::new(Committing(vec![
             Payload::MessageReceived {
@@ -466,6 +482,7 @@ fn the_tool_call_limit_stops_tools_being_sent_and_then_exhausts() {
     let model = Arc::new(Scripted::new(vec![], true));
     let mut app = App::new(
         model.clone(),
+        Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
         vec![Arc::new(FakeTool)],
         MapShape::Prompt,
@@ -493,6 +510,7 @@ fn a_model_that_cannot_use_tools_is_sent_none() {
     let model = Arc::new(Scripted::new(vec![vec![]], false));
     let mut app = App::new(
         model.clone(),
+        Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
         vec![Arc::new(FakeTool)],
         MapShape::Prompt,
@@ -517,6 +535,7 @@ fn seeded_app_with_shape(
     let model = Arc::new(Scripted::new(vec![], true));
     let app = App::new(
         model.clone(),
+        Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::seeded(events)),
         tools,
         map_shape,
@@ -689,6 +708,7 @@ fn a_map_that_does_not_fold_fails_at_open() {
     )];
     let err = App::new(
         Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::seeded(events)),
         Vec::new(),
         MapShape::Prompt,
@@ -774,9 +794,123 @@ fn a_model_called_event_never_reaches_the_next_request() {
 }
 
 #[test]
+fn set_model_swaps_the_live_model() {
+    let scripted: Arc<dyn percept::Model> = Arc::new(Scripted::new(vec![], true));
+    let descriptor = percept::ModelDescriptor {
+        provider: percept::Provider::Ollama,
+        model: "scripted".to_string(),
+    };
+    let catalog = Arc::new(FakeCatalog::new(
+        vec![descriptor.clone()],
+        vec![(descriptor.clone(), scripted)],
+    ));
+    let mut app = App::new(
+        Arc::new(Silent),
+        catalog,
+        Arc::new(FakeLog::default()),
+        Vec::new(),
+        MapShape::Prompt,
+        SOURCE.to_string(),
+    )
+    .unwrap();
+    assert_eq!(app.model_name(), "silent");
+
+    app.set_model(&descriptor).unwrap();
+
+    assert_eq!(app.model_name(), "scripted");
+}
+
+#[test]
+fn set_model_clears_last_usage_so_the_new_model_reads_as_unasked() {
+    let scripted: Arc<dyn percept::Model> = Arc::new(Scripted::new(vec![], true));
+    let descriptor = percept::ModelDescriptor {
+        provider: percept::Provider::Ollama,
+        model: "scripted".to_string(),
+    };
+    let catalog = Arc::new(FakeCatalog::new(
+        vec![descriptor.clone()],
+        vec![(descriptor.clone(), scripted)],
+    ));
+    let mut app = App::new(
+        Arc::new(Silent),
+        catalog,
+        Arc::new(FakeLog::default()),
+        Vec::new(),
+        MapShape::Prompt,
+        SOURCE.to_string(),
+    )
+    .unwrap();
+    let _ = app.submit("hi".to_string()).unwrap();
+    app.append_chunk(Chunk::Usage(usage()));
+    app.end_stream().unwrap();
+    assert!(app.last_usage().is_some());
+
+    app.set_model(&descriptor).unwrap();
+
+    assert!(app.last_usage().is_none());
+}
+
+#[test]
+fn set_model_errs_and_leaves_the_model_in_place_while_a_turn_streams() {
+    let scripted: Arc<dyn percept::Model> = Arc::new(Scripted::new(vec![], true));
+    let descriptor = percept::ModelDescriptor {
+        provider: percept::Provider::Ollama,
+        model: "scripted".to_string(),
+    };
+    let catalog = Arc::new(FakeCatalog::new(
+        vec![descriptor.clone()],
+        vec![(descriptor.clone(), scripted)],
+    ));
+    let mut app = App::new(
+        Arc::new(Silent),
+        catalog,
+        Arc::new(FakeLog::default()),
+        Vec::new(),
+        MapShape::Prompt,
+        SOURCE.to_string(),
+    )
+    .unwrap();
+
+    let _ = app.submit("hi".to_string()).unwrap();
+    assert!(app.is_replying());
+
+    assert!(app.set_model(&descriptor).is_err());
+    assert_eq!(app.model_name(), "silent");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn available_models_returns_the_catalog_s_listing() {
+    let descriptors = vec![
+        percept::ModelDescriptor {
+            provider: percept::Provider::Ollama,
+            model: "gemma".to_string(),
+        },
+        percept::ModelDescriptor {
+            provider: percept::Provider::OpenAi,
+            model: "gpt".to_string(),
+        },
+    ];
+    let catalog = Arc::new(FakeCatalog::new(descriptors.clone(), Vec::new()));
+    let app = App::new(
+        Arc::new(Silent),
+        catalog,
+        Arc::new(FakeLog::default()),
+        Vec::new(),
+        MapShape::Prompt,
+        SOURCE.to_string(),
+    )
+    .unwrap();
+
+    let listed = app.available_models().await;
+
+    assert_eq!(listed, descriptors);
+}
+
+#[test]
 fn last_usage_is_the_most_recent_round_trip_not_a_sum() {
     let mut app = App::new(
         Arc::new(Scripted::new(vec![], true)),
+        Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
         Vec::new(),
         MapShape::Prompt,

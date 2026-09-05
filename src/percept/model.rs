@@ -1,5 +1,7 @@
 use std::error::Error;
+use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use futures_core::Stream;
 
@@ -52,18 +54,18 @@ pub enum Message {
     ToolResult { content: String },
 }
 
-/// A kind of content a model reads or writes. Only the three the
-/// current model shapes call for - a model that needs video or
-/// embeddings adds its variant then.
-//
-// No reader yet: the tool-use step is the first consumer. Lint
-// suppressed rather than the vocabulary deferred.
-#[allow(dead_code)]
+/// A kind of content a model reads or writes. `Thought` is the content
+/// of a `Chunk::Thought` - a model that never streams one leaves it out
+/// of `output`. A model that needs video or embeddings adds its variant
+/// then.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Modality {
     Text,
+    #[allow(dead_code)]
     Image,
+    #[allow(dead_code)]
     Audio,
+    Thought,
 }
 
 /// What a model accepts and produces. `input` and `output` list its
@@ -101,6 +103,47 @@ pub trait Model: Send + Sync {
     fn name(&self) -> &str;
 
     fn reply(&self, request: &ModelRequest) -> ReplyStream;
+}
+
+/// The providers a `Catalog` can build a model from - closed, unlike
+/// `source`, which is open by design.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provider {
+    Ollama,
+    OpenAi,
+}
+
+impl std::fmt::Display for Provider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            Provider::Ollama => "ollama",
+            Provider::OpenAi => "openai",
+        };
+        f.write_str(name)
+    }
+}
+
+/// Names one model a catalog can build - which provider serves it, and
+/// the provider's own name for it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelDescriptor {
+    pub provider: Provider,
+    pub model: String,
+}
+
+/// Listed and built, so a caller can offer every model available
+/// across providers without knowing how to reach any of them. `list`
+/// is async because it queries a provider's server; `build` is not -
+/// building a `Model` is just construction, no round trip.
+pub type ModelListing = Pin<Box<dyn Future<Output = Vec<ModelDescriptor>> + Send>>;
+
+pub trait ModelCatalog: Send + Sync {
+    /// Every model available across providers. A provider a request
+    /// can't reach is left out rather than failing the whole listing.
+    fn list(&self) -> ModelListing;
+
+    /// Builds the concrete `Model` `descriptor` names.
+    fn build(&self, descriptor: &ModelDescriptor) -> Result<Arc<dyn Model>, Box<dyn Error>>;
 }
 
 /// Converts the transcript into the form Model expects. A recorded

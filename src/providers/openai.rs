@@ -270,13 +270,26 @@ fn parse_line(line: &str, model: &str) -> Result<Line, Box<dyn Error + Send + Sy
     })
 }
 
-/// Tokens of context a known OpenAI model holds - the GPT-5.6 family
-/// (Sol, Terra, Luna) all share one window. `None` for a name this
-/// table doesn't recognize - not a guess.
+/// OpenAI models this app knows the shape of - Sol, Terra, and Luna
+/// all share one context window and all think, so `reply` sends
+/// `reasoning.effort` and parses reasoning deltas for each. Named once
+/// so `context_window` and `output_modalities` can't drift apart on
+/// which models they recognize.
+const GPT_5_6_FAMILY: &[&str] = &["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
+
+/// Tokens of context a known OpenAI model holds. `None` for a name
+/// this table doesn't recognize - not a guess.
 fn context_window(model: &str) -> Option<u32> {
-    match model {
-        "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" => Some(1_050_000),
-        _ => None,
+    GPT_5_6_FAMILY.contains(&model).then_some(1_050_000)
+}
+
+/// What a known OpenAI model writes. An unrecognized name is
+/// text-only, not a guess.
+fn output_modalities(model: &str) -> &'static [Modality] {
+    if GPT_5_6_FAMILY.contains(&model) {
+        &[Modality::Text, Modality::Thought]
+    } else {
+        &[Modality::Text]
     }
 }
 
@@ -284,7 +297,7 @@ impl Model for OpenAi {
     fn capabilities(&self) -> ModelCapabilities {
         ModelCapabilities {
             input: &[Modality::Text],
-            output: &[Modality::Text],
+            output: output_modalities(&self.model),
             tool_use: true,
             context_window: context_window(&self.model),
         }
@@ -493,6 +506,28 @@ mod tests {
             wire[0],
             json!({"type": "message", "role": "assistant", "content": "search_events({\"size\":5})"})
         );
+    }
+
+    #[test]
+    fn a_known_thinking_model_reports_thought_output() {
+        let openai = OpenAi::new(
+            "https://api.openai.com/v1".to_string(),
+            "gpt-5.6-luna".to_string(),
+            "low".to_string(),
+            "key".to_string(),
+        );
+        assert!(openai.capabilities().output.contains(&Modality::Thought));
+    }
+
+    #[test]
+    fn an_unrecognized_model_is_text_only() {
+        let openai = OpenAi::new(
+            "https://api.openai.com/v1".to_string(),
+            "gpt-3".to_string(),
+            "low".to_string(),
+            "key".to_string(),
+        );
+        assert_eq!(openai.capabilities().output, &[Modality::Text]);
     }
 
     #[test]

@@ -4,11 +4,12 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::percept::{
-    self, Actor, Chunk, Event, EventId, Modality, Model, ModelCapabilities, ModelRequest, NodeId,
-    Payload, ReplyStream, Tool, ToolOutput, ToolSpec, Usage,
+    self, Actor, Chunk, Event, EventId, Modality, Model, ModelCapabilities, ModelCatalog,
+    ModelDescriptor, ModelListing, ModelRequest, NodeId, Payload, ReplyStream, Tool, ToolOutput,
+    ToolSpec, Usage,
 };
 
 /// An in-memory EventLog. `start_failing` flips `append` into an error
@@ -165,6 +166,44 @@ pub fn usage() -> Usage {
         input_tokens: 100,
         output_tokens: 20,
         cached_tokens: None,
+    }
+}
+
+/// A ModelCatalog that lists whatever it was given and builds whatever
+/// model was registered against a descriptor, without reaching a
+/// provider. `build` errs for any descriptor it wasn't given a model
+/// for. `default` lists and builds nothing, for a caller that only
+/// needs `App::new` to compile.
+#[derive(Default)]
+pub struct FakeCatalog {
+    listing: Vec<ModelDescriptor>,
+    models: Vec<(ModelDescriptor, Arc<dyn Model>)>,
+}
+
+impl FakeCatalog {
+    pub fn new(
+        listing: Vec<ModelDescriptor>,
+        models: Vec<(ModelDescriptor, Arc<dyn Model>)>,
+    ) -> Self {
+        Self { listing, models }
+    }
+}
+
+impl ModelCatalog for FakeCatalog {
+    fn list(&self) -> ModelListing {
+        let listing = self.listing.clone();
+        Box::pin(async move { listing })
+    }
+
+    fn build(
+        &self,
+        descriptor: &ModelDescriptor,
+    ) -> Result<Arc<dyn Model>, Box<dyn std::error::Error>> {
+        self.models
+            .iter()
+            .find(|(candidate, _)| candidate == descriptor)
+            .map(|(_, model)| model.clone())
+            .ok_or_else(|| format!("no such model: {descriptor:?}").into())
     }
 }
 

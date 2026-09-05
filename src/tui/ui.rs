@@ -1,10 +1,10 @@
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Paragraph};
+use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, ListState, Paragraph};
 use ratatui::Frame;
 
-use super::Chat;
+use super::{Chat, ModelsMenu};
 use crate::percept::{Actor, Event, EventId, EventKind, Payload};
 
 /// One marker plus a space. Every wrapped line of a turn indents past
@@ -48,6 +48,53 @@ pub fn draw(frame: &mut Frame, chat: &mut Chat) {
     draw_input(frame, chat, input_area);
     frame.render_widget(Paragraph::new(status), status_area);
     frame.render_widget(Paragraph::new(model_status(chat)), model_area);
+
+    if let Some(menu) = &chat.models_menu {
+        draw_models_menu(frame, area, menu);
+    }
+}
+
+/// `/models`'s popup: an overlay centered on the frame, so it draws
+/// over the transcript rather than fighting the input area for space.
+fn draw_models_menu(frame: &mut Frame, area: Rect, menu: &ModelsMenu) {
+    let rows = menu.descriptors().map_or(1, <[_]>::len).max(1) as u16;
+    let popup = centered_rect(area.width * 3 / 4, rows + 2, area);
+
+    frame.render_widget(Clear, popup);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .title(" models ");
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+
+    let items: Vec<ListItem> = match menu.descriptors() {
+        None => vec![ListItem::new("Loading models…")],
+        Some([]) => vec![ListItem::new("No models available")],
+        Some(descriptors) => descriptors
+            .iter()
+            .map(|d| ListItem::new(format!("{}/{}", d.provider, d.model)))
+            .collect(),
+    };
+    let list = List::new(items).highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+
+    let mut state = ListState::default();
+    if menu.descriptors().is_some_and(|d| !d.is_empty()) {
+        state.select(Some(menu.selected_index()));
+    }
+    frame.render_stateful_widget(list, inner, &mut state);
+}
+
+/// A `width` by `height` rect centered inside `area`, clamped so it
+/// never overflows a small terminal.
+fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let width = width.clamp(1, area.width.max(1));
+    let height = height.clamp(1, area.height.max(1));
+    Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    }
 }
 
 /// The box has one row per entered line plus its top and bottom border.

@@ -34,6 +34,26 @@ impl Ollama {
 /// as `done_reason: length`. Sized for that, not for the model's limit.
 const CONTEXT_TOKENS: u32 = 16384;
 
+/// Families of locally-run ollama models known to think, matched
+/// against the model's name before its `:tag`. Not exhaustive - a
+/// model pulled under a family this list doesn't carry yet reports
+/// text-only, not a guess.
+const THINKING_MODEL_FAMILIES: &[&str] = &["deepseek-r1", "qwq", "gpt-oss", "magistral"];
+
+/// What `model` writes, judged by its family name. ollama names a pull
+/// as `family:tag`, so the tag is dropped before matching.
+fn output_modalities(model: &str) -> &'static [Modality] {
+    let family = model
+        .split(':')
+        .next()
+        .expect("split yields at least one item");
+    if THINKING_MODEL_FAMILIES.contains(&family) {
+        &[Modality::Text, Modality::Thought]
+    } else {
+        &[Modality::Text]
+    }
+}
+
 #[derive(Serialize)]
 struct ChatRequest {
     model: String,
@@ -221,7 +241,7 @@ impl Model for Ollama {
     fn capabilities(&self) -> ModelCapabilities {
         ModelCapabilities {
             input: &[Modality::Text],
-            output: &[Modality::Text],
+            output: output_modalities(&self.model),
             tool_use: true,
             context_window: Some(CONTEXT_TOKENS),
         }
@@ -337,6 +357,21 @@ mod tests {
             panic!("expected an error")
         };
         assert!(err.to_string().contains("model 'nope' not found"));
+    }
+
+    #[test]
+    fn a_known_thinking_family_reports_thought_output_regardless_of_tag() {
+        let ollama = Ollama::new(
+            "http://localhost:11434".to_string(),
+            "deepseek-r1:14b".to_string(),
+        );
+        assert!(ollama.capabilities().output.contains(&Modality::Thought));
+    }
+
+    #[test]
+    fn an_unrecognized_family_is_text_only() {
+        let ollama = Ollama::new("http://localhost:11434".to_string(), "llama3.1".to_string());
+        assert_eq!(ollama.capabilities().output, &[Modality::Text]);
     }
 
     #[test]

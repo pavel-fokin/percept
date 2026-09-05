@@ -1,7 +1,7 @@
 use super::*;
 use crate::app::{App, MapShape};
 use crate::percept::{self, Payload};
-use crate::testing::{content, FakeLog, FakeTool, Scripted};
+use crate::testing::{content, FakeCatalog, FakeLog, FakeTool, Scripted};
 use std::sync::Arc;
 
 fn args(actor: &str, payload: &str) -> PublishArgs {
@@ -221,6 +221,7 @@ async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
     let tools: Vec<Arc<dyn percept::Tool>> = vec![Arc::new(FakeTool)];
     let app = App::new(
         Arc::new(model),
+        Arc::new(FakeCatalog::default()),
         log.clone(),
         tools,
         MapShape::Prompt,
@@ -259,6 +260,7 @@ async fn a_stream_error_ends_the_turn_but_still_commits_partial_text() {
     );
     let app = App::new(
         Arc::new(model),
+        Arc::new(FakeCatalog::default()),
         log.clone(),
         Vec::new(),
         MapShape::Prompt,

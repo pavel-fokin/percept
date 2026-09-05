@@ -22,7 +22,7 @@ mod tui;
 use app::{App, MapShape};
 use cli::{Cli, Command, EventsCommand, MapsCommand};
 use percept::Actor;
-use providers::{Ollama, OpenAi};
+use providers::{Catalog, OPENAI_MODEL};
 use store::{Jsonl, ReadEvent, ReadMap, ReviseMap, SearchEvents};
 use tui::{Chat, StreamEvent};
 
@@ -47,7 +47,6 @@ const OLLAMA_URL: &str = "http://localhost:11434";
 const OLLAMA_MODEL: &str = "gemma4";
 
 const OPENAI_URL: &str = "https://api.openai.com/v1";
-const OPENAI_MODEL: &str = "gpt-5.6-luna";
 /// How long the model thinks before answering. Low keeps a turn quick
 /// while still letting it plan a search.
 const OPENAI_REASONING: &str = "low";
@@ -132,27 +131,42 @@ async fn run(
     }
 }
 
-fn build_model() -> Result<Arc<dyn percept::Model>, Box<dyn std::error::Error>> {
+/// Builds the model `PERCEPT_PROVIDER` names through `catalog`, so the
+/// provider dispatch lives once. Still checks `OPENAI_KEY_VAR` here,
+/// eagerly, unlike `catalog` itself: a run that starts with
+/// `PERCEPT_PROVIDER=openai` and no key set should fail at startup, not
+/// on the first reply - but `/models` switching shouldn't need the key
+/// set just to list models, so `catalog` stays lenient about it.
+fn build_model(
+    catalog: &dyn percept::ModelCatalog,
+) -> Result<Arc<dyn percept::Model>, Box<dyn std::error::Error>> {
     let provider = std::env::var(PROVIDER_VAR).unwrap_or_else(|_| "ollama".to_string());
-    match provider.as_str() {
-        "ollama" => Ok(Arc::new(Ollama::new(
-            OLLAMA_URL.to_string(),
-            OLLAMA_MODEL.to_string(),
-        ))),
+    let (provider, model) = match provider.as_str() {
+        "ollama" => (percept::Provider::Ollama, OLLAMA_MODEL.to_string()),
         "openai" => {
-            let api_key = std::env::var(OPENAI_KEY_VAR)
-                .map_err(|_| format!("{OPENAI_KEY_VAR} is not set"))?;
-            Ok(Arc::new(OpenAi::new(
-                OPENAI_URL.to_string(),
-                OPENAI_MODEL.to_string(),
-                OPENAI_REASONING.to_string(),
-                api_key,
-            )))
+            std::env::var(OPENAI_KEY_VAR).map_err(|_| format!("{OPENAI_KEY_VAR} is not set"))?;
+            (percept::Provider::OpenAi, OPENAI_MODEL.to_string())
         }
         other => {
-            Err(format!("{PROVIDER_VAR}={other:?} names no provider; use ollama or openai").into())
+            return Err(
+                format!("{PROVIDER_VAR}={other:?} names no provider; use ollama or openai").into(),
+            )
         }
-    }
+    };
+    catalog.build(&percept::ModelDescriptor { provider, model })
+}
+
+/// `OPENAI_KEY_VAR` is read leniently here, unlike `build_model`'s
+/// openai branch, since a run that never asks for an openai model
+/// shouldn't need the key set.
+fn build_catalog() -> Catalog {
+    let api_key = std::env::var(OPENAI_KEY_VAR).unwrap_or_default();
+    Catalog::new(
+        OLLAMA_URL.to_string(),
+        OPENAI_URL.to_string(),
+        api_key,
+        OPENAI_REASONING.to_string(),
+    )
 }
 
 fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
@@ -171,7 +185,8 @@ fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
 /// in the `source` they stamp and in how they drive its reply stream.
 fn build_app(source: &str) -> Result<App, Box<dyn std::error::Error>> {
     let log = Arc::new(Jsonl::open(LOG_PATH)?);
-    let model = build_model()?;
+    let catalog: Arc<dyn percept::ModelCatalog> = Arc::new(build_catalog());
+    let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
     let mut tools: Vec<Arc<dyn percept::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
@@ -181,7 +196,7 @@ fn build_app(source: &str) -> Result<App, Box<dyn std::error::Error>> {
     if map_shape.opens_by_tool() {
         tools.push(Arc::new(ReadMap::new(log.clone())));
     }
-    App::new(model, log, tools, map_shape, source.to_string())
+    App::new(model, catalog, log, tools, map_shape, source.to_string())
 }
 
 /// One turn without the TUI: `ask` with the user's prompt, `reflect`
