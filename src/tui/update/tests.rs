@@ -279,6 +279,21 @@ async fn enter_still_submits_normally_while_the_dropdown_is_open_for_ordinary_te
 }
 
 #[test]
+fn ctrl_j_newline_refreshes_stale_command_suggestions() {
+    let mut chat = chat_with_two_suggestions();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+    handle_key(
+        &mut chat,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL),
+        &tx,
+    )
+    .unwrap();
+
+    assert!(chat.command_suggestions.is_empty());
+}
+
+#[test]
 fn a_models_listed_event_with_a_matching_token_populates_the_menu() {
     let mut chat = chat();
     chat.models_menu = Some(ModelsMenu::loading(5));

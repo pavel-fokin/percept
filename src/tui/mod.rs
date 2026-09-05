@@ -134,12 +134,12 @@ impl<'a> Chat<'a> {
         self.textarea.lines().join("\n")
     }
 
-    /// Refilters `command_suggestions` from the textarea's current
-    /// line: every `Command` whose name starts with it, while the
-    /// trimmed line itself starts with `/`. Empty otherwise, so a line
-    /// that no longer starts with `/`, or matches nothing, hides the
-    /// list. The highlighted row resets to the top - a narrower or
-    /// wider match makes the old row meaningless.
+    /// Refilters `command_suggestions` from the textarea's trimmed
+    /// content: every `Command` whose name starts with it, while the
+    /// content itself starts with `/`. Empty otherwise, so content that
+    /// no longer starts with `/`, or matches nothing, hides the list.
+    /// The highlighted row resets to the top - a narrower or wider
+    /// match makes the old row meaningless.
     pub fn recompute_command_suggestions(&mut self) {
         let text = self.current_text();
         let prefix = text.trim();

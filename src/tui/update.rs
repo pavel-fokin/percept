@@ -35,6 +35,7 @@ pub fn handle_key(
         (KeyCode::Esc, _) => Ok(true),
         (KeyCode::Char('j'), KeyModifiers::CONTROL) => {
             chat.textarea.insert_newline();
+            chat.recompute_command_suggestions();
             Ok(false)
         }
         (KeyCode::PageUp, _) => {

@@ -92,13 +92,8 @@ fn draw_models_menu(frame: &mut Frame, area: Rect, menu: &ModelsMenu) {
             .map(|d| ListItem::new(format!("{}/{}", d.provider, d.model)))
             .collect(),
     };
-    let list = List::new(items).highlight_style(Style::default().add_modifier(Modifier::REVERSED));
-
-    let mut state = ListState::default();
-    if menu.descriptors().is_some_and(|d| !d.is_empty()) {
-        state.select(Some(menu.selected_index()));
-    }
-    frame.render_stateful_widget(list, inner, &mut state);
+    let selected = menu.descriptors().is_some_and(|d| !d.is_empty()).then(|| menu.selected_index());
+    render_selectable_list(frame, inner, items, selected);
 }
 
 /// The commands matching what's typed so far, anchored directly above
@@ -120,9 +115,17 @@ fn draw_command_suggestions(frame: &mut Frame, chat: &Chat, area: Rect) {
             ]))
         })
         .collect();
+    render_selectable_list(frame, area, items, Some(chat.command_selected));
+}
+
+/// A `List` with the row `selected` highlighted, reversed - the one
+/// look every popup or dropdown with a highlighted row shares.
+/// `selected: None` renders the list with nothing highlighted, for a
+/// popup still loading with no row to pick yet.
+fn render_selectable_list(frame: &mut Frame, area: Rect, items: Vec<ListItem>, selected: Option<usize>) {
     let list = List::new(items).highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     let mut state = ListState::default();
-    state.select(Some(chat.command_selected));
+    state.select(selected);
     frame.render_stateful_widget(list, area, &mut state);
 }
 
