@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError, Scope, Source};
@@ -214,6 +215,9 @@ pub struct App {
     /// The tools the model may call, sent with each request when the
     /// model reports `tool_use`.
     tools: Vec<Arc<dyn percept::Tool>>,
+    /// Rerenders a map after a tool's commits change it - see
+    /// `commit_tool_result`.
+    renderer: Arc<dyn percept::MapRenderer>,
     /// How much of each map `build_request` sends every turn.
     map_shape: MapShape,
     /// The turn now streaming, or None between turns.
@@ -235,6 +239,7 @@ impl App {
         catalog: Arc<dyn percept::ModelCatalog>,
         log: Arc<dyn percept::EventLog>,
         tools: Vec<Arc<dyn percept::Tool>>,
+        renderer: Arc<dyn percept::MapRenderer>,
         map_shape: MapShape,
         source: Source,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -249,6 +254,7 @@ impl App {
             catalog,
             log,
             tools,
+            renderer,
             map_shape,
             pending: None,
             last_usage,
@@ -305,6 +311,13 @@ impl App {
             .into_iter()
             .map(|payload| Event::new(Actor::Model, self.source.clone(), Some(called_id), payload))
             .collect();
+        // Which maps `commits` changes, read off before they're moved
+        // into the log below - a tool's result may touch more than one.
+        let changed: HashSet<String> = commits
+            .iter()
+            .filter_map(|event| percept::map_of(event.payload()))
+            .map(str::to_string)
+            .collect();
         // A tool checked its commits against the log file, and this
         // transcript can be behind it - another writer since startup.
         // Checked again here, against what the next request will fold,
@@ -315,6 +328,7 @@ impl App {
                 for event in commits {
                     self.commit(event)?;
                 }
+                self.render_changed(&changed)?;
                 output.content
             }
             Err(err) => err.to_string(),
@@ -326,6 +340,21 @@ impl App {
             turn.anchor = resulted_id;
             turn.tool_calls += 1;
         });
+        Ok(())
+    }
+
+    /// Rerenders every map named in `changed`, folded fresh from the
+    /// transcript just committed to. A tool round that touched no map
+    /// folds and renders nothing.
+    fn render_changed(&self, changed: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
+        if changed.is_empty() {
+            return Ok(());
+        }
+        for map in Map::fold_all(&scope(&self.source), &self.events)? {
+            if changed.contains(map.schema().name) {
+                self.renderer.render(&map)?;
+            }
+        }
         Ok(())
     }
 

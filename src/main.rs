@@ -48,6 +48,11 @@ const CLI_SOURCE_NAME: &str = "percept-cli";
 /// `prompt` (the default, today's behaviour), `headlines`, or `tool`.
 const MAPS_VAR: &str = "PERCEPT_MAPS";
 
+/// Where a project's maps are rendered as Markdown, under its root -
+/// rerendered on every write, so a reader who never runs `percept`
+/// still sees the latest fold.
+const MAPS_DIR: &str = ".percept";
+
 /// Where the local ollama server listens.
 const OLLAMA_URL: &str = "http://localhost:11434";
 /// The model ollama serves replies with.
@@ -222,7 +227,10 @@ fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
 
 /// Both the TUI and `ask` build the same `App` this way, differing only
 /// in the `Source` they stamp and in how they drive its reply stream.
-fn build_app(source: percept::Source) -> Result<App, Box<dyn std::error::Error>> {
+fn build_app(
+    source: percept::Source,
+    renderer: Arc<dyn percept::MapRenderer>,
+) -> Result<App, Box<dyn std::error::Error>> {
     let log = Arc::new(Jsonl::open(log_path()?)?);
     let catalog: Arc<dyn percept::ModelCatalog> = Arc::new(build_catalog());
     let model = build_model(&*catalog)?;
@@ -236,7 +244,7 @@ fn build_app(source: percept::Source) -> Result<App, Box<dyn std::error::Error>>
     if map_shape.opens_by_tool() {
         tools.push(Arc::new(ReadMap::new(log.clone(), scope)));
     }
-    App::new(model, catalog, log, tools, map_shape, source)
+    App::new(model, catalog, log, tools, renderer, map_shape, source)
 }
 
 /// One turn without the TUI: `ask` with the user's prompt, `reflect`
@@ -245,13 +253,17 @@ async fn headless_turn(
     actor: Actor,
     prompt: String,
     source: percept::Source,
+    renderer: Arc<dyn percept::MapRenderer>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let app = build_app(source)?;
+    let app = build_app(source, renderer)?;
     cli::run_turn(Box::new(app), actor, prompt).await
 }
 
-async fn try_main(source: percept::Source) -> Result<(), Box<dyn std::error::Error>> {
-    let app = build_app(source)?;
+async fn try_main(
+    source: percept::Source,
+    renderer: Arc<dyn percept::MapRenderer>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let app = build_app(source, renderer)?;
 
     let mut terminal = ratatui::init();
     let mouse = match MouseCapture::enable() {
@@ -283,6 +295,8 @@ async fn main() {
         name: CLI_SOURCE_NAME.to_string(),
         path: root.clone(),
     };
+    let renderer: Arc<dyn percept::MapRenderer> =
+        Arc::new(store::MarkdownFiles::new(root.join(MAPS_DIR)));
 
     let result = match cli.command {
         Some(Command::Events { command }) => log_path()
@@ -302,20 +316,39 @@ async fn main() {
             .and_then(|log| match command {
                 MapsCommand::List(args) => cli::maps_list(args, &log, &root),
                 MapsCommand::Show(args) => cli::maps_show(args, &log, &root),
-                MapsCommand::AddNode(args) => cli::maps_add_node(args, &log, &cli_source),
-                MapsCommand::AddEdge(args) => cli::maps_add_edge(args, &log, &cli_source),
-                MapsCommand::RemoveNode(args) => cli::maps_remove_node(args, &log, &cli_source),
-                MapsCommand::RemoveEdge(args) => cli::maps_remove_edge(args, &log, &cli_source),
+                MapsCommand::AddNode(args) => {
+                    cli::maps_add_node(args, &log, &cli_source, renderer.as_ref())
+                }
+                MapsCommand::AddEdge(args) => {
+                    cli::maps_add_edge(args, &log, &cli_source, renderer.as_ref())
+                }
+                MapsCommand::RemoveNode(args) => {
+                    cli::maps_remove_node(args, &log, &cli_source, renderer.as_ref())
+                }
+                MapsCommand::RemoveEdge(args) => {
+                    cli::maps_remove_edge(args, &log, &cli_source, renderer.as_ref())
+                }
             }),
-        Some(Command::Ask(args)) => headless_turn(Actor::User, args.prompt, cli_source).await,
+        Some(Command::Ask(args)) => {
+            headless_turn(Actor::User, args.prompt, cli_source, renderer).await
+        }
         Some(Command::Reflect) => {
-            headless_turn(Actor::System, REFLECT_PROMPT.to_string(), cli_source).await
+            headless_turn(
+                Actor::System,
+                REFLECT_PROMPT.to_string(),
+                cli_source,
+                renderer,
+            )
+            .await
         }
         None => {
-            try_main(percept::Source {
-                name: TUI_SOURCE_NAME.to_string(),
-                path: root,
-            })
+            try_main(
+                percept::Source {
+                    name: TUI_SOURCE_NAME.to_string(),
+                    path: root,
+                },
+                renderer,
+            )
             .await
         }
     };

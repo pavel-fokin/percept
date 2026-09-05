@@ -2,7 +2,9 @@
 //! serde-free. `Jsonl` implements `percept::EventLog`; `SearchEvents`,
 //! `ReadEvent`, `ReviseMap`, and `ReadMap` implement `percept::Tool`,
 //! since all four wire formats live here. `map` folds a cognitive map
-//! from the log and prints it.
+//! from the log and prints it; `render`'s `MarkdownFiles` implements
+//! `percept::MapRenderer`, writing a map's fold to `.percept/` as
+//! Markdown on every write.
 
 mod error;
 mod event;
@@ -10,6 +12,7 @@ mod jsonl;
 mod map;
 mod read_event;
 mod read_map;
+mod render;
 mod revise_map;
 mod search_events;
 
@@ -22,5 +25,6 @@ pub use jsonl::Jsonl;
 pub use map::{encode_edge, encode_map, encode_node, fold_map, revise, Snapshot};
 pub use read_event::{read, ReadEvent};
 pub use read_map::ReadMap;
+pub use render::MarkdownFiles;
 pub use revise_map::ReviseMap;
 pub use search_events::SearchEvents;

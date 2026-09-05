@@ -8,9 +8,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::percept::{
-    self, Actor, Chunk, Event, EventId, Modality, Model, ModelCapabilities, ModelCatalog,
-    ModelDescriptor, ModelListing, ModelRequest, NodeId, Payload, ReplyStream, Source, Tool,
-    ToolOutput, ToolSpec, Usage,
+    self, Actor, Chunk, Event, EventId, Map, MapRenderer, Modality, Model, ModelCapabilities,
+    ModelCatalog, ModelDescriptor, ModelListing, ModelRequest, NodeId, Payload, ReplyStream,
+    Source, Tool, ToolOutput, ToolSpec, Usage,
 };
 
 /// A `Source` for tests that don't care about the path - a fixed one
@@ -145,6 +145,30 @@ fn tag(message: &percept::Message) -> String {
         percept::Message::Text { content, .. } => content.clone(),
         percept::Message::ToolCall { .. } => "<call>".to_string(),
         percept::Message::ToolResult { .. } => "<result>".to_string(),
+    }
+}
+
+/// A MapRenderer that records the name of every map it was asked to
+/// render, in order, so a test can assert what got rerendered without
+/// touching a filesystem.
+#[derive(Default)]
+pub struct FakeRenderer {
+    rendered: Mutex<Vec<String>>,
+}
+
+impl FakeRenderer {
+    pub fn rendered(&self) -> Vec<String> {
+        self.rendered.lock().unwrap().clone()
+    }
+}
+
+impl MapRenderer for FakeRenderer {
+    fn render(&self, map: &Map) -> Result<(), Box<dyn std::error::Error>> {
+        self.rendered
+            .lock()
+            .unwrap()
+            .push(map.schema().name.to_string());
+        Ok(())
     }
 }
 

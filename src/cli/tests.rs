@@ -1,7 +1,9 @@
 use super::*;
 use crate::app::{App, MapShape};
 use crate::percept::{self, Payload};
-use crate::testing::{content, node_added_at, source, FakeCatalog, FakeLog, FakeTool, Scripted};
+use crate::testing::{
+    content, node_added_at, source, FakeCatalog, FakeLog, FakeRenderer, FakeTool, Scripted,
+};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -230,6 +232,7 @@ async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
         Arc::new(FakeCatalog::default()),
         log.clone(),
         tools,
+        Arc::new(FakeRenderer::default()),
         MapShape::Prompt,
         source("cli"),
     )
@@ -269,6 +272,7 @@ async fn a_stream_error_ends_the_turn_but_still_commits_partial_text() {
         Arc::new(FakeCatalog::default()),
         log.clone(),
         Vec::new(),
+        Arc::new(FakeRenderer::default()),
         MapShape::Prompt,
         source("cli"),
     )
@@ -347,6 +351,7 @@ fn depth_is_refused_without_around() {
 #[test]
 fn every_write_verb_refuses_the_code_map() {
     let log = FakeLog::default();
+    let renderer = FakeRenderer::default();
     let target = || MapArgs {
         map: "code".to_string(),
         source: Vec::new(),
@@ -362,6 +367,7 @@ fn every_write_verb_refuses_the_code_map() {
         },
         &log,
         &cli_source,
+        &renderer,
     );
     let remove_node = maps_remove_node(
         RemoveNodeArgs {
@@ -372,6 +378,7 @@ fn every_write_verb_refuses_the_code_map() {
         },
         &log,
         &cli_source,
+        &renderer,
     );
     let edge_args = || EdgeArgs {
         target: target(),
@@ -385,12 +392,36 @@ fn every_write_verb_refuses_the_code_map() {
             name: "src/app/mod.rs".to_string(),
         },
     };
-    let add_edge = maps_add_edge(edge_args(), &log, &cli_source);
-    let remove_edge = maps_remove_edge(edge_args(), &log, &cli_source);
+    let add_edge = maps_add_edge(edge_args(), &log, &cli_source, &renderer);
+    let remove_edge = maps_remove_edge(edge_args(), &log, &cli_source, &renderer);
 
     for result in [add_node, remove_node, add_edge, remove_edge] {
         let err = result.err().unwrap();
         assert!(err.to_string().starts_with("\"code\" is derived"), "{err}");
     }
     assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
+fn maps_add_node_renders_the_map_it_changed_once() {
+    let log = FakeLog::default();
+    let renderer = FakeRenderer::default();
+
+    maps_add_node(
+        AddNodeArgs {
+            target: MapArgs {
+                map: "decisions".to_string(),
+                source: Vec::new(),
+            },
+            kind: "decision".to_string(),
+            name: "Rust over Go".to_string(),
+            prop: Vec::new(),
+        },
+        &log,
+        &source("cli"),
+        &renderer,
+    )
+    .unwrap();
+
+    assert_eq!(renderer.rendered(), vec!["decisions".to_string()]);
 }

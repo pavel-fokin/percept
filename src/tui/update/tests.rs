@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::app::{App, MapShape};
 use crate::percept::{self, ModelDescriptor, Provider};
-use crate::testing::{source, FakeCatalog, FakeLog, Scripted};
+use crate::testing::{source, FakeCatalog, FakeLog, FakeRenderer, Scripted};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
@@ -40,6 +40,7 @@ fn chat_with_catalog(catalog: FakeCatalog) -> Chat<'static> {
         Arc::new(catalog),
         Arc::new(FakeLog::default()),
         Vec::new(),
+        Arc::new(FakeRenderer::default()),
         MapShape::Prompt,
         source("test"),
     )

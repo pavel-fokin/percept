@@ -467,13 +467,20 @@ fn print_map(mut map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error:
     print_lines(nodes.chain(edges))
 }
 
-/// Commits a shell user's map change: actor `user`, no cause.
+/// Commits a shell user's map change - actor `user`, no cause - then
+/// rerenders the map it just changed, folded fresh from the log.
 fn record(
     log: &dyn EventLog,
     source: &percept::Source,
     payload: Payload,
+    renderer: &dyn percept::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    log.append(&Event::new(Actor::User, source.clone(), None, payload))
+    let map = percept::map_of(&payload)
+        .expect("record only ever takes a map payload")
+        .to_string();
+    log.append(&Event::new(Actor::User, source.clone(), None, payload))?;
+    let scope = percept::Scope::Project(source.path.clone());
+    renderer.render(&store::fold_map(log, &map, &scope)?)
 }
 
 /// Adds a node to a map and prints its minted id, so a shell script can
@@ -482,6 +489,7 @@ pub fn maps_add_node(
     args: AddNodeArgs,
     log: &dyn EventLog,
     source: &percept::Source,
+    renderer: &dyn percept::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let MapArgs { map, source: cited } = args.target;
     let scope = percept::Scope::Project(source.path.clone());
@@ -494,7 +502,7 @@ pub fn maps_add_node(
     if let Payload::NodeAdded { node, .. } = &payload {
         println!("{}", node.as_uuid());
     }
-    record(log, source, payload)
+    record(log, source, payload, renderer)
 }
 
 /// Adds an edge between two nodes already in a map.
@@ -502,6 +510,7 @@ pub fn maps_add_edge(
     args: EdgeArgs,
     log: &dyn EventLog,
     source: &percept::Source,
+    renderer: &dyn percept::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let MapArgs { map, source: cited } = args.target;
     let scope = percept::Scope::Project(source.path.clone());
@@ -511,7 +520,7 @@ pub fn maps_add_edge(
         to: args.to,
         sources,
     })?;
-    record(log, source, payload)
+    record(log, source, payload, renderer)
 }
 
 /// Removes a node from a map, dropping the edges that touch it.
@@ -519,6 +528,7 @@ pub fn maps_remove_node(
     args: RemoveNodeArgs,
     log: &dyn EventLog,
     source: &percept::Source,
+    renderer: &dyn percept::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let MapArgs { map, source: cited } = args.target;
     let scope = percept::Scope::Project(source.path.clone());
@@ -530,7 +540,7 @@ pub fn maps_remove_node(
         reason: args.reason,
         sources,
     })?;
-    record(log, source, payload)
+    record(log, source, payload, renderer)
 }
 
 /// Removes an edge from a map.
@@ -538,6 +548,7 @@ pub fn maps_remove_edge(
     args: EdgeArgs,
     log: &dyn EventLog,
     source: &percept::Source,
+    renderer: &dyn percept::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let MapArgs { map, source: cited } = args.target;
     let scope = percept::Scope::Project(source.path.clone());
@@ -547,7 +558,7 @@ pub fn maps_remove_edge(
         to: args.to,
         sources,
     })?;
-    record(log, source, payload)
+    record(log, source, payload, renderer)
 }
 
 /// A reader that stops early - `head`, or a `jq` that has seen enough -

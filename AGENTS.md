@@ -48,8 +48,11 @@ model builds maps today. The user will build and co-own them.
 - `Event` is an append-only log entry: `id`, an `actor`, a `source`, an
   optional `causation_id`, a `created_at`, and a typed `payload`. Once
   committed it never changes.
-- `source` names the writer that produced an event - `tui`,
-  `claude-code`, `telegram`. Open by design, where `Actor` is closed.
+- `Source` names the writer that produced an event - `percept-tui`,
+  `percept-cli`, `claude-code` - and the project root it ran in. The
+  name is open by design, where `Actor` is closed. One log at
+  `$PERCEPT_HOME/percept.jsonl`, `~/.percept` by default, holds every
+  project; the path is how a fold picks one project out of it.
 - `Message` is a value object (no identity) - the shape `Model` needs to
   talk to an LLM. Derived from the log at the boundary, never stored.
 - `Actor` (`User`, `Model`, `System`) is the one vocabulary for who a
@@ -63,6 +66,19 @@ model builds maps today. The user will build and co-own them.
   goes through `Map::apply`, so the rules live once. `code` is a `Map`
   too, but folded from the working tree instead of the log - see
   `code` below.
+- `Scope` says which project's events a fold reads: the current one by
+  default, every one with `--all-projects`. A `MapRenderer` writes a
+  map somewhere a reader finds it; today that is
+  `<project>/.percept/<map>.md`, rewritten on every write.
+
+## Decisions
+
+The decisions map for this repo, rendered by percept from its own log.
+Every node cites the event it was drawn from. It is the record of why;
+where it disagrees with a rule above, the rule wins and the map says
+what the rule cost.
+
+@.percept/decisions.md
 
 ## Architecture
 
@@ -76,7 +92,7 @@ it, never sideways or up:
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
 | Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps`, `ask`, `reflect` - the log and its maps without the TUI. |
 | Infrastructure | `providers` | `Ollama` and `OpenAi` - implement `percept::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` carries the key. |
-| Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`, and the four tools the model calls: `search_events`, `read_event`, `revise_map`, `read_map`. |
+| Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`, the four tools the model calls: `search_events`, `read_event`, `revise_map`, `read_map`, and `MarkdownFiles`, the `MapRenderer` that writes `.percept/`. |
 | Infrastructure | `code` | The `code` map: walks the working tree with `ignore`, parses each file with `tree-sitter`, and builds a `Map` of `file`, `function`, `type`, and `package` nodes - `maps list` and `maps show` read it, but it is never folded from the log and never reaches the model's prompt. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 

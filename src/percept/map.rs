@@ -574,7 +574,7 @@ impl Map {
 
     /// A node as `Display` names it; the id when the map has no such
     /// node.
-    fn label(&self, id: NodeId) -> String {
+    pub fn label(&self, id: NodeId) -> String {
         self.node(id)
             .map_or_else(|| id.as_uuid().to_string(), Node::to_string)
     }
