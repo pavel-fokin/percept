@@ -26,9 +26,13 @@ use providers::{Catalog, OPENAI_MODEL};
 use store::{Jsonl, ReadEvent, ReadMap, ReviseMap, SearchEvents};
 use tui::{Chat, StreamEvent};
 
-/// Where the event log lives: `percept.jsonl` in the working directory,
-/// so the transcript follows wherever the app is launched from.
-const LOG_PATH: &str = "percept.jsonl";
+/// Names the directory percept keeps its state in - the event log, and
+/// the installed binary. Defaults to `~/.percept`.
+const HOME_VAR: &str = "PERCEPT_HOME";
+
+/// The event log's file name under `PERCEPT_HOME`. One log for every
+/// project: an event's `source.path` says which one it came from.
+const LOG_FILE: &str = "percept.jsonl";
 
 /// Where the code map is walked from: the working directory, so the
 /// map follows the app the way the log does.
@@ -138,6 +142,19 @@ async fn run(
     }
 }
 
+/// `$PERCEPT_HOME/percept.jsonl`, or `~/.percept/percept.jsonl` when the
+/// variable is unset. `HOME` unset is an error: there is nowhere to put
+/// the log, and a relative default would scatter logs per directory.
+fn log_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let home = match std::env::var_os(HOME_VAR) {
+        Some(home) => PathBuf::from(home),
+        None => std::env::var_os("HOME")
+            .map(|home| PathBuf::from(home).join(".percept"))
+            .ok_or(format!("neither {HOME_VAR} nor HOME is set"))?,
+    };
+    Ok(home.join(LOG_FILE))
+}
+
 /// Walks up from the current directory looking for a `.git` entry - the
 /// closest thing to a project root without shelling out to git. Falls
 /// back to the current directory when none is found. Canonicalized
@@ -210,7 +227,7 @@ fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
 /// Both the TUI and `ask` build the same `App` this way, differing only
 /// in the `Source` they stamp and in how they drive its reply stream.
 fn build_app(source: percept::Source) -> Result<App, Box<dyn std::error::Error>> {
-    let log = Arc::new(Jsonl::open(LOG_PATH)?);
+    let log = Arc::new(Jsonl::open(log_path()?)?);
     let catalog: Arc<dyn percept::ModelCatalog> = Arc::new(build_catalog());
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
@@ -271,21 +288,20 @@ async fn main() {
     };
 
     let result = match cli.command {
-        Some(Command::Events { command }) => Jsonl::open(LOG_PATH)
-            .map_err(Box::<dyn std::error::Error>::from)
+        Some(Command::Events { command }) => log_path()
+            .and_then(|path| Ok(Jsonl::open(path)?))
             .and_then(|log| match command {
                 EventsCommand::Publish(args) => cli::publish(args, &log, &root),
                 EventsCommand::Search(args) => cli::search(args, &log),
                 EventsCommand::Show(args) => cli::show(args, &log),
             }),
         // `maps show code` is walked fresh from the working tree, never
-        // the log, so it must not even open `percept.jsonl` - a
-        // directory with no log still gets a code map.
+        // the log, so it must not even open the log.
         Some(Command::Maps {
             command: MapsCommand::Show(args),
         }) if args.is_code() => cli::maps_show_code(args, Path::new(CODE_ROOT)),
-        Some(Command::Maps { command }) => Jsonl::open(LOG_PATH)
-            .map_err(Box::<dyn std::error::Error>::from)
+        Some(Command::Maps { command }) => log_path()
+            .and_then(|path| Ok(Jsonl::open(path)?))
             .and_then(|log| match command {
                 MapsCommand::List => cli::maps_list(&log, Path::new(CODE_ROOT)),
                 MapsCommand::Show(args) => cli::maps_show(args, &log),

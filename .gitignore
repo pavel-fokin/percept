@@ -1,5 +1,4 @@
 .env
 /docs
 /target
-/percept.jsonl
 /.claude/skills/percept/

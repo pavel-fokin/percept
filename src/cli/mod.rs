@@ -38,9 +38,10 @@ use crate::store;
 Record what happens across your tools, so a model can query it.
 
 percept keeps an append-only log of events - prompts, replies, and tool \
-calls - in percept.jsonl in the working directory. It never ranks, \
-summarises, or answers: its job is to make looking cheap and leave \
-relevance to the caller.
+calls - in $PERCEPT_HOME/percept.jsonl, ~/.percept by default, shared \
+by every project; each event names the project it came from. It never \
+ranks, summarises, or answers: its job is to make looking cheap and \
+leave relevance to the caller.
 
 Run with no arguments to open the TUI. Every subcommand reaches the log \
 without it: `events publish` appends one event, `events search` and \
