@@ -18,22 +18,25 @@ const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 /// activity is context, not dialogue - a peek is enough.
 const TOOL_PREVIEW: usize = 200;
 
-/// Rows the status may take. A wrapped error grows it; the cap keeps a
-/// long one from squeezing the transcript off the screen.
-const STATUS_MAX: usize = 4;
+/// Rows the activity row may take. A wrapped error grows it; the cap
+/// keeps a long one from squeezing the transcript off the screen.
+const ACTIVITY_MAX: usize = 4;
 
 pub fn draw(frame: &mut Frame, chat: &mut Chat) {
     // One blank column each side, so text never touches the edge.
     let area = frame.area().inner(Margin::new(1, 0));
     let width = area.width.max(1) as usize;
 
-    let status = status(chat, width);
-    let status_height = status.len().min(STATUS_MAX) as u16;
-    let input_height = input_height(chat, area.height, status_height + 1);
-    let [transcript_area, input_area, status_area, model_area] = Layout::vertical([
+    let activity_lines = activity(chat, width);
+    let activity_height = activity_lines.len().min(ACTIVITY_MAX) as u16;
+    // Reserved rows other than the transcript and the input itself:
+    // the activity row above it, the hint and model rows below.
+    let input_height = input_height(chat, area.height, activity_height + 2);
+    let [transcript_area, activity_area, input_area, hint_area, model_area] = Layout::vertical([
         Constraint::Min(1),
+        Constraint::Length(activity_height),
         Constraint::Length(input_height),
-        Constraint::Length(status_height),
+        Constraint::Length(1),
         Constraint::Length(1),
     ])
     .areas(area);
@@ -45,8 +48,9 @@ pub fn draw(frame: &mut Frame, chat: &mut Chat) {
         Paragraph::new(text).scroll((chat.scroll_offset, 0)),
         transcript_area,
     );
+    frame.render_widget(Paragraph::new(activity_lines), activity_area);
     draw_input(frame, chat, input_area);
-    frame.render_widget(Paragraph::new(status), status_area);
+    frame.render_widget(Paragraph::new(hint(chat)), hint_area);
     frame.render_widget(Paragraph::new(model_status(chat)), model_area);
 
     if let Some(menu) = &chat.models_menu {
@@ -99,10 +103,11 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
 
 /// The box has one row per entered line plus its top and bottom border.
 /// Keep one row for the transcript when the terminal is short.
-/// `below_height` is the status row plus the model row beneath it.
-fn input_height(chat: &Chat, total_height: u16, below_height: u16) -> u16 {
+/// `chrome_height` is every other reserved row - activity, hint, and
+/// model - regardless of which side of the input they sit on.
+fn input_height(chat: &Chat, total_height: u16, chrome_height: u16) -> u16 {
     let wanted = (chat.textarea.lines().len() as u16).saturating_add(2);
-    let available = total_height.saturating_sub(below_height).saturating_sub(1);
+    let available = total_height.saturating_sub(chrome_height).saturating_sub(1);
     wanted.min(available).max(1)
 }
 
@@ -290,10 +295,11 @@ pub(super) fn turn_lines(
         .collect()
 }
 
-/// The row under the input: what went wrong, what the model is doing,
-/// or which keys to press. Apart from the transcript because none of
-/// it reaches the log.
-fn status(chat: &Chat, width: usize) -> Vec<Line<'static>> {
+/// The row above the input: what went wrong, or what the model is
+/// doing right now. Empty once both clear, so idle state reserves no
+/// space between the transcript and the input. Apart from the
+/// transcript because none of it reaches the log.
+fn activity(chat: &Chat, width: usize) -> Vec<Line<'static>> {
     if let Some(error) = &chat.error {
         // Wrapped rather than truncated - a provider's own words are
         // the whole reason the error is shown.
@@ -303,28 +309,44 @@ fn status(chat: &Chat, width: usize) -> Vec<Line<'static>> {
         let frame = SPINNER[chat.spinner % SPINNER.len()];
         // A first token can be minutes away while ollama loads a
         // model, so the label says which half of the wait this is.
+        // The counter only covers this half too - once the reply
+        // itself starts streaming, how long it takes is visible in
+        // the transcript, not worth a second clock for.
         let label = match chat.app.pending_reply() {
-            Some(_) => "Responding…",
-            None => "Thinking…",
+            Some(_) => "Responding…".to_string(),
+            None => {
+                let secs = chat.thinking_started.map_or(0, |t| t.elapsed().as_secs());
+                format!("Thinking… {secs}s")
+            }
         };
         return vec![Line::from(vec![
             Span::styled(format!("{frame} "), chat.assistant_style),
             Span::styled(label, chat.hint_style),
         ])];
     }
-    if !chat.follows_transcript {
-        return vec![Line::from(Span::styled(
-            "PgUp/PgDn scroll · End latest",
-            chat.hint_style,
-        ))];
-    }
-    vec![Line::from(Span::styled(
-        "Enter send · Ctrl+J newline · PgUp/PgDn scroll · Esc quit",
-        chat.hint_style,
-    ))]
+    Vec::new()
 }
 
-/// The row under the status row: the model's name and the last round
+/// The row under the input: which keys do something right now. Enter
+/// sends nothing while a reply streams, so that hint drops out instead
+/// of naming a key that's currently inert.
+fn hint(chat: &Chat) -> Line<'static> {
+    if chat.app.is_replying() {
+        return Line::from(Span::styled("Esc quit", chat.hint_style));
+    }
+    if !chat.follows_transcript {
+        return Line::from(Span::styled(
+            "PgUp/PgDn scroll · End latest",
+            chat.hint_style,
+        ));
+    }
+    Line::from(Span::styled(
+        "Enter send · Ctrl+J newline · PgUp/PgDn scroll · Esc quit",
+        chat.hint_style,
+    ))
+}
+
+/// The row under the hint row: the model's name and the last round
 /// trip's input tokens against its context window, when the window is
 /// known. No round trip yet - this session's or an earlier one's, from
 /// the log it opened on - reads as zero, not as nothing.

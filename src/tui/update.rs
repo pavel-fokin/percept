@@ -160,6 +160,7 @@ pub fn handle_stream(
         StreamEvent::Ended(error) => {
             chat.app.end_stream()?;
             chat.error = error;
+            chat.thinking_started = None;
         }
         // The popup may have been closed (Esc) before the fetch landed,
         // or closed and reopened since - either way, a token that
@@ -237,6 +238,7 @@ fn submit(
     }
     chat.textarea.clear();
     chat.error = None;
+    chat.thinking_started = Some(std::time::Instant::now());
 
     let stream = chat.app.submit(text)?;
     spawn_drain(stream, reply_tx.clone());

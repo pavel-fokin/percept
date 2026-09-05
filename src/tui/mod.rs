@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use ratatui::style::{Color, Modifier, Style};
 use ratatui_textarea::TextArea;
 
@@ -46,6 +48,10 @@ pub struct Chat<'a> {
     /// Which spinner frame the status row shows. Advanced by `tick`
     /// while a turn streams, so a wait with no tokens yet still moves.
     pub spinner: usize,
+    /// When the turn now streaming was submitted. Backs the "Thinking…"
+    /// seconds counter - shown only until the reply itself starts
+    /// streaming, not the thought that may precede it.
+    pub thinking_started: Option<Instant>,
     /// The first visible transcript line. It stays put while the user
     /// reads history, even as a reply adds new lines below it.
     pub scroll_offset: u16,
@@ -90,6 +96,7 @@ impl<'a> Chat<'a> {
             error_style: Style::default().fg(Color::Red),
             hint_style: Style::default().fg(Color::DarkGray),
             spinner: 0,
+            thinking_started: None,
             scroll_offset: 0,
             scroll_limit: 0,
             page_height: 1,
