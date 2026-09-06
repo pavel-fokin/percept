@@ -3,12 +3,11 @@
 //! without touching a filesystem. `MarkdownFiles` implements
 //! `percept::MapRenderer`.
 
-use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::percept::{Actor, EventId, Map, MapRenderer, Node, NodeId, Schema, DECISIONS, RESOLVES};
+use crate::percept::{Actor, EventId, Map, MapRenderer, Node, Schema, DECISIONS};
 use crate::store::event::ids;
 
 /// What every rendered map opens with, so a reader who lands on the
@@ -23,11 +22,6 @@ const DECISIONS_GUIDE: &str = "Questions in the order they were raised, grouped 
     decisions --around 'question:<name>'`. What changed lately: `percept maps show decisions \
     --since 1d`.";
 
-/// The decisions map's preamble: the shared notice, then its guide.
-pub fn decisions_preamble() -> String {
-    format!("{PREAMBLE} {DECISIONS_GUIDE}")
-}
-
 /// `map` as Markdown: a heading and the preamble, then the map's body.
 /// The decisions map renders as a question-keyed list grouped by the
 /// prompt that raised each question - see `push_decisions`. Every
@@ -37,12 +31,12 @@ pub fn decisions_preamble() -> String {
 pub fn markdown(map: &Map) -> String {
     let schema = map.schema();
     let decisions = schema.name == DECISIONS.name;
-    let preamble = if decisions {
-        decisions_preamble()
-    } else {
-        PREAMBLE.to_string()
-    };
-    let mut out = format!("# {}\n\n{preamble}\n", schema.name);
+    let mut out = format!("# {}\n\n{PREAMBLE}", schema.name);
+    if decisions {
+        out.push(' ');
+        out.push_str(DECISIONS_GUIDE);
+    }
+    out.push('\n');
 
     if map.nodes().is_empty() {
         out.push_str("\n(empty: nothing has been recorded here yet.)\n");
@@ -104,7 +98,7 @@ fn ordered_kinds(schema: &'static Schema) -> Vec<&'static str> {
 /// section's - then, on its own indented line, the sources it cites,
 /// when it cites any.
 fn push_node(out: &mut String, node: &Node) {
-    let _ = writeln!(out, "- {:?}{}", node.name, node.properties_line());
+    let _ = writeln!(out, "- {}{}", marked_name(node), node.properties_line());
     if !node.sources.is_empty() {
         let _ = writeln!(out, "  sources: {}", ids(&node.sources).join(", "));
     }
@@ -117,36 +111,21 @@ fn push_node(out: &mut String, node: &Node) {
 /// `open`; under a decision: what it superseded, as `was`, and the
 /// prompt it cites when that is not the group's.
 fn push_decisions(out: &mut String, map: &Map) {
-    // A question is settled by the current end of each resolver's
-    // supersession chain, so a correction needs no new `resolves` edge.
-    // A `resolves` edge between the wrong kinds settles nothing.
-    let mut settled_by: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
-    let mut settling: HashSet<NodeId> = HashSet::new();
-    for edge in map.edges().iter().filter(|edge| edge.kind == RESOLVES) {
-        let ends = map.node(edge.from).zip(map.node(edge.to));
-        let Some((decision, question)) = ends.filter(|(d, q)| d.kind == DECISION && q.kind == QUESTION)
-        else {
-            continue;
-        };
-        let current = map.successor(decision.id);
-        settling.extend([decision.id, current]);
-        let entry = settled_by.entry(question.id).or_default();
-        if !entry.contains(&current) {
-            entry.push(current);
+    // The headlines are the questions and the current decisions; a
+    // decision that settles a question is shown under it, not on its own.
+    let items = map
+        .headlines()
+        .filter(|node| node.kind == "question" || !map.settles(node.id));
+
+    let mut groups: Vec<(Option<EventId>, Vec<&Node>)> = Vec::new();
+    for item in items {
+        let key = item.sources.first().copied();
+        match groups.iter_mut().find(|(group, _)| *group == key) {
+            Some((_, nodes)) => nodes.push(item),
+            None => groups.push((key, vec![item])),
         }
     }
-
-    let items: Vec<&Node> = map
-        .nodes()
-        .iter()
-        .filter(|node| {
-            node.kind == QUESTION
-                || node.kind == DECISION
-                    && !settling.contains(&node.id)
-                    && !map.is_superseded(node.id)
-        })
-        .collect();
-    if items.is_empty() {
+    if groups.is_empty() {
         let _ = writeln!(
             out,
             "\n(no question or decision yet; {} nodes of other kinds.)",
@@ -155,23 +134,13 @@ fn push_decisions(out: &mut String, map: &Map) {
         return;
     }
 
-    let mut group_order: Vec<Option<EventId>> = Vec::new();
-    let mut groups: HashMap<Option<EventId>, Vec<&Node>> = HashMap::new();
-    for item in items {
-        let key = item.sources.first().copied();
-        if !groups.contains_key(&key) {
-            group_order.push(key);
-        }
-        groups.entry(key).or_default().push(item);
-    }
-
-    for key in group_order {
+    for (key, nodes) in groups {
         out.push_str("\n## ");
         push_group_heading(out, key);
         out.push('\n');
-        for node in &groups[&key] {
-            if node.kind == QUESTION {
-                push_question(out, map, node, &settled_by, key);
+        for node in nodes {
+            if node.kind == "question" {
+                push_question(out, map, node, key);
             } else {
                 push_decision_line(out, map, node, "- decision ", key);
             }
@@ -179,50 +148,32 @@ fn push_decisions(out: &mut String, map: &Map) {
     }
 }
 
-const QUESTION: &str = "question";
-const DECISION: &str = "decision";
-
-/// A group's heading: the settling prompt's date and id, the id alone
+/// A group's heading: the raising prompt's date and id, the id alone
 /// when it isn't a UUIDv7, or `uncited` when the question cites no
 /// source at all.
 fn push_group_heading(out: &mut String, key: Option<EventId>) {
-    match key {
-        None => out.push_str("uncited"),
-        Some(id) => match id.minted_at() {
-            Some(at) => {
-                let _ = write!(out, "{} \u{b7} {}", at.date(), id.as_uuid());
-            }
-            None => {
-                let _ = write!(out, "{}", id.as_uuid());
-            }
-        },
+    let Some(id) = key else {
+        out.push_str("uncited");
+        return;
+    };
+    if let Some(at) = id.minted_at() {
+        let _ = write!(out, "{} \u{b7} ", at.date());
     }
+    let _ = write!(out, "{}", id.as_uuid());
 }
 
 /// One question's bullet, then the decision that settles it now - or
 /// `open` when none does.
-fn push_question(
-    out: &mut String,
-    map: &Map,
-    question: &Node,
-    settled_by: &HashMap<NodeId, Vec<NodeId>>,
-    group: Option<EventId>,
-) {
+fn push_question(out: &mut String, map: &Map, question: &Node, group: Option<EventId>) {
     let _ = writeln!(
         out,
         "- {}{}",
         marked_name(question),
         question.properties_line()
     );
-    let decisions: Vec<&Node> = settled_by
-        .get(&question.id)
-        .into_iter()
-        .flatten()
-        .filter_map(|id| map.node(*id))
-        .collect();
+    let decisions = map.settled_by(question.id);
     if decisions.is_empty() {
         out.push_str("  open\n");
-        return;
     }
     for decision in decisions {
         push_decision_line(out, map, decision, "  decision ", group);

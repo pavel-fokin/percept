@@ -39,7 +39,7 @@ fn heading(id: EventId) -> String {
 }
 
 fn head() -> String {
-    format!("# decisions\n\n{}\n", decisions_preamble())
+    format!("# decisions\n\n{PREAMBLE} {DECISIONS_GUIDE}\n")
 }
 
 #[test]

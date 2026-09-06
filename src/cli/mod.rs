@@ -110,7 +110,7 @@ pub struct ShowMapArgs {
     /// timestamp, or `<N>d`, `<N>h`, `<N>m` back from now: the nodes
     /// added since, and the ends of the edges added since. Refused for
     /// the code map, which is walked fresh and has no history.
-    #[arg(long, value_parser = parse_since)]
+    #[arg(long, value_parser = |s: &str| parse_time("since", s))]
     since: Option<Timestamp>,
     /// Fold every project's events instead of only this one's. Ignored
     /// for the code map, which is never folded from the log.
@@ -730,11 +730,6 @@ fn print_reply(reply: &str) -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut out = io::stdout().lock();
     writeln!(out, "{reply}").or_else(stop_if_pipe_closed)
-}
-
-/// `maps show --since`, parsed the way `events search --since` is.
-fn parse_since(s: &str) -> Result<Timestamp, String> {
-    parse_time("since", s)
 }
 
 /// Parses a `--since`/`--until` value: an ISO-8601 timestamp, or a

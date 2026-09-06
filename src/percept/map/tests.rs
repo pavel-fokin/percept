@@ -51,17 +51,35 @@ fn successor_follows_a_supersession_chain_to_its_end() {
 }
 
 #[test]
-fn supersedes_lists_the_decisions_a_node_replaced() {
-    let (old, new) = (NodeId::new(), NodeId::new());
+fn a_question_is_settled_by_the_current_end_of_each_resolvers_chain() {
+    let (q, a, b) = (NodeId::new(), NodeId::new(), NodeId::new());
     let events = [
-        node_added("decisions", old, "decision", "Go"),
-        node_added("decisions", new, "decision", "Rust"),
-        edge_added("decisions", SUPERSEDES, new, old),
+        node_added("decisions", q, "question", "Which?"),
+        node_added("decisions", a, "decision", "A"),
+        node_added("decisions", b, "decision", "B"),
+        edge_added("decisions", RESOLVES, a, q),
+        edge_added("decisions", SUPERSEDES, b, a),
     ];
     let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
-    let names: Vec<&str> = map.supersedes(new).map(|node| node.name.as_str()).collect();
-    assert_eq!(names, ["Go"]);
-    assert_eq!(map.supersedes(old).count(), 0);
+
+    let names: Vec<&str> = map.settled_by(q).iter().map(|node| node.name.as_str()).collect();
+    assert_eq!(names, ["B"]);
+    assert!(map.settles(a));
+    assert!(map.settles(b));
+}
+
+#[test]
+fn a_resolves_edge_between_other_kinds_settles_nothing() {
+    let (o, d) = (NodeId::new(), NodeId::new());
+    let events = [
+        node_added("decisions", o, "option", "Go"),
+        node_added("decisions", d, "decision", "Rust"),
+        edge_added("decisions", RESOLVES, d, o),
+    ];
+    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+
+    assert!(map.settled_by(o).is_empty());
+    assert!(!map.settles(d));
 }
 
 /// `event`, re-stamped as created at `at`.
@@ -104,12 +122,9 @@ fn since_leaves_out_an_edge_older_than_the_instant_between_kept_nodes() {
     let earlier = at.minus_minutes(1).unwrap();
     let events = [
         created_at(node_added("decisions", question, "question", "Which language?"), earlier),
-        created_at(edge_added("decisions", "resolves", decision, question), earlier),
         created_at(node_added("decisions", decision, "decision", "Rust"), at),
+        created_at(edge_added("decisions", "resolves", decision, question), earlier),
     ];
-    // The edge names a node added later, so fold it in an order that
-    // holds both first.
-    let events = [events[0].clone(), events[2].clone(), events[1].clone()];
     let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
 
     let cut = map.since(at);

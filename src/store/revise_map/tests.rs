@@ -1,6 +1,6 @@
 use super::*;
-use crate::percept::{Actor, Event, EventId, NodeId};
-use crate::testing::{node_added, scope, source, FakeLog};
+use crate::percept::{Actor, Event, EventId};
+use crate::testing::{edge_added, node_added, node_added_by, scope, source, FakeLog};
 
 fn tool(events: Vec<Event>) -> ReviseMap {
     let log = Arc::new(FakeLog::seeded(events));
@@ -188,19 +188,7 @@ fn removing_a_user_written_node_is_refused_and_says_to_supersede() {
 fn removing_a_user_written_edge_is_refused() {
     let decision = node_added("decision", "Rust");
     let question = node_added("question", "Which language?");
-    let (from, to) = (node_id(&decision), node_id(&question));
-    let edge = Event::new(
-        Actor::User,
-        source("tui"),
-        None,
-        Payload::EdgeAdded {
-            map: "decisions".to_string(),
-            kind: "resolves".to_string(),
-            from,
-            to,
-            sources: Vec::new(),
-        },
-    );
+    let edge = edge_added("resolves", &decision, &question);
     let revise = tool(vec![decision, question, edge]);
 
     let err = revise
@@ -214,33 +202,9 @@ fn removing_a_user_written_edge_is_refused() {
 
 #[test]
 fn removing_a_model_node_that_a_user_edge_touches_is_refused() {
-    let model_node = Event::new(
-        Actor::Model,
-        source("tui"),
-        None,
-        Payload::NodeAdded {
-            map: "decisions".to_string(),
-            node: NodeId::new(),
-            kind: "decision".to_string(),
-            name: "Rust".to_string(),
-            properties: BTreeMap::new(),
-            sources: vec![EventId::new()],
-        },
-    );
+    let model_node = node_added_by(Actor::Model, "decision", "Rust");
     let question = node_added("question", "Which language?");
-    let (from, to) = (node_id(&model_node), node_id(&question));
-    let user_edge = Event::new(
-        Actor::User,
-        source("tui"),
-        None,
-        Payload::EdgeAdded {
-            map: "decisions".to_string(),
-            kind: "resolves".to_string(),
-            from,
-            to,
-            sources: Vec::new(),
-        },
-    );
+    let user_edge = edge_added("resolves", &model_node, &question);
     let revise = tool(vec![model_node, question, user_edge]);
 
     let err = revise
@@ -252,30 +216,9 @@ fn removing_a_model_node_that_a_user_edge_touches_is_refused() {
     assert!(err.contains("the user wrote the edge"), "{err}");
 }
 
-/// The node id a `node.added` event minted.
-fn node_id(event: &Event) -> NodeId {
-    match event.payload() {
-        Payload::NodeAdded { node, .. } => *node,
-        _ => panic!("expected node.added"),
-    }
-}
-
 #[test]
 fn removing_a_model_written_node_is_allowed() {
-    let node = Event::new(
-        Actor::Model,
-        source("tui"),
-        None,
-        Payload::NodeAdded {
-            map: "decisions".to_string(),
-            node: NodeId::new(),
-            kind: "decision".to_string(),
-            name: "Go".to_string(),
-            properties: BTreeMap::new(),
-            sources: vec![EventId::new()],
-        },
-    );
-    let revise = tool(vec![node]);
+    let revise = tool(vec![node_added_by(Actor::Model, "decision", "Go")]);
 
     let output = revise
         .run(r#"{"map":"decisions","changes":[{"op":"remove_node","kind":"decision","name":"Go","reason":"wrong"}]}"#)

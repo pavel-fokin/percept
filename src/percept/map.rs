@@ -66,6 +66,10 @@ pub const SUPERSEDES: &str = "supersedes";
 /// The edge kind from a decision to the question it settles.
 pub const RESOLVES: &str = "resolves";
 
+/// The two node kinds `settled_by` joins.
+const QUESTION: &str = "question";
+const DECISION: &str = "decision";
+
 /// The decision map: what was asked, what was weighed, what was chosen
 /// and on what grounds. An option `answers` its question, evidence
 /// `supports` or `contradicts` an option, a decision `resolves` the
@@ -74,9 +78,9 @@ pub const RESOLVES: &str = "resolves";
 pub const DECISIONS: Schema = Schema {
     name: "decisions",
     purpose: "what was asked, what was chosen, and why, so a settled question is not reopened",
-    node_kinds: &["question", "option", "evidence", "decision"],
+    node_kinds: &[QUESTION, "option", "evidence", DECISION],
     edge_kinds: &["answers", "supports", "contradicts", RESOLVES, SUPERSEDES],
-    headline_kinds: &["question", "decision"],
+    headline_kinds: &[QUESTION, DECISION],
 };
 
 /// The code map: a codebase's files, the symbols they define, and what
@@ -97,18 +101,23 @@ pub const SCHEMAS: &[&Schema] = &[&DECISIONS];
 /// builds one fresh; no writer commits to it.
 pub const DERIVED: &[&Schema] = &[&CODE];
 
+/// Whether `name` names a map in `DERIVED`.
+fn is_derived(name: &str) -> bool {
+    DERIVED.iter().any(|schema| schema.name == name)
+}
+
 impl Schema {
     /// Whether this map is built from something other than the log, so
     /// its nodes have no history: no writer, no moment they were added.
     pub fn is_derived(&self) -> bool {
-        DERIVED.iter().any(|schema| schema.name == self.name)
+        is_derived(self.name)
     }
 
     /// The log-folded schema `name` names, or the error every boundary
     /// that folds or writes a map by name reports. A derived map is its
     /// own error: it exists, and this is the wrong door to it.
     pub fn find(name: &str) -> Result<&'static Schema, MapError> {
-        if DERIVED.iter().any(|schema| schema.name == name) {
+        if is_derived(name) {
             return Err(MapError::Derived(name.to_string()));
         }
         SCHEMAS
@@ -402,15 +411,21 @@ impl Map {
             .filter(|node| !self.is_superseded(node.id))
     }
 
-    /// Whether another node has a `supersedes` edge to `id`.
-    pub fn is_superseded(&self, id: NodeId) -> bool {
+    /// The node with a `supersedes` edge to `id`. Two nodes superseding
+    /// one is a writer's mistake; the first in map order wins.
+    fn superseded_by(&self, id: NodeId) -> Option<NodeId> {
         self.edges
             .iter()
-            .any(|edge| edge.kind == SUPERSEDES && edge.to == id)
+            .find(|edge| edge.kind == SUPERSEDES && edge.to == id)
+            .map(|edge| edge.from)
+    }
+
+    pub fn is_superseded(&self, id: NodeId) -> bool {
+        self.superseded_by(id).is_some()
     }
 
     /// The nodes `id` supersedes, in map order.
-    pub fn supersedes(&self, id: NodeId) -> impl Iterator<Item = &Node> {
+    fn supersedes(&self, id: NodeId) -> impl Iterator<Item = &Node> {
         self.edges
             .iter()
             .filter(move |edge| edge.kind == SUPERSEDES && edge.from == id)
@@ -419,17 +434,11 @@ impl Map {
 
     /// The end of `id`'s supersession chain: `id` itself when nothing
     /// supersedes it, else the node that does, followed until one is
-    /// current. Two nodes superseding one is a writer's mistake; the
-    /// first in map order wins. A cycle stops at the node already seen.
+    /// current. A cycle stops at the node already seen.
     pub fn successor(&self, id: NodeId) -> NodeId {
         let mut seen = HashSet::from([id]);
         let mut current = id;
-        while let Some(next) = self
-            .edges
-            .iter()
-            .find(|edge| edge.kind == SUPERSEDES && edge.to == current)
-            .map(|edge| edge.from)
-        {
+        while let Some(next) = self.superseded_by(current) {
             if !seen.insert(next) {
                 break;
             }
@@ -453,6 +462,45 @@ impl Map {
             }
         }
         out
+    }
+
+    /// The decisions that settle `question` now: each decision with a
+    /// `resolves` edge to it, followed to the end of its supersession
+    /// chain, so a correction needs no new `resolves` edge. In map
+    /// order, each once. A `resolves` edge between other kinds settles
+    /// nothing.
+    pub fn settled_by(&self, question: NodeId) -> Vec<&Node> {
+        let mut out: Vec<&Node> = Vec::new();
+        for edge in self.resolving_edges() {
+            if edge.to != question {
+                continue;
+            }
+            if let Some(current) = self.node(self.successor(edge.from)) {
+                if !out.iter().any(|node| node.id == current.id) {
+                    out.push(current);
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether `decision`, or a decision it supersedes, has a
+    /// `resolves` edge to a question - so it belongs under one in a
+    /// render rather than on its own.
+    pub fn settles(&self, decision: NodeId) -> bool {
+        let chain: HashSet<NodeId> = std::iter::once(decision)
+            .chain(self.predecessors(decision).iter().map(|node| node.id))
+            .collect();
+        self.resolving_edges().any(|edge| chain.contains(&edge.from))
+    }
+
+    /// The `resolves` edges that run from a decision to a question.
+    fn resolving_edges(&self) -> impl Iterator<Item = &Edge> {
+        self.edges.iter().filter(|edge| {
+            edge.kind == RESOLVES
+                && self.node(edge.from).is_some_and(|node| node.kind == DECISION)
+                && self.node(edge.to).is_some_and(|node| node.kind == QUESTION)
+        })
     }
 
     pub fn edges(&self) -> &[Edge] {

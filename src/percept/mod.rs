@@ -12,7 +12,6 @@ pub use event_log::EventLog;
 pub use map::SUPERSEDES;
 pub use map::{
     map_of, Edge, Map, MapError, Mutation, Node, NodeId, NodeRef, Schema, Scope, CODE, DECISIONS,
-    RESOLVES,
 };
 pub use model::{
     to_messages, Chunk, Message, Modality, Model, ModelCapabilities, ModelCatalog, ModelDescriptor,

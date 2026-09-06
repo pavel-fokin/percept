@@ -277,32 +277,8 @@ fn apply(
             sources,
         } => {
             let node = NodeRef { kind, name };
-            // A node the user wrote is their landmark in a shared map.
-            // The model may hang edges on it, never take it away; a
-            // correction is a superseding node. Removing a node drops
-            // the edges that touch it, so a user-written edge guards
-            // the node at its ends the same way.
-            let map = snapshot.map();
-            if let Some(found) = map.find(&node.kind, &node.name) {
-                if found.actor == Actor::User {
-                    return Err(format!(
-                        "{node} was written by the user and the model may not remove it; \
-                         add the corrected node and a supersedes edge from it to this one instead"
-                    )
-                    .into());
-                }
-                if let Some(edge) = map
-                    .edges()
-                    .iter()
-                    .find(|edge| edge.actor == Actor::User && (edge.from == found.id || edge.to == found.id))
-                {
-                    return Err(format!(
-                        "{node} cannot be removed by the model: the user wrote the edge {}, \
-                         which removing the node would drop",
-                        map.edge_line(edge)
-                    )
-                    .into());
-                }
+            if let Some(why) = user_guards_node(snapshot.map(), &node) {
+                return Err(why.into());
             }
             let line = format!("removed {node}");
             let mutation = Mutation::RemoveNode {
@@ -358,6 +334,31 @@ fn apply(
         _ => line,
     };
     Ok((line, payload))
+}
+
+/// Why the model may not remove `node`, if the user's marks stand in
+/// the way: the node is the user's, or a user-written edge touches it -
+/// removing a node drops its edges, so that edge guards its ends too.
+/// `None` when the node is free to go, or the map lacks it - `apply`
+/// reports that.
+fn user_guards_node(map: &Map, node: &NodeRef) -> Option<String> {
+    let found = map.find(&node.kind, &node.name)?;
+    if found.actor == Actor::User {
+        return Some(format!(
+            "{node} was written by the user and the model may not remove it; \
+             add the corrected node and a supersedes edge from it to this one instead"
+        ));
+    }
+    map.edges()
+        .iter()
+        .find(|edge| edge.actor == Actor::User && (edge.from == found.id || edge.to == found.id))
+        .map(|edge| {
+            format!(
+                "{node} cannot be removed by the model: the user wrote the edge {}, \
+                 which removing the node would drop",
+                map.edge_line(edge)
+            )
+        })
 }
 
 /// Whether `map` holds the edge `from kind to` and the user wrote it. An
