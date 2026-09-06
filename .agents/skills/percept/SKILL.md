@@ -57,10 +57,12 @@ on it.
 
 ## Record a decision
 
-The recipe is in the [plan skill](../plan/SKILL.md): a `question`, its
-`option`s with `answers` edges, the `decision` with a `resolves` edge,
-every node citing the prompt that settled it. Write through
-`percept maps` or `revise_map`, never by editing the rendered Markdown.
+The recipe is in the [plan skill](../plan/SKILL.md): a `question`, the
+`decision` with a `resolves` edge, and an `option` with an `answers`
+edge for each alternative that lost, saying why in its `why` property.
+Every node cites the prompt that settled it and is written as
+`--actor model`. Write through `percept maps` or `revise_map`, never
+by editing the rendered Markdown.
 Capture an unlogged prompt with `events publish` under its real actor
 and source before citing it; never invent an id or cite an agent's
 summary as the user's words.

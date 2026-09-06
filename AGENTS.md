@@ -163,10 +163,12 @@ skips it.
   of those: the builder proposes it, and review challenges it. The user
   agrees the set before any code; an explicit instruction to implement
   a proposal already discussed supplies that agreement. Each settled
-  decision is then recorded in the decisions map, citing the prompt
-  that settled it, so the next session does not reopen it. A decision
-  that changes an earlier one is added with a `supersedes` edge to it;
-  the old node is never removed.
+  decision is then recorded in the decisions map as `model`, citing
+  the prompt that settled it, so the next session does not reopen it.
+  An option is recorded only for an alternative that lost, with the
+  reason it lost; the pick is the decision itself. A decision that
+  changes an earlier one is added with a `supersedes` edge to it; the
+  old node is never removed.
 - **Build.** An issue with no design left in it, touching one or two
   files, the main agent builds itself. Anything larger goes to the
   `software-developer` subagent, which follows this file, writes the
@@ -177,13 +179,15 @@ skips it.
   ad hoc `grep`.
 - **Review.** The main agent checks each diff against its issue, and
   small fixes land there; larger rework goes back to the subagent.
-  The shared `code-review` and `simplify` skills run once each over the whole
-  branch, before the user merges. Two passes looking for different
-  things catch more than a pass per issue. A branch that adds no
-  branches, no I/O, and no behaviour change - a vocabulary or type
-  addition, a rename, a doc edit - skips both. The main agent does one
-  inline review pass instead. The skill passes are for diffs with
-  logic in them.
+  Then two passes run once each over the whole branch, before the user
+  merges: one for correctness, defects a reader of the diff would not
+  see, and one for simplification, complexity the diff adds that a
+  simpler form removes. Two passes looking for different things catch
+  more than a pass per issue. Each client runs them with what it has;
+  `CLAUDE.md` names Claude Code's. A branch that adds no branches, no
+  I/O, and no behaviour change - a vocabulary or type addition, a
+  rename, a doc edit - skips both. The main agent does one inline
+  review pass instead. The two passes are for diffs with logic in them.
 - **Reflect.** Close the session by proposing changes to this workflow,
   but only when a step strained or missed something. A session where
   the process fit the work needs no reflection. Cutting a step counts

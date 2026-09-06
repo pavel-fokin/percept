@@ -61,3 +61,15 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "Which coding agents must this repo's percept setup serve?"
   decision "any agent: one client-neutral body, and per client only a thin adapter that points at it": why: "percept is for working with different coding agents and tools; instructions in AGENTS.md, skills in .agents/skills, capture in scripts/agent-hook.py, and a client folder holds only discovery metadata and the commands that call them, so a new agent costs an adapter, never a copy"
   was "one body under .agents and scripts/agent-hook.py; .claude symlinks to it and .codex adapts it"
+
+## 2026-09-06 · 01a0767e-1c8a-7430-8dde-2d8d028c28ba
+- "Who is the actor when the plan skill records a decision?"
+  decision "model, through --actor model on the percept maps write verbs; the default stays user": why: "the plan skill is the agent writing; a human at the terminal is still user without a flag; the 74 nodes recorded before stay user, history does not move"
+- "When is read_map offered to the model?"
+  decision "always, in every map shape": why: "a cut around one node is worth a call even when the whole map is in the prompt; one tool fewer to reason about"
+- "What makes an option worth a node?"
+  decision "only an alternative that lost, and it says why: an option without a why property is refused": why: "the rule lives in the shared write path, so the CLI and revise_map both enforce it and the history of options without a reason still folds"
+- "Where do the review passes live?"
+  decision "in the workflow text, not as shared skills: each client uses its own review tooling, and CLAUDE.md names Claude Code's": why: "the core flow stays general; a client-specific file carries what only that client can do"
+- "Which values does since take on the model's tools?"
+  decision "the same as the CLI: ISO-8601 or Nd, Nh, Nm back from now, through one parser": why: "one meaning for since wherever it is typed"

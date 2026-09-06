@@ -148,6 +148,15 @@ old question now shows the new decision with its own `source` line and
 the old decision as `was`, exactly as the render was designed to. The
 hook script's fixed list of two client names went with it.
 
+A second round of decisions closed the open items: the plan skill
+records as `--actor model`, so the actor mark finally carries
+information; `read_map` is offered in every shape; an option is only a
+rejected alternative and must say why, enforced in the shared write
+path so history still folds; the shared review skills went, and
+CLAUDE.md names Claude Code's own; `since` has one parser everywhere.
+The main checkout's old shell hooks and local settings are backed up
+under `~/.percept/legacy`.
+
 Left on the Codex branch, with the reason:
 
 - **`commitment` nodes, `details` edges, HTML render.** The overview

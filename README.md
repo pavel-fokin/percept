@@ -25,7 +25,9 @@ that nothing else bears on it.
 `PERCEPT_MAPS` says how much of each map reaches the model each turn:
 `prompt` (the default), `headlines`, or `tool`. In every shape the
 prompt carries one line per map with its purpose, size, and last
-change. The code map never reaches the model.
+change, and `read_map` is offered, so the model can cut a map around
+one node even when the whole map is in the prompt. The code map never
+reaches the model.
 
 ## Coding agents
 

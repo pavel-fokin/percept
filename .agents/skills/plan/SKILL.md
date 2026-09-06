@@ -54,8 +54,9 @@ Verify: <how to confirm the outcome>
    files, build yourself. Hand anything larger to the
    `software-developer` subagent, one issue at a time.
 4. **Review here.** Check the diff against the issue's outcome and
-   decisions. The shared `code-review` and `simplify` skills each run
-   once per branch, before it merges - not per issue.
+   decisions. A correctness pass and a simplification pass each run
+   once per branch, before it merges - not per issue - with whatever
+   review tooling this client has (AGENTS.md, Review).
 5. **Fix.** Small corrections: apply them yourself. Larger rework: send
    it back to `software-developer` with the specifics.
 6. **Commit.** Re-run the build and tests yourself first. One commit per
@@ -89,30 +90,32 @@ of this map's sources. percept stamps every event with the main
 checkout's path, worktree or not, which is why the filter asks for the
 common git dir's parent and not `--show-toplevel`.
 
-One decision, with `P=~/.percept/bin/percept` and `$id` the prompt:
+One decision, with `P="~/.percept/bin/percept maps"` and `$id` the
+prompt. Every write carries `--actor model`: the agent is recording,
+not the user, and the map shows the difference.
 
 ```
-$P maps add-node decisions --kind question --name "Where does the log live?" --source $id
-$P maps add-node decisions --kind option --name "percept.jsonl in the working directory" --source $id
-$P maps add-edge decisions --kind answers \
+$P add-node decisions --actor model --kind question --name "Where does the log live?" --source $id
+$P add-node decisions --actor model --kind option --name "percept.jsonl in the working directory" \
+  --prop why="one log per checkout makes cross-project search a join" --source $id
+$P add-edge decisions --actor model --kind answers \
   --from 'option:percept.jsonl in the working directory' --to 'question:Where does the log live?' --source $id
-$P maps add-node decisions --kind option --name "one log under ~/.percept" --source $id
-$P maps add-edge decisions --kind answers \
-  --from 'option:one log under ~/.percept' --to 'question:Where does the log live?' --source $id
-$P maps add-node decisions --kind decision --name "one log under ~/.percept" \
+$P add-node decisions --actor model --kind decision --name "one log under ~/.percept" \
   --prop why="one variable also covers the binary; cross-project search stays free" --source $id
-$P maps add-edge decisions --kind resolves \
+$P add-edge decisions --actor model --kind resolves \
   --from 'decision:one log under ~/.percept' --to 'question:Where does the log live?' --source $id
 ```
 
-Every option gets its `answers` edge: that edge is what lets `--around`
-a question reach the options weighed for it. A name that starts with
-`--` is passed as `--name=<name>`, or clap reads it as a flag.
+An option is an alternative that lost, and it says why in `why`: the
+store refuses one without it. The pick is not an option, it is the
+decision, named as the choice it made. When nothing real was rejected,
+record the question and the decision alone. Every option gets its
+`answers` edge: that edge is what lets `--around` a question reach the
+alternatives weighed for it. A name that starts with `--` is passed as
+`--name=<name>`, or clap reads it as a flag.
 
-Name the decision as the option it picks. Add an `evidence` node with a
-`contradicts` edge to an option only when the user gave a reason it
-lost; skip it otherwise. A node whose name already exists is refused,
-so read `.percept/decisions.md` before adding to a question it holds.
+A node whose name already exists is refused, so read
+`.percept/decisions.md` before adding to a question it holds.
 The render shows questions and decisions only; `percept maps show
 decisions --around 'question:<name>'` shows a question's options and
 evidence, and `--since 1d` shows what the map gained today.
@@ -121,13 +124,13 @@ A decision that changes an earlier one is never a removal. Add the new
 decision, then point it at the old one:
 
 ```
-$P maps add-edge decisions --kind supersedes \
+$P add-edge decisions --actor model --kind supersedes \
   --from 'decision:<new>' --to 'decision:<old>' --source $id
 ```
 
 The old decision leaves the headlines and renders as `was` under its
 successor, so a reader who knew it still finds it.
 
-At the reflect step, record an approach the session abandoned the same
-way: an `evidence` node naming what failed and why, citing the event
-where it failed, with a `contradicts` edge to the option it killed.
+At the reflect step, record an approach the session tried and abandoned
+as an option under the question it was trying to answer, its `why`
+saying what failed, citing the event where it failed.
