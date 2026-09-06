@@ -17,7 +17,7 @@
 //! `--full`, `show`, or `show --range` into one `content`.
 
 use std::collections::BTreeMap;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::Path;
 
 use clap::{Args, Parser, Subcommand};
@@ -202,6 +202,8 @@ pub struct PublishArgs {
     source: String,
     #[arg(long = "type")]
     kind: String,
+    /// The payload as JSON, or `-` to read it from stdin - for a payload
+    /// longer than an argument may be.
     #[arg(long)]
     payload: String,
     /// The id of the event this one follows from.
@@ -355,7 +357,14 @@ pub fn publish(
         .as_deref()
         .map(|id| known_event_id(id, log))
         .transpose()?;
-    let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
+    let payload = if args.payload == "-" {
+        let mut text = String::new();
+        io::stdin().read_to_string(&mut text)?;
+        text
+    } else {
+        args.payload
+    };
+    let payload = serde_json::from_str(&payload).map_err(store::Error::BadPayload)?;
     let source = percept::Source {
         name: args.source,
         path: root.to_path_buf(),
