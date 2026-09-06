@@ -44,8 +44,12 @@ Verify: <how to confirm the outcome>
 ## Steps
 
 1. **Decompose.** Split the request into issues. Order them so each one
-   builds on the last. Show the set to the user and get agreement before
-   any code.
+   builds on the last. Show the set before building. An explicit request
+   to implement an already-discussed proposal supplies agreement; ask
+   only about unresolved choices that affect the user.
+   Use the [percept skill](../percept/SKILL.md) to record lasting
+   commitments with evidence. Routine choices stay in the log; the
+   issue's decision list is not a list of nodes to create.
 2. **Build.** An issue with no design left in it, touching one or two
    files, build yourself. Hand anything larger to the
    `software-developer` subagent, one issue at a time.

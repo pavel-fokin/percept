@@ -41,7 +41,9 @@ cognitive commit - one event in the same log, citing the experience it
 was derived from. A map is folded from those commits, so the cognitive
 history rebuilds it deterministically; the experience alone does not,
 because a second pass through the model gives a different map. The
-model builds maps today. The user will build and co-own them.
+human and agent form their own interpretations. Shared maps make those
+interpretations available for discussion and correction. Recording a
+claim does not mean the human agrees with it.
 
 ## Domain
 
@@ -49,7 +51,7 @@ model builds maps today. The user will build and co-own them.
   optional `causation_id`, a `created_at`, and a typed `payload`. Once
   committed it never changes.
 - `Source` names the writer that produced an event - `percept-tui`,
-  `percept-cli`, `claude-code` - and the project root it ran in. The
+  `percept-cli`, `claude-code`, `codex` - and the project root it ran in. The
   name is open by design, where `Actor` is closed. One log at
   `$PERCEPT_HOME/percept.jsonl`, `~/.percept` by default, holds every
   project; the path is how a fold picks one project out of it.
@@ -71,14 +73,30 @@ model builds maps today. The user will build and co-own them.
   map somewhere a reader finds it; today that is
   `<project>/.percept/<map>.md`, rewritten on every write.
 
-## Decisions
+## Shared maps
 
-The decisions map for this repo, rendered by percept from its own log.
-Every node cites the event it was drawn from. It is the record of why;
-where it disagrees with a rule above, the rule wins and the map says
-what the rule cost.
+Start with [.percept/index.md](.percept/index.md), then select the map
+and fragment relevant to the task. Read the shared
+[percept skill](.agents/skills/percept/SKILL.md) for retrieval and revision.
+The decisions map records rationale; the rules above take precedence.
+Do not load every decision into each session.
 
-@.percept/decisions.md
+A commitment is a lasting choice whose rationale protects future work.
+Promote one when forgetting it could cause a mistake, repeated debate,
+or violation of a constraint. Keep supporting choices beneath it.
+Routine settings and task progress can remain in the experience log.
+
+Balance three budgets:
+
+| Budget | What to minimize |
+|---|---|
+| Overview | Concepts and relationships needed to understand one commitment. |
+| Change | New meaning and lost familiar references after a revision. |
+| Verification | Work to inspect evidence and trace a correction's consequences. |
+
+Preserve names and identities. Prefer local, cited corrections over
+reorganization for neatness. Discuss regrouping that changes navigation.
+State what changed, why, and which conclusions need reconsideration.
 
 ## Architecture
 
@@ -110,20 +128,22 @@ skips it.
   flags, defaults - are settled with them before the build, never
   assumed. Where a function or a rule sits inside the code is not one
   of those: the builder proposes it, and review challenges it. The user
-  agrees the set before any code. Each settled decision is then recorded
-  in the decisions map, citing the prompt that settled it, so the next
-  session does not reopen it.
+  agrees the set before any code; an explicit instruction to implement
+  a discussed proposal supplies that agreement. Record lasting
+  commitments under the admission rule above, citing the actual prompt.
+  Agreement about an implementation does not require one map node per
+  flag, filename, or task.
 - **Build.** An issue with no design left in it, touching one or two
   files, the main agent builds itself. Anything larger goes to the
   `software-developer` subagent, which follows this file, writes the
   code, runs the build and tests, and reports back. It does not design,
   choose scope, commit, or push. Explore the project's code structure -
   what a file imports, defines, or depends on - with `percept maps show
-  code` (see `.claude/skills/percept/SKILL.md` for query patterns), not
+  code` (see `.agents/skills/percept/SKILL.md` for query patterns), not
   ad hoc `grep`.
 - **Review.** The main agent checks each diff against its issue, and
   small fixes land there; larger rework goes back to the subagent.
-  `/code-review` and `/simplify` then run once each over the whole
+  The shared `code-review` and `simplify` skills run once each over the whole
   branch, before the user merges. Two passes looking for different
   things catch more than a pass per issue. A branch that adds no
   branches, no I/O, and no behaviour change - a vocabulary or type
@@ -135,8 +155,8 @@ skips it.
   the process fit the work needs no reflection. Cutting a step counts
   for more than adding one. Aim for the smallest process that still
   catches mistakes. An approach the session tried and abandoned goes
-  into the decisions map as evidence, so no later session tries it
-  again.
+  into the log. Link it as evidence when repeating it would threaten a
+  lasting commitment.
 
 The TUI only runs on a real terminal. `scripts/drive.py` forks a pty,
 sends timed keystrokes, and prints the frames; `--plain` strips the
