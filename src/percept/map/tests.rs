@@ -185,7 +185,7 @@ fn an_unknown_kind_fails_the_fold() {
             kind: "goal".to_string()
         }
         .to_string(),
-        "no node kind \"goal\" in map \"decisions\"; kinds are question, option, evidence, decision"
+        "no node kind \"goal\" in map \"decisions\"; kinds are commitment, question, option, evidence, decision"
     );
 }
 
@@ -544,4 +544,39 @@ fn a_derived_map_is_found_by_neither_fold_nor_write() {
     assert!(err
         .to_string()
         .starts_with("\"code\" is derived from the working tree"));
+}
+
+#[test]
+fn grouping_keeps_original_nodes_below_a_stable_commitment() {
+    let (ids, mut events) = rust_over_go();
+    let commitment = NodeId::new();
+    events.push(node_added(
+        "decisions",
+        commitment,
+        "commitment",
+        "Language",
+    ));
+    events.push(edge_added("decisions", "details", commitment, ids[2]));
+    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    assert_eq!(
+        map.headlines().map(|n| n.name.as_str()).collect::<Vec<_>>(),
+        ["Language"]
+    );
+    assert_eq!(map.node(ids[2]).unwrap().name, "Rust over Go");
+    assert_eq!(map.nodes().len(), 4);
+    assert_eq!(map.edges().len(), 2);
+}
+
+#[test]
+fn commitment_cycles_do_not_remove_the_overview() {
+    let first = NodeId::new();
+    let second = NodeId::new();
+    let events = [
+        node_added("decisions", first, "commitment", "First"),
+        node_added("decisions", second, "commitment", "Second"),
+        edge_added("decisions", "details", first, second),
+        edge_added("decisions", "details", second, first),
+    ];
+    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    assert_eq!(map.headlines().count(), 2);
 }

@@ -24,9 +24,14 @@ impl ReviseMap {
 
 const NAME: &str = "revise_map";
 
-const DESCRIPTION: &str = "Record into a named map what you have judged \
-    from the log: a question that was raised, the options weighed, \
-    evidence for or against, the decision taken. One call carries a \
+const DESCRIPTION: &str = "Revise a shared interpretation when evidence changes its meaning. \
+    Retain rationale whose loss risks a mistake, repeated debate, or constraint violation. \
+    New events alone do not require revision; no revision is a valid result. \
+    Preserve familiar names and identities. Prefer local evidence and links, not \
+    renaming or removal for neatness. Discuss regrouping that changes navigation. \
+    A commitment holds a lasting choice; details edges point from it to supporting nodes. \
+    Recording a claim does not establish human agreement. Keep disputed claims visible. \
+    Report changed meaning, cited evidence, and affected conclusions. One call carries a \
     batch of changes to one map, checked together in order and \
     committed only if every change passes - a later change may refer to \
     a node an earlier one in the same batch just added. Cite the event \

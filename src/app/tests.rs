@@ -697,10 +697,9 @@ fn a_map_is_sent_with_its_kinds_ahead_of_the_transcript_and_outside_the_window()
 
     let sent = model.last_request();
     assert_eq!(sent.len(), CONTEXT_EVENTS + 2);
-    assert!(sent[1].starts_with(
-        "The decisions map, built from this log. Node kinds: question, option, \
-         evidence, decision. Edge kinds: supports, contradicts, resolves.\n"
-    ));
+    assert!(sent[1].starts_with("The decisions map, built from this log."));
+    assert!(sent[1].contains(percept::DECISIONS.purpose));
+    assert!(sent[1].contains("Node kinds: commitment, question, option, evidence, decision."));
     assert!(sent[1].contains("- decision \"Rust over Go\""));
 }
 
@@ -712,7 +711,7 @@ fn an_empty_map_is_still_sent_with_its_kinds() {
 
     let sent = model.last_request();
     assert_eq!(sent.len(), 3);
-    assert!(sent[1].contains("Node kinds: question, option, evidence, decision."));
+    assert!(sent[1].contains("Node kinds: commitment, question, option, evidence, decision."));
     assert!(sent[1].contains("\n(empty:"), "{}", sent[1]);
 }
 
@@ -728,12 +727,11 @@ fn a_headlines_map_sends_only_its_headline_nodes() {
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    assert!(sent[1].starts_with(
-        "The decisions map, built from this log. Node kinds: question, option, \
-         evidence, decision. Edge kinds: supports, contradicts, resolves.\n"
-    ));
+    assert!(sent[1].starts_with("The decisions map, built from this log."));
+    assert!(sent[1].contains(percept::DECISIONS.purpose));
+    assert!(sent[1].contains("Node kinds: commitment, question, option, evidence, decision."));
     assert!(
-        sent[1].contains("Its question and decision nodes follow; read_map shows the whole map.\n")
+        sent[1].contains("Its overview follows; read_map opens details and cited evidence IDs.\n")
     );
     assert!(sent[1].contains("- decision \"Rust over Go\""));
     assert!(!sent[1].contains("benchmarks"));
@@ -751,10 +749,9 @@ fn a_tool_shape_map_sends_only_its_size() {
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    assert!(sent[1].starts_with(
-        "The decisions map, built from this log. Node kinds: question, option, \
-         evidence, decision. Edge kinds: supports, contradicts, resolves.\n"
-    ));
+    assert!(sent[1].starts_with("The decisions map, built from this log."));
+    assert!(sent[1].contains(percept::DECISIONS.purpose));
+    assert!(sent[1].contains("Node kinds: commitment, question, option, evidence, decision."));
     assert!(sent[1].contains("It holds 2 nodes and 0 edges. read_map shows it."));
     assert!(!sent[1].contains("Rust over Go"));
 }

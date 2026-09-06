@@ -110,6 +110,9 @@ pub struct ShowMapArgs {
     /// for the code map, which is never folded from the log.
     #[arg(long)]
     all_projects: bool,
+    /// Render the selected map as Markdown instead of JSONL.
+    #[arg(long)]
+    markdown: bool,
 }
 
 impl ShowMapArgs {
@@ -455,18 +458,25 @@ pub fn maps_show_code(args: ShowMapArgs, root: &Path) -> Result<(), Box<dyn std:
 
 /// `maps_show` and `maps_show_code`'s shared tail: cut `map` to
 /// `args`'s filters, then print it nodes-then-edges.
-fn print_map(mut map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(node) = &args.around {
-        map = map.around(node, args.depth)?;
+fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let view = store::MapView::select(map, args.around.as_ref(), args.depth, &args.kind)?;
+    let filtered = args.around.is_some() || !args.kind.is_empty();
+    if filtered {
+        eprintln!("{}", view.summary());
     }
-    if !args.kind.is_empty() {
-        map = map.keep_kinds(&args.kind)?;
+    let map = &view.map;
+    if args.markdown {
+        let mut text = store::markdown(map);
+        if filtered {
+            text = format!("> {}\n\n{text}", view.summary());
+        }
+        return io::stdout()
+            .lock()
+            .write_all(text.as_bytes())
+            .or_else(stop_if_pipe_closed);
     }
     let nodes = map.nodes().iter().map(store::encode_node);
-    let edges = map
-        .edges()
-        .iter()
-        .map(|edge| store::encode_edge(&map, edge));
+    let edges = map.edges().iter().map(|edge| store::encode_edge(map, edge));
     print_lines(nodes.chain(edges))
 }
 

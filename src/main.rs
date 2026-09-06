@@ -46,7 +46,7 @@ const TUI_SOURCE_NAME: &str = "percept-tui";
 const CLI_SOURCE_NAME: &str = "percept-cli";
 
 /// Names how much of each cognitive map reaches the model each turn:
-/// `prompt` (the default, today's behaviour), `headlines`, or `tool`.
+/// `tool` (the default), `headlines`, or `prompt`.
 const MAPS_VAR: &str = "PERCEPT_MAPS";
 
 /// Where a project's maps are rendered as Markdown, under its root -
@@ -72,14 +72,15 @@ const FIREWORKS_KEY_VAR: &str = "FIREWORKS_API_KEY";
 
 /// What `percept reflect` asks the model to do. One place to change it,
 /// like the ollama settings above.
-const REFLECT_PROMPT: &str = "Revise the decisions map from recent events. \
-    First call search_events for questions raised, options weighed, \
-    evidence given, and decisions taken that the map does not yet hold; \
-    only its results carry event ids. Then record them with revise_map, \
-    citing those ids in each node's sources - a node without one is \
-    refused. Remove what no longer holds, with a reason. Reply with a \
-    short summary of what changed, or say the map already held \
-    everything.";
+const REFLECT_PROMPT: &str = "Review the decisions map against relevant recent events. \
+    Use read_map to select a fragment and search_events to find evidence; read cited events \
+    before correcting a claim. Retain rationale whose loss could cause a mistake, repeated \
+    debate, or constraint violation. A new event alone does not justify revision. \
+    Prefer local, cited evidence and relationships. Preserve familiar names and identities; \
+    discuss regrouping that changes navigation. Do not rename or remove for neatness. \
+    A recorded interpretation does not establish human agreement; keep disputed claims visible. \
+    Revise only when evidence changes meaning, using real source event IDs. \
+    Report changed meaning, its evidence, and affected conclusions, or say no revision is needed.";
 
 /// How often the status row's spinner advances while a turn streams.
 const SPINNER_TICK: std::time::Duration = std::time::Duration::from_millis(90);
@@ -174,8 +175,10 @@ fn log_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
 /// `scripts/install.sh` or a package manager put the binary.
 fn is_dev_build(exe: &Path) -> bool {
     exe.ancestors().any(|dir| {
-        matches!(dir.file_name().and_then(|name| name.to_str()), Some("debug" | "release"))
-            && dir.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new("target"))
+        matches!(
+            dir.file_name().and_then(|name| name.to_str()),
+            Some("debug" | "release")
+        ) && dir.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new("target"))
     })
 }
 
@@ -279,7 +282,7 @@ fn build_catalog() -> Catalog {
 }
 
 fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
-    let shape = std::env::var(MAPS_VAR).unwrap_or_else(|_| "prompt".to_string());
+    let shape = std::env::var(MAPS_VAR).unwrap_or_else(|_| "tool".to_string());
     match shape.as_str() {
         "prompt" => Ok(MapShape::Prompt),
         "headlines" => Ok(MapShape::Headlines),
@@ -301,14 +304,12 @@ fn build_app(
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
     let scope = source.scope();
-    let mut tools: Vec<Arc<dyn percept::Tool>> = vec![
+    let tools: Vec<Arc<dyn percept::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
         Arc::new(ReadEvent::new(log.clone())),
         Arc::new(ReviseMap::new(log.clone(), scope.clone())),
+        Arc::new(ReadMap::new(log.clone(), scope)),
     ];
-    if map_shape.opens_by_tool() {
-        tools.push(Arc::new(ReadMap::new(log.clone(), scope)));
-    }
     App::new(model, catalog, log, tools, renderer, map_shape, source)
 }
 

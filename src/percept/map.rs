@@ -47,6 +47,7 @@ impl Source {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Schema {
     pub name: &'static str,
+    pub purpose: &'static str,
     pub node_kinds: &'static [&'static str],
     pub edge_kinds: &'static [&'static str],
     /// The node kinds worth a reader's attention without opening the
@@ -58,9 +59,10 @@ pub struct Schema {
 /// and on what grounds.
 pub const DECISIONS: Schema = Schema {
     name: "decisions",
-    node_kinds: &["question", "option", "evidence", "decision"],
-    edge_kinds: &["supports", "contradicts", "resolves"],
-    headline_kinds: &["question", "decision"],
+    purpose: "Lasting commitments, their rationale, exceptions, and supporting choices.",
+    node_kinds: &["commitment", "question", "option", "evidence", "decision"],
+    edge_kinds: &["details", "supports", "contradicts", "resolves"],
+    headline_kinds: &["commitment", "question", "decision"],
 };
 
 /// The code map: a codebase's files, the symbols they define, and what
@@ -68,6 +70,7 @@ pub const DECISIONS: Schema = Schema {
 /// log, so it is in `DERIVED` and not `SCHEMAS`.
 pub const CODE: Schema = Schema {
     name: "code",
+    purpose: "Files, symbols, and imports in the current checkout.",
     node_kinds: &["file", "function", "type", "package"],
     edge_kinds: &["contains", "imports"],
     headline_kinds: &["file"],
@@ -360,13 +363,44 @@ impl Map {
         &self.nodes
     }
 
-    /// The nodes of the schema's headline kinds, in map order - what a
-    /// reader sees of the map before opening it.
+    /// Headline nodes in map order. Explicit commitment groups keep
+    /// supporting choices and their resolved questions below the overview.
     pub fn headlines(&self) -> impl Iterator<Item = &Node> {
         let kinds = self.schema.headline_kinds;
-        self.nodes
+        let grouped: HashSet<NodeId> = if self.schema == &DECISIONS {
+            self.edges
+                .iter()
+                .filter(|edge| {
+                    edge.kind == "details"
+                        && self
+                            .node(edge.from)
+                            .is_some_and(|node| node.kind == "commitment")
+                })
+                .map(|edge| edge.to)
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        let resolved: HashSet<NodeId> = self
+            .edges
             .iter()
-            .filter(move |node| kinds.contains(&node.kind.as_str()))
+            .filter(|edge| {
+                edge.kind == "resolves"
+                    && grouped.contains(&edge.from)
+                    && self
+                        .node(edge.from)
+                        .is_some_and(|node| node.kind == "decision")
+                    && self
+                        .node(edge.to)
+                        .is_some_and(|node| node.kind == "question")
+            })
+            .map(|edge| edge.to)
+            .collect();
+        self.nodes.iter().filter(move |node| {
+            kinds.contains(&node.kind.as_str())
+                && (node.kind == "commitment"
+                    || (!grouped.contains(&node.id) && !resolved.contains(&node.id)))
+        })
     }
 
     pub fn edges(&self) -> &[Edge] {

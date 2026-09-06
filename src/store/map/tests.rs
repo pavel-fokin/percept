@@ -195,3 +195,15 @@ fn an_edge_line_names_its_ends_as_kind_and_name() {
     assert_eq!(line["to"], "package:clap");
     assert_eq!(line["sources"], serde_json::json!([]));
 }
+
+#[test]
+fn discovery_distinguishes_cognitive_and_working_tree_maps() {
+    let cognitive: serde_json::Value =
+        serde_json::from_str(&encode_map(&Map::empty(&crate::percept::DECISIONS))).unwrap();
+    let code: serde_json::Value =
+        serde_json::from_str(&encode_map(&Map::empty(&crate::percept::CODE))).unwrap();
+    assert_eq!(cognitive["origin"], "event log");
+    assert_eq!(code["origin"], "working tree");
+    assert!(cognitive["purpose"].as_str().unwrap().contains("rationale"));
+    assert!(code["purpose"].as_str().unwrap().contains("checkout"));
+}

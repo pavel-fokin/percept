@@ -9,7 +9,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::percept::{
-    Edge, EventId, EventLog, Map, MapError, Mutation, Node, NodeId, Payload, Schema, Scope,
+    Edge, EventId, EventLog, Map, MapError, Mutation, Node, NodeId, NodeRef, Payload, Schema, Scope,
 };
 use crate::store::event::ids;
 use crate::store::parse_event_id;
@@ -86,6 +86,8 @@ pub fn revise(
 #[derive(Serialize)]
 struct MapLine {
     map: &'static str,
+    purpose: &'static str,
+    origin: &'static str,
     nodes: usize,
     edges: usize,
 }
@@ -111,10 +113,103 @@ struct EdgeLine<'a> {
 pub fn encode_map(map: &Map) -> String {
     serde_json::to_string(&MapLine {
         map: map.schema().name,
+        purpose: map.schema().purpose,
+        origin: if crate::percept::DERIVED.contains(&map.schema()) {
+            "working tree"
+        } else {
+            "event log"
+        },
         nodes: map.nodes().len(),
         edges: map.edges().len(),
     })
     .expect("MapLine always serializes")
+}
+
+/// A selected fragment and the limits measured against its full map.
+pub struct MapView {
+    pub map: Map,
+    pub total_nodes: usize,
+    pub total_edges: usize,
+    pub boundary_edges: usize,
+}
+
+impl MapView {
+    pub fn select(
+        map: Map,
+        around: Option<&NodeRef>,
+        depth: usize,
+        kinds: &[String],
+    ) -> Result<Self, MapError> {
+        let total_nodes = map.nodes().len();
+        let total_edges = map.edges().len();
+        let mut selected = match around {
+            Some(node) => map.around(node, depth)?,
+            None if !kinds.is_empty() => map.keep_kinds(kinds)?,
+            None => {
+                return Ok(Self {
+                    map,
+                    total_nodes,
+                    total_edges,
+                    boundary_edges: 0,
+                })
+            }
+        };
+        if around.is_some() && !kinds.is_empty() {
+            selected = selected.keep_kinds(kinds)?;
+        }
+        let boundary_edges = map
+            .edges()
+            .iter()
+            .filter(|edge| selected.node(edge.from).is_some() != selected.node(edge.to).is_some())
+            .count();
+        Ok(Self {
+            map: selected,
+            total_nodes,
+            total_edges,
+            boundary_edges,
+        })
+    }
+
+    pub fn incomplete(&self) -> bool {
+        self.map.nodes().len() < self.total_nodes || self.map.edges().len() < self.total_edges
+    }
+
+    pub fn notice(&self) -> &'static str {
+        if self.incomplete() {
+            "Incomplete fragment: omitted material may contain exceptions, contradictions, or consequences. Expand before relying on it."
+        } else if self.total_nodes == 0 {
+            "The map is empty: nothing has been recorded here yet. The log may still hold relevant evidence."
+        } else {
+            "Complete recorded map; its interpretations and relationships may still be incomplete."
+        }
+    }
+
+    pub fn metadata(&self) -> String {
+        serde_json::json!({
+            "map": self.map.schema().name,
+            "shown_nodes": self.map.nodes().len(),
+            "total_nodes": self.total_nodes,
+            "shown_edges": self.map.edges().len(),
+            "total_edges": self.total_edges,
+            "boundary_edges": self.boundary_edges,
+            "incomplete": self.incomplete(),
+            "notice": self.notice(),
+        })
+        .to_string()
+    }
+
+    pub fn summary(&self) -> String {
+        format!(
+            "{}: showing {}/{} nodes and {}/{} edges; {} crossing boundary edges. {}",
+            self.map.schema().name,
+            self.map.nodes().len(),
+            self.total_nodes,
+            self.map.edges().len(),
+            self.total_edges,
+            self.boundary_edges,
+            self.notice(),
+        )
+    }
 }
 
 pub fn encode_node(node: &Node) -> String {

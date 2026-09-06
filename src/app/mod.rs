@@ -19,19 +19,12 @@ const CONTEXT_EVENTS: usize = 20;
 /// to check a change before it commits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MapShape {
-    /// The whole map, as today.
+    /// The whole map in the prompt; `read_map` supplies evidence IDs.
     Prompt,
     /// Only its headline nodes; `read_map` opens the rest.
     Headlines,
     /// Only its size; `read_map` opens it.
     Tool,
-}
-
-impl MapShape {
-    /// Whether the model needs `read_map` to see a whole map.
-    pub fn opens_by_tool(self) -> bool {
-        matches!(self, Self::Headlines | Self::Tool)
-    }
 }
 
 /// What a presentation needs from the app layer - `tui` and `cli::ask`
@@ -165,8 +158,7 @@ fn last_model_called(events: &[Event]) -> Option<usize> {
 fn headlines_body(map: &Map) -> String {
     let lines: Vec<String> = map.headlines().map(|node| format!("- {node}")).collect();
     format!(
-        "Its {} nodes follow; read_map shows the whole map.\n{}",
-        map.schema().headline_kinds.join(" and "),
+        "Its overview follows; read_map opens details and cited evidence IDs.\n{}",
         lines.join("\n")
     )
 }
@@ -417,8 +409,12 @@ impl App {
             messages.push(percept::Message::Text {
                 role: Actor::System,
                 content: format!(
-                    "The {} map, built from this log. Node kinds: {}. Edge kinds: {}.\n{body}",
+                    "The {} map, built from this log. {} Node kinds: {}. Edge kinds: {}.\n\
+                    Maps are interpretations, not proof of agreement. Choose a relevant fragment with read_map. \
+                    Check cited events on contradictions or consequential corrections, then inspect affected conclusions. \
+                    New events alone do not require revision.\n{body}",
                     schema.name,
+                    schema.purpose,
                     schema.node_kinds.join(", "),
                     schema.edge_kinds.join(", ")
                 ),
