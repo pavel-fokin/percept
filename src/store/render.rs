@@ -197,7 +197,11 @@ fn push_decision_line(
         marked_name(decision),
         decision.properties_line()
     );
-    if let Some(source) = decision.sources.first().filter(|source| Some(**source) != group) {
+    if let Some(source) = decision
+        .sources
+        .first()
+        .filter(|source| Some(**source) != group)
+    {
         let _ = writeln!(out, "  source {}", source.as_uuid());
     }
     for was in map.predecessors(decision.id) {

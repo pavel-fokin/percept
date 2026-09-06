@@ -128,7 +128,7 @@ impl Tool for SearchEvents {
 
 /// ISO-8601 only - the model is told the current time and works out
 /// absolute bounds itself, so no relative shorthand and no clock here.
-fn parse_time(s: &str) -> Result<Timestamp, Box<dyn std::error::Error>> {
+pub(super) fn parse_time(s: &str) -> Result<Timestamp, Box<dyn std::error::Error>> {
     s.parse()
         .map_err(|_| format!("invalid timestamp {s:?}, expected ISO-8601").into())
 }

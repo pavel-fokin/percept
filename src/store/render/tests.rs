@@ -5,7 +5,14 @@ use crate::percept::{Actor, EventId, Mutation, CODE, DECISIONS, SUPERSEDES};
 use crate::testing::node_ref;
 
 /// Adds a node with one `why` property when `why` is given.
-fn add(map: &mut Map, kind: &str, name: &str, why: Option<&str>, sources: &[EventId], actor: Actor) {
+fn add(
+    map: &mut Map,
+    kind: &str,
+    name: &str,
+    why: Option<&str>,
+    sources: &[EventId],
+    actor: Actor,
+) {
     let properties = why
         .map(|why| BTreeMap::from([("why".to_string(), why.to_string())]))
         .unwrap_or_default();
@@ -64,7 +71,14 @@ fn an_empty_decisions_map_renders_the_preamble_and_the_empty_notice() {
 fn questions_group_under_the_prompt_that_raised_them_in_first_seen_order() {
     let mut map = Map::empty(&DECISIONS);
     let (first, second) = (EventId::new(), EventId::new());
-    add(&mut map, "question", "Where does the event log live?", None, &[first], Actor::User);
+    add(
+        &mut map,
+        "question",
+        "Where does the event log live?",
+        None,
+        &[first],
+        Actor::User,
+    );
     add(
         &mut map,
         "decision",
@@ -79,7 +93,14 @@ fn questions_group_under_the_prompt_that_raised_them_in_first_seen_order() {
         ("decision", "one log under ~/.percept"),
         ("question", "Where does the event log live?"),
     );
-    add(&mut map, "question", "How is a decision corrected?", None, &[second], Actor::User);
+    add(
+        &mut map,
+        "question",
+        "How is a decision corrected?",
+        None,
+        &[second],
+        Actor::User,
+    );
     add(
         &mut map,
         "decision",
@@ -115,7 +136,14 @@ fn questions_group_under_the_prompt_that_raised_them_in_first_seen_order() {
 #[test]
 fn a_question_without_a_decision_is_open() {
     let mut map = Map::empty(&DECISIONS);
-    add(&mut map, "question", "Which key accepts a suggestion?", None, &[], Actor::User);
+    add(
+        &mut map,
+        "question",
+        "Which key accepts a suggestion?",
+        None,
+        &[],
+        Actor::User,
+    );
 
     assert_eq!(
         markdown(&map),
@@ -133,15 +161,36 @@ fn a_question_without_a_decision_is_open() {
 fn a_superseding_decision_settles_the_question_its_predecessor_resolved() {
     let mut map = Map::empty(&DECISIONS);
     let source = EventId::new();
-    add(&mut map, "question", "Which model is default?", None, &[source], Actor::User);
-    add(&mut map, "decision", "gpt3 by default", None, &[source], Actor::User);
+    add(
+        &mut map,
+        "question",
+        "Which model is default?",
+        None,
+        &[source],
+        Actor::User,
+    );
+    add(
+        &mut map,
+        "decision",
+        "gpt3 by default",
+        None,
+        &[source],
+        Actor::User,
+    );
     link(
         &mut map,
         "resolves",
         ("decision", "gpt3 by default"),
         ("question", "Which model is default?"),
     );
-    add(&mut map, "decision", "gemma4 by default", None, &[source], Actor::User);
+    add(
+        &mut map,
+        "decision",
+        "gemma4 by default",
+        None,
+        &[source],
+        Actor::User,
+    );
     link(
         &mut map,
         SUPERSEDES,
@@ -167,11 +216,23 @@ fn a_superseding_decision_settles_the_question_its_predecessor_resolved() {
 fn a_supersession_chain_lists_every_predecessor_nearest_first() {
     let mut map = Map::empty(&DECISIONS);
     let source = EventId::new();
-    add(&mut map, "question", "Which model?", None, &[source], Actor::User);
+    add(
+        &mut map,
+        "question",
+        "Which model?",
+        None,
+        &[source],
+        Actor::User,
+    );
     for name in ["A", "B", "C"] {
         add(&mut map, "decision", name, None, &[source], Actor::User);
     }
-    link(&mut map, "resolves", ("decision", "A"), ("question", "Which model?"));
+    link(
+        &mut map,
+        "resolves",
+        ("decision", "A"),
+        ("question", "Which model?"),
+    );
     link(&mut map, SUPERSEDES, ("decision", "B"), ("decision", "A"));
     link(&mut map, SUPERSEDES, ("decision", "C"), ("decision", "B"));
 
@@ -194,9 +255,28 @@ fn a_supersession_chain_lists_every_predecessor_nearest_first() {
 fn a_decision_citing_another_prompt_than_its_question_names_it() {
     let mut map = Map::empty(&DECISIONS);
     let (raised, settled) = (EventId::new(), EventId::new());
-    add(&mut map, "question", "Which model?", None, &[raised], Actor::User);
-    add(&mut map, "decision", "gemma4", None, &[settled], Actor::User);
-    link(&mut map, "resolves", ("decision", "gemma4"), ("question", "Which model?"));
+    add(
+        &mut map,
+        "question",
+        "Which model?",
+        None,
+        &[raised],
+        Actor::User,
+    );
+    add(
+        &mut map,
+        "decision",
+        "gemma4",
+        None,
+        &[settled],
+        Actor::User,
+    );
+    link(
+        &mut map,
+        "resolves",
+        ("decision", "gemma4"),
+        ("question", "Which model?"),
+    );
 
     assert_eq!(
         markdown(&map),
@@ -217,7 +297,14 @@ fn a_decision_citing_another_prompt_than_its_question_names_it() {
 fn a_model_written_node_is_marked() {
     let mut map = Map::empty(&DECISIONS);
     let source = EventId::new();
-    add(&mut map, "question", "Which key accepts a suggestion?", None, &[source], Actor::Model);
+    add(
+        &mut map,
+        "question",
+        "Which key accepts a suggestion?",
+        None,
+        &[source],
+        Actor::Model,
+    );
 
     assert_eq!(
         markdown(&map),
@@ -236,7 +323,14 @@ fn a_model_written_node_is_marked() {
 fn a_decision_resolving_no_question_is_its_own_bullet() {
     let mut map = Map::empty(&DECISIONS);
     let source = EventId::new();
-    add(&mut map, "decision", "gemma4 by default", Some("the local model"), &[source], Actor::Model);
+    add(
+        &mut map,
+        "decision",
+        "gemma4 by default",
+        Some("the local model"),
+        &[source],
+        Actor::Model,
+    );
 
     assert_eq!(
         markdown(&map),
@@ -255,8 +349,20 @@ fn a_resolves_edge_between_the_wrong_kinds_settles_nothing() {
     let mut map = Map::empty(&DECISIONS);
     let source = EventId::new();
     add(&mut map, "option", "gemma4", None, &[source], Actor::User);
-    add(&mut map, "decision", "gemma4 by default", None, &[source], Actor::User);
-    link(&mut map, "resolves", ("decision", "gemma4 by default"), ("option", "gemma4"));
+    add(
+        &mut map,
+        "decision",
+        "gemma4 by default",
+        None,
+        &[source],
+        Actor::User,
+    );
+    link(
+        &mut map,
+        "resolves",
+        ("decision", "gemma4 by default"),
+        ("option", "gemma4"),
+    );
 
     assert!(markdown(&map).contains("- decision \"gemma4 by default\"\n"));
 }
@@ -264,11 +370,21 @@ fn a_resolves_edge_between_the_wrong_kinds_settles_nothing() {
 #[test]
 fn a_map_with_no_question_or_decision_says_so() {
     let mut map = Map::empty(&DECISIONS);
-    add(&mut map, "option", "Rust", None, &[EventId::new()], Actor::User);
+    add(
+        &mut map,
+        "option",
+        "Rust",
+        None,
+        &[EventId::new()],
+        Actor::User,
+    );
 
     assert_eq!(
         markdown(&map),
-        format!("{}\n(no question or decision yet; 1 nodes of other kinds.)\n", head())
+        format!(
+            "{}\n(no question or decision yet; 1 nodes of other kinds.)\n",
+            head()
+        )
     );
 }
 
@@ -287,7 +403,12 @@ fn a_map_of_another_schema_renders_per_kind() {
         Actor::System,
     )
     .unwrap();
-    link(&mut map, "contains", ("file", "src/main.rs"), ("function", "main"));
+    link(
+        &mut map,
+        "contains",
+        ("file", "src/main.rs"),
+        ("function", "main"),
+    );
 
     let expected = format!(
         "# code\n\

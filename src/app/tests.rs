@@ -739,7 +739,9 @@ fn a_headlines_map_sends_only_its_headline_nodes() {
     let sent = model.last_request();
     assert_decisions_header(&sent[1]);
     assert!(
-        sent[1].contains("Its question and decision nodes follow; read_map shows the whole map.\n")
+        sent[1].contains(
+            "Its question and decision nodes follow; read_map opens the rest, whole or around one node.\n"
+        )
     );
     assert!(sent[1].contains("- decision \"Rust over Go\""));
     assert!(!sent[1].contains("benchmarks"));
@@ -785,7 +787,11 @@ fn an_empty_map_header_says_it_holds_nothing_yet() {
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    assert!(sent[1].contains(". It holds nothing yet. Node kinds:"), "{}", sent[1]);
+    assert!(
+        sent[1].contains(". It holds nothing yet. Node kinds:"),
+        "{}",
+        sent[1]
+    );
 }
 
 #[test]

@@ -470,21 +470,19 @@ pub fn maps_show_code(args: ShowMapArgs, root: &Path) -> Result<(), Box<dyn std:
 /// `maps_show` and `maps_show_code`'s shared tail: cut `map` to
 /// `args`'s filters, then print it nodes-then-edges. `--since` runs
 /// after `--around`, so it reads as "what changed near this node".
-fn print_map(mut map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(node) = &args.around {
-        map = map.around(node, args.depth)?;
+fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let selection = percept::Selection {
+        around: args.around.as_ref().map(|node| (node, args.depth)),
+        since: args.since,
+        kinds: &args.kind,
+    };
+    let fragment = map.select(&selection)?;
+    if !selection.is_whole() {
+        eprintln!("{}", store::describe_fragment(&fragment));
     }
-    if let Some(at) = args.since {
-        map = map.since(at);
-    }
-    if !args.kind.is_empty() {
-        map = map.keep_kinds(&args.kind)?;
-    }
-    let nodes = map.nodes().iter().map(|node| store::encode_node(&map, node));
-    let edges = map
-        .edges()
-        .iter()
-        .map(|edge| store::encode_edge(&map, edge));
+    let map = fragment.map();
+    let nodes = map.nodes().iter().map(|node| store::encode_node(map, node));
+    let edges = map.edges().iter().map(|edge| store::encode_edge(map, edge));
     print_lines(nodes.chain(edges))
 }
 

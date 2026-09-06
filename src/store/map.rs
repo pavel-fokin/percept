@@ -9,7 +9,8 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::percept::{
-    Actor, Edge, EventId, EventLog, Map, MapError, Mutation, Node, NodeId, Payload, Schema, Scope,
+    Actor, Edge, EventId, EventLog, Fragment, Map, MapError, Mutation, Node, NodeId, Payload,
+    Schema, Scope,
 };
 use crate::shared::Timestamp;
 use crate::store::event::{actor_name, ids};
@@ -147,6 +148,53 @@ pub fn encode_map(map: &Map) -> String {
         edges: map.edges().len(),
     })
     .expect("MapLine always serializes")
+}
+
+#[derive(Serialize)]
+struct FragmentLine<'a> {
+    map: &'static str,
+    shown_nodes: usize,
+    total_nodes: usize,
+    shown_edges: usize,
+    total_edges: usize,
+    boundary_edges: usize,
+    partial: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<&'a str>,
+}
+
+const NOTHING_RECORDED: &str =
+    "nothing has been recorded here yet; the log may still hold what it would";
+
+/// One line saying how much of a map a fragment shows, printed before
+/// the fragment's nodes so a reader knows what the cut left out.
+pub fn encode_fragment(fragment: &Fragment) -> String {
+    let map = fragment.map();
+    serde_json::to_string(&FragmentLine {
+        map: map.schema().name,
+        shown_nodes: map.nodes().len(),
+        total_nodes: fragment.total_nodes(),
+        shown_edges: map.edges().len(),
+        total_edges: fragment.total_edges(),
+        boundary_edges: fragment.boundary_edges(),
+        partial: fragment.is_partial(),
+        note: (fragment.total_nodes() == 0).then_some(NOTHING_RECORDED),
+    })
+    .expect("FragmentLine always serializes")
+}
+
+/// `encode_fragment` as one line of prose, for a terminal's stderr.
+pub fn describe_fragment(fragment: &Fragment) -> String {
+    let map = fragment.map();
+    format!(
+        "{}: {} of {} nodes, {} of {} edges; {} edges cross the cut",
+        map.schema().name,
+        map.nodes().len(),
+        fragment.total_nodes(),
+        map.edges().len(),
+        fragment.total_edges(),
+        fragment.boundary_edges(),
+    )
 }
 
 pub fn encode_node(map: &Map, node: &Node) -> String {

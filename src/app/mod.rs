@@ -179,7 +179,7 @@ fn catalogue_line(map: &Map) -> String {
 fn headlines_body(map: &Map) -> String {
     let lines: Vec<String> = map.headlines().map(|node| format!("- {node}")).collect();
     format!(
-        "Its {} nodes follow; read_map shows the whole map.\n{}",
+        "Its {} nodes follow; read_map opens the rest, whole or around one node.\n{}",
         map.schema().headline_kinds.join(" and "),
         lines.join("\n")
     )

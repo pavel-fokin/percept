@@ -182,6 +182,56 @@ impl fmt::Display for NodeRef {
     }
 }
 
+/// How much of a map a reader asked for. `around` cuts first, then
+/// `since`, then `kinds`, so the three together read as "what changed
+/// near this node, of these kinds". All absent is the whole map.
+#[derive(Default)]
+pub struct Selection<'a> {
+    pub around: Option<(&'a NodeRef, usize)>,
+    pub since: Option<Timestamp>,
+    pub kinds: &'a [String],
+}
+
+impl Selection<'_> {
+    pub fn is_whole(&self) -> bool {
+        self.around.is_none() && self.since.is_none() && self.kinds.is_empty()
+    }
+}
+
+/// A map cut to a `Selection`, with what the cut left out counted: the
+/// whole map's size, and the edges with one end inside the cut and one
+/// outside - where a reader who needs more widens from.
+pub struct Fragment {
+    map: Map,
+    total_nodes: usize,
+    total_edges: usize,
+    boundary_edges: usize,
+}
+
+impl Fragment {
+    pub fn map(&self) -> &Map {
+        &self.map
+    }
+
+    pub fn total_nodes(&self) -> usize {
+        self.total_nodes
+    }
+
+    pub fn total_edges(&self) -> usize {
+        self.total_edges
+    }
+
+    pub fn boundary_edges(&self) -> usize {
+        self.boundary_edges
+    }
+
+    /// Whether the cut left anything out. A whole map is never partial,
+    /// even an empty one.
+    pub fn is_partial(&self) -> bool {
+        self.map.nodes.len() < self.total_nodes || self.map.edges.len() < self.total_edges
+    }
+}
+
 /// One change a writer asks for. Names nodes by `NodeRef`; the
 /// `Payload` that `apply` returns carries ids.
 pub enum Mutation {
@@ -491,14 +541,17 @@ impl Map {
         let chain: HashSet<NodeId> = std::iter::once(decision)
             .chain(self.predecessors(decision).iter().map(|node| node.id))
             .collect();
-        self.resolving_edges().any(|edge| chain.contains(&edge.from))
+        self.resolving_edges()
+            .any(|edge| chain.contains(&edge.from))
     }
 
     /// The `resolves` edges that run from a decision to a question.
     fn resolving_edges(&self) -> impl Iterator<Item = &Edge> {
         self.edges.iter().filter(|edge| {
             edge.kind == RESOLVES
-                && self.node(edge.from).is_some_and(|node| node.kind == DECISION)
+                && self
+                    .node(edge.from)
+                    .is_some_and(|node| node.kind == DECISION)
                 && self.node(edge.to).is_some_and(|node| node.kind == QUESTION)
         })
     }
@@ -579,10 +632,7 @@ impl Map {
             .iter()
             .filter(|edge| edge.added_at >= at)
             .collect();
-        let touched: HashSet<NodeId> = fresh
-            .iter()
-            .flat_map(|edge| [edge.from, edge.to])
-            .collect();
+        let touched: HashSet<NodeId> = fresh.iter().flat_map(|edge| [edge.from, edge.to]).collect();
         let nodes = self
             .nodes
             .iter()
@@ -591,6 +641,43 @@ impl Map {
             .collect();
         let edges = fresh.into_iter().cloned().collect();
         Self::from_parts(self.schema, nodes, edges)
+    }
+
+    /// The map cut to `selection`, in its fixed order, counting what
+    /// the cut left out. Consumes the map: a whole selection is the map
+    /// itself, not a copy.
+    pub fn select(self, selection: &Selection) -> Result<Fragment, MapError> {
+        let total_nodes = self.nodes.len();
+        let total_edges = self.edges.len();
+        let mut cut: Option<Map> = None;
+        if let Some((node, depth)) = selection.around {
+            cut = Some(self.around(node, depth)?);
+        }
+        if let Some(at) = selection.since {
+            cut = Some(cut.as_ref().unwrap_or(&self).since(at));
+        }
+        if !selection.kinds.is_empty() {
+            cut = Some(cut.as_ref().unwrap_or(&self).keep_kinds(selection.kinds)?);
+        }
+        let Some(cut) = cut else {
+            return Ok(Fragment {
+                map: self,
+                total_nodes,
+                total_edges,
+                boundary_edges: 0,
+            });
+        };
+        let boundary_edges = self
+            .edges
+            .iter()
+            .filter(|edge| cut.node(edge.from).is_some() != cut.node(edge.to).is_some())
+            .count();
+        Ok(Fragment {
+            map: cut,
+            total_nodes,
+            total_edges,
+            boundary_edges,
+        })
     }
 
     /// A copy holding `nodes` and only the edges that join two of them.

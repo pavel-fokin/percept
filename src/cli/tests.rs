@@ -331,14 +331,17 @@ fn depth_is_refused_without_around() {
 
 #[test]
 fn since_on_maps_show_parses_like_events_search() {
-    let cli = Cli::try_parse_from(["percept", "maps", "show", "decisions", "--since", "1d"]).unwrap();
+    let cli =
+        Cli::try_parse_from(["percept", "maps", "show", "decisions", "--since", "1d"]).unwrap();
     match cli.command {
         Some(Command::Maps {
             command: MapsCommand::Show(args),
         }) => assert!(args.since.is_some()),
         _ => panic!("expected maps show"),
     }
-    assert!(Cli::try_parse_from(["percept", "maps", "show", "decisions", "--since", "soon"]).is_err());
+    assert!(
+        Cli::try_parse_from(["percept", "maps", "show", "decisions", "--since", "soon"]).is_err()
+    );
 }
 
 #[test]
@@ -351,7 +354,10 @@ fn since_is_refused_for_the_code_map() {
         panic!("expected maps show");
     };
 
-    let err = maps_show_code(args, Path::new(ROOT)).err().unwrap().to_string();
+    let err = maps_show_code(args, Path::new(ROOT))
+        .err()
+        .unwrap()
+        .to_string();
 
     assert!(err.contains("no history"), "{err}");
 }

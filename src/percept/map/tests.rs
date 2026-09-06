@@ -46,7 +46,11 @@ fn successor_follows_a_supersession_chain_to_its_end() {
 
     assert_eq!(map.successor(a), c);
     assert_eq!(map.successor(c), c);
-    let names: Vec<&str> = map.predecessors(c).iter().map(|node| node.name.as_str()).collect();
+    let names: Vec<&str> = map
+        .predecessors(c)
+        .iter()
+        .map(|node| node.name.as_str())
+        .collect();
     assert_eq!(names, ["B", "A"]);
 }
 
@@ -62,7 +66,11 @@ fn a_question_is_settled_by_the_current_end_of_each_resolvers_chain() {
     ];
     let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
 
-    let names: Vec<&str> = map.settled_by(q).iter().map(|node| node.name.as_str()).collect();
+    let names: Vec<&str> = map
+        .settled_by(q)
+        .iter()
+        .map(|node| node.name.as_str())
+        .collect();
     assert_eq!(names, ["B"]);
     assert!(map.settles(a));
     assert!(map.settles(b));
@@ -100,7 +108,10 @@ fn since_keeps_what_was_added_from_that_instant_and_what_it_attached_to() {
     let at = Timestamp::now();
     let earlier = at.minus_minutes(1).unwrap();
     let events = [
-        created_at(node_added("decisions", question, "question", "Which language?"), earlier),
+        created_at(
+            node_added("decisions", question, "question", "Which language?"),
+            earlier,
+        ),
         created_at(node_added("decisions", old, "option", "Go"), earlier),
         created_at(node_added("decisions", new, "decision", "Rust"), at),
         created_at(edge_added("decisions", "resolves", new, question), at),
@@ -121,9 +132,15 @@ fn since_leaves_out_an_edge_older_than_the_instant_between_kept_nodes() {
     let at = Timestamp::now();
     let earlier = at.minus_minutes(1).unwrap();
     let events = [
-        created_at(node_added("decisions", question, "question", "Which language?"), earlier),
+        created_at(
+            node_added("decisions", question, "question", "Which language?"),
+            earlier,
+        ),
         created_at(node_added("decisions", decision, "decision", "Rust"), at),
-        created_at(edge_added("decisions", "resolves", decision, question), earlier),
+        created_at(
+            edge_added("decisions", "resolves", decision, question),
+            earlier,
+        ),
     ];
     let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
 
@@ -672,6 +689,34 @@ fn around_follows_edges_both_ways_one_step_per_depth() {
         .unwrap();
     assert_eq!(two.nodes().len(), 3, "the unlinked option stays out");
     assert_eq!(two.edges().len(), 2);
+}
+
+#[test]
+fn select_counts_the_whole_and_the_edges_crossing_the_cut() {
+    let whole = chain();
+    let (nodes, edges) = (whole.nodes().len(), whole.edges().len());
+    let question = node_ref("question", "Which language?");
+    let selection = Selection {
+        around: Some((&question, 1)),
+        ..Selection::default()
+    };
+
+    let fragment = whole.select(&selection).unwrap();
+
+    assert_eq!(fragment.map().nodes().len(), 2);
+    assert_eq!(fragment.total_nodes(), nodes);
+    assert_eq!(fragment.total_edges(), edges);
+    assert_eq!(fragment.boundary_edges(), 1, "the decision's edge onward");
+    assert!(fragment.is_partial());
+}
+
+#[test]
+fn a_whole_selection_is_the_map_itself_and_never_partial() {
+    let fragment = chain().select(&Selection::default()).unwrap();
+
+    assert_eq!(fragment.map().nodes().len(), fragment.total_nodes());
+    assert_eq!(fragment.boundary_edges(), 0);
+    assert!(!fragment.is_partial());
 }
 
 #[test]

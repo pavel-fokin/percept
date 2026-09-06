@@ -37,11 +37,7 @@ pub fn draw(frame: &mut Frame, chat: &mut Chat) {
     // Reserved rows other than the transcript and the input itself: the
     // activity and suggestion rows above it, the hint and model rows
     // below.
-    let input_height = input_height(
-        chat,
-        area.height,
-        activity_height + suggestions_height + 2,
-    );
+    let input_height = input_height(chat, area.height, activity_height + suggestions_height + 2);
     let [transcript_area, activity_area, suggestions_area, input_area, hint_area, model_area] =
         Layout::vertical([
             Constraint::Min(1),
@@ -92,7 +88,10 @@ fn draw_models_menu(frame: &mut Frame, area: Rect, menu: &ModelsMenu) {
             .map(|d| ListItem::new(format!("{}/{}", d.provider, d.model)))
             .collect(),
     };
-    let selected = menu.descriptors().is_some_and(|d| !d.is_empty()).then(|| menu.selected_index());
+    let selected = menu
+        .descriptors()
+        .is_some_and(|d| !d.is_empty())
+        .then(|| menu.selected_index());
     render_selectable_list(frame, inner, items, selected);
 }
 
@@ -122,7 +121,12 @@ fn draw_command_suggestions(frame: &mut Frame, chat: &Chat, area: Rect) {
 /// look every popup or dropdown with a highlighted row shares.
 /// `selected: None` renders the list with nothing highlighted, for a
 /// popup still loading with no row to pick yet.
-fn render_selectable_list(frame: &mut Frame, area: Rect, items: Vec<ListItem>, selected: Option<usize>) {
+fn render_selectable_list(
+    frame: &mut Frame,
+    area: Rect,
+    items: Vec<ListItem>,
+    selected: Option<usize>,
+) {
     let list = List::new(items).highlight_style(Style::default().add_modifier(Modifier::REVERSED));
     let mut state = ListState::default();
     state.select(selected);

@@ -174,8 +174,10 @@ fn log_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
 /// `scripts/install.sh` or a package manager put the binary.
 fn is_dev_build(exe: &Path) -> bool {
     exe.ancestors().any(|dir| {
-        matches!(dir.file_name().and_then(|name| name.to_str()), Some("debug" | "release"))
-            && dir.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new("target"))
+        matches!(
+            dir.file_name().and_then(|name| name.to_str()),
+            Some("debug" | "release")
+        ) && dir.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new("target"))
     })
 }
 
