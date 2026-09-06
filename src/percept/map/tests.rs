@@ -18,6 +18,34 @@ fn headlines_are_the_schema_s_headline_kinds_in_map_order() {
     assert_eq!(names, ["Which language?", "Rust"]);
 }
 
+#[test]
+fn a_superseded_decision_leaves_the_headlines() {
+    let (old, new) = (NodeId::new(), NodeId::new());
+    let events = [
+        node_added("decisions", old, "decision", "Go"),
+        node_added("decisions", new, "decision", "Rust"),
+        edge_added("decisions", SUPERSEDES, new, old),
+    ];
+    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let names: Vec<&str> = map.headlines().map(|node| node.name.as_str()).collect();
+    assert_eq!(names, ["Rust"]);
+    assert!(map.is_superseded(old));
+}
+
+#[test]
+fn supersedes_lists_the_decisions_a_node_replaced() {
+    let (old, new) = (NodeId::new(), NodeId::new());
+    let events = [
+        node_added("decisions", old, "decision", "Go"),
+        node_added("decisions", new, "decision", "Rust"),
+        edge_added("decisions", SUPERSEDES, new, old),
+    ];
+    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let names: Vec<&str> = map.supersedes(new).map(|node| node.name.as_str()).collect();
+    assert_eq!(names, ["Go"]);
+    assert_eq!(map.supersedes(old).count(), 0);
+}
+
 fn node_added(map: &str, node: NodeId, kind: &str, name: &str) -> Event {
     committed(Payload::NodeAdded {
         map: map.to_string(),

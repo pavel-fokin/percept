@@ -54,12 +54,17 @@ pub struct Schema {
     pub headline_kinds: &'static [&'static str],
 }
 
+/// The edge kind that corrects a decision: from the new one to the one
+/// it replaces. The old node stays, one hop away, and leaves the
+/// headlines - a removal would take a reader's landmark with it.
+pub const SUPERSEDES: &str = "supersedes";
+
 /// The decision map: what was asked, what was weighed, what was chosen
 /// and on what grounds.
 pub const DECISIONS: Schema = Schema {
     name: "decisions",
     node_kinds: &["question", "option", "evidence", "decision"],
-    edge_kinds: &["supports", "contradicts", "resolves"],
+    edge_kinds: &["supports", "contradicts", "resolves", SUPERSEDES],
     headline_kinds: &["question", "decision"],
 };
 
@@ -366,13 +371,30 @@ impl Map {
         &self.nodes
     }
 
-    /// The nodes of the schema's headline kinds, in map order - what a
-    /// reader sees of the map before opening it.
+    /// The nodes of the schema's headline kinds, in map order, less the
+    /// superseded ones - what a reader sees of the map before opening
+    /// it.
     pub fn headlines(&self) -> impl Iterator<Item = &Node> {
         let kinds = self.schema.headline_kinds;
         self.nodes
             .iter()
             .filter(move |node| kinds.contains(&node.kind.as_str()))
+            .filter(|node| !self.is_superseded(node.id))
+    }
+
+    /// Whether another node has a `supersedes` edge to `id`.
+    pub fn is_superseded(&self, id: NodeId) -> bool {
+        self.edges
+            .iter()
+            .any(|edge| edge.kind == SUPERSEDES && edge.to == id)
+    }
+
+    /// The nodes `id` supersedes, in map order.
+    pub fn supersedes(&self, id: NodeId) -> impl Iterator<Item = &Node> {
+        self.edges
+            .iter()
+            .filter(move |edge| edge.kind == SUPERSEDES && edge.from == id)
+            .filter_map(|edge| self.node(edge.to))
     }
 
     pub fn edges(&self) -> &[Edge] {

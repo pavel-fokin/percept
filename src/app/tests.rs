@@ -699,7 +699,7 @@ fn a_map_is_sent_with_its_kinds_ahead_of_the_transcript_and_outside_the_window()
     assert_eq!(sent.len(), CONTEXT_EVENTS + 2);
     assert!(sent[1].starts_with(
         "The decisions map, built from this log. Node kinds: question, option, \
-         evidence, decision. Edge kinds: supports, contradicts, resolves.\n"
+         evidence, decision. Edge kinds: supports, contradicts, resolves, supersedes.\n"
     ));
     assert!(sent[1].contains("- decision \"Rust over Go\""));
 }
@@ -730,7 +730,7 @@ fn a_headlines_map_sends_only_its_headline_nodes() {
     let sent = model.last_request();
     assert!(sent[1].starts_with(
         "The decisions map, built from this log. Node kinds: question, option, \
-         evidence, decision. Edge kinds: supports, contradicts, resolves.\n"
+         evidence, decision. Edge kinds: supports, contradicts, resolves, supersedes.\n"
     ));
     assert!(
         sent[1].contains("Its question and decision nodes follow; read_map shows the whole map.\n")
@@ -753,7 +753,7 @@ fn a_tool_shape_map_sends_only_its_size() {
     let sent = model.last_request();
     assert!(sent[1].starts_with(
         "The decisions map, built from this log. Node kinds: question, option, \
-         evidence, decision. Edge kinds: supports, contradicts, resolves.\n"
+         evidence, decision. Edge kinds: supports, contradicts, resolves, supersedes.\n"
     ));
     assert!(sent[1].contains("It holds 2 nodes and 0 edges. read_map shows it."));
     assert!(!sent[1].contains("Rust over Go"));
