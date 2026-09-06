@@ -196,28 +196,31 @@ fn open_log() -> Result<Jsonl, Box<dyn std::error::Error>> {
 /// directory scans every project under it, and on macOS the
 /// TCC-protected Desktop, Photos and Music, so a project sitting at
 /// `$HOME` itself is not supported - work from a subdirectory. Errors
-/// when nothing is found; the caller prints it and exits. Canonicalized,
-/// so the path comes out absolute and two writers started from a
-/// symlinked path get the same one.
+/// when nothing is found; the caller prints it and exits. cwd and
+/// `$HOME` are both canonicalized first, so a symlinked home directory
+/// still stops the walk and two writers started from a symlinked path
+/// get the same root.
 fn checkout_root() -> std::io::Result<PathBuf> {
-    let cwd = std::env::current_dir()?;
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    discover_root(&cwd, home.as_deref())
-        .ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                format!(
-                    "{} is not inside a project: no .git or .percept directory here or above",
-                    cwd.display()
-                ),
-            )
-        })?
-        .canonicalize()
+    let cwd = std::env::current_dir()?.canonicalize()?;
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .and_then(|home| home.canonicalize().ok());
+    discover_root(&cwd, home.as_deref()).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!(
+                "{} is not inside a project: no .git or .percept directory here or above. \
+                 Run `git init` or `mkdir .percept` to make this one.",
+                cwd.display()
+            ),
+        )
+    })
 }
 
 /// The walk `checkout_root` runs, split out so it takes cwd and `$HOME`
-/// as arguments and does no canonicalizing. `None` when the search
-/// reaches `home` or the filesystem root before a marker.
+/// as arguments; both are already canonical, so an ancestor reached
+/// through `parent()` is too. `None` when the search reaches `home` or
+/// the filesystem root before a marker.
 fn discover_root(cwd: &Path, home: Option<&Path>) -> Option<PathBuf> {
     let mut dir = cwd;
     loop {
