@@ -67,8 +67,9 @@ Each client keeps its own source name, `claude-code` or `codex`.
 A capture error is printed to stderr and the hook exits non-zero, which
 is how the client shows it; the turn continues. A missing binary
 disables capture and writes nothing. Events before hooks were enabled
-are not imported automatically. Payloads go to `events publish` on
-stdin, so a large tool result is recorded whole.
+are not imported automatically. A payload longer than the operating
+system allows for one argument cannot be published this way; the hook
+reports that error and the log keeps the tool call without its result.
 
 ## Comparing worktrees
 

@@ -29,8 +29,6 @@ class AgentHookTests(unittest.TestCase):
             f"#!{sys.executable}\n"
             "import json, os, pathlib, sys, uuid\n"
             "args = dict(zip(sys.argv[3::2], sys.argv[4::2]))\n"
-            "if args.get('--payload') == '-':\n"
-            "    args['--payload'] = sys.stdin.read()\n"
             "if os.environ.get('FAIL_CAPTURE'):\n"
             "    print('disk is full', file=sys.stderr)\n"
             "    sys.exit(1)\n"
@@ -237,10 +235,10 @@ class AgentHookTests(unittest.TestCase):
         result = self.run_hook("Stop", raw="{broken", ok=False)
         self.assertEqual(json.loads(result.stdout), {})
 
-    def test_a_payload_longer_than_an_argument_is_published_whole(self):
-        self.run_hook("UserPromptSubmit", prompt="x" * 3_000_000)
-        payload = json.loads(self.events()[0]["args"]["--payload"])
-        self.assertEqual(len(payload["content"]), 3_000_000)
+    def test_oversized_payload_reports_error_without_blocking(self):
+        result = self.run_hook("UserPromptSubmit", prompt="x" * 3_000_000, ok=False)
+        self.assertIn("Argument list too long", result.stderr)
+        self.assertEqual(json.loads(result.stdout), {})
 
     def test_configured_commands_resolve_script_from_nested_checkout_with_spaces(self):
         scripts = self.repo / "scripts"

@@ -32,17 +32,14 @@ def checkout_root(cwd):
 
 
 def publish(binary, root, client, actor, kind, payload, cause=None):
-    # The payload goes on stdin: an argument has a length limit, and a
-    # tool result can be larger than it.
     command = [
         str(binary), "events", "publish", "--source", client,
-        "--actor", actor, "--type", kind, "--payload", "-",
+        "--actor", actor, "--type", kind, "--payload", json.dumps(payload),
     ]
     if cause:
         command.extend(["--causation", cause])
     result = subprocess.run(
-        command, cwd=root, input=json.dumps(payload),
-        capture_output=True, text=True, timeout=5,
+        command, cwd=root, capture_output=True, text=True, timeout=5,
     )
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or f"percept exited {result.returncode}")
