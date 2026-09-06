@@ -69,6 +69,15 @@ class AgentHookTests(unittest.TestCase):
         self.assertEqual(event["args"]["--actor"], "user")
         self.assertEqual(json.loads(event["args"]["--payload"]), {"content": "hello"})
 
+    def test_any_client_name_becomes_the_events_source(self):
+        self.prompt(client="opencode")
+        self.assertEqual(self.events()[0]["args"]["--source"], "opencode")
+
+    def test_an_empty_client_name_is_refused_without_blocking(self):
+        result = self.run_hook("UserPromptSubmit", client="", prompt="hello")
+        self.assertIn("client name must not be empty", result.stderr)
+        self.assertEqual(self.events(), [])
+
     def test_tool_result_cites_call_and_call_cites_prompt(self):
         prompt = self.prompt()
         self.run_hook("PostToolUse", tool_name="Bash", tool_input={"command": "ls"},

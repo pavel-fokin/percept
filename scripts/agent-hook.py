@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Capture Claude Code and Codex events through percept's public CLI."""
+"""Capture a coding agent's events through percept's public CLI.
+
+The first argument names the client; every event is recorded under it
+as its source. The hook input is the shape Claude Code and Codex share.
+"""
 
 import fcntl
 import hashlib
@@ -128,8 +132,8 @@ def main():
     output = {}
     try:
         client = sys.argv[1]
-        if client not in ("claude-code", "codex"):
-            raise ValueError(f"unsupported client {client!r}")
+        if not client:
+            raise ValueError("client name must not be empty")
         data = json.load(sys.stdin)
         if not isinstance(data, dict):
             raise ValueError("hook input must be a JSON object")
