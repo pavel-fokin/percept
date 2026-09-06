@@ -9,7 +9,7 @@ fn a_fresh_id_is_minted_between_before_and_after() {
     let minted = id.minted_at().unwrap();
     // UUIDv7 keeps milliseconds, so it may sit a fraction before `before`.
     assert!(minted <= after);
-    assert_eq!(minted.date(), before.date());
+    assert!(minted >= before.minus_minutes(1).unwrap());
 }
 
 #[test]

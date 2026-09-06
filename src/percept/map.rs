@@ -63,6 +63,9 @@ pub struct Schema {
 /// headlines - a removal would take a reader's landmark with it.
 pub const SUPERSEDES: &str = "supersedes";
 
+/// The edge kind from a decision to the question it settles.
+pub const RESOLVES: &str = "resolves";
+
 /// The decision map: what was asked, what was weighed, what was chosen
 /// and on what grounds. An option `answers` its question, evidence
 /// `supports` or `contradicts` an option, a decision `resolves` the
@@ -72,7 +75,7 @@ pub const DECISIONS: Schema = Schema {
     name: "decisions",
     purpose: "what was asked, what was chosen, and why, so a settled question is not reopened",
     node_kinds: &["question", "option", "evidence", "decision"],
-    edge_kinds: &["answers", "supports", "contradicts", "resolves", SUPERSEDES],
+    edge_kinds: &["answers", "supports", "contradicts", RESOLVES, SUPERSEDES],
     headline_kinds: &["question", "decision"],
 };
 
@@ -95,6 +98,12 @@ pub const SCHEMAS: &[&Schema] = &[&DECISIONS];
 pub const DERIVED: &[&Schema] = &[&CODE];
 
 impl Schema {
+    /// Whether this map is built from something other than the log, so
+    /// its nodes have no history: no writer, no moment they were added.
+    pub fn is_derived(&self) -> bool {
+        DERIVED.iter().any(|schema| schema.name == self.name)
+    }
+
     /// The log-folded schema `name` names, or the error every boundary
     /// that folds or writes a map by name reports. A derived map is its
     /// own error: it exists, and this is the wrong door to it.
@@ -144,7 +153,9 @@ pub struct Edge {
     pub from: NodeId,
     pub to: NodeId,
     pub sources: Vec<EventId>,
-    /// When this edge was added - the `edge.added` event's `created_at`.
+    /// Who added this edge - the actor its `edge.added` event carried.
+    pub actor: Actor,
+    /// When this edge was added - that event's `created_at`.
     pub added_at: Timestamp,
 }
 
@@ -406,6 +417,44 @@ impl Map {
             .filter_map(|edge| self.node(edge.to))
     }
 
+    /// The end of `id`'s supersession chain: `id` itself when nothing
+    /// supersedes it, else the node that does, followed until one is
+    /// current. Two nodes superseding one is a writer's mistake; the
+    /// first in map order wins. A cycle stops at the node already seen.
+    pub fn successor(&self, id: NodeId) -> NodeId {
+        let mut seen = HashSet::from([id]);
+        let mut current = id;
+        while let Some(next) = self
+            .edges
+            .iter()
+            .find(|edge| edge.kind == SUPERSEDES && edge.to == current)
+            .map(|edge| edge.from)
+        {
+            if !seen.insert(next) {
+                break;
+            }
+            current = next;
+        }
+        current
+    }
+
+    /// Everything `id` supersedes, transitively, nearest first - the
+    /// `was` lines under a decision.
+    pub fn predecessors(&self, id: NodeId) -> Vec<&Node> {
+        let mut seen = HashSet::from([id]);
+        let mut out = Vec::new();
+        let mut frontier = vec![id];
+        while let Some(current) = frontier.pop() {
+            for node in self.supersedes(current) {
+                if seen.insert(node.id) {
+                    out.push(node);
+                    frontier.push(node.id);
+                }
+            }
+        }
+        out
+    }
+
     pub fn edges(&self) -> &[Edge] {
         &self.edges
     }
@@ -642,6 +691,7 @@ impl Map {
                     from: *from,
                     to: *to,
                     sources: sources.clone(),
+                    actor,
                     added_at: at,
                 });
             }

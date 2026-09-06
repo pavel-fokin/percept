@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::percept::{Actor, EventId, Map, MapRenderer, Node, NodeId, Schema, DECISIONS};
+use crate::percept::{Actor, EventId, Map, MapRenderer, Node, NodeId, Schema, DECISIONS, RESOLVES};
 use crate::store::event::ids;
 
 /// What every rendered map opens with, so a reader who lands on the
@@ -16,26 +16,31 @@ use crate::store::event::ids;
 const PREAMBLE: &str = "Folded from the percept log for this project and rerendered on every \
     write. Change it with `percept maps`, not by hand.";
 
-/// What the decisions map opens with: the same notice, plus how the
-/// list below reads and where the detail it leaves out still lives.
-const DECISIONS_PREAMBLE: &str = "Folded from the percept log for this project and rerendered \
-    on every write. Change it with `percept maps`, not by hand. Questions in the order they \
-    were raised, grouped under the prompt that settled them, each with its decision. Options \
-    and evidence: `percept maps show decisions --around 'question:<name>'`. What changed \
-    lately: `percept maps show decisions --since 1d`.";
+/// What the decisions map adds to the preamble: how the list below
+/// reads and where the detail it leaves out still lives.
+const DECISIONS_GUIDE: &str = "Questions in the order they were raised, grouped under the \
+    prompt that raised them, each with its decision. Options and evidence: `percept maps show \
+    decisions --around 'question:<name>'`. What changed lately: `percept maps show decisions \
+    --since 1d`.";
+
+/// The decisions map's preamble: the shared notice, then its guide.
+pub fn decisions_preamble() -> String {
+    format!("{PREAMBLE} {DECISIONS_GUIDE}")
+}
 
 /// `map` as Markdown: a heading and the preamble, then the map's body.
 /// The decisions map renders as a question-keyed list grouped by the
-/// prompt that settled each question - see `push_decisions`. Every
+/// prompt that raised each question - see `push_decisions`. Every
 /// other schema keeps one `## <kind>` section per node kind that holds
 /// a node and a `## edges` section - see `push_by_kind`. Empty for a
 /// map with no nodes, past the preamble.
 pub fn markdown(map: &Map) -> String {
     let schema = map.schema();
-    let preamble = if schema.name == DECISIONS.name {
-        DECISIONS_PREAMBLE
+    let decisions = schema.name == DECISIONS.name;
+    let preamble = if decisions {
+        decisions_preamble()
     } else {
-        PREAMBLE
+        PREAMBLE.to_string()
     };
     let mut out = format!("# {}\n\n{preamble}\n", schema.name);
 
@@ -44,7 +49,7 @@ pub fn markdown(map: &Map) -> String {
         return out;
     }
 
-    if schema.name == DECISIONS.name {
+    if decisions {
         push_decisions(&mut out, map);
     } else {
         push_by_kind(&mut out, map);
@@ -106,23 +111,49 @@ fn push_node(out: &mut String, node: &Node) {
 }
 
 /// The decisions map's body: every question, and every decision that
-/// resolves none, grouped under the prompt that settled it and listed
-/// in the order it was raised. Under a question: its decision, or
-/// `open`; under a decision: what it superseded, as `was`.
+/// resolves none, grouped under the prompt that raised it - the first
+/// source it cites, which never changes - and listed in the order it
+/// was raised. Under a question: the decision that settles it now, or
+/// `open`; under a decision: what it superseded, as `was`, and the
+/// prompt it cites when that is not the group's.
 fn push_decisions(out: &mut String, map: &Map) {
-    let mut resolved_by: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
-    let mut resolvers: HashSet<NodeId> = HashSet::new();
-    for edge in map.edges().iter().filter(|edge| edge.kind == "resolves") {
-        resolved_by.entry(edge.to).or_default().push(edge.from);
-        resolvers.insert(edge.from);
+    // A question is settled by the current end of each resolver's
+    // supersession chain, so a correction needs no new `resolves` edge.
+    // A `resolves` edge between the wrong kinds settles nothing.
+    let mut settled_by: HashMap<NodeId, Vec<NodeId>> = HashMap::new();
+    let mut settling: HashSet<NodeId> = HashSet::new();
+    for edge in map.edges().iter().filter(|edge| edge.kind == RESOLVES) {
+        let ends = map.node(edge.from).zip(map.node(edge.to));
+        let Some((decision, question)) = ends.filter(|(d, q)| d.kind == DECISION && q.kind == QUESTION)
+        else {
+            continue;
+        };
+        let current = map.successor(decision.id);
+        settling.extend([decision.id, current]);
+        let entry = settled_by.entry(question.id).or_default();
+        if !entry.contains(&current) {
+            entry.push(current);
+        }
     }
 
-    let items = map.nodes().iter().filter(|node| {
-        node.kind == "question"
-            || node.kind == "decision"
-                && !resolvers.contains(&node.id)
-                && !map.is_superseded(node.id)
-    });
+    let items: Vec<&Node> = map
+        .nodes()
+        .iter()
+        .filter(|node| {
+            node.kind == QUESTION
+                || node.kind == DECISION
+                    && !settling.contains(&node.id)
+                    && !map.is_superseded(node.id)
+        })
+        .collect();
+    if items.is_empty() {
+        let _ = writeln!(
+            out,
+            "\n(no question or decision yet; {} nodes of other kinds.)",
+            map.nodes().len()
+        );
+        return;
+    }
 
     let mut group_order: Vec<Option<EventId>> = Vec::new();
     let mut groups: HashMap<Option<EventId>, Vec<&Node>> = HashMap::new();
@@ -139,14 +170,17 @@ fn push_decisions(out: &mut String, map: &Map) {
         push_group_heading(out, key);
         out.push('\n');
         for node in &groups[&key] {
-            if node.kind == "question" {
-                push_question(out, map, node, &resolved_by);
+            if node.kind == QUESTION {
+                push_question(out, map, node, &settled_by, key);
             } else {
-                push_decision_line(out, map, node, "- decision ");
+                push_decision_line(out, map, node, "- decision ", key);
             }
         }
     }
 }
+
+const QUESTION: &str = "question";
+const DECISION: &str = "decision";
 
 /// A group's heading: the settling prompt's date and id, the id alone
 /// when it isn't a UUIDv7, or `uncited` when the question cites no
@@ -165,13 +199,14 @@ fn push_group_heading(out: &mut String, key: Option<EventId>) {
     }
 }
 
-/// One question's bullet, then its resolving decision - or `open` when
-/// none resolves it, past what `is_superseded` has already ruled out.
+/// One question's bullet, then the decision that settles it now - or
+/// `open` when none does.
 fn push_question(
     out: &mut String,
     map: &Map,
     question: &Node,
-    resolved_by: &HashMap<NodeId, Vec<NodeId>>,
+    settled_by: &HashMap<NodeId, Vec<NodeId>>,
+    group: Option<EventId>,
 ) {
     let _ = writeln!(
         out,
@@ -179,11 +214,10 @@ fn push_question(
         marked_name(question),
         question.properties_line()
     );
-    let decisions: Vec<&Node> = resolved_by
+    let decisions: Vec<&Node> = settled_by
         .get(&question.id)
         .into_iter()
         .flatten()
-        .filter(|id| !map.is_superseded(**id))
         .filter_map(|id| map.node(*id))
         .collect();
     if decisions.is_empty() {
@@ -191,21 +225,31 @@ fn push_question(
         return;
     }
     for decision in decisions {
-        push_decision_line(out, map, decision, "  decision ");
+        push_decision_line(out, map, decision, "  decision ", group);
     }
 }
 
 /// A decision's line under `prefix` - a question's indent, or its own
-/// bullet when it resolves no question - then one `was` line per node
-/// it supersedes.
-fn push_decision_line(out: &mut String, map: &Map, decision: &Node, prefix: &str) {
+/// bullet when it resolves no question - then the prompt it cites when
+/// that is not the group's, then one `was` line per decision it
+/// superseded, nearest first.
+fn push_decision_line(
+    out: &mut String,
+    map: &Map,
+    decision: &Node,
+    prefix: &str,
+    group: Option<EventId>,
+) {
     let _ = writeln!(
         out,
         "{prefix}{}{}",
         marked_name(decision),
         decision.properties_line()
     );
-    for was in map.supersedes(decision.id) {
+    if let Some(source) = decision.sources.first().filter(|source| Some(**source) != group) {
+        let _ = writeln!(out, "  source {}", source.as_uuid());
+    }
+    for was in map.predecessors(decision.id) {
         let _ = writeln!(out, "  was {}", marked_name(was));
     }
 }

@@ -480,7 +480,7 @@ fn print_map(mut map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error:
     if !args.kind.is_empty() {
         map = map.keep_kinds(&args.kind)?;
     }
-    let nodes = map.nodes().iter().map(store::encode_node);
+    let nodes = map.nodes().iter().map(|node| store::encode_node(&map, node));
     let edges = map
         .edges()
         .iter()

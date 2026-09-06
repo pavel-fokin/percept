@@ -80,10 +80,11 @@ model builds maps today. The user will build and co-own them.
   map somewhere a reader finds it; today that is
   `<project>/.percept/<map>.md`, rewritten on every write. The
   decisions render lists questions in the order they were raised,
-  grouped under the prompt that settled them, each with its decision;
-  options and evidence stay out of it and are reached with `percept
-  maps show decisions --around question:<name>`. `--since <time>` on
-  `maps show` lists what a map gained since a reader last looked.
+  grouped under the prompt that raised them, each with the decision
+  that settles it now; options and evidence stay out of it and are
+  reached with `percept maps show decisions --around question:<name>`.
+  `--since <time>` on `maps show` lists what a map gained since a
+  reader last looked.
 
 ## Decisions
 

@@ -185,6 +185,82 @@ fn removing_a_user_written_node_is_refused_and_says_to_supersede() {
 }
 
 #[test]
+fn removing_a_user_written_edge_is_refused() {
+    let decision = node_added("decision", "Rust");
+    let question = node_added("question", "Which language?");
+    let (from, to) = (node_id(&decision), node_id(&question));
+    let edge = Event::new(
+        Actor::User,
+        source("tui"),
+        None,
+        Payload::EdgeAdded {
+            map: "decisions".to_string(),
+            kind: "resolves".to_string(),
+            from,
+            to,
+            sources: Vec::new(),
+        },
+    );
+    let revise = tool(vec![decision, question, edge]);
+
+    let err = revise
+        .run(r#"{"map":"decisions","changes":[{"op":"remove_edge","kind":"resolves","from":{"kind":"decision","name":"Rust"},"to":{"kind":"question","name":"Which language?"}}]}"#)
+        .err()
+        .unwrap()
+        .to_string();
+
+    assert!(err.contains("written by the user"), "{err}");
+}
+
+#[test]
+fn removing_a_model_node_that_a_user_edge_touches_is_refused() {
+    let model_node = Event::new(
+        Actor::Model,
+        source("tui"),
+        None,
+        Payload::NodeAdded {
+            map: "decisions".to_string(),
+            node: NodeId::new(),
+            kind: "decision".to_string(),
+            name: "Rust".to_string(),
+            properties: BTreeMap::new(),
+            sources: vec![EventId::new()],
+        },
+    );
+    let question = node_added("question", "Which language?");
+    let (from, to) = (node_id(&model_node), node_id(&question));
+    let user_edge = Event::new(
+        Actor::User,
+        source("tui"),
+        None,
+        Payload::EdgeAdded {
+            map: "decisions".to_string(),
+            kind: "resolves".to_string(),
+            from,
+            to,
+            sources: Vec::new(),
+        },
+    );
+    let revise = tool(vec![model_node, question, user_edge]);
+
+    let err = revise
+        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","kind":"decision","name":"Rust","reason":"wrong"}]}"#)
+        .err()
+        .unwrap()
+        .to_string();
+
+    assert!(err.contains("the user wrote the edge"), "{err}");
+}
+
+/// The node id a `node.added` event minted.
+fn node_id(event: &Event) -> NodeId {
+    match event.payload() {
+        Payload::NodeAdded { node, .. } => *node,
+        _ => panic!("expected node.added"),
+    }
+}
+
+#[test]
 fn removing_a_model_written_node_is_allowed() {
     let node = Event::new(
         Actor::Model,

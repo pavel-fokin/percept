@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{Actor, EventLog, Mutation, NodeRef, Payload, Scope};
+use crate::percept::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Scope};
 use crate::percept::{Tool, ToolOutput, ToolSpec};
 use crate::store::Snapshot;
 
@@ -279,16 +279,30 @@ fn apply(
             let node = NodeRef { kind, name };
             // A node the user wrote is their landmark in a shared map.
             // The model may hang edges on it, never take it away; a
-            // correction is a superseding node.
-            if snapshot
-                .find(&node)
-                .is_some_and(|found| found.actor == Actor::User)
-            {
-                return Err(format!(
-                    "{node} was written by the user and the model may not remove it; \
-                     add the corrected node and a supersedes edge from it to this one instead"
-                )
-                .into());
+            // correction is a superseding node. Removing a node drops
+            // the edges that touch it, so a user-written edge guards
+            // the node at its ends the same way.
+            let map = snapshot.map();
+            if let Some(found) = map.find(&node.kind, &node.name) {
+                if found.actor == Actor::User {
+                    return Err(format!(
+                        "{node} was written by the user and the model may not remove it; \
+                         add the corrected node and a supersedes edge from it to this one instead"
+                    )
+                    .into());
+                }
+                if let Some(edge) = map
+                    .edges()
+                    .iter()
+                    .find(|edge| edge.actor == Actor::User && (edge.from == found.id || edge.to == found.id))
+                {
+                    return Err(format!(
+                        "{node} cannot be removed by the model: the user wrote the edge {}, \
+                         which removing the node would drop",
+                        map.edge_line(edge)
+                    )
+                    .into());
+                }
             }
             let line = format!("removed {node}");
             let mutation = Mutation::RemoveNode {
@@ -311,6 +325,12 @@ fn apply(
             sources,
         } => {
             let (from, to): (NodeRef, NodeRef) = (from.into(), to.into());
+            if !adding_edge && user_wrote_edge(snapshot.map(), &kind, &from, &to) {
+                return Err(format!(
+                    "edge {from} {kind} {to} was written by the user and the model may not remove it"
+                )
+                .into());
+            }
             let sources = snapshot.resolve(&sources)?;
             let verb = if adding_edge { "added" } else { "removed" };
             let line = format!("{verb} edge {from} {kind} {to}");
@@ -338,6 +358,20 @@ fn apply(
         _ => line,
     };
     Ok((line, payload))
+}
+
+/// Whether `map` holds the edge `from kind to` and the user wrote it. An
+/// edge the map lacks is not the user's; `apply` reports it missing.
+fn user_wrote_edge(map: &Map, kind: &str, from: &NodeRef, to: &NodeRef) -> bool {
+    let Some(from) = map.find(&from.kind, &from.name) else {
+        return false;
+    };
+    let Some(to) = map.find(&to.kind, &to.name) else {
+        return false;
+    };
+    map.edges().iter().any(|edge| {
+        edge.kind == kind && edge.from == from.id && edge.to == to.id && edge.actor == Actor::User
+    })
 }
 
 #[cfg(test)]

@@ -9,9 +9,9 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::percept::{
-    Actor, Edge, EventId, EventLog, Map, MapError, Mutation, Node, NodeId, NodeRef, Payload,
-    Schema, Scope,
+    Actor, Edge, EventId, EventLog, Map, MapError, Mutation, Node, NodeId, Payload, Schema, Scope,
 };
+use crate::shared::Timestamp;
 use crate::store::event::{actor_name, ids};
 use crate::store::parse_event_id;
 
@@ -65,9 +65,10 @@ impl Snapshot {
         self.map.apply(mutation, actor)
     }
 
-    /// The node `node` names, as the map stands in this snapshot.
-    pub fn find(&self, node: &NodeRef) -> Option<&Node> {
-        self.map.find(&node.kind, &node.name)
+    /// The map as it stands in this snapshot, for a writer that checks a
+    /// change against more than `apply` enforces.
+    pub fn map(&self) -> &Map {
+        &self.map
     }
 }
 
@@ -98,6 +99,24 @@ struct MapLine {
     edges: usize,
 }
 
+/// Who added a node or edge and when. Absent on a derived map's lines:
+/// its nodes were stamped by the walk that built them, and a reader
+/// would take that for the moment the code was written.
+#[derive(Serialize)]
+struct Stamp {
+    actor: &'static str,
+    added_at: String,
+}
+
+impl Stamp {
+    fn of(map: &Map, actor: Actor, added_at: Timestamp) -> Option<Self> {
+        (!map.schema().is_derived()).then(|| Self {
+            actor: actor_name(actor),
+            added_at: added_at.to_string(),
+        })
+    }
+}
+
 #[derive(Serialize)]
 struct NodeLine<'a> {
     node: String,
@@ -105,8 +124,8 @@ struct NodeLine<'a> {
     name: &'a str,
     properties: &'a BTreeMap<String, String>,
     sources: Vec<String>,
-    actor: &'static str,
-    added_at: String,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    stamp: Option<Stamp>,
 }
 
 #[derive(Serialize)]
@@ -115,7 +134,8 @@ struct EdgeLine<'a> {
     from: String,
     to: String,
     sources: Vec<String>,
-    added_at: String,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    stamp: Option<Stamp>,
 }
 
 /// One line naming a map and its size, for `maps list`.
@@ -129,15 +149,14 @@ pub fn encode_map(map: &Map) -> String {
     .expect("MapLine always serializes")
 }
 
-pub fn encode_node(node: &Node) -> String {
+pub fn encode_node(map: &Map, node: &Node) -> String {
     serde_json::to_string(&NodeLine {
         node: node.id.as_uuid().to_string(),
         kind: &node.kind,
         name: &node.name,
         properties: &node.properties,
         sources: ids(&node.sources),
-        actor: actor_name(node.actor),
-        added_at: node.added_at.to_string(),
+        stamp: Stamp::of(map, node.actor, node.added_at),
     })
     .expect("NodeLine always serializes")
 }
@@ -151,7 +170,7 @@ pub fn encode_edge(map: &Map, edge: &Edge) -> String {
         from: node_ref(map, edge.from),
         to: node_ref(map, edge.to),
         sources: ids(&edge.sources),
-        added_at: edge.added_at.to_string(),
+        stamp: Stamp::of(map, edge.actor, edge.added_at),
     })
     .expect("EdgeLine always serializes")
 }

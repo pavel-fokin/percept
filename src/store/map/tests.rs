@@ -187,7 +187,8 @@ fn a_source_is_checked_against_the_loaded_log() {
 }
 
 #[test]
-fn a_node_line_carries_its_id_and_sources_as_uuids() {
+fn a_node_line_carries_its_id_sources_actor_and_time() {
+    let map = Map::empty(&crate::percept::DECISIONS);
     let node = Node {
         id: NodeId::new(),
         kind: "evidence".to_string(),
@@ -198,13 +199,36 @@ fn a_node_line_carries_its_id_and_sources_as_uuids() {
         added_at: Timestamp::now(),
     };
 
-    let line: serde_json::Value = serde_json::from_str(&encode_node(&node)).unwrap();
+    let line: serde_json::Value = serde_json::from_str(&encode_node(&map, &node)).unwrap();
 
     assert_eq!(line["node"], node.id.as_uuid().to_string());
     assert_eq!(line["kind"], "evidence");
     assert_eq!(line["name"], "Built both");
     assert_eq!(line["properties"]["summary"], "side by side");
     assert_eq!(line["sources"][0], node.sources[0].as_uuid().to_string());
+    assert_eq!(line["actor"], "user");
+    assert_eq!(line["added_at"], node.added_at.to_string());
+}
+
+#[test]
+fn a_derived_map_s_lines_carry_no_actor_or_time() {
+    let mut map = Map::empty(&crate::percept::CODE);
+    map.apply(
+        Mutation::AddNode {
+            kind: "file".to_string(),
+            name: "src/main.rs".to_string(),
+            properties: BTreeMap::new(),
+            sources: Vec::new(),
+        },
+        Actor::System,
+    )
+    .unwrap();
+
+    let line: serde_json::Value =
+        serde_json::from_str(&encode_node(&map, &map.nodes()[0])).unwrap();
+
+    assert!(line.get("actor").is_none(), "{line}");
+    assert!(line.get("added_at").is_none(), "{line}");
 }
 
 #[test]

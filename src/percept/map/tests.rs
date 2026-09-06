@@ -33,6 +33,24 @@ fn a_superseded_decision_leaves_the_headlines() {
 }
 
 #[test]
+fn successor_follows_a_supersession_chain_to_its_end() {
+    let (a, b, c) = (NodeId::new(), NodeId::new(), NodeId::new());
+    let events = [
+        node_added("decisions", a, "decision", "A"),
+        node_added("decisions", b, "decision", "B"),
+        node_added("decisions", c, "decision", "C"),
+        edge_added("decisions", SUPERSEDES, b, a),
+        edge_added("decisions", SUPERSEDES, c, b),
+    ];
+    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+
+    assert_eq!(map.successor(a), c);
+    assert_eq!(map.successor(c), c);
+    let names: Vec<&str> = map.predecessors(c).iter().map(|node| node.name.as_str()).collect();
+    assert_eq!(names, ["B", "A"]);
+}
+
+#[test]
 fn supersedes_lists_the_decisions_a_node_replaced() {
     let (old, new) = (NodeId::new(), NodeId::new());
     let events = [

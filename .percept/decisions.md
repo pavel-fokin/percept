@@ -1,6 +1,6 @@
 # decisions
 
-Folded from the percept log for this project and rerendered on every write. Change it with `percept maps`, not by hand. Questions in the order they were raised, grouped under the prompt that settled them, each with its decision. Options and evidence: `percept maps show decisions --around 'question:<name>'`. What changed lately: `percept maps show decisions --since 1d`.
+Folded from the percept log for this project and rerendered on every write. Change it with `percept maps`, not by hand. Questions in the order they were raised, grouped under the prompt that raised them, each with its decision. Options and evidence: `percept maps show decisions --around 'question:<name>'`. What changed lately: `percept maps show decisions --since 1d`.
 
 ## 2026-09-05 · 01a0705c-72fd-70b1-a4c6-0408b12bd8d5
 - "Where does the event log live?"
@@ -15,6 +15,7 @@ Folded from the percept log for this project and rerendered on every write. Chan
 ## 2026-09-05 · 01a07195-c647-7f70-87ee-fb8f9faacdd8
 - "Where should a dev build's event log default to when PERCEPT_HOME is unset?"
   decision "detect target/debug or target/release via current_exe(), default those to <checkout>/.percept": why: "install.sh copies the binary to ~/.percept/bin, outside target/, so the check separates a repo build from an installed one without a build-time flag; PERCEPT_HOME still overrides either case"
+  source 01a07195-da7b-72e3-9160-1577b943f1c4
 
 ## 2026-09-05 · 01a072dd-7ffc-7112-94d3-c7137849d2f2
 - "Which Fireworks model should PERCEPT_PROVIDER=fireworks build?"
@@ -26,7 +27,9 @@ Folded from the percept log for this project and rerendered on every write. Chan
 
 ## 2026-09-06 · 01a07544-9b9d-7ca0-bfea-9cb27dfe4b60
 - "How does the decisions render stay readable as it grows?"
-  decision "questions in first-seen order, grouped by the prompt that settled them, decision inline": why: "nothing moves when a node is added, so a reader keeps their landmarks; the prompt is the unit the human recalls by; options and evidence stay reachable with --around"
+  decision "questions in first-seen order, grouped by the prompt that raised them, decision inline": why: "the raising prompt never changes, so a question never moves; the settling prompt moves when a decision is superseded, and the decision names its own prompt when it differs"
+  source 01a07563-a7f6-7dc0-8504-a47276f2e3e9
+  was "questions in first-seen order, grouped by the prompt that settled them, decision inline"
 - "How is a decision corrected?"
   decision "add the new decision with a supersedes edge to the old one": why: "the old landmark stays one hop away and leaves the headlines; a removal makes the reader lose a point of reference"
 - "Who may remove a node the user wrote?"
