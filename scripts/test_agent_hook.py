@@ -29,6 +29,8 @@ class AgentHookTests(unittest.TestCase):
             f"#!{sys.executable}\n"
             "import json, os, pathlib, sys, uuid\n"
             "args = dict(zip(sys.argv[3::2], sys.argv[4::2]))\n"
+            "if args.get('--payload') == '-':\n"
+            "    args['--payload'] = sys.stdin.read()\n"
             "if os.environ.get('FAIL_CAPTURE'):\n"
             "    print('disk is full', file=sys.stderr)\n"
             "    sys.exit(1)\n"
@@ -41,7 +43,10 @@ class AgentHookTests(unittest.TestCase):
         self.binary.chmod(0o755)
         self.env = dict(os.environ, PERCEPT_HOME=str(self.home), PERCEPT_BIN=str(self.binary))
 
-    def run_hook(self, event, client="codex", cwd=None, env=None, raw=None, **fields):
+    def run_hook(self, event, client="codex", cwd=None, env=None, raw=None, ok=True, **fields):
+        """Runs the hook. A failure exits 1 with a `percept hook:` line on
+        stderr and still prints a JSON object, so the client shows the
+        error without blocking the turn."""
         data = dict(hook_event_name=event, session_id="session", cwd=str(cwd or self.repo))
         data.update(fields)
         result = subprocess.run(
@@ -49,9 +54,14 @@ class AgentHookTests(unittest.TestCase):
             input=json.dumps(data) if raw is None else raw,
             text=True, capture_output=True, env=env or self.env, cwd=self.root,
         )
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.returncode, 0 if ok else 1, result.stderr)
+        if not ok:
+            self.assertIn("percept hook:", result.stderr)
         json.loads(result.stdout)
         return result
+
+    def state_files(self):
+        return list((self.home / "hook-sessions").glob("*"))
 
     def events(self):
         return [json.loads(path.read_text()) for path in self.home.glob("*.event")]
@@ -74,7 +84,7 @@ class AgentHookTests(unittest.TestCase):
         self.assertEqual(self.events()[0]["args"]["--source"], "opencode")
 
     def test_an_empty_client_name_is_refused_without_blocking(self):
-        result = self.run_hook("UserPromptSubmit", client="", prompt="hello")
+        result = self.run_hook("UserPromptSubmit", client="", prompt="hello", ok=False)
         self.assertIn("client name must not be empty", result.stderr)
         self.assertEqual(self.events(), [])
 
@@ -96,6 +106,26 @@ class AgentHookTests(unittest.TestCase):
         reply = next(event for event in self.events() if event["args"]["--actor"] == "model")
         self.assertEqual(reply["args"]["--causation"], prompt)
         self.assertEqual(json.loads(reply["args"]["--payload"]), {"content": "reply"})
+
+    def test_stop_clears_the_turns_state(self):
+        self.prompt()
+        self.assertEqual(len(self.state_files()), 1)
+        self.run_hook("Stop", last_assistant_message="reply")
+        self.assertEqual(self.state_files(), [])
+
+    def test_the_binary_keeps_its_own_default_log(self):
+        env = dict(self.env)
+        del env["PERCEPT_HOME"]
+        probe = self.root / "probe"
+        probe.write_text(
+            f"#!{sys.executable}\n"
+            "import os, sys, uuid\n"
+            "open(sys.argv[0] + '.seen', 'w').write(os.environ.get('PERCEPT_HOME', 'unset'))\n"
+            "print(uuid.uuid4())\n"
+        )
+        probe.chmod(0o755)
+        self.run_hook("UserPromptSubmit", prompt="hello", env=dict(env, PERCEPT_BIN=str(probe)))
+        self.assertEqual((self.root / "probe.seen").read_text(), "unset")
 
     def test_concurrent_clients_checkouts_sessions_and_turns_keep_separate_causes(self):
         second = self.root / "second checkout"
@@ -135,7 +165,8 @@ class AgentHookTests(unittest.TestCase):
 
     def test_failed_prompt_removes_previous_cause(self):
         self.prompt()
-        result = self.run_hook("UserPromptSubmit", prompt="next", env=dict(self.env, FAIL_CAPTURE="1"))
+        result = self.run_hook("UserPromptSubmit", prompt="next",
+                               env=dict(self.env, FAIL_CAPTURE="1"), ok=False)
         self.assertIn("disk is full", result.stderr)
         self.run_hook("Stop", last_assistant_message="reply")
         reply = next(event for event in self.events() if event["args"]["--actor"] == "model")
@@ -143,18 +174,19 @@ class AgentHookTests(unittest.TestCase):
 
     def test_invalid_prompt_removes_previous_cause(self):
         self.prompt()
-        result = self.run_hook("UserPromptSubmit", prompt={})
+        result = self.run_hook("UserPromptSubmit", prompt={}, ok=False)
         self.assertIn("prompt must be a string", result.stderr)
         self.run_hook("Stop", last_assistant_message="reply")
         reply = next(event for event in self.events() if event["args"]["--actor"] == "model")
         self.assertNotIn("--causation", reply["args"])
 
-    def test_missing_binary_leaves_coding_available(self):
+    def test_missing_binary_leaves_coding_available_and_writes_nothing(self):
         result = self.run_hook("Stop", last_assistant_message="reply",
                                env=dict(self.env, PERCEPT_BIN=str(self.root / "missing")))
         self.assertEqual(result.stderr, "")
         self.assertEqual(json.loads(result.stdout), {})
         self.assertEqual(self.events(), [])
+        self.assertFalse((self.home / "hook-sessions").exists())
 
     def test_storage_override_does_not_change_default_binary_location(self):
         user_home = self.root / "user home"
@@ -184,8 +216,7 @@ class AgentHookTests(unittest.TestCase):
         self.assertEqual(self.events(), [])
 
     def test_an_unreadable_transcript_is_an_error_not_an_event(self):
-        result = self.run_hook("Stop", transcript_path=str(self.root / "absent"))
-        self.assertIn("percept hook:", result.stderr)
+        self.run_hook("Stop", transcript_path=str(self.root / "absent"), ok=False)
         self.assertEqual(self.events(), [])
 
     def test_claude_fallback_reads_only_current_turn_and_preserves_tool_results(self):
@@ -203,14 +234,13 @@ class AgentHookTests(unittest.TestCase):
         self.assertEqual(json.loads(self.events()[0]["args"]["--payload"]), {"content": "start\nend"})
 
     def test_malformed_input_reports_error_without_blocking(self):
-        result = self.run_hook("Stop", raw="{broken")
-        self.assertIn("percept hook:", result.stderr)
+        result = self.run_hook("Stop", raw="{broken", ok=False)
         self.assertEqual(json.loads(result.stdout), {})
 
-    def test_oversized_payload_reports_error_without_blocking(self):
-        result = self.run_hook("UserPromptSubmit", prompt="x" * 3_000_000)
-        self.assertIn("Argument list too long", result.stderr)
-        self.assertEqual(json.loads(result.stdout), {})
+    def test_a_payload_longer_than_an_argument_is_published_whole(self):
+        self.run_hook("UserPromptSubmit", prompt="x" * 3_000_000)
+        payload = json.loads(self.events()[0]["args"]["--payload"])
+        self.assertEqual(len(payload["content"]), 3_000_000)
 
     def test_configured_commands_resolve_script_from_nested_checkout_with_spaces(self):
         scripts = self.repo / "scripts"

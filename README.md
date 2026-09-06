@@ -64,11 +64,11 @@ be created. Keep unrelated local settings.
 The hooks capture user prompts, completed tool calls and results, and
 the final reply. A prompt hook returns its event ID for later citations.
 Each client keeps its own source name, `claude-code` or `codex`.
-Capture errors report to stderr and let the coding session continue.
-A missing binary disables capture. Events before hooks were enabled
-are not imported automatically.
-Payloads exceeding the operating system's argument limit cannot be
-captured through the current publish CLI; the hook reports that error.
+A capture error is printed to stderr and the hook exits non-zero, which
+is how the client shows it; the turn continues. A missing binary
+disables capture and writes nothing. Events before hooks were enabled
+are not imported automatically. Payloads go to `events publish` on
+stdin, so a large tool result is recorded whole.
 
 ## Comparing worktrees
 

@@ -12,7 +12,6 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import uuid
 
 
 def text_field(data, name):
@@ -33,20 +32,21 @@ def checkout_root(cwd):
 
 
 def publish(binary, root, client, actor, kind, payload, cause=None):
+    # The payload goes on stdin: an argument has a length limit, and a
+    # tool result can be larger than it.
     command = [
         str(binary), "events", "publish", "--source", client,
-        "--actor", actor, "--type", kind, "--payload", json.dumps(payload),
+        "--actor", actor, "--type", kind, "--payload", "-",
     ]
     if cause:
         command.extend(["--causation", cause])
     result = subprocess.run(
-        command, cwd=root, capture_output=True, text=True, timeout=5,
+        command, cwd=root, input=json.dumps(payload),
+        capture_output=True, text=True, timeout=5,
     )
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or f"percept exited {result.returncode}")
-    event_id = result.stdout.strip()
-    uuid.UUID(event_id)
-    return event_id
+    return result.stdout.strip()
 
 
 def claude_reply(path):
@@ -82,26 +82,31 @@ def capture(client, data):
     turn = data.get("turn_id", "")
     if not isinstance(turn, str):
         raise ValueError("turn_id must be a string")
-    home = Path(os.environ.get("PERCEPT_HOME") or Path.home() / ".percept").resolve()
-    os.environ["PERCEPT_HOME"] = str(home)
     binary = Path(os.environ.get("PERCEPT_BIN") or Path.home() / ".percept/bin/percept")
     binary = binary.expanduser().resolve()
-    key = hashlib.sha256(json.dumps([client, str(root), session, turn]).encode()).hexdigest()
+    if not binary.is_file():
+        return {}
+    # The binary keeps its own default for the log, so a worktree build
+    # reads the same log from a hook and from the shell. Only the turn
+    # state lives here.
+    home = Path(os.environ.get("PERCEPT_HOME") or Path.home() / ".percept").resolve()
     sessions = home / "hook-sessions"
     sessions.mkdir(parents=True, exist_ok=True)
-    state = sessions / f"{key}.json"
-    with (sessions / f"{key}.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        # Invalidate before publishing: a failed prompt must not inherit the previous cause.
+    key = hashlib.sha256(json.dumps([client, str(root), session, turn]).encode()).hexdigest()
+    # One file per turn is both the lock and the state: the prompt's event
+    # id, which the turn's later events cite as their cause.
+    with (sessions / key).open("a+") as state:
+        fcntl.flock(state, fcntl.LOCK_EX)
+        state.seek(0)
+        cause = state.read().strip() or None
         if event == "UserPromptSubmit":
-            state.unlink(missing_ok=True)
-        if not binary.is_file():
-            return {}
-        cause = json.loads(state.read_text()) if state.exists() else None
-        if event == "UserPromptSubmit":
+            # Invalidate before publishing: a failed prompt must not inherit the previous cause.
+            state.seek(0)
+            state.truncate()
+            state.flush()
             prompt = text_field(data, "prompt")
             event_id = publish(binary, root, client, "user", "message.received", {"content": prompt})
-            state.write_text(json.dumps(event_id))
+            state.write(event_id)
             return {"hookSpecificOutput": {
                 "hookEventName": event,
                 "additionalContext": f"percept event {event_id}",
@@ -124,11 +129,13 @@ def capture(client, data):
                 raise ValueError("last_assistant_message must be a string")
             if reply and reply.strip():
                 publish(binary, root, client, "model", "message.received", {"content": reply}, cause)
+            (sessions / key).unlink()
     return {}
 
 
 def main():
     output = {}
+    failed = False
     try:
         client = sys.argv[1]
         if not client:
@@ -139,7 +146,10 @@ def main():
         output = capture(client, data)
     except Exception as error:  # the hook never fails the agent's turn
         print(f"percept hook: {error}", file=sys.stderr)
+        failed = True
     print(json.dumps(output))
+    # Non-zero without blocking: the client shows stderr only then.
+    sys.exit(1 if failed else 0)
 
 
 if __name__ == "__main__":
