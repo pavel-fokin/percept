@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{EventLog, Mutation, NodeRef, Payload, Scope};
+use crate::percept::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Scope, DECISION};
 use crate::percept::{Tool, ToolOutput, ToolSpec};
+use crate::store::map::NodeRefArgs;
 use crate::store::Snapshot;
 
 /// The `revise_map` tool: checks a batch of changes to one map against
@@ -36,7 +37,9 @@ const DESCRIPTION: &str = "Record into a named map what you have judged \
     even when what you are recording is in front of you. Read the map \
     first, from the conversation or with read_map, and do not add a \
     node that is already there; a node is named by its kind and name, \
-    not by an id you choose.";
+    not by an id you choose. Correct a decision by adding the new one \
+    with a supersedes edge to the old, not by removing the old: a node \
+    the user wrote cannot be removed by you at all.";
 
 /// JSON Schema for `run`'s `arguments`. A string, not a `Value` - the
 /// domain's `ToolSpec` is serde-free, so the provider parses this. The
@@ -127,24 +130,6 @@ const PARAMETERS: &str = r#"{
   "required": ["map", "changes"],
   "additionalProperties": false
 }"#;
-
-/// A node named the way a writer knows it - by kind and name - matching
-/// `NodeRef`, but its own type since the domain stays serde-free.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct NodeRefArgs {
-    kind: String,
-    name: String,
-}
-
-impl From<NodeRefArgs> for NodeRef {
-    fn from(node: NodeRefArgs) -> Self {
-        NodeRef {
-            kind: node.kind,
-            name: node.name,
-        }
-    }
-}
 
 /// One change the model asks for. `op` picks the shape, mirroring
 /// `Mutation` - which this becomes once its `sources` resolve to
@@ -275,6 +260,16 @@ fn apply(
             sources,
         } => {
             let node = NodeRef { kind, name };
+            if node.kind == DECISION {
+                return Err(format!(
+                    "{node} is a decision, and a decision is never removed; add the one \
+                     that replaces it with a supersedes edge to this one"
+                )
+                .into());
+            }
+            if let Some(why) = user_guards_node(snapshot.map(), &node) {
+                return Err(why.into());
+            }
             let line = format!("removed {node}");
             let mutation = Mutation::RemoveNode {
                 node,
@@ -296,6 +291,12 @@ fn apply(
             sources,
         } => {
             let (from, to): (NodeRef, NodeRef) = (from.into(), to.into());
+            if !adding_edge && user_wrote_edge(snapshot.map(), &kind, &from, &to) {
+                return Err(format!(
+                    "edge {from} {kind} {to} was written by the user and the model may not remove it"
+                )
+                .into());
+            }
             let sources = snapshot.resolve(&sources)?;
             let verb = if adding_edge { "added" } else { "removed" };
             let line = format!("{verb} edge {from} {kind} {to}");
@@ -317,12 +318,51 @@ fn apply(
             (mutation, line)
         }
     };
-    let payload = snapshot.apply(mutation)?;
+    let payload = snapshot.apply(mutation, Actor::Model)?;
     let line = match &payload {
         Payload::NodeAdded { node, .. } => format!("{line} as {}", node.as_uuid()),
         _ => line,
     };
     Ok((line, payload))
+}
+
+/// Why the model may not remove `node`, if the user's marks stand in
+/// the way: the node is the user's, or a user-written edge touches it -
+/// removing a node drops its edges, so that edge guards its ends too.
+/// `None` when the node is free to go, or the map lacks it - `apply`
+/// reports that.
+fn user_guards_node(map: &Map, node: &NodeRef) -> Option<String> {
+    let found = map.find(&node.kind, &node.name)?;
+    if found.actor == Actor::User {
+        return Some(format!(
+            "{node} was written by the user and the model may not remove it; \
+             add the corrected node and a supersedes edge from it to this one instead"
+        ));
+    }
+    map.edges()
+        .iter()
+        .find(|edge| edge.actor == Actor::User && (edge.from == found.id || edge.to == found.id))
+        .map(|edge| {
+            format!(
+                "{node} cannot be removed by the model: the user wrote the edge {}, \
+                 which removing the node would drop",
+                map.edge_line(edge)
+            )
+        })
+}
+
+/// Whether `map` holds the edge `from kind to` and the user wrote it. An
+/// edge the map lacks is not the user's; `apply` reports it missing.
+fn user_wrote_edge(map: &Map, kind: &str, from: &NodeRef, to: &NodeRef) -> bool {
+    let Some(from) = map.find(&from.kind, &from.name) else {
+        return false;
+    };
+    let Some(to) = map.find(&to.kind, &to.name) else {
+        return false;
+    };
+    map.edges().iter().any(|edge| {
+        edge.kind == kind && edge.from == from.id && edge.to == to.id && edge.actor == Actor::User
+    })
 }
 
 #[cfg(test)]

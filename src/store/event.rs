@@ -564,7 +564,7 @@ fn parse_event_ids(sources: Vec<String>) -> Result<Vec<EventId>, Error> {
     sources.iter().map(|s| parse_event_id(s)).collect()
 }
 
-fn actor_name(actor: Actor) -> &'static str {
+pub(crate) fn actor_name(actor: Actor) -> &'static str {
     match actor {
         Actor::User => "user",
         Actor::Model => "model",

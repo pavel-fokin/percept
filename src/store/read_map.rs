@@ -2,13 +2,14 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{EventLog, Scope, Tool, ToolOutput, ToolSpec};
-use crate::store::fold_map;
+use crate::percept::{EventLog, NodeRef, Scope, Selection, Tool, ToolOutput, ToolSpec};
+use crate::store::map::NodeRefArgs;
+use crate::store::{encode_fragment, encode_lines, fold_map, optional_time};
 
-/// The `read_map` tool: prints one map by name, the same text the
-/// prompt carries when a map is sent whole. Offered when it is not, so
-/// the model can open a map it judges relevant instead of reading every
-/// map every turn.
+/// The `read_map` tool: one map, whole or cut to a fragment, as JSONL
+/// with event ids on every node and edge. Offered when the prompt does
+/// not carry the map whole, so the model opens what it judges relevant
+/// instead of reading every map every turn.
 pub struct ReadMap {
     log: Arc<dyn EventLog>,
     scope: Scope,
@@ -22,17 +23,31 @@ impl ReadMap {
 
 const NAME: &str = "read_map";
 
-const DESCRIPTION: &str = "Read one cognitive map by name: every node, \
-    then every edge, as the map stands now. Open a map before answering \
-    from it or revising it; what the conversation shows of a map may be \
-    only its headlines.";
+const DESCRIPTION: &str = "Read one cognitive map by name, whole or cut to \
+    a fragment: around one node to a depth, since an instant, of some \
+    kinds. Returns JSONL: first a line counting what was shown of the \
+    whole and how many edges cross the cut, then every node, then every \
+    edge, each with the event ids it cites. A crossing edge is where to \
+    widen when an exception or a contradiction could change the answer. \
+    Open a map before answering from it or revising it; what the \
+    conversation shows of a map may be only its headlines.";
 
 /// JSON Schema for `run`'s `arguments`. A string, not a `Value` - the
 /// domain's `ToolSpec` is serde-free, so the provider parses this.
 const PARAMETERS: &str = r#"{
   "type": "object",
   "properties": {
-    "map": {"type": "string", "description": "the map's name, e.g. decisions"}
+    "map": {"type": "string", "description": "the map's name, e.g. decisions"},
+    "around": {
+      "type": "object",
+      "description": "keep this node and what is within depth edges of it, either way",
+      "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
+      "required": ["kind", "name"],
+      "additionalProperties": false
+    },
+    "depth": {"type": "integer", "minimum": 0, "description": "edges out from around, default 1; nothing without around"},
+    "since": {"type": "string", "description": "ISO-8601, or 1d/2h/30m back from now; keep what the map gained since then"},
+    "kinds": {"type": "array", "items": {"type": "string"}, "description": "keep only these node kinds"}
   },
   "required": ["map"],
   "additionalProperties": false
@@ -42,6 +57,16 @@ const PARAMETERS: &str = r#"{
 #[serde(deny_unknown_fields)]
 struct Args {
     map: String,
+    around: Option<NodeRefArgs>,
+    #[serde(default = "one")]
+    depth: usize,
+    since: Option<String>,
+    #[serde(default)]
+    kinds: Vec<String>,
+}
+
+fn one() -> usize {
+    1
 }
 
 impl Tool for ReadMap {
@@ -55,15 +80,15 @@ impl Tool for ReadMap {
 
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
-        let map = fold_map(self.log.as_ref(), &args.map, &self.scope)?;
-        if map.nodes().is_empty() {
-            return Ok(ToolOutput::text(format!(
-                "the {} map is empty: nothing has been recorded here yet. \
-                 The log may still hold what it would.",
-                args.map
-            )));
-        }
-        Ok(ToolOutput::text(map.to_string()))
+        let around = args.around.map(NodeRef::from);
+        let selection = Selection {
+            around: around.as_ref().map(|node| (node, args.depth)),
+            since: optional_time(args.since.as_deref())?,
+            kinds: &args.kinds,
+        };
+        let fragment = fold_map(self.log.as_ref(), &args.map, &self.scope)?.select(&selection)?;
+        let lines = std::iter::once(encode_fragment(&fragment)).chain(encode_lines(fragment.map()));
+        Ok(ToolOutput::text(lines.collect::<Vec<_>>().join("\n")))
     }
 }
 

@@ -41,7 +41,10 @@ cognitive commit - one event in the same log, citing the experience it
 was derived from. A map is folded from those commits, so the cognitive
 history rebuilds it deterministically; the experience alone does not,
 because a second pass through the model gives a different map. The
-model builds maps today. The user will build and co-own them.
+model builds maps today; the user co-owns them. Human and agent each
+keep their own understanding. A shared map is where the two are
+compared and corrected, and a recorded claim is not the human's
+agreement.
 
 ## Domain
 
@@ -49,7 +52,7 @@ model builds maps today. The user will build and co-own them.
   optional `causation_id`, a `created_at`, and a typed `payload`. Once
   committed it never changes.
 - `Source` names the writer that produced an event - `percept-tui`,
-  `percept-cli`, `claude-code` - and the project root it ran in. The
+  `percept-cli`, `claude-code`, `codex` - and the project root it ran in. The
   name is open by design, where `Actor` is closed. One log at
   `$PERCEPT_HOME/percept.jsonl`, `~/.percept` by default, holds every
   project; the path is how a fold picks one project out of it.
@@ -62,14 +65,50 @@ model builds maps today. The user will build and co-own them.
 - `Map` is a cognitive map: nodes and edges the model builds from the
   log, folded from `node.added`, `node.removed`, `edge.added`, and
   `edge.removed` events in the same log. A `Schema` names a map and
-  the node and edge kinds it allows - `decisions` today. Every change
-  goes through `Map::apply`, so the rules live once. `code` is a `Map`
-  too, but folded from the working tree instead of the log - see
-  `code` below.
+  the node and edge kinds it allows, and one line of purpose - what
+  the map makes cheap - that the prompt carries in place of the map
+  itself. `decisions` today. Every change goes through `Map::apply`, so
+  the rules live once. `code` is a `Map` too, but folded from the
+  working tree instead of the log - see `code` below.
+- A node records who added it - `User` or `Model` - and when. A
+  user-written node is the human's landmark in a shared map: the model
+  may attach edges to it but never remove it. A decision is corrected by
+  adding the new one with a `supersedes` edge to the old, never by
+  removal, so the old landmark stays one hop away and leaves the
+  headlines. Stability of the representation is a value beside accuracy
+  and compactness: a map may grow, but what a reader has seen does not
+  move.
 - `Scope` says which project's events a fold reads: the current one by
   default, every one with `--all-projects`. A `MapRenderer` writes a
   map somewhere a reader finds it; today that is
-  `<project>/.percept/<map>.md`, rewritten on every write.
+  `<project>/.percept/<map>.md`, rewritten on every write. The
+  decisions render lists questions in the order they were raised,
+  grouped under the prompt that raised them, each with the decision
+  that settles it now; options and evidence stay out of it and are
+  reached with `percept maps show decisions --around question:<name>`.
+  `--since <time>` on `maps show` lists what a map gained since a
+  reader last looked. A `Selection` - around a node, since an instant,
+  of some kinds - cuts a map to a `Fragment`, which counts what the cut
+  left out and how many edges cross it. `maps show` and `read_map` both
+  cut through it, so the order of the cuts lives once.
+
+## Maps
+
+Start with [.percept/index.md](.percept/index.md): one row per map
+saying what it is for, where it comes from, and how to open a fragment
+of it. The shared [percept skill](.agents/skills/percept/SKILL.md)
+covers selecting a fragment, checking a claim, and revising.
+
+A map is judged by what it costs its reader, on three budgets:
+
+| Budget | What to keep small |
+|---|---|
+| Overview | Concepts held at once to understand one decision. |
+| Change | New meaning to absorb after an update, and landmarks moved. |
+| Verification | Work to check a conclusion and see what a correction touches. |
+
+The change budget weighs most. Add beside what a reader has seen;
+never move or merge it without the user's say.
 
 ## Decisions
 
@@ -98,6 +137,18 @@ it, never sideways or up:
 
 Wire concrete types together only at the entrypoint - `main` in Rust.
 
+## Coding agents
+
+percept serves whichever coding agent the user runs, so the setup in
+this repo is client-neutral. Instructions live in `AGENTS.md`, skills
+in `.agents/skills`, the subagent body in `.agents/agents`, and event
+capture in `scripts/agent-hook.py`, which takes the client's name as
+its argument and records under it as the source. A client's own folder
+- `.claude`, `.codex` - holds only discovery metadata and the commands
+that call the shared files: a symlink, a settings file, an adapter. A
+new agent costs an adapter, never a copy. A rule only one client can
+follow is not a rule of this repo.
+
 ## Workflow
 
 Non-trivial work runs plan, build, review, reflect. A one-line fix
@@ -110,26 +161,33 @@ skips it.
   flags, defaults - are settled with them before the build, never
   assumed. Where a function or a rule sits inside the code is not one
   of those: the builder proposes it, and review challenges it. The user
-  agrees the set before any code. Each settled decision is then recorded
-  in the decisions map, citing the prompt that settled it, so the next
-  session does not reopen it.
+  agrees the set before any code; an explicit instruction to implement
+  a proposal already discussed supplies that agreement. Each settled
+  decision is then recorded in the decisions map as `model`, citing
+  the prompt that settled it, so the next session does not reopen it.
+  An option is recorded only for an alternative that lost, with the
+  reason it lost; the pick is the decision itself. A decision that
+  changes an earlier one is added with a `supersedes` edge to it; the
+  old node is never removed.
 - **Build.** An issue with no design left in it, touching one or two
   files, the main agent builds itself. Anything larger goes to the
   `software-developer` subagent, which follows this file, writes the
   code, runs the build and tests, and reports back. It does not design,
   choose scope, commit, or push. Explore the project's code structure -
   what a file imports, defines, or depends on - with `percept maps show
-  code` (see `.claude/skills/percept/SKILL.md` for query patterns), not
+  code` (see `.agents/skills/percept/SKILL.md` for query patterns), not
   ad hoc `grep`.
 - **Review.** The main agent checks each diff against its issue, and
   small fixes land there; larger rework goes back to the subagent.
-  `/code-review` and `/simplify` then run once each over the whole
-  branch, before the user merges. Two passes looking for different
-  things catch more than a pass per issue. A branch that adds no
-  branches, no I/O, and no behaviour change - a vocabulary or type
-  addition, a rename, a doc edit - skips both. The main agent does one
-  inline review pass instead. The skill passes are for diffs with
-  logic in them.
+  Then two passes run once each over the whole branch, before the user
+  merges: one for correctness, defects a reader of the diff would not
+  see, and one for simplification, complexity the diff adds that a
+  simpler form removes. Two passes looking for different things catch
+  more than a pass per issue. Each client runs them with what it has;
+  `CLAUDE.md` names Claude Code's. A branch that adds no branches, no
+  I/O, and no behaviour change - a vocabulary or type addition, a
+  rename, a doc edit - skips both. The main agent does one inline
+  review pass instead. The two passes are for diffs with logic in them.
 - **Reflect.** Close the session by proposing changes to this workflow,
   but only when a step strained or missed something. A session where
   the process fit the work needs no reflection. Cutting a step counts

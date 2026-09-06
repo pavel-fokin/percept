@@ -4,12 +4,24 @@ use std::str::FromStr;
 /// An instant on the system clock, UTC. Wraps `jiff::Timestamp` so the
 /// rest of the code depends on this type, not the crate. `Display` and
 /// `FromStr` are RFC 3339 in UTC (`...Z`), the form the wire format uses.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Timestamp(jiff::Timestamp);
 
 impl Timestamp {
     pub fn now() -> Self {
         Self(jiff::Timestamp::now())
+    }
+
+    /// The instant `seconds` and `nanos` after the Unix epoch, or `None`
+    /// past the range a timestamp can hold.
+    pub fn from_unix(seconds: i64, nanos: i32) -> Option<Self> {
+        jiff::Timestamp::new(seconds, nanos).ok().map(Self)
+    }
+
+    /// The calendar date in UTC, `2026-09-05` - what a heading wants
+    /// where the full instant would be noise.
+    pub fn date(&self) -> String {
+        self.0.strftime("%Y-%m-%d").to_string()
     }
 
     /// This instant less `minutes`, or `None` if that leaves the range

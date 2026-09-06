@@ -330,12 +330,46 @@ fn depth_is_refused_without_around() {
 }
 
 #[test]
+fn since_on_maps_show_parses_like_events_search() {
+    let cli =
+        Cli::try_parse_from(["percept", "maps", "show", "decisions", "--since", "1d"]).unwrap();
+    match cli.command {
+        Some(Command::Maps {
+            command: MapsCommand::Show(args),
+        }) => assert!(args.since.is_some()),
+        _ => panic!("expected maps show"),
+    }
+    assert!(
+        Cli::try_parse_from(["percept", "maps", "show", "decisions", "--since", "soon"]).is_err()
+    );
+}
+
+#[test]
+fn since_is_refused_for_the_code_map() {
+    let cli = Cli::try_parse_from(["percept", "maps", "show", "code", "--since", "1d"]).unwrap();
+    let Some(Command::Maps {
+        command: MapsCommand::Show(args),
+    }) = cli.command
+    else {
+        panic!("expected maps show");
+    };
+
+    let err = maps_show_code(args, Path::new(ROOT))
+        .err()
+        .unwrap()
+        .to_string();
+
+    assert!(err.contains("no history"), "{err}");
+}
+
+#[test]
 fn every_write_verb_refuses_the_code_map() {
     let log = FakeLog::default();
     let renderer = FakeRenderer::default();
     let target = || MapArgs {
         map: "code".to_string(),
         source: Vec::new(),
+        actor: Actor::User,
     };
 
     let cli_source = source("cli");
@@ -393,6 +427,7 @@ fn maps_add_node_renders_the_map_it_changed_once() {
             target: MapArgs {
                 map: "decisions".to_string(),
                 source: Vec::new(),
+                actor: Actor::User,
             },
             kind: "decision".to_string(),
             name: "Rust over Go".to_string(),
@@ -405,4 +440,53 @@ fn maps_add_node_renders_the_map_it_changed_once() {
     .unwrap();
 
     assert_eq!(renderer.rendered(), vec!["decisions".to_string()]);
+}
+
+#[test]
+fn a_map_write_commits_as_the_actor_given_and_defaults_to_user() {
+    let log = FakeLog::default();
+    let renderer = FakeRenderer::default();
+    let cli = Cli::try_parse_from([
+        "percept",
+        "maps",
+        "add-node",
+        "decisions",
+        "--actor",
+        "model",
+        "--kind",
+        "question",
+        "--name",
+        "Which?",
+    ])
+    .unwrap();
+    let Some(Command::Maps {
+        command: MapsCommand::AddNode(args),
+    }) = cli.command
+    else {
+        panic!("expected maps add-node")
+    };
+    assert!(args.target.actor == Actor::Model);
+
+    maps_add_node(args, &log, &source("cli"), &renderer).unwrap();
+
+    let events = log.load().unwrap();
+    assert!(events[0].actor() == Actor::Model);
+    let default = Cli::try_parse_from([
+        "percept",
+        "maps",
+        "add-node",
+        "decisions",
+        "--kind",
+        "question",
+        "--name",
+        "Which?",
+    ])
+    .unwrap();
+    let Some(Command::Maps {
+        command: MapsCommand::AddNode(args),
+    }) = default.command
+    else {
+        panic!("expected maps add-node")
+    };
+    assert!(args.target.actor == Actor::User);
 }

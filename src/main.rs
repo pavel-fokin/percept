@@ -77,9 +77,10 @@ const REFLECT_PROMPT: &str = "Revise the decisions map from recent events. \
     evidence given, and decisions taken that the map does not yet hold; \
     only its results carry event ids. Then record them with revise_map, \
     citing those ids in each node's sources - a node without one is \
-    refused. Remove what no longer holds, with a reason. Reply with a \
-    short summary of what changed, or say the map already held \
-    everything.";
+    refused. A decision that no longer holds is not removed: add the one \
+    that replaces it with a supersedes edge to the old, so the old stays \
+    one hop away. Reply with a short summary of what changed, or say the \
+    map already held everything.";
 
 /// How often the status row's spinner advances while a turn streams.
 const SPINNER_TICK: std::time::Duration = std::time::Duration::from_millis(90);
@@ -174,8 +175,10 @@ fn log_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
 /// `scripts/install.sh` or a package manager put the binary.
 fn is_dev_build(exe: &Path) -> bool {
     exe.ancestors().any(|dir| {
-        matches!(dir.file_name().and_then(|name| name.to_str()), Some("debug" | "release"))
-            && dir.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new("target"))
+        matches!(
+            dir.file_name().and_then(|name| name.to_str()),
+            Some("debug" | "release")
+        ) && dir.parent().and_then(Path::file_name) == Some(std::ffi::OsStr::new("target"))
     })
 }
 
@@ -301,14 +304,12 @@ fn build_app(
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
     let scope = source.scope();
-    let mut tools: Vec<Arc<dyn percept::Tool>> = vec![
+    let tools: Vec<Arc<dyn percept::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
         Arc::new(ReadEvent::new(log.clone())),
         Arc::new(ReviseMap::new(log.clone(), scope.clone())),
+        Arc::new(ReadMap::new(log.clone(), scope)),
     ];
-    if map_shape.opens_by_tool() {
-        tools.push(Arc::new(ReadMap::new(log.clone(), scope)));
-    }
     App::new(model, catalog, log, tools, renderer, map_shape, source)
 }
 

@@ -4,8 +4,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::percept::{EventQuery, EventSearch, Tool, ToolOutput, ToolSpec};
-use crate::shared::Timestamp;
-use crate::store::{parse_actor, parse_kind, summarize, PREVIEW_CHARS};
+use crate::store::{optional_time, parse_actor, parse_kind, summarize, PREVIEW_CHARS};
 
 /// The `search_events` tool: turns the model's JSON arguments into an
 /// `EventQuery`, runs it, and returns each match as one summarized
@@ -39,8 +38,8 @@ const DESCRIPTION: &str = "Search the percept event log. Every field is \
 const PARAMETERS: &str = r#"{
   "type": "object",
   "properties": {
-    "since": {"type": "string", "description": "ISO-8601 lower bound, inclusive"},
-    "until": {"type": "string", "description": "ISO-8601 upper bound, exclusive"},
+    "since": {"type": "string", "description": "lower bound, inclusive: ISO-8601, or 1d/2h/30m back from now"},
+    "until": {"type": "string", "description": "upper bound, exclusive: ISO-8601, or 1d/2h/30m back from now"},
     "actors": {"type": "array", "items": {"type": "string", "enum": ["user", "model", "system"]}},
     "sources": {"type": "array", "items": {"type": "string"}, "description": "the writer that produced the event, e.g. percept-tui or claude-code"},
     "kinds": {"type": "array", "items": {"type": "string", "enum": ["message.received", "thought.recorded", "tool.called", "tool.resulted", "node.added", "node.removed", "edge.added", "edge.removed", "model.called"]}},
@@ -80,13 +79,8 @@ impl Tool for SearchEvents {
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
 
-        // An empty bound is no bound: a model that fills every field the
-        // schema offers sends one for a bound it does not want, and
-        // refusing it cost a call per turn.
-        let since = args.since.as_deref().filter(|s| !s.is_empty());
-        let until = args.until.as_deref().filter(|s| !s.is_empty());
-        let since = since.map(parse_time).transpose()?;
-        let until = until.map(parse_time).transpose()?;
+        let since = optional_time(args.since.as_deref())?;
+        let until = optional_time(args.until.as_deref())?;
         let actors = args
             .actors
             .iter()
@@ -124,13 +118,6 @@ impl Tool for SearchEvents {
                 .join("\n"),
         ))
     }
-}
-
-/// ISO-8601 only - the model is told the current time and works out
-/// absolute bounds itself, so no relative shorthand and no clock here.
-fn parse_time(s: &str) -> Result<Timestamp, Box<dyn std::error::Error>> {
-    s.parse()
-        .map_err(|_| format!("invalid timestamp {s:?}, expected ISO-8601").into())
 }
 
 #[cfg(test)]

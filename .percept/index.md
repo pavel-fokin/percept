@@ -1,0 +1,18 @@
+# Map directory
+
+Choose a map by the question you need answered. `percept maps list`
+prints each map's purpose and current size.
+
+| Map | Use it for | Origin | Entry point |
+|---|---|---|---|
+| decisions | Why a choice was made: the question, the options weighed, the decision that settles it now, and the ones it superseded. | Cognitive commits in this project's event log. | [decisions.md](decisions.md), then `maps show decisions --around 'question:<name>'`. `--since 1d` for what changed since yesterday. |
+| code | Files, the symbols they define, what imports what. | The current working tree, rebuilt on every query. | `maps show code --around file:src/main.rs --kind file`. |
+
+A claim missing from a map may still be in the log. A fragment cut with
+`--around` stops at its edge; the stderr line says how much it left out,
+and a question's options are one hop from it. Code says what is, not
+why.
+
+The shared [percept skill](../.agents/skills/percept/SKILL.md) covers
+selecting a fragment, checking a claim against the log, and revising
+without moving what a reader has seen.

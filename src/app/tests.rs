@@ -697,11 +697,20 @@ fn a_map_is_sent_with_its_kinds_ahead_of_the_transcript_and_outside_the_window()
 
     let sent = model.last_request();
     assert_eq!(sent.len(), CONTEXT_EVENTS + 2);
-    assert!(sent[1].starts_with(
-        "The decisions map, built from this log. Node kinds: question, option, \
-         evidence, decision. Edge kinds: supports, contradicts, resolves.\n"
-    ));
+    assert_decisions_header(&sent[1]);
     assert!(sent[1].contains("- decision \"Rust over Go\""));
+}
+
+/// The catalogue line every shape of the decisions map opens with.
+fn assert_decisions_header(message: &str) {
+    assert!(message.starts_with(
+        "The decisions map: what was asked, what was chosen, and why, so a settled question is \
+         not reopened. It holds "
+    ));
+    assert!(message.contains(
+        ". Node kinds: question, option, evidence, decision. Edge kinds: answers, supports, \
+         contradicts, resolves, supersedes.\n"
+    ));
 }
 
 #[test]
@@ -728,12 +737,11 @@ fn a_headlines_map_sends_only_its_headline_nodes() {
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    assert!(sent[1].starts_with(
-        "The decisions map, built from this log. Node kinds: question, option, \
-         evidence, decision. Edge kinds: supports, contradicts, resolves.\n"
-    ));
+    assert_decisions_header(&sent[1]);
     assert!(
-        sent[1].contains("Its question and decision nodes follow; read_map shows the whole map.\n")
+        sent[1].contains(
+            "Its question and decision nodes follow; read_map opens the rest, whole or around one node.\n"
+        )
     );
     assert!(sent[1].contains("- decision \"Rust over Go\""));
     assert!(!sent[1].contains("benchmarks"));
@@ -751,12 +759,39 @@ fn a_tool_shape_map_sends_only_its_size() {
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    assert!(sent[1].starts_with(
-        "The decisions map, built from this log. Node kinds: question, option, \
-         evidence, decision. Edge kinds: supports, contradicts, resolves.\n"
-    ));
-    assert!(sent[1].contains("It holds 2 nodes and 0 edges. read_map shows it."));
+    assert_decisions_header(&sent[1]);
+    assert!(sent[1].contains("It holds 2 nodes and 0 edges, last changed "));
+    assert!(sent[1].ends_with("\nread_map shows it."));
     assert!(!sent[1].contains("Rust over Go"));
+}
+
+#[test]
+fn a_map_header_carries_its_purpose_size_and_last_change() {
+    let events = vec![node_added("decision", "Rust over Go")];
+    let changed = events[0].created_at();
+    let (model, mut app) = seeded_app(events, Vec::new());
+
+    let _ = app.submit("now".to_string()).unwrap();
+
+    let sent = model.last_request();
+    assert!(sent[1].starts_with(&format!(
+        "The decisions map: {}. It holds 1 nodes and 0 edges, last changed {changed}. Node kinds:",
+        percept::DECISIONS.purpose
+    )));
+}
+
+#[test]
+fn an_empty_map_header_says_it_holds_nothing_yet() {
+    let (model, mut app) = seeded_app(Vec::new(), Vec::new());
+
+    let _ = app.submit("now".to_string()).unwrap();
+
+    let sent = model.last_request();
+    assert!(
+        sent[1].contains(". It holds nothing yet. Node kinds:"),
+        "{}",
+        sent[1]
+    );
 }
 
 #[test]

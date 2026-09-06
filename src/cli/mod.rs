@@ -106,6 +106,12 @@ pub struct ShowMapArgs {
     /// How many edges out `--around` reaches; 0 is the node alone.
     #[arg(long, default_value_t = 1, requires = "around")]
     depth: usize,
+    /// Keep only what the map gained since this instant - an ISO-8601
+    /// timestamp, or `<N>d`, `<N>h`, `<N>m` back from now: the nodes
+    /// added since, and the ends of the edges added since. Refused for
+    /// the code map, which is walked fresh and has no history.
+    #[arg(long, value_parser = |s: &str| parse_time("since", s))]
+    since: Option<Timestamp>,
     /// Fold every project's events instead of only this one's. Ignored
     /// for the code map, which is never folded from the log.
     #[arg(long)]
@@ -136,6 +142,14 @@ pub struct MapArgs {
     /// Repeatable. An event this fact was drawn from.
     #[arg(long)]
     source: Vec<String>,
+    /// Who is writing: `user` for a human at the terminal, `model` for an
+    /// agent recording on their behalf. The map shows the difference.
+    #[arg(long, default_value = "user", value_parser = parse_actor_arg)]
+    actor: Actor,
+}
+
+fn parse_actor_arg(s: &str) -> Result<Actor, String> {
+    store::parse_actor(s).map_err(|err| err.to_string())
 }
 
 #[derive(Args)]
@@ -447,27 +461,34 @@ pub fn maps_show(
 }
 
 /// Prints the code map, walked fresh from `root` - never the log, so
-/// this runs in a directory with no `percept.jsonl`.
+/// this runs in a directory with no `percept.jsonl`. `--since` is
+/// refused: every node is as old as this walk.
 pub fn maps_show_code(args: ShowMapArgs, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    if args.since.is_some() {
+        return Err(
+            "--since has no meaning for the code map: it is walked fresh from the working tree \
+             and has no history"
+                .into(),
+        );
+    }
     let map = code::build(root)?;
     print_map(map, &args)
 }
 
 /// `maps_show` and `maps_show_code`'s shared tail: cut `map` to
-/// `args`'s filters, then print it nodes-then-edges.
-fn print_map(mut map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(node) = &args.around {
-        map = map.around(node, args.depth)?;
+/// `args`'s filters, then print it nodes-then-edges. `--since` runs
+/// after `--around`, so it reads as "what changed near this node".
+fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let selection = percept::Selection {
+        around: args.around.as_ref().map(|node| (node, args.depth)),
+        since: args.since,
+        kinds: &args.kind,
+    };
+    let fragment = map.select(&selection)?;
+    if !selection.is_whole() {
+        eprintln!("{}", store::encode_fragment(&fragment));
     }
-    if !args.kind.is_empty() {
-        map = map.keep_kinds(&args.kind)?;
-    }
-    let nodes = map.nodes().iter().map(store::encode_node);
-    let edges = map
-        .edges()
-        .iter()
-        .map(|edge| store::encode_edge(&map, edge));
-    print_lines(nodes.chain(edges))
+    print_lines(store::encode_lines(fragment.map()))
 }
 
 /// One map change from the shell: `target`'s cited events resolved and
@@ -482,15 +503,14 @@ fn write(
     renderer: &dyn percept::MapRenderer,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
-    let MapArgs { map, source: cited } = target;
+    let MapArgs {
+        map,
+        source: cited,
+        actor,
+    } = target;
     let scope = source.scope();
-    let payload = store::revise(log, &map, &scope, &cited, mutation)?;
-    log.append(&Event::new(
-        Actor::User,
-        source.clone(),
-        None,
-        payload.clone(),
-    ))?;
+    let payload = store::revise(log, &map, &scope, &cited, actor, mutation)?;
+    log.append(&Event::new(actor, source.clone(), None, payload.clone()))?;
     renderer.render(&store::fold_map(log, &map, &scope)?)?;
     Ok(payload)
 }
@@ -719,25 +739,7 @@ fn print_reply(reply: &str) -> Result<(), Box<dyn std::error::Error>> {
 /// `flag` names the flag the value came from, so a rejected value's
 /// error says which one.
 fn parse_time(flag: &str, s: &str) -> Result<Timestamp, String> {
-    let parsed = match relative_minutes(s) {
-        Some(minutes) => Timestamp::now().minus_minutes(minutes),
-        None => s.parse().ok(),
-    };
-    parsed.ok_or_else(|| format!("invalid --{flag} value {s}"))
-}
-
-/// `<N>d`, `<N>h`, or `<N>m` as a count of minutes. `None` for anything
-/// else - `parse_time` then tries it as ISO-8601.
-fn relative_minutes(s: &str) -> Option<i64> {
-    let (digits, unit) = s.split_at_checked(s.len().checked_sub(1)?)?;
-    let n: i64 = digits.parse().ok()?;
-
-    match unit {
-        "d" => n.checked_mul(24 * 60),
-        "h" => n.checked_mul(60),
-        "m" => Some(n),
-        _ => None,
-    }
+    store::parse_time(s).map_err(|_| format!("invalid --{flag} value {s}"))
 }
 
 #[cfg(test)]

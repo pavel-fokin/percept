@@ -5,13 +5,15 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::percept::{
-    Edge, EventId, EventLog, Map, MapError, Mutation, Node, NodeId, Payload, Schema, Scope,
+    Actor, Edge, EventId, EventLog, Fragment, Map, MapError, Mutation, Node, NodeId, NodeRef,
+    Payload, Schema, Scope, DECISIONS, OPTION,
 };
-use crate::store::event::ids;
+use crate::shared::Timestamp;
+use crate::store::event::{actor_name, ids};
 use crate::store::parse_event_id;
 
 /// The map `name` names, folded from every event in `log` that falls
@@ -60,8 +62,14 @@ impl Snapshot {
             .collect()
     }
 
-    pub fn apply(&mut self, mutation: Mutation) -> Result<Payload, MapError> {
-        self.map.apply(mutation)
+    pub fn apply(&mut self, mutation: Mutation, actor: Actor) -> Result<Payload, MapError> {
+        self.map.apply(mutation, actor)
+    }
+
+    /// The map as it stands in this snapshot, for a writer that checks a
+    /// change against more than `apply` enforces.
+    pub fn map(&self) -> &Map {
+        &self.map
     }
 }
 
@@ -76,18 +84,62 @@ pub fn revise(
     name: &str,
     scope: &Scope,
     sources: &[String],
+    actor: Actor,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
     let mut snapshot = Snapshot::load(log, name, scope)?;
     let sources = snapshot.resolve(sources)?;
-    Ok(snapshot.apply(mutation(sources))?)
+    let mutation = mutation(sources);
+    // A rule for new writes only, so the options recorded before it
+    // still fold: this is why it sits here and not in `Map::apply`.
+    if let Mutation::AddNode {
+        kind,
+        name,
+        properties,
+        ..
+    } = &mutation
+    {
+        if snapshot.map().schema() == &DECISIONS && kind == OPTION && !properties.contains_key(WHY)
+        {
+            return Err(format!(
+                "option {name:?} does not say why it lost: an option is an alternative that \
+                 was rejected, and its `why` property carries the reason; the pick is the \
+                 decision itself"
+            )
+            .into());
+        }
+    }
+    Ok(snapshot.apply(mutation, actor)?)
 }
+
+/// The property that carries a node's reason, on a decision and on a
+/// rejected option alike.
+const WHY: &str = "why";
 
 #[derive(Serialize)]
 struct MapLine {
     map: &'static str,
+    purpose: &'static str,
     nodes: usize,
     edges: usize,
+}
+
+/// Who added a node or edge and when. Absent on a derived map's lines:
+/// its nodes were stamped by the walk that built them, and a reader
+/// would take that for the moment the code was written.
+#[derive(Serialize)]
+struct Stamp {
+    actor: &'static str,
+    added_at: String,
+}
+
+impl Stamp {
+    fn of(map: &Map, actor: Actor, added_at: Timestamp) -> Option<Self> {
+        (!map.schema().is_derived()).then(|| Self {
+            actor: actor_name(actor),
+            added_at: added_at.to_string(),
+        })
+    }
 }
 
 #[derive(Serialize)]
@@ -97,6 +149,8 @@ struct NodeLine<'a> {
     name: &'a str,
     properties: &'a BTreeMap<String, String>,
     sources: Vec<String>,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    stamp: Option<Stamp>,
 }
 
 #[derive(Serialize)]
@@ -105,25 +159,86 @@ struct EdgeLine<'a> {
     from: String,
     to: String,
     sources: Vec<String>,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    stamp: Option<Stamp>,
 }
 
 /// One line naming a map and its size, for `maps list`.
 pub fn encode_map(map: &Map) -> String {
     serde_json::to_string(&MapLine {
         map: map.schema().name,
+        purpose: map.schema().purpose,
         nodes: map.nodes().len(),
         edges: map.edges().len(),
     })
     .expect("MapLine always serializes")
 }
 
-pub fn encode_node(node: &Node) -> String {
+#[derive(Serialize)]
+struct FragmentLine<'a> {
+    map: &'static str,
+    shown_nodes: usize,
+    total_nodes: usize,
+    shown_edges: usize,
+    total_edges: usize,
+    boundary_edges: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<&'a str>,
+}
+
+const NOTHING_RECORDED: &str =
+    "nothing has been recorded here yet; the log may still hold what it would";
+
+/// One line saying how much of a map a fragment shows, printed before
+/// the fragment's nodes so a reader knows what the cut left out.
+pub fn encode_fragment(fragment: &Fragment) -> String {
+    let map = fragment.map();
+    serde_json::to_string(&FragmentLine {
+        map: map.schema().name,
+        shown_nodes: map.nodes().len(),
+        total_nodes: fragment.total_nodes(),
+        shown_edges: map.edges().len(),
+        total_edges: fragment.total_edges(),
+        boundary_edges: fragment.boundary_edges(),
+        note: (fragment.total_nodes() == 0).then_some(NOTHING_RECORDED),
+    })
+    .expect("FragmentLine always serializes")
+}
+
+/// A map as JSONL: every node, then every edge - the order `maps show`
+/// prints and `read_map` returns.
+pub fn encode_lines(map: &Map) -> impl Iterator<Item = String> + '_ {
+    let nodes = map.nodes().iter().map(move |node| encode_node(map, node));
+    let edges = map.edges().iter().map(move |edge| encode_edge(map, edge));
+    nodes.chain(edges)
+}
+
+/// A node named the way a writer knows it - by kind and name - matching
+/// `NodeRef`, but its own type since the domain stays serde-free.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct NodeRefArgs {
+    kind: String,
+    name: String,
+}
+
+impl From<NodeRefArgs> for NodeRef {
+    fn from(node: NodeRefArgs) -> Self {
+        NodeRef {
+            kind: node.kind,
+            name: node.name,
+        }
+    }
+}
+
+pub fn encode_node(map: &Map, node: &Node) -> String {
     serde_json::to_string(&NodeLine {
         node: node.id.as_uuid().to_string(),
         kind: &node.kind,
         name: &node.name,
         properties: &node.properties,
         sources: ids(&node.sources),
+        stamp: Stamp::of(map, node.actor, node.added_at),
     })
     .expect("NodeLine always serializes")
 }
@@ -137,6 +252,7 @@ pub fn encode_edge(map: &Map, edge: &Edge) -> String {
         from: node_ref(map, edge.from),
         to: node_ref(map, edge.to),
         sources: ids(&edge.sources),
+        stamp: Stamp::of(map, edge.actor, edge.added_at),
     })
     .expect("EdgeLine always serializes")
 }

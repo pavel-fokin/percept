@@ -3,4 +3,5 @@
 /target
 /percept.jsonl
 /.percept/percept.jsonl
-/.claude/skills/percept/
+/.percept/hook-sessions/
+**/__pycache__/

@@ -10,8 +10,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{self, Write as _};
 use std::path::PathBuf;
 
-use super::{Event, EventId, Payload, Source};
-use crate::shared::Id;
+use super::{Actor, Event, EventId, Payload, Source};
+use crate::shared::{Id, Timestamp};
 
 /// Which events a fold may draw from: one project's alone, or every
 /// project's. The log is shared by every project that writes to it;
@@ -47,6 +47,10 @@ impl Source {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Schema {
     pub name: &'static str,
+    /// The one reasoning operation this map makes cheap, as a reader
+    /// deciding whether to open it needs to hear it - what the prompt
+    /// carries in place of the map.
+    pub purpose: &'static str,
     pub node_kinds: &'static [&'static str],
     pub edge_kinds: &'static [&'static str],
     /// The node kinds worth a reader's attention without opening the
@@ -54,13 +58,34 @@ pub struct Schema {
     pub headline_kinds: &'static [&'static str],
 }
 
+/// The edge kind that corrects a decision: from the new one to the one
+/// it replaces. The old node stays, one hop away, and leaves the
+/// headlines - a removal would take a reader's landmark with it.
+pub const SUPERSEDES: &str = "supersedes";
+
+/// The edge kind from a decision to the question it settles.
+pub const RESOLVES: &str = "resolves";
+
+/// The two node kinds `settled_by` joins.
+const QUESTION: &str = "question";
+/// The one node kind `revise_map` never removes: a decision is corrected
+/// by a successor with a `supersedes` edge, so it is public.
+pub const DECISION: &str = "decision";
+/// An alternative that lost. The store refuses one that does not say
+/// why, so it is public too.
+pub const OPTION: &str = "option";
+
 /// The decision map: what was asked, what was weighed, what was chosen
-/// and on what grounds.
+/// and on what grounds. An option `answers` its question, evidence
+/// `supports` or `contradicts` an option, a decision `resolves` the
+/// question, and a later decision `supersedes` an earlier one - so
+/// `--around` a question reaches everything weighed for it.
 pub const DECISIONS: Schema = Schema {
     name: "decisions",
-    node_kinds: &["question", "option", "evidence", "decision"],
-    edge_kinds: &["supports", "contradicts", "resolves"],
-    headline_kinds: &["question", "decision"],
+    purpose: "what was asked, what was chosen, and why, so a settled question is not reopened",
+    node_kinds: &[QUESTION, "option", "evidence", DECISION],
+    edge_kinds: &["answers", "supports", "contradicts", RESOLVES, SUPERSEDES],
+    headline_kinds: &[QUESTION, DECISION],
 };
 
 /// The code map: a codebase's files, the symbols they define, and what
@@ -68,6 +93,7 @@ pub const DECISIONS: Schema = Schema {
 /// log, so it is in `DERIVED` and not `SCHEMAS`.
 pub const CODE: Schema = Schema {
     name: "code",
+    purpose: "which file defines which symbol and imports which file or package",
     node_kinds: &["file", "function", "type", "package"],
     edge_kinds: &["contains", "imports"],
     headline_kinds: &["file"],
@@ -80,12 +106,23 @@ pub const SCHEMAS: &[&Schema] = &[&DECISIONS];
 /// builds one fresh; no writer commits to it.
 pub const DERIVED: &[&Schema] = &[&CODE];
 
+/// Whether `name` names a map in `DERIVED`.
+fn is_derived(name: &str) -> bool {
+    DERIVED.iter().any(|schema| schema.name == name)
+}
+
 impl Schema {
+    /// Whether this map is built from something other than the log, so
+    /// its nodes have no history: no writer, no moment they were added.
+    pub fn is_derived(&self) -> bool {
+        is_derived(self.name)
+    }
+
     /// The log-folded schema `name` names, or the error every boundary
     /// that folds or writes a map by name reports. A derived map is its
     /// own error: it exists, and this is the wrong door to it.
     pub fn find(name: &str) -> Result<&'static Schema, MapError> {
-        if DERIVED.iter().any(|schema| schema.name == name) {
+        if is_derived(name) {
             return Err(MapError::Derived(name.to_string()));
         }
         SCHEMAS
@@ -109,6 +146,10 @@ pub struct Node {
     pub name: String,
     pub properties: BTreeMap<String, String>,
     pub sources: Vec<EventId>,
+    /// Who added this node - the actor its `node.added` event carried.
+    pub actor: Actor,
+    /// When this node was added - that event's `created_at`.
+    pub added_at: Timestamp,
 }
 
 /// A node as a writer names it: kind and quoted name, never the id.
@@ -126,6 +167,10 @@ pub struct Edge {
     pub from: NodeId,
     pub to: NodeId,
     pub sources: Vec<EventId>,
+    /// Who added this edge - the actor its `edge.added` event carried.
+    pub actor: Actor,
+    /// When this edge was added - that event's `created_at`.
+    pub added_at: Timestamp,
 }
 
 /// Points at a node the way a writer knows it - by kind and name -
@@ -139,6 +184,50 @@ pub struct NodeRef {
 impl fmt::Display for NodeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {:?}", self.kind, self.name)
+    }
+}
+
+/// How much of a map a reader asked for. `around` cuts first, then
+/// `since`, then `kinds`, so the three together read as "what changed
+/// near this node, of these kinds". All absent is the whole map.
+#[derive(Default)]
+pub struct Selection<'a> {
+    pub around: Option<(&'a NodeRef, usize)>,
+    pub since: Option<Timestamp>,
+    pub kinds: &'a [String],
+}
+
+impl Selection<'_> {
+    pub fn is_whole(&self) -> bool {
+        self.around.is_none() && self.since.is_none() && self.kinds.is_empty()
+    }
+}
+
+/// A map cut to a `Selection`, with what the cut left out counted: the
+/// whole map's size, and the edges with one end inside the cut and one
+/// outside - where a reader who needs more widens from.
+pub struct Fragment {
+    map: Map,
+    total_nodes: usize,
+    total_edges: usize,
+    boundary_edges: usize,
+}
+
+impl Fragment {
+    pub fn map(&self) -> &Map {
+        &self.map
+    }
+
+    pub fn total_nodes(&self) -> usize {
+        self.total_nodes
+    }
+
+    pub fn total_edges(&self) -> usize {
+        self.total_edges
+    }
+
+    pub fn boundary_edges(&self) -> usize {
+        self.boundary_edges
     }
 }
 
@@ -332,7 +421,7 @@ impl Map {
             if map_of(event.payload()) != Some(schema.name) {
                 continue;
             }
-            map.replay(event.payload())
+            map.replay(event.payload(), event.actor(), event.created_at())
                 .map_err(|error| MapError::Rejected {
                     event: event.id(),
                     error: Box::new(error),
@@ -360,17 +449,123 @@ impl Map {
         &self.nodes
     }
 
-    /// The nodes of the schema's headline kinds, in map order - what a
-    /// reader sees of the map before opening it.
+    /// The nodes of the schema's headline kinds, in map order, less the
+    /// superseded ones - what a reader sees of the map before opening
+    /// it.
     pub fn headlines(&self) -> impl Iterator<Item = &Node> {
         let kinds = self.schema.headline_kinds;
         self.nodes
             .iter()
             .filter(move |node| kinds.contains(&node.kind.as_str()))
+            .filter(|node| !self.is_superseded(node.id))
+    }
+
+    /// The node with a `supersedes` edge to `id`. Two nodes superseding
+    /// one is a writer's mistake; the first in map order wins.
+    fn superseded_by(&self, id: NodeId) -> Option<NodeId> {
+        self.edges
+            .iter()
+            .find(|edge| edge.kind == SUPERSEDES && edge.to == id)
+            .map(|edge| edge.from)
+    }
+
+    pub fn is_superseded(&self, id: NodeId) -> bool {
+        self.superseded_by(id).is_some()
+    }
+
+    /// The nodes `id` supersedes, in map order.
+    fn supersedes(&self, id: NodeId) -> impl Iterator<Item = &Node> {
+        self.edges
+            .iter()
+            .filter(move |edge| edge.kind == SUPERSEDES && edge.from == id)
+            .filter_map(|edge| self.node(edge.to))
+    }
+
+    /// The end of `id`'s supersession chain: `id` itself when nothing
+    /// supersedes it, else the node that does, followed until one is
+    /// current. A cycle stops at the node already seen.
+    pub fn successor(&self, id: NodeId) -> NodeId {
+        let mut seen = HashSet::from([id]);
+        let mut current = id;
+        while let Some(next) = self.superseded_by(current) {
+            if !seen.insert(next) {
+                break;
+            }
+            current = next;
+        }
+        current
+    }
+
+    /// Everything `id` supersedes, transitively, nearest first - the
+    /// `was` lines under a decision.
+    pub fn predecessors(&self, id: NodeId) -> Vec<&Node> {
+        let mut seen = HashSet::from([id]);
+        let mut out = Vec::new();
+        let mut frontier = vec![id];
+        while let Some(current) = frontier.pop() {
+            for node in self.supersedes(current) {
+                if seen.insert(node.id) {
+                    out.push(node);
+                    frontier.push(node.id);
+                }
+            }
+        }
+        out
+    }
+
+    /// The decisions that settle `question` now: each decision with a
+    /// `resolves` edge to it, followed to the end of its supersession
+    /// chain, so a correction needs no new `resolves` edge. In map
+    /// order, each once. A `resolves` edge between other kinds settles
+    /// nothing.
+    pub fn settled_by(&self, question: NodeId) -> Vec<&Node> {
+        let mut out: Vec<&Node> = Vec::new();
+        for edge in self.resolving_edges() {
+            if edge.to != question {
+                continue;
+            }
+            if let Some(current) = self.node(self.successor(edge.from)) {
+                if !out.iter().any(|node| node.id == current.id) {
+                    out.push(current);
+                }
+            }
+        }
+        out
+    }
+
+    /// Whether `decision`, or a decision it supersedes, has a
+    /// `resolves` edge to a question - so it belongs under one in a
+    /// render rather than on its own.
+    pub fn settles(&self, decision: NodeId) -> bool {
+        let chain: HashSet<NodeId> = std::iter::once(decision)
+            .chain(self.predecessors(decision).iter().map(|node| node.id))
+            .collect();
+        self.resolving_edges()
+            .any(|edge| chain.contains(&edge.from))
+    }
+
+    /// The `resolves` edges that run from a decision to a question.
+    fn resolving_edges(&self) -> impl Iterator<Item = &Edge> {
+        self.edges.iter().filter(|edge| {
+            edge.kind == RESOLVES
+                && self
+                    .node(edge.from)
+                    .is_some_and(|node| node.kind == DECISION)
+                && self.node(edge.to).is_some_and(|node| node.kind == QUESTION)
+        })
     }
 
     pub fn edges(&self) -> &[Edge] {
         &self.edges
+    }
+
+    /// When the map last gained a node or an edge; `None` while it is
+    /// empty. A removal leaves no trace here - what was removed lives
+    /// only in the events.
+    pub fn last_changed(&self) -> Option<Timestamp> {
+        let nodes = self.nodes.iter().map(|node| node.added_at);
+        let edges = self.edges.iter().map(|edge| edge.added_at);
+        nodes.chain(edges).max()
     }
 
     pub fn node(&self, id: NodeId) -> Option<&Node> {
@@ -425,6 +620,67 @@ impl Map {
         Ok(self.cut_to(nodes))
     }
 
+    /// The map cut to what it gained since `at`: the nodes added then
+    /// or later, plus the ends of every edge added then or later, so a
+    /// new decision resolving an old question shows the question too.
+    /// Edges from before `at` are not in the cut, even between kept
+    /// nodes - they are not what changed.
+    pub fn since(&self, at: Timestamp) -> Self {
+        let fresh: Vec<&Edge> = self
+            .edges
+            .iter()
+            .filter(|edge| edge.added_at >= at)
+            .collect();
+        let touched: HashSet<NodeId> = fresh.iter().flat_map(|edge| [edge.from, edge.to]).collect();
+        let nodes = self
+            .nodes
+            .iter()
+            .filter(|node| node.added_at >= at || touched.contains(&node.id))
+            .cloned()
+            .collect();
+        let edges = fresh.into_iter().cloned().collect();
+        Self::from_parts(self.schema, nodes, edges)
+    }
+
+    /// The map cut to `selection`, in its fixed order, counting what
+    /// the cut left out. Consumes the map: a whole selection is the map
+    /// itself, not a copy.
+    pub fn select(self, selection: &Selection) -> Result<Fragment, MapError> {
+        let total_nodes = self.nodes.len();
+        let total_edges = self.edges.len();
+        // An empty map has nothing to cut, and a node it lacks is not an
+        // error to report over "nothing recorded yet".
+        if selection.is_whole() || self.nodes.is_empty() {
+            return Ok(Fragment {
+                map: self,
+                total_nodes,
+                total_edges,
+                boundary_edges: 0,
+            });
+        }
+        let mut cut = match selection.around {
+            Some((node, depth)) => self.around(node, depth)?,
+            None => self.cut_to(self.nodes.clone()),
+        };
+        if let Some(at) = selection.since {
+            cut = cut.since(at);
+        }
+        if !selection.kinds.is_empty() {
+            cut = cut.keep_kinds(selection.kinds)?;
+        }
+        let boundary_edges = self
+            .edges
+            .iter()
+            .filter(|edge| cut.node(edge.from).is_some() != cut.node(edge.to).is_some())
+            .count();
+        Ok(Fragment {
+            map: cut,
+            total_nodes,
+            total_edges,
+            boundary_edges,
+        })
+    }
+
     /// A copy holding `nodes` and only the edges that join two of them.
     /// An edge to a node outside the cut is not a fact of the cut.
     fn cut_to(&self, nodes: Vec<Node>) -> Self {
@@ -442,7 +698,7 @@ impl Map {
     /// state, applies it, and returns the `Payload` that records it.
     /// The caller commits that payload; the map is already updated, so
     /// a batch can check each step against the ones before it.
-    pub fn apply(&mut self, mutation: Mutation) -> Result<Payload, MapError> {
+    pub fn apply(&mut self, mutation: Mutation, actor: Actor) -> Result<Payload, MapError> {
         let map = self.schema.name.to_string();
         let payload = match mutation {
             Mutation::AddNode {
@@ -493,14 +749,16 @@ impl Map {
                 sources,
             },
         };
-        self.replay(&payload)?;
+        self.replay(&payload, actor, Timestamp::now())?;
         Ok(payload)
     }
 
     /// Applies one recorded change - every rule a map enforces lives
     /// here, so a fold and `apply` agree. Removing a node drops the
-    /// edges that touch it: an edge to nothing is not a fact.
-    fn replay(&mut self, payload: &Payload) -> Result<(), MapError> {
+    /// edges that touch it: an edge to nothing is not a fact. `actor`
+    /// and `at` stamp a node or edge this call adds - who and when,
+    /// from the event that carried it.
+    fn replay(&mut self, payload: &Payload, actor: Actor, at: Timestamp) -> Result<(), MapError> {
         match payload {
             Payload::NodeAdded {
                 node,
@@ -528,6 +786,8 @@ impl Map {
                     name: name.clone(),
                     properties: properties.clone(),
                     sources: sources.clone(),
+                    actor,
+                    added_at: at,
                 });
             }
             Payload::NodeRemoved { node, .. } => {
@@ -567,6 +827,8 @@ impl Map {
                     from: *from,
                     to: *to,
                     sources: sources.clone(),
+                    actor,
+                    added_at: at,
                 });
             }
             Payload::EdgeRemoved { kind, from, to, .. } => {

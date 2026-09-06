@@ -262,10 +262,16 @@ impl ModelCatalog for FakeCatalog {
     }
 }
 
-/// A node on the decisions map, cited from one event, for tests that
-/// need a map with something in it.
+/// A node on the decisions map, written by the user and cited from one
+/// event, for tests that need a map with something in it.
 pub fn node_added(kind: &str, name: &str) -> Event {
-    node_added_at("/test", kind, name)
+    node_added_by(Actor::User, kind, name)
+}
+
+/// `node_added`, committed as `actor` - for a test about who wrote a
+/// node.
+pub fn node_added_by(actor: Actor, kind: &str, name: &str) -> Event {
+    Event::new(actor, source("test"), None, node_added_payload(kind, name))
 }
 
 /// `node_added`, from a project other than `/test` - for a test that
@@ -275,13 +281,43 @@ pub fn node_added_at(path: &str, kind: &str, name: &str) -> Event {
         Actor::User,
         source_at("test", path),
         None,
-        Payload::NodeAdded {
+        node_added_payload(kind, name),
+    )
+}
+
+fn node_added_payload(kind: &str, name: &str) -> Payload {
+    Payload::NodeAdded {
+        map: "decisions".to_string(),
+        node: NodeId::new(),
+        kind: kind.to_string(),
+        name: name.to_string(),
+        properties: BTreeMap::new(),
+        sources: vec![EventId::new()],
+    }
+}
+
+/// The node id a `node.added` event minted, so a test can point an
+/// edge at it.
+pub fn node_id(event: &Event) -> NodeId {
+    match event.payload() {
+        Payload::NodeAdded { node, .. } => *node,
+        _ => panic!("expected a node.added event"),
+    }
+}
+
+/// An edge on the decisions map, written by the user, between two nodes
+/// `node_added` minted.
+pub fn edge_added(kind: &str, from: &Event, to: &Event) -> Event {
+    Event::new(
+        Actor::User,
+        source("test"),
+        None,
+        Payload::EdgeAdded {
             map: "decisions".to_string(),
-            node: NodeId::new(),
             kind: kind.to_string(),
-            name: name.to_string(),
-            properties: BTreeMap::new(),
-            sources: vec![EventId::new()],
+            from: node_id(from),
+            to: node_id(to),
+            sources: Vec::new(),
         },
     )
 }
