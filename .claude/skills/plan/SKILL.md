@@ -101,6 +101,20 @@ Name the decision as the option it picks. Add an `evidence` node with a
 `contradicts` edge to an option only when the user gave a reason it
 lost; skip it otherwise. A node whose name already exists is refused,
 so read `.percept/decisions.md` before adding to a question it holds.
+The render shows questions and decisions only; `percept maps show
+decisions --around 'question:<name>'` shows a question's options and
+evidence, and `--since 1d` shows what the map gained today.
+
+A decision that changes an earlier one is never a removal. Add the new
+decision, then point it at the old one:
+
+```
+$P maps add-edge decisions --kind supersedes \
+  --from 'decision:<new>' --to 'decision:<old>' --source $id
+```
+
+The old decision leaves the headlines and renders as `was` under its
+successor, so a reader who knew it still finds it.
 
 At the reflect step, record an approach the session abandoned the same
 way: an `evidence` node naming what failed and why, citing the event

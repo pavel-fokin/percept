@@ -62,14 +62,28 @@ model builds maps today. The user will build and co-own them.
 - `Map` is a cognitive map: nodes and edges the model builds from the
   log, folded from `node.added`, `node.removed`, `edge.added`, and
   `edge.removed` events in the same log. A `Schema` names a map and
-  the node and edge kinds it allows - `decisions` today. Every change
-  goes through `Map::apply`, so the rules live once. `code` is a `Map`
-  too, but folded from the working tree instead of the log - see
-  `code` below.
+  the node and edge kinds it allows, and one line of purpose - what
+  the map makes cheap - that the prompt carries in place of the map
+  itself. `decisions` today. Every change goes through `Map::apply`, so
+  the rules live once. `code` is a `Map` too, but folded from the
+  working tree instead of the log - see `code` below.
+- A node records who added it - `User` or `Model` - and when. A
+  user-written node is the human's landmark in a shared map: the model
+  may attach edges to it but never remove it. A decision is corrected by
+  adding the new one with a `supersedes` edge to the old, never by
+  removal, so the old landmark stays one hop away and leaves the
+  headlines. Stability of the representation is a value beside accuracy
+  and compactness: a map may grow, but what a reader has seen does not
+  move.
 - `Scope` says which project's events a fold reads: the current one by
   default, every one with `--all-projects`. A `MapRenderer` writes a
   map somewhere a reader finds it; today that is
-  `<project>/.percept/<map>.md`, rewritten on every write.
+  `<project>/.percept/<map>.md`, rewritten on every write. The
+  decisions render lists questions in the order they were raised,
+  grouped under the prompt that settled them, each with its decision;
+  options and evidence stay out of it and are reached with `percept
+  maps show decisions --around question:<name>`. `--since <time>` on
+  `maps show` lists what a map gained since a reader last looked.
 
 ## Decisions
 
@@ -112,7 +126,8 @@ skips it.
   of those: the builder proposes it, and review challenges it. The user
   agrees the set before any code. Each settled decision is then recorded
   in the decisions map, citing the prompt that settled it, so the next
-  session does not reopen it.
+  session does not reopen it. A decision that changes an earlier one is
+  added with a `supersedes` edge to it; the old node is never removed.
 - **Build.** An issue with no design left in it, touching one or two
   files, the main agent builds itself. Anything larger goes to the
   `software-developer` subagent, which follows this file, writes the
