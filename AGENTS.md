@@ -137,6 +137,18 @@ it, never sideways or up:
 
 Wire concrete types together only at the entrypoint - `main` in Rust.
 
+## Coding agents
+
+percept serves whichever coding agent the user runs, so the setup in
+this repo is client-neutral. Instructions live in `AGENTS.md`, skills
+in `.agents/skills`, the subagent body in `.agents/agents`, and event
+capture in `scripts/agent-hook.py`, which takes the client's name as
+its argument and records under it as the source. A client's own folder
+- `.claude`, `.codex` - holds only discovery metadata and the commands
+that call the shared files: a symlink, a settings file, an adapter. A
+new agent costs an adapter, never a copy. A rule only one client can
+follow is not a rule of this repo.
+
 ## Workflow
 
 Non-trivial work runs plan, build, review, reflect. A one-line fix

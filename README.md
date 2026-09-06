@@ -27,10 +27,11 @@ that nothing else bears on it.
 prompt carries one line per map with its purpose, size, and last
 change. The code map never reaches the model.
 
-## Claude Code and Codex
+## Coding agents
 
-Both clients use the same repository instructions, skills, and event
-capture. Client files contain only the discovery metadata and commands.
+The setup is client-neutral: one body of instructions, skills, and
+event capture, and per client only the files that point at it. Claude
+Code and Codex are wired today.
 
 | Shared source | Claude Code entry | Codex entry |
 |---|---|---|
@@ -39,8 +40,15 @@ capture. Client files contain only the discovery metadata and commands.
 | `.agents/agents/software-developer.md` | `.claude/agents/software-developer.md` | `.codex/agents/software-developer.toml` |
 | `scripts/agent-hook.py` | `.claude/settings.json` | `.codex/hooks.json` |
 
+To add a client, point its skill discovery at `.agents/skills` and its
+hooks at `scripts/agent-hook.py <client-name>`. The script records every
+event under that name as its source, so `percept events search --source
+<client-name>` reads one client's history. It reads the hook input
+shape Claude Code and Codex share; a client that sends another shape
+needs a small translation in the script, not a script of its own.
+
 Install the binary with `scripts/install.sh`. Hooks need Python 3 and
-Git. Open either client from this checkout and trust the repository.
+Git. Open the client from this checkout and trust the repository.
 In Codex, use `/hooks` to review and trust the three capture hooks.
 Restart an existing client session to load the project configuration.
 See the official [Codex hooks](https://learn.chatgpt.com/docs/hooks) and

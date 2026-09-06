@@ -141,6 +141,13 @@ out. What came across, and how:
 | `.percept/index.md`, one row per map | Kept | Rows describe this branch's render and entry points. AGENTS.md points at it and keeps the decisions include Codex had removed. |
 | `read_map` with `around`, `depth`, `kinds`, and coverage counts | Ported | Lives in the domain as `Selection` and `Fragment` on `Map`, so the CLI and the tool share one cut order: around, since, kinds. `since` is accepted too. The count line has `partial` and the numbers; Codex's prose notices are gone. A filtered `maps show` prints the same counts on stderr. |
 
+Pavel then fixed the rule behind the interop: the setup must serve any
+coding agent, not two. That is recorded as a decision superseding the
+two-client one, which was the first real supersession on this map: the
+old question now shows the new decision with its own `source` line and
+the old decision as `was`, exactly as the render was designed to. The
+hook script's fixed list of two client names went with it.
+
 Left on the Codex branch, with the reason:
 
 - **`commitment` nodes, `details` edges, HTML render.** The overview

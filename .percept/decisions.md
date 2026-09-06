@@ -51,6 +51,13 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "How is the decisions map rendered for a reader?"
   decision "Markdown lines: one per question, one per decision": why: "the user was not sure about HTML; a line per node reads in a diff and in AGENTS.md, and the grouping needs no node the model has to invent"
 - "Where do Claude Code and Codex find the shared instructions, skills, and capture hooks?"
-  decision "one body under .agents and scripts/agent-hook.py; .claude symlinks to it and .codex adapts it": why: "taken whole from codex/shared-maps: both clients record into the same log under their own source name, and one skill text serves both"
+  decision "any agent: one client-neutral body, and per client only a thin adapter that points at it": why: "percept is for working with different coding agents and tools; instructions in AGENTS.md, skills in .agents/skills, capture in scripts/agent-hook.py, and a client folder holds only discovery metadata and the commands that call them, so a new agent costs an adapter, never a copy"
+  source 01a07641-6411-7812-9878-09fc6a5f2e06
+  was "one body under .agents and scripts/agent-hook.py; .claude symlinks to it and .codex adapts it"
 - "Where does a session start when it needs a map?"
   decision ".percept/index.md: one row per map with its use, origin, and entry point": why: "taken from codex/shared-maps; the catalogue line serves the model mid-turn, the index serves whoever opens the repo"
+
+## 2026-09-06 · 01a07641-6411-7812-9878-09fc6a5f2e06
+- "Which coding agents must this repo's percept setup serve?"
+  decision "any agent: one client-neutral body, and per client only a thin adapter that points at it": why: "percept is for working with different coding agents and tools; instructions in AGENTS.md, skills in .agents/skills, capture in scripts/agent-hook.py, and a client folder holds only discovery metadata and the commands that call them, so a new agent costs an adapter, never a copy"
+  was "one body under .agents and scripts/agent-hook.py; .claude symlinks to it and .codex adapts it"
