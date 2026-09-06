@@ -27,13 +27,6 @@ pub enum MapShape {
     Tool,
 }
 
-impl MapShape {
-    /// Whether the model needs `read_map` to see a whole map.
-    pub fn opens_by_tool(self) -> bool {
-        matches!(self, Self::Headlines | Self::Tool)
-    }
-}
-
 /// What a presentation needs from the app layer - `tui` and `cli::ask`
 /// both drive a turn through it. Lives here, not in either of them, so
 /// implementing it doesn't pull a presentation into app's dependencies.

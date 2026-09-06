@@ -304,14 +304,12 @@ fn build_app(
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
     let scope = source.scope();
-    let mut tools: Vec<Arc<dyn percept::Tool>> = vec![
+    let tools: Vec<Arc<dyn percept::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
         Arc::new(ReadEvent::new(log.clone())),
         Arc::new(ReviseMap::new(log.clone(), scope.clone())),
+        Arc::new(ReadMap::new(log.clone(), scope)),
     ];
-    if map_shape.opens_by_tool() {
-        tools.push(Arc::new(ReadMap::new(log.clone(), scope)));
-    }
     App::new(model, catalog, log, tools, renderer, map_shape, source)
 }
 
