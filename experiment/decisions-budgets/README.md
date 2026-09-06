@@ -127,11 +127,42 @@ cat .percept/decisions.md
 The render file is committed, so `git diff main -- .percept/decisions.md`
 shows the shape change on real data.
 
+## Taken from the Codex branch
+
+Codex answered the same concern on `codex/shared-maps`. Pavel compared
+the two and asked for its strongest parts to be folded in here, with
+the Claude Code and Codex interop kept whole and the HTML render left
+out. What came across, and how:
+
+| From Codex | Here | Changed on the way |
+|---|---|---|
+| Shared capture hook `scripts/agent-hook.py`, `.claude/settings.json`, `.codex/hooks.json`, one `software-developer` body under `.agents` | Cherry-picked | Nothing. |
+| Skills under `.agents/skills`, `.claude/skills` as symlinks, `README.md`, `.gitignore` | Cherry-picked, then rewritten | The plan skill keeps this branch's recording recipe, with Codex's line that an explicit "implement it" supplies agreement. The percept skill is rewritten around questions, `--since`, `supersedes`, and actor marks instead of commitments. |
+| `.percept/index.md`, one row per map | Kept | Rows describe this branch's render and entry points. AGENTS.md points at it and keeps the decisions include Codex had removed. |
+| `read_map` with `around`, `depth`, `kinds`, and coverage counts | Ported | Lives in the domain as `Selection` and `Fragment` on `Map`, so the CLI and the tool share one cut order: around, since, kinds. `since` is accepted too. The count line has `partial` and the numbers; Codex's prose notices are gone. A filtered `maps show` prints the same counts on stderr. |
+
+Left on the Codex branch, with the reason:
+
+- **`commitment` nodes, `details` edges, HTML render.** The overview
+  was a model's grouping marked `proposed`, written to a temp log, so
+  the shared log never held it. The user was not sure about HTML.
+- **`PERCEPT_MAPS` default flipped to `tool`, `read_map` always
+  registered, reflect prompt rewritten.** Untested against a model on
+  this branch; each is a separate decision.
+- **Admission rule** ("not one node per flag or filename"). Cuts the
+  change budget at the source and is worth deciding. Not taken without
+  the user's word, since AGENTS.md says the opposite today.
+- **`--markdown` on `maps show`.** No reader asked for it.
+
 ## Open
 
 - The plan skill records decisions through the CLI as `user`. An agent
   recording on the user's behalf is attributed to the user. Whether
   that is right for co-ownership is not settled.
+- Merging into main meets an untracked `.claude/skills/percept/`
+  directory and hook entries in `.claude/settings.local.json` from the
+  old setup. Both must go first, or prompts are recorded twice and the
+  skill symlink cannot be created. The README says how.
 - The read moment per map (open `attempts` on a failure, `decisions` at
   the plan step) is still the model's judgment. Encoding it as a
   trigger percept fires is the next step for the overview budget.

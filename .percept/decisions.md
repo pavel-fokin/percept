@@ -44,3 +44,13 @@ Folded from the percept log for this project and rerendered on every write. Chan
   decision "--around cuts first, --since cuts what is left": why: "reads as what changed near this node; the other order would drop old edges before the neighbourhood is walked"
 - "How does an option point at the question it was weighed for?"
   decision "an answers edge from the option to the question": why: "--around a question follows edges, not sources, so without it the render's pointer to --around reached no option"
+
+## 2026-09-06 · 01a0762d-7a6e-73a1-a7e9-ba4e182871d1
+- "How does the model select a fragment of a map?"
+  decision "read_map takes around, depth, since, and kinds, and opens with a line counting what the cut left out": why: "the CLI already had the cut; the model loop had none, so it read every node; the counts say how much was left out and how many edges cross the cut, taken from the codex/shared-maps branch"
+- "How is the decisions map rendered for a reader?"
+  decision "Markdown lines: one per question, one per decision": why: "the user was not sure about HTML; a line per node reads in a diff and in AGENTS.md, and the grouping needs no node the model has to invent"
+- "Where do Claude Code and Codex find the shared instructions, skills, and capture hooks?"
+  decision "one body under .agents and scripts/agent-hook.py; .claude symlinks to it and .codex adapts it": why: "taken whole from codex/shared-maps: both clients record into the same log under their own source name, and one skill text serves both"
+- "Where does a session start when it needs a map?"
+  decision ".percept/index.md: one row per map with its use, origin, and entry point": why: "taken from codex/shared-maps; the catalogue line serves the model mid-turn, the index serves whoever opens the repo"

@@ -87,7 +87,10 @@ agreement.
   that settles it now; options and evidence stay out of it and are
   reached with `percept maps show decisions --around question:<name>`.
   `--since <time>` on `maps show` lists what a map gained since a
-  reader last looked.
+  reader last looked. A `Selection` - around a node, since an instant,
+  of some kinds - cuts a map to a `Fragment`, which counts what the cut
+  left out and how many edges cross it. `maps show` and `read_map` both
+  cut through it, so the order of the cuts lives once.
 
 ## Maps
 
