@@ -73,3 +73,12 @@ Folded from the percept log for this project and rerendered on every write. Chan
   decision "in the workflow text, not as shared skills: each client uses its own review tooling, and CLAUDE.md names Claude Code's": why: "the core flow stays general; a client-specific file carries what only that client can do"
 - "Which values does since take on the model's tools?"
   decision "the same as the CLI: ISO-8601 or Nd, Nh, Nm back from now, through one parser": why: "one meaning for since wherever it is typed"
+
+## 2026-09-06 · 01a076df-b938-7ad1-b81b-42093e40f682
+- "How does percept find the project root, and what happens when there is none?" (model)
+  decision "Walk up from cwd for .git or .percept; stop at $HOME and the filesystem root; error when neither is found" (model): why: "matches git and cargo; the ceiling stops a stray ~/.git or the real ~/.percept from turning into a home-wide code-map walk that also trips macOS's protected folders"
+
+## 2026-09-06 · 01a076c5-08cd-7b71-a036-cf1afda93dc7
+- "Does install.sh copy the binary into ~/.percept/bin or symlink it?" (model)
+  decision "Copy it with install -m 755, and also into ~/.local/bin or ~/bin when ~/.percept/bin is not on PATH" (model): why: "the binary must sit outside target/ for is_dev_build to tell an install from a cargo build (01a07195); the extra copy into a PATH dir lets percept resolve without editing PATH"
+  source 01a076e9-5ddd-7221-90f5-4b23e7b57850
