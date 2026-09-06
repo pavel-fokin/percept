@@ -7,8 +7,11 @@ description: Select, check, and revise percept's cognitive maps; query its exper
 
 Read [.percept/index.md](../../../.percept/index.md) to choose a map.
 `percept maps list` prints each map's purpose and size. The installed
-binary is `~/.percept/bin/percept`; a worktree build is
-`target/debug/percept`. For code query patterns, read [code.md](code.md).
+binary is `~/.percept/bin/percept` and reads `~/.percept/percept.jsonl`.
+A worktree build, `target/debug/percept`, reads `<checkout>/.percept/`
+instead unless `PERCEPT_HOME` says otherwise, so set it to
+`$HOME/.percept` to query the shared log with a dev build. For code
+query patterns, read [code.md](code.md).
 
 ## Select a fragment
 

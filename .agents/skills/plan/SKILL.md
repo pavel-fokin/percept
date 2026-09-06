@@ -78,14 +78,16 @@ use that id. Without it, the latest prompt from this project is
 
 ```
 ~/.percept/bin/percept events search --source claude-code --actor user \
-  | jq -r --arg root "$(git rev-parse --show-toplevel)" \
+  | jq -r --arg root "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")" \
       'select(.source.path == $root) | .id' | tail -1
 ```
 
 A Codex session's prompts carry `--source codex` instead. The log is
 shared by every project, and `events search` filters by source name
 only, so the path filter is what keeps a foreign project's prompt out
-of this map's sources.
+of this map's sources. percept stamps every event with the main
+checkout's path, worktree or not, which is why the filter asks for the
+common git dir's parent and not `--show-toplevel`.
 
 One decision, with `P=~/.percept/bin/percept` and `$id` the prompt:
 
