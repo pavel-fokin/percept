@@ -2,6 +2,8 @@ use std::marker::PhantomData;
 
 use uuid::Uuid;
 
+use super::Timestamp;
+
 /// Id is a phantom-typed UUID: T pins it to one entity type, so IDs from
 /// different entities can't be mixed up. Per ADR, entity IDs use UUIDv7 -
 /// time-ordered, so IDs sort by creation.
@@ -33,6 +35,14 @@ impl<T> Id<T> {
 
     pub fn as_uuid(&self) -> Uuid {
         self.uuid
+    }
+
+    /// When this id was minted, read from the UUIDv7 itself - so a
+    /// reader holding only an id can date it without the log. `None`
+    /// for a UUID of another version.
+    pub fn minted_at(&self) -> Option<Timestamp> {
+        let (seconds, nanos) = self.uuid.get_timestamp()?.to_unix();
+        Timestamp::from_unix(i64::try_from(seconds).ok()?, i32::try_from(nanos).ok()?)
     }
 }
 
@@ -71,3 +81,6 @@ impl<T> std::fmt::Debug for Id<T> {
         write!(f, "{}", self.uuid)
     }
 }
+
+#[cfg(test)]
+mod tests;
