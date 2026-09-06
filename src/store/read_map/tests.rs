@@ -122,6 +122,13 @@ fn around_on_an_empty_map_still_says_nothing_is_recorded() {
 }
 
 #[test]
-fn a_since_that_is_not_iso8601_is_an_error() {
+fn since_takes_the_shorthand_the_cli_takes() {
+    let rows = read(r#"{"map":"decisions","since":"1d"}"#).unwrap();
+
+    assert_eq!(rows[0]["shown_nodes"], 4, "everything was added just now");
+}
+
+#[test]
+fn a_since_that_is_neither_iso8601_nor_shorthand_is_an_error() {
     assert!(read(r#"{"map":"decisions","since":"yesterday"}"#).is_err());
 }

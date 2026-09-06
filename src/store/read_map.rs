@@ -46,7 +46,7 @@ const PARAMETERS: &str = r#"{
       "additionalProperties": false
     },
     "depth": {"type": "integer", "minimum": 0, "description": "edges out from around, default 1; nothing without around"},
-    "since": {"type": "string", "description": "ISO-8601; keep what the map gained since then"},
+    "since": {"type": "string", "description": "ISO-8601, or 1d/2h/30m back from now; keep what the map gained since then"},
     "kinds": {"type": "array", "items": {"type": "string"}, "description": "keep only these node kinds"}
   },
   "required": ["map"],

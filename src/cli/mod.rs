@@ -142,6 +142,14 @@ pub struct MapArgs {
     /// Repeatable. An event this fact was drawn from.
     #[arg(long)]
     source: Vec<String>,
+    /// Who is writing: `user` for a human at the terminal, `model` for an
+    /// agent recording on their behalf. The map shows the difference.
+    #[arg(long, default_value = "user", value_parser = parse_actor_arg)]
+    actor: Actor,
+}
+
+fn parse_actor_arg(s: &str) -> Result<Actor, String> {
+    store::parse_actor(s).map_err(|err| err.to_string())
 }
 
 #[derive(Args)]
@@ -495,15 +503,14 @@ fn write(
     renderer: &dyn percept::MapRenderer,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
-    let MapArgs { map, source: cited } = target;
+    let MapArgs {
+        map,
+        source: cited,
+        actor,
+    } = target;
     let scope = source.scope();
-    let payload = store::revise(log, &map, &scope, &cited, Actor::User, mutation)?;
-    log.append(&Event::new(
-        Actor::User,
-        source.clone(),
-        None,
-        payload.clone(),
-    ))?;
+    let payload = store::revise(log, &map, &scope, &cited, actor, mutation)?;
+    log.append(&Event::new(actor, source.clone(), None, payload.clone()))?;
     renderer.render(&store::fold_map(log, &map, &scope)?)?;
     Ok(payload)
 }
@@ -732,25 +739,7 @@ fn print_reply(reply: &str) -> Result<(), Box<dyn std::error::Error>> {
 /// `flag` names the flag the value came from, so a rejected value's
 /// error says which one.
 fn parse_time(flag: &str, s: &str) -> Result<Timestamp, String> {
-    let parsed = match relative_minutes(s) {
-        Some(minutes) => Timestamp::now().minus_minutes(minutes),
-        None => s.parse().ok(),
-    };
-    parsed.ok_or_else(|| format!("invalid --{flag} value {s}"))
-}
-
-/// `<N>d`, `<N>h`, or `<N>m` as a count of minutes. `None` for anything
-/// else - `parse_time` then tries it as ISO-8601.
-fn relative_minutes(s: &str) -> Option<i64> {
-    let (digits, unit) = s.split_at_checked(s.len().checked_sub(1)?)?;
-    let n: i64 = digits.parse().ok()?;
-
-    match unit {
-        "d" => n.checked_mul(24 * 60),
-        "h" => n.checked_mul(60),
-        "m" => Some(n),
-        _ => None,
-    }
+    store::parse_time(s).map_err(|_| format!("invalid --{flag} value {s}"))
 }
 
 #[cfg(test)]
