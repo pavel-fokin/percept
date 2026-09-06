@@ -9,7 +9,8 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::percept::{
-    Actor, Edge, EventId, EventLog, Map, MapError, Mutation, Node, NodeId, Payload, Schema, Scope,
+    Actor, Edge, EventId, EventLog, Map, MapError, Mutation, Node, NodeId, NodeRef, Payload,
+    Schema, Scope,
 };
 use crate::store::event::{actor_name, ids};
 use crate::store::parse_event_id;
@@ -62,6 +63,11 @@ impl Snapshot {
 
     pub fn apply(&mut self, mutation: Mutation, actor: Actor) -> Result<Payload, MapError> {
         self.map.apply(mutation, actor)
+    }
+
+    /// The node `node` names, as the map stands in this snapshot.
+    pub fn find(&self, node: &NodeRef) -> Option<&Node> {
+        self.map.find(&node.kind, &node.name)
     }
 }
 

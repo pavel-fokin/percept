@@ -1,6 +1,6 @@
 use super::*;
-use crate::percept::{Actor, Event, EventId};
-use crate::testing::{scope, source, FakeLog};
+use crate::percept::{Actor, Event, EventId, NodeId};
+use crate::testing::{node_added, scope, source, FakeLog};
 
 fn tool(events: Vec<Event>) -> ReviseMap {
     let log = Arc::new(FakeLog::seeded(events));
@@ -168,4 +168,42 @@ fn a_change_can_reference_a_node_an_earlier_change_just_added() {
         output.content.lines().last().unwrap(),
         "added edge decision \"Rust over Go\" resolves question \"Which language?\""
     );
+}
+
+#[test]
+fn removing_a_user_written_node_is_refused_and_says_to_supersede() {
+    let revise = tool(vec![node_added("decision", "Go")]);
+
+    let err = revise
+        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","kind":"decision","name":"Go","reason":"wrong"}]}"#)
+        .err()
+        .unwrap()
+        .to_string();
+
+    assert!(err.contains("written by the user"), "{err}");
+    assert!(err.contains("supersedes"), "{err}");
+}
+
+#[test]
+fn removing_a_model_written_node_is_allowed() {
+    let node = Event::new(
+        Actor::Model,
+        source("tui"),
+        None,
+        Payload::NodeAdded {
+            map: "decisions".to_string(),
+            node: NodeId::new(),
+            kind: "decision".to_string(),
+            name: "Go".to_string(),
+            properties: BTreeMap::new(),
+            sources: vec![EventId::new()],
+        },
+    );
+    let revise = tool(vec![node]);
+
+    let output = revise
+        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","kind":"decision","name":"Go","reason":"wrong"}]}"#)
+        .unwrap();
+
+    assert!(matches!(output.commits[0], Payload::NodeRemoved { .. }));
 }

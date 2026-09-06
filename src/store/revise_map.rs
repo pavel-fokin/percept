@@ -36,7 +36,9 @@ const DESCRIPTION: &str = "Record into a named map what you have judged \
     even when what you are recording is in front of you. Read the map \
     first, from the conversation or with read_map, and do not add a \
     node that is already there; a node is named by its kind and name, \
-    not by an id you choose.";
+    not by an id you choose. Correct a decision by adding the new one \
+    with a supersedes edge to the old, not by removing the old: a node \
+    the user wrote cannot be removed by you at all.";
 
 /// JSON Schema for `run`'s `arguments`. A string, not a `Value` - the
 /// domain's `ToolSpec` is serde-free, so the provider parses this. The
@@ -275,6 +277,19 @@ fn apply(
             sources,
         } => {
             let node = NodeRef { kind, name };
+            // A node the user wrote is their landmark in a shared map.
+            // The model may hang edges on it, never take it away; a
+            // correction is a superseding node.
+            if snapshot
+                .find(&node)
+                .is_some_and(|found| found.actor == Actor::User)
+            {
+                return Err(format!(
+                    "{node} was written by the user and the model may not remove it; \
+                     add the corrected node and a supersedes edge from it to this one instead"
+                )
+                .into());
+            }
             let line = format!("removed {node}");
             let mutation = Mutation::RemoveNode {
                 node,
