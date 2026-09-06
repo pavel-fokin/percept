@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use super::{client, Ollama, OpenAi};
+use super::{client, Fireworks, Ollama, OpenAi};
 use crate::percept::{Model, ModelCatalog, ModelDescriptor, ModelListing, Provider};
 
 /// OpenAI models the catalog offers - a short static list, since
@@ -12,30 +12,45 @@ use crate::percept::{Model, ModelCatalog, ModelDescriptor, ModelListing, Provide
 pub const OPENAI_MODEL: &str = "gpt-5.6-luna";
 const OPENAI_MODELS: &[&str] = &[OPENAI_MODEL];
 
+/// Fireworks models the catalog offers - a short static list, the same
+/// reasoning as `OPENAI_MODELS`: Fireworks' own catalog is too large to
+/// list live, so `main` builds with this one model when
+/// `PERCEPT_PROVIDER=fireworks`.
+pub const FIREWORKS_MODEL: &str = "accounts/fireworks/models/glm-5p3";
+const FIREWORKS_MODELS: &[&str] = &[FIREWORKS_MODEL];
+
+/// Where a hosted provider lives and the key that authenticates to it -
+/// grouped so a call site can't transpose one provider's url with
+/// another's key the way two same-typed positional strings would let it.
+pub struct ProviderConfig {
+    pub url: String,
+    pub api_key: String,
+}
+
 /// Every model a run of `percept` can reach: ollama's, listed live from
-/// its server, and OpenAI's, from a static list. Holds what building
-/// either provider needs, wired in at the entrypoint rather than read
-/// from the environment here.
+/// its server, and OpenAI's and Fireworks', each from a static list.
+/// Holds what building any provider needs, wired in at the entrypoint
+/// rather than read from the environment here.
 pub struct Catalog {
     ollama_url: String,
-    openai_url: String,
-    openai_api_key: String,
+    openai: ProviderConfig,
     openai_reasoning_effort: String,
+    fireworks: ProviderConfig,
     client: reqwest::Client,
 }
 
 impl Catalog {
     pub fn new(
         ollama_url: String,
-        openai_url: String,
-        openai_api_key: String,
+        openai: ProviderConfig,
         openai_reasoning_effort: String,
+        fireworks: ProviderConfig,
     ) -> Self {
         Self {
             ollama_url,
-            openai_url,
-            openai_api_key,
+            openai,
             openai_reasoning_effort,
+            fireworks,
             client: client(),
         }
     }
@@ -65,11 +80,12 @@ fn parse_tags(body: &str) -> Result<Vec<ModelDescriptor>, Box<dyn Error + Send +
         .collect())
 }
 
-fn openai_descriptors() -> Vec<ModelDescriptor> {
-    OPENAI_MODELS
+/// Every model a static-list provider offers, paired with `provider`.
+fn static_descriptors(provider: Provider, models: &[&str]) -> Vec<ModelDescriptor> {
+    models
         .iter()
         .map(|model| ModelDescriptor {
-            provider: Provider::OpenAi,
+            provider,
             model: model.to_string(),
         })
         .collect()
@@ -83,7 +99,8 @@ impl ModelCatalog for Catalog {
             // A provider a request can't reach is left out, not
             // failed on - the catalog still shows what it can.
             let mut descriptors = fetch_tags(&client, &url).await.unwrap_or_default();
-            descriptors.extend(openai_descriptors());
+            descriptors.extend(static_descriptors(Provider::OpenAi, OPENAI_MODELS));
+            descriptors.extend(static_descriptors(Provider::Fireworks, FIREWORKS_MODELS));
             descriptors
         })
     }
@@ -95,10 +112,15 @@ impl ModelCatalog for Catalog {
                 descriptor.model.clone(),
             ))),
             Provider::OpenAi => Ok(Arc::new(OpenAi::new(
-                self.openai_url.clone(),
+                self.openai.url.clone(),
                 descriptor.model.clone(),
                 self.openai_reasoning_effort.clone(),
-                self.openai_api_key.clone(),
+                self.openai.api_key.clone(),
+            ))),
+            Provider::Fireworks => Ok(Arc::new(Fireworks::new(
+                self.fireworks.url.clone(),
+                descriptor.model.clone(),
+                self.fireworks.api_key.clone(),
             ))),
         }
     }

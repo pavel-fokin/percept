@@ -22,7 +22,7 @@ mod tui;
 use app::{App, MapShape};
 use cli::{Cli, Command, EventsCommand, MapsCommand};
 use percept::Actor;
-use providers::{Catalog, OPENAI_MODEL};
+use providers::{Catalog, ProviderConfig, FIREWORKS_MODEL, OPENAI_MODEL};
 use store::{Jsonl, ReadEvent, ReadMap, ReviseMap, SearchEvents};
 use tui::{Chat, StreamEvent};
 
@@ -34,7 +34,8 @@ const HOME_VAR: &str = "PERCEPT_HOME";
 /// project: an event's `source.path` says which one it came from.
 const LOG_FILE: &str = "percept.jsonl";
 
-/// Names the provider that answers: `ollama` (the default) or `openai`.
+/// Names the provider that answers: `ollama` (the default), `openai`,
+/// or `fireworks`.
 const PROVIDER_VAR: &str = "PERCEPT_PROVIDER";
 
 /// Source name the TUI stamps on every event it commits.
@@ -64,6 +65,10 @@ const OPENAI_URL: &str = "https://api.openai.com/v1";
 const OPENAI_REASONING: &str = "low";
 /// Where the key is read from.
 const OPENAI_KEY_VAR: &str = "OPENAI_API_KEY";
+
+const FIREWORKS_URL: &str = "https://api.fireworks.ai/inference/v1";
+/// Where the key is read from.
+const FIREWORKS_KEY_VAR: &str = "FIREWORKS_API_KEY";
 
 /// What `percept reflect` asks the model to do. One place to change it,
 /// like the ollama settings above.
@@ -238,10 +243,16 @@ fn build_model(
             std::env::var(OPENAI_KEY_VAR).map_err(|_| format!("{OPENAI_KEY_VAR} is not set"))?;
             (percept::Provider::OpenAi, OPENAI_MODEL.to_string())
         }
+        "fireworks" => {
+            std::env::var(FIREWORKS_KEY_VAR)
+                .map_err(|_| format!("{FIREWORKS_KEY_VAR} is not set"))?;
+            (percept::Provider::Fireworks, FIREWORKS_MODEL.to_string())
+        }
         other => {
-            return Err(
-                format!("{PROVIDER_VAR}={other:?} names no provider; use ollama or openai").into(),
+            return Err(format!(
+                "{PROVIDER_VAR}={other:?} names no provider; use ollama, openai or fireworks"
             )
+            .into())
         }
     };
     catalog.build(&percept::ModelDescriptor { provider, model })
@@ -251,12 +262,19 @@ fn build_model(
 /// openai branch, since a run that never asks for an openai model
 /// shouldn't need the key set.
 fn build_catalog() -> Catalog {
-    let api_key = std::env::var(OPENAI_KEY_VAR).unwrap_or_default();
+    let openai = ProviderConfig {
+        url: OPENAI_URL.to_string(),
+        api_key: std::env::var(OPENAI_KEY_VAR).unwrap_or_default(),
+    };
+    let fireworks = ProviderConfig {
+        url: FIREWORKS_URL.to_string(),
+        api_key: std::env::var(FIREWORKS_KEY_VAR).unwrap_or_default(),
+    };
     Catalog::new(
         OLLAMA_URL.to_string(),
-        OPENAI_URL.to_string(),
-        api_key,
+        openai,
         OPENAI_REASONING.to_string(),
+        fireworks,
     )
 }
 
