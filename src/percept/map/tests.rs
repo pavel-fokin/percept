@@ -334,7 +334,11 @@ fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
     assert!(matches!(unknown, MapError::UnknownNodeKind { .. }));
     assert_eq!(blank, MapError::BlankName);
     assert!(matches!(duplicate, MapError::DuplicateNode { .. }));
-    assert_eq!(missing, MapError::NoSuchNode(node_ref("evidence", "Nope")));
+    assert!(matches!(
+        &missing,
+        MapError::NoSuchNode { node, suggestions }
+            if node == &node_ref("evidence", "Nope") && suggestions.is_empty()
+    ));
     assert_eq!(missing.to_string(), "no evidence \"Nope\" in the map");
     assert!(matches!(no_edge, MapError::NoSuchEdge { .. }));
     assert_eq!(map.nodes().len(), 1);
@@ -486,7 +490,51 @@ fn around_a_node_the_map_lacks_is_an_error() {
         .around(&node_ref("option", "Rust"), 1)
         .err()
         .unwrap();
-    assert_eq!(err, MapError::NoSuchNode(node_ref("option", "Rust")));
+    assert!(matches!(
+        &err,
+        MapError::NoSuchNode { node, .. } if node == &node_ref("option", "Rust")
+    ));
+}
+
+#[test]
+fn a_missing_node_names_same_kind_nodes_that_share_a_word() {
+    let err = chain()
+        .around(&node_ref("decision", "Rust and Go"), 1)
+        .err()
+        .unwrap();
+    assert_eq!(
+        err.to_string(),
+        "no decision \"Rust and Go\" in the map; did you mean decision:Rust over Go"
+    );
+}
+
+#[test]
+fn a_missing_node_stays_silent_on_a_single_shared_word() {
+    let err = chain()
+        .around(&node_ref("decision", "Rust and Java"), 1)
+        .err()
+        .unwrap();
+    assert_eq!(err.to_string(), "no decision \"Rust and Java\" in the map");
+}
+
+#[test]
+fn a_missing_node_counts_a_repeated_word_once() {
+    let mut map = Map::empty(&DECISIONS);
+    map.apply(add_node("decision", "safe safe pick")).unwrap();
+    let err = map
+        .around(&node_ref("decision", "safe choice"), 1)
+        .err()
+        .unwrap();
+    assert_eq!(err.to_string(), "no decision \"safe choice\" in the map");
+}
+
+#[test]
+fn a_missing_node_ignores_overlaps_of_another_kind() {
+    let err = chain()
+        .around(&node_ref("question", "Rust over Go"), 1)
+        .err()
+        .unwrap();
+    assert_eq!(err.to_string(), "no question \"Rust over Go\" in the map");
 }
 
 #[test]
