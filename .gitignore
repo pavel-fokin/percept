@@ -5,3 +5,6 @@
 /.percept/percept.jsonl
 /.percept/hook-sessions/
 **/__pycache__/
+
+# Experiment run output — regenerate with the run scripts
+experiment/*/runs/
