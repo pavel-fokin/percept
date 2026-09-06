@@ -143,6 +143,15 @@ fn is_percepts_prompt(event: &Event) -> bool {
     event.actor() == Actor::System && event.kind() == EventKind::MessageReceived
 }
 
+/// Whether `event` belongs in `App`'s own transcript cache: either it
+/// is `source`'s own conversation - a message, a thought, a tool call -
+/// or it changes a map, which stays the project's shared history no
+/// matter who wrote it. A conversational event from another writer is
+/// left out, so another client's dialogue never replays as this one's.
+fn belongs_to_transcript(event: &Event, source: &Source) -> bool {
+    event.source() == source || percept::map_of(event.payload()).is_some()
+}
+
 /// The index of the last `model.called` in `events`, so a reopened log
 /// shows what its last round trip cost instead of reading as unasked.
 fn last_model_called(events: &[Event]) -> Option<usize> {
@@ -255,10 +264,7 @@ impl App {
         let events: Vec<Event> = log
             .load()?
             .into_iter()
-            .filter(|event| {
-                scope.admits(event)
-                    && (event.source() == &source || percept::map_of(event.payload()).is_some())
-            })
+            .filter(|event| scope.admits(event) && belongs_to_transcript(event, &source))
             .collect();
         Map::fold_all(&scope, &events)?;
         let last_usage = last_model_called(&events);
