@@ -77,9 +77,10 @@ const REFLECT_PROMPT: &str = "Revise the decisions map from recent events. \
     evidence given, and decisions taken that the map does not yet hold; \
     only its results carry event ids. Then record them with revise_map, \
     citing those ids in each node's sources - a node without one is \
-    refused. Remove what no longer holds, with a reason. Reply with a \
-    short summary of what changed, or say the map already held \
-    everything.";
+    refused. A decision that no longer holds is not removed: add the one \
+    that replaces it with a supersedes edge to the old, so the old stays \
+    one hop away. Reply with a short summary of what changed, or say the \
+    map already held everything.";
 
 /// How often the status row's spinner advances while a turn streams.
 const SPINNER_TICK: std::time::Duration = std::time::Duration::from_millis(90);
