@@ -106,8 +106,19 @@ fn an_empty_cut_of_a_full_map_is_not_an_empty_map() {
 }
 
 #[test]
-fn depth_needs_around() {
-    assert!(read(r#"{"map":"decisions","depth":2}"#).is_err());
+fn depth_without_around_is_a_whole_read_not_a_wasted_call() {
+    let rows = read(r#"{"map":"decisions","depth":2}"#).unwrap();
+
+    assert_eq!(rows[0]["shown_nodes"], 4);
+}
+
+#[test]
+fn around_on_an_empty_map_still_says_nothing_is_recorded() {
+    let out = ReadMap::new(Arc::new(FakeLog::default()), scope())
+        .run(r#"{"map":"decisions","around":{"kind":"question","name":"Where?"}}"#)
+        .unwrap();
+
+    assert!(out.content.contains("nothing has been recorded"));
 }
 
 #[test]

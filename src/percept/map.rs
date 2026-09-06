@@ -68,7 +68,9 @@ pub const RESOLVES: &str = "resolves";
 
 /// The two node kinds `settled_by` joins.
 const QUESTION: &str = "question";
-const DECISION: &str = "decision";
+/// The one node kind `revise_map` never removes: a decision is corrected
+/// by a successor with a `supersedes` edge, so it is public.
+pub const DECISION: &str = "decision";
 
 /// The decision map: what was asked, what was weighed, what was chosen
 /// and on what grounds. An option `answers` its question, evidence
@@ -643,7 +645,9 @@ impl Map {
     pub fn select(self, selection: &Selection) -> Result<Fragment, MapError> {
         let total_nodes = self.nodes.len();
         let total_edges = self.edges.len();
-        if selection.is_whole() {
+        // An empty map has nothing to cut, and a node it lacks is not an
+        // error to report over "nothing recorded yet".
+        if selection.is_whole() || self.nodes.is_empty() {
             return Ok(Fragment {
                 map: self,
                 total_nodes,

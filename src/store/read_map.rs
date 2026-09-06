@@ -45,7 +45,7 @@ const PARAMETERS: &str = r#"{
       "required": ["kind", "name"],
       "additionalProperties": false
     },
-    "depth": {"type": "integer", "minimum": 0, "description": "edges out from around, default 1"},
+    "depth": {"type": "integer", "minimum": 0, "description": "edges out from around, default 1; nothing without around"},
     "since": {"type": "string", "description": "ISO-8601; keep what the map gained since then"},
     "kinds": {"type": "array", "items": {"type": "string"}, "description": "keep only these node kinds"}
   },
@@ -58,10 +58,15 @@ const PARAMETERS: &str = r#"{
 struct Args {
     map: String,
     around: Option<NodeRefArgs>,
-    depth: Option<usize>,
+    #[serde(default = "one")]
+    depth: usize,
     since: Option<String>,
     #[serde(default)]
     kinds: Vec<String>,
+}
+
+fn one() -> usize {
+    1
 }
 
 impl Tool for ReadMap {
@@ -75,12 +80,9 @@ impl Tool for ReadMap {
 
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
-        if args.depth.is_some() && args.around.is_none() {
-            return Err("depth needs around".into());
-        }
         let around = args.around.map(NodeRef::from);
         let selection = Selection {
-            around: around.as_ref().map(|node| (node, args.depth.unwrap_or(1))),
+            around: around.as_ref().map(|node| (node, args.depth)),
             since: optional_time(args.since.as_deref())?,
             kinds: &args.kinds,
         };

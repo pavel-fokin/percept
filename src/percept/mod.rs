@@ -12,7 +12,7 @@ pub use event_log::EventLog;
 pub use map::SUPERSEDES;
 pub use map::{
     map_of, Edge, Fragment, Map, MapError, Mutation, Node, NodeId, NodeRef, Schema, Scope,
-    Selection, CODE, DECISIONS,
+    Selection, CODE, DECISION, DECISIONS,
 };
 pub use model::{
     to_messages, Chunk, Message, Modality, Model, ModelCapabilities, ModelCatalog, ModelDescriptor,

@@ -719,6 +719,20 @@ fn a_whole_selection_is_the_map_itself() {
 }
 
 #[test]
+fn select_on_an_empty_map_is_the_empty_map_not_a_missing_node() {
+    let question = node_ref("question", "Which language?");
+    let selection = Selection {
+        around: Some((&question, 1)),
+        ..Selection::default()
+    };
+
+    let fragment = Map::empty(&DECISIONS).select(&selection).unwrap();
+
+    assert_eq!(fragment.total_nodes(), 0);
+    assert!(fragment.map().nodes().is_empty());
+}
+
+#[test]
 fn select_walks_around_before_it_keeps_kinds() {
     let question = node_ref("question", "Which language?");
     let kinds = ["evidence".to_string()];

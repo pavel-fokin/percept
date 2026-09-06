@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Scope};
+use crate::percept::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Scope, DECISION};
 use crate::percept::{Tool, ToolOutput, ToolSpec};
 use crate::store::map::NodeRefArgs;
 use crate::store::Snapshot;
@@ -260,6 +260,13 @@ fn apply(
             sources,
         } => {
             let node = NodeRef { kind, name };
+            if node.kind == DECISION {
+                return Err(format!(
+                    "{node} is a decision, and a decision is never removed; add the one \
+                     that replaces it with a supersedes edge to this one"
+                )
+                .into());
+            }
             if let Some(why) = user_guards_node(snapshot.map(), &node) {
                 return Err(why.into());
             }
