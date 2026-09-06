@@ -90,12 +90,20 @@ One decision, with `P=~/.percept/bin/percept` and `$id` the prompt:
 ```
 $P maps add-node decisions --kind question --name "Where does the log live?" --source $id
 $P maps add-node decisions --kind option --name "percept.jsonl in the working directory" --source $id
+$P maps add-edge decisions --kind answers \
+  --from 'option:percept.jsonl in the working directory' --to 'question:Where does the log live?' --source $id
 $P maps add-node decisions --kind option --name "one log under ~/.percept" --source $id
+$P maps add-edge decisions --kind answers \
+  --from 'option:one log under ~/.percept' --to 'question:Where does the log live?' --source $id
 $P maps add-node decisions --kind decision --name "one log under ~/.percept" \
   --prop why="one variable also covers the binary; cross-project search stays free" --source $id
 $P maps add-edge decisions --kind resolves \
   --from 'decision:one log under ~/.percept' --to 'question:Where does the log live?' --source $id
 ```
+
+Every option gets its `answers` edge: that edge is what lets `--around`
+a question reach the options weighed for it. A name that starts with
+`--` is passed as `--name=<name>`, or clap reads it as a flag.
 
 Name the decision as the option it picks. Add an `evidence` node with a
 `contradicts` edge to an option only when the user gave a reason it

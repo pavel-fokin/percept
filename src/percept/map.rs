@@ -64,12 +64,15 @@ pub struct Schema {
 pub const SUPERSEDES: &str = "supersedes";
 
 /// The decision map: what was asked, what was weighed, what was chosen
-/// and on what grounds.
+/// and on what grounds. An option `answers` its question, evidence
+/// `supports` or `contradicts` an option, a decision `resolves` the
+/// question, and a later decision `supersedes` an earlier one - so
+/// `--around` a question reaches everything weighed for it.
 pub const DECISIONS: Schema = Schema {
     name: "decisions",
     purpose: "what was asked, what was chosen, and why, so a settled question is not reopened",
     node_kinds: &["question", "option", "evidence", "decision"],
-    edge_kinds: &["supports", "contradicts", "resolves", SUPERSEDES],
+    edge_kinds: &["answers", "supports", "contradicts", "resolves", SUPERSEDES],
     headline_kinds: &["question", "decision"],
 };
 

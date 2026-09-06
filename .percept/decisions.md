@@ -39,3 +39,5 @@ Folded from the percept log for this project and rerendered on every write. Chan
   decision "hide options and evidence from the render": why: "dropping a kind would orphan eleven recorded nodes; the reader's cost is the render, and --around keeps the rest reachable; revisit after the questions experiment runs against a flatter schema"
 - "How do --around and --since combine on maps show?"
   decision "--around cuts first, --since cuts what is left": why: "reads as what changed near this node; the other order would drop old edges before the neighbourhood is walked"
+- "How does an option point at the question it was weighed for?"
+  decision "an answers edge from the option to the question": why: "--around a question follows edges, not sources, so without it the render's pointer to --around reached no option"
