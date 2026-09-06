@@ -33,6 +33,40 @@ fn record_at(log: &FakeLog, path: &str, payload: Payload) {
 }
 
 #[test]
+fn an_option_without_a_why_is_refused_as_a_new_write() {
+    let log = FakeLog::default();
+
+    let err = revise(
+        &log,
+        "decisions",
+        &scope(),
+        &[],
+        Actor::User,
+        add_node("option", "SQLite"),
+    )
+    .err()
+    .unwrap()
+    .to_string();
+
+    assert!(err.contains("why it lost"), "{err}");
+}
+
+#[test]
+fn an_option_with_a_why_is_recorded() {
+    let log = FakeLog::default();
+    let mutation = |sources| Mutation::AddNode {
+        kind: "option".to_string(),
+        name: "SQLite".to_string(),
+        properties: BTreeMap::from([("why".to_string(), "one more dependency".to_string())]),
+        sources,
+    };
+
+    let payload = revise(&log, "decisions", &scope(), &[], Actor::User, mutation).unwrap();
+
+    assert!(matches!(payload, Payload::NodeAdded { .. }));
+}
+
+#[test]
 fn revise_returns_the_payload_that_records_the_mutation() {
     let log = FakeLog::default();
 
@@ -42,7 +76,7 @@ fn revise_returns_the_payload_that_records_the_mutation() {
         &scope(),
         &[],
         Actor::User,
-        add_node("option", "Rust"),
+        add_node("decision", "Rust"),
     )
     .unwrap();
 
@@ -50,7 +84,7 @@ fn revise_returns_the_payload_that_records_the_mutation() {
     record(&log, payload);
     assert!(fold_map(&log, "decisions", &scope())
         .unwrap()
-        .find("option", "Rust")
+        .find("decision", "Rust")
         .is_some());
 }
 
@@ -63,7 +97,7 @@ fn revise_loads_the_log_so_a_second_call_sees_the_first() {
         &scope(),
         &[],
         Actor::User,
-        add_node("option", "Rust"),
+        add_node("decision", "Rust"),
     )
     .unwrap();
     record(&log, first);
@@ -74,12 +108,12 @@ fn revise_loads_the_log_so_a_second_call_sees_the_first() {
         &scope(),
         &[],
         Actor::User,
-        add_node("option", "Rust"),
+        add_node("decision", "Rust"),
     )
     .err()
     .unwrap();
 
-    assert_eq!(err.to_string(), "option \"Rust\" is already in the map");
+    assert_eq!(err.to_string(), "decision \"Rust\" is already in the map");
 }
 
 #[test]
@@ -94,7 +128,7 @@ fn revise_allows_the_same_name_under_a_different_project_s_path() {
         &here,
         &[],
         Actor::User,
-        add_node("option", "Rust"),
+        add_node("decision", "Rust"),
     )
     .unwrap();
     record_at(&log, "/here", first);
@@ -105,14 +139,14 @@ fn revise_allows_the_same_name_under_a_different_project_s_path() {
         &there,
         &[],
         Actor::User,
-        add_node("option", "Rust"),
+        add_node("decision", "Rust"),
     )
     .unwrap();
     record_at(&log, "/there", elsewhere);
 
     assert!(fold_map(&log, "decisions", &there)
         .unwrap()
-        .find("option", "Rust")
+        .find("decision", "Rust")
         .is_some());
 }
 
@@ -157,7 +191,7 @@ fn a_source_is_checked_against_the_loaded_log() {
         &scope(),
         &[known],
         Actor::User,
-        add_node("option", "Rust"),
+        add_node("decision", "Rust"),
     )
     .unwrap();
     let missing = revise(
@@ -166,7 +200,7 @@ fn a_source_is_checked_against_the_loaded_log() {
         &scope(),
         std::slice::from_ref(&unknown),
         Actor::User,
-        add_node("option", "Go"),
+        add_node("decision", "Go"),
     )
     .err()
     .unwrap();
@@ -176,7 +210,7 @@ fn a_source_is_checked_against_the_loaded_log() {
         &scope(),
         &["user".to_string()],
         Actor::User,
-        add_node("option", "Go"),
+        add_node("decision", "Go"),
     )
     .err()
     .unwrap();

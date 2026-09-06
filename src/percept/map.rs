@@ -71,6 +71,9 @@ const QUESTION: &str = "question";
 /// The one node kind `revise_map` never removes: a decision is corrected
 /// by a successor with a `supersedes` edge, so it is public.
 pub const DECISION: &str = "decision";
+/// An alternative that lost. The store refuses one that does not say
+/// why, so it is public too.
+pub const OPTION: &str = "option";
 
 /// The decision map: what was asked, what was weighed, what was chosen
 /// and on what grounds. An option `answers` its question, evidence

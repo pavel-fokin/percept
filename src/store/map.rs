@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::percept::{
     Actor, Edge, EventId, EventLog, Fragment, Map, MapError, Mutation, Node, NodeId, NodeRef,
-    Payload, Schema, Scope,
+    Payload, Schema, Scope, DECISIONS, OPTION,
 };
 use crate::shared::Timestamp;
 use crate::store::event::{actor_name, ids};
@@ -89,8 +89,32 @@ pub fn revise(
 ) -> Result<Payload, Box<dyn std::error::Error>> {
     let mut snapshot = Snapshot::load(log, name, scope)?;
     let sources = snapshot.resolve(sources)?;
-    Ok(snapshot.apply(mutation(sources), actor)?)
+    let mutation = mutation(sources);
+    // A rule for new writes only, so the options recorded before it
+    // still fold: this is why it sits here and not in `Map::apply`.
+    if let Mutation::AddNode {
+        kind,
+        name,
+        properties,
+        ..
+    } = &mutation
+    {
+        if snapshot.map().schema() == &DECISIONS && kind == OPTION && !properties.contains_key(WHY)
+        {
+            return Err(format!(
+                "option {name:?} does not say why it lost: an option is an alternative that \
+                 was rejected, and its `why` property carries the reason; the pick is the \
+                 decision itself"
+            )
+            .into());
+        }
+    }
+    Ok(snapshot.apply(mutation, actor)?)
 }
+
+/// The property that carries a node's reason, on a decision and on a
+/// rejected option alike.
+const WHY: &str = "why";
 
 #[derive(Serialize)]
 struct MapLine {
