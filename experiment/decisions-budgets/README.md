@@ -139,7 +139,7 @@ out. What came across, and how:
 | Shared capture hook `scripts/agent-hook.py`, `.claude/settings.json`, `.codex/hooks.json`, one `software-developer` body under `.agents` | Cherry-picked | Nothing. |
 | Skills under `.agents/skills`, `.claude/skills` as symlinks, `README.md`, `.gitignore` | Cherry-picked, then rewritten | The plan skill keeps this branch's recording recipe, with Codex's line that an explicit "implement it" supplies agreement. The percept skill is rewritten around questions, `--since`, `supersedes`, and actor marks instead of commitments. |
 | `.percept/index.md`, one row per map | Kept | Rows describe this branch's render and entry points. AGENTS.md points at it and keeps the decisions include Codex had removed. |
-| `read_map` with `around`, `depth`, `kinds`, and coverage counts | Ported | Lives in the domain as `Selection` and `Fragment` on `Map`, so the CLI and the tool share one cut order: around, since, kinds. `since` is accepted too. The count line has `partial` and the numbers; Codex's prose notices are gone. A filtered `maps show` prints the same counts on stderr. |
+| `read_map` with `around`, `depth`, `kinds`, and coverage counts | Ported | Lives in the domain as `Selection` and `Fragment` on `Map`, so the CLI and the tool share one cut order: around, since, kinds. `since` is accepted too. The count line has the numbers only; Codex's prose notices are gone. A filtered `maps show` prints the same line on stderr. |
 
 Pavel then fixed the rule behind the interop: the setup must serve any
 coding agent, not two. That is recorded as a decision superseding the

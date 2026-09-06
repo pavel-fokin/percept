@@ -3,8 +3,8 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::percept::{EventLog, NodeRef, Scope, Selection, Tool, ToolOutput, ToolSpec};
-use crate::store::search_events::parse_time;
-use crate::store::{encode_edge, encode_fragment, encode_node, fold_map};
+use crate::store::map::NodeRefArgs;
+use crate::store::{encode_fragment, encode_lines, fold_map, optional_time};
 
 /// The `read_map` tool: one map, whole or cut to a fragment, as JSONL
 /// with event ids on every node and edge. Offered when the prompt does
@@ -57,18 +57,11 @@ const PARAMETERS: &str = r#"{
 #[serde(deny_unknown_fields)]
 struct Args {
     map: String,
-    around: Option<Around>,
+    around: Option<NodeRefArgs>,
     depth: Option<usize>,
     since: Option<String>,
     #[serde(default)]
     kinds: Vec<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Around {
-    kind: String,
-    name: String,
 }
 
 impl Tool for ReadMap {
@@ -85,21 +78,14 @@ impl Tool for ReadMap {
         if args.depth.is_some() && args.around.is_none() {
             return Err("depth needs around".into());
         }
-        let around = args.around.map(|node| NodeRef {
-            kind: node.kind,
-            name: node.name,
-        });
-        let since = args.since.as_deref().map(parse_time).transpose()?;
+        let around = args.around.map(NodeRef::from);
         let selection = Selection {
             around: around.as_ref().map(|node| (node, args.depth.unwrap_or(1))),
-            since,
+            since: optional_time(args.since.as_deref())?,
             kinds: &args.kinds,
         };
         let fragment = fold_map(self.log.as_ref(), &args.map, &self.scope)?.select(&selection)?;
-        let map = fragment.map();
-        let lines = std::iter::once(encode_fragment(&fragment))
-            .chain(map.nodes().iter().map(|node| encode_node(map, node)))
-            .chain(map.edges().iter().map(|edge| encode_edge(map, edge)));
+        let lines = std::iter::once(encode_fragment(&fragment)).chain(encode_lines(fragment.map()));
         Ok(ToolOutput::text(lines.collect::<Vec<_>>().join("\n")))
     }
 }

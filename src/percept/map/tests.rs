@@ -707,16 +707,41 @@ fn select_counts_the_whole_and_the_edges_crossing_the_cut() {
     assert_eq!(fragment.total_nodes(), nodes);
     assert_eq!(fragment.total_edges(), edges);
     assert_eq!(fragment.boundary_edges(), 1, "the decision's edge onward");
-    assert!(fragment.is_partial());
 }
 
 #[test]
-fn a_whole_selection_is_the_map_itself_and_never_partial() {
+fn a_whole_selection_is_the_map_itself() {
     let fragment = chain().select(&Selection::default()).unwrap();
 
     assert_eq!(fragment.map().nodes().len(), fragment.total_nodes());
+    assert_eq!(fragment.map().edges().len(), fragment.total_edges());
     assert_eq!(fragment.boundary_edges(), 0);
-    assert!(!fragment.is_partial());
+}
+
+#[test]
+fn select_walks_around_before_it_keeps_kinds() {
+    let question = node_ref("question", "Which language?");
+    let kinds = ["evidence".to_string()];
+    let selection = Selection {
+        around: Some((&question, 2)),
+        since: None,
+        kinds: &kinds,
+    };
+
+    let fragment = chain().select(&selection).unwrap();
+
+    let names: Vec<&str> = fragment
+        .map()
+        .nodes()
+        .iter()
+        .map(|n| n.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        ["Built both"],
+        "reached through the decision, then kept alone"
+    );
+    assert_eq!(fragment.boundary_edges(), 1);
 }
 
 #[test]

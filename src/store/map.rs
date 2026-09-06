@@ -5,12 +5,12 @@
 
 use std::collections::{BTreeMap, HashSet};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::percept::{
-    Actor, Edge, EventId, EventLog, Fragment, Map, MapError, Mutation, Node, NodeId, Payload,
-    Schema, Scope,
+    Actor, Edge, EventId, EventLog, Fragment, Map, MapError, Mutation, Node, NodeId, NodeRef,
+    Payload, Schema, Scope,
 };
 use crate::shared::Timestamp;
 use crate::store::event::{actor_name, ids};
@@ -158,7 +158,6 @@ struct FragmentLine<'a> {
     shown_edges: usize,
     total_edges: usize,
     boundary_edges: usize,
-    partial: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     note: Option<&'a str>,
 }
@@ -177,24 +176,35 @@ pub fn encode_fragment(fragment: &Fragment) -> String {
         shown_edges: map.edges().len(),
         total_edges: fragment.total_edges(),
         boundary_edges: fragment.boundary_edges(),
-        partial: fragment.is_partial(),
         note: (fragment.total_nodes() == 0).then_some(NOTHING_RECORDED),
     })
     .expect("FragmentLine always serializes")
 }
 
-/// `encode_fragment` as one line of prose, for a terminal's stderr.
-pub fn describe_fragment(fragment: &Fragment) -> String {
-    let map = fragment.map();
-    format!(
-        "{}: {} of {} nodes, {} of {} edges; {} edges cross the cut",
-        map.schema().name,
-        map.nodes().len(),
-        fragment.total_nodes(),
-        map.edges().len(),
-        fragment.total_edges(),
-        fragment.boundary_edges(),
-    )
+/// A map as JSONL: every node, then every edge - the order `maps show`
+/// prints and `read_map` returns.
+pub fn encode_lines(map: &Map) -> impl Iterator<Item = String> + '_ {
+    let nodes = map.nodes().iter().map(move |node| encode_node(map, node));
+    let edges = map.edges().iter().map(move |edge| encode_edge(map, edge));
+    nodes.chain(edges)
+}
+
+/// A node named the way a writer knows it - by kind and name - matching
+/// `NodeRef`, but its own type since the domain stays serde-free.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct NodeRefArgs {
+    kind: String,
+    name: String,
+}
+
+impl From<NodeRefArgs> for NodeRef {
+    fn from(node: NodeRefArgs) -> Self {
+        NodeRef {
+            kind: node.kind,
+            name: node.name,
+        }
+    }
 }
 
 pub fn encode_node(map: &Map, node: &Node) -> String {

@@ -478,12 +478,9 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
     };
     let fragment = map.select(&selection)?;
     if !selection.is_whole() {
-        eprintln!("{}", store::describe_fragment(&fragment));
+        eprintln!("{}", store::encode_fragment(&fragment));
     }
-    let map = fragment.map();
-    let nodes = map.nodes().iter().map(|node| store::encode_node(map, node));
-    let edges = map.edges().iter().map(|edge| store::encode_edge(map, edge));
-    print_lines(nodes.chain(edges))
+    print_lines(store::encode_lines(fragment.map()))
 }
 
 /// One map change from the shell: `target`'s cited events resolved and

@@ -183,8 +183,9 @@ class AgentHookTests(unittest.TestCase):
         self.assertEqual(result.stderr, "")
         self.assertEqual(self.events(), [])
 
-    def test_codex_does_not_parse_transcript_fallback(self):
-        self.run_hook("Stop", transcript_path=str(self.root / "absent"))
+    def test_an_unreadable_transcript_is_an_error_not_an_event(self):
+        result = self.run_hook("Stop", transcript_path=str(self.root / "absent"))
+        self.assertIn("percept hook:", result.stderr)
         self.assertEqual(self.events(), [])
 
     def test_claude_fallback_reads_only_current_turn_and_preserves_tool_results(self):

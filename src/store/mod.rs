@@ -22,12 +22,25 @@ pub use event::{
     PREVIEW_CHARS,
 };
 pub use jsonl::Jsonl;
-pub use map::{
-    describe_fragment, encode_edge, encode_fragment, encode_map, encode_node, fold_map, revise,
-    Snapshot,
-};
+pub use map::{encode_fragment, encode_lines, encode_map, fold_map, revise, Snapshot};
 pub use read_event::{read, ReadEvent};
 pub use read_map::ReadMap;
 pub use render::MarkdownFiles;
 pub use revise_map::ReviseMap;
 pub use search_events::SearchEvents;
+
+/// A tool's optional time bound. Absent or empty is no bound: a model
+/// that fills every field the schema offers sends "" for a bound it
+/// does not want, and refusing it cost a call per turn. Otherwise
+/// ISO-8601 only - the model is told the current time and works out
+/// absolute bounds itself, so no relative shorthand and no clock here.
+fn optional_time(
+    s: Option<&str>,
+) -> Result<Option<crate::shared::Timestamp>, Box<dyn std::error::Error>> {
+    s.filter(|s| !s.is_empty())
+        .map(|s| {
+            s.parse()
+                .map_err(|_| format!("invalid timestamp {s:?}, expected ISO-8601").into())
+        })
+        .transpose()
+}

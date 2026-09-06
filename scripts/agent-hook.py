@@ -117,13 +117,12 @@ def capture(client, data):
             }, cause)
             publish(binary, root, client, "system", "tool.resulted", {"content": response}, call_id)
         else:
-            if data.get("last_assistant_message") is not None:
-                reply = text_field(data, "last_assistant_message")
-            elif client == "claude-code" and data.get("transcript_path"):
+            reply = data.get("last_assistant_message")
+            if reply is None and data.get("transcript_path"):
                 reply = claude_reply(text_field(data, "transcript_path"))
-            else:
-                reply = ""
-            if reply.strip():
+            if reply is not None and not isinstance(reply, str):
+                raise ValueError("last_assistant_message must be a string")
+            if reply and reply.strip():
                 publish(binary, root, client, "model", "message.received", {"content": reply}, cause)
     return {}
 
@@ -138,8 +137,7 @@ def main():
         if not isinstance(data, dict):
             raise ValueError("hook input must be a JSON object")
         output = capture(client, data)
-    except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError,
-            RuntimeError, subprocess.SubprocessError) as error:
+    except Exception as error:  # the hook never fails the agent's turn
         print(f"percept hook: {error}", file=sys.stderr)
     print(json.dumps(output))
 

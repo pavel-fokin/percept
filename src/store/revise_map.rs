@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 use crate::percept::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Scope};
 use crate::percept::{Tool, ToolOutput, ToolSpec};
+use crate::store::map::NodeRefArgs;
 use crate::store::Snapshot;
 
 /// The `revise_map` tool: checks a batch of changes to one map against
@@ -129,24 +130,6 @@ const PARAMETERS: &str = r#"{
   "required": ["map", "changes"],
   "additionalProperties": false
 }"#;
-
-/// A node named the way a writer knows it - by kind and name - matching
-/// `NodeRef`, but its own type since the domain stays serde-free.
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct NodeRefArgs {
-    kind: String,
-    name: String,
-}
-
-impl From<NodeRefArgs> for NodeRef {
-    fn from(node: NodeRefArgs) -> Self {
-        NodeRef {
-            kind: node.kind,
-            name: node.name,
-        }
-    }
-}
 
 /// One change the model asks for. `op` picks the shape, mirroring
 /// `Mutation` - which this becomes once its `sources` resolve to

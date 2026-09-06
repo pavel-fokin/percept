@@ -224,12 +224,6 @@ impl Fragment {
     pub fn boundary_edges(&self) -> usize {
         self.boundary_edges
     }
-
-    /// Whether the cut left anything out. A whole map is never partial,
-    /// even an empty one.
-    pub fn is_partial(&self) -> bool {
-        self.map.nodes.len() < self.total_nodes || self.map.edges.len() < self.total_edges
-    }
 }
 
 /// One change a writer asks for. Names nodes by `NodeRef`; the
@@ -649,24 +643,24 @@ impl Map {
     pub fn select(self, selection: &Selection) -> Result<Fragment, MapError> {
         let total_nodes = self.nodes.len();
         let total_edges = self.edges.len();
-        let mut cut: Option<Map> = None;
-        if let Some((node, depth)) = selection.around {
-            cut = Some(self.around(node, depth)?);
-        }
-        if let Some(at) = selection.since {
-            cut = Some(cut.as_ref().unwrap_or(&self).since(at));
-        }
-        if !selection.kinds.is_empty() {
-            cut = Some(cut.as_ref().unwrap_or(&self).keep_kinds(selection.kinds)?);
-        }
-        let Some(cut) = cut else {
+        if selection.is_whole() {
             return Ok(Fragment {
                 map: self,
                 total_nodes,
                 total_edges,
                 boundary_edges: 0,
             });
+        }
+        let mut cut = match selection.around {
+            Some((node, depth)) => self.around(node, depth)?,
+            None => self.cut_to(self.nodes.clone()),
         };
+        if let Some(at) = selection.since {
+            cut = cut.since(at);
+        }
+        if !selection.kinds.is_empty() {
+            cut = cut.keep_kinds(selection.kinds)?;
+        }
         let boundary_edges = self
             .edges
             .iter()

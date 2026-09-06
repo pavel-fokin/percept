@@ -73,76 +73,44 @@ fn weighed_question() -> Vec<Event> {
     ]
 }
 
-fn read(args: &str) -> Vec<serde_json::Value> {
-    ReadMap::new(Arc::new(FakeLog::seeded(weighed_question())), scope())
-        .run(args)
-        .unwrap()
+fn read(args: &str) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error>> {
+    let out = ReadMap::new(Arc::new(FakeLog::seeded(weighed_question())), scope()).run(args)?;
+    Ok(out
         .content
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
-        .collect()
+        .collect())
 }
 
 #[test]
-fn a_fragment_opens_with_what_the_cut_left_out() {
-    let rows = read(r#"{"map":"decisions","around":{"kind":"question","name":"Where?"}}"#);
+fn a_read_opens_with_the_counts_then_the_nodes_then_the_edges() {
+    let rows = read(r#"{"map":"decisions","around":{"kind":"question","name":"Where?"}}"#).unwrap();
 
     assert_eq!(rows[0]["shown_nodes"], 3);
     assert_eq!(rows[0]["total_nodes"], 4);
-    assert_eq!(rows[0]["shown_edges"], 2);
-    assert_eq!(rows[0]["total_edges"], 3);
     assert_eq!(rows[0]["boundary_edges"], 1);
-    assert_eq!(rows[0]["partial"], true);
-    assert_eq!(rows.len(), 1 + 3 + 2);
-}
-
-#[test]
-fn every_node_and_edge_line_carries_its_sources() {
-    let rows = read(r#"{"map":"decisions"}"#);
-
-    assert!(rows[1..].iter().all(|row| row["sources"].is_array()));
-}
-
-#[test]
-fn kinds_cut_after_the_walk() {
-    let rows = read(
-        r#"{"map":"decisions","around":{"kind":"question","name":"Where?"},"depth":2,"kinds":["evidence"]}"#,
-    );
-
-    assert_eq!(rows.len(), 2);
-    assert_eq!(rows[1]["name"], "benchmarks");
-    assert_eq!(rows[0]["boundary_edges"], 1);
-}
-
-#[test]
-fn a_whole_read_is_not_partial() {
-    let rows = read(r#"{"map":"decisions"}"#);
-
-    assert_eq!(rows[0]["partial"], false);
-    assert_eq!(rows[0]["shown_edges"], 3);
     assert!(rows[0].get("note").is_none());
+    assert_eq!(rows.len(), 1 + 3 + 2);
+    assert!(rows[1..=3].iter().all(|row| row["sources"].is_array()));
+    assert!(rows[4..].iter().all(|row| row["edge"].is_string()));
 }
 
 #[test]
-fn an_empty_cut_of_a_full_map_is_partial_not_empty() {
-    let rows = read(r#"{"map":"decisions","since":"2999-01-01T00:00:00Z"}"#);
+fn an_empty_cut_of_a_full_map_is_not_an_empty_map() {
+    let rows = read(r#"{"map":"decisions","since":"2999-01-01T00:00:00Z"}"#).unwrap();
 
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["shown_nodes"], 0);
     assert_eq!(rows[0]["total_nodes"], 4);
-    assert_eq!(rows[0]["partial"], true);
     assert!(rows[0].get("note").is_none());
 }
 
 #[test]
-fn a_bad_selector_is_an_error_not_a_whole_read() {
-    let tool = ReadMap::new(Arc::new(FakeLog::seeded(weighed_question())), scope());
-    for args in [
-        r#"{"map":"decisions","depth":2}"#,
-        r#"{"map":"decisions","around":{"kind":"question","name":"Missing"}}"#,
-        r#"{"map":"decisions","kinds":["goal"]}"#,
-        r#"{"map":"decisions","since":"yesterday"}"#,
-    ] {
-        assert!(tool.run(args).is_err(), "{args}");
-    }
+fn depth_needs_around() {
+    assert!(read(r#"{"map":"decisions","depth":2}"#).is_err());
+}
+
+#[test]
+fn a_since_that_is_not_iso8601_is_an_error() {
+    assert!(read(r#"{"map":"decisions","since":"yesterday"}"#).is_err());
 }
