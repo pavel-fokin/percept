@@ -46,6 +46,61 @@ fn supersedes_lists_the_decisions_a_node_replaced() {
     assert_eq!(map.supersedes(old).count(), 0);
 }
 
+/// `event`, re-stamped as created at `at`.
+fn created_at(event: Event, at: Timestamp) -> Event {
+    Event::restore(
+        event.id(),
+        event.actor(),
+        event.source().clone(),
+        event.causation_id(),
+        at,
+        event.payload().clone(),
+    )
+}
+
+#[test]
+fn since_keeps_what_was_added_from_that_instant_and_what_it_attached_to() {
+    let (question, old, new) = (NodeId::new(), NodeId::new(), NodeId::new());
+    let at = Timestamp::now();
+    let earlier = at.minus_minutes(1).unwrap();
+    let events = [
+        created_at(node_added("decisions", question, "question", "Which language?"), earlier),
+        created_at(node_added("decisions", old, "option", "Go"), earlier),
+        created_at(node_added("decisions", new, "decision", "Rust"), at),
+        created_at(edge_added("decisions", "resolves", new, question), at),
+    ];
+    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+
+    let cut = map.since(at);
+
+    let mut names: Vec<&str> = cut.nodes().iter().map(|node| node.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["Rust", "Which language?"]);
+    assert_eq!(cut.edges().len(), 1);
+}
+
+#[test]
+fn since_leaves_out_an_edge_older_than_the_instant_between_kept_nodes() {
+    let (question, decision) = (NodeId::new(), NodeId::new());
+    let at = Timestamp::now();
+    let earlier = at.minus_minutes(1).unwrap();
+    let events = [
+        created_at(node_added("decisions", question, "question", "Which language?"), earlier),
+        created_at(edge_added("decisions", "resolves", decision, question), earlier),
+        created_at(node_added("decisions", decision, "decision", "Rust"), at),
+    ];
+    // The edge names a node added later, so fold it in an order that
+    // holds both first.
+    let events = [events[0].clone(), events[2].clone(), events[1].clone()];
+    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+
+    let cut = map.since(at);
+
+    let names: Vec<&str> = cut.nodes().iter().map(|node| node.name.as_str()).collect();
+    assert_eq!(names, ["Rust"]);
+    assert!(cut.edges().is_empty());
+}
+
 fn node_added(map: &str, node: NodeId, kind: &str, name: &str) -> Event {
     committed(Payload::NodeAdded {
         map: map.to_string(),

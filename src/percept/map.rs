@@ -453,6 +453,31 @@ impl Map {
         Ok(self.cut_to(nodes))
     }
 
+    /// The map cut to what it gained since `at`: the nodes added then
+    /// or later, plus the ends of every edge added then or later, so a
+    /// new decision resolving an old question shows the question too.
+    /// Edges from before `at` are not in the cut, even between kept
+    /// nodes - they are not what changed.
+    pub fn since(&self, at: Timestamp) -> Self {
+        let fresh: Vec<&Edge> = self
+            .edges
+            .iter()
+            .filter(|edge| edge.added_at >= at)
+            .collect();
+        let touched: HashSet<NodeId> = fresh
+            .iter()
+            .flat_map(|edge| [edge.from, edge.to])
+            .collect();
+        let nodes = self
+            .nodes
+            .iter()
+            .filter(|node| node.added_at >= at || touched.contains(&node.id))
+            .cloned()
+            .collect();
+        let edges = fresh.into_iter().cloned().collect();
+        Self::from_parts(self.schema, nodes, edges)
+    }
+
     /// A copy holding `nodes` and only the edges that join two of them.
     /// An edge to a node outside the cut is not a fact of the cut.
     fn cut_to(&self, nodes: Vec<Node>) -> Self {

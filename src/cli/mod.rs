@@ -106,6 +106,12 @@ pub struct ShowMapArgs {
     /// How many edges out `--around` reaches; 0 is the node alone.
     #[arg(long, default_value_t = 1, requires = "around")]
     depth: usize,
+    /// Keep only what the map gained since this instant - an ISO-8601
+    /// timestamp, or `<N>d`, `<N>h`, `<N>m` back from now: the nodes
+    /// added since, and the ends of the edges added since. Refused for
+    /// the code map, which is walked fresh and has no history.
+    #[arg(long, value_parser = parse_since)]
+    since: Option<Timestamp>,
     /// Fold every project's events instead of only this one's. Ignored
     /// for the code map, which is never folded from the log.
     #[arg(long)]
@@ -447,17 +453,29 @@ pub fn maps_show(
 }
 
 /// Prints the code map, walked fresh from `root` - never the log, so
-/// this runs in a directory with no `percept.jsonl`.
+/// this runs in a directory with no `percept.jsonl`. `--since` is
+/// refused: every node is as old as this walk.
 pub fn maps_show_code(args: ShowMapArgs, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    if args.since.is_some() {
+        return Err(
+            "--since has no meaning for the code map: it is walked fresh from the working tree \
+             and has no history"
+                .into(),
+        );
+    }
     let map = code::build(root)?;
     print_map(map, &args)
 }
 
 /// `maps_show` and `maps_show_code`'s shared tail: cut `map` to
-/// `args`'s filters, then print it nodes-then-edges.
+/// `args`'s filters, then print it nodes-then-edges. `--since` runs
+/// after `--around`, so it reads as "what changed near this node".
 fn print_map(mut map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(node) = &args.around {
         map = map.around(node, args.depth)?;
+    }
+    if let Some(at) = args.since {
+        map = map.since(at);
     }
     if !args.kind.is_empty() {
         map = map.keep_kinds(&args.kind)?;
@@ -712,6 +730,11 @@ fn print_reply(reply: &str) -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut out = io::stdout().lock();
     writeln!(out, "{reply}").or_else(stop_if_pipe_closed)
+}
+
+/// `maps show --since`, parsed the way `events search --since` is.
+fn parse_since(s: &str) -> Result<Timestamp, String> {
+    parse_time("since", s)
 }
 
 /// Parses a `--since`/`--until` value: an ISO-8601 timestamp, or a
