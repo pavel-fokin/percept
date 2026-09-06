@@ -93,6 +93,7 @@ pub fn revise(
 #[derive(Serialize)]
 struct MapLine {
     map: &'static str,
+    purpose: &'static str,
     nodes: usize,
     edges: usize,
 }
@@ -121,6 +122,7 @@ struct EdgeLine<'a> {
 pub fn encode_map(map: &Map) -> String {
     serde_json::to_string(&MapLine {
         map: map.schema().name,
+        purpose: map.schema().purpose,
         nodes: map.nodes().len(),
         edges: map.edges().len(),
     })

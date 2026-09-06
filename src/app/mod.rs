@@ -158,6 +158,20 @@ fn last_model_called(events: &[Event]) -> Option<usize> {
         .rposition(|event| event.kind() == EventKind::ModelCalled)
 }
 
+/// A map's size and age in one clause, so the model can tell whether
+/// opening it is worth a call: what a catalogue says about a map it
+/// does not show.
+fn catalogue_line(map: &Map) -> String {
+    match map.last_changed() {
+        Some(at) => format!(
+            "It holds {} nodes and {} edges, last changed {at}",
+            map.nodes().len(),
+            map.edges().len()
+        ),
+        None => "It holds nothing yet".to_string(),
+    }
+}
+
 /// `MapShape::Headlines`'s body: the headline nodes as `Map`'s
 /// `Display` formats a node line, without properties - a reader
 /// deciding whether to open the map with `read_map` doesn't need them
@@ -407,18 +421,16 @@ impl App {
                 match self.map_shape {
                     MapShape::Prompt => map.to_string(),
                     MapShape::Headlines => headlines_body(&map),
-                    MapShape::Tool => format!(
-                        "It holds {} nodes and {} edges. read_map shows it.",
-                        map.nodes().len(),
-                        map.edges().len()
-                    ),
+                    MapShape::Tool => "read_map shows it.".to_string(),
                 }
             };
             messages.push(percept::Message::Text {
                 role: Actor::System,
                 content: format!(
-                    "The {} map, built from this log. Node kinds: {}. Edge kinds: {}.\n{body}",
+                    "The {} map: {}. {}. Node kinds: {}. Edge kinds: {}.\n{body}",
                     schema.name,
+                    schema.purpose,
+                    catalogue_line(&map),
                     schema.node_kinds.join(", "),
                     schema.edge_kinds.join(", ")
                 ),

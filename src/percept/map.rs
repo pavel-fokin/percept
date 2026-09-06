@@ -47,6 +47,10 @@ impl Source {
 #[derive(Debug, PartialEq, Eq)]
 pub struct Schema {
     pub name: &'static str,
+    /// The one reasoning operation this map makes cheap, as a reader
+    /// deciding whether to open it needs to hear it - what the prompt
+    /// carries in place of the map.
+    pub purpose: &'static str,
     pub node_kinds: &'static [&'static str],
     pub edge_kinds: &'static [&'static str],
     /// The node kinds worth a reader's attention without opening the
@@ -63,6 +67,7 @@ pub const SUPERSEDES: &str = "supersedes";
 /// and on what grounds.
 pub const DECISIONS: Schema = Schema {
     name: "decisions",
+    purpose: "what was asked, what was chosen, and why, so a settled question is not reopened",
     node_kinds: &["question", "option", "evidence", "decision"],
     edge_kinds: &["supports", "contradicts", "resolves", SUPERSEDES],
     headline_kinds: &["question", "decision"],
@@ -73,6 +78,7 @@ pub const DECISIONS: Schema = Schema {
 /// log, so it is in `DERIVED` and not `SCHEMAS`.
 pub const CODE: Schema = Schema {
     name: "code",
+    purpose: "which file defines which symbol and imports which file or package",
     node_kinds: &["file", "function", "type", "package"],
     edge_kinds: &["contains", "imports"],
     headline_kinds: &["file"],
@@ -399,6 +405,15 @@ impl Map {
 
     pub fn edges(&self) -> &[Edge] {
         &self.edges
+    }
+
+    /// When the map last gained a node or an edge; `None` while it is
+    /// empty. A removal leaves no trace here - what was removed lives
+    /// only in the events.
+    pub fn last_changed(&self) -> Option<Timestamp> {
+        let nodes = self.nodes.iter().map(|node| node.added_at);
+        let edges = self.edges.iter().map(|edge| edge.added_at);
+        nodes.chain(edges).max()
     }
 
     pub fn node(&self, id: NodeId) -> Option<&Node> {
