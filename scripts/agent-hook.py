@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""Capture Claude Code and Codex events through percept's public CLI."""
+
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+import uuid
+
+
+def text_field(data, name):
+    value = data[name]
+    if not isinstance(value, str):
+        raise ValueError(f"{name} must be a string")
+    return value
+
+
+def checkout_root(cwd):
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], cwd=cwd,
+        capture_output=True, text=True, timeout=5,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip())
+    return Path(result.stdout.strip()).resolve()
+
+
+def publish(binary, root, client, actor, kind, payload, cause=None):
+    command = [
+        str(binary), "events", "publish", "--source", client,
+        "--actor", actor, "--type", kind, "--payload", json.dumps(payload),
+    ]
+    if cause:
+        command.extend(["--causation", cause])
+    result = subprocess.run(
+        command, cwd=root, capture_output=True, text=True, timeout=5,
+    )
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or f"percept exited {result.returncode}")
+    event_id = result.stdout.strip()
+    uuid.UUID(event_id)
+    return event_id
+
+
+def claude_reply(path):
+    reply = []
+    with Path(path).open() as transcript:
+        for line in transcript:
+            entry = json.loads(line)
+            content = entry.get("message", {}).get("content", [])
+            if entry.get("type") == "user":
+                if isinstance(content, str) or not any(
+                    block.get("type") == "tool_result" for block in content
+                ):
+                    reply = []
+            elif entry.get("type") == "assistant":
+                if isinstance(content, str):
+                    reply.append(content)
+                else:
+                    reply.extend(
+                        text_field(block, "text") for block in content
+                        if block.get("type") == "text"
+                    )
+    return "\n".join(reply)
+
+
+def capture(client, data):
+    event = text_field(data, "hook_event_name")
+    if event not in ("UserPromptSubmit", "PostToolUse", "Stop"):
+        raise ValueError(f"unsupported hook event {event!r}")
+    root = checkout_root(text_field(data, "cwd"))
+    session = text_field(data, "session_id")
+    if not session:
+        raise ValueError("session_id must not be empty")
+    turn = data.get("turn_id", "")
+    if not isinstance(turn, str):
+        raise ValueError("turn_id must be a string")
+    home = Path(os.environ.get("PERCEPT_HOME") or Path.home() / ".percept").resolve()
+    os.environ["PERCEPT_HOME"] = str(home)
+    binary = Path(os.environ.get("PERCEPT_BIN") or Path.home() / ".percept/bin/percept")
+    binary = binary.expanduser().resolve()
+    key = hashlib.sha256(json.dumps([client, str(root), session, turn]).encode()).hexdigest()
+    sessions = home / "hook-sessions"
+    sessions.mkdir(parents=True, exist_ok=True)
+    state = sessions / f"{key}.json"
+    with (sessions / f"{key}.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        # Invalidate before publishing: a failed prompt must not inherit the previous cause.
+        if event == "UserPromptSubmit":
+            state.unlink(missing_ok=True)
+        if not binary.is_file():
+            return {}
+        cause = json.loads(state.read_text()) if state.exists() else None
+        if event == "UserPromptSubmit":
+            prompt = text_field(data, "prompt")
+            event_id = publish(binary, root, client, "user", "message.received", {"content": prompt})
+            state.write_text(json.dumps(event_id))
+            return {"hookSpecificOutput": {
+                "hookEventName": event,
+                "additionalContext": f"percept event {event_id}",
+            }}
+        if event == "PostToolUse":
+            tool = text_field(data, "tool_name")
+            arguments = data["tool_input"]
+            response = data["tool_response"]
+            if not isinstance(response, str):
+                response = json.dumps(response)
+            call_id = publish(binary, root, client, "model", "tool.called", {
+                "tool": tool, "arguments": arguments,
+            }, cause)
+            publish(binary, root, client, "system", "tool.resulted", {"content": response}, call_id)
+        else:
+            if data.get("last_assistant_message") is not None:
+                reply = text_field(data, "last_assistant_message")
+            elif client == "claude-code" and data.get("transcript_path"):
+                reply = claude_reply(text_field(data, "transcript_path"))
+            else:
+                reply = ""
+            if reply.strip():
+                publish(binary, root, client, "model", "message.received", {"content": reply}, cause)
+    return {}
+
+
+def main():
+    output = {}
+    try:
+        client = sys.argv[1]
+        if client not in ("claude-code", "codex"):
+            raise ValueError(f"unsupported client {client!r}")
+        data = json.load(sys.stdin)
+        if not isinstance(data, dict):
+            raise ValueError("hook input must be a JSON object")
+        output = capture(client, data)
+    except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError,
+            RuntimeError, subprocess.SubprocessError) as error:
+        print(f"percept hook: {error}", file=sys.stderr)
+    print(json.dumps(output))
+
+
+if __name__ == "__main__":
+    main()
