@@ -1,0 +1,97 @@
+# percept
+
+An experience log and shared cognitive maps. See [AGENTS.md](AGENTS.md)
+for the architecture and [.percept/index.md](.percept/index.md) for the
+maps.
+
+## Reading decisions
+
+`.percept/decisions.md` lists questions in the order they were raised,
+grouped under the prompt that raised them, each with the decision that
+settles it now. Options, evidence, and superseded decisions stay in the
+map and are one query away:
+
+```sh
+percept maps list
+percept maps show decisions --around 'question:Where does the event log live?'
+percept maps show decisions --since 1d
+```
+
+A filtered read reports on stderr how much of the map it left out;
+stdout stays JSONL. The model's `read_map` tool takes the same cut and
+returns the same counts. A fragment is where checking starts, not proof
+that nothing else bears on it.
+
+`PERCEPT_MAPS` says how much of each map reaches the model each turn:
+`prompt` (the default), `headlines`, or `tool`. In every shape the
+prompt carries one line per map with its purpose, size, and last
+change. The code map never reaches the model.
+
+## Claude Code and Codex
+
+Both clients use the same repository instructions, skills, and event
+capture. Client files contain only the discovery metadata and commands.
+
+| Shared source | Claude Code entry | Codex entry |
+|---|---|---|
+| `AGENTS.md` | `CLAUDE.md` imports it | Loaded directly |
+| `.agents/skills/` | `.claude/skills/` symlinks | Discovered directly |
+| `.agents/agents/software-developer.md` | `.claude/agents/software-developer.md` | `.codex/agents/software-developer.toml` |
+| `scripts/agent-hook.py` | `.claude/settings.json` | `.codex/hooks.json` |
+
+Install the binary with `scripts/install.sh`. Hooks need Python 3 and
+Git. Open either client from this checkout and trust the repository.
+In Codex, use `/hooks` to review and trust the three capture hooks.
+Restart an existing client session to load the project configuration.
+See the official [Codex hooks](https://learn.chatgpt.com/docs/hooks) and
+[skills](https://learn.chatgpt.com/docs/build-skills) documentation.
+
+Older checkouts may have percept hooks in `.claude/settings.local.json`
+and an untracked `.claude/skills/percept/` directory holding
+`on-prompt.sh`, `on-tool.sh`, and `on-stop.sh`. Remove those hook
+entries and that directory before using the versioned configuration,
+or every prompt is recorded twice and the shared skill symlink cannot
+be created. Keep unrelated local settings.
+
+The hooks capture user prompts, completed tool calls and results, and
+the final reply. A prompt hook returns its event ID for later citations.
+Each client keeps its own source name, `claude-code` or `codex`.
+Capture errors report to stderr and let the coding session continue.
+A missing binary disables capture. Events before hooks were enabled
+are not imported automatically.
+Payloads exceeding the operating system's argument limit cannot be
+captured through the current publish CLI; the hook reports that error.
+
+## Comparing worktrees
+
+Percept treats worktrees as the same project. To keep experiments out
+of the shared log, launch the client with a separate state directory:
+
+```sh
+cargo build --offline
+export PERCEPT_HOME="$PWD/.percept"
+export PERCEPT_BIN="$PWD/target/debug/percept"
+export PATH="$PWD/target/debug:$PATH"
+codex
+# Or:
+claude
+```
+
+Without `PERCEPT_BIN`, hooks use `~/.percept/bin/percept`. The example
+uses this branch's binary independently of the state directory. Session
+causation is isolated by client, checkout, session, and turn where the
+client supplies it.
+
+The log and hook state are local data, not files to commit. A worktree
+without historical events starts with an empty live map, even when a
+tracked Markdown view exists. An empty map does not mean no prior
+decision.
+
+## Verification
+
+```sh
+cargo build --offline
+cargo test --offline
+cargo clippy --offline --all-targets -- -D warnings
+python3 -m unittest discover -s scripts -p 'test_*.py'
+```

@@ -41,7 +41,10 @@ cognitive commit - one event in the same log, citing the experience it
 was derived from. A map is folded from those commits, so the cognitive
 history rebuilds it deterministically; the experience alone does not,
 because a second pass through the model gives a different map. The
-model builds maps today. The user will build and co-own them.
+model builds maps today; the user co-owns them. Human and agent each
+keep their own understanding. A shared map is where the two are
+compared and corrected, and a recorded claim is not the human's
+agreement.
 
 ## Domain
 
@@ -49,7 +52,7 @@ model builds maps today. The user will build and co-own them.
   optional `causation_id`, a `created_at`, and a typed `payload`. Once
   committed it never changes.
 - `Source` names the writer that produced an event - `percept-tui`,
-  `percept-cli`, `claude-code` - and the project root it ran in. The
+  `percept-cli`, `claude-code`, `codex` - and the project root it ran in. The
   name is open by design, where `Actor` is closed. One log at
   `$PERCEPT_HOME/percept.jsonl`, `~/.percept` by default, holds every
   project; the path is how a fold picks one project out of it.
@@ -85,6 +88,24 @@ model builds maps today. The user will build and co-own them.
   reached with `percept maps show decisions --around question:<name>`.
   `--since <time>` on `maps show` lists what a map gained since a
   reader last looked.
+
+## Maps
+
+Start with [.percept/index.md](.percept/index.md): one row per map
+saying what it is for, where it comes from, and how to open a fragment
+of it. The shared [percept skill](.agents/skills/percept/SKILL.md)
+covers selecting a fragment, checking a claim, and revising.
+
+A map is judged by what it costs its reader, on three budgets:
+
+| Budget | What to keep small |
+|---|---|
+| Overview | Concepts held at once to understand one decision. |
+| Change | New meaning to absorb after an update, and landmarks moved. |
+| Verification | Work to check a conclusion and see what a correction touches. |
+
+The change budget weighs most. Add beside what a reader has seen;
+never move or merge it without the user's say.
 
 ## Decisions
 
@@ -125,21 +146,23 @@ skips it.
   flags, defaults - are settled with them before the build, never
   assumed. Where a function or a rule sits inside the code is not one
   of those: the builder proposes it, and review challenges it. The user
-  agrees the set before any code. Each settled decision is then recorded
-  in the decisions map, citing the prompt that settled it, so the next
-  session does not reopen it. A decision that changes an earlier one is
-  added with a `supersedes` edge to it; the old node is never removed.
+  agrees the set before any code; an explicit instruction to implement
+  a proposal already discussed supplies that agreement. Each settled
+  decision is then recorded in the decisions map, citing the prompt
+  that settled it, so the next session does not reopen it. A decision
+  that changes an earlier one is added with a `supersedes` edge to it;
+  the old node is never removed.
 - **Build.** An issue with no design left in it, touching one or two
   files, the main agent builds itself. Anything larger goes to the
   `software-developer` subagent, which follows this file, writes the
   code, runs the build and tests, and reports back. It does not design,
   choose scope, commit, or push. Explore the project's code structure -
   what a file imports, defines, or depends on - with `percept maps show
-  code` (see `.claude/skills/percept/SKILL.md` for query patterns), not
+  code` (see `.agents/skills/percept/SKILL.md` for query patterns), not
   ad hoc `grep`.
 - **Review.** The main agent checks each diff against its issue, and
   small fixes land there; larger rework goes back to the subagent.
-  `/code-review` and `/simplify` then run once each over the whole
+  The shared `code-review` and `simplify` skills run once each over the whole
   branch, before the user merges. Two passes looking for different
   things catch more than a pass per issue. A branch that adds no
   branches, no I/O, and no behaviour change - a vocabulary or type
