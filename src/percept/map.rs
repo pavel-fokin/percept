@@ -10,8 +10,8 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{self, Write as _};
 use std::path::PathBuf;
 
-use super::{Event, EventId, Payload, Source};
-use crate::shared::Id;
+use super::{Actor, Event, EventId, Payload, Source};
+use crate::shared::{Id, Timestamp};
 
 /// Which events a fold may draw from: one project's alone, or every
 /// project's. The log is shared by every project that writes to it;
@@ -109,6 +109,10 @@ pub struct Node {
     pub name: String,
     pub properties: BTreeMap<String, String>,
     pub sources: Vec<EventId>,
+    /// Who added this node - the actor its `node.added` event carried.
+    pub actor: Actor,
+    /// When this node was added - that event's `created_at`.
+    pub added_at: Timestamp,
 }
 
 /// A node as a writer names it: kind and quoted name, never the id.
@@ -126,6 +130,8 @@ pub struct Edge {
     pub from: NodeId,
     pub to: NodeId,
     pub sources: Vec<EventId>,
+    /// When this edge was added - the `edge.added` event's `created_at`.
+    pub added_at: Timestamp,
 }
 
 /// Points at a node the way a writer knows it - by kind and name -
@@ -332,7 +338,7 @@ impl Map {
             if map_of(event.payload()) != Some(schema.name) {
                 continue;
             }
-            map.replay(event.payload())
+            map.replay(event.payload(), event.actor(), event.created_at())
                 .map_err(|error| MapError::Rejected {
                     event: event.id(),
                     error: Box::new(error),
@@ -442,7 +448,7 @@ impl Map {
     /// state, applies it, and returns the `Payload` that records it.
     /// The caller commits that payload; the map is already updated, so
     /// a batch can check each step against the ones before it.
-    pub fn apply(&mut self, mutation: Mutation) -> Result<Payload, MapError> {
+    pub fn apply(&mut self, mutation: Mutation, actor: Actor) -> Result<Payload, MapError> {
         let map = self.schema.name.to_string();
         let payload = match mutation {
             Mutation::AddNode {
@@ -493,14 +499,16 @@ impl Map {
                 sources,
             },
         };
-        self.replay(&payload)?;
+        self.replay(&payload, actor, Timestamp::now())?;
         Ok(payload)
     }
 
     /// Applies one recorded change - every rule a map enforces lives
     /// here, so a fold and `apply` agree. Removing a node drops the
-    /// edges that touch it: an edge to nothing is not a fact.
-    fn replay(&mut self, payload: &Payload) -> Result<(), MapError> {
+    /// edges that touch it: an edge to nothing is not a fact. `actor`
+    /// and `at` stamp a node or edge this call adds - who and when,
+    /// from the event that carried it.
+    fn replay(&mut self, payload: &Payload, actor: Actor, at: Timestamp) -> Result<(), MapError> {
         match payload {
             Payload::NodeAdded {
                 node,
@@ -528,6 +536,8 @@ impl Map {
                     name: name.clone(),
                     properties: properties.clone(),
                     sources: sources.clone(),
+                    actor,
+                    added_at: at,
                 });
             }
             Payload::NodeRemoved { node, .. } => {
@@ -567,6 +577,7 @@ impl Map {
                     from: *from,
                     to: *to,
                     sources: sources.clone(),
+                    added_at: at,
                 });
             }
             Payload::EdgeRemoved { kind, from, to, .. } => {

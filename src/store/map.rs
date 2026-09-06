@@ -9,9 +9,9 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::percept::{
-    Edge, EventId, EventLog, Map, MapError, Mutation, Node, NodeId, Payload, Schema, Scope,
+    Actor, Edge, EventId, EventLog, Map, MapError, Mutation, Node, NodeId, Payload, Schema, Scope,
 };
-use crate::store::event::ids;
+use crate::store::event::{actor_name, ids};
 use crate::store::parse_event_id;
 
 /// The map `name` names, folded from every event in `log` that falls
@@ -60,8 +60,8 @@ impl Snapshot {
             .collect()
     }
 
-    pub fn apply(&mut self, mutation: Mutation) -> Result<Payload, MapError> {
-        self.map.apply(mutation)
+    pub fn apply(&mut self, mutation: Mutation, actor: Actor) -> Result<Payload, MapError> {
+        self.map.apply(mutation, actor)
     }
 }
 
@@ -76,11 +76,12 @@ pub fn revise(
     name: &str,
     scope: &Scope,
     sources: &[String],
+    actor: Actor,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
     let mut snapshot = Snapshot::load(log, name, scope)?;
     let sources = snapshot.resolve(sources)?;
-    Ok(snapshot.apply(mutation(sources))?)
+    Ok(snapshot.apply(mutation(sources), actor)?)
 }
 
 #[derive(Serialize)]
@@ -97,6 +98,8 @@ struct NodeLine<'a> {
     name: &'a str,
     properties: &'a BTreeMap<String, String>,
     sources: Vec<String>,
+    actor: &'static str,
+    added_at: String,
 }
 
 #[derive(Serialize)]
@@ -105,6 +108,7 @@ struct EdgeLine<'a> {
     from: String,
     to: String,
     sources: Vec<String>,
+    added_at: String,
 }
 
 /// One line naming a map and its size, for `maps list`.
@@ -124,6 +128,8 @@ pub fn encode_node(node: &Node) -> String {
         name: &node.name,
         properties: &node.properties,
         sources: ids(&node.sources),
+        actor: actor_name(node.actor),
+        added_at: node.added_at.to_string(),
     })
     .expect("NodeLine always serializes")
 }
@@ -137,6 +143,7 @@ pub fn encode_edge(map: &Map, edge: &Edge) -> String {
         from: node_ref(map, edge.from),
         to: node_ref(map, edge.to),
         sources: ids(&edge.sources),
+        added_at: edge.added_at.to_string(),
     })
     .expect("EdgeLine always serializes")
 }

@@ -4,7 +4,7 @@ use std::str::FromStr;
 /// An instant on the system clock, UTC. Wraps `jiff::Timestamp` so the
 /// rest of the code depends on this type, not the crate. `Display` and
 /// `FromStr` are RFC 3339 in UTC (`...Z`), the form the wire format uses.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Timestamp(jiff::Timestamp);
 
 impl Timestamp {

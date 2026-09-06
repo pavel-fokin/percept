@@ -97,6 +97,30 @@ fn rejected_with(err: MapError, expected: EventId) -> MapError {
 }
 
 #[test]
+fn fold_stamps_a_node_with_its_events_actor_and_time() {
+    let event = Event::new(
+        Actor::Model,
+        source("test"),
+        None,
+        Payload::NodeAdded {
+            map: "decisions".to_string(),
+            node: NodeId::new(),
+            kind: "option".to_string(),
+            name: "Rust".to_string(),
+            properties: BTreeMap::new(),
+            sources: Vec::new(),
+        },
+    );
+    let created_at = event.created_at();
+
+    let map = Map::fold(&DECISIONS, &scope(), &[event]).unwrap();
+
+    let node = map.find("option", "Rust").unwrap();
+    assert_eq!(node.actor, Actor::Model);
+    assert_eq!(node.added_at, created_at);
+}
+
+#[test]
 fn a_fold_holds_every_node_and_edge_still_present() {
     let (ids, events) = rust_over_go();
 
@@ -294,7 +318,7 @@ fn apply_records_what_a_fold_rebuilds() {
         ),
     ]
     .into_iter()
-    .map(|m| committed(built.apply(m).unwrap()))
+    .map(|m| committed(built.apply(m, Actor::User).unwrap()))
     .collect();
 
     let folded = Map::fold(&DECISIONS, &scope(), &events).unwrap();
@@ -306,28 +330,53 @@ fn apply_records_what_a_fold_rebuilds() {
 }
 
 #[test]
+fn apply_stamps_the_node_with_the_actor_given() {
+    let mut map = Map::empty(&DECISIONS);
+    map.apply(add_node("option", "Rust"), Actor::User).unwrap();
+
+    let node = map.find("option", "Rust").unwrap();
+
+    assert_eq!(node.actor, Actor::User);
+}
+
+#[test]
 fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
     let mut map = Map::empty(&DECISIONS);
-    map.apply(add_node("option", "Rust")).unwrap();
+    map.apply(add_node("option", "Rust"), Actor::User).unwrap();
 
-    let unknown = map.apply(add_node("goal", "Ship")).err().unwrap();
-    let blank = map.apply(add_node("option", "  ")).err().unwrap();
-    let duplicate = map.apply(add_node("option", "Rust")).err().unwrap();
+    let unknown = map
+        .apply(add_node("goal", "Ship"), Actor::User)
+        .err()
+        .unwrap();
+    let blank = map
+        .apply(add_node("option", "  "), Actor::User)
+        .err()
+        .unwrap();
+    let duplicate = map
+        .apply(add_node("option", "Rust"), Actor::User)
+        .err()
+        .unwrap();
     let missing = map
-        .apply(add_edge(
-            "supports",
-            node_ref("evidence", "Nope"),
-            node_ref("option", "Rust"),
-        ))
+        .apply(
+            add_edge(
+                "supports",
+                node_ref("evidence", "Nope"),
+                node_ref("option", "Rust"),
+            ),
+            Actor::User,
+        )
         .err()
         .unwrap();
     let no_edge = map
-        .apply(Mutation::RemoveEdge {
-            kind: "supports".to_string(),
-            from: node_ref("option", "Rust"),
-            to: node_ref("option", "Rust"),
-            sources: Vec::new(),
-        })
+        .apply(
+            Mutation::RemoveEdge {
+                kind: "supports".to_string(),
+                from: node_ref("option", "Rust"),
+                to: node_ref("option", "Rust"),
+                sources: Vec::new(),
+            },
+            Actor::User,
+        )
         .err()
         .unwrap();
 
@@ -348,21 +397,29 @@ fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
 #[test]
 fn apply_removes_a_node_by_name_and_its_edges_with_it() {
     let mut map = Map::empty(&DECISIONS);
-    map.apply(add_node("question", "Which language?")).unwrap();
-    map.apply(add_node("decision", "Rust over Go")).unwrap();
-    map.apply(add_edge(
-        "resolves",
-        node_ref("decision", "Rust over Go"),
-        node_ref("question", "Which language?"),
-    ))
+    map.apply(add_node("question", "Which language?"), Actor::User)
+        .unwrap();
+    map.apply(add_node("decision", "Rust over Go"), Actor::User)
+        .unwrap();
+    map.apply(
+        add_edge(
+            "resolves",
+            node_ref("decision", "Rust over Go"),
+            node_ref("question", "Which language?"),
+        ),
+        Actor::User,
+    )
     .unwrap();
 
     let payload = map
-        .apply(Mutation::RemoveNode {
-            node: node_ref("question", "Which language?"),
-            reason: "answered".to_string(),
-            sources: Vec::new(),
-        })
+        .apply(
+            Mutation::RemoveNode {
+                node: node_ref("question", "Which language?"),
+                reason: "answered".to_string(),
+                sources: Vec::new(),
+            },
+            Actor::User,
+        )
         .unwrap();
 
     assert!(matches!(payload, Payload::NodeRemoved { .. }));
@@ -373,23 +430,31 @@ fn apply_removes_a_node_by_name_and_its_edges_with_it() {
 #[test]
 fn a_map_reads_as_one_line_per_node_then_per_edge() {
     let mut map = Map::empty(&DECISIONS);
-    map.apply(add_node("question", "Which language?")).unwrap();
-    map.apply(Mutation::AddNode {
-        kind: "evidence".to_string(),
-        name: "Built both".to_string(),
-        properties: BTreeMap::from([
-            ("summary".to_string(), "side by\nside".to_string()),
-            ("when".to_string(), "August".to_string()),
-        ]),
-        sources: Vec::new(),
-    })
+    map.apply(add_node("question", "Which language?"), Actor::User)
+        .unwrap();
+    map.apply(
+        Mutation::AddNode {
+            kind: "evidence".to_string(),
+            name: "Built both".to_string(),
+            properties: BTreeMap::from([
+                ("summary".to_string(), "side by\nside".to_string()),
+                ("when".to_string(), "August".to_string()),
+            ]),
+            sources: Vec::new(),
+        },
+        Actor::User,
+    )
     .unwrap();
-    map.apply(add_node("decision", "Rust over Go")).unwrap();
-    map.apply(add_edge(
-        "resolves",
-        node_ref("decision", "Rust over Go"),
-        node_ref("question", "Which language?"),
-    ))
+    map.apply(add_node("decision", "Rust over Go"), Actor::User)
+        .unwrap();
+    map.apply(
+        add_edge(
+            "resolves",
+            node_ref("decision", "Rust over Go"),
+            node_ref("question", "Which language?"),
+        ),
+        Actor::User,
+    )
     .unwrap();
 
     assert_eq!(
@@ -439,21 +504,30 @@ fn keeping_a_kind_the_schema_lacks_is_an_error() {
 /// step at a time and against the edge direction.
 fn chain() -> Map {
     let mut map = Map::empty(&DECISIONS);
-    map.apply(add_node("question", "Which language?")).unwrap();
-    map.apply(add_node("decision", "Rust over Go")).unwrap();
-    map.apply(add_node("evidence", "Built both")).unwrap();
-    map.apply(add_node("option", "Go")).unwrap();
-    map.apply(add_edge(
-        "resolves",
-        node_ref("decision", "Rust over Go"),
-        node_ref("question", "Which language?"),
-    ))
+    map.apply(add_node("question", "Which language?"), Actor::User)
+        .unwrap();
+    map.apply(add_node("decision", "Rust over Go"), Actor::User)
+        .unwrap();
+    map.apply(add_node("evidence", "Built both"), Actor::User)
+        .unwrap();
+    map.apply(add_node("option", "Go"), Actor::User).unwrap();
+    map.apply(
+        add_edge(
+            "resolves",
+            node_ref("decision", "Rust over Go"),
+            node_ref("question", "Which language?"),
+        ),
+        Actor::User,
+    )
     .unwrap();
-    map.apply(add_edge(
-        "supports",
-        node_ref("evidence", "Built both"),
-        node_ref("decision", "Rust over Go"),
-    ))
+    map.apply(
+        add_edge(
+            "supports",
+            node_ref("evidence", "Built both"),
+            node_ref("decision", "Rust over Go"),
+        ),
+        Actor::User,
+    )
     .unwrap();
     map
 }
@@ -520,7 +594,8 @@ fn a_missing_node_stays_silent_on_a_single_shared_word() {
 #[test]
 fn a_missing_node_counts_a_repeated_word_once() {
     let mut map = Map::empty(&DECISIONS);
-    map.apply(add_node("decision", "safe safe pick")).unwrap();
+    map.apply(add_node("decision", "safe safe pick"), Actor::User)
+        .unwrap();
     let err = map
         .around(&node_ref("decision", "safe choice"), 1)
         .err()

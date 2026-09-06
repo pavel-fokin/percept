@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::percept::{Actor, Event, NodeId, NodeRef};
+use crate::shared::Timestamp;
 use crate::testing::{scope, source, source_at, FakeLog};
 
 fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
@@ -35,7 +36,15 @@ fn record_at(log: &FakeLog, path: &str, payload: Payload) {
 fn revise_returns_the_payload_that_records_the_mutation() {
     let log = FakeLog::default();
 
-    let payload = revise(&log, "decisions", &scope(), &[], add_node("option", "Rust")).unwrap();
+    let payload = revise(
+        &log,
+        "decisions",
+        &scope(),
+        &[],
+        Actor::User,
+        add_node("option", "Rust"),
+    )
+    .unwrap();
 
     assert!(matches!(&payload, Payload::NodeAdded { name, .. } if name == "Rust"));
     record(&log, payload);
@@ -48,12 +57,27 @@ fn revise_returns_the_payload_that_records_the_mutation() {
 #[test]
 fn revise_loads_the_log_so_a_second_call_sees_the_first() {
     let log = FakeLog::default();
-    let first = revise(&log, "decisions", &scope(), &[], add_node("option", "Rust")).unwrap();
+    let first = revise(
+        &log,
+        "decisions",
+        &scope(),
+        &[],
+        Actor::User,
+        add_node("option", "Rust"),
+    )
+    .unwrap();
     record(&log, first);
 
-    let err = revise(&log, "decisions", &scope(), &[], add_node("option", "Rust"))
-        .err()
-        .unwrap();
+    let err = revise(
+        &log,
+        "decisions",
+        &scope(),
+        &[],
+        Actor::User,
+        add_node("option", "Rust"),
+    )
+    .err()
+    .unwrap();
 
     assert_eq!(err.to_string(), "option \"Rust\" is already in the map");
 }
@@ -64,10 +88,26 @@ fn revise_allows_the_same_name_under_a_different_project_s_path() {
     let here = Scope::Project(PathBuf::from("/here"));
     let there = Scope::Project(PathBuf::from("/there"));
 
-    let first = revise(&log, "decisions", &here, &[], add_node("option", "Rust")).unwrap();
+    let first = revise(
+        &log,
+        "decisions",
+        &here,
+        &[],
+        Actor::User,
+        add_node("option", "Rust"),
+    )
+    .unwrap();
     record_at(&log, "/here", first);
 
-    let elsewhere = revise(&log, "decisions", &there, &[], add_node("option", "Rust")).unwrap();
+    let elsewhere = revise(
+        &log,
+        "decisions",
+        &there,
+        &[],
+        Actor::User,
+        add_node("option", "Rust"),
+    )
+    .unwrap();
     record_at(&log, "/there", elsewhere);
 
     assert!(fold_map(&log, "decisions", &there)
@@ -83,6 +123,7 @@ fn revising_the_code_map_is_refused() {
         "code",
         &scope(),
         &[],
+        Actor::User,
         add_node("file", "src/main.rs"),
     )
     .err()
@@ -115,6 +156,7 @@ fn a_source_is_checked_against_the_loaded_log() {
         "decisions",
         &scope(),
         &[known],
+        Actor::User,
         add_node("option", "Rust"),
     )
     .unwrap();
@@ -123,6 +165,7 @@ fn a_source_is_checked_against_the_loaded_log() {
         "decisions",
         &scope(),
         std::slice::from_ref(&unknown),
+        Actor::User,
         add_node("option", "Go"),
     )
     .err()
@@ -132,6 +175,7 @@ fn a_source_is_checked_against_the_loaded_log() {
         "decisions",
         &scope(),
         &["user".to_string()],
+        Actor::User,
         add_node("option", "Go"),
     )
     .err()
@@ -150,6 +194,8 @@ fn a_node_line_carries_its_id_and_sources_as_uuids() {
         name: "Built both".to_string(),
         properties: BTreeMap::from([("summary".to_string(), "side by side".to_string())]),
         sources: vec![EventId::new()],
+        actor: Actor::User,
+        added_at: Timestamp::now(),
     };
 
     let line: serde_json::Value = serde_json::from_str(&encode_node(&node)).unwrap();
@@ -165,26 +211,32 @@ fn a_node_line_carries_its_id_and_sources_as_uuids() {
 fn an_edge_line_names_its_ends_as_kind_and_name() {
     let mut map = Map::empty(&crate::percept::CODE);
     for (kind, name) in [("file", "src/main.rs"), ("package", "clap")] {
-        map.apply(Mutation::AddNode {
-            kind: kind.to_string(),
-            name: name.to_string(),
-            properties: BTreeMap::new(),
-            sources: Vec::new(),
-        })
+        map.apply(
+            Mutation::AddNode {
+                kind: kind.to_string(),
+                name: name.to_string(),
+                properties: BTreeMap::new(),
+                sources: Vec::new(),
+            },
+            Actor::User,
+        )
         .unwrap();
     }
-    map.apply(Mutation::AddEdge {
-        kind: "imports".to_string(),
-        from: NodeRef {
-            kind: "file".to_string(),
-            name: "src/main.rs".to_string(),
+    map.apply(
+        Mutation::AddEdge {
+            kind: "imports".to_string(),
+            from: NodeRef {
+                kind: "file".to_string(),
+                name: "src/main.rs".to_string(),
+            },
+            to: NodeRef {
+                kind: "package".to_string(),
+                name: "clap".to_string(),
+            },
+            sources: Vec::new(),
         },
-        to: NodeRef {
-            kind: "package".to_string(),
-            name: "clap".to_string(),
-        },
-        sources: Vec::new(),
-    })
+        Actor::User,
+    )
     .unwrap();
 
     let line: serde_json::Value =

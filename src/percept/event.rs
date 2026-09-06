@@ -18,7 +18,7 @@ pub struct Source {
 }
 
 /// Who an Event is attributed to. Extend by adding a variant.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Actor {
     User,
     Model,

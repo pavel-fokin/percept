@@ -484,7 +484,7 @@ fn write(
 ) -> Result<Payload, Box<dyn std::error::Error>> {
     let MapArgs { map, source: cited } = target;
     let scope = source.scope();
-    let payload = store::revise(log, &map, &scope, &cited, mutation)?;
+    let payload = store::revise(log, &map, &scope, &cited, Actor::User, mutation)?;
     log.append(&Event::new(
         Actor::User,
         source.clone(),

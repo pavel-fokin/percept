@@ -16,7 +16,7 @@ use std::path::Path;
 
 use ignore::WalkBuilder;
 
-use crate::percept::{Map, MapError, Mutation, NodeRef, CODE};
+use crate::percept::{Actor, Map, MapError, Mutation, NodeRef, CODE};
 
 /// Builds the code map from every `.rs` file under `root`, gitignore
 /// rules applied the way `ignore` applies them for any tool. Node ids
@@ -31,12 +31,15 @@ pub fn build(root: &Path) -> Result<Map, MapError> {
     let mut map = Map::empty(&CODE);
     let mut packages = HashSet::new();
     for file in &files {
-        map.apply(Mutation::AddNode {
-            kind: "file".to_string(),
-            name: file.clone(),
-            properties: BTreeMap::from([("language".to_string(), "rust".to_string())]),
-            sources: Vec::new(),
-        })?;
+        map.apply(
+            Mutation::AddNode {
+                kind: "file".to_string(),
+                name: file.clone(),
+                properties: BTreeMap::from([("language".to_string(), "rust".to_string())]),
+                sources: Vec::new(),
+            },
+            Actor::System,
+        )?;
     }
 
     for file in &files {
@@ -64,21 +67,27 @@ pub fn build(root: &Path) -> Result<Map, MapError> {
                 kind: symbol.kind.to_string(),
                 name: format!("{file}::{}", symbol.path.join("::")),
             };
-            map.apply(Mutation::AddNode {
-                kind: node.kind.clone(),
-                name: node.name.clone(),
-                properties: BTreeMap::from([
-                    ("public".to_string(), symbol.public.to_string()),
-                    ("line".to_string(), symbol.line.to_string()),
-                ]),
-                sources: Vec::new(),
-            })?;
-            map.apply(Mutation::AddEdge {
-                kind: "contains".to_string(),
-                from: this.clone(),
-                to: node,
-                sources: Vec::new(),
-            })?;
+            map.apply(
+                Mutation::AddNode {
+                    kind: node.kind.clone(),
+                    name: node.name.clone(),
+                    properties: BTreeMap::from([
+                        ("public".to_string(), symbol.public.to_string()),
+                        ("line".to_string(), symbol.line.to_string()),
+                    ]),
+                    sources: Vec::new(),
+                },
+                Actor::System,
+            )?;
+            map.apply(
+                Mutation::AddEdge {
+                    kind: "contains".to_string(),
+                    from: this.clone(),
+                    to: node,
+                    sources: Vec::new(),
+                },
+                Actor::System,
+            )?;
         }
 
         let paths = imports
@@ -102,12 +111,15 @@ pub fn build(root: &Path) -> Result<Map, MapError> {
                 },
                 Target::Package(name) => {
                     if packages.insert(name.clone()) {
-                        map.apply(Mutation::AddNode {
-                            kind: "package".to_string(),
-                            name: name.clone(),
-                            properties: BTreeMap::new(),
-                            sources: Vec::new(),
-                        })?;
+                        map.apply(
+                            Mutation::AddNode {
+                                kind: "package".to_string(),
+                                name: name.clone(),
+                                properties: BTreeMap::new(),
+                                sources: Vec::new(),
+                            },
+                            Actor::System,
+                        )?;
                     }
                     NodeRef {
                         kind: "package".to_string(),
@@ -115,12 +127,15 @@ pub fn build(root: &Path) -> Result<Map, MapError> {
                     }
                 }
             };
-            map.apply(Mutation::AddEdge {
-                kind: "imports".to_string(),
-                from: this.clone(),
-                to,
-                sources: Vec::new(),
-            })?;
+            map.apply(
+                Mutation::AddEdge {
+                    kind: "imports".to_string(),
+                    from: this.clone(),
+                    to,
+                    sources: Vec::new(),
+                },
+                Actor::System,
+            )?;
         }
     }
 

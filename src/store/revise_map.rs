@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{EventLog, Mutation, NodeRef, Payload, Scope};
+use crate::percept::{Actor, EventLog, Mutation, NodeRef, Payload, Scope};
 use crate::percept::{Tool, ToolOutput, ToolSpec};
 use crate::store::Snapshot;
 
@@ -317,7 +317,7 @@ fn apply(
             (mutation, line)
         }
     };
-    let payload = snapshot.apply(mutation)?;
+    let payload = snapshot.apply(mutation, Actor::Model)?;
     let line = match &payload {
         Payload::NodeAdded { node, .. } => format!("{line} as {}", node.as_uuid()),
         _ => line,
