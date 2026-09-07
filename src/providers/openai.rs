@@ -35,6 +35,51 @@ impl OpenAi {
     }
 }
 
+impl Model for OpenAi {
+    fn capabilities(&self) -> ModelCapabilities {
+        let ModelProfile {
+            context_window,
+            output,
+        } = model_profile(&self.model).unwrap_or(ModelProfile {
+            context_window: None,
+            output: &[Modality::Text],
+        });
+        ModelCapabilities {
+            input: &[Modality::Text],
+            output,
+            tool_use: true,
+            context_window,
+        }
+    }
+
+    fn name(&self) -> &str {
+        &self.model
+    }
+
+    fn reply(&self, request: &ModelRequest) -> ReplyStream {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+        let client = self.client.clone();
+        let url = self.url.clone();
+        let api_key = self.api_key.clone();
+        let model = self.model.clone();
+        let request = Request::new(model.clone(), self.reasoning_effort.clone(), request);
+
+        tokio::spawn(async move {
+            let request = client.post(&url).bearer_auth(api_key).json(&request);
+            let mut pending = None;
+            stream_lines(request, "openai", &tx, |line| {
+                forward(parse_line(line, &model), &tx, &mut pending)
+            })
+            .await;
+        });
+
+        Box::pin(UnboundedReceiverStream::new(rx))
+    }
+}
+
+// --- Request building -------------------------------------------------
+
 #[derive(Serialize)]
 struct Request {
     model: String,
@@ -158,6 +203,8 @@ fn items(messages: &[Message]) -> Vec<Item> {
     out
 }
 
+// --- Response parsing -------------------------------------------------
+
 /// The streamed events OpenAi acts on, by their `type`. Everything
 /// else the server sends - lifecycle, content parts, argument
 /// fragments of a call that arrives whole in its item - is `Other`.
@@ -270,63 +317,25 @@ fn parse_line(line: &str, model: &str) -> Result<Line, Box<dyn Error + Send + Sy
     })
 }
 
+// --- Model metadata ---------------------------------------------------
+
 /// OpenAI models this app knows the shape of - Sol, Terra, and Luna
 /// all share one context window and all think, so `reply` sends
-/// `reasoning.effort` and parses reasoning deltas for each. Named once
-/// so `context_window` and `output_modalities` can't drift apart on
-/// which models they recognize.
+/// `reasoning.effort` and parses reasoning deltas for each.
 const GPT_5_6_FAMILY: &[&str] = &["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
 
-/// Tokens of context a known OpenAI model holds. `None` for a name
-/// this table doesn't recognize - not a guess.
-fn context_window(model: &str) -> Option<u32> {
-    GPT_5_6_FAMILY.contains(&model).then_some(1_050_000)
+/// What this app knows about one model name. `model_profile` answers
+/// `None` for a name the table doesn't recognize - not a guess.
+struct ModelProfile {
+    context_window: Option<u32>,
+    output: &'static [Modality],
 }
 
-/// What a known OpenAI model writes. An unrecognized name is
-/// text-only, not a guess.
-fn output_modalities(model: &str) -> &'static [Modality] {
-    if GPT_5_6_FAMILY.contains(&model) {
-        &[Modality::Text, Modality::Thought]
-    } else {
-        &[Modality::Text]
-    }
-}
-
-impl Model for OpenAi {
-    fn capabilities(&self) -> ModelCapabilities {
-        ModelCapabilities {
-            input: &[Modality::Text],
-            output: output_modalities(&self.model),
-            tool_use: true,
-            context_window: context_window(&self.model),
-        }
-    }
-
-    fn name(&self) -> &str {
-        &self.model
-    }
-
-    fn reply(&self, request: &ModelRequest) -> ReplyStream {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-
-        let client = self.client.clone();
-        let url = self.url.clone();
-        let api_key = self.api_key.clone();
-        let model = self.model.clone();
-        let request = Request::new(self.model.clone(), self.reasoning_effort.clone(), request);
-
-        tokio::spawn(async move {
-            let request = client.post(&url).bearer_auth(api_key).json(&request);
-            let mut pending = None;
-            stream_lines(request, "openai", &tx, |line| {
-                forward(parse_line(line, &model), &tx, &mut pending)
-            })
-            .await;
-        });
-
-        Box::pin(UnboundedReceiverStream::new(rx))
-    }
+fn model_profile(model: &str) -> Option<ModelProfile> {
+    GPT_5_6_FAMILY.contains(&model).then_some(ModelProfile {
+        context_window: Some(1_050_000),
+        output: &[Modality::Text, Modality::Thought],
+    })
 }
 
 #[cfg(test)]
@@ -510,24 +519,15 @@ mod tests {
 
     #[test]
     fn a_known_thinking_model_reports_thought_output() {
-        let openai = OpenAi::new(
-            "https://api.openai.com/v1".to_string(),
-            "gpt-5.6-luna".to_string(),
-            "low".to_string(),
-            "key".to_string(),
-        );
+        let openai = openai("gpt-5.6-luna");
         assert!(openai.capabilities().output.contains(&Modality::Thought));
     }
 
     #[test]
     fn an_unrecognized_model_is_text_only() {
-        let openai = OpenAi::new(
-            "https://api.openai.com/v1".to_string(),
-            "gpt-3".to_string(),
-            "low".to_string(),
-            "key".to_string(),
-        );
+        let openai = openai("gpt-3");
         assert_eq!(openai.capabilities().output, &[Modality::Text]);
+        assert_eq!(openai.capabilities().context_window, None);
     }
 
     #[test]
@@ -556,5 +556,14 @@ mod tests {
         assert_eq!(wire["store"], false);
         assert_eq!(wire["parallel_tool_calls"], false);
         assert_eq!(wire["stream"], true);
+    }
+
+    fn openai(model: &str) -> OpenAi {
+        OpenAi::new(
+            "https://api.openai.com/v1".to_string(),
+            model.to_string(),
+            "low".to_string(),
+            "key".to_string(),
+        )
     }
 }
