@@ -14,17 +14,34 @@ const REF_PREFIX: &str = "refs/percept/snapshots/";
 /// ignored ones aside - under `refs/percept/snapshots/<prompt>`,
 /// parented on `HEAD` so `git diff <ref>` shows what the turn changed.
 /// The commit is built through a scratch index, so the user's own
-/// index and branch are left as they were. `restore` puts the tree and
-/// the index back to that commit, removes files the turn created, and
-/// unstages everything, so what was uncommitted before the turn is
-/// uncommitted again - though no longer staged.
+/// index and branch are left as they were. Only the newest snapshot
+/// is kept: `App` restores the last turn and no earlier one, and a
+/// ref that is never restored would pin every untracked file it saw,
+/// secrets included, for as long as the repository lives. `restore`
+/// puts the tree and the index back to that commit, removes files the
+/// turn created, and unstages everything, so what was uncommitted
+/// before the turn is uncommitted again - though no longer staged.
 pub struct GitSnapshot {
     checkout: PathBuf,
+    /// The repository's git dir, where the scratch index goes.
+    git_dir: PathBuf,
 }
 
 impl GitSnapshot {
-    pub fn new(checkout: PathBuf) -> Self {
-        Self { checkout }
+    /// Opens the repository `checkout` is in. Errs when it is not one,
+    /// or git is not installed - at startup, so a coding session never
+    /// finds out at its first prompt.
+    pub fn open(checkout: &Path) -> Result<Self, Box<dyn Error>> {
+        let mut snapshot = Self {
+            checkout: checkout.to_path_buf(),
+            git_dir: PathBuf::new(),
+        };
+        snapshot.git_dir = PathBuf::from(
+            snapshot
+                .git(&["rev-parse", "--absolute-git-dir"], None)
+                .map_err(|err| format!("{}: {err}", checkout.display()))?,
+        );
+        Ok(snapshot)
     }
 
     /// Runs one git command at the checkout and returns its stdout, or
@@ -66,8 +83,10 @@ impl Snapshot for GitSnapshot {
     fn take(&self, prompt: EventId) -> Result<(), Box<dyn Error>> {
         // A scratch index in the repository's own git dir - never the
         // user's index, which `git add -A` would otherwise stage into.
-        let git_dir = PathBuf::from(self.git(&["rev-parse", "--absolute-git-dir"], None)?);
-        let index = git_dir.join("percept-snapshot-index");
+        // Named by pid, so two sessions in one checkout do not share it.
+        let index = self
+            .git_dir
+            .join(format!("percept-snapshot-index-{}", std::process::id()));
         let head = self.head();
         let result = (|| {
             match &head {
@@ -82,7 +101,15 @@ impl Snapshot for GitSnapshot {
                 args.extend(["-p", head.as_str()]);
             }
             let commit = self.git(&args, None)?;
-            self.git(&["update-ref", &ref_for(prompt), &commit], None)?;
+            let new_ref = ref_for(prompt);
+            self.git(&["update-ref", &new_ref, &commit], None)?;
+            for old_ref in self
+                .git(&["for-each-ref", "--format=%(refname)", REF_PREFIX], None)?
+                .lines()
+                .filter(|old_ref| *old_ref != new_ref)
+            {
+                self.git(&["update-ref", "-d", old_ref], None)?;
+            }
             Ok(())
         })();
         let _ = std::fs::remove_file(&index);

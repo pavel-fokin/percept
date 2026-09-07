@@ -703,8 +703,10 @@ pub async fn run_turn(
                         eprintln!("⚒ {tool}({arguments}) - declined: needs approval, run in the TUI or pass --yes");
                         app.decline_tool()?
                     }
+                    // Unknown to `App`, or denied by the policy; the
+                    // result it committed says which.
                     ToolStep::Continue(stream) => {
-                        eprintln!("⚒ {tool}({arguments}) - no such tool");
+                        eprintln!("⚒ {tool}({arguments}) - not run");
                         stream
                     }
                     ToolStep::Stop => break,

@@ -468,6 +468,29 @@ fn undo_restores_the_last_turn_s_snapshot_once() {
 }
 
 #[test]
+fn undo_rerenders_every_map_so_the_render_follows_the_log_not_the_restored_tree() {
+    let renderer = Arc::new(FakeRenderer::default());
+    let mut app = App::new(
+        Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::seeded(vec![node_added("question", "q")])),
+        Vec::new(),
+        renderer.clone(),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap()
+    .with_snapshot(Arc::new(FakeSnapshot::default()));
+    let _ = app.submit("change it".to_string()).unwrap();
+    app.end_stream().unwrap();
+    assert!(renderer.rendered().is_empty());
+
+    app.undo().unwrap();
+
+    assert_eq!(renderer.rendered(), vec!["decisions".to_string()]);
+}
+
+#[test]
 fn undo_is_refused_while_a_turn_streams() {
     let (snapshot, mut app) = app_with_snapshot();
     let _ = app.submit("change it".to_string()).unwrap();

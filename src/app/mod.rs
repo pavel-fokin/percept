@@ -438,6 +438,15 @@ impl App {
         Ok(())
     }
 
+    /// Every map the log folds for this project, by name.
+    fn map_names(&self) -> HashSet<String> {
+        Map::fold_all(&self.source.scope(), &self.events)
+            .into_iter()
+            .flatten()
+            .map(|map| map.schema().name.to_string())
+            .collect()
+    }
+
     /// Whether every map still folds once `new` follows the transcript.
     fn fits_maps(&self, new: &[Event]) -> Result<(), MapError> {
         if new.is_empty() {
@@ -732,7 +741,10 @@ impl AppService for App {
         };
         snapshot.restore(prompt)?;
         self.undo_point = None;
-        Ok(())
+        // The restore put every rendered map back to before the turn,
+        // while the log still holds what the turn added to them: the
+        // log is the record, so the renders follow it, not the tree.
+        self.render_changed(&self.map_names())
     }
 }
 

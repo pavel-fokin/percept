@@ -101,3 +101,34 @@ fn identical_strings_are_refused() {
 
     assert!(err.contains("are the same"), "{err}");
 }
+
+#[test]
+fn an_empty_old_string_is_refused_even_with_replace_all() {
+    let (dir, tool) = tool();
+    write_and_read(&dir, &tool.workspace, "a.txt", "abc");
+
+    let err = tool
+        .run(r#"{"path": "a.txt", "old_string": "", "new_string": "x", "replace_all": true}"#)
+        .err()
+        .unwrap();
+
+    assert_eq!(err.to_string(), "old_string is empty");
+    assert_eq!(fs::read_to_string(dir.path().join("a.txt")).unwrap(), "abc");
+}
+
+#[test]
+fn a_file_that_is_not_utf8_is_refused_untouched() {
+    let (dir, tool) = tool();
+    let path = dir.path().join("latin1.txt");
+    fs::write(&path, b"caf\xe9 foo").unwrap();
+    let resolved = tool.workspace.resolve("latin1.txt").unwrap();
+    tool.workspace.mark_read(&resolved);
+
+    let err = tool
+        .run(r#"{"path": "latin1.txt", "old_string": "foo", "new_string": "bar"}"#)
+        .err()
+        .unwrap();
+
+    assert_eq!(err.to_string(), "latin1.txt is not UTF-8");
+    assert_eq!(fs::read(&path).unwrap(), b"caf\xe9 foo");
+}

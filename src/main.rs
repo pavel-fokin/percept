@@ -397,7 +397,7 @@ fn build_app(
         Toolset::Code => app
             .with_policy(Arc::new(AskBeforeWrites))
             .with_tool_cap(CODE_TOOL_CAP)
-            .with_snapshot(Arc::new(GitSnapshot::new(checkout.to_path_buf()))),
+            .with_snapshot(Arc::new(GitSnapshot::open(checkout)?)),
     })
 }
 
@@ -530,4 +530,8 @@ async fn main() {
         eprintln!("percept: {err}");
         std::process::exit(1);
     }
+    // An explicit exit, not a fall off the end: dropping the runtime
+    // waits for every blocking task, and a `bash` call the user quit
+    // in the middle of can hold one for minutes.
+    std::process::exit(0);
 }

@@ -67,6 +67,34 @@ fn a_sleep_past_the_timeout_errors_within_a_few_seconds() {
 }
 
 #[test]
+fn a_background_process_holding_the_pipe_is_cut_off_at_the_timeout_not_waited_for() {
+    let (_dir, tool) = tool();
+    let start = std::time::Instant::now();
+
+    let out = tool
+        .run(r#"{"command": "sleep 5 & echo started", "timeout_secs": 1}"#)
+        .unwrap();
+
+    assert_eq!(out.content, "exit 0\nstarted\n");
+    assert!(
+        start.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        start.elapsed()
+    );
+}
+
+#[test]
+fn the_command_runs_under_bash_so_a_bashism_works() {
+    let (_dir, tool) = tool();
+
+    let out = tool
+        .run(r#"{"command": "[[ 1 == 1 ]] && echo ${BASH_VERSION:+bash}"}"#)
+        .unwrap();
+
+    assert_eq!(out.content, "exit 0\nbash\n");
+}
+
+#[test]
 fn output_past_30000_characters_is_truncated_with_the_trailer() {
     let (_dir, tool) = tool();
 

@@ -25,10 +25,11 @@ impl EditFile {
 const NAME: &str = "edit_file";
 
 const DESCRIPTION: &str = "Replace old_string with new_string in a file \
-    already read this session with read_file. old_string must match the \
-    file's text exactly and occur exactly once, unless replace_all is \
-    set, in which case every occurrence is replaced. old_string and \
-    new_string must differ.";
+    already read this session with read_file. old_string must be \
+    non-empty, match the file's text exactly, and occur exactly once, \
+    unless replace_all is set, in which case every occurrence is \
+    replaced. old_string and new_string must differ. The file must be \
+    UTF-8.";
 
 const PARAMETERS: &str = r#"{
   "type": "object",
@@ -48,7 +49,8 @@ struct Args {
     path: String,
     old_string: String,
     new_string: String,
-    replace_all: Option<bool>,
+    #[serde(default)]
+    replace_all: bool,
 }
 
 impl Tool for EditFile {
@@ -67,6 +69,9 @@ impl Tool for EditFile {
         if !self.workspace.was_read(&resolved) {
             return Err(format!("{} has not been read; call read_file first", args.path).into());
         }
+        if args.old_string.is_empty() {
+            return Err("old_string is empty".into());
+        }
         if args.old_string == args.new_string {
             return Err("old_string and new_string are the same".into());
         }
@@ -75,14 +80,15 @@ impl Tool for EditFile {
         if bytes[..bytes.len().min(BINARY_SNIFF_BYTES)].contains(&0) {
             return Err(format!("{} is binary", args.path).into());
         }
-        let text = String::from_utf8_lossy(&bytes).into_owned();
+        // Strict, not lossy: a lossy decode written back would rewrite
+        // every byte that is not UTF-8, far from the edit.
+        let text = String::from_utf8(bytes).map_err(|_| format!("{} is not UTF-8", args.path))?;
 
         let count = text.matches(&args.old_string).count();
         if count == 0 {
             return Err(format!("old_string was not found in {}", args.path).into());
         }
-        let replace_all = args.replace_all.unwrap_or(false);
-        if !replace_all && count > 1 {
+        if !args.replace_all && count > 1 {
             return Err(format!(
                 "old_string occurs {count} times in {}; make it unique with more context, or pass replace_all",
                 args.path
@@ -90,12 +96,8 @@ impl Tool for EditFile {
             .into());
         }
 
-        let replacements = if replace_all { count } else { 1 };
-        let updated = if replace_all {
-            text.replace(&args.old_string, &args.new_string)
-        } else {
-            text.replacen(&args.old_string, &args.new_string, 1)
-        };
+        let replacements = if args.replace_all { count } else { 1 };
+        let updated = text.replacen(&args.old_string, &args.new_string, replacements);
         std::fs::write(&resolved, updated)?;
 
         let relative = self.workspace.relative(&resolved);

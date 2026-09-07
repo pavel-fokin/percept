@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use globset::GlobBuilder;
-use ignore::WalkBuilder;
 use serde::Deserialize;
 
 use crate::percept::{Tool, ToolOutput, ToolSpec};
@@ -66,7 +65,7 @@ impl Tool for FindFiles {
 
         let root = self.workspace.root();
         let mut matches = Vec::new();
-        for entry in WalkBuilder::new(root).require_git(false).build() {
+        for entry in self.workspace.walk(root) {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(_) => continue,

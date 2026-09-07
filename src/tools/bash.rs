@@ -1,7 +1,8 @@
 use std::io::Read;
-use std::process::{Command, Stdio};
+use std::os::unix::process::CommandExt;
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
-use std::thread;
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
@@ -18,9 +19,15 @@ const MAX_TIMEOUT_SECS: u64 = 600;
 /// Output past this many characters is cut, with a trailer saying so.
 const OUTPUT_LIMIT: usize = 30_000;
 
-/// The `bash` tool: runs a shell command at the workspace root and
-/// reports its exit code, stdout, and stderr. Not interactive - a
-/// command that waits on stdin hangs until it times out.
+/// How often the running command is checked against its deadline.
+const POLL_INTERVAL: Duration = Duration::from_millis(50);
+
+/// The `bash` tool: runs a command with `bash -c` at the workspace root
+/// and reports its exit code, stdout, and stderr. Bash, not `sh`,
+/// because the name promises it and a model writes bashisms. Not
+/// interactive - a command that waits on stdin hangs until it times
+/// out. The command gets a process group of its own, so a timeout
+/// kills whatever it started, not only the shell.
 pub struct Bash {
     workspace: Arc<Workspace>,
 }
@@ -33,12 +40,13 @@ impl Bash {
 
 const NAME: &str = "bash";
 
-const DESCRIPTION: &str = "Run a shell command at the workspace root \
-    with `sh -c`. Not interactive - a command that waits on stdin \
-    hangs until it times out. Output is truncated past 30000 \
-    characters. The first line of the result is `exit {code}` (or \
-    `killed by signal` if the process was killed), followed by stdout, \
-    and then stderr under a `--- stderr ---` marker when there is any.";
+const DESCRIPTION: &str = "Run a command at the workspace root with \
+    `bash -c`. Not interactive - a command that waits on stdin hangs \
+    until it times out, and a background process it leaves behind is \
+    killed at the timeout. Output is truncated past 30000 characters. \
+    The first line of the result is `exit {code}` (or `killed by \
+    signal`), followed by stdout, and then stderr under a `--- stderr \
+    ---` marker when there is any.";
 
 const PARAMETERS: &str = r#"{
   "type": "object",
@@ -74,44 +82,39 @@ impl Tool for Bash {
                 .min(MAX_TIMEOUT_SECS),
         );
 
-        let mut child = Command::new("sh")
+        let mut child = Command::new("bash")
             .arg("-c")
             .arg(&args.command)
             .current_dir(self.workspace.root())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
+            .process_group(0)
             .spawn()?;
 
-        let mut stdout_pipe = child.stdout.take().expect("stdout was piped");
-        let mut stderr_pipe = child.stderr.take().expect("stderr was piped");
+        let stdout_thread = drain(child.stdout.take().expect("stdout was piped"));
+        let stderr_thread = drain(child.stderr.take().expect("stderr was piped"));
 
-        let stdout_thread = thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = stdout_pipe.read_to_end(&mut buf);
-            buf
-        });
-        let stderr_thread = thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = stderr_pipe.read_to_end(&mut buf);
-            buf
-        });
-
-        const POLL_INTERVAL: Duration = Duration::from_millis(50);
+        // Done means the shell has exited and both pipes have closed: a
+        // background process the shell left holding a pipe keeps the
+        // call open, and the deadline is what ends it.
         let deadline = Instant::now() + timeout;
-        let status = loop {
-            if let Some(status) = child.try_wait()? {
-                break Some(status);
+        let mut status = None;
+        loop {
+            if status.is_none() {
+                status = child.try_wait()?;
+            }
+            if status.is_some() && stdout_thread.is_finished() && stderr_thread.is_finished() {
+                break;
             }
             if Instant::now() >= deadline {
-                break None;
+                kill_group(&mut child);
+                break;
             }
             thread::sleep(POLL_INTERVAL);
-        };
+        }
 
         let Some(status) = status else {
-            let _ = child.kill();
-            let _ = child.wait();
             return Err(format!("timed out after {}s", timeout.as_secs()).into());
         };
 
@@ -142,6 +145,31 @@ impl Tool for Bash {
 
         Ok(ToolOutput::text(out))
     }
+}
+
+/// Reads a pipe to its end on its own thread, so a command that fills
+/// one pipe never blocks on the other.
+fn drain(mut pipe: impl Read + Send + 'static) -> JoinHandle<Vec<u8>> {
+    thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = pipe.read_to_end(&mut buf);
+        buf
+    })
+}
+
+/// Kills the command's whole process group - the shell and everything
+/// it started - then reaps the shell. `process_group(0)` made the
+/// group's id the shell's pid, and `kill` takes a negated pid for a
+/// group. Killing closes the pipes, so the readers finish too.
+fn kill_group(child: &mut Child) {
+    let _ = Command::new("kill")
+        .arg("-KILL")
+        .arg(format!("-{}", child.id()))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 #[cfg(test)]

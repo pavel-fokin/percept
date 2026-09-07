@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use ignore::WalkBuilder;
 use regex::Regex;
 use serde::Deserialize;
 
@@ -36,7 +35,8 @@ const NAME: &str = "grep_files";
 const DESCRIPTION: &str = "Search text files for lines matching a \
     regex, case-sensitive. `path` narrows the search to one file or a \
     directory (default the whole workspace); `glob` further narrows by \
-    file name, e.g. `*.rs`. Gitignored and binary files are skipped. \
+    file name, e.g. `*.rs`. Gitignored and binary files are skipped; \
+    dot-directories such as .percept are searched. \
     Results are `path:line:text`, text clipped to 200 characters, \
     capped at 200 matches; narrow the pattern, path, or glob if the \
     result says more were cut.";
@@ -81,7 +81,7 @@ impl Tool for GrepFiles {
         let resolved = self.workspace.resolve(&path)?;
 
         let mut matches = Vec::new();
-        for entry in WalkBuilder::new(&resolved).require_git(false).build() {
+        for entry in self.workspace.walk(&resolved) {
             let entry = match entry {
                 Ok(entry) => entry,
                 Err(_) => continue,

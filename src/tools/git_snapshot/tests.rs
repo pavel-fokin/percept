@@ -41,7 +41,7 @@ fn git_stdout(root: &Path, args: &[&str]) -> String {
 #[test]
 fn restore_puts_a_changed_file_back_as_the_snapshot_saw_it() {
     let dir = repo();
-    let snapshot = GitSnapshot::new(dir.path().to_path_buf());
+    let snapshot = GitSnapshot::open(dir.path()).unwrap();
     let prompt = EventId::new();
     fs::write(dir.path().join("kept.txt"), "before the turn\n").unwrap();
 
@@ -56,7 +56,7 @@ fn restore_puts_a_changed_file_back_as_the_snapshot_saw_it() {
 #[test]
 fn restore_removes_a_file_the_turn_created_and_keeps_an_ignored_one() {
     let dir = repo();
-    let snapshot = GitSnapshot::new(dir.path().to_path_buf());
+    let snapshot = GitSnapshot::open(dir.path()).unwrap();
     let prompt = EventId::new();
     fs::write(dir.path().join("ignored.log"), "log\n").unwrap();
 
@@ -71,7 +71,7 @@ fn restore_removes_a_file_the_turn_created_and_keeps_an_ignored_one() {
 #[test]
 fn restore_brings_back_an_untracked_file_the_turn_deleted() {
     let dir = repo();
-    let snapshot = GitSnapshot::new(dir.path().to_path_buf());
+    let snapshot = GitSnapshot::open(dir.path()).unwrap();
     let prompt = EventId::new();
     fs::write(dir.path().join("draft.txt"), "untracked before\n").unwrap();
 
@@ -91,7 +91,7 @@ fn restore_brings_back_an_untracked_file_the_turn_deleted() {
 #[test]
 fn take_leaves_the_branch_and_index_untouched_and_keeps_the_snapshot_under_its_own_ref() {
     let dir = repo();
-    let snapshot = GitSnapshot::new(dir.path().to_path_buf());
+    let snapshot = GitSnapshot::open(dir.path()).unwrap();
     let prompt = EventId::new();
     let head_before = git_stdout(dir.path(), &["rev-parse", "HEAD"]);
     fs::write(dir.path().join("kept.txt"), "dirty\n").unwrap();
@@ -109,9 +109,38 @@ fn take_leaves_the_branch_and_index_untouched_and_keeps_the_snapshot_under_its_o
 }
 
 #[test]
+fn opening_a_directory_that_is_not_a_repository_is_an_error() {
+    let dir = tempfile::tempdir().unwrap();
+
+    assert!(GitSnapshot::open(dir.path()).is_err());
+}
+
+#[test]
+fn take_keeps_only_the_newest_snapshot_ref() {
+    let dir = repo();
+    let snapshot = GitSnapshot::open(dir.path()).unwrap();
+    let first = EventId::new();
+    let second = EventId::new();
+
+    snapshot.take(first).unwrap();
+    snapshot.take(second).unwrap();
+
+    let refs = git_stdout(
+        dir.path(),
+        &[
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/percept/snapshots",
+        ],
+    );
+    assert_eq!(refs, format!("refs/percept/snapshots/{}", second.as_uuid()));
+    assert!(snapshot.restore(first).is_err());
+}
+
+#[test]
 fn restoring_a_prompt_never_snapshotted_is_an_error() {
     let dir = repo();
-    let snapshot = GitSnapshot::new(dir.path().to_path_buf());
+    let snapshot = GitSnapshot::open(dir.path()).unwrap();
 
     let err = snapshot.restore(EventId::new()).unwrap_err();
 
@@ -127,7 +156,7 @@ fn a_repository_with_no_commit_yet_can_still_be_snapshotted_and_restored() {
         .status()
         .unwrap()
         .success());
-    let snapshot = GitSnapshot::new(dir.path().to_path_buf());
+    let snapshot = GitSnapshot::open(dir.path()).unwrap();
     let prompt = EventId::new();
     fs::write(dir.path().join("first.txt"), "one\n").unwrap();
 

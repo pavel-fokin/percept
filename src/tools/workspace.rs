@@ -48,9 +48,12 @@ impl Workspace {
 
         let normalized = normalize(&joined);
 
+        // `symlink_metadata`, not `exists`: a dangling symlink exists as
+        // a link, and must be resolved as one - `exists` would follow
+        // it, call it missing, and let a write create its target.
         let mut existing = normalized.as_path();
         let mut missing = Vec::new();
-        while !existing.exists() {
+        while existing.symlink_metadata().is_err() {
             let (Some(parent), Some(name)) = (existing.parent(), existing.file_name()) else {
                 break;
             };
@@ -60,7 +63,7 @@ impl Workspace {
 
         let mut resolved = existing
             .canonicalize()
-            .unwrap_or_else(|_| existing.to_path_buf());
+            .map_err(|err| format!("{path} cannot be resolved: {err}"))?;
         for name in missing.into_iter().rev() {
             resolved.push(name);
         }
@@ -69,6 +72,18 @@ impl Workspace {
             return Err(format!("{path} is outside the workspace").into());
         }
         Ok(resolved)
+    }
+
+    /// The files under `from`, as `find_files` and `grep_files` walk
+    /// them: gitignore honoured, dot-directories entered - `.percept`
+    /// and `.agents` hold what a reader here most wants - and `.git`
+    /// itself left alone.
+    pub fn walk(&self, from: &Path) -> ignore::Walk {
+        ignore::WalkBuilder::new(from)
+            .require_git(false)
+            .hidden(false)
+            .filter_entry(|entry| entry.file_name() != ".git")
+            .build()
     }
 
     /// The path as the model should see it: relative to the root,
