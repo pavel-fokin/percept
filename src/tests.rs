@@ -2,7 +2,40 @@ use std::fs;
 
 use tempfile::tempdir;
 
-use super::discover_root;
+use super::{default_toolset, discover_root, Toolset, TUI_SOURCE_NAME};
+
+#[test]
+fn tui_defaults_to_code_tools() {
+    assert!(matches!(
+        default_toolset(TUI_SOURCE_NAME, None),
+        Ok(Toolset::Code)
+    ));
+}
+
+#[test]
+fn headless_source_defaults_to_maps_tools() {
+    assert!(matches!(
+        default_toolset("percept-cli", None),
+        Ok(Toolset::Maps)
+    ));
+}
+
+#[test]
+fn explicit_toolset_overrides_client_default() {
+    assert!(matches!(
+        default_toolset(TUI_SOURCE_NAME, Some("maps")),
+        Ok(Toolset::Maps)
+    ));
+    assert!(matches!(
+        default_toolset("percept-cli", Some("code")),
+        Ok(Toolset::Code)
+    ));
+}
+
+#[test]
+fn unknown_toolset_is_rejected() {
+    assert!(default_toolset(TUI_SOURCE_NAME, Some("unknown")).is_err());
+}
 
 #[test]
 fn finds_a_git_checkout_from_a_nested_directory() {

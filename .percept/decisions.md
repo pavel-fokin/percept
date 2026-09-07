@@ -228,8 +228,10 @@ Folded from the percept log for this project and rerendered on every write. Chan
 
 ## "How are the coding tools switched on?" (model)
 
-- decision "PERCEPT_TOOLS=code adds them beside the map tools; the default, maps, is today's behaviour" (model)
-  why: "follows PERCEPT_MAPS: one env var read at the entrypoint, nothing else moves"
+- decision "the TUI defaults to code tools while headless commands default to maps; PERCEPT_TOOLS overrides either" (model)
+  why: "The TUI is commonly used for coding, so it should expose file tools without setup; headless map turns retain the safer maps-only default."
+  source 01a07c4b-ba33-79c1-b846-6167a698478f
+  was "PERCEPT_TOOLS=code adds them beside the map tools; the default, maps, is today's behaviour" (model)
 - weighed "always on, in every turn" (model)
   why: "every turn, reflect included, would gain the tree and spend its tool calls on it"
 
