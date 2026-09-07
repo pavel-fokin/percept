@@ -1,27 +1,8 @@
 use super::*;
-use std::fs;
+use crate::testing::Fixture;
 
-struct Fixture {
-    dir: tempfile::TempDir,
-}
-
-impl Fixture {
-    fn new() -> Self {
-        let dir = tempfile::tempdir().unwrap();
-        fs::create_dir(dir.path().join(".git")).unwrap();
-        Self { dir }
-    }
-
-    fn write(&self, path: &str, content: &str) -> &Self {
-        let full = self.dir.path().join(path);
-        fs::create_dir_all(full.parent().unwrap()).unwrap();
-        fs::write(full, content).unwrap();
-        self
-    }
-
-    fn tool(&self) -> FindFiles {
-        FindFiles::new(Arc::new(Workspace::new(self.dir.path()).unwrap()))
-    }
+fn tool(fixture: &Fixture) -> FindFiles {
+    FindFiles::new(Arc::new(Workspace::new(fixture.path()).unwrap()))
 }
 
 #[test]
@@ -32,7 +13,7 @@ fn matches_recursively() {
         .write("src/app/mod.rs", "")
         .write("README.md", "");
 
-    let out = fixture.tool().run(r#"{"pattern": "src/**/*.rs"}"#).unwrap();
+    let out = tool(&fixture).run(r#"{"pattern": "src/**/*.rs"}"#).unwrap();
 
     assert_eq!(out.content, "src/app/mod.rs\nsrc/main.rs");
 }
@@ -45,7 +26,7 @@ fn a_gitignored_file_is_skipped() {
         .write("src/ignored.rs", "")
         .write("src/kept.rs", "");
 
-    let out = fixture.tool().run(r#"{"pattern": "src/**/*.rs"}"#).unwrap();
+    let out = tool(&fixture).run(r#"{"pattern": "src/**/*.rs"}"#).unwrap();
 
     assert_eq!(out.content, "src/kept.rs");
 }
@@ -57,7 +38,7 @@ fn the_cap_trailer_appears_past_500() {
         fixture.write(&format!("src/file_{i}.rs"), "");
     }
 
-    let out = fixture.tool().run(r#"{"pattern": "src/**/*.rs"}"#).unwrap();
+    let out = tool(&fixture).run(r#"{"pattern": "src/**/*.rs"}"#).unwrap();
 
     assert!(
         out.content
@@ -72,5 +53,5 @@ fn the_cap_trailer_appears_past_500() {
 fn a_bad_glob_errors() {
     let fixture = Fixture::new();
 
-    assert!(fixture.tool().run(r#"{"pattern": "["}"#).is_err());
+    assert!(tool(&fixture).run(r#"{"pattern": "["}"#).is_err());
 }

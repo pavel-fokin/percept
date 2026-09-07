@@ -4,7 +4,7 @@ use globset::GlobBuilder;
 use serde::Deserialize;
 
 use crate::percept::{Tool, ToolOutput, ToolSpec};
-use crate::tools::Workspace;
+use crate::tools::{join_capped, Workspace};
 
 /// Cap on matches returned, so a broad pattern can't flood the
 /// model's window with the whole tree.
@@ -63,37 +63,17 @@ impl Tool for FindFiles {
             .build()?
             .compile_matcher();
 
-        let root = self.workspace.root();
-        let mut matches = Vec::new();
-        for entry in self.workspace.walk(root) {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(_) => continue,
-            };
-            if !entry.file_type().is_some_and(|t| t.is_file()) {
-                continue;
-            }
-            let relative = entry.path().strip_prefix(root).unwrap_or(entry.path());
-            if glob.is_match(relative) {
-                matches.push(self.workspace.relative(entry.path()));
-            }
-        }
+        let mut matches: Vec<String> = self
+            .workspace
+            .walk(self.workspace.root())
+            .map(|entry| self.workspace.relative(entry.path()))
+            .filter(|relative| glob.is_match(relative))
+            .collect();
         matches.sort();
 
-        let total = matches.len();
-        let truncated = total > MAX_MATCHES;
-        matches.truncate(MAX_MATCHES);
-
-        let mut out = matches.join("\n");
-        if truncated {
-            let remaining = total - MAX_MATCHES;
-            if !out.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(&format!("[{remaining} more matches; narrow the pattern]"));
-        }
-
-        Ok(ToolOutput::text(out))
+        Ok(ToolOutput::text(join_capped(matches, MAX_MATCHES, |n| {
+            format!("[{n} more matches; narrow the pattern]")
+        })))
     }
 }
 

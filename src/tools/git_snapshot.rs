@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 
 use crate::percept::{EventId, Snapshot};
 
@@ -23,47 +24,40 @@ const REF_PREFIX: &str = "refs/percept/snapshots/";
 /// before the turn is uncommitted again - though no longer staged.
 pub struct GitSnapshot {
     checkout: PathBuf,
-    /// The repository's git dir, where the scratch index goes.
-    git_dir: PathBuf,
+    /// The scratch index, in the repository's own git dir and named by
+    /// pid so two sessions in one checkout do not share it. Kept for
+    /// the session: its stat cache is what lets the next `take` skip
+    /// rehashing every unchanged file.
+    index: PathBuf,
+    /// The ref the last `take` wrote, deleted by the next one.
+    last_ref: Mutex<Option<String>>,
 }
 
 impl GitSnapshot {
     /// Opens the repository `checkout` is in. Errs when it is not one,
     /// or git is not installed - at startup, so a coding session never
-    /// finds out at its first prompt.
+    /// finds out at its first prompt. Refs an earlier session left
+    /// behind are deleted here.
     pub fn open(checkout: &Path) -> Result<Self, Box<dyn Error>> {
-        let mut snapshot = Self {
+        let git_dir = git(checkout, &["rev-parse", "--absolute-git-dir"], None)
+            .map_err(|err| format!("{}: {err}", checkout.display()))?;
+        let snapshot = Self {
             checkout: checkout.to_path_buf(),
-            git_dir: PathBuf::new(),
+            index: Path::new(&git_dir)
+                .join(format!("percept-snapshot-index-{}", std::process::id())),
+            last_ref: Mutex::new(None),
         };
-        snapshot.git_dir = PathBuf::from(
-            snapshot
-                .git(&["rev-parse", "--absolute-git-dir"], None)
-                .map_err(|err| format!("{}: {err}", checkout.display()))?,
-        );
+        for stale in snapshot
+            .git(&["for-each-ref", "--format=%(refname)", REF_PREFIX], None)?
+            .lines()
+        {
+            snapshot.git(&["update-ref", "-d", stale], None)?;
+        }
         Ok(snapshot)
     }
 
-    /// Runs one git command at the checkout and returns its stdout, or
-    /// its stderr as the error.
     fn git(&self, args: &[&str], index: Option<&Path>) -> Result<String, Box<dyn Error>> {
-        let mut command = Command::new("git");
-        command
-            .args(args)
-            .current_dir(&self.checkout)
-            .env("GIT_AUTHOR_NAME", "percept")
-            .env("GIT_AUTHOR_EMAIL", "percept@localhost")
-            .env("GIT_COMMITTER_NAME", "percept")
-            .env("GIT_COMMITTER_EMAIL", "percept@localhost");
-        if let Some(index) = index {
-            command.env("GIT_INDEX_FILE", index);
-        }
-        let output = command.output()?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(format!("git {}: {stderr}", args[0]).into());
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        git(&self.checkout, args, index)
     }
 
     /// `HEAD` as a commit id, or `None` in a repository with no commit
@@ -71,8 +65,35 @@ impl GitSnapshot {
     fn head(&self) -> Option<String> {
         self.git(&["rev-parse", "--verify", "--quiet", "HEAD"], None)
             .ok()
-            .filter(|head| !head.is_empty())
     }
+}
+
+impl Drop for GitSnapshot {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.index);
+    }
+}
+
+/// Runs one git command at `checkout` and returns its stdout, or its
+/// stderr as the error. `index` swaps in a scratch index for the call.
+fn git(checkout: &Path, args: &[&str], index: Option<&Path>) -> Result<String, Box<dyn Error>> {
+    let mut command = Command::new("git");
+    command
+        .args(args)
+        .current_dir(checkout)
+        .env("GIT_AUTHOR_NAME", "percept")
+        .env("GIT_AUTHOR_EMAIL", "percept@localhost")
+        .env("GIT_COMMITTER_NAME", "percept")
+        .env("GIT_COMMITTER_EMAIL", "percept@localhost");
+    if let Some(index) = index {
+        command.env("GIT_INDEX_FILE", index);
+    }
+    let output = command.output()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(format!("git {}: {stderr}", args[0]).into());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 fn ref_for(prompt: EventId) -> String {
@@ -81,39 +102,28 @@ fn ref_for(prompt: EventId) -> String {
 
 impl Snapshot for GitSnapshot {
     fn take(&self, prompt: EventId) -> Result<(), Box<dyn Error>> {
-        // A scratch index in the repository's own git dir - never the
-        // user's index, which `git add -A` would otherwise stage into.
-        // Named by pid, so two sessions in one checkout do not share it.
-        let index = self
-            .git_dir
-            .join(format!("percept-snapshot-index-{}", std::process::id()));
         let head = self.head();
-        let result = (|| {
-            match &head {
-                Some(head) => self.git(&["read-tree", head], Some(&index))?,
-                None => self.git(&["read-tree", "--empty"], Some(&index))?,
-            };
-            self.git(&["add", "-A"], Some(&index))?;
-            let tree = self.git(&["write-tree"], Some(&index))?;
-            let message = format!("percept snapshot before {}", prompt.as_uuid());
-            let mut args = vec!["commit-tree", tree.as_str(), "-m", message.as_str()];
-            if let Some(head) = &head {
-                args.extend(["-p", head.as_str()]);
-            }
-            let commit = self.git(&args, None)?;
-            let new_ref = ref_for(prompt);
-            self.git(&["update-ref", &new_ref, &commit], None)?;
-            for old_ref in self
-                .git(&["for-each-ref", "--format=%(refname)", REF_PREFIX], None)?
-                .lines()
-                .filter(|old_ref| *old_ref != new_ref)
-            {
-                self.git(&["update-ref", "-d", old_ref], None)?;
-            }
-            Ok(())
-        })();
-        let _ = std::fs::remove_file(&index);
-        result
+        // `add -A` alone would carry over whatever the scratch index
+        // last held; reading HEAD first makes each snapshot HEAD plus
+        // the working tree, and the stat cache survives the read.
+        match &head {
+            Some(head) => self.git(&["read-tree", head], Some(&self.index))?,
+            None => self.git(&["read-tree", "--empty"], Some(&self.index))?,
+        };
+        self.git(&["add", "-A"], Some(&self.index))?;
+        let tree = self.git(&["write-tree"], Some(&self.index))?;
+        let message = format!("percept snapshot before {}", prompt.as_uuid());
+        let mut args = vec!["commit-tree", tree.as_str(), "-m", message.as_str()];
+        if let Some(head) = &head {
+            args.extend(["-p", head.as_str()]);
+        }
+        let commit = self.git(&args, None)?;
+        let new_ref = ref_for(prompt);
+        self.git(&["update-ref", &new_ref, &commit], None)?;
+        if let Some(old_ref) = self.last_ref.lock().unwrap().replace(new_ref) {
+            self.git(&["update-ref", "-d", &old_ref], None)?;
+        }
+        Ok(())
     }
 
     fn restore(&self, prompt: EventId) -> Result<(), Box<dyn Error>> {

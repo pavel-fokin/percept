@@ -234,9 +234,14 @@ async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
     )
     .unwrap();
 
-    run_turn(Box::new(app), Actor::User, "what happened".to_string())
-        .await
-        .unwrap();
+    run_turn(
+        Box::new(app),
+        Actor::User,
+        "what happened".to_string(),
+        false,
+    )
+    .await
+    .unwrap();
 
     let events = log.load().unwrap();
     assert_eq!(events.len(), 4);
@@ -274,7 +279,7 @@ async fn a_stream_error_ends_the_turn_but_still_commits_partial_text() {
     )
     .unwrap();
 
-    let result = run_turn(Box::new(app), Actor::User, "hi".to_string()).await;
+    let result = run_turn(Box::new(app), Actor::User, "hi".to_string(), false).await;
 
     assert!(result.is_err());
     let events = log.load().unwrap();

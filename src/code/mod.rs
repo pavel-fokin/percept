@@ -17,6 +17,7 @@ use std::path::Path;
 use ignore::WalkBuilder;
 
 use crate::percept::{Actor, Map, MapError, Mutation, NodeRef, CODE};
+use crate::shared::to_slash;
 
 /// Builds the code map from every `.rs` file under `root`, gitignore
 /// rules applied the way `ignore` applies them for any tool. Node ids
@@ -167,13 +168,6 @@ fn rust_files(root: &Path) -> Vec<String> {
     }
     files.sort();
     files
-}
-
-fn to_slash(path: &Path) -> String {
-    path.components()
-        .map(|c| c.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
 }
 
 #[cfg(test)]

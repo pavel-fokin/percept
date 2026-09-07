@@ -3,16 +3,12 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::percept::{Tool, ToolOutput, ToolSpec};
-use crate::tools::Workspace;
+use crate::tools::{is_binary, Workspace};
 
 /// Default number of lines a call returns when the model gives no
 /// `limit` - large enough for most files, small enough that a huge one
 /// still comes back in a page.
 const DEFAULT_LIMIT: usize = 2000;
-
-/// How much of a file's start is checked for a NUL byte before it is
-/// read as text.
-const BINARY_SNIFF_BYTES: usize = 8192;
 
 /// The `read_file` tool: returns a window of a file's lines, offset
 /// and limit both 1-based counts into the file. When lines remain past
@@ -51,8 +47,18 @@ const PARAMETERS: &str = r#"{
 #[serde(deny_unknown_fields)]
 struct Args {
     path: String,
-    offset: Option<usize>,
-    limit: Option<usize>,
+    #[serde(default = "first_line")]
+    offset: usize,
+    #[serde(default = "default_limit")]
+    limit: usize,
+}
+
+fn first_line() -> usize {
+    1
+}
+
+fn default_limit() -> usize {
+    DEFAULT_LIMIT
 }
 
 impl Tool for ReadFile {
@@ -69,23 +75,21 @@ impl Tool for ReadFile {
         let resolved = self.workspace.resolve(&args.path)?;
 
         let bytes = std::fs::read(&resolved)?;
-        if bytes[..bytes.len().min(BINARY_SNIFF_BYTES)].contains(&0) {
+        if is_binary(&bytes) {
             return Err(format!("{} is binary", args.path).into());
         }
         let text = String::from_utf8_lossy(&bytes);
 
-        let offset = args.offset.unwrap_or(1).max(1);
-        let limit = args.limit.unwrap_or(DEFAULT_LIMIT).max(1);
-
-        let lines: Vec<&str> = text.lines().collect();
-        let start = offset.saturating_sub(1).min(lines.len());
-        let end = start.saturating_add(limit).min(lines.len());
-        let window = &lines[start..end];
+        // A model may send 0 for either; both mean "from the start".
+        let start = args.offset.max(1) - 1;
+        let limit = args.limit.max(1);
+        let mut lines = text.lines();
+        let window: Vec<&str> = lines.by_ref().skip(start).take(limit).collect();
+        let remaining = lines.count();
 
         let mut out = window.join("\n");
-        if end < lines.len() {
-            let next = end + 1;
-            let remaining = lines.len() - end;
+        if remaining > 0 {
+            let next = start + window.len() + 1;
             if !out.is_empty() {
                 out.push('\n');
             }

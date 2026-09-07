@@ -2,8 +2,7 @@ use super::*;
 use std::fs;
 
 fn tool() -> (tempfile::TempDir, ReadFile) {
-    let dir = tempfile::tempdir().unwrap();
-    let workspace = Arc::new(Workspace::new(dir.path()).unwrap());
+    let (dir, workspace) = crate::tools::workspace::temp_workspace();
     (dir, ReadFile::new(workspace))
 }
 

@@ -2,7 +2,9 @@
 //! No domain meaning of their own.
 
 mod id;
+mod path;
 mod time;
 
 pub use id::Id;
+pub use path::to_slash;
 pub use time::Timestamp;

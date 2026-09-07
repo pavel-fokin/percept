@@ -144,6 +144,16 @@ impl<'a> Chat<'a> {
         self.textarea.lines().join("\n")
     }
 
+    /// Consumes the input line: clears the textarea and its
+    /// suggestions, and the last command's error and notice with them,
+    /// since what they were about is over.
+    pub fn take_input(&mut self) {
+        self.textarea.clear();
+        self.recompute_command_suggestions();
+        self.error = None;
+        self.notice = None;
+    }
+
     /// Refilters `command_suggestions` from the textarea's trimmed
     /// content: every `Command` whose name starts with it, while the
     /// content itself starts with `/`. Empty otherwise, so content that

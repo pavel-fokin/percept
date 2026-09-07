@@ -7,6 +7,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
+use crate::shared::to_slash;
+
 /// A working tree rooted at an absolute, canonical path, plus the set
 /// of files a tool has actually read - the record a later edit tool
 /// checks before writing, so an edit of a file the model has not read
@@ -77,24 +79,21 @@ impl Workspace {
     /// The files under `from`, as `find_files` and `grep_files` walk
     /// them: gitignore honoured, dot-directories entered - `.percept`
     /// and `.agents` hold what a reader here most wants - and `.git`
-    /// itself left alone.
-    pub fn walk(&self, from: &Path) -> ignore::Walk {
+    /// itself left alone. An entry that cannot be read is skipped.
+    pub fn walk(&self, from: &Path) -> impl Iterator<Item = ignore::DirEntry> {
         ignore::WalkBuilder::new(from)
             .require_git(false)
             .hidden(false)
             .filter_entry(|entry| entry.file_name() != ".git")
             .build()
+            .flatten()
+            .filter(|entry| entry.file_type().is_some_and(|t| t.is_file()))
     }
 
     /// The path as the model should see it: relative to the root,
-    /// `/`-separated regardless of platform.
+    /// `/`-separated.
     pub fn relative(&self, path: &Path) -> String {
-        let relative = path.strip_prefix(&self.root).unwrap_or(path);
-        relative
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/")
+        to_slash(path.strip_prefix(&self.root).unwrap_or(path))
     }
 
     /// Records that `read_file` has returned `path`'s contents.
@@ -123,6 +122,15 @@ fn normalize(path: &Path) -> PathBuf {
         }
     }
     out
+}
+
+/// A workspace over a fresh temp dir, for every tool's tests. The dir
+/// is returned too, since dropping it removes the tree.
+#[cfg(test)]
+pub fn temp_workspace() -> (tempfile::TempDir, std::sync::Arc<Workspace>) {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = std::sync::Arc::new(Workspace::new(dir.path()).unwrap());
+    (dir, workspace)
 }
 
 #[cfg(test)]

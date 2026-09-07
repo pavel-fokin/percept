@@ -16,6 +16,33 @@ use crate::percept::{
 /// The project root `source` stamps, for a test that compares paths.
 pub const ROOT: &str = "/test";
 
+/// A scratch directory a test writes files into, torn down when the
+/// test ends - never the repository itself.
+pub struct Fixture {
+    dir: tempfile::TempDir,
+}
+
+impl Fixture {
+    pub fn new() -> Self {
+        Self {
+            dir: tempfile::tempdir().unwrap(),
+        }
+    }
+
+    pub fn path(&self) -> &std::path::Path {
+        self.dir.path()
+    }
+
+    /// Writes `content` at `path`, relative to the fixture's root,
+    /// creating any directories it needs.
+    pub fn write(&self, path: &str, content: &str) -> &Self {
+        let full = self.dir.path().join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+        self
+    }
+}
+
 /// A `Source` for tests that don't care about the path - a fixed one
 /// under `ROOT`, so a caller only names the writer.
 pub fn source(name: &str) -> Source {
@@ -209,7 +236,7 @@ pub struct FixedPolicy(pub percept::Verdict);
 
 impl percept::Policy for FixedPolicy {
     fn check(&self, _tool: &str, _arguments: &str) -> percept::Verdict {
-        self.0.clone()
+        self.0
     }
 }
 

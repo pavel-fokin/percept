@@ -673,11 +673,15 @@ pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error
 /// needs the thread while headless, so a tool runs inline and the turn
 /// is one plain `await` loop. Each tool call and its result print to
 /// stderr as they happen, so stdout stays pipeable. That trace is for
-/// watching a run live; the log is what a run is read back from.
+/// watching a run live; the log is what a run is read back from. `yes`
+/// is the user's standing answer to every call the policy puts to
+/// them - what `y` is in the TUI; without it, headless, such a call is
+/// declined.
 pub async fn run_turn(
     mut app: Box<dyn AppService>,
     actor: Actor,
     prompt: String,
+    yes: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut stream = app.submit_as(actor, prompt)?;
     // What stdout gets. `App` clears its own reply buffer at each tool
@@ -691,22 +695,18 @@ pub async fn run_turn(
             // means, and a call it refused never happened.
             Some(Ok(Chunk::ToolCall { tool, arguments })) => {
                 stream = match app.begin_tool(&tool, arguments.clone())? {
-                    ToolStep::Run(run, arguments) => {
+                    ToolStep::Ask(_, arguments) if !yes => {
+                        eprintln!("⚒ {tool}({arguments}) - declined: needs approval, run in the TUI or pass --yes");
+                        app.decline_tool()?
+                    }
+                    ToolStep::Run(run, arguments) | ToolStep::Ask(run, arguments) => {
                         eprintln!("⚒ {tool}({arguments})");
                         let output = run_tool(&*run, &arguments);
                         eprintln!("⚒ {}", output.content);
                         app.finish_tool(output)?
                     }
-                    // Headless, there is no one to ask. `--yes` on `ask`
-                    // swaps in a policy that never asks.
-                    ToolStep::Ask(_, arguments) => {
-                        eprintln!("⚒ {tool}({arguments}) - declined: needs approval, run in the TUI or pass --yes");
-                        app.decline_tool()?
-                    }
-                    // Unknown to `App`, or denied by the policy; the
-                    // result it committed says which.
                     ToolStep::Continue(stream) => {
-                        eprintln!("⚒ {tool}({arguments}) - not run");
+                        eprintln!("⚒ {tool}({arguments}) - no such tool");
                         stream
                     }
                     ToolStep::Stop => break,

@@ -4,10 +4,8 @@ use std::fs;
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
 
-fn workspace() -> (tempfile::TempDir, Workspace) {
-    let dir = tempfile::tempdir().unwrap();
-    let workspace = Workspace::new(dir.path()).unwrap();
-    (dir, workspace)
+fn workspace() -> (tempfile::TempDir, std::sync::Arc<Workspace>) {
+    temp_workspace()
 }
 
 #[test]
@@ -69,8 +67,6 @@ fn walk_enters_dot_directories_but_not_git_itself() {
 
     let seen: Vec<String> = workspace
         .walk(workspace.root())
-        .flatten()
-        .filter(|entry| entry.file_type().is_some_and(|t| t.is_file()))
         .map(|entry| workspace.relative(entry.path()))
         .collect();
 

@@ -404,20 +404,6 @@ fn declining_an_asked_call_commits_the_refusal_as_its_result_and_asks_again() {
 }
 
 #[test]
-fn a_call_the_policy_denies_commits_the_reason_as_its_result_without_running() {
-    let mut app = app_with_policy(Verdict::Deny("not here".to_string()));
-
-    let _ = app.submit("go".to_string()).unwrap();
-    let step = app.begin_tool("search_events", "{}".to_string()).unwrap();
-
-    assert!(matches!(step, ToolStep::Continue(_)));
-    assert_eq!(
-        result_content(&app.events()[2]),
-        "search_events was not run: not here"
-    );
-}
-
-#[test]
 fn an_unknown_tool_is_refused_before_the_policy_is_asked() {
     let mut app = app_with_policy(Verdict::Ask);
 

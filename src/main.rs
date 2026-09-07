@@ -325,7 +325,6 @@ fn build_catalog() -> Catalog {
 }
 
 /// Which tools `TOOLS_VAR` asks for.
-#[derive(Clone, Copy, PartialEq, Eq)]
 enum Toolset {
     Maps,
     Code,
@@ -380,7 +379,6 @@ fn build_app(
     let catalog: Arc<dyn percept::ModelCatalog> = Arc::new(build_catalog());
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
-    let toolset = build_toolset()?;
     let scope = source.scope();
     let mut tools: Vec<Arc<dyn percept::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
@@ -388,22 +386,22 @@ fn build_app(
         Arc::new(ReviseMap::new(log.clone(), scope.clone())),
         Arc::new(ReadMap::new(log.clone(), scope)),
     ];
-    if toolset == Toolset::Code {
-        tools.extend(code_tools(checkout)?);
+    match build_toolset()? {
+        Toolset::Maps => App::new(model, catalog, log, tools, renderer, map_shape, source),
+        Toolset::Code => {
+            tools.extend(code_tools(checkout)?);
+            Ok(
+                App::new(model, catalog, log, tools, renderer, map_shape, source)?
+                    .with_policy(Arc::new(AskBeforeWrites))
+                    .with_tool_cap(CODE_TOOL_CAP)
+                    .with_snapshot(Arc::new(GitSnapshot::open(checkout)?)),
+            )
+        }
     }
-    let app = App::new(model, catalog, log, tools, renderer, map_shape, source)?;
-    Ok(match toolset {
-        Toolset::Maps => app,
-        Toolset::Code => app
-            .with_policy(Arc::new(AskBeforeWrites))
-            .with_tool_cap(CODE_TOOL_CAP)
-            .with_snapshot(Arc::new(GitSnapshot::open(checkout)?)),
-    })
 }
 
 /// One turn without the TUI: `ask` with the user's prompt, `reflect`
-/// with percept's own. `yes` runs every call the policy would ask
-/// about; without it, headless, such a call is declined.
+/// with percept's own. `yes` is `ask --yes`.
 async fn headless_turn(
     actor: Actor,
     prompt: String,
@@ -412,11 +410,8 @@ async fn headless_turn(
     renderer: Arc<dyn percept::MapRenderer>,
     checkout: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut app = build_app(source, renderer, checkout)?;
-    if yes {
-        app = app.with_policy(Arc::new(percept::AllowAll));
-    }
-    cli::run_turn(Box::new(app), actor, prompt).await
+    let app = build_app(source, renderer, checkout)?;
+    cli::run_turn(Box::new(app), actor, prompt, yes).await
 }
 
 async fn try_main(

@@ -1,7 +1,7 @@
-/// Whether a tool call the model asked for may run. Checked once per
-/// call, after `tool.called` is committed and before anything runs, so
-/// the log always shows what the model asked for, and the verdict
-/// decides only what happened next.
+/// Whether a tool call the model asked for runs at once or waits on
+/// the user. Checked once per call, after `tool.called` is committed
+/// and before anything runs, so the log always shows what the model
+/// asked for, and the verdict decides only what happened next.
 pub trait Policy: Send + Sync {
     /// `arguments` is the JSON text the model produced, so a policy
     /// can look inside a call - the command a `bash` call would run -
@@ -9,18 +9,14 @@ pub trait Policy: Send + Sync {
     fn check(&self, tool: &str, arguments: &str) -> Verdict;
 }
 
-/// What a `Policy` says about one call.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// What a `Policy` says about one call. A policy that refuses outright
+/// - a denylist - would add a third answer carrying its reason.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verdict {
     /// Run it.
     Allow,
     /// Put it to the user; run it if they say so.
     Ask,
-    /// Do not run it. The text goes back to the model as the call's
-    /// result, so it can do something else. No policy denies yet; a
-    /// denylist would.
-    #[allow(dead_code)]
-    Deny(String),
 }
 
 /// The policy with no rules: every call runs. What a caller with no

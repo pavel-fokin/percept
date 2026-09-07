@@ -4,14 +4,11 @@ use regex::Regex;
 use serde::Deserialize;
 
 use crate::percept::{Tool, ToolOutput, ToolSpec};
-use crate::tools::Workspace;
-
-/// How much of a file's start is checked for a NUL byte before it is
-/// searched as text.
-const BINARY_SNIFF_BYTES: usize = 8192;
+use crate::tools::{is_binary, join_capped, Workspace};
 
 /// Cap on matches returned, so a broad pattern can't flood the model's
-/// window.
+/// window. The walk stops at the cap: past it the rest of the tree is
+/// read for a count the model only uses as "narrow it".
 const MAX_MATCHES: usize = 200;
 
 /// How many characters of a matching line are kept.
@@ -37,9 +34,9 @@ const DESCRIPTION: &str = "Search text files for lines matching a \
     directory (default the whole workspace); `glob` further narrows by \
     file name, e.g. `*.rs`. Gitignored and binary files are skipped; \
     dot-directories such as .percept are searched. \
-    Results are `path:line:text`, text clipped to 200 characters, \
-    capped at 200 matches; narrow the pattern, path, or glob if the \
-    result says more were cut.";
+    Results are `path:line:text`, text clipped to 200 characters. The \
+    search stops at 200 matches; narrow the pattern, path, or glob if \
+    the result says so.";
 
 const PARAMETERS: &str = r#"{
   "type": "object",
@@ -56,8 +53,13 @@ const PARAMETERS: &str = r#"{
 #[serde(deny_unknown_fields)]
 struct Args {
     pattern: String,
-    path: Option<String>,
+    #[serde(default = "root")]
+    path: String,
     glob: Option<String>,
+}
+
+fn root() -> String {
+    ".".to_string()
 }
 
 impl Tool for GrepFiles {
@@ -77,59 +79,37 @@ impl Tool for GrepFiles {
             .map(|glob| globset::Glob::new(&glob).map(|g| g.compile_matcher()))
             .transpose()?;
 
-        let path = args.path.unwrap_or_else(|| ".".to_string());
-        let resolved = self.workspace.resolve(&path)?;
+        let resolved = self.workspace.resolve(&args.path)?;
 
         let mut matches = Vec::new();
         for entry in self.workspace.walk(&resolved) {
-            let entry = match entry {
-                Ok(entry) => entry,
-                Err(_) => continue,
-            };
-            if !entry.file_type().is_some_and(|t| t.is_file()) {
-                continue;
+            if matches.len() > MAX_MATCHES {
+                break;
             }
             if let Some(glob) = &name_glob {
-                let name = entry.file_name();
-                if !glob.is_match(name) {
+                if !glob.is_match(entry.file_name()) {
                     continue;
                 }
             }
-
             let Ok(bytes) = std::fs::read(entry.path()) else {
                 continue;
             };
-            if bytes[..bytes.len().min(BINARY_SNIFF_BYTES)].contains(&0) {
+            if is_binary(&bytes) {
                 continue;
             }
             let text = String::from_utf8_lossy(&bytes);
             let relative = self.workspace.relative(entry.path());
-
             for (number, line) in text.lines().enumerate() {
-                if !regex.is_match(line) {
-                    continue;
+                if regex.is_match(line) {
+                    let clipped: String = line.chars().take(MAX_LINE_CHARS).collect();
+                    matches.push(format!("{relative}:{}:{clipped}", number + 1));
                 }
-                let clipped: String = line.chars().take(MAX_LINE_CHARS).collect();
-                matches.push(format!("{relative}:{}:{clipped}", number + 1));
             }
         }
 
-        let total = matches.len();
-        let truncated = total > MAX_MATCHES;
-        matches.truncate(MAX_MATCHES);
-
-        let mut out = matches.join("\n");
-        if truncated {
-            let remaining = total - MAX_MATCHES;
-            if !out.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(&format!(
-                "[{remaining} more matches; narrow the pattern or path]"
-            ));
-        }
-
-        Ok(ToolOutput::text(out))
+        Ok(ToolOutput::text(join_capped(matches, MAX_MATCHES, |_| {
+            format!("[more than {MAX_MATCHES} matches; narrow the pattern or path]")
+        })))
     }
 }
 

@@ -34,10 +34,15 @@ const PARAMETERS: &str = r#"{
   "additionalProperties": false
 }"#;
 
-#[derive(Deserialize, Default)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Args {
-    path: Option<String>,
+    #[serde(default = "root")]
+    path: String,
+}
+
+fn root() -> String {
+    ".".to_string()
 }
 
 impl Tool for ListFiles {
@@ -51,11 +56,10 @@ impl Tool for ListFiles {
 
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
-        let path = args.path.unwrap_or_else(|| ".".to_string());
-        let resolved = self.workspace.resolve(&path)?;
+        let resolved = self.workspace.resolve(&args.path)?;
 
         if !resolved.is_dir() {
-            return Err(format!("{path} is not a directory").into());
+            return Err(format!("{} is not a directory", args.path).into());
         }
 
         let mut entries = Vec::new();

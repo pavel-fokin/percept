@@ -115,6 +115,17 @@ fn opening_a_directory_that_is_not_a_repository_is_an_error() {
     assert!(GitSnapshot::open(dir.path()).is_err());
 }
 
+fn snapshot_refs(root: &Path) -> String {
+    git_stdout(
+        root,
+        &[
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/percept/snapshots",
+        ],
+    )
+}
+
 #[test]
 fn take_keeps_only_the_newest_snapshot_ref() {
     let dir = repo();
@@ -125,16 +136,24 @@ fn take_keeps_only_the_newest_snapshot_ref() {
     snapshot.take(first).unwrap();
     snapshot.take(second).unwrap();
 
-    let refs = git_stdout(
-        dir.path(),
-        &[
-            "for-each-ref",
-            "--format=%(refname)",
-            "refs/percept/snapshots",
-        ],
+    assert_eq!(
+        snapshot_refs(dir.path()),
+        format!("refs/percept/snapshots/{}", second.as_uuid())
     );
-    assert_eq!(refs, format!("refs/percept/snapshots/{}", second.as_uuid()));
     assert!(snapshot.restore(first).is_err());
+}
+
+#[test]
+fn open_deletes_refs_an_earlier_session_left_behind() {
+    let dir = repo();
+    let earlier = GitSnapshot::open(dir.path()).unwrap();
+    earlier.take(EventId::new()).unwrap();
+    drop(earlier);
+    assert!(!snapshot_refs(dir.path()).is_empty());
+
+    let _later = GitSnapshot::open(dir.path()).unwrap();
+
+    assert!(snapshot_refs(dir.path()).is_empty());
 }
 
 #[test]

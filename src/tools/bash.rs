@@ -62,7 +62,12 @@ const PARAMETERS: &str = r#"{
 #[serde(deny_unknown_fields)]
 struct Args {
     command: String,
-    timeout_secs: Option<u64>,
+    #[serde(default = "default_timeout")]
+    timeout_secs: u64,
+}
+
+fn default_timeout() -> u64 {
+    DEFAULT_TIMEOUT_SECS
 }
 
 impl Tool for Bash {
@@ -76,11 +81,7 @@ impl Tool for Bash {
 
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
-        let timeout = Duration::from_secs(
-            args.timeout_secs
-                .unwrap_or(DEFAULT_TIMEOUT_SECS)
-                .min(MAX_TIMEOUT_SECS),
-        );
+        let timeout = Duration::from_secs(args.timeout_secs.min(MAX_TIMEOUT_SECS));
 
         let mut child = Command::new("bash")
             .arg("-c")

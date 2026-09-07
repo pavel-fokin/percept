@@ -3,11 +3,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::percept::{Tool, ToolOutput, ToolSpec};
-use crate::tools::Workspace;
-
-/// How much of a file's start is checked for a NUL byte before it is
-/// edited as text.
-const BINARY_SNIFF_BYTES: usize = 8192;
+use crate::tools::{is_binary, Workspace};
 
 /// The `edit_file` tool: replaces `old_string` with `new_string` in a
 /// file already read this session. Refuses an edit of a file the model
@@ -77,7 +73,7 @@ impl Tool for EditFile {
         }
 
         let bytes = std::fs::read(&resolved)?;
-        if bytes[..bytes.len().min(BINARY_SNIFF_BYTES)].contains(&0) {
+        if is_binary(&bytes) {
             return Err(format!("{} is binary", args.path).into());
         }
         // Strict, not lossy: a lossy decode written back would rewrite

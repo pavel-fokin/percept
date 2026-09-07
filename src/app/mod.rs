@@ -209,9 +209,9 @@ struct Turn {
     /// exact because the transcript is only ever appended to.
     start: usize,
     tool_calls: usize,
-    /// The `tool.called` awaiting its result, set by `begin_tool` and
-    /// taken when the result commits.
-    open_call: Option<EventId>,
+    /// The `tool.called` awaiting its result, with the tool's name, set
+    /// by `begin_tool` and taken when the result commits.
+    open_call: Option<(EventId, String)>,
     thought: String,
     reply: String,
     /// What the round trip just streamed cost, set by `append_chunk`
@@ -357,21 +357,6 @@ impl App {
             .is_some_and(|turn| turn.tool_calls >= self.tool_cap)
     }
 
-    /// The name the open `tool.called` asked for, for the words a
-    /// refusal or a denial hands back to the model.
-    fn open_call_name(&self) -> Option<&str> {
-        let called_id = self.pending.as_ref()?.open_call?;
-        let event = self
-            .events
-            .iter()
-            .rev()
-            .find(|event| event.id() == called_id)?;
-        match event.payload() {
-            percept::Payload::ToolCalled { tool, .. } => Some(tool),
-            _ => None,
-        }
-    }
-
     /// Commits each of `output.commits`, caused by the open call and
     /// attributed to the model - what the tool judged, before the
     /// result that reports it - then `tool.resulted` for the call
@@ -381,7 +366,8 @@ impl App {
         &mut self,
         output: percept::ToolOutput,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let Some(called_id) = self.pending.as_mut().and_then(|turn| turn.open_call.take()) else {
+        let Some((called_id, _)) = self.pending.as_mut().and_then(|turn| turn.open_call.take())
+        else {
             return Ok(());
         };
         let commits: Vec<Event> = output
@@ -436,15 +422,6 @@ impl App {
             self.renderer.render(&map)?;
         }
         Ok(())
-    }
-
-    /// Every map the log folds for this project, by name.
-    fn map_names(&self) -> HashSet<String> {
-        Map::fold_all(&self.source.scope(), &self.events)
-            .into_iter()
-            .flatten()
-            .map(|map| map.schema().name.to_string())
-            .collect()
     }
 
     /// Whether every map still folds once `new` follows the transcript.
@@ -642,7 +619,7 @@ impl AppService for App {
         );
         let called_id = called.id();
         self.commit(called)?;
-        self.with_pending(|turn| turn.open_call = Some(called_id));
+        self.with_pending(|turn| turn.open_call = Some((called_id, tool.to_string())));
 
         let Some(run) = self.tools.iter().find(|t| t.spec().name == tool).cloned() else {
             let output = percept::ToolOutput::text(format!("no such tool: {tool}"));
@@ -652,11 +629,6 @@ impl AppService for App {
         match self.policy.check(tool, &arguments) {
             percept::Verdict::Allow => Ok(ToolStep::Run(run, arguments)),
             percept::Verdict::Ask => Ok(ToolStep::Ask(run, arguments)),
-            percept::Verdict::Deny(reason) => {
-                let output = percept::ToolOutput::text(format!("{tool} was not run: {reason}"));
-                self.commit_tool_result(output)?;
-                Ok(ToolStep::Continue(self.ask()?))
-            }
         }
     }
 
@@ -669,7 +641,13 @@ impl AppService for App {
     }
 
     fn decline_tool(&mut self) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
-        let tool = self.open_call_name().unwrap_or("the tool").to_string();
+        let Some((_, tool)) = self
+            .pending
+            .as_ref()
+            .and_then(|turn| turn.open_call.as_ref())
+        else {
+            return Err("no tool call is waiting".into());
+        };
         let output = percept::ToolOutput::text(format!(
             "The user declined to run {tool}. Do not retry it; ask them or do something else."
         ));
@@ -744,7 +722,11 @@ impl AppService for App {
         // The restore put every rendered map back to before the turn,
         // while the log still holds what the turn added to them: the
         // log is the record, so the renders follow it, not the tree.
-        self.render_changed(&self.map_names())
+        let every_map = percept::SCHEMAS
+            .iter()
+            .map(|schema| schema.name.to_string())
+            .collect();
+        self.render_changed(&every_map)
     }
 }
 

@@ -1,31 +1,8 @@
 use super::*;
-use std::fs;
+use crate::testing::Fixture;
 
-/// A scratch directory holding fixture Rust sources, torn down when the
-/// test ends - never the repository itself.
-struct Fixture {
-    dir: tempfile::TempDir,
-}
-
-impl Fixture {
-    fn new() -> Self {
-        Self {
-            dir: tempfile::tempdir().unwrap(),
-        }
-    }
-
-    /// Writes `content` at `path`, relative to the fixture's root,
-    /// creating any directories it needs.
-    fn write(&self, path: &str, content: &str) -> &Self {
-        let full = self.dir.path().join(path);
-        fs::create_dir_all(full.parent().unwrap()).unwrap();
-        fs::write(full, content).unwrap();
-        self
-    }
-
-    fn build(&self) -> Map {
-        build(self.dir.path()).unwrap()
-    }
+fn build_map(fixture: &Fixture) -> Map {
+    build(fixture.path()).unwrap()
 }
 
 fn has_edge(map: &Map, from: (&str, &str), kind: &str, to: (&str, &str)) -> bool {
@@ -43,7 +20,7 @@ fn mod_x_resolves_to_x_rs() {
         .write("src/main.rs", "mod app;\n")
         .write("src/app.rs", "");
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     assert!(has_edge(
         &map,
@@ -60,7 +37,7 @@ fn mod_x_resolves_to_x_mod_rs() {
         .write("src/main.rs", "mod store;\n")
         .write("src/store/mod.rs", "");
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     assert!(has_edge(
         &map,
@@ -78,7 +55,7 @@ fn use_crate_resolves_to_the_longest_existing_prefix() {
         .write("src/percept/mod.rs", "")
         .write("src/percept/map.rs", "");
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     assert!(has_edge(
         &map,
@@ -96,7 +73,7 @@ fn super_resolves_from_the_parent_module() {
         .write("src/percept/event.rs", "")
         .write("src/percept/map.rs", "use super::event::EventId;\n");
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     assert!(has_edge(
         &map,
@@ -114,7 +91,7 @@ fn a_use_group_expands_to_an_edge_per_member() {
         "use std::collections::{BTreeMap, HashSet};\n",
     );
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     assert!(has_edge(
         &map,
@@ -131,7 +108,7 @@ fn two_files_importing_the_same_crate_share_one_package_node() {
         .write("src/main.rs", "use clap::Parser;\n")
         .write("src/cli.rs", "use clap::Args;\n");
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     let packages: Vec<_> = map
         .nodes()
@@ -158,7 +135,7 @@ fn two_uses_of_the_same_crate_in_one_file_collapse_to_one_edge() {
     let fixture = Fixture::new();
     fixture.write("src/main.rs", "use clap::Parser;\nuse clap::Args;\n");
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     let edges: Vec<_> = map
         .edges()
@@ -176,7 +153,7 @@ fn a_gitignored_file_is_skipped() {
         .write("src/main.rs", "mod generated;\n")
         .write("src/generated.rs", "");
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     assert!(map.find("file", "src/generated.rs").is_none());
     assert!(map.edges().is_empty());
@@ -187,7 +164,7 @@ fn a_functions_symbol_carries_public_and_line_and_is_contained_by_its_file() {
     let fixture = Fixture::new();
     fixture.write("src/main.rs", "\npub fn greet() {}\n");
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     let node = map.find("function", "src/main.rs::greet").unwrap();
     assert_eq!(
@@ -211,7 +188,7 @@ fn a_cfg_gated_duplicate_name_skips_rather_than_fails() {
         "#[cfg(unix)]\nfn greet() {}\n#[cfg(windows)]\nfn greet() {}\n",
     );
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     let symbols: Vec<_> = map
         .nodes()
@@ -228,7 +205,7 @@ fn a_use_of_a_module_the_file_declares_is_a_file_edge_not_a_package() {
         .write("src/main.rs", "mod app;\nuse app::App;\n")
         .write("src/app/mod.rs", "");
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     assert!(map.find("package", "app").is_none());
     assert!(has_edge(
@@ -247,7 +224,7 @@ fn a_gitignore_is_honoured_outside_a_git_checkout() {
         .write("src/main.rs", "")
         .write("target/debug/build/gen.rs", "pub fn gen() {}\n");
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     assert!(map.find("file", "target/debug/build/gen.rs").is_none());
 }
@@ -260,7 +237,7 @@ fn a_use_inside_an_inline_module_is_not_the_file_s_import() {
         "#[cfg(test)]\nmod tests {\n    use super::helper::h;\n}\n",
     );
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     assert!(map.edges().is_empty());
 }
@@ -270,7 +247,7 @@ fn a_use_of_the_file_s_own_item_makes_no_edge() {
     let fixture = Fixture::new();
     fixture.write("src/foo/mod.rs", "pub struct Bar;\nuse crate::foo::Bar;\n");
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     assert!(map.edges().iter().all(|edge| edge.kind != "imports"));
 }
@@ -285,7 +262,7 @@ fn a_glob_import_of_the_parent_is_an_edge_to_the_parent_s_file() {
         )
         .write("src/percept/map/tests.rs", "use super::*;\n");
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     assert!(has_edge(
         &map,
@@ -303,7 +280,7 @@ fn two_impls_of_one_generic_trait_keep_their_methods_apart() {
         "struct E;\nimpl From<A> for E { fn from(a: A) -> E { E } }\nimpl From<B> for E { fn from(b: B) -> E { E } }\n",
     );
 
-    let map = fixture.build();
+    let map = build_map(&fixture);
 
     assert!(map
         .find("function", "src/main.rs::E::From<A>::from")

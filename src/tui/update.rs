@@ -28,8 +28,8 @@ pub fn handle_key(
         handle_models_menu_key(chat, key);
         return Ok(false);
     }
-    if chat.approval.is_some() {
-        handle_approval_key(chat, key, reply_tx)?;
+    if let Some(approval) = chat.approval.take() {
+        handle_approval_key(chat, approval, key, reply_tx)?;
         return Ok(false);
     }
     if handle_command_suggestion_key(chat, key) {
@@ -93,26 +93,20 @@ fn is_undo_command(text: &str) -> bool {
     text.trim() == commands::UNDO
 }
 
-/// Clears the input and puts the tree back, saying so in the activity
+/// Takes the input and puts the tree back, saying so in the activity
 /// row - or saying why not. Nothing reaches the log either way.
 fn undo(chat: &mut Chat) {
-    chat.textarea.clear();
-    chat.recompute_command_suggestions();
+    chat.take_input();
     match chat.app.undo() {
-        Ok(()) => {
-            chat.error = None;
-            chat.notice = Some("Working tree restored to before the last turn".to_string());
-        }
+        Ok(()) => chat.notice = Some("Working tree restored to before the last turn".to_string()),
         Err(err) => chat.error = Some(err.to_string()),
     }
 }
 
-/// Clears the input, opens the popup in its loading state, and kicks
+/// Takes the input, opens the popup in its loading state, and kicks
 /// off the fetch. The list arrives later as a `ModelsListed` event.
 fn open_models_menu(chat: &mut Chat, reply_tx: &UnboundedSender<StreamEvent>) {
-    chat.textarea.clear();
-    chat.recompute_command_suggestions();
-    chat.error = None;
+    chat.take_input();
     let token = chat.new_models_token();
     chat.models_menu = Some(ModelsMenu::loading(token));
     spawn_models(chat.app.available_models(), token, reply_tx.clone());
@@ -165,24 +159,23 @@ fn handle_models_menu_key(chat: &mut Chat, key: KeyEvent) {
 
 /// Key handling while a tool call waits on the user. `y` runs it the
 /// way an allowed call runs; `n` or Esc declines it, and `App` tells
-/// the model so. Every other key is swallowed: the turn is paused on
-/// this answer, and typing into the textarea would not change that.
+/// the model so. Every other key is swallowed and the call keeps
+/// waiting: the turn is paused on this answer, and typing into the
+/// textarea would not change that.
 fn handle_approval_key(
     chat: &mut Chat,
+    approval: Approval,
     key: KeyEvent,
     reply_tx: &UnboundedSender<StreamEvent>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => {
-            if let Some(approval) = chat.approval.take() {
-                spawn_tool(approval.tool, approval.arguments, reply_tx.clone());
-            }
+            spawn_tool(approval.tool, approval.arguments, reply_tx.clone());
         }
         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-            chat.approval = None;
             spawn_drain(chat.app.decline_tool()?, reply_tx.clone());
         }
-        _ => {}
+        _ => chat.approval = Some(approval),
     }
     Ok(())
 }
@@ -310,10 +303,7 @@ fn submit(
     if text.is_empty() {
         return Ok(());
     }
-    chat.textarea.clear();
-    chat.recompute_command_suggestions();
-    chat.error = None;
-    chat.notice = None;
+    chat.take_input();
     chat.thinking_started = Some(std::time::Instant::now());
 
     let stream = chat.app.submit(text)?;

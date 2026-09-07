@@ -126,7 +126,7 @@ it, never sideways or up:
 
 | Layer | Package | Owns |
 |---|---|---|
-| Domain | `percept` | `Event`, `Message`, `Model`, `Map`, `Tool` - entities and the capabilities they need, as interfaces. `Policy` says whether a tool call runs, asks, or is denied; `Snapshot` saves the working tree under a prompt and puts it back. Serde-free; depends on `shared` and on `futures-core`, for the stream type its reply port returns. |
+| Domain | `percept` | `Event`, `Message`, `Model`, `Map`, `Tool` - entities and the capabilities they need, as interfaces. `Policy` says whether a tool call runs at once or asks the user; `Snapshot` saves the working tree under a prompt and puts it back. Serde-free; depends on `shared` and on `futures-core`, for the stream type its reply port returns. |
 | Application | `app` | `App` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. Runs the tool loop: commits `tool.called`, asks the `Policy`, hands the caller a `ToolStep` - run, ask the user, or carry on. `MapShape` says how much of each map the prompt carries; `PERCEPT_MAPS` sets it at the entrypoint. `PERCEPT_TOOLS=code` adds the file tools, the policy that asks before a write, a cap of fifty calls, and a snapshot per prompt; `undo` restores the last one. |
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. A `ToolStep::Ask` pauses the turn on a `y`/`n` row; `/undo` puts the tree back. |
 | Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps`, `ask`, `reflect` - the log and its maps without the TUI. Headless, a call the policy would ask about is declined unless `ask --yes`. |
