@@ -1025,28 +1025,56 @@ impl Map {
         }
     }
 
-    /// Up to five nodes of the same kind as `node` that share at least
-    /// two `/`, `::`, or whitespace segments of its name, most overlap
-    /// first. Two is the floor: one shared word is noise in a prose
-    /// name - every `decision` shares "the" - and a weak hint in a
-    /// path. A wrong kind or an unrelated name gets no guesses.
+    /// Up to five nodes to retry with, each named `kind:name`, most
+    /// name-overlap first. The same-kind pass wants two shared `/`,
+    /// `::`, or whitespace segments: one shared word is noise in a
+    /// prose name - every `decision` shares "the" - and a weak hint in
+    /// a path. When it finds nothing, a cross-kind pass runs, since a
+    /// wrong kind is how `package:providers` misses a real
+    /// `file:src/providers/...`; there one shared segment is enough,
+    /// but only when a name has a `/` or `::` in it, so a path or
+    /// symbol lookup crosses kinds while a prose one stays silent.
     fn suggestions_for(&self, node: &NodeRef) -> Vec<String> {
+        let same_kind =
+            self.suggestions_matching(node, |n| n.kind == node.kind, |_, shared| shared >= 2);
+        if !same_kind.is_empty() {
+            return same_kind;
+        }
+        let query_is_path = is_path_like(&node.name);
+        self.suggestions_matching(
+            node,
+            |_| true,
+            |candidate, shared| {
+                shared >= 2 || (shared == 1 && (query_is_path || is_path_like(candidate)))
+            },
+        )
+    }
+
+    /// Nodes `keep` admits whose name shares segments with `node`'s
+    /// that `strong` accepts, given the candidate's name and the count
+    /// shared; scored by overlap, five at most, each named `kind:name`.
+    fn suggestions_matching(
+        &self,
+        node: &NodeRef,
+        keep: impl Fn(&Node) -> bool,
+        strong: impl Fn(&str, usize) -> bool,
+    ) -> Vec<String> {
         let wanted: HashSet<&str> = segments(&node.name).collect();
-        let mut scored: Vec<(usize, &str)> = self
+        let mut scored: Vec<(usize, &Node)> = self
             .nodes
             .iter()
-            .filter(|n| n.kind == node.kind)
+            .filter(|n| keep(n))
             .filter_map(|n| {
                 let have: HashSet<&str> = segments(&n.name).collect();
                 let shared = wanted.intersection(&have).count();
-                (shared >= 2).then_some((shared, n.name.as_str()))
+                strong(&n.name, shared).then_some((shared, n))
             })
             .collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
         scored
             .into_iter()
             .take(5)
-            .map(|(_, name)| format!("{}:{name}", node.kind))
+            .map(|(_, n)| format!("{}:{}", n.kind, n.name))
             .collect()
     }
 
@@ -1139,6 +1167,12 @@ impl Map {
 fn segments(name: &str) -> impl Iterator<Item = &str> {
     name.split(|c: char| c == '/' || c == ':' || c.is_whitespace())
         .filter(|part| !part.is_empty())
+}
+
+/// Whether a name reads as a path or a symbol rather than prose - a
+/// `/` or a `::` in it - so a single shared segment is a real hint.
+fn is_path_like(name: &str) -> bool {
+    name.contains('/') || name.contains("::")
 }
 
 /// Which map a payload changes, if it changes one.

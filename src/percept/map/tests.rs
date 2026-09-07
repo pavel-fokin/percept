@@ -896,12 +896,47 @@ fn a_missing_node_counts_a_repeated_word_once() {
 }
 
 #[test]
-fn a_missing_node_ignores_overlaps_of_another_kind() {
+fn a_missing_node_names_a_matching_node_of_another_kind() {
     let err = chain()
         .around(&node_ref("question", "Rust over Go"), 1)
         .err()
         .unwrap();
-    assert_eq!(err.to_string(), "no question \"Rust over Go\" in the map");
+    assert_eq!(
+        err.to_string(),
+        "no question \"Rust over Go\" in the map; did you mean decision:Rust over Go"
+    );
+}
+
+#[test]
+fn a_missing_node_crosses_kinds_on_a_lone_shared_path_segment() {
+    let mut map = Map::empty(&CODE);
+    map.apply(add_node("file", "src/providers/catalog.rs"), Actor::System)
+        .unwrap();
+    map.apply(add_node("file", "src/providers/openai.rs"), Actor::System)
+        .unwrap();
+
+    let err = map
+        .around(&node_ref("package", "providers"), 1)
+        .err()
+        .unwrap();
+
+    assert_eq!(
+        err.to_string(),
+        "no package \"providers\" in the map; \
+         did you mean file:src/providers/catalog.rs, file:src/providers/openai.rs"
+    );
+}
+
+#[test]
+fn a_missing_prose_node_does_not_cross_kinds_on_one_shared_word() {
+    let err = chain()
+        .around(&node_ref("question", "Rust and Kotlin"), 1)
+        .err()
+        .unwrap();
+    assert_eq!(
+        err.to_string(),
+        "no question \"Rust and Kotlin\" in the map"
+    );
 }
 
 #[test]
