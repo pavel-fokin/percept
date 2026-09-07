@@ -126,13 +126,14 @@ it, never sideways or up:
 
 | Layer | Package | Owns |
 |---|---|---|
-| Domain | `percept` | `Event`, `Message`, `Model`, `Map` - entities and the capabilities they need, as interfaces. Serde-free; depends on `shared` and on `futures-core`, for the stream type its reply port returns. |
-| Application | `app` | `App` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. `MapShape` says how much of each map the prompt carries; `PERCEPT_MAPS` sets it at the entrypoint. |
-| Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
-| Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps`, `ask`, `reflect` - the log and its maps without the TUI. |
+| Domain | `percept` | `Event`, `Message`, `Model`, `Map`, `Tool` - entities and the capabilities they need, as interfaces. `Policy` says whether a tool call runs, asks, or is denied; `Snapshot` saves the working tree under a prompt and puts it back. Serde-free; depends on `shared` and on `futures-core`, for the stream type its reply port returns. |
+| Application | `app` | `App` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. Runs the tool loop: commits `tool.called`, asks the `Policy`, hands the caller a `ToolStep` - run, ask the user, or carry on. `MapShape` says how much of each map the prompt carries; `PERCEPT_MAPS` sets it at the entrypoint. `PERCEPT_TOOLS=code` adds the file tools, the policy that asks before a write, a cap of fifty calls, and a snapshot per prompt; `undo` restores the last one. |
+| Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. A `ToolStep::Ask` pauses the turn on a `y`/`n` row; `/undo` puts the tree back. |
+| Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps`, `ask`, `reflect` - the log and its maps without the TUI. Headless, a call the policy would ask about is declined unless `ask --yes`. |
 | Infrastructure | `providers` | `Ollama` and `OpenAi` - implement `percept::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` carries the key. |
 | Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`, the four tools the model calls: `search_events`, `read_event`, `revise_map`, `read_map`, and `MarkdownFiles`, the `MapRenderer` that writes `.percept/`. |
 | Infrastructure | `code` | The `code` map: walks the working tree with `ignore`, parses each file with `tree-sitter`, and builds a `Map` of `file`, `function`, `type`, and `package` nodes - `maps list` and `maps show` read it, but it is never folded from the log and never reaches the model's prompt. |
+| Infrastructure | `tools` | The file tools the model calls under `PERCEPT_TOOLS=code`: `read_file`, `write_file`, `edit_file`, `list_files`, `find_files`, `grep_files`, native over `Workspace` - the one place a path the model gave becomes a real path, refusing any outside the checkout - and `bash`, one `sh -c` at the root with a timeout. No virtual filesystem: both routes see the one tree. `AskBeforeWrites` is the `Policy`; `GitSnapshot` the `Snapshot`, a commit under `refs/percept/snapshots/<prompt>` built through a scratch index. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 
 Wire concrete types together only at the entrypoint - `main` in Rust.

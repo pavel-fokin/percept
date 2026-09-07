@@ -82,3 +82,19 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "Does install.sh copy the binary into ~/.percept/bin or symlink it?" (model)
   decision "Copy it with install -m 755, and also into ~/.local/bin or ~/bin when ~/.percept/bin is not on PATH" (model): why: "the binary must sit outside target/ for is_dev_build to tell an install from a cargo build (01a07195); the extra copy into a PATH dir lets percept resolve without editing PATH"
   source 01a076e9-5ddd-7221-90f5-4b23e7b57850
+
+## 2026-09-06 · 01a0786b-a16d-7c52-9aaa-d4eb9b4ce16a
+- "Which of a project's events should percept-tui replay as its own conversation?" (model)
+  decision "conversational events count only from percept-tui's own source; a map mutation counts from any source in the project" (model): why: "to_messages already replayed another client's message.received/tool.called as this session's own dialogue, since agent-hook.py stamps the same event kinds for claude-code and codex; filtering self.events by source.name alone would also drop other sources' node/edge events from the fold, hiding decisions the plan skill recorded during a Claude Code session"
+
+## 2026-09-07 · 01a07ab0-7838-7843-a5d2-0b456b01eb44
+- "How are the coding tools switched on?" (model)
+  decision "PERCEPT_TOOLS=code adds them beside the map tools; the default, maps, is today's behaviour" (model): why: "follows PERCEPT_MAPS: one env var read at the entrypoint, nothing else moves"
+- "What are the coding tools named?" (model)
+  decision "read_file, write_file, edit_file, list_files, find_files, grep_files, bash" (model): why: "verb_noun like read_event and read_map, so a bare read is never confused with them; no sed tool, edit_file covers it"
+- "Which tool calls ask the user before they run?" (model)
+  decision "write_file, edit_file and bash ask; the rest run; percept ask declines an ask unless --yes" (model): why: "reads are routine, mutation and arbitrary commands are not; a headless turn has no one to ask"
+- "How many tool calls may a coding turn make?" (model)
+  decision "50 with PERCEPT_TOOLS=code; 5 stays for maps" (model): why: "a coding task reads several files before one edit; five ends it mid-read"
+- "How is a coding turn undone?" (model)
+  decision "a commit at refs/percept/snapshots/<prompt id> before each prompt when the coding tools are on; /undo restores the last one" (model): why: "scratch refs leave the branch and index alone; version control is the undo the user already knows; the id ties it to the prompt event"
