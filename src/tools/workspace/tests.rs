@@ -55,6 +55,18 @@ fn a_path_that_does_not_exist_yet_under_an_existing_directory_resolves() {
 }
 
 #[test]
+fn a_path_under_directories_that_do_not_exist_yet_resolves_without_a_trailing_separator() {
+    let (dir, workspace) = workspace();
+
+    let resolved = workspace.resolve("a/b/new.txt").unwrap();
+
+    // Compared as strings: `Path` equality ignores a trailing separator
+    // that `fs::write` does not.
+    let expected = dir.path().canonicalize().unwrap().join("a/b/new.txt");
+    assert_eq!(resolved.as_os_str(), expected.as_os_str());
+}
+
+#[test]
 fn relative_strips_the_root() {
     let (dir, workspace) = workspace();
     let path = dir.path().canonicalize().unwrap().join("src/main.rs");

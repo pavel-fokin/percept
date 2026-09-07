@@ -49,29 +49,21 @@ impl Workspace {
         let normalized = normalize(&joined);
 
         let mut existing = normalized.as_path();
-        let mut rest = PathBuf::new();
-        loop {
-            if existing.exists() {
-                break;
-            }
-            let Some(parent) = existing.parent() else {
+        let mut missing = Vec::new();
+        while !existing.exists() {
+            let (Some(parent), Some(name)) = (existing.parent(), existing.file_name()) else {
                 break;
             };
-            let Some(name) = existing.file_name() else {
-                break;
-            };
-            rest = PathBuf::from(name).join(rest);
+            missing.push(name.to_os_string());
             existing = parent;
         }
 
-        let canonical_existing = existing
+        let mut resolved = existing
             .canonicalize()
             .unwrap_or_else(|_| existing.to_path_buf());
-        let resolved = if rest.as_os_str().is_empty() {
-            canonical_existing
-        } else {
-            canonical_existing.join(rest)
-        };
+        for name in missing.into_iter().rev() {
+            resolved.push(name);
+        }
 
         if !resolved.starts_with(&self.root) {
             return Err(format!("{path} is outside the workspace").into());
