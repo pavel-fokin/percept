@@ -91,10 +91,25 @@ pub enum MapsCommand {
     RemoveEdge(EdgeArgs),
 }
 
+/// How `maps show` and `maps list` print a map.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum Format {
+    /// One JSON object per line - map, then node, then edge.
+    #[default]
+    Json,
+    /// The rendered Markdown, as written to `.percept/<map>.md`.
+    #[value(alias = "markdown")]
+    Md,
+}
+
 #[derive(Args)]
 pub struct ShowMapArgs {
     /// The map's name, as `maps list` prints it.
     map: String,
+    /// `json` (default) for one JSON object per line, `md` for the
+    /// rendered Markdown.
+    #[arg(long, value_enum, default_value_t = Format::Json)]
+    format: Format,
     /// Repeatable. Keep only nodes of any of these kinds, and the edges
     /// between them.
     #[arg(long)]
@@ -131,6 +146,10 @@ pub struct ListMapsArgs {
     /// Fold every project's events instead of only this one's.
     #[arg(long)]
     all_projects: bool,
+    /// `json` (default) for one JSON object per line, `md` for a
+    /// Markdown table.
+    #[arg(long, value_enum, default_value_t = Format::Json)]
+    format: Format,
 }
 
 /// What every map change names: the map, and the events it was drawn
@@ -427,6 +446,16 @@ fn print_lines(lines: impl Iterator<Item = String>) -> Result<(), Box<dyn std::e
     out.flush().or_else(stop_if_pipe_closed)
 }
 
+/// Writes one block of text to stdout verbatim - a rendered Markdown
+/// map already carries its own newlines.
+fn print_text(text: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let mut out = io::BufWriter::new(io::stdout().lock());
+    if let Err(e) = write!(out, "{text}") {
+        return stop_if_pipe_closed(e);
+    }
+    out.flush().or_else(stop_if_pipe_closed)
+}
+
 /// The scope `maps list` and `maps show` fold: every project's events
 /// with `--all-projects`, else only `root`'s.
 fn scope(all_projects: bool, root: &Path) -> percept::Scope {
@@ -449,7 +478,29 @@ pub fn maps_list(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut maps = Map::fold_all(&scope(args.all_projects, project), &log.load()?)?;
     maps.push(code::build(tree)?);
-    print_lines(maps.iter().map(store::encode_map))
+    match args.format {
+        Format::Json => print_lines(maps.iter().map(store::encode_map)),
+        Format::Md => print_text(&list_markdown(&maps)),
+    }
+}
+
+/// `maps list` as a Markdown table - one row per map.
+fn list_markdown(maps: &[Map]) -> String {
+    use std::fmt::Write as _;
+
+    let mut out = String::from("| map | purpose | nodes | edges |\n|---|---|---|---|\n");
+    for map in maps {
+        let schema = map.schema();
+        let _ = writeln!(
+            out,
+            "| {} | {} | {} | {} |",
+            schema.name,
+            schema.purpose,
+            map.nodes().len(),
+            map.edges().len()
+        );
+    }
+    out
 }
 
 /// Prints the map `args.map` names, nodes then edges. `--around` cuts
@@ -492,7 +543,10 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
     if !selection.is_whole() {
         eprintln!("{}", store::encode_fragment(&fragment));
     }
-    print_lines(store::encode_lines(fragment.map()))
+    match args.format {
+        Format::Json => print_lines(store::encode_lines(fragment.map())),
+        Format::Md => print_text(&store::markdown(fragment.map())),
+    }
 }
 
 /// One map change from the shell: `target`'s cited events resolved and

@@ -100,6 +100,26 @@ fn an_outcome_settles_a_task_the_way_a_decision_settles_a_question() {
 }
 
 #[test]
+fn weighed_for_lists_answering_options_but_not_ones_that_restate_the_decision() {
+    let (q, lost, restated, d) = (NodeId::new(), NodeId::new(), NodeId::new(), NodeId::new());
+    let events = [
+        node_added("decisions", q, "question", "Which parser?"),
+        node_added("decisions", lost, "option", "reuse OpenAi"),
+        node_added("decisions", restated, "option", "its own parser"),
+        node_added("decisions", d, "decision", "its own parser"),
+        edge_added("decisions", ANSWERS, lost, q),
+        edge_added("decisions", ANSWERS, restated, q),
+        edge_added("decisions", RESOLVES, d, q),
+    ];
+    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+
+    assert_eq!(
+        map.weighed_for(q).iter().map(|n| n.id).collect::<Vec<_>>(),
+        vec![lost]
+    );
+}
+
+#[test]
 fn a_resolves_edge_between_other_kinds_settles_nothing() {
     let (o, d) = (NodeId::new(), NodeId::new());
     let events = [

@@ -77,6 +77,9 @@ pub const SUPERSEDES: &str = "supersedes";
 /// The edge kind from a decision to the question it settles.
 pub const RESOLVES: &str = "resolves";
 
+/// The edge kind from an option to the question it was weighed for.
+pub const ANSWERS: &str = "answers";
+
 /// The edge kind from a task to the task it must land before.
 pub const BLOCKS: &str = "blocks";
 
@@ -104,7 +107,7 @@ pub const DECISIONS: Schema = Schema {
     name: "decisions",
     purpose: "what was asked, what was chosen, and why, so a settled question is not reopened",
     node_kinds: &[QUESTION, "option", "evidence", DECISION],
-    edge_kinds: &["answers", "supports", "contradicts", RESOLVES, SUPERSEDES],
+    edge_kinds: &[ANSWERS, "supports", "contradicts", RESOLVES, SUPERSEDES],
     headline_kinds: &[QUESTION, DECISION],
     settlement: Some(Settlement {
         by: DECISION,
@@ -606,6 +609,29 @@ impl Map {
             .iter()
             .filter(|edge| edge.kind == BLOCKS && edge.to == task)
             .filter_map(|edge| self.node(edge.from))
+            .collect()
+    }
+
+    /// The options with an `answers` edge to `question`, in map order -
+    /// the alternatives weighed against its decision. Older entries
+    /// recorded the winning choice, and decisions it later superseded,
+    /// as options too; those are dropped, so a caller is never handed an
+    /// "alternative" that is really the decision under another kind.
+    pub fn weighed_for(&self, question: NodeId) -> Vec<&Node> {
+        let mut restated: HashSet<&str> = HashSet::new();
+        for decision in self.settled_by(question) {
+            restated.insert(decision.name.as_str());
+            restated.extend(
+                self.predecessors(decision.id)
+                    .iter()
+                    .map(|node| node.name.as_str()),
+            );
+        }
+        self.edges
+            .iter()
+            .filter(|edge| edge.kind == ANSWERS && edge.to == question)
+            .filter_map(|edge| self.node(edge.from))
+            .filter(|node| node.kind == OPTION && !restated.contains(node.name.as_str()))
             .collect()
     }
 

@@ -28,7 +28,10 @@ either direction; `--kind` then keeps only those kinds. `--since` keeps
 what was added from that instant, and cuts after `--around`, so the two
 together read as "what changed near this node". A filtered read prints
 one line on stderr: how many nodes and edges were shown of the total,
-and how many edges cross the cut. stdout stays JSONL.
+and how many edges cross the cut. stdout is JSONL by default; `--format
+md` prints the rendered Markdown instead - the same text as
+`.percept/<map>.md`, cut to the fragment. `percept maps list --format
+md` prints the catalogue as a table.
 
 The model's `read_map` tool takes the same `around`, `depth`, and
 `kinds`, and returns the same counts as its first line. A count says
