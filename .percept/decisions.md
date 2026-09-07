@@ -82,3 +82,7 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "Does install.sh copy the binary into ~/.percept/bin or symlink it?" (model)
   decision "Copy it with install -m 755, and also into ~/.local/bin or ~/bin when ~/.percept/bin is not on PATH" (model): why: "the binary must sit outside target/ for is_dev_build to tell an install from a cargo build (01a07195); the extra copy into a PATH dir lets percept resolve without editing PATH"
   source 01a076e9-5ddd-7221-90f5-4b23e7b57850
+
+## 2026-09-06 · 01a0786b-a16d-7c52-9aaa-d4eb9b4ce16a
+- "Which of a project's events should percept-tui replay as its own conversation?" (model)
+  decision "conversational events count only from percept-tui's own source; a map mutation counts from any source in the project" (model): why: "to_messages already replayed another client's message.received/tool.called as this session's own dialogue, since agent-hook.py stamps the same event kinds for claude-code and codex; filtering self.events by source.name alone would also drop other sources' node/edge events from the fold, hiding decisions the plan skill recorded during a Claude Code session"
