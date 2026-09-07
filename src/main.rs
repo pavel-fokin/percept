@@ -19,6 +19,8 @@ mod store;
 mod testing;
 #[cfg(test)]
 mod tests;
+#[allow(dead_code, unused_imports)]
+mod tools;
 mod tui;
 
 use app::{App, MapShape};
