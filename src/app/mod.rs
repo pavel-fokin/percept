@@ -5,8 +5,9 @@ use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError, Sour
 use crate::shared::Timestamp;
 
 /// Most tool calls one user turn may make, unless `with_tool_cap` says
-/// otherwise. At the cap the next request goes out with no tools, so
-/// the model has to answer with text.
+/// otherwise. At the cap the next request goes out with no tools and a
+/// note that the budget is spent, so the model answers with text
+/// instead of reaching for a tool that is no longer there.
 const MAX_TOOL_CALLS: usize = 5;
 
 /// How many of the most recent events the model reads as prompt text.
@@ -548,9 +549,20 @@ impl App {
             history.chain(&self.events[turn_start..]),
         ));
 
+        // Dropping the tools is not enough on its own: a model mid-turn
+        // reaches for one anyway, `begin_tool` stops the turn on it, and
+        // the reply is empty. Say the budget is spent so it answers.
         let tools = if self.chat.capabilities().tool_use && !self.tools_exhausted() {
             self.tools.iter().map(|tool| tool.spec()).collect()
         } else {
+            if self.tools_exhausted() {
+                messages.push(percept::Message::Text {
+                    role: Actor::System,
+                    content: "This turn's tool budget is spent. You cannot call any more \
+                              tools now. Answer with what you have."
+                        .to_string(),
+                });
+            }
             Vec::new()
         };
 
