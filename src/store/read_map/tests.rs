@@ -83,33 +83,60 @@ fn read(args: &str) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error>
 }
 
 #[test]
-fn a_read_opens_with_the_counts_then_the_nodes_then_the_edges() {
+fn a_read_opens_with_the_schema_then_the_counts_then_the_nodes_then_the_edges() {
     let rows = read(r#"{"map":"decisions","around":{"kind":"question","name":"Where?"}}"#).unwrap();
 
-    assert_eq!(rows[0]["shown_nodes"], 3);
-    assert_eq!(rows[0]["total_nodes"], 4);
-    assert_eq!(rows[0]["boundary_edges"], 1);
-    assert!(rows[0].get("note").is_none());
-    assert_eq!(rows.len(), 1 + 3 + 2);
-    assert!(rows[1..=3].iter().all(|row| row["sources"].is_array()));
-    assert!(rows[4..].iter().all(|row| row["edge"].is_string()));
+    assert_eq!(rows[0]["schema"], "decisions");
+    assert_eq!(rows[1]["shown_nodes"], 3);
+    assert_eq!(rows[1]["total_nodes"], 4);
+    assert_eq!(rows[1]["boundary_edges"], 1);
+    assert!(rows[1].get("note").is_none());
+    assert_eq!(rows.len(), 1 + 1 + 3 + 2);
+    assert!(rows[2..=4].iter().all(|row| row["sources"].is_array()));
+    assert!(rows[5..].iter().all(|row| row["edge"].is_string()));
+}
+
+#[test]
+fn the_schema_line_glosses_every_kind_so_a_selector_is_not_a_guess() {
+    let rows = read(r#"{"map":"decisions"}"#).unwrap();
+
+    let option = rows[0]["node_kinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|kind| kind["name"] == "option")
+        .unwrap();
+    assert!(option["gloss"]
+        .as_str()
+        .unwrap()
+        .contains("weighed and lost"));
+    let resolves = rows[0]["edge_kinds"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|kind| kind["name"] == "resolves")
+        .unwrap();
+    assert!(resolves["gloss"]
+        .as_str()
+        .unwrap()
+        .contains("the question it settles"));
 }
 
 #[test]
 fn an_empty_cut_of_a_full_map_is_not_an_empty_map() {
     let rows = read(r#"{"map":"decisions","since":"2999-01-01T00:00:00Z"}"#).unwrap();
 
-    assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["shown_nodes"], 0);
-    assert_eq!(rows[0]["total_nodes"], 4);
-    assert!(rows[0].get("note").is_none());
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[1]["shown_nodes"], 0);
+    assert_eq!(rows[1]["total_nodes"], 4);
+    assert!(rows[1].get("note").is_none());
 }
 
 #[test]
 fn depth_without_around_is_a_whole_read_not_a_wasted_call() {
     let rows = read(r#"{"map":"decisions","depth":2}"#).unwrap();
 
-    assert_eq!(rows[0]["shown_nodes"], 4);
+    assert_eq!(rows[1]["shown_nodes"], 4);
 }
 
 #[test]
@@ -125,7 +152,7 @@ fn around_on_an_empty_map_still_says_nothing_is_recorded() {
 fn since_takes_the_shorthand_the_cli_takes() {
     let rows = read(r#"{"map":"decisions","since":"1d"}"#).unwrap();
 
-    assert_eq!(rows[0]["shown_nodes"], 4, "everything was added just now");
+    assert_eq!(rows[1]["shown_nodes"], 4, "everything was added just now");
 }
 
 #[test]

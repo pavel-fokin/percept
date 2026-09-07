@@ -202,6 +202,46 @@ pub fn encode_map(map: &Map) -> String {
 }
 
 #[derive(Serialize)]
+struct KindLine {
+    name: &'static str,
+    gloss: &'static str,
+}
+
+impl KindLine {
+    fn of(kinds: &'static [crate::percept::Kind]) -> Vec<Self> {
+        kinds
+            .iter()
+            .map(|kind| Self {
+                name: kind.name,
+                gloss: kind.gloss,
+            })
+            .collect()
+    }
+}
+
+#[derive(Serialize)]
+struct SchemaLine {
+    schema: &'static str,
+    purpose: &'static str,
+    node_kinds: Vec<KindLine>,
+    edge_kinds: Vec<KindLine>,
+}
+
+/// One line describing a map's kinds, each with the gloss it carries on
+/// its `Schema` - what `read_map` returns before the fragment, so the
+/// model meets `package` or `option` with its meaning attached and does
+/// not guess a selector from a name alone.
+pub fn encode_schema(schema: &'static crate::percept::Schema) -> String {
+    serde_json::to_string(&SchemaLine {
+        schema: schema.name,
+        purpose: schema.purpose,
+        node_kinds: KindLine::of(schema.node_kinds),
+        edge_kinds: KindLine::of(schema.edge_kinds),
+    })
+    .expect("SchemaLine always serializes")
+}
+
+#[derive(Serialize)]
 struct FragmentLine<'a> {
     map: &'static str,
     shown_nodes: usize,

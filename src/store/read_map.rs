@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use crate::percept::{MapReader, NodeRef, Selection, Tool, ToolOutput, ToolSpec};
 use crate::store::map::NodeRefArgs;
-use crate::store::{encode_fragment, encode_lines, optional_time};
+use crate::store::{encode_fragment, encode_lines, encode_schema, optional_time};
 
 /// The `read_map` tool: one map, whole or cut to a fragment, as JSONL
 /// with event ids on every node and edge. Offered when the prompt does
@@ -24,11 +24,13 @@ const NAME: &str = "read_map";
 
 const DESCRIPTION: &str = "Read one cognitive map by name, whole or cut to \
     a fragment: around one node to a depth, since an instant, of some \
-    kinds. The maps are decisions, tasks, and code - files, the symbols \
-    they define, and what imports what, walked fresh from the working \
-    tree. Prefer this over grep for code structure. Returns JSONL: first \
-    a line counting what was shown of the whole and how many edges cross \
-    the cut, then every node, then every edge, each with the event ids it \
+    kinds. The maps are decisions, tasks, and code - the last walked \
+    fresh from the working tree. Prefer this over grep for code \
+    structure. Returns JSONL: first a line naming the map's node and edge \
+    kinds, each with one line on what it is - read it before choosing an \
+    `around` selector, since a kind's name alone can mislead. Then a line \
+    counting what was shown of the whole and how many edges cross the \
+    cut, then every node, then every edge, each with the event ids it \
     cites. A crossing edge is where to widen when an exception or a \
     contradiction could change the answer. Open a map before answering \
     from it or revising it; what the conversation shows of a map may be \
@@ -91,7 +93,12 @@ impl Tool for ReadMap {
         };
         // `select` refuses `since` on the code map - it has no history.
         let fragment = self.maps.read(&args.map)?.select(&selection)?;
-        let lines = std::iter::once(encode_fragment(&fragment)).chain(encode_lines(fragment.map()));
+        let lines = [
+            encode_schema(fragment.map().schema()),
+            encode_fragment(&fragment),
+        ]
+        .into_iter()
+        .chain(encode_lines(fragment.map()));
         Ok(ToolOutput::text(lines.collect::<Vec<_>>().join("\n")))
     }
 }
