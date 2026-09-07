@@ -106,3 +106,9 @@ Folded from the percept log for this project and rerendered on every write. Chan
 ## 2026-09-07 · 01a07b11-93a4-7431-b374-9c92de8bc643
 - "How does a coding turn learn the project's conventions?" (model)
   decision "AGENTS.md at the checkout root goes into the system prompt every round under PERCEPT_TOOLS=code; absent, nothing is sent" (model): why: "the coding agent wrote banner comments, an overlong subject and skipped review because it never saw the rules; a chat over the log has no tree to follow them in and pays nothing"
+
+## 2026-09-07 · 01a07b15-4bcd-7812-88e6-083ec60104a8
+- "Where is future work tracked?" (model)
+  decision "a tasks map: task and outcome nodes; resolves, blocks and supersedes edges; every task says why" (model): why: "resolves is the word decisions already uses, so a reader learns one vocabulary; a task without a why is a todo nobody can weigh"
+- "Where does a done task go in the tasks render?" (model)
+  decision "a Done section below the open tasks, each with its outcome" (model): why: "findable without a query; the open list stays the part a session reads first"
