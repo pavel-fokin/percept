@@ -243,14 +243,10 @@ impl App {
     /// Opens on what `log` already holds for this project, so the
     /// transcript survives a restart. The log is shared by every
     /// project; another project's events stay in it and out of this
-    /// transcript, though the search tools still reach them. Within
-    /// this project, a conversational event - a message, a thought, a
-    /// tool call - counts only from this writer, so another client's
-    /// dialogue never replays as this one's; a map mutation counts from
-    /// any writer, so a map stays the project's shared history, not
-    /// this client's private view of it. A map that does not fold
-    /// fails here, at open, the way a log line that does not decode
-    /// does - not on the first turn.
+    /// transcript, though the search tools still reach them.
+    /// `belongs_to_transcript` says what counts within this project. A
+    /// map that does not fold fails here, at open, the way a log line
+    /// that does not decode does - not on the first turn.
     pub fn new(
         chat: Arc<dyn percept::Model>,
         catalog: Arc<dyn percept::ModelCatalog>,
