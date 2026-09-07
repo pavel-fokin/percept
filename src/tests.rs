@@ -1,8 +1,13 @@
 use std::fs;
+use std::sync::Arc;
 
 use tempfile::tempdir;
 
-use super::{discover_root, resolve_toolset, Toolset, TUI_SOURCE_NAME};
+use super::{
+    discover_root, resolve_toolset, LogMaps, ReadMap, RoutedMaps, Toolset, TUI_SOURCE_NAME,
+};
+use crate::percept::{MapReader, Tool};
+use crate::testing::{scope, FakeLog};
 
 #[test]
 fn tui_in_a_git_checkout_defaults_to_code_tools() {
@@ -43,6 +48,58 @@ fn explicit_toolset_overrides_client_default() {
 #[test]
 fn unknown_toolset_is_rejected() {
     assert!(resolve_toolset(TUI_SOURCE_NAME, Some("unknown"), true).is_err());
+}
+
+#[test]
+fn routed_maps_walks_the_working_tree_for_the_code_map() {
+    let tree = tempdir().unwrap();
+    fs::write(
+        tree.path().join("lib.rs"),
+        "pub fn answer() -> u32 { 42 }\n",
+    )
+    .unwrap();
+    let maps = RoutedMaps {
+        folded: LogMaps::new(Arc::new(FakeLog::default()), scope()),
+        root: tree.path().to_path_buf(),
+    };
+
+    let code = maps.read("code").unwrap();
+
+    assert!(code
+        .nodes()
+        .iter()
+        .any(|node| node.kind == "file" && node.name == "lib.rs"));
+    assert!(code
+        .nodes()
+        .iter()
+        .any(|node| node.kind == "function" && node.name.ends_with("::answer")));
+}
+
+#[test]
+fn routed_maps_folds_every_other_map_from_the_log() {
+    let maps = RoutedMaps {
+        folded: LogMaps::new(Arc::new(FakeLog::default()), scope()),
+        root: tempdir().unwrap().path().to_path_buf(),
+    };
+
+    assert_eq!(maps.read("decisions").unwrap().nodes().len(), 0);
+    assert!(maps.read("plans").is_err());
+}
+
+#[test]
+fn read_map_refuses_since_on_the_code_map() {
+    let tree = tempdir().unwrap();
+    fs::write(tree.path().join("lib.rs"), "pub fn f() {}\n").unwrap();
+    let tool = ReadMap::new(Arc::new(RoutedMaps {
+        folded: LogMaps::new(Arc::new(FakeLog::default()), scope()),
+        root: tree.path().to_path_buf(),
+    }));
+
+    let Err(err) = tool.run(r#"{"map":"code","since":"1d"}"#) else {
+        panic!("expected an error")
+    };
+
+    assert!(err.to_string().contains("no meaning for"), "{err}");
 }
 
 #[test]

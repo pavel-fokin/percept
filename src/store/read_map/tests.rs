@@ -1,11 +1,17 @@
 use super::*;
 use crate::percept::Event;
+use crate::store::LogMaps;
 use crate::testing::{edge_added, node_added, node_added_at, scope, FakeLog};
+
+/// A `read_map` over the log-folded maps, the way `main` wires it for
+/// every map but `code`.
+fn tool(log: FakeLog) -> ReadMap {
+    ReadMap::new(Arc::new(LogMaps::new(Arc::new(log), scope())))
+}
 
 #[test]
 fn spec_names_the_tool_and_carries_valid_schema_json() {
-    let tool = ReadMap::new(Arc::new(FakeLog::default()), scope());
-    let spec = tool.spec();
+    let spec = tool(FakeLog::default()).spec();
     assert_eq!(spec.name, "read_map");
     let schema: serde_json::Value = serde_json::from_str(spec.parameters).unwrap();
     assert_eq!(schema["type"], "object");
@@ -14,9 +20,7 @@ fn spec_names_the_tool_and_carries_valid_schema_json() {
 #[test]
 fn a_map_reads_as_its_nodes_and_edges() {
     let log = FakeLog::seeded(vec![node_added("decision", "JSONL for the log")]);
-    let out = ReadMap::new(Arc::new(log), scope())
-        .run(r#"{"map":"decisions"}"#)
-        .unwrap();
+    let out = tool(log).run(r#"{"map":"decisions"}"#).unwrap();
     assert!(out.content.contains("decision"));
     assert!(out.content.contains("JSONL for the log"));
     assert!(out.commits.is_empty());
@@ -24,7 +28,7 @@ fn a_map_reads_as_its_nodes_and_edges() {
 
 #[test]
 fn an_empty_map_says_so() {
-    let out = ReadMap::new(Arc::new(FakeLog::default()), scope())
+    let out = tool(FakeLog::default())
         .run(r#"{"map":"decisions"}"#)
         .unwrap();
     assert!(out.content.contains("nothing has been recorded"));
@@ -37,16 +41,13 @@ fn a_node_from_another_project_never_reaches_the_read() {
         "decision",
         "Not this project's",
     )]);
-    let out = ReadMap::new(Arc::new(log), scope())
-        .run(r#"{"map":"decisions"}"#)
-        .unwrap();
+    let out = tool(log).run(r#"{"map":"decisions"}"#).unwrap();
     assert!(out.content.contains("nothing has been recorded"));
 }
 
 #[test]
 fn an_unknown_map_is_an_error() {
-    let tool = ReadMap::new(Arc::new(FakeLog::default()), scope());
-    let Err(err) = tool.run(r#"{"map":"plans"}"#) else {
+    let Err(err) = tool(FakeLog::default()).run(r#"{"map":"plans"}"#) else {
         panic!("expected an error")
     };
     assert!(err.to_string().contains("no map named"));
@@ -54,8 +55,7 @@ fn an_unknown_map_is_an_error() {
 
 #[test]
 fn a_missing_name_is_an_error() {
-    let tool = ReadMap::new(Arc::new(FakeLog::default()), scope());
-    assert!(tool.run("{}").is_err());
+    assert!(tool(FakeLog::default()).run("{}").is_err());
 }
 
 /// A question with its decision, one option, and the evidence for that
@@ -74,7 +74,7 @@ fn weighed_question() -> Vec<Event> {
 }
 
 fn read(args: &str) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error>> {
-    let out = ReadMap::new(Arc::new(FakeLog::seeded(weighed_question())), scope()).run(args)?;
+    let out = tool(FakeLog::seeded(weighed_question())).run(args)?;
     Ok(out
         .content
         .lines()
@@ -114,7 +114,7 @@ fn depth_without_around_is_a_whole_read_not_a_wasted_call() {
 
 #[test]
 fn around_on_an_empty_map_still_says_nothing_is_recorded() {
-    let out = ReadMap::new(Arc::new(FakeLog::default()), scope())
+    let out = tool(FakeLog::default())
         .run(r#"{"map":"decisions","around":{"kind":"question","name":"Where?"}}"#)
         .unwrap();
 

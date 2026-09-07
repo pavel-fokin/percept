@@ -776,6 +776,28 @@ fn select_on_an_empty_map_is_the_empty_map_not_a_missing_node() {
 }
 
 #[test]
+fn since_on_a_derived_map_is_refused_it_has_no_before() {
+    let selection = Selection {
+        since: Some(Timestamp::now()),
+        ..Selection::default()
+    };
+
+    let err = Map::empty(&CODE).select(&selection).err().unwrap();
+
+    assert_eq!(err, MapError::SinceOnDerived("code"));
+}
+
+#[test]
+fn since_on_a_log_folded_map_is_fine() {
+    let selection = Selection {
+        since: Some(Timestamp::now()),
+        ..Selection::default()
+    };
+
+    assert!(Map::empty(&DECISIONS).select(&selection).is_ok());
+}
+
+#[test]
 fn select_walks_around_before_it_keeps_kinds() {
     let question = node_ref("question", "Which language?");
     let kinds = ["evidence".to_string()];
