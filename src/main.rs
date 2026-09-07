@@ -56,10 +56,9 @@ const CLI_SOURCE_NAME: &str = "percept-cli";
 /// `prompt` (the default, today's behaviour), `headlines`, or `tool`.
 const MAPS_VAR: &str = "PERCEPT_MAPS";
 
-/// Names which tools a turn carries: `maps` (the default) for the log
-/// and map tools alone, or `code` to add the file tools, `bash`, the
-/// policy that asks before a write, and a snapshot of the tree per
-/// prompt.
+/// Names which tools a turn carries. The TUI defaults to `code` in a git
+/// checkout and `maps` without one; headless commands always default to
+/// `maps`. Setting this variable overrides the default.
 const TOOLS_VAR: &str = "PERCEPT_TOOLS";
 
 /// Most tool calls a coding turn may make. A coding task reads several
@@ -69,7 +68,7 @@ const CODE_TOOL_CAP: usize = 50;
 
 /// The project's instructions to a coding agent, at the checkout
 /// root: the client-neutral file this repo keeps its own in. Read once
-/// at startup and sent every round under `PERCEPT_TOOLS=code`; a
+/// at startup and sent every round while the coding tools are on; a
 /// project without one gets none.
 const INSTRUCTIONS_FILE: &str = "AGENTS.md";
 
@@ -330,19 +329,48 @@ fn build_catalog() -> Catalog {
     )
 }
 
-/// Which tools `TOOLS_VAR` asks for.
+/// Which tools a turn carries: `Maps` for the log and map tools alone,
+/// `Code` to add the file tools and `bash`. `resolve_toolset` picks one
+/// from the client, `TOOLS_VAR`, and whether a git snapshot is possible.
 enum Toolset {
     Maps,
     Code,
 }
 
-fn build_toolset() -> Result<Toolset, Box<dyn std::error::Error>> {
-    let tools = std::env::var(TOOLS_VAR).unwrap_or_else(|_| "maps".to_string());
-    match tools.as_str() {
+/// The TUI defaults to `Code`, but only where `snapshot_ok` - the code
+/// toolset's undo is a git commit, and a `.percept`-only project has no
+/// repository to make one in. `TOOLS_VAR` overrides the default; an
+/// explicit `code` there is honoured even without a repository, and then
+/// fails later with git's own error.
+fn resolve_toolset(
+    source_name: &str,
+    configured: Option<&str>,
+    snapshot_ok: bool,
+) -> Result<Toolset, Box<dyn std::error::Error>> {
+    let default = if source_name == TUI_SOURCE_NAME && snapshot_ok {
+        "code"
+    } else {
+        "maps"
+    };
+    match configured.unwrap_or(default) {
         "maps" => Ok(Toolset::Maps),
         "code" => Ok(Toolset::Code),
         other => Err(format!("{TOOLS_VAR}={other:?} names no toolset; use maps or code").into()),
     }
+}
+
+fn build_toolset(
+    source: &percept::Source,
+    checkout: &Path,
+) -> Result<Toolset, Box<dyn std::error::Error>> {
+    // A `.git` entry - directory in a clone, file in a linked worktree -
+    // is what `GitSnapshot::open` needs; a `.percept`-only project has none.
+    let snapshot_ok = checkout.join(".git").exists();
+    resolve_toolset(
+        &source.name,
+        std::env::var(TOOLS_VAR).ok().as_deref(),
+        snapshot_ok,
+    )
 }
 
 /// The file tools, over the checkout being worked in - never the main
@@ -374,8 +402,9 @@ fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
 
 /// Both the TUI and `ask` build the same `App` this way, differing only
 /// in the `Source` they stamp and in how they drive its reply stream.
-/// `PERCEPT_TOOLS=code` adds the file tools over `checkout`, with the
-/// policy, cap and snapshot a turn that changes files needs.
+/// The `code` toolset - the TUI's default, or `PERCEPT_TOOLS=code`
+/// elsewhere - adds the file tools over `checkout`, with the policy, cap
+/// and snapshot a turn that changes files needs.
 fn build_app(
     source: percept::Source,
     renderer: Arc<dyn percept::MapRenderer>,
@@ -392,7 +421,7 @@ fn build_app(
         Arc::new(ReviseMap::new(log.clone(), scope.clone())),
         Arc::new(ReadMap::new(log.clone(), scope)),
     ];
-    match build_toolset()? {
+    match build_toolset(&source, checkout)? {
         Toolset::Maps => App::new(model, catalog, log, tools, renderer, map_shape, source),
         Toolset::Code => {
             tools.extend(code_tools(checkout)?);

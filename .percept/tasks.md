@@ -34,3 +34,7 @@ why: "markdown() branches on schema.name for decisions/tasks and falls back to p
 - "send the project's instructions to a coding turn" (model)
   outcome "done in 1f1a9a9: AGENTS.md goes into the system prompt under PERCEPT_TOOLS=code" (model)
   ref: "1f1a9a9"
+- "default the TUI to code tools, not maps-only" (model)
+  outcome "done in 9402950" (model)
+  ref: "9402950"
+  why: "TUI defaults to the code toolset; headless stays maps; PERCEPT_TOOLS overrides either"
