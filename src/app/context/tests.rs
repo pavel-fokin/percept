@@ -38,11 +38,14 @@ fn prompt(actor: Actor, name: &str, tokens: usize) -> Event {
 /// Fills to 100 tokens, cuts back to 50.
 fn history_only() -> Context {
     Context {
-        sections: vec![Section::History(Window {
-            share: 0.5,
-            keep: 0.25,
-            floor: 100,
-        })],
+        sections: vec![Section::History {
+            window: Window {
+                share: 0.5,
+                keep: 0.25,
+                floor: 100,
+            },
+            index: 0,
+        }],
     }
 }
 
@@ -83,11 +86,14 @@ fn a_tool_round_only_appends_to_the_request_so_its_prefix_is_reusable() {
 #[test]
 fn an_old_tool_result_is_cut_to_its_head_while_the_turn_s_own_stays_whole() {
     let context = Context {
-        sections: vec![Section::History(Window {
-            share: 0.5,
-            keep: 0.25,
-            floor: 1000,
-        })],
+        sections: vec![Section::History {
+            window: Window {
+                share: 0.5,
+                keep: 0.25,
+                floor: 1000,
+            },
+            index: 0,
+        }],
     };
     let long = "x".repeat(500);
     let events = vec![
@@ -173,4 +179,32 @@ fn a_reported_context_window_scales_the_marks() {
     };
     let sent = contents(&context.build(view).unwrap().messages);
     assert_eq!(first_word(&sent[0]), "p8");
+}
+
+#[test]
+fn events_just_past_the_window_are_indexed_one_line_each_with_their_ids() {
+    let context = Context {
+        sections: vec![Section::History {
+            window: Window {
+                share: 0.5,
+                keep: 0.25,
+                floor: 100,
+            },
+            index: 3,
+        }],
+    };
+    // Eleven prompts of ten tokens: the window opens on p6, and the
+    // three before it are indexed.
+    let events: Vec<Event> = (0..11)
+        .map(|i| prompt(Actor::User, &format!("p{i}"), 10))
+        .collect();
+
+    let sent = contents(&context.build(view(&events)).unwrap().messages);
+
+    let index = &sent[0];
+    assert!(index.starts_with("Before the messages below"));
+    assert!(!index.contains("p2"));
+    assert!(index.contains(&format!("{} user: p3", events[3].id().as_uuid())));
+    assert!(index.contains("user: p5"));
+    assert_eq!(first_word(&sent[1]), "p6");
 }

@@ -53,8 +53,16 @@ fn tokens(event: &Event) -> usize {
     chars.div_ceil(4)
 }
 
-/// How much of a tool result outside the turn the model still reads.
+/// How much of an event outside the window the model still reads.
 const PREVIEW_CHARS: usize = 120;
+
+/// The first `PREVIEW_CHARS` of `text`, on one line.
+fn head(text: &str) -> String {
+    text.chars()
+        .take(PREVIEW_CHARS)
+        .map(|c| if c == '\n' { ' ' } else { c })
+        .collect()
+}
 
 /// A tool result from an earlier turn, cut to its head with a handle
 /// to the whole. A file read from a past turn is the costliest thing
@@ -65,11 +73,29 @@ fn cut(content: &str, id: EventId) -> String {
     if len <= PREVIEW_CHARS {
         return content.to_string();
     }
-    let head: String = content.chars().take(PREVIEW_CHARS).collect();
     format!(
-        "{head}... [{len} chars; read_event {} opens the whole]",
+        "{}... [{len} chars; read_event {} opens the whole]",
+        head(content),
         id.as_uuid()
     )
+}
+
+/// One line for an event past the window: who, the head of what, and
+/// the id to open it. None for an event the model never sees as a
+/// message.
+fn line(event: &Event) -> Option<String> {
+    let text = match event.payload() {
+        percept::Payload::MessageReceived { content }
+        | percept::Payload::ToolResulted { content } => head(content),
+        percept::Payload::ToolCalled { tool, arguments } => head(&format!("{tool} {arguments}")),
+        _ => return None,
+    };
+    let actor = match event.actor() {
+        Actor::User => "user",
+        Actor::Model => "model",
+        Actor::System => "system",
+    };
+    Some(format!("{} {actor}: {text}", event.id().as_uuid()))
 }
 
 /// How far back history goes in full: a share of the model's context
@@ -125,8 +151,10 @@ pub enum Section {
     /// Every map, each as its schema's purpose line and this shape.
     Maps(MapShape),
     /// The transcript back as far as the window reaches, its tool
-    /// results cut to a head, plus the whole turn in progress.
-    History(Window),
+    /// results cut to a head, plus the whole turn in progress. Before
+    /// it, one line per event for `index` events further back, so the
+    /// model can open with `read_event` what it can no longer see.
+    History { window: Window, index: usize },
 }
 
 /// What `Context::build` needs from `App`'s state, borrowed for the
@@ -219,7 +247,7 @@ impl Context {
                         });
                     }
                 }
-                Section::History(window) => {
+                Section::History { window, index } => {
                     // The turn in progress is never history: a long
                     // tool loop must not evict the question it is
                     // answering.
@@ -227,6 +255,21 @@ impl Context {
                     let window_start = window
                         .start(view.events, view.context_window)
                         .min(turn_start);
+                    let lines: Vec<String> = view.events
+                        [window_start.saturating_sub(*index)..window_start]
+                        .iter()
+                        .filter_map(line)
+                        .collect();
+                    if !lines.is_empty() {
+                        messages.push(percept::Message::Text {
+                            role: Actor::System,
+                            content: format!(
+                                "Before the messages below, oldest first, one line each; \
+                                 read_event opens any by its id:\n{}",
+                                lines.join("\n")
+                            ),
+                        });
+                    }
                     // Percept's own prompts - a `reflect` - are
                     // history the model need not obey. Replayed as
                     // system text they would stand as an instruction

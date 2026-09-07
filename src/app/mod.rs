@@ -24,6 +24,10 @@ const WINDOW: Window = Window {
     floor: 8_000,
 };
 
+/// How many events before the window the model sees as one line each:
+/// a page it can scan for what to open with `read_event`.
+const INDEX_EVENTS: usize = 200;
+
 /// How much of each cognitive map `Context::build` sends every turn.
 /// The map's kinds go in regardless of shape - `revise_map` needs them
 /// to check a change before it commits.
@@ -79,7 +83,10 @@ impl Harness {
                 sections: vec![
                     Section::Instructions,
                     Section::Maps(map_shape),
-                    Section::History(WINDOW),
+                    Section::History {
+                        window: WINDOW,
+                        index: INDEX_EVENTS,
+                    },
                     Section::Time,
                 ],
             },
