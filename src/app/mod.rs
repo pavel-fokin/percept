@@ -59,8 +59,10 @@ pub struct Harness {
 impl Harness {
     /// `tools` and `map_shape` with today's defaults for the rest:
     /// `AllowAll`, `MAX_TOOL_CALLS`, no snapshot, no instructions, the
-    /// standard context - time, instructions, maps, then the last
-    /// `CONTEXT_EVENTS` events.
+    /// standard context - instructions, maps, the last `CONTEXT_EVENTS`
+    /// events, then the time. Stable first: every provider reuses a
+    /// request's prefix when it matches the last one, and a tool round
+    /// only appends, so what changes every round goes last.
     pub fn new(tools: Vec<Arc<dyn percept::Tool>>, map_shape: MapShape) -> Self {
         Self {
             tools,
@@ -70,10 +72,10 @@ impl Harness {
             instructions: None,
             context: Context {
                 sections: vec![
-                    Section::Time,
                     Section::Instructions,
                     Section::Maps(map_shape),
                     Section::History(CONTEXT_EVENTS),
+                    Section::Time,
                 ],
             },
         }

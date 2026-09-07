@@ -600,9 +600,9 @@ fn instructions_go_to_the_model_as_system_text_before_the_maps_every_round() {
     run_one_tool(&mut app, "search_events", "{}");
 
     let sent = model.last_request();
-    // The time, then the instructions, then the decisions map.
-    assert!(sent[1].contains("Commit subjects stay under 72 chars."));
-    assert!(sent[2].starts_with("The decisions map"));
+    // The instructions, then the decisions map; the time goes last.
+    assert!(sent[0].contains("Commit subjects stay under 72 chars."));
+    assert!(sent[1].starts_with("The decisions map"));
 }
 
 #[test]
@@ -950,7 +950,7 @@ fn a_log_longer_than_the_window_sends_only_its_newest_events() {
     // The whole log stays in the transcript the TUI renders.
     assert_eq!(app.events().len(), 26);
     let sent = model.last_request();
-    // The time, one message per map, then the window.
+    // One message per map, then the window, then the time.
     assert_eq!(sent.len(), CONTEXT_EVENTS + 1 + SCHEMAS.len());
     assert!(!sent.contains(&"0".to_string()));
     assert!(sent.contains(&"24".to_string()));
@@ -1019,8 +1019,8 @@ fn a_map_is_sent_with_its_kinds_ahead_of_the_transcript_and_outside_the_window()
 
     let sent = model.last_request();
     assert_eq!(sent.len(), CONTEXT_EVENTS + 1 + SCHEMAS.len());
-    assert_decisions_header(&sent[1]);
-    assert!(sent[1].contains("- decision \"Rust over Go\""));
+    assert_decisions_header(&sent[0]);
+    assert!(sent[0].contains("- decision \"Rust over Go\""));
 }
 
 /// The catalogue line every shape of the decisions map opens with.
@@ -1042,10 +1042,10 @@ fn an_empty_map_is_still_sent_with_its_kinds() {
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    // The time, one message per map, the prompt.
+    // One message per map, the prompt, the time.
     assert_eq!(sent.len(), 2 + SCHEMAS.len());
-    assert!(sent[1].contains("Node kinds: question, option, evidence, decision."));
-    assert!(sent[1].contains("\n(empty:"), "{}", sent[1]);
+    assert!(sent[0].contains("Node kinds: question, option, evidence, decision."));
+    assert!(sent[0].contains("\n(empty:"), "{}", sent[0]);
 }
 
 #[test]
@@ -1060,14 +1060,14 @@ fn a_headlines_map_sends_only_its_headline_nodes() {
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    assert_decisions_header(&sent[1]);
+    assert_decisions_header(&sent[0]);
     assert!(
-        sent[1].contains(
+        sent[0].contains(
             "Its question and decision nodes follow; read_map opens the rest, whole or around one node.\n"
         )
     );
-    assert!(sent[1].contains("- decision \"Rust over Go\""));
-    assert!(!sent[1].contains("benchmarks"));
+    assert!(sent[0].contains("- decision \"Rust over Go\""));
+    assert!(!sent[0].contains("benchmarks"));
 }
 
 #[test]
@@ -1082,10 +1082,10 @@ fn a_tool_shape_map_sends_only_its_size() {
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    assert_decisions_header(&sent[1]);
-    assert!(sent[1].contains("It holds 2 nodes and 0 edges, last changed "));
-    assert!(sent[1].ends_with("\nread_map shows it."));
-    assert!(!sent[1].contains("Rust over Go"));
+    assert_decisions_header(&sent[0]);
+    assert!(sent[0].contains("It holds 2 nodes and 0 edges, last changed "));
+    assert!(sent[0].ends_with("\nread_map shows it."));
+    assert!(!sent[0].contains("Rust over Go"));
 }
 
 #[test]
@@ -1097,7 +1097,7 @@ fn a_map_header_carries_its_purpose_size_and_last_change() {
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    assert!(sent[1].starts_with(&format!(
+    assert!(sent[0].starts_with(&format!(
         "The decisions map: {}. It holds 1 nodes and 0 edges, last changed {changed}. Node kinds:",
         percept::DECISIONS.purpose
     )));
@@ -1111,9 +1111,9 @@ fn an_empty_map_header_says_it_holds_nothing_yet() {
 
     let sent = model.last_request();
     assert!(
-        sent[1].contains(". It holds nothing yet. Node kinds:"),
+        sent[0].contains(". It holds nothing yet. Node kinds:"),
         "{}",
-        sent[1]
+        sent[0]
     );
 }
 
@@ -1194,7 +1194,7 @@ fn a_log_shorter_than_the_window_sends_all_of_it() {
 
     let _ = app.submit("now".to_string()).unwrap();
 
-    // The time, one message per map, three events, the prompt.
+    // One message per map, three events, the prompt, the time.
     assert_eq!(model.last_request().len(), 5 + SCHEMAS.len());
 }
 
@@ -1210,7 +1210,7 @@ fn a_model_called_event_never_reaches_the_next_request() {
     let _ = app.submit("second".to_string()).unwrap();
 
     let sent = model.last_request();
-    // The time, one message per map, "first", "ok", "second" - the
+    // One message per map, "first", "ok", "second", the time - the
     // model.called event between "ok" and "second" is never one of
     // them.
     assert_eq!(sent.len(), 4 + SCHEMAS.len());

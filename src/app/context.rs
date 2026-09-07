@@ -38,7 +38,8 @@ fn is_percepts_prompt(event: &Event) -> bool {
 /// membership are data, so a new purpose is a new list, not a new
 /// function.
 pub enum Section {
-    /// The current time, for `since` on the tools.
+    /// The current time, for `since` on the tools. It changes every
+    /// round, so it goes after everything a provider could cache.
     Time,
     /// The harness's instructions as system text.
     Instructions,
@@ -178,3 +179,6 @@ impl Context {
         })
     }
 }
+
+#[cfg(test)]
+mod tests;
