@@ -41,34 +41,36 @@ fn link(map: &mut Map, kind: &str, from: (&str, &str), to: (&str, &str)) {
     .unwrap();
 }
 
-fn heading(id: EventId) -> String {
-    format!("{} \u{b7} {}", id.minted_at().unwrap().date(), id.as_uuid())
-}
-
 fn head() -> String {
     format!("# decisions\n\n{PREAMBLE} {DECISIONS_GUIDE}\n")
 }
 
+fn tasks_head() -> String {
+    format!("# tasks\n\n{PREAMBLE} {TASKS_GUIDE}\n")
+}
+
+/// A `## contents` block: one `- "name" · date` line per entry.
+fn contents(entries: &[(&str, EventId)]) -> String {
+    let mut out = "\n## contents\n".to_string();
+    for (name, id) in entries {
+        out.push_str(&format!(
+            "- {name:?} \u{b7} {}\n",
+            id.minted_at().unwrap().date()
+        ));
+    }
+    out
+}
+
 #[test]
 fn an_empty_decisions_map_renders_the_preamble_and_the_empty_notice() {
-    let text = markdown(&Map::empty(&DECISIONS));
-
     assert_eq!(
-        text,
-        "# decisions\n\
-         \n\
-         Folded from the percept log for this project and rerendered on every write. \
-         Change it with `percept maps`, not by hand. Questions in the order they were \
-         raised, grouped under the prompt that raised them, each with its decision. \
-         Options and evidence: `percept maps show decisions --around 'question:<name>'`. \
-         What changed lately: `percept maps show decisions --since 1d`.\n\
-         \n\
-         (empty: nothing has been recorded here yet.)\n"
+        markdown(&Map::empty(&DECISIONS)),
+        format!("{}\n(empty: nothing has been recorded here yet.)\n", head())
     );
 }
 
 #[test]
-fn questions_group_under_the_prompt_that_raised_them_in_first_seen_order() {
+fn questions_render_flat_at_h2_in_first_seen_order() {
     let mut map = Map::empty(&DECISIONS);
     let (first, second) = (EventId::new(), EventId::new());
     add(
@@ -117,20 +119,71 @@ fn questions_group_under_the_prompt_that_raised_them_in_first_seen_order() {
     );
 
     let expected = format!(
-        "{}\n\
-         ## {}\n\
-         - \"Where does the event log live?\"\n\
-         \x20 decision \"one log under ~/.percept\": why: \"PERCEPT_HOME also holds the binary\"\n\
+        "{}{}\n\
+         ## \"Where does the event log live?\"\n\
          \n\
-         ## {}\n\
-         - \"How is a decision corrected?\"\n\
-         \x20 decision \"add the new decision with a supersedes edge\": why: \"the old landmark stays one hop away\"\n",
+         - decision \"one log under ~/.percept\"\n\
+         \x20 why: \"PERCEPT_HOME also holds the binary\"\n\
+         \n\
+         ## \"How is a decision corrected?\"\n\
+         \n\
+         - decision \"add the new decision with a supersedes edge\"\n\
+         \x20 why: \"the old landmark stays one hop away\"\n",
         head(),
-        heading(first),
-        heading(second)
+        contents(&[
+            ("Where does the event log live?", first),
+            ("How is a decision corrected?", second),
+        ]),
     );
 
     assert_eq!(markdown(&map), expected);
+}
+
+#[test]
+fn the_contents_list_names_every_question_with_its_raising_date() {
+    let mut map = Map::empty(&DECISIONS);
+    let prompt = EventId::new();
+    for name in ["Which model?", "Where is the key?", "What is the URL?"] {
+        add(&mut map, "question", name, None, &[prompt], Actor::User);
+    }
+
+    let text = markdown(&map);
+
+    assert!(text.contains(&format!(
+        "\n## contents\n\
+         - \"Which model?\" \u{b7} {date}\n\
+         - \"Where is the key?\" \u{b7} {date}\n\
+         - \"What is the URL?\" \u{b7} {date}\n\
+         \n## \"Which model?\"\n",
+        date = prompt.minted_at().unwrap().date()
+    )));
+}
+
+#[test]
+fn a_questions_own_properties_render_under_its_heading() {
+    let mut map = Map::empty(&DECISIONS);
+    let source = EventId::new();
+    add(
+        &mut map,
+        "question",
+        "How should X integrate?",
+        Some("not decided; three models sketched"),
+        &[source],
+        Actor::User,
+    );
+
+    assert_eq!(
+        markdown(&map),
+        format!(
+            "{}{}\n\
+             ## \"How should X integrate?\"\n\
+             \n\
+             why: \"not decided; three models sketched\"\n\
+             - open\n",
+            head(),
+            contents(&[("How should X integrate?", source)]),
+        )
+    );
 }
 
 #[test]
@@ -149,16 +202,19 @@ fn a_question_without_a_decision_is_open() {
         markdown(&map),
         format!(
             "{}\n\
-             ## uncited\n\
-             - \"Which key accepts a suggestion?\"\n\
-             \x20 open\n",
+             ## contents\n\
+             - \"Which key accepts a suggestion?\" \u{b7} uncited\n\
+             \n\
+             ## \"Which key accepts a suggestion?\"\n\
+             \n\
+             - open\n",
             head()
         )
     );
 }
 
 #[test]
-fn a_superseding_decision_settles_the_question_its_predecessor_resolved() {
+fn a_superseding_decision_shows_its_predecessor_as_was() {
     let mut map = Map::empty(&DECISIONS);
     let source = EventId::new();
     add(
@@ -201,13 +257,13 @@ fn a_superseding_decision_settles_the_question_its_predecessor_resolved() {
     assert_eq!(
         markdown(&map),
         format!(
-            "{}\n\
-             ## {}\n\
-             - \"Which model is default?\"\n\
-             \x20 decision \"gemma4 by default\"\n\
+            "{}{}\n\
+             ## \"Which model is default?\"\n\
+             \n\
+             - decision \"gemma4 by default\"\n\
              \x20 was \"gpt3 by default\"\n",
             head(),
-            heading(source)
+            contents(&[("Which model is default?", source)]),
         )
     );
 }
@@ -239,20 +295,20 @@ fn a_supersession_chain_lists_every_predecessor_nearest_first() {
     assert_eq!(
         markdown(&map),
         format!(
-            "{}\n\
-             ## {}\n\
-             - \"Which model?\"\n\
-             \x20 decision \"C\"\n\
+            "{}{}\n\
+             ## \"Which model?\"\n\
+             \n\
+             - decision \"C\"\n\
              \x20 was \"B\"\n\
              \x20 was \"A\"\n",
             head(),
-            heading(source)
+            contents(&[("Which model?", source)]),
         )
     );
 }
 
 #[test]
-fn a_decision_citing_another_prompt_than_its_question_names_it() {
+fn a_decision_citing_a_different_prompt_than_its_question_names_the_source() {
     let mut map = Map::empty(&DECISIONS);
     let (raised, settled) = (EventId::new(), EventId::new());
     add(
@@ -281,20 +337,20 @@ fn a_decision_citing_another_prompt_than_its_question_names_it() {
     assert_eq!(
         markdown(&map),
         format!(
-            "{}\n\
-             ## {}\n\
-             - \"Which model?\"\n\
-             \x20 decision \"gemma4\"\n\
+            "{}{}\n\
+             ## \"Which model?\"\n\
+             \n\
+             - decision \"gemma4\"\n\
              \x20 source {}\n",
             head(),
-            heading(raised),
+            contents(&[("Which model?", raised)]),
             settled.as_uuid()
         )
     );
 }
 
 #[test]
-fn a_model_written_node_is_marked() {
+fn a_model_written_question_is_marked() {
     let mut map = Map::empty(&DECISIONS);
     let source = EventId::new();
     add(
@@ -309,18 +365,19 @@ fn a_model_written_node_is_marked() {
     assert_eq!(
         markdown(&map),
         format!(
-            "{}\n\
-             ## {}\n\
-             - \"Which key accepts a suggestion?\" (model)\n\
-             \x20 open\n",
+            "{}{}\n\
+             ## \"Which key accepts a suggestion?\" (model)\n\
+             \n\
+             - open\n",
             head(),
-            heading(source)
+            contents(&[("Which key accepts a suggestion?", source)])
+                .replace(" \u{b7} ", " (model) \u{b7} "),
         )
     );
 }
 
 #[test]
-fn a_decision_resolving_no_question_is_its_own_bullet() {
+fn a_decision_resolving_no_question_gets_its_own_h2() {
     let mut map = Map::empty(&DECISIONS);
     let source = EventId::new();
     add(
@@ -335,13 +392,135 @@ fn a_decision_resolving_no_question_is_its_own_bullet() {
     assert_eq!(
         markdown(&map),
         format!(
-            "{}\n\
-             ## {}\n\
-             - decision \"gemma4 by default\" (model): why: \"the local model\"\n",
+            "{}{}\n\
+             ## \"gemma4 by default\" (model)\n\
+             \n\
+             - decision \"gemma4 by default\" (model)\n\
+             \x20 why: \"the local model\"\n",
             head(),
-            heading(source)
+            contents(&[("gemma4 by default", source)]).replace(" \u{b7} ", " (model) \u{b7} "),
         )
     );
+}
+
+#[test]
+fn a_question_lists_the_options_weighed_against_its_decision() {
+    let mut map = Map::empty(&DECISIONS);
+    let source = EventId::new();
+    add(
+        &mut map,
+        "question",
+        "How is the provider built?",
+        None,
+        &[source],
+        Actor::User,
+    );
+    add(
+        &mut map,
+        "decision",
+        "its own wire parser",
+        Some("a different SSE shape"),
+        &[source],
+        Actor::User,
+    );
+    link(
+        &mut map,
+        "resolves",
+        ("decision", "its own wire parser"),
+        ("question", "How is the provider built?"),
+    );
+    add(
+        &mut map,
+        "option",
+        "reuse the OpenAi struct",
+        Some("the wire shapes differ"),
+        &[source],
+        Actor::User,
+    );
+    link(
+        &mut map,
+        "answers",
+        ("option", "reuse the OpenAi struct"),
+        ("question", "How is the provider built?"),
+    );
+
+    assert!(markdown(&map).contains(
+        "- decision \"its own wire parser\"\n\
+         \x20 why: \"a different SSE shape\"\n\
+         - weighed \"reuse the OpenAi struct\"\n\
+         \x20 why: \"the wire shapes differ\"\n"
+    ));
+}
+
+#[test]
+fn an_option_that_repeats_the_winning_decision_is_not_listed_as_weighed() {
+    let mut map = Map::empty(&DECISIONS);
+    let source = EventId::new();
+    add(
+        &mut map,
+        "question",
+        "Which parser?",
+        None,
+        &[source],
+        Actor::User,
+    );
+    add(
+        &mut map,
+        "decision",
+        "its own parser",
+        None,
+        &[source],
+        Actor::User,
+    );
+    link(
+        &mut map,
+        "resolves",
+        ("decision", "its own parser"),
+        ("question", "Which parser?"),
+    );
+    add(
+        &mut map,
+        "option",
+        "its own parser",
+        Some("older data"),
+        &[source],
+        Actor::User,
+    );
+    link(
+        &mut map,
+        "answers",
+        ("option", "its own parser"),
+        ("question", "Which parser?"),
+    );
+
+    assert!(!markdown(&map).contains("- weighed "));
+}
+
+#[test]
+fn an_option_with_no_answers_edge_stays_out_of_the_render() {
+    let mut map = Map::empty(&DECISIONS);
+    let source = EventId::new();
+    add(
+        &mut map,
+        "question",
+        "Which model?",
+        None,
+        &[source],
+        Actor::User,
+    );
+    add(
+        &mut map,
+        "option",
+        "a loose option",
+        Some("no edge"),
+        &[source],
+        Actor::User,
+    );
+
+    let text = markdown(&map);
+
+    assert!(!text.contains("- weighed "));
+    assert!(!text.contains("a loose option"));
 }
 
 #[test]
@@ -364,7 +543,9 @@ fn a_resolves_edge_between_the_wrong_kinds_settles_nothing() {
         ("option", "gemma4"),
     );
 
-    assert!(markdown(&map).contains("- decision \"gemma4 by default\"\n"));
+    assert!(
+        markdown(&map).contains("## \"gemma4 by default\"\n\n- decision \"gemma4 by default\"\n")
+    );
 }
 
 #[test]
@@ -389,7 +570,7 @@ fn a_map_with_no_question_or_decision_says_so() {
 }
 
 #[test]
-fn open_tasks_group_under_their_prompt_with_what_they_wait_on_and_done_ones_follow() {
+fn open_tasks_render_flat_with_why_and_blockers_then_done() {
     let mut map = Map::empty(&TASKS);
     let (first, second) = (EventId::new(), EventId::new());
     add(
@@ -438,22 +619,24 @@ fn open_tasks_group_under_their_prompt_with_what_they_wait_on_and_done_ones_foll
     );
 
     let expected = format!(
-        "# tasks\n\
+        "{}{}\n\
+         ## \"cancel a turn without quitting\"\n\
          \n\
-         {PREAMBLE} {TASKS_GUIDE}\n\
+         why: \"Esc drops the session\"\n\
+         waits on \"cancellable reply streams\"\n\
          \n\
-         ## {}\n\
-         - \"cancel a turn without quitting\": why: \"Esc drops the session\"\n\
-         \x20 waits on \"cancellable reply streams\"\n\
+         ## \"cancellable reply streams\"\n\
          \n\
-         ## {}\n\
-         - \"cancellable reply streams\": why: \"nothing can stop a stream today\"\n\
+         why: \"nothing can stop a stream today\"\n\
          \n\
          ## done\n\
          - \"send AGENTS.md to a coding turn\" (model)\n\
          \x20 outcome \"done in 1f1a9a9\"\n",
-        heading(first),
-        heading(second)
+        tasks_head(),
+        contents(&[
+            ("cancel a turn without quitting", first),
+            ("cancellable reply streams", second),
+        ]),
     );
 
     assert_eq!(markdown(&map), expected);
@@ -461,12 +644,11 @@ fn open_tasks_group_under_their_prompt_with_what_they_wait_on_and_done_ones_foll
 
 #[test]
 fn an_empty_tasks_map_renders_its_guide_and_the_empty_notice() {
-    let text = markdown(&Map::empty(&TASKS));
-
     assert_eq!(
-        text,
+        markdown(&Map::empty(&TASKS)),
         format!(
-            "# tasks\n\n{PREAMBLE} {TASKS_GUIDE}\n\n(empty: nothing has been recorded here yet.)\n"
+            "{}\n(empty: nothing has been recorded here yet.)\n",
+            tasks_head()
         )
     );
 }

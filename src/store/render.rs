@@ -17,24 +17,24 @@ const PREAMBLE: &str = "Folded from the percept log for this project and rerende
 
 /// What the decisions map adds to the preamble: how the list below
 /// reads and where the detail it leaves out still lives.
-const DECISIONS_GUIDE: &str = "Questions in the order they were raised, grouped under the \
-    prompt that raised them, each with its decision. Options and evidence: `percept maps show \
-    decisions --around 'question:<name>'`. What changed lately: `percept maps show decisions \
-    --since 1d`.";
+const DECISIONS_GUIDE: &str = "A `## contents` list, then every question at `##` in the order it \
+    was raised - its decision, what that decision replaced (`was`), and the alternatives \
+    weighed against it. Evidence and full detail: `percept maps show decisions --around \
+    'question:<name>'`. What changed lately: `percept maps show decisions --since 1d`.";
 
 /// What the tasks map adds to the preamble.
-const TASKS_GUIDE: &str = "Open tasks in the order they were raised, grouped under the \
-    prompt that raised them, each with what it waits on. Done and dropped tasks follow under \
-    `done`, each with its outcome. A task's own history: `percept maps show tasks --around \
-    'task:<name>'`. What changed lately: `percept maps show tasks --since 1d`.";
+const TASKS_GUIDE: &str = "A `## contents` list, then every open task at `##` in the order it \
+    was raised, each with why it matters and what it waits on. Done and dropped tasks follow \
+    under `done`, each with its outcome. A task's own history: `percept maps show tasks \
+    --around 'task:<name>'`. What changed lately: `percept maps show tasks --since 1d`.";
 
 /// `map` as Markdown: a heading and the preamble, then the map's body.
-/// The decisions map renders as a question-keyed list grouped by the
-/// prompt that raised each question - see `push_decisions`; the tasks
-/// map as open tasks grouped the same way, then the done ones - see
-/// `push_tasks`. Every other schema keeps one `## <kind>` section per
-/// node kind that holds a node and a `## edges` section - see
-/// `push_by_kind`. Empty for a map with no nodes, past the preamble.
+/// The decisions map renders as a `## contents` list and then one `##`
+/// per question, first-seen order - see `push_decisions`; the tasks map
+/// the same way, then the done ones - see `push_tasks`. Every other
+/// schema keeps one `## <kind>` section per node kind that holds a node
+/// and a `## edges` section - see `push_by_kind`. Empty for a map with
+/// no nodes, past the preamble.
 pub fn markdown(map: &Map) -> String {
     let schema = map.schema();
     let mut out = format!("# {}\n\n{PREAMBLE}", schema.name);
@@ -115,21 +115,21 @@ fn push_node(out: &mut String, node: &Node) {
     }
 }
 
-/// The decisions map's body: every question, and every decision that
-/// resolves none, grouped under the prompt that raised it - the first
-/// source it cites, which never changes - and listed in the order it
-/// was raised. Under a question: the decision that settles it now, or
-/// `open`; under a decision: what it superseded, as `was`, and the
-/// prompt it cites when that is not the group's.
+/// The decisions map's body: a `## contents` list, then one `##` per
+/// question - and per decision that resolves none - in the order it was
+/// raised, which never changes, so nothing a reader has seen moves.
+/// Under a question: its decision, or `- open`, then the options
+/// weighed against it. Under a decision: its properties one per line,
+/// the prompt it cites, and one `was` line per decision it superseded,
+/// nearest first.
 fn push_decisions(out: &mut String, map: &Map) {
-    // The headlines are the questions and the current decisions; a
+    // The headlines are the questions and the standalone decisions; a
     // decision that settles a question is shown under it, not on its own.
-    let items = map
+    let headlines: Vec<&Node> = map
         .headlines()
-        .filter(|node| node.kind == "question" || !map.settles(node.id));
-
-    let groups = grouped_by_prompt(items);
-    if groups.is_empty() {
+        .filter(|node| node.kind == "question" || !map.settles(node.id))
+        .collect();
+    if headlines.is_empty() {
         let _ = writeln!(
             out,
             "\n(no question or decision yet; {} nodes of other kinds.)",
@@ -138,32 +138,30 @@ fn push_decisions(out: &mut String, map: &Map) {
         return;
     }
 
-    for (key, nodes) in groups {
-        out.push_str("\n## ");
-        push_group_heading(out, key);
-        out.push('\n');
-        for node in nodes {
-            if node.kind == "question" {
-                push_question(out, map, node, key);
-            } else {
-                push_decision_line(out, map, node, "- decision ", key);
-            }
+    push_contents(out, &headlines);
+    for node in headlines {
+        let _ = write!(out, "\n## {}\n\n", marked_name(node));
+        if node.kind == "question" {
+            push_question_body(out, map, node);
+        } else {
+            // A standalone decision's `##` already names it; pass its own
+            // prompt as `raised_by` so it prints no redundant `source`.
+            push_decision(out, map, node, node.sources.first().copied());
         }
     }
 }
 
-/// The tasks map's body: every open task - one no outcome resolves -
-/// grouped under the prompt that raised it, in the order raised, each
-/// with the tasks it waits on; then, under `done`, every settled task
-/// with its outcome, in the order raised. A task never moves within
-/// the open list; settling it is the one move, and the agreed one.
+/// The tasks map's body: a `## contents` list, then one `##` per open
+/// task - one no outcome resolves - in the order it was raised, each
+/// with why it matters and the tasks it waits on; then, under `done`,
+/// every settled task with its outcome. A task never moves in the open
+/// list; settling it is the one move, and the agreed one.
 fn push_tasks(out: &mut String, map: &Map) {
     let (done, open): (Vec<&Node>, Vec<&Node>) = map
         .headlines()
         .partition(|task| !map.settled_by(task.id).is_empty());
 
-    let groups = grouped_by_prompt(open.into_iter());
-    if groups.is_empty() && done.is_empty() {
+    if open.is_empty() && done.is_empty() {
         let _ = writeln!(
             out,
             "\n(no task yet; {} nodes of other kinds.)",
@@ -171,15 +169,14 @@ fn push_tasks(out: &mut String, map: &Map) {
         );
         return;
     }
-    for (key, tasks) in groups {
-        out.push_str("\n## ");
-        push_group_heading(out, key);
-        out.push('\n');
-        for task in tasks {
-            let _ = writeln!(out, "- {}{}", marked_name(task), task.properties_line());
-            for blocker in map.blocked_by(task.id) {
-                let _ = writeln!(out, "  waits on {}", marked_name(blocker));
-            }
+    if !open.is_empty() {
+        push_contents(out, &open);
+    }
+    for task in open {
+        let _ = write!(out, "\n## {}\n\n", marked_name(task));
+        push_props(out, task, "");
+        for blocker in map.blocked_by(task.id) {
+            let _ = writeln!(out, "waits on {}", marked_name(blocker));
         }
     }
     if !done.is_empty() {
@@ -187,87 +184,66 @@ fn push_tasks(out: &mut String, map: &Map) {
         for task in done {
             let _ = writeln!(out, "- {}", marked_name(task));
             for outcome in map.settled_by(task.id) {
-                let _ = writeln!(
-                    out,
-                    "  outcome {}{}",
-                    marked_name(outcome),
-                    outcome.properties_line()
-                );
+                let _ = writeln!(out, "  outcome {}", marked_name(outcome));
+                push_props(out, outcome, "  ");
             }
         }
     }
 }
 
-/// `items` bucketed by the prompt each cites first - the one that
-/// raised it, which never changes - in first-seen order of both the
-/// prompts and the items under them.
-fn grouped_by_prompt<'a>(
-    items: impl Iterator<Item = &'a Node>,
-) -> Vec<(Option<EventId>, Vec<&'a Node>)> {
-    let mut groups: Vec<(Option<EventId>, Vec<&Node>)> = Vec::new();
-    for item in items {
-        let key = item.sources.first().copied();
-        match groups.iter_mut().find(|(group, _)| *group == key) {
-            Some((_, nodes)) => nodes.push(item),
-            None => groups.push((key, vec![item])),
+/// One `## contents` line per headline - its text and the date its
+/// raising prompt was minted, in first-seen order - the overview a
+/// reader scans before the entries.
+fn push_contents(out: &mut String, headlines: &[&Node]) {
+    out.push_str("\n## contents\n");
+    for node in headlines {
+        let _ = write!(out, "- {}", marked_name(node));
+        match node.sources.first().and_then(|id| id.minted_at()) {
+            Some(at) => {
+                let _ = writeln!(out, " \u{b7} {}", at.date());
+            }
+            None => out.push_str(" \u{b7} uncited\n"),
         }
     }
-    groups
 }
 
-/// A group's heading: the raising prompt's date and id, the id alone
-/// when it isn't a UUIDv7, or `uncited` when the question cites no
-/// source at all.
-fn push_group_heading(out: &mut String, key: Option<EventId>) {
-    let Some(id) = key else {
-        out.push_str("uncited");
-        return;
-    };
-    if let Some(at) = id.minted_at() {
-        let _ = write!(out, "{} \u{b7} ", at.date());
+/// A node's properties, each on its own line under `indent` - a long
+/// `why` reads on a line of its own, never wrapped onto the name.
+fn push_props(out: &mut String, node: &Node, indent: &str) {
+    for (key, value) in &node.properties {
+        let _ = writeln!(out, "{indent}{key}: {value:?}");
     }
-    let _ = write!(out, "{}", id.as_uuid());
 }
 
-/// One question's bullet, then the decision that settles it now - or
-/// `open` when none does.
-fn push_question(out: &mut String, map: &Map, question: &Node, group: Option<EventId>) {
-    let _ = writeln!(
-        out,
-        "- {}{}",
-        marked_name(question),
-        question.properties_line()
-    );
+/// The body under a question's `##`: the question's own properties, its
+/// decision - or `- open` when none settles it - then one `- weighed`
+/// bullet per alternative that lost, each with its own `why`.
+fn push_question_body(out: &mut String, map: &Map, question: &Node) {
+    push_props(out, question, "");
     let decisions = map.settled_by(question.id);
     if decisions.is_empty() {
-        out.push_str("  open\n");
+        out.push_str("- open\n");
     }
-    for decision in decisions {
-        push_decision_line(out, map, decision, "  decision ", group);
+    for decision in &decisions {
+        push_decision(out, map, decision, question.sources.first().copied());
+    }
+    for option in map.weighed_for(question.id) {
+        let _ = writeln!(out, "- weighed {}", marked_name(option));
+        push_props(out, option, "  ");
     }
 }
 
-/// A decision's line under `prefix` - a question's indent, or its own
-/// bullet when it resolves no question - then the prompt it cites when
-/// that is not the group's, then one `was` line per decision it
+/// A `- decision` bullet, its properties one per line, the prompt it
+/// cites when that is not `raised_by` - the prompt already shown for the
+/// headline this sits under - and one `was` line per decision it
 /// superseded, nearest first.
-fn push_decision_line(
-    out: &mut String,
-    map: &Map,
-    decision: &Node,
-    prefix: &str,
-    group: Option<EventId>,
-) {
-    let _ = writeln!(
-        out,
-        "{prefix}{}{}",
-        marked_name(decision),
-        decision.properties_line()
-    );
+fn push_decision(out: &mut String, map: &Map, decision: &Node, raised_by: Option<EventId>) {
+    let _ = writeln!(out, "- decision {}", marked_name(decision));
+    push_props(out, decision, "  ");
     if let Some(source) = decision
         .sources
         .first()
-        .filter(|source| Some(**source) != group)
+        .filter(|id| Some(**id) != raised_by)
     {
         let _ = writeln!(out, "  source {}", source.as_uuid());
     }
