@@ -59,6 +59,8 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "In what order does a request carry its sections?" (model) · 2026-09-07
 - "How does a user see what the model was shown?" (model) · 2026-09-07
 - "Where do design proposals live?" (model) · 2026-09-07
+- "How does the prompt stay within the model's window as the maps grow?" (model) · 2026-09-07
+- "How does a rendered map stay scoped to the branch it is committed in?" (model) · 2026-09-07
 
 ## "Where does the event log live?"
 
@@ -425,3 +427,13 @@ why: "Different models can support different effort levels."
 
 - decision "docs/, tracked; the /docs ignore line is dropped" (model)
   why: "the harness design is the first; a tracked folder beside AGENTS.md is where a reader looks"
+
+## "How does the prompt stay within the model's window as the maps grow?" (model)
+
+note: "Not decided. The maps are always in view and never shrink, so the prompt grows without bound; on a 16k model the instructions and the decisions map exceed the window before history is counted and the provider truncates the instructions. Options: apply the precedence rule in docs/harness.md, dropping the maps to headlines and then to a catalogue line when over budget; a token budget per map; keep superseded decisions out of the prompt shape while the render keeps them. Task: let the instructions and maps give way under the budget on a small window."
+- open
+
+## "How does a rendered map stay scoped to the branch it is committed in?" (model)
+
+note: "Not decided. One log holds every branch, and the render is a file in one branch, so recording from any worktree rewrites the render with unmerged branches' nodes; hit in four sessions, again on feat/harness with two questions from the effort branch. Options: stop committing the render and regenerate on demand; regenerate in a pre-commit step; teach the renderer a branch scope from the events' sources or the checkout. Task: stop committing the rendered map Markdown, or scope its rewrite to the branch."
+- open
