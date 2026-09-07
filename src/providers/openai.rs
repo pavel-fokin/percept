@@ -78,8 +78,6 @@ impl Model for OpenAi {
     }
 }
 
-// --- Request building -------------------------------------------------
-
 #[derive(Serialize)]
 struct Request {
     model: String,
@@ -203,8 +201,6 @@ fn items(messages: &[Message]) -> Vec<Item> {
     out
 }
 
-// --- Response parsing -------------------------------------------------
-
 /// The streamed events OpenAi acts on, by their `type`. Everything
 /// else the server sends - lifecycle, content parts, argument
 /// fragments of a call that arrives whole in its item - is `Other`.
@@ -317,20 +313,18 @@ fn parse_line(line: &str, model: &str) -> Result<Line, Box<dyn Error + Send + Sy
     })
 }
 
-// --- Model metadata ---------------------------------------------------
-
 /// OpenAI models this app knows the shape of - Sol, Terra, and Luna
 /// all share one context window and all think, so `reply` sends
 /// `reasoning.effort` and parses reasoning deltas for each.
 const GPT_5_6_FAMILY: &[&str] = &["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"];
 
-/// What this app knows about one model name. `model_profile` answers
-/// `None` for a name the table doesn't recognize - not a guess.
+/// What this app knows about one model name.
 struct ModelProfile {
     context_window: Option<u32>,
     output: &'static [Modality],
 }
 
+/// `None` for a name the table doesn't recognize - not a guess.
 fn model_profile(model: &str) -> Option<ModelProfile> {
     GPT_5_6_FAMILY.contains(&model).then_some(ModelProfile {
         context_window: Some(1_050_000),
