@@ -5,17 +5,25 @@ use tempfile::tempdir;
 use super::{discover_root, resolve_toolset, Toolset, TUI_SOURCE_NAME};
 
 #[test]
-fn tui_defaults_to_code_tools() {
+fn tui_in_a_git_checkout_defaults_to_code_tools() {
     assert!(matches!(
-        resolve_toolset(TUI_SOURCE_NAME, None),
+        resolve_toolset(TUI_SOURCE_NAME, None, true),
         Ok(Toolset::Code)
+    ));
+}
+
+#[test]
+fn tui_without_a_git_checkout_defaults_to_maps_tools() {
+    assert!(matches!(
+        resolve_toolset(TUI_SOURCE_NAME, None, false),
+        Ok(Toolset::Maps)
     ));
 }
 
 #[test]
 fn headless_source_defaults_to_maps_tools() {
     assert!(matches!(
-        resolve_toolset("percept-cli", None),
+        resolve_toolset("percept-cli", None, true),
         Ok(Toolset::Maps)
     ));
 }
@@ -23,18 +31,18 @@ fn headless_source_defaults_to_maps_tools() {
 #[test]
 fn explicit_toolset_overrides_client_default() {
     assert!(matches!(
-        resolve_toolset(TUI_SOURCE_NAME, Some("maps")),
+        resolve_toolset(TUI_SOURCE_NAME, Some("maps"), true),
         Ok(Toolset::Maps)
     ));
     assert!(matches!(
-        resolve_toolset("percept-cli", Some("code")),
+        resolve_toolset("percept-cli", Some("code"), false),
         Ok(Toolset::Code)
     ));
 }
 
 #[test]
 fn unknown_toolset_is_rejected() {
-    assert!(resolve_toolset(TUI_SOURCE_NAME, Some("unknown")).is_err());
+    assert!(resolve_toolset(TUI_SOURCE_NAME, Some("unknown"), true).is_err());
 }
 
 #[test]

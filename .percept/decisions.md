@@ -228,9 +228,10 @@ Folded from the percept log for this project and rerendered on every write. Chan
 
 ## "How are the coding tools switched on?" (model)
 
-- decision "the TUI defaults to code tools while headless commands default to maps; PERCEPT_TOOLS overrides either" (model)
-  why: "The TUI is commonly used for coding, so it should expose file tools without setup; headless map turns retain the safer maps-only default."
-  source 01a07c4b-ba33-79c1-b846-6167a698478f
+- decision "the TUI defaults to code tools only in a git checkout; headless and non-git TUI default to maps; PERCEPT_TOOLS overrides either" (model)
+  why: "the code toolset's undo is a git snapshot, so an unconditional default broke the TUI in a .percept-only project - a layout checkout_root supports; resolve_toolset now picks code only where a git checkout exists"
+  source 01a07c5e-04b7-7860-9c9c-07b815f05867
+  was "the TUI defaults to code tools while headless commands default to maps; PERCEPT_TOOLS overrides either" (model)
   was "PERCEPT_TOOLS=code adds them beside the map tools; the default, maps, is today's behaviour" (model)
 - weighed "always on, in every turn" (model)
   why: "every turn, reflect included, would gain the tree and spend its tool calls on it"
