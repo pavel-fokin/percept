@@ -884,6 +884,31 @@ fn the_tool_call_limit_stops_tools_being_sent_and_then_exhausts() {
 }
 
 #[test]
+fn the_request_after_the_last_tool_call_says_the_budget_is_spent() {
+    let model = Arc::new(Scripted::new(vec![], true));
+    let mut app = App::new(
+        model.clone(),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        vec![Arc::new(FakeTool)],
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap();
+
+    let _ = app.submit("go".to_string()).unwrap();
+    for _ in 0..MAX_TOOL_CALLS {
+        run_one_tool(&mut app, "search_events", "{}");
+    }
+
+    assert!(model
+        .last_request()
+        .iter()
+        .any(|message| message.contains("tool budget is spent")));
+}
+
+#[test]
 fn a_model_that_cannot_use_tools_is_sent_none() {
     let model = Arc::new(Scripted::new(vec![vec![]], false));
     let mut app = App::new(
