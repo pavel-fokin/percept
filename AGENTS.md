@@ -67,7 +67,7 @@ agreement.
   `edge.removed` events in the same log. A `Schema` names a map and
   the node and edge kinds it allows, and one line of purpose - what
   the map makes cheap - that the prompt carries in place of the map
-  itself. `decisions` today. Every change goes through `Map::apply`, so
+  itself. `decisions` and `tasks` today. Every change goes through `Map::apply`, so
   the rules live once. `code` is a `Map` too, but folded from the
   working tree instead of the log - see `code` below.
 - A node records who added it - `User` or `Model` - and when. A
@@ -195,7 +195,10 @@ skips it.
   for more than adding one. Aim for the smallest process that still
   catches mistakes. An approach the session tried and abandoned goes
   into the decisions map as evidence, so no later session tries it
-  again.
+  again. Work the session found and left undone goes into the tasks
+  map with its why, and an issue that was an open task gets its
+  outcome there, so the next session starts from the list and not
+  from a re-read.
 
 The TUI only runs on a real terminal. `scripts/drive.py` forks a pty,
 sends timed keystrokes, and prints the frames; `--plain` strips the

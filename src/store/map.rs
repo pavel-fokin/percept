@@ -10,7 +10,7 @@ use uuid::Uuid;
 
 use crate::percept::{
     Actor, Edge, EventId, EventLog, Fragment, Map, MapError, Mutation, Node, NodeId, NodeRef,
-    Payload, Schema, Scope, DECISIONS, OPTION,
+    Payload, Schema, Scope, DECISIONS, OPTION, TASK, TASKS,
 };
 use crate::shared::Timestamp;
 use crate::store::event::{actor_name, ids};
@@ -99,8 +99,8 @@ pub fn revise(
         ..
     } = &mutation
     {
-        if snapshot.map().schema() == &DECISIONS && kind == OPTION && !properties.contains_key(WHY)
-        {
+        let schema = snapshot.map().schema();
+        if schema == &DECISIONS && kind == OPTION && !properties.contains_key(WHY) {
             return Err(format!(
                 "option {name:?} does not say why it lost: an option is an alternative that \
                  was rejected, and its `why` property carries the reason; the pick is the \
@@ -108,12 +108,19 @@ pub fn revise(
             )
             .into());
         }
+        if schema == &TASKS && kind == TASK && !properties.contains_key(WHY) {
+            return Err(format!(
+                "task {name:?} does not say why it matters: its `why` property carries what \
+                 it costs to leave undone, which is how the next session weighs it"
+            )
+            .into());
+        }
     }
     Ok(snapshot.apply(mutation, actor)?)
 }
 
-/// The property that carries a node's reason, on a decision and on a
-/// rejected option alike.
+/// The property that carries a node's reason: on a decision, a
+/// rejected option, and a task alike.
 const WHY: &str = "why";
 
 #[derive(Serialize)]

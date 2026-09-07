@@ -1,5 +1,5 @@
 use super::*;
-use crate::percept::{Actor, Chunk, Payload, Verdict};
+use crate::percept::{Actor, Chunk, Payload, Verdict, SCHEMAS};
 use crate::testing::{
     content, node_added, source, usage, FakeCatalog, FakeLog, FakeRenderer, FakeSnapshot, FakeTool,
     FixedPolicy, Scripted,
@@ -498,7 +498,9 @@ fn undo_rerenders_every_map_so_the_render_follows_the_log_not_the_restored_tree(
 
     app.undo().unwrap();
 
-    assert_eq!(renderer.rendered(), vec!["decisions".to_string()]);
+    let mut rendered = renderer.rendered();
+    rendered.sort();
+    assert_eq!(rendered, vec!["decisions".to_string(), "tasks".to_string()]);
 }
 
 #[test]
@@ -876,8 +878,8 @@ fn a_log_longer_than_the_window_sends_only_its_newest_events() {
     // The whole log stays in the transcript the TUI renders.
     assert_eq!(app.events().len(), 26);
     let sent = model.last_request();
-    // The time, the decisions map, then the window.
-    assert_eq!(sent.len(), CONTEXT_EVENTS + 2);
+    // The time, one message per map, then the window.
+    assert_eq!(sent.len(), CONTEXT_EVENTS + 1 + SCHEMAS.len());
     assert!(!sent.contains(&"0".to_string()));
     assert!(sent.contains(&"24".to_string()));
     assert!(sent.contains(&"now".to_string()));
@@ -903,7 +905,7 @@ fn a_window_opening_on_a_tool_result_drops_it() {
 
     let sent = model.last_request();
     assert!(!sent.contains(&"<result>".to_string()));
-    assert_eq!(sent.len(), CONTEXT_EVENTS + 1);
+    assert_eq!(sent.len(), CONTEXT_EVENTS + SCHEMAS.len());
 }
 
 #[test]
@@ -944,7 +946,7 @@ fn a_map_is_sent_with_its_kinds_ahead_of_the_transcript_and_outside_the_window()
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    assert_eq!(sent.len(), CONTEXT_EVENTS + 2);
+    assert_eq!(sent.len(), CONTEXT_EVENTS + 1 + SCHEMAS.len());
     assert_decisions_header(&sent[1]);
     assert!(sent[1].contains("- decision \"Rust over Go\""));
 }
@@ -968,7 +970,8 @@ fn an_empty_map_is_still_sent_with_its_kinds() {
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    assert_eq!(sent.len(), 3);
+    // The time, one message per map, the prompt.
+    assert_eq!(sent.len(), 2 + SCHEMAS.len());
     assert!(sent[1].contains("Node kinds: question, option, evidence, decision."));
     assert!(sent[1].contains("\n(empty:"), "{}", sent[1]);
 }
@@ -1120,8 +1123,8 @@ fn a_log_shorter_than_the_window_sends_all_of_it() {
 
     let _ = app.submit("now".to_string()).unwrap();
 
-    // The time, the decisions map, three events, the prompt.
-    assert_eq!(model.last_request().len(), 6);
+    // The time, one message per map, three events, the prompt.
+    assert_eq!(model.last_request().len(), 5 + SCHEMAS.len());
 }
 
 #[test]
@@ -1136,10 +1139,10 @@ fn a_model_called_event_never_reaches_the_next_request() {
     let _ = app.submit("second".to_string()).unwrap();
 
     let sent = model.last_request();
-    // The time, the decisions map, "first", "ok", "second" - the
+    // The time, one message per map, "first", "ok", "second" - the
     // model.called event between "ok" and "second" is never one of
     // them.
-    assert_eq!(sent.len(), 5);
+    assert_eq!(sent.len(), 4 + SCHEMAS.len());
     assert!(sent.contains(&"first".to_string()));
     assert!(sent.contains(&"ok".to_string()));
     assert!(sent.contains(&"second".to_string()));

@@ -102,7 +102,7 @@ fn an_unknown_map_is_an_error() {
     let revise = tool(Vec::new());
 
     let err = revise
-        .run(r#"{"map":"tasks","changes":[{"op":"add_node","kind":"goal","name":"Ship","sources":[]}]}"#)
+        .run(r#"{"map":"glossary","changes":[{"op":"add_node","kind":"goal","name":"Ship","sources":[]}]}"#)
         .err()
         .unwrap();
 

@@ -14,7 +14,7 @@ pub use event_log::EventLog;
 pub use map::SUPERSEDES;
 pub use map::{
     map_of, Edge, Fragment, Map, MapError, Mutation, Node, NodeId, NodeRef, Schema, Scope,
-    Selection, CODE, DECISION, DECISIONS, OPTION, SCHEMAS,
+    Selection, CODE, DECISION, DECISIONS, OPTION, SCHEMAS, TASK, TASKS,
 };
 pub use model::{
     to_messages, Chunk, Message, Modality, Model, ModelCapabilities, ModelCatalog, ModelDescriptor,
