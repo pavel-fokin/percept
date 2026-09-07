@@ -81,6 +81,41 @@ fn a_tool_round_only_appends_to_the_request_so_its_prefix_is_reusable() {
 }
 
 #[test]
+fn an_old_tool_result_is_cut_to_its_head_while_the_turn_s_own_stays_whole() {
+    let context = Context {
+        sections: vec![Section::History(Window {
+            share: 0.5,
+            keep: 0.25,
+            floor: 1000,
+        })],
+    };
+    let long = "x".repeat(500);
+    let events = vec![
+        prompt(Actor::User, "u0", 2),
+        Event::tool_called("read_file".into(), "{}".into(), source("t"), None),
+        Event::tool_resulted(long.clone(), source("t"), None),
+        prompt(Actor::User, "u1", 2),
+        Event::tool_called("read_file".into(), "{}".into(), source("t"), None),
+        Event::tool_resulted(long.clone(), source("t"), None),
+    ];
+    let old_result = events[2].id();
+
+    let view = View {
+        turn_start: Some(3),
+        ..view(&events)
+    };
+    let sent = contents(&context.build(view).unwrap().messages);
+
+    assert_eq!(sent.len(), 6);
+    assert!(sent[2].starts_with(&"x".repeat(PREVIEW_CHARS)));
+    assert!(sent[2].ends_with(&format!(
+        "[500 chars; read_event {} opens the whole]",
+        old_result.as_uuid()
+    )));
+    assert_eq!(sent[5], long);
+}
+
+#[test]
 fn history_holds_still_until_it_fills_then_cuts_back_to_the_keep_mark() {
     let context = history_only();
     let mut events: Vec<Event> = (0..10)

@@ -19,8 +19,8 @@ pub use map::{
 };
 pub use map_reader::MapReader;
 pub use model::{
-    to_messages, Chunk, Message, Modality, Model, ModelCapabilities, ModelCatalog, ModelDescriptor,
-    ModelListing, ModelRequest, Provider, ReplyStream, Usage,
+    message_of, to_messages, Chunk, Message, Modality, Model, ModelCapabilities, ModelCatalog,
+    ModelDescriptor, ModelListing, ModelRequest, Provider, ReplyStream, Usage,
 };
 pub use policy::{AllowAll, Policy, Verdict};
 pub use render::MapRenderer;

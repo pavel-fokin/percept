@@ -163,27 +163,33 @@ pub trait ModelCatalog: Send + Sync {
 pub fn to_messages<'a>(events: impl IntoIterator<Item = &'a Event>) -> Vec<Message> {
     events
         .into_iter()
-        .filter_map(|e| match e.payload() {
-            Payload::MessageReceived { content } => Some(Message::Text {
-                role: e.actor(),
-                content: content.clone(),
-            }),
-            Payload::ToolCalled { tool, arguments } => Some(Message::ToolCall {
-                tool: tool.clone(),
-                arguments: arguments.clone(),
-            }),
-            Payload::ToolResulted { content } => Some(Message::ToolResult {
-                content: content.clone(),
-            }),
-            Payload::ThoughtRecorded { .. }
-            | Payload::NodeAdded { .. }
-            | Payload::NodeRemoved { .. }
-            | Payload::EdgeAdded { .. }
-            | Payload::EdgeRemoved { .. }
-            | Payload::ModelCalled(..) => None,
-        })
+        .filter_map(message_of)
         .skip_while(|message| matches!(message, Message::ToolResult { .. }))
         .collect()
+}
+
+/// The message one event replays as, or none for the kinds
+/// `to_messages` leaves out.
+pub fn message_of(event: &Event) -> Option<Message> {
+    match event.payload() {
+        Payload::MessageReceived { content } => Some(Message::Text {
+            role: event.actor(),
+            content: content.clone(),
+        }),
+        Payload::ToolCalled { tool, arguments } => Some(Message::ToolCall {
+            tool: tool.clone(),
+            arguments: arguments.clone(),
+        }),
+        Payload::ToolResulted { content } => Some(Message::ToolResult {
+            content: content.clone(),
+        }),
+        Payload::ThoughtRecorded { .. }
+        | Payload::NodeAdded { .. }
+        | Payload::NodeRemoved { .. }
+        | Payload::EdgeAdded { .. }
+        | Payload::EdgeRemoved { .. }
+        | Payload::ModelCalled(..) => None,
+    }
 }
 
 #[cfg(test)]

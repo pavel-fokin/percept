@@ -1,5 +1,5 @@
 use crate::app::MapShape;
-use crate::percept::{self, Actor, Event, EventKind, Map, Scope};
+use crate::percept::{self, Actor, Event, EventId, EventKind, Map, Scope};
 use crate::shared::Timestamp;
 
 /// A map's size and age in one clause, so the model can tell whether
@@ -51,6 +51,25 @@ fn tokens(event: &Event) -> usize {
         _ => 0,
     };
     chars.div_ceil(4)
+}
+
+/// How much of a tool result outside the turn the model still reads.
+const PREVIEW_CHARS: usize = 120;
+
+/// A tool result from an earlier turn, cut to its head with a handle
+/// to the whole. A file read from a past turn is the costliest thing
+/// in history and the least likely to be needed again as it was; the
+/// id lets `read_event` open it when it is.
+fn cut(content: &str, id: EventId) -> String {
+    let len = content.chars().count();
+    if len <= PREVIEW_CHARS {
+        return content.to_string();
+    }
+    let head: String = content.chars().take(PREVIEW_CHARS).collect();
+    format!(
+        "{head}... [{len} chars; read_event {} opens the whole]",
+        id.as_uuid()
+    )
 }
 
 /// How far back history goes in full: a share of the model's context
@@ -105,8 +124,8 @@ pub enum Section {
     Instructions,
     /// Every map, each as its schema's purpose line and this shape.
     Maps(MapShape),
-    /// The transcript in full, back as far as the window reaches, plus
-    /// the whole turn in progress.
+    /// The transcript back as far as the window reaches, its tool
+    /// results cut to a head, plus the whole turn in progress.
     History(Window),
 }
 
@@ -215,10 +234,20 @@ impl Context {
                     // are dropped; the turn's own prompt stays.
                     let history = view.events[window_start..turn_start]
                         .iter()
-                        .filter(|event| !is_percepts_prompt(event));
-                    messages.extend(percept::to_messages(
-                        history.chain(&view.events[turn_start..]),
-                    ));
+                        .filter(|event| !is_percepts_prompt(event))
+                        .filter_map(|event| match event.payload() {
+                            percept::Payload::ToolResulted { content } => {
+                                Some(percept::Message::ToolResult {
+                                    content: cut(content, event.id()),
+                                })
+                            }
+                            _ => percept::message_of(event),
+                        })
+                        .skip_while(|message| {
+                            matches!(message, percept::Message::ToolResult { .. })
+                        });
+                    messages.extend(history);
+                    messages.extend(percept::to_messages(&view.events[turn_start..]));
                 }
             }
         }
