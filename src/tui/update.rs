@@ -222,7 +222,12 @@ pub fn handle_stream(
                     chat.approval = Some(Approval { tool, arguments });
                 }
                 ToolStep::Continue(stream) => spawn_drain(stream, reply_tx.clone()),
-                ToolStep::Stop => {}
+                // The tool call was the stream's last chunk, so
+                // `spawn_drain` sent no `Ended`. `App` already closed the
+                // turn; the UI still needs the signal to stop the spinner.
+                ToolStep::Stop => {
+                    let _ = reply_tx.send(StreamEvent::Ended(None));
+                }
             }
         }
         StreamEvent::ToolResult(output) => {

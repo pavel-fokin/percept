@@ -329,6 +329,29 @@ fn a_call_the_policy_asks_about_waits_on_an_approval_instead_of_running() {
     assert_eq!(chat.app.events().len(), 2);
 }
 
+#[test]
+fn a_tool_call_past_the_budget_ends_the_turn_instead_of_hanging() {
+    let app = App::new(
+        Arc::new(Scripted::new(vec![], true)),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        vec![Arc::new(FakeTool)],
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source("test"),
+    )
+    .unwrap()
+    .with_tool_cap(0);
+    let mut chat = Chat::new(Box::new(app));
+    let _ = chat.app.submit("go".to_string()).unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+    handle_stream(&mut chat, tool_call(), &tx).unwrap();
+
+    assert!(matches!(rx.try_recv(), Ok(StreamEvent::Ended(None))));
+    assert!(!chat.app.is_replying());
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn n_declines_the_waiting_call_and_the_turn_goes_on() {
     let mut chat = chat_asking();
