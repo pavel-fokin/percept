@@ -142,6 +142,7 @@ impl Window {
 /// One part of the request `Context::build` assembles. Order and
 /// membership are data, so a new purpose is a new list, not a new
 /// function.
+#[derive(Clone, Copy)]
 pub enum Section {
     /// The current time, for `since` on the tools. It changes every
     /// round, so it goes after everything a provider could cache.
@@ -155,6 +156,25 @@ pub enum Section {
     /// it, one line per event for `index` events further back, so the
     /// model can open with `read_event` what it can no longer see.
     History { window: Window, index: usize },
+}
+
+impl std::fmt::Display for Section {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Section::Time => write!(f, "time"),
+            Section::Instructions => write!(f, "instructions"),
+            Section::Maps(shape) => write!(
+                f,
+                "maps ({})",
+                match shape {
+                    MapShape::Prompt => "prompt",
+                    MapShape::Headlines => "headlines",
+                    MapShape::Tool => "tool",
+                }
+            ),
+            Section::History { .. } => write!(f, "history"),
+        }
+    }
 }
 
 /// What `Context::build` needs from `App`'s state, borrowed for the
@@ -191,6 +211,38 @@ impl Context {
     pub fn build(&self, view: View) -> Result<percept::ModelRequest, Box<dyn std::error::Error>> {
         let mut messages = Vec::new();
         for section in &self.sections {
+            messages.extend(self.render(section, &view)?);
+        }
+
+        // Dropping the tools is not enough on its own: a model
+        // mid-turn reaches for one anyway, `begin_tool` stops the
+        // turn on it, and the reply is empty. Say the budget is spent
+        // so it answers.
+        if view.budget_spent {
+            messages.push(percept::Message::Text {
+                role: Actor::System,
+                content: "This turn's tool budget is spent. You cannot call any more \
+                          tools now. Answer with what you have."
+                    .to_string(),
+            });
+        }
+
+        Ok(percept::ModelRequest {
+            messages,
+            tools: view.tools,
+        })
+    }
+
+    /// What `section` contributes to the request: `build` is a loop
+    /// over this, and `describe` reads it to count and estimate one
+    /// section without sending anything.
+    fn render(
+        &self,
+        section: &Section,
+        view: &View,
+    ) -> Result<Vec<percept::Message>, Box<dyn std::error::Error>> {
+        let mut messages = Vec::new();
+        {
             match section {
                 Section::Time => messages.push(percept::Message::Text {
                     role: Actor::System,
@@ -294,24 +346,64 @@ impl Context {
                 }
             }
         }
+        Ok(messages)
+    }
 
-        // Dropping the tools is not enough on its own: a model
-        // mid-turn reaches for one anyway, `begin_tool` stops the
-        // turn on it, and the reply is empty. Say the budget is spent
-        // so it answers.
-        if view.budget_spent {
-            messages.push(percept::Message::Text {
-                role: Actor::System,
-                content: "This turn's tool budget is spent. You cannot call any more \
-                          tools now. Answer with what you have."
-                    .to_string(),
-            });
+    /// One line per section - its name and shape, how many messages it
+    /// renders, and an estimate of their cost - for `/context` to show
+    /// the model's actual input without sending it. Nothing here is
+    /// committed to the log.
+    pub fn describe(&self, view: &View) -> Result<String, Box<dyn std::error::Error>> {
+        let mut lines = Vec::new();
+        for section in &self.sections {
+            let messages = self.render(section, view)?;
+            let tokens: usize = messages.iter().map(message_tokens).sum();
+            let word = if messages.len() == 1 {
+                "message"
+            } else {
+                "messages"
+            };
+            let mut line = format!(
+                "{:<18}{} {word}   {} tokens",
+                section.to_string(),
+                messages.len(),
+                format_k(tokens)
+            );
+            if let Section::History { window, index } = section {
+                line.push_str(&format!(
+                    "  (share {}, keep {}, floor {}, index {index})",
+                    window.share, window.keep, window.floor
+                ));
+            }
+            lines.push(line);
         }
+        Ok(lines.join("\n"))
+    }
+}
 
-        Ok(percept::ModelRequest {
-            messages,
-            tools: view.tools,
-        })
+/// What one message of the request costs to read, at four characters a
+/// token - the same estimate `tokens` uses for a log event, applied to
+/// a `Message` instead: its text, or a tool call's name and arguments.
+fn message_tokens(message: &percept::Message) -> usize {
+    let chars = match message {
+        percept::Message::Text { content, .. } | percept::Message::ToolResult { content } => {
+            content.chars().count()
+        }
+        percept::Message::ToolCall { tool, arguments } => {
+            tool.chars().count() + arguments.chars().count()
+        }
+    };
+    chars.div_ceil(4)
+}
+
+/// `n` as a plain number under a thousand, or one decimal place of
+/// thousands above it - `1.2k` for a figure a reader need not read
+/// exactly.
+pub(crate) fn format_k(n: usize) -> String {
+    if n >= 1000 {
+        format!("{:.1}k", n as f64 / 1000.0)
+    } else {
+        n.to_string()
     }
 }
 

@@ -195,6 +195,11 @@ pub trait AppService {
         descriptor: &percept::ModelDescriptor,
     ) -> Result<(), Box<dyn std::error::Error>>;
 
+    /// One line per section of the request the model would receive
+    /// now, then a line with the last round's cost - see
+    /// `Context::describe`. Nothing here is committed to the log.
+    fn describe_context(&self) -> Result<String, Box<dyn std::error::Error>>;
+
     /// Puts the working tree back as it stood before the last finished
     /// turn, through the `Snapshot` taken at that turn's prompt. Errs
     /// while a turn streams, when no snapshot is kept, or when nothing
@@ -383,16 +388,16 @@ impl App {
         }
     }
 
-    /// Starts the next reply stream for the current request state.
-    /// Errs only when a map in the log does not fold - which is a
-    /// corrupt log, not a bad turn.
-    fn ask(&self) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
+    /// The request state as `Context` sees it right now: what `ask`
+    /// sends, and what `describe_context` reports on without sending
+    /// anything.
+    fn view(&self) -> View<'_> {
         let tools = if self.chat.capabilities().tool_use && !self.tools_exhausted() {
             self.tools.iter().map(|tool| tool.spec()).collect()
         } else {
             Vec::new()
         };
-        let view = View {
+        View {
             instructions: self.instructions.as_deref(),
             events: &self.events,
             scope: self.source.scope(),
@@ -400,8 +405,14 @@ impl App {
             context_window: self.chat.capabilities().context_window,
             tools,
             budget_spent: self.tools_exhausted(),
-        };
-        Ok(self.chat.reply(&self.context.build(view)?))
+        }
+    }
+
+    /// Starts the next reply stream for the current request state.
+    /// Errs only when a map in the log does not fold - which is a
+    /// corrupt log, not a bad turn.
+    fn ask(&self) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
+        Ok(self.chat.reply(&self.context.build(self.view())?))
     }
 
     /// Whether this turn has made `tool_cap` calls. Past it the request
@@ -696,6 +707,19 @@ impl AppService for App {
         self.chat = self.catalog.build(descriptor)?;
         self.last_usage = None;
         Ok(())
+    }
+
+    fn describe_context(&self) -> Result<String, Box<dyn std::error::Error>> {
+        let sections = self.context.describe(&self.view())?;
+        let last_round = match self.last_usage() {
+            Some(usage) => format!(
+                "last round: {} in, {} cached",
+                context::format_k(usage.input_tokens as usize),
+                context::format_k(usage.cached_tokens.unwrap_or(0) as usize)
+            ),
+            None => "last round: none yet".to_string(),
+        };
+        Ok(format!("{sections}\n{last_round}"))
     }
 
     fn undo(&mut self) -> Result<(), Box<dyn std::error::Error>> {

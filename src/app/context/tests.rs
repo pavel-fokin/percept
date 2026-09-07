@@ -54,6 +54,26 @@ fn first_word(message: &str) -> &str {
 }
 
 #[test]
+fn describe_prints_one_line_per_section_with_its_message_count_and_tokens() {
+    let context = Harness::new(Vec::new(), MapShape::Prompt).context;
+    let events = vec![Event::message_received(
+        Actor::User,
+        "hi".into(),
+        source("t"),
+        None,
+    )];
+    let view = view(&events);
+
+    let report = context.describe(&view).unwrap();
+    let lines: Vec<&str> = report.lines().collect();
+
+    assert_eq!(lines.len(), context.sections.len());
+    assert!(lines[0].starts_with("instructions"));
+    assert!(lines[0].contains("message"));
+    assert!(lines[0].contains("tokens"));
+}
+
+#[test]
 fn a_tool_round_only_appends_to_the_request_so_its_prefix_is_reusable() {
     let context = Harness::new(Vec::new(), MapShape::Prompt).context;
     let prompt = Event::message_received(Actor::User, "hello".into(), source("t"), None);

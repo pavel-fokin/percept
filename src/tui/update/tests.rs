@@ -459,6 +459,23 @@ fn slash_undo_without_a_snapshot_shows_why_it_cannot() {
 }
 
 #[test]
+fn slash_context_puts_a_report_starting_with_the_first_section_in_the_notice() {
+    let mut chat = chat();
+    type_str(&mut chat, "/context");
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+    handle_key(
+        &mut chat,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        &tx,
+    )
+    .unwrap();
+
+    assert!(chat.current_text().is_empty());
+    assert!(chat.notice.as_deref().unwrap().starts_with("instructions"));
+}
+
+#[test]
 fn a_models_listed_event_with_a_matching_token_populates_the_menu() {
     let mut chat = chat();
     chat.models_menu = Some(ModelsMenu::loading(5));
