@@ -8,6 +8,7 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "make the reply stream cancellable" (model) · 2026-09-07
 - "let /undo reach the last turn after a restart" (model) · 2026-09-07
 - "make the map renderer schema-driven, not dispatched on map name" (model) · 2026-09-07
+- "score suggestion segments by rarity, not a flat count" (model) · 2026-09-07
 
 ## "tell a coding turn to branch from main, not HEAD" (model)
 
@@ -29,6 +30,10 @@ why: "the undo point lives in the session; the snapshot ref survives until the n
 ## "make the map renderer schema-driven, not dispatched on map name" (model)
 
 why: "markdown() branches on schema.name for decisions/tasks and falls back to push_by_kind; a third log-folded schema that wants the settlement-style render would need a new branch. A RenderStyle on Schema, plus the edge roles it needs, would let a new map pick a style without touching the renderer. Deferred: only two schemas today, both one style."
+
+## "score suggestion segments by rarity, not a flat count" (model)
+
+why: "suggestions_for uses a floor of 2 shared name segments to tell signal from noise, then a second is_path_like gate (name has slash or colons) lets a lone specific segment like providers cross kinds without letting a prose word like Rust do the same - two heuristics cancelling each other. Scoring each shared segment by how few nodes carry it makes providers strong and the weak on its own, dropping both the 1-vs-2 split and is_path_like."
 
 ## done
 - "send the project's instructions to a coding turn" (model)
