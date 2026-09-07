@@ -268,6 +268,34 @@ fn thought_recorded_round_trips_through_json() {
 }
 
 #[test]
+fn tool_called_arguments_that_are_not_one_json_value_encode_as_a_string_not_a_panic() {
+    let spliced = r#"{"path":"a"}{"path":"b"}"#;
+    let original = percept::Event::restore(
+        EventId::new(),
+        Actor::Model,
+        source("tui"),
+        None,
+        Timestamp::now(),
+        Payload::ToolCalled {
+            tool: "read_file".to_string(),
+            arguments: spliced.to_string(),
+        },
+    );
+
+    let wire = Event::from(&original);
+    assert_eq!(wire.payload["arguments"], spliced);
+
+    let json = serde_json::to_string(&wire).unwrap();
+    let restored = percept::Event::try_from(serde_json::from_str::<Event>(&json).unwrap()).unwrap();
+    match restored.payload() {
+        Payload::ToolCalled { arguments, .. } => {
+            assert_eq!(serde_json::from_str::<Value>(arguments).unwrap(), spliced);
+        }
+        _ => panic!("expected ToolCalled"),
+    }
+}
+
+#[test]
 fn tool_called_round_trips_with_arguments_as_a_nested_object() {
     let original = percept::Event::restore(
         EventId::new(),
