@@ -329,14 +329,14 @@ fn build_catalog() -> Catalog {
 }
 
 /// Which tools a turn carries: `Maps` for the log and map tools alone,
-/// `Code` to add the file tools and `bash`. `default_toolset` picks one
+/// `Code` to add the file tools and `bash`. `resolve_toolset` picks one
 /// from the client and `TOOLS_VAR`.
 enum Toolset {
     Maps,
     Code,
 }
 
-fn default_toolset(
+fn resolve_toolset(
     source_name: &str,
     configured: Option<&str>,
 ) -> Result<Toolset, Box<dyn std::error::Error>> {
@@ -353,7 +353,7 @@ fn default_toolset(
 }
 
 fn build_toolset(source: &percept::Source) -> Result<Toolset, Box<dyn std::error::Error>> {
-    default_toolset(&source.name, std::env::var(TOOLS_VAR).ok().as_deref())
+    resolve_toolset(&source.name, std::env::var(TOOLS_VAR).ok().as_deref())
 }
 
 /// The file tools, over the checkout being worked in - never the main
