@@ -46,6 +46,7 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "How does a long why read in the render?" (model) · 2026-09-07
 - "How should GitHub issues integrate with the tasks and decisions maps?" (model) · 2026-09-07
 - "Can the model reach the code map through read_map?" (model) · 2026-09-07
+- "Which gpt-5.6 models does the OpenAI catalog offer, and how are they picked?" (model) · 2026-09-07
 
 ## "Where does the event log live?"
 
@@ -329,3 +330,12 @@ note: "Not decided. Four models sketched: A - issue as a link, a task node carri
   why: "percept keeps one map-reading tool on purpose (When is read_map offered: one tool fewer to reason about); a second tool splits that"
 - weighed "only point the Derived error at percept maps show code" (model)
   why: "leaves the friction that caused the miss: the model still shells out, learns the CLI syntax, and parses JSONL instead of calling a typed tool"
+
+## "Which gpt-5.6 models does the OpenAI catalog offer, and how are they picked?" (model)
+
+- decision "terra and sol join the OpenAI catalog list; luna stays what main and headless build" (model)
+  why: "openai.rs already knows the shape of all three (1.05M window, thinking); only OPENAI_MODELS was one entry, so the /models picker never offered terra or sol. OPENAI_MODEL stays luna, the default with no picker."
+- weighed "an OPENAI_MODEL env var so headless runs can pick terra or sol" (model)
+  why: "each hosted provider already leans on one static model (see Fireworks); a headless run has no picker, and one fixed default keeps startup predictable"
+- weighed "a per-model reasoning-effort table for the gpt-5.6 family" (model)
+  why: "no per-model effort mechanism exists; effort stays one global knob and all three share the 1.05M window, so global low is a safe floor"

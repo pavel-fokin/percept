@@ -29,14 +29,44 @@ fn an_ollama_descriptor_builds_an_ollama_model() {
 
 #[test]
 fn an_openai_descriptor_builds_an_openai_model() {
-    let descriptor = ModelDescriptor {
-        provider: Provider::OpenAi,
-        model: "gpt-5.6-luna".to_string(),
-    };
+    for name in ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"] {
+        let descriptor = ModelDescriptor {
+            provider: Provider::OpenAi,
+            model: name.to_string(),
+        };
 
-    let model = catalog().build(&descriptor).unwrap();
+        let model = catalog().build(&descriptor).unwrap();
 
-    assert_eq!(model.name(), "gpt-5.6-luna");
+        assert_eq!(model.name(), name);
+    }
+}
+
+#[tokio::test]
+async fn listing_offers_every_openai_model() {
+    // No server listens here, so ollama drops out and only the static
+    // lists remain.
+    let unreachable = Catalog::new(
+        "http://127.0.0.1:1".to_string(),
+        ProviderConfig {
+            url: "https://api.openai.com/v1".to_string(),
+            api_key: "sk-test".to_string(),
+        },
+        "low".to_string(),
+        ProviderConfig {
+            url: "https://api.fireworks.ai/inference/v1".to_string(),
+            api_key: "fw-test".to_string(),
+        },
+    );
+
+    let openai: Vec<String> = unreachable
+        .list()
+        .await
+        .into_iter()
+        .filter(|d| d.provider == Provider::OpenAi)
+        .map(|d| d.model)
+        .collect();
+
+    assert_eq!(openai, ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]);
 }
 
 #[test]

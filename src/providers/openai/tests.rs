@@ -177,8 +177,11 @@ fn a_call_another_writer_left_unanswered_replays_as_text() {
 
 #[test]
 fn a_known_thinking_model_reports_thought_output() {
-    let openai = openai("gpt-5.6-luna");
-    assert!(openai.capabilities().output.contains(&Modality::Thought));
+    for name in ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"] {
+        let openai = openai(name);
+        assert!(openai.capabilities().output.contains(&Modality::Thought));
+        assert_eq!(openai.capabilities().context_window, Some(1_050_000));
+    }
 }
 
 #[test]

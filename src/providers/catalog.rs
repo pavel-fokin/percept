@@ -7,10 +7,11 @@ use super::{client, Fireworks, Ollama, OpenAi};
 use crate::percept::{Model, ModelCatalog, ModelDescriptor, ModelListing, Provider};
 
 /// OpenAI models the catalog offers - a short static list, since
-/// OpenAI has no listing endpoint worth querying. One entry today, the
-/// model `main` builds with when `PERCEPT_PROVIDER=openai`.
+/// OpenAI has no listing endpoint worth querying. The `/models` picker
+/// shows all three; `OPENAI_MODEL` is the one `main` builds with when
+/// `PERCEPT_PROVIDER=openai` and headless runs have no picker.
 pub const OPENAI_MODEL: &str = "gpt-5.6-luna";
-const OPENAI_MODELS: &[&str] = &[OPENAI_MODEL];
+const OPENAI_MODELS: &[&str] = &[OPENAI_MODEL, "gpt-5.6-terra", "gpt-5.6-sol"];
 
 /// Fireworks models the catalog offers - a short static list, the same
 /// reasoning as `OPENAI_MODELS`: Fireworks' own catalog is too large to
