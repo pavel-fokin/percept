@@ -169,6 +169,10 @@ pub fn handle_stream(
         StreamEvent::Chunk(Chunk::ToolCall { tool, arguments }) => {
             match chat.app.begin_tool(&tool, arguments)? {
                 ToolStep::Run(run, arguments) => spawn_tool(run, arguments, reply_tx.clone()),
+                ToolStep::Ask(_, _) => {
+                    chat.error = Some(format!("{tool} needs approval; the TUI cannot ask yet"));
+                    spawn_drain(chat.app.decline_tool()?, reply_tx.clone());
+                }
                 ToolStep::Continue(stream) => spawn_drain(stream, reply_tx.clone()),
                 ToolStep::Stop => {}
             }

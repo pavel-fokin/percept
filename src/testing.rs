@@ -204,6 +204,15 @@ impl Tool for FakeTool {
     }
 }
 
+/// A Policy that gives the same verdict to every call.
+pub struct FixedPolicy(pub percept::Verdict);
+
+impl percept::Policy for FixedPolicy {
+    fn check(&self, _tool: &str, _arguments: &str) -> percept::Verdict {
+        self.0.clone()
+    }
+}
+
 /// The text of a `message.received` event, for asserting on what a turn
 /// committed.
 pub fn content(event: &Event) -> &str {

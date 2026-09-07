@@ -693,6 +693,12 @@ pub async fn run_turn(
                         eprintln!("⚒ {}", output.content);
                         app.finish_tool(output)?
                     }
+                    // Headless, there is no one to ask. `--yes` on `ask`
+                    // swaps in a policy that never asks.
+                    ToolStep::Ask(_, arguments) => {
+                        eprintln!("⚒ {tool}({arguments}) - declined: needs approval, run in the TUI or pass --yes");
+                        app.decline_tool()?
+                    }
                     ToolStep::Continue(stream) => {
                         eprintln!("⚒ {tool}({arguments}) - no such tool");
                         stream

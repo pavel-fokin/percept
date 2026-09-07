@@ -4,8 +4,9 @@ use std::sync::Arc;
 use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError, Source};
 use crate::shared::Timestamp;
 
-/// Most tool calls one user turn may make. At the cap the next request
-/// goes out with no tools, so the model has to answer with text.
+/// Most tool calls one user turn may make, unless `with_tool_cap` says
+/// otherwise. At the cap the next request goes out with no tools, so
+/// the model has to answer with text.
 const MAX_TOOL_CALLS: usize = 5;
 
 /// How many of the most recent events the model reads as prompt text.
@@ -73,6 +74,12 @@ pub trait AppService {
         output: percept::ToolOutput,
     ) -> Result<percept::ReplyStream, Box<dyn std::error::Error>>;
 
+    /// What the caller does when the user says no to a `ToolStep::Ask`:
+    /// the refusal is committed as the call's result, in words the
+    /// model can act on, and the model is asked again. The words are
+    /// turn policy, so they live here and not in each presentation.
+    fn decline_tool(&mut self) -> Result<percept::ReplyStream, Box<dyn std::error::Error>>;
+
     /// Commits the streamed thought, if any, then the streamed reply, if
     /// any, as separate model events. Either with no chunks commits
     /// nothing. Errs if an event can't be appended to the log; a failed
@@ -120,6 +127,11 @@ pub enum ToolStep {
     /// Run this tool with these arguments off the main loop, then pass
     /// its output to `finish_tool`.
     Run(Arc<dyn percept::Tool>, String),
+    /// The policy wants the user's say. Put the call to them; on yes,
+    /// treat it as `Run`, on no, call `decline_tool`. `tool.called` is
+    /// already committed either way: the log shows what the model
+    /// asked for, and the result shows what the user let happen.
+    Ask(Arc<dyn percept::Tool>, String),
     /// Nothing to run (the name matched no tool); `App` already
     /// recorded the result. Drain this stream to continue the turn.
     Continue(percept::ReplyStream),
@@ -216,6 +228,11 @@ pub struct App {
     /// The tools the model may call, sent with each request when the
     /// model reports `tool_use`.
     tools: Vec<Arc<dyn percept::Tool>>,
+    /// Asked before any of `tools` runs. `AllowAll` unless `with_policy`
+    /// says otherwise - the map tools have always run unasked.
+    policy: Arc<dyn percept::Policy>,
+    /// Most tool calls one turn may make - see `MAX_TOOL_CALLS`.
+    tool_cap: usize,
     /// Rerenders a map after a tool's commits change it - see
     /// `commit_tool_result`.
     renderer: Arc<dyn percept::MapRenderer>,
@@ -262,11 +279,26 @@ impl App {
             catalog,
             log,
             tools,
+            policy: Arc::new(percept::AllowAll),
+            tool_cap: MAX_TOOL_CALLS,
             renderer,
             map_shape,
             pending: None,
             last_usage,
         })
+    }
+
+    /// Replaces the policy every tool call is checked against.
+    pub fn with_policy(mut self, policy: Arc<dyn percept::Policy>) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    /// Replaces the per-turn tool cap. A coding turn reads several files
+    /// before it edits one; `MAX_TOOL_CALLS` would end it mid-read.
+    pub fn with_tool_cap(mut self, cap: usize) -> Self {
+        self.tool_cap = cap;
+        self
     }
 
     /// Appends an event, then adds it to the transcript - never the
@@ -294,12 +326,27 @@ impl App {
         Ok(self.chat.reply(&self.build_request()?))
     }
 
-    /// Whether this turn has made `MAX_TOOL_CALLS`. Past it the request
+    /// Whether this turn has made `tool_cap` calls. Past it the request
     /// carries no tools and `begin_tool` ends the turn.
     fn tools_exhausted(&self) -> bool {
         self.pending
             .as_ref()
-            .is_some_and(|turn| turn.tool_calls >= MAX_TOOL_CALLS)
+            .is_some_and(|turn| turn.tool_calls >= self.tool_cap)
+    }
+
+    /// The name the open `tool.called` asked for, for the words a
+    /// refusal or a denial hands back to the model.
+    fn open_call_name(&self) -> Option<&str> {
+        let called_id = self.pending.as_ref()?.open_call?;
+        let event = self
+            .events
+            .iter()
+            .rev()
+            .find(|event| event.id() == called_id)?;
+        match event.payload() {
+            percept::Payload::ToolCalled { tool, .. } => Some(tool),
+            _ => None,
+        }
     }
 
     /// Commits each of `output.commits`, caused by the open call and
@@ -558,10 +605,16 @@ impl AppService for App {
         self.commit(called)?;
         self.with_pending(|turn| turn.open_call = Some(called_id));
 
-        match self.tools.iter().find(|t| t.spec().name == tool).cloned() {
-            Some(run) => Ok(ToolStep::Run(run, arguments)),
-            None => {
-                let output = percept::ToolOutput::text(format!("no such tool: {tool}"));
+        let Some(run) = self.tools.iter().find(|t| t.spec().name == tool).cloned() else {
+            let output = percept::ToolOutput::text(format!("no such tool: {tool}"));
+            self.commit_tool_result(output)?;
+            return Ok(ToolStep::Continue(self.ask()?));
+        };
+        match self.policy.check(tool, &arguments) {
+            percept::Verdict::Allow => Ok(ToolStep::Run(run, arguments)),
+            percept::Verdict::Ask => Ok(ToolStep::Ask(run, arguments)),
+            percept::Verdict::Deny(reason) => {
+                let output = percept::ToolOutput::text(format!("{tool} was not run: {reason}"));
                 self.commit_tool_result(output)?;
                 Ok(ToolStep::Continue(self.ask()?))
             }
@@ -574,6 +627,14 @@ impl AppService for App {
     ) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
         self.commit_tool_result(output)?;
         self.ask()
+    }
+
+    fn decline_tool(&mut self) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
+        let tool = self.open_call_name().unwrap_or("the tool").to_string();
+        let output = percept::ToolOutput::text(format!(
+            "The user declined to run {tool}. Do not retry it; ask them or do something else."
+        ));
+        self.finish_tool(output)
     }
 
     fn end_stream(&mut self) -> Result<(), Box<dyn std::error::Error>> {

@@ -1,7 +1,8 @@
 use super::*;
-use crate::percept::{Actor, Chunk, Payload};
+use crate::percept::{Actor, Chunk, Payload, Verdict};
 use crate::testing::{
-    content, node_added, source, usage, FakeCatalog, FakeLog, FakeRenderer, FakeTool, Scripted,
+    content, node_added, source, usage, FakeCatalog, FakeLog, FakeRenderer, FakeTool, FixedPolicy,
+    Scripted,
 };
 
 const SOURCE: &str = "tui";
@@ -346,7 +347,108 @@ fn run_one_tool(app: &mut App, name: &str, arguments: &str) {
         // `begin_tool` already committed the result (no such tool)
         // or ended the turn (cap spent).
         ToolStep::Continue(_) | ToolStep::Stop => {}
+        ToolStep::Ask(..) => panic!("the default policy never asks"),
     }
+}
+
+fn app_with_policy(policy: Verdict) -> App {
+    App::new(
+        Arc::new(Scripted::new(vec![], true)),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        vec![Arc::new(FakeTool)],
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap()
+    .with_policy(Arc::new(FixedPolicy(policy)))
+}
+
+fn result_content(event: &Event) -> &str {
+    match event.payload() {
+        Payload::ToolResulted { content } => content,
+        _ => panic!("expected a tool.resulted event"),
+    }
+}
+
+#[test]
+fn a_call_the_policy_asks_about_comes_back_as_an_ask_step_after_tool_called() {
+    let mut app = app_with_policy(Verdict::Ask);
+
+    let _ = app.submit("go".to_string()).unwrap();
+    let step = app.begin_tool("search_events", "{}".to_string()).unwrap();
+
+    assert!(matches!(step, ToolStep::Ask(_, ref args) if args == "{}"));
+    // The call is on the record; nothing has run and no result exists.
+    assert_eq!(app.events().len(), 2);
+    assert!(matches!(
+        app.events()[1].payload(),
+        Payload::ToolCalled { .. }
+    ));
+}
+
+#[test]
+fn declining_an_asked_call_commits_the_refusal_as_its_result_and_asks_again() {
+    let mut app = app_with_policy(Verdict::Ask);
+
+    let _ = app.submit("go".to_string()).unwrap();
+    let _ = app.begin_tool("search_events", "{}".to_string()).unwrap();
+    let _ = app.decline_tool().unwrap();
+
+    let events = app.events();
+    assert_eq!(events.len(), 3);
+    assert!(result_content(&events[2]).starts_with("The user declined to run search_events"));
+    assert!(events[2].causation_id() == Some(events[1].id()));
+    assert!(app.is_replying());
+}
+
+#[test]
+fn a_call_the_policy_denies_commits_the_reason_as_its_result_without_running() {
+    let mut app = app_with_policy(Verdict::Deny("not here".to_string()));
+
+    let _ = app.submit("go".to_string()).unwrap();
+    let step = app.begin_tool("search_events", "{}".to_string()).unwrap();
+
+    assert!(matches!(step, ToolStep::Continue(_)));
+    assert_eq!(
+        result_content(&app.events()[2]),
+        "search_events was not run: not here"
+    );
+}
+
+#[test]
+fn an_unknown_tool_is_refused_before_the_policy_is_asked() {
+    let mut app = app_with_policy(Verdict::Ask);
+
+    let _ = app.submit("go".to_string()).unwrap();
+    let step = app.begin_tool("nope", "{}".to_string()).unwrap();
+
+    assert!(matches!(step, ToolStep::Continue(_)));
+    assert_eq!(result_content(&app.events()[2]), "no such tool: nope");
+}
+
+#[test]
+fn with_tool_cap_replaces_the_default_cap() {
+    let model = Arc::new(Scripted::new(vec![], true));
+    let mut app = App::new(
+        model.clone(),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        vec![Arc::new(FakeTool)],
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap()
+    .with_tool_cap(2);
+
+    let _ = app.submit("go".to_string()).unwrap();
+    run_one_tool(&mut app, "search_events", "{}");
+    assert!(!app.tools_exhausted());
+    run_one_tool(&mut app, "search_events", "{}");
+    assert!(app.tools_exhausted());
+    assert_eq!(model.tool_counts(), vec![1, 1, 0]);
 }
 
 #[test]
