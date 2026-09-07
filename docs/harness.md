@@ -125,12 +125,13 @@ pub enum Section {
     Instructions,
     /// Every map, each as its schema's purpose line and this shape.
     Maps(MapShape),
-    /// One constant-size line per event past the window, with its
-    /// id, back this many events.
-    Index(usize),
-    /// The transcript in full, back as far as `window` reaches.
-    History { window: Window, results: ResultShape },
-    /// The current time, for `since` on the tools.
+    /// The transcript back as far as the window reaches, its tool
+    /// results cut to a head, plus the whole turn in progress. Before
+    /// it, one line per event for `index` events further back, so the
+    /// model can open with `read_event` what it can no longer see.
+    History { window: Window, index: usize },
+    /// The current time, for `since` on the tools. It changes every
+    /// round, so it goes after everything a provider could cache.
     Time,
 }
 
@@ -138,50 +139,48 @@ pub struct Context {
     pub sections: Vec<Section>,
 }
 
-/// The `code` harness's view, once the cache reorder lands.
+/// The one harness's view, as `Harness::new` builds it.
 Context {
     sections: vec![
         Section::Instructions,
-        Section::Maps(MapShape::Prompt),
-        Section::Index(200),
+        Section::Maps(map_shape),
         Section::History {
-            window: Window::Tokens { share: 0.125, keep: 0.0625, floor: 8_000 },
-            results: ResultShape::Preview,
+            window: Window { share: 0.125, keep: 0.0625, floor: 8_000 },
+            index: 200,
         },
         Section::Time,
     ],
 }
 
-pub enum Window {
-    /// The last n message-bearing events, as today.
-    Events(usize),
-    /// A share of the model's context window, with a floor for a
-    /// model that reports none. Fills to `share`, then cuts back to
-    /// `keep` and holds still - see the cache rule below.
-    Tokens { share: f32, keep: f32, floor: u32 },
-}
-
-pub enum ResultShape {
-    Whole,
-    /// Outside the current turn, the preview line search_events
-    /// prints, with the event's id, so read_event can open it.
-    Preview,
-}
+/// A share of the model's context window. History fills to `share`,
+/// is cut back to `keep`, then holds still until it fills again. For
+/// a model that reports no window, `floor` is the high mark and half
+/// of it the low.
+pub struct Window { pub share: f32, pub keep: f32, pub floor: u32 }
 ```
 
-Each variant renders itself from a view of memory - the transcript,
-the maps, the model's capabilities, the turn in progress - and returns
-its messages. One function walks the list:
+Three things in the first draft turned out to be one section. The
+index starts where history stops and needs the same cut, so it is a
+field of `History`. A tool result outside the current turn is always
+cut to its head with a `read_event` handle, so there is no shape to
+choose. And a window counted in events had no caller once the token
+window existed, so `Window` is a struct, not an enum.
+
+Each section renders itself from a `View`: the transcript, the scope
+the maps fold in, the turn in progress, the model's context window,
+and what `App` decided about the tools. One function walks the list:
 
 ```rust
 impl Context {
-    pub fn build(
-        &self,
-        view: &View,
-        tools: Vec<ToolSpec>,
-    ) -> Result<ModelRequest, Box<dyn Error>>
+    pub fn build(&self, view: View) -> Result<ModelRequest, Box<dyn Error>>
 }
 ```
+
+The window's start is a function of the log alone: the cuts are
+replayed over the whole transcript on every build, so two rounds agree
+on the start with no state kept between them, and a restart lands on
+the same cut. Tokens are estimated at four characters each, over what
+`to_messages` would carry.
 
 ### Two orders
 
@@ -190,10 +189,9 @@ and the builder keeps them apart.
 
 - **Budget priority** says who gives way when the request is too big:
   instructions, then maps, then the current turn, then history, then
-  the index. Each tier takes from what the one before left. Today
-  nothing gives way, because the maps are unconditional and history is
-  a fixed count. Once the window is sized by tokens, something can,
-  and this order says what.
+  the index. Today only history gives way, to its window; the maps
+  are unconditional and the index is a fixed count of lines. Should
+  the maps ever need to give way too, this is the order.
 - **Message sequence** is the order the model reads. It is set by what
   changes least often, for the cache.
 
@@ -223,9 +221,10 @@ Two rules follow from it:
 
 - **The window slides in steps, not per event.** A window that drops
   the oldest message every round moves the prefix every round. So
-  `Window::Tokens` fills to `share`, cuts back to `keep`, and holds
-  still until it fills again. The boundary between the index and full
-  history moves with it, in the same steps.
+  history fills to `share`, cuts back to `keep`, and holds still until
+  it fills again. A cut lands on a user prompt, never inside a tool
+  round. The boundary between the index and full history moves with
+  it, in the same steps.
 - **A map's stability rule is also a cache rule.** Add beside what a
   reader has seen and never move it, which AGENTS.md asks for the
   reader's sake, is what keeps a rendered map a prefix of its next
@@ -307,10 +306,9 @@ harness driven differently, and it stays that way.
 ## Seeing the context
 
 A `/context` command in the TUI shows what the model was shown. It is
-a fold over the section list: each section's name, shape, and tokens
-by the builder's own estimate, so there is one number and not two that
-drift. History adds three counts: messages in full, results shown as
-previews, events in the index. Beside them, the last round's
+a fold over the section list: each section's name, shape, message
+count, and tokens by the builder's own estimate, so there is one
+number and not two that drift. Beside them, the last round's
 `input_tokens` and `cached_tokens`, which percept already records.
 
 It is the verification budget applied to the harness. Two claims in
@@ -338,18 +336,16 @@ These are settled before the build, not assumed.
 
 ## Steps
 
-1. **Extract.** Add `Harness`, `Context`, and `Section` in `app`, move
-   `build_request` and `window_start` into `Context::build`, and have
-   `App::new` take a `Harness`. Behaviour identical, section order as
-   today; the existing tests pass unchanged.
-2. **Reorder for the cache.** Time to the end. One test that the
-   prefix before the turn's tail is identical across two rounds. The
-   cheapest change in the set, and likely the largest saving.
-3. **Vary the view.** Land `Window::Tokens` with its step rule,
-   `ResultShape::Preview`, and `Index`, each with one test. `code` and
-   `maps` switch to the token window by default.
-4. **`/context`.** The render over the sections, then use it to check
-   steps 2 and 3 before the branch is reviewed.
+Each landed as one commit on `feat/harness`.
+
+1. **Extract.** `Harness`, `Context`, and `Section` in `app`;
+   `build_request` and `window_start` became `Context::build`; `App::new`
+   takes a `Harness`. Behaviour identical, the existing tests unchanged.
+2. **Reorder for the cache.** Time to the end, with a test that a tool
+   round only appends to the request.
+3. **Vary the view.** The token window with its step rule, the cut of
+   old tool results, and the index, each with its tests.
+4. **`/context`.** The render over the sections.
 
 ## Alternatives weighed
 
@@ -365,6 +361,14 @@ These are settled before the build, not assumed.
   hidden in the build function, and the budget rule with them. A list
   of typed sections makes both visible, and gives a provider a
   boundary to mark for its cache.
+- **A window counted in events, a result shape, and an index section
+  as separate knobs.** Each had one value in use. The event window had
+  no caller once the token window existed; a result outside the turn
+  is always cut; the index belongs to the history it precedes.
+- **The store's JSON summary line for the cut result and the index.**
+  It is the serde boundary, and `app` may not depend on `store`. The
+  builder prints its own one-line text preview with the id, which is
+  what the model needs to call `read_event`.
 - **The context's parts as policy objects.** The word `Policy` already
   means whether a tool call runs or asks. A second family under the
   same word makes a reader ask which kind every time. The parts cut a
