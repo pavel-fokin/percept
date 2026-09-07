@@ -256,9 +256,10 @@ line only. One commit per issue.
 
 Work happens on a branch. Check which one is checked out before the
 first commit - a status snapshot from the start of a session can be
-stale - and branch off main if that is where you are. Merging into main
-is the user's call, not the agent's - hand back a reviewed branch and
-stop there. The same holds for pushing.
+stale - and switch to main before branching, never onto another feature
+branch, so a PR carries only its own commits. Merging into main is the
+user's call, not the agent's - hand back a reviewed branch and stop
+there. The same holds for pushing.
 
 ## Writing
 
