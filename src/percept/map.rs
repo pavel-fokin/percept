@@ -238,6 +238,17 @@ impl Schema {
         self.edge_kinds.iter().map(|kind| kind.name)
     }
 
+    /// The node kind names as a `, `-joined list, for a prompt line or
+    /// an "expected one of" error.
+    pub fn node_kinds_csv(&self) -> String {
+        self.node_kind_names().collect::<Vec<_>>().join(", ")
+    }
+
+    /// The edge kind names as a `, `-joined list.
+    pub fn edge_kinds_csv(&self) -> String {
+        self.edge_kind_names().collect::<Vec<_>>().join(", ")
+    }
+
     /// The log-folded schema `name` names, or the error every boundary
     /// that folds or writes a map by name reports. A derived map is its
     /// own error: it exists, and this is the wrong door to it.
@@ -458,13 +469,13 @@ impl fmt::Display for MapError {
                 f,
                 "no node kind {kind:?} in map {:?}; kinds are {}",
                 map.name,
-                map.node_kind_names().collect::<Vec<_>>().join(", ")
+                map.node_kinds_csv()
             ),
             Self::UnknownEdgeKind { map, kind } => write!(
                 f,
                 "no edge kind {kind:?} in map {:?}; kinds are {}",
                 map.name,
-                map.edge_kind_names().collect::<Vec<_>>().join(", ")
+                map.edge_kinds_csv()
             ),
             Self::BlankName => write!(f, "a node's name must not be blank"),
             Self::DuplicateNode { kind, name } => {
