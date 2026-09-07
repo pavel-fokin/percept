@@ -61,6 +61,9 @@ The public surface of the whole crate:
 Filter before you print. `percept maps show code` with no filter is the
 one thing that wastes context here.
 
+Output is JSONL for `jq`. `--format md` prints a per-kind Markdown
+outline instead - a human read, not a pipe.
+
 The code map is read-only. `percept maps add-node code ...` is refused;
 change the code, and the map follows.
 

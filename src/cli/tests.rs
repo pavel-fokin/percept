@@ -309,6 +309,50 @@ fn maps_show_kind_is_repeatable() {
 }
 
 #[test]
+fn maps_show_format_defaults_to_json() {
+    assert_eq!(
+        parse_show(["percept", "maps", "show", "decisions"]).format,
+        Format::Json
+    );
+}
+
+#[test]
+fn maps_show_format_md_and_its_markdown_alias_both_parse_to_md() {
+    assert_eq!(
+        parse_show(["percept", "maps", "show", "decisions", "--format", "md"]).format,
+        Format::Md
+    );
+    assert_eq!(
+        parse_show([
+            "percept",
+            "maps",
+            "show",
+            "decisions",
+            "--format",
+            "markdown"
+        ])
+        .format,
+        Format::Md
+    );
+}
+
+#[test]
+fn maps_show_rejects_an_unknown_format() {
+    assert!(
+        Cli::try_parse_from(["percept", "maps", "show", "decisions", "--format", "yaml"]).is_err()
+    );
+}
+
+fn parse_show<const N: usize>(argv: [&str; N]) -> ShowMapArgs {
+    match Cli::try_parse_from(argv).unwrap().command {
+        Some(Command::Maps {
+            command: MapsCommand::Show(args),
+        }) => args,
+        _ => panic!("expected maps show"),
+    }
+}
+
+#[test]
 fn all_projects_scopes_to_every_project_while_the_default_scopes_to_root() {
     assert_eq!(
         scope(false, Path::new(ROOT)),
