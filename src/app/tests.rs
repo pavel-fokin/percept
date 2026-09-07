@@ -1,8 +1,8 @@
 use super::*;
 use crate::percept::{Actor, Chunk, Payload, Verdict, SCHEMAS};
 use crate::testing::{
-    content, node_added, source, usage, FakeCatalog, FakeLog, FakeRenderer, FakeSnapshot, FakeTool,
-    FixedPolicy, Scripted,
+    content, node_added, scope, source, usage, FakeCatalog, FakeLog, FakeRenderer, FakeSnapshot,
+    FakeTool, FixedPolicy, Scripted,
 };
 
 const SOURCE: &str = "tui";
@@ -223,6 +223,68 @@ fn preseeded_log_becomes_the_opening_transcript() {
 
     let _ = app.submit("next".to_string()).unwrap();
     assert_eq!(app.events().len(), 3);
+}
+
+#[test]
+fn another_source_s_conversation_in_the_same_project_stays_out_of_the_transcript() {
+    let seeded = vec![
+        Event::message_received(Actor::User, "hi".to_string(), source(SOURCE), None),
+        Event::message_received(
+            Actor::User,
+            "codex was here".to_string(),
+            source("codex"),
+            None,
+        ),
+    ];
+    let log = Arc::new(FakeLog::seeded(seeded));
+    let app = App::new(
+        Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
+        log,
+        Vec::new(),
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap();
+
+    assert_eq!(app.events().len(), 1);
+    assert_eq!(content(&app.events()[0]), "hi");
+}
+
+#[test]
+fn another_source_s_map_mutation_in_the_same_project_still_folds() {
+    let seeded = vec![Event::new(
+        Actor::Model,
+        source("codex"),
+        None,
+        Payload::NodeAdded {
+            map: "decisions".to_string(),
+            node: percept::NodeId::new(),
+            kind: "question".to_string(),
+            name: "why?".to_string(),
+            properties: Default::default(),
+            sources: Vec::new(),
+        },
+    )];
+    let log = Arc::new(FakeLog::seeded(seeded));
+    let app = App::new(
+        Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
+        log,
+        Vec::new(),
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap();
+
+    let decisions = Map::fold_all(&scope(), app.events())
+        .unwrap()
+        .into_iter()
+        .find(|map| map.schema().name == "decisions")
+        .unwrap();
+    assert_eq!(decisions.nodes().len(), 1);
 }
 
 #[test]
