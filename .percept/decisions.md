@@ -51,6 +51,14 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "How does a reader learn a map's node and edge kinds?" (model) · 2026-09-07
 - "What does maps list --format md render per map?" (model) · 2026-09-07
 - "Does AGENTS.md list the code map's node kinds?" (model) · 2026-09-07
+- "How does the TUI select reasoning effort?" (model) · 2026-09-07
+- "What happens to reasoning effort when the model changes?" (model) · 2026-09-07
+- "Are the maps and code toolsets two harnesses?" (model) · 2026-09-07
+- "How far back does the model's history reach?" (model) · 2026-09-07
+- "What does the model see past the window?" (model) · 2026-09-07
+- "In what order does a request carry its sections?" (model) · 2026-09-07
+- "How does a user see what the model was shown?" (model) · 2026-09-07
+- "Where do design proposals live?" (model) · 2026-09-07
 
 ## "Where does the event log live?"
 
@@ -369,3 +377,51 @@ note: "Not decided. Four models sketched: A - issue as a link, a task node carri
 
 - decision "no; the code row points at percept maps list, and the preamble notes code keys internal code by file path" (model)
   why: "the Package column trained the model to try package:providers this session; the kinds now live on the Schema"
+
+## "How does the TUI select reasoning effort?" (model)
+
+why: "The catalog exposes supported effort levels, but the user needs a lightweight way to change the live session setting."
+- decision "a session-only /effort command with contextual suggestions and Tab completion" (model)
+  why: "It uses normal command syntax and the existing suggestion area; Enter applies a complete value without starting a model turn, while bare /effort reports current and available values."
+
+## "What happens to reasoning effort when the model changes?" (model)
+
+why: "Different models can support different effort levels."
+- decision "keep the selected effort when supported; otherwise use the new model's configured default" (model)
+  why: "A compatible selection remains stable, while an incompatible one cannot leak into requests for the new model."
+
+## "Are the maps and code toolsets two harnesses?" (model)
+
+- decision "one harness, with the tree on or off; PERCEPT_TOOLS and PERCEPT_MAPS stay as knobs on it" (model)
+  why: "a harness is for a purpose; the toolsets differ by whether a git checkout exists, which is the environment, so there is nothing to pick and no variable to add"
+- weighed "maps and code as named harnesses picked by PERCEPT_HARNESS" (model)
+  why: "two settings of one thing; a variable to select between them names a difference that is not a purpose"
+
+## "How far back does the model's history reach?" (model)
+
+- decision "a token window: one eighth of the model's context, cut back to one sixteenth, 8k floor when the model reports none; results outside the current turn as preview lines" (model)
+  why: "twenty raw events lost a confirmed plan before the build turn on a 1M model; a share scales with the model, and the cut lands in steps so the request's prefix stays cacheable between cuts"
+- weighed "raise CONTEXT_EVENTS" (model)
+  why: "fights the design that says a model searches what it cannot hold, and 40 events still miss a plan written before a six-exchange discussion"
+- weighed "record the confirmed plan as a task node so the tasks map carries it" (model)
+  why: "a specific map is content, not the harness; the builder must work for any map, so the fix belongs in how the window is cut"
+
+## "What does the model see past the window?" (model)
+
+- decision "one preview line per event with its id, back 200 events, so read_event can open any of them" (model)
+  why: "the log as environment with handles into it; percept ranks nothing, the line is the same constant-size output search_events gives"
+
+## "In what order does a request carry its sections?" (model)
+
+- decision "stable first: instructions, maps, index, history, then the time last" (model)
+  why: "every provider reuses a matching prefix; the time at position one changed every round and killed the cache, so a fifty-call turn paid for the maps fifty times"
+
+## "How does a user see what the model was shown?" (model)
+
+- decision "/context in the TUI: each section's shape and estimated tokens beside the last round's input and cached tokens" (model)
+  why: "the two claims of the window work, that it reached the plan and that the cache held, cannot be checked without it; both coding clients call it /context"
+
+## "Where do design proposals live?" (model)
+
+- decision "docs/, tracked; the /docs ignore line is dropped" (model)
+  why: "the harness design is the first; a tracked folder beside AGENTS.md is where a reader looks"
