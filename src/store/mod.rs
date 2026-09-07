@@ -27,7 +27,7 @@ pub use jsonl::Jsonl;
 pub use map::{encode_fragment, encode_lines, encode_map, fold_map, revise, LogMaps, Snapshot};
 pub use read_event::{read, ReadEvent};
 pub use read_map::ReadMap;
-pub use render::{markdown, MarkdownFiles};
+pub use render::{catalogue, markdown, MarkdownFiles};
 pub use revise_map::ReviseMap;
 pub use search_events::SearchEvents;
 

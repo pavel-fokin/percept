@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::percept::{Actor, EventId, Map, MapRenderer, Node, Schema, DECISIONS, TASKS};
+use crate::percept::{Actor, EventId, Kind, Map, MapRenderer, Node, Schema, DECISIONS, TASKS};
 use crate::store::event::ids;
 
 /// What every rendered map opens with, so a reader who lands on the
@@ -61,6 +61,58 @@ pub fn markdown(map: &Map) -> String {
     }
 
     out
+}
+
+/// `maps list --format md`: one `##` section per map, in the order the
+/// caller folded them. Each names the map's purpose and size, lists its
+/// node and edge kinds with the gloss each carries on its `Schema`, and
+/// shows one real node line and one real edge line so a reader sees the
+/// shape the JSONL takes and how an edge names its ends (`kind:name`).
+pub fn catalogue(maps: &[Map]) -> String {
+    let mut out = String::from(
+        "# maps\n\nEvery map percept knows: what it makes cheap, how big it is, \
+         its node and edge kinds, and one line from it.\n",
+    );
+    for map in maps {
+        let schema = map.schema();
+        let _ = write!(
+            out,
+            "\n## {}\n\n{}\n\n{} nodes, {} edges.\n",
+            schema.name,
+            schema.purpose,
+            map.nodes().len(),
+            map.edges().len()
+        );
+        push_kind_glosses(&mut out, "Node kinds", schema.node_kinds);
+        push_kind_glosses(&mut out, "Edge kinds", schema.edge_kinds);
+        push_example(&mut out, map);
+    }
+    out
+}
+
+fn push_kind_glosses(out: &mut String, heading: &str, kinds: &'static [Kind]) {
+    let _ = write!(out, "\n{heading}:\n");
+    for kind in kinds {
+        let _ = writeln!(out, "- `{}` - {}", kind.name, kind.gloss);
+    }
+}
+
+/// The map's first node line and first edge line, verbatim JSONL, under
+/// an `Example` heading - or a note when the map holds none yet.
+fn push_example(out: &mut String, map: &Map) {
+    let node = map.nodes().first();
+    let edge = map.edges().first();
+    if node.is_none() && edge.is_none() {
+        out.push_str("\nExample: nothing recorded here yet.\n");
+        return;
+    }
+    out.push_str("\nExample node and edge:\n\n");
+    if let Some(node) = node {
+        let _ = writeln!(out, "    {}", super::map::encode_node(map, node));
+    }
+    if let Some(edge) = edge {
+        let _ = writeln!(out, "    {}", super::map::encode_edge(map, edge));
+    }
 }
 
 /// One `## <kind>` section per node kind that holds a node - headline

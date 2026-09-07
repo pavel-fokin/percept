@@ -697,6 +697,39 @@ fn a_map_of_another_schema_renders_per_kind() {
 }
 
 #[test]
+fn the_catalogue_gives_each_map_a_section_with_its_kinds_glossed() {
+    let mut decisions = Map::empty(&DECISIONS);
+    add(
+        &mut decisions,
+        "question",
+        "Where does the log live?",
+        None,
+        &[],
+        Actor::User,
+    );
+
+    let text = catalogue(std::slice::from_ref(&decisions));
+
+    assert!(text.starts_with("# maps\n"));
+    assert!(text.contains("## decisions\n"));
+    assert!(text.contains(DECISIONS.purpose));
+    assert!(text.contains("1 nodes, 0 edges.\n"));
+    assert!(text.contains("\nNode kinds:\n- `question` - a matter the project had to settle\n"));
+    assert!(text.contains("\nEdge kinds:\n- `answers` - from an option to the question"));
+    assert!(text.contains("\nExample node and edge:\n\n    {\"node\":"));
+    assert!(text.contains("\"name\":\"Where does the log live?\""));
+}
+
+#[test]
+fn the_catalogue_glosses_a_code_package_as_an_external_crate() {
+    let text = catalogue(&[Map::empty(&CODE)]);
+
+    assert!(text.contains("- `package` - an external crate a file imports"));
+    assert!(text.contains("never one of this project's own modules"));
+    assert!(text.contains("\nExample: nothing recorded here yet.\n"));
+}
+
+#[test]
 fn markdown_files_writes_the_map_named_file_in_its_directory_creating_it() {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("maps");
