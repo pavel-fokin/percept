@@ -26,7 +26,7 @@ use app::{App, MapShape};
 use cli::{Cli, Command, EventsCommand, MapsCommand};
 use percept::Actor;
 use providers::{Catalog, ProviderConfig, FIREWORKS_MODEL, OPENAI_MODEL};
-use store::{Jsonl, ReadEvent, ReadMap, ReviseMap, SearchEvents};
+use store::{Jsonl, LogMaps, ReadEvent, ReadMap, ReviseMap, SearchEvents};
 use tools::{
     AskBeforeWrites, Bash, EditFile, FindFiles, GitSnapshot, GrepFiles, ListFiles, ReadFile,
     Workspace, WriteFile,
@@ -388,6 +388,24 @@ fn code_tools(checkout: &Path) -> Result<Vec<Arc<dyn percept::Tool>>, Box<dyn st
     ])
 }
 
+/// Routes `read_map` by name: the `code` map is walked fresh from the
+/// working tree, every other map is folded from the log. Wiring only -
+/// it is what keeps `store` from depending on `code`.
+struct RoutedMaps {
+    folded: LogMaps,
+    root: PathBuf,
+}
+
+impl percept::MapReader for RoutedMaps {
+    fn read(&self, name: &str) -> Result<percept::Map, Box<dyn std::error::Error>> {
+        if name == percept::CODE.name {
+            Ok(code::build(&self.root)?)
+        } else {
+            self.folded.read(name)
+        }
+    }
+}
+
 fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
     let shape = std::env::var(MAPS_VAR).unwrap_or_else(|_| "prompt".to_string());
     match shape.as_str() {
@@ -415,11 +433,15 @@ fn build_app(
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
     let scope = source.scope();
+    let maps = RoutedMaps {
+        folded: LogMaps::new(log.clone(), scope.clone()),
+        root: checkout.to_path_buf(),
+    };
     let mut tools: Vec<Arc<dyn percept::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
         Arc::new(ReadEvent::new(log.clone())),
-        Arc::new(ReviseMap::new(log.clone(), scope.clone())),
-        Arc::new(ReadMap::new(log.clone(), scope)),
+        Arc::new(ReviseMap::new(log.clone(), scope)),
+        Arc::new(ReadMap::new(Arc::new(maps))),
     ];
     match build_toolset(&source, checkout)? {
         Toolset::Maps => App::new(model, catalog, log, tools, renderer, map_shape, source),

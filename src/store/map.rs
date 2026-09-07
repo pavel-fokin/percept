@@ -4,13 +4,14 @@
 //! `Snapshot` of the log and turned into the payload that records it.
 
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::percept::{
-    Actor, Edge, EventId, EventLog, Fragment, Map, MapError, Mutation, Node, NodeId, NodeRef,
-    Payload, Schema, Scope, DECISIONS, OPTION, TASK, TASKS,
+    Actor, Edge, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation, Node, NodeId,
+    NodeRef, Payload, Schema, Scope, DECISIONS, OPTION, TASK, TASKS,
 };
 use crate::shared::Timestamp;
 use crate::store::event::{actor_name, ids};
@@ -24,6 +25,25 @@ pub fn fold_map(
     scope: &Scope,
 ) -> Result<Map, Box<dyn std::error::Error>> {
     Ok(Map::fold(Schema::find(name)?, scope, &log.load()?)?)
+}
+
+/// The `MapReader` for every log-folded map. `main` wraps this to route
+/// `code` to the working-tree walk, so `store` never depends on `code`.
+pub struct LogMaps {
+    log: Arc<dyn EventLog>,
+    scope: Scope,
+}
+
+impl LogMaps {
+    pub fn new(log: Arc<dyn EventLog>, scope: Scope) -> Self {
+        Self { log, scope }
+    }
+}
+
+impl MapReader for LogMaps {
+    fn read(&self, name: &str) -> Result<Map, Box<dyn std::error::Error>> {
+        fold_map(self.log.as_ref(), name, &self.scope)
+    }
 }
 
 /// One writer's view of the log, loaded once: a map folded from it,

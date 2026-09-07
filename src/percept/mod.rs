@@ -1,6 +1,7 @@
 mod event;
 mod event_log;
 mod map;
+mod map_reader;
 mod model;
 mod policy;
 mod render;
@@ -16,6 +17,7 @@ pub use map::{
     map_of, Edge, Fragment, Map, MapError, Mutation, Node, NodeId, NodeRef, Schema, Scope,
     Selection, CODE, DECISION, DECISIONS, OPTION, SCHEMAS, TASK, TASKS,
 };
+pub use map_reader::MapReader;
 pub use model::{
     to_messages, Chunk, Message, Modality, Model, ModelCapabilities, ModelCatalog, ModelDescriptor,
     ModelListing, ModelRequest, Provider, ReplyStream, Usage,

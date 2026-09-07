@@ -45,6 +45,7 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "How is a map read as Markdown from the CLI?" (model) · 2026-09-07
 - "How does a long why read in the render?" (model) · 2026-09-07
 - "How should GitHub issues integrate with the tasks and decisions maps?" (model) · 2026-09-07
+- "Can the model reach the code map through read_map?" (model) · 2026-09-07
 
 ## "Where does the event log live?"
 
@@ -319,3 +320,12 @@ Folded from the percept log for this project and rerendered on every write. Chan
 
 note: "Not decided. Four models sketched: A - issue as a link, a task node carries issue:N, one-way push creates/closes, percept stays truth; B - issue as an event source, a webhook publishes issue.opened/closed under source github and a fold derives tasks; C - bidirectional sync; D - a GithubIssues MapRenderer beside MarkdownFiles. Leaning A plus a thin one-way push. Keep decisions percept-native; keep GitHub a strict projection so it is not a third party in the human/agent merge. Full tradeoffs in the 2026-09-07 session."
 - open
+
+## "Can the model reach the code map through read_map?" (model)
+
+- decision "read_map serves the code map too, dispatched by map name, offered in every turn" (model)
+  why: "the model had one ergonomic tool for decisions and tasks and a bash incantation for code, so it grepped; read_map now dispatches code to the working-tree walk through a MapReader port so store keeps no sideways dep; --since on code is refused as in the CLI"
+- weighed "a separate read_code tool beside read_map" (model)
+  why: "percept keeps one map-reading tool on purpose (When is read_map offered: one tool fewer to reason about); a second tool splits that"
+- weighed "only point the Derived error at percept maps show code" (model)
+  why: "leaves the friction that caused the miss: the model still shells out, learns the CLI syntax, and parses JSONL instead of calling a typed tool"

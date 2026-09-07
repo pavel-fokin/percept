@@ -2,22 +2,21 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{EventLog, NodeRef, Scope, Selection, Tool, ToolOutput, ToolSpec};
+use crate::percept::{MapReader, NodeRef, Selection, Tool, ToolOutput, ToolSpec};
 use crate::store::map::NodeRefArgs;
-use crate::store::{encode_fragment, encode_lines, fold_map, optional_time};
+use crate::store::{encode_fragment, encode_lines, optional_time};
 
 /// The `read_map` tool: one map, whole or cut to a fragment, as JSONL
 /// with event ids on every node and edge. Offered when the prompt does
 /// not carry the map whole, so the model opens what it judges relevant
 /// instead of reading every map every turn.
 pub struct ReadMap {
-    log: Arc<dyn EventLog>,
-    scope: Scope,
+    maps: Arc<dyn MapReader>,
 }
 
 impl ReadMap {
-    pub fn new(log: Arc<dyn EventLog>, scope: Scope) -> Self {
-        Self { log, scope }
+    pub fn new(maps: Arc<dyn MapReader>) -> Self {
+        Self { maps }
     }
 }
 
@@ -25,19 +24,23 @@ const NAME: &str = "read_map";
 
 const DESCRIPTION: &str = "Read one cognitive map by name, whole or cut to \
     a fragment: around one node to a depth, since an instant, of some \
-    kinds. Returns JSONL: first a line counting what was shown of the \
-    whole and how many edges cross the cut, then every node, then every \
-    edge, each with the event ids it cites. A crossing edge is where to \
-    widen when an exception or a contradiction could change the answer. \
-    Open a map before answering from it or revising it; what the \
-    conversation shows of a map may be only its headlines.";
+    kinds. The maps are decisions, tasks, and code - files, the symbols \
+    they define, and what imports what, walked fresh from the working \
+    tree. Prefer this over grep for code structure. Returns JSONL: first \
+    a line counting what was shown of the whole and how many edges cross \
+    the cut, then every node, then every edge, each with the event ids it \
+    cites. A crossing edge is where to widen when an exception or a \
+    contradiction could change the answer. Open a map before answering \
+    from it or revising it; what the conversation shows of a map may be \
+    only its headlines. `since` has no meaning for code, which has no \
+    history.";
 
 /// JSON Schema for `run`'s `arguments`. A string, not a `Value` - the
 /// domain's `ToolSpec` is serde-free, so the provider parses this.
 const PARAMETERS: &str = r#"{
   "type": "object",
   "properties": {
-    "map": {"type": "string", "description": "the map's name, e.g. decisions"},
+    "map": {"type": "string", "description": "the map's name: decisions, tasks, or code"},
     "around": {
       "type": "object",
       "description": "keep this node and what is within depth edges of it, either way",
@@ -86,7 +89,8 @@ impl Tool for ReadMap {
             since: optional_time(args.since.as_deref())?,
             kinds: &args.kinds,
         };
-        let fragment = fold_map(self.log.as_ref(), &args.map, &self.scope)?.select(&selection)?;
+        // `select` refuses `since` on the code map - it has no history.
+        let fragment = self.maps.read(&args.map)?.select(&selection)?;
         let lines = std::iter::once(encode_fragment(&fragment)).chain(encode_lines(fragment.map()));
         Ok(ToolOutput::text(lines.collect::<Vec<_>>().join("\n")))
     }

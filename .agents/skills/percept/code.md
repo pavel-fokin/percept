@@ -7,6 +7,10 @@ stdout and selection notices on stderr. Compose stdout with `jq`,
 `grep`, and shell loops. It
 never ranks or summarises - you decide what is relevant.
 
+In a turn with the `read_map` tool, call it with `map` set to `code`
+for the same graph and the same `around` / `depth` / `kinds` cuts, no
+shell needed. `since` has no meaning for `code` - it has no history.
+
 Binary: `~/.percept/bin/percept`, installed by `scripts/install.sh`.
 
 Nodes:

@@ -313,6 +313,9 @@ pub enum MapError {
     UnknownMap(String),
     /// A map in `DERIVED`, named where only a log-folded map fits.
     Derived(String),
+    /// `since` on a `DERIVED` map: it is walked fresh, so it has no
+    /// "before". One rule for the CLI and the `read_map` tool.
+    SinceOnDerived(&'static str),
     UnknownNodeKind {
         map: &'static Schema,
         kind: String,
@@ -367,7 +370,13 @@ impl fmt::Display for MapError {
             ),
             Self::Derived(name) => write!(
                 f,
-                "{name:?} is derived from the working tree, not folded from the log or written"
+                "{name:?} is derived from the working tree, not the log: read it \
+                 with read_map or `percept maps show {name}`"
+            ),
+            Self::SinceOnDerived(name) => write!(
+                f,
+                "since has no meaning for {name}: it is walked fresh from the \
+                 working tree and has no history"
             ),
             Self::UnknownNodeKind { map, kind } => write!(
                 f,
@@ -726,6 +735,9 @@ impl Map {
     /// the cut left out. Consumes the map: a whole selection is the map
     /// itself, not a copy.
     pub fn select(self, selection: &Selection) -> Result<Fragment, MapError> {
+        if selection.since.is_some() && self.schema.is_derived() {
+            return Err(MapError::SinceOnDerived(self.schema.name));
+        }
         let total_nodes = self.nodes.len();
         let total_edges = self.edges.len();
         // An empty map has nothing to cut, and a node it lacks is not an

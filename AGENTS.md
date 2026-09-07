@@ -131,8 +131,8 @@ it, never sideways or up:
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. A `ToolStep::Ask` pauses the turn on a row: `y` runs once, `a` runs and allows that tool for the session, `n` declines; `/undo` puts the tree back. |
 | Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps`, `ask`, `reflect` - the log and its maps without the TUI. Headless, a call the policy would ask about is declined unless `ask --yes`. |
 | Infrastructure | `providers` | `Ollama` and `OpenAi` - implement `percept::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` carries the key. |
-| Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`, the four tools the model calls: `search_events`, `read_event`, `revise_map`, `read_map`, and `MarkdownFiles`, the `MapRenderer` that writes `.percept/`. |
-| Infrastructure | `code` | The `code` map: walks the working tree with `ignore`, parses each file with `tree-sitter`, and builds a `Map` of `file`, `function`, `type`, and `package` nodes - `maps list` and `maps show` read it, but it is never folded from the log and never reaches the model's prompt. |
+| Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`, the four tools the model calls: `search_events`, `read_event`, `revise_map`, `read_map`, and `MarkdownFiles`, the `MapRenderer` that writes `.percept/`. `read_map` opens a map through a `percept::MapReader`; `LogMaps` here folds the log-backed ones, and `main` wraps it to route `code`. |
+| Infrastructure | `code` | The `code` map: walks the working tree with `ignore`, parses each file with `tree-sitter`, and builds a `Map` of `file`, `function`, `type`, and `package` nodes. `maps list`, `maps show`, and `read_map` reach it; it is never folded from the log and never carried in the prompt. |
 | Infrastructure | `tools` | The file tools the model calls under `PERCEPT_TOOLS=code`: `read_file`, `write_file`, `edit_file`, `list_files`, `find_files`, `grep_files`, native over `Workspace` - the one place a path the model gave becomes a real path, refusing any outside the checkout - and `bash`, one `sh -c` at the root with a timeout. No virtual filesystem: both routes see the one tree. `AskBeforeWrites` is the `Policy`; `GitSnapshot` the `Snapshot`, a commit under `refs/percept/snapshots/<prompt>` built through a scratch index. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 
@@ -175,9 +175,10 @@ skips it.
   `software-developer` subagent, which follows this file, writes the
   code, runs the build and tests, and reports back. It does not design,
   choose scope, commit, or push. Explore the project's code structure -
-  what a file imports, defines, or depends on - with `percept maps show
-  code` (see `.agents/skills/percept/SKILL.md` for query patterns), not
-  ad hoc `grep`.
+  what a file imports, defines, or depends on - with the code map, not
+  ad hoc `grep`: `read_map` with `map` set to `code` in a turn that has
+  it, `percept maps show code` from the shell (see
+  `.agents/skills/percept/SKILL.md` for query patterns).
 - **Review.** The main agent checks each diff against its issue, and
   small fixes land there; larger rework goes back to the subagent.
   Then two passes run once each over the whole branch, before the user

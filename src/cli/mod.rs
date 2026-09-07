@@ -516,16 +516,9 @@ pub fn maps_show(
 }
 
 /// Prints the code map, walked fresh from `root` - never the log, so
-/// this runs in a directory with no `percept.jsonl`. `--since` is
-/// refused: every node is as old as this walk.
+/// this runs in a directory with no `percept.jsonl`. `print_map`'s
+/// `select` refuses `--since`: every node is as old as this walk.
 pub fn maps_show_code(args: ShowMapArgs, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    if args.since.is_some() {
-        return Err(
-            "--since has no meaning for the code map: it is walked fresh from the working tree \
-             and has no history"
-                .into(),
-        );
-    }
     let map = code::build(root)?;
     print_map(map, &args)
 }
