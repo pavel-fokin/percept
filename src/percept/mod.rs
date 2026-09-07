@@ -5,6 +5,7 @@ mod model;
 mod policy;
 mod render;
 mod search;
+mod snapshot;
 mod tool;
 
 pub use event::{Actor, Event, EventId, EventKind, Payload, Source};
@@ -22,4 +23,5 @@ pub use model::{
 pub use policy::{AllowAll, Policy, Verdict};
 pub use render::MapRenderer;
 pub use search::{EventQuery, EventSearch};
+pub use snapshot::Snapshot;
 pub use tool::{Tool, ToolOutput, ToolSpec};

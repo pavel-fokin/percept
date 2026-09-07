@@ -17,7 +17,9 @@ pub enum Verdict {
     /// Put it to the user; run it if they say so.
     Ask,
     /// Do not run it. The text goes back to the model as the call's
-    /// result, so it can do something else.
+    /// result, so it can do something else. No policy denies yet; a
+    /// denylist would.
+    #[allow(dead_code)]
     Deny(String),
 }
 

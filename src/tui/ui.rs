@@ -350,6 +350,17 @@ fn activity(chat: &Chat, width: usize) -> Vec<Line<'static>> {
         // the whole reason the error is shown.
         return turn_lines("!", chat.error_style, chat.error_style, error, width);
     }
+    if let Some(notice) = &chat.notice {
+        return turn_lines("·", chat.hint_style, chat.hint_style, notice, width);
+    }
+    if let Some(approval) = &chat.approval {
+        let question = format!(
+            "Run {}({})? y/n",
+            approval.tool.spec().name,
+            clip(&approval.arguments)
+        );
+        return turn_lines("?", chat.user_style, Style::default(), &question, width);
+    }
     if chat.app.is_replying() {
         let frame = SPINNER[chat.spinner % SPINNER.len()];
         // A first token can be minutes away while ollama loads a
@@ -376,6 +387,9 @@ fn activity(chat: &Chat, width: usize) -> Vec<Line<'static>> {
 /// sends nothing while a reply streams, so that hint drops out instead
 /// of naming a key that's currently inert.
 fn hint(chat: &Chat) -> Line<'static> {
+    if chat.approval.is_some() {
+        return Line::from(Span::styled("y run · n decline", chat.hint_style));
+    }
     if chat.app.is_replying() {
         return Line::from(Span::styled("Esc quit", chat.hint_style));
     }

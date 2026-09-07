@@ -287,6 +287,10 @@ pub struct AskArgs {
     /// The prompt to send.
     #[arg(value_parser = non_blank)]
     pub prompt: String,
+    /// Run every tool call the policy would ask about. Headless, there
+    /// is no one to ask, so without this such a call is declined.
+    #[arg(long)]
+    pub yes: bool,
 }
 
 /// Parses `--range START:END`; either side may be blank.

@@ -119,6 +119,13 @@ pub trait AppService {
         &mut self,
         descriptor: &percept::ModelDescriptor,
     ) -> Result<(), Box<dyn std::error::Error>>;
+
+    /// Puts the working tree back as it stood before the last finished
+    /// turn, through the `Snapshot` taken at that turn's prompt. Errs
+    /// while a turn streams, when no snapshot is kept, or when nothing
+    /// is left to undo - a second `undo` in a row has no earlier
+    /// snapshot to reach, since each turn's snapshot is used once.
+    fn undo(&mut self) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 /// What the caller should do after `begin_tool`. The decision - run,
@@ -233,6 +240,13 @@ pub struct App {
     policy: Arc<dyn percept::Policy>,
     /// Most tool calls one turn may make - see `MAX_TOOL_CALLS`.
     tool_cap: usize,
+    /// Where the working tree is saved before each prompt, when the
+    /// turn can change it. `None` for a chat over the log alone: a
+    /// snapshot of a tree no tool touches would be noise.
+    snapshot: Option<Arc<dyn percept::Snapshot>>,
+    /// The prompt whose snapshot `undo` would restore: the last turn
+    /// that took one, cleared once used.
+    undo_point: Option<EventId>,
     /// Rerenders a map after a tool's commits change it - see
     /// `commit_tool_result`.
     renderer: Arc<dyn percept::MapRenderer>,
@@ -281,11 +295,20 @@ impl App {
             tools,
             policy: Arc::new(percept::AllowAll),
             tool_cap: MAX_TOOL_CALLS,
+            snapshot: None,
+            undo_point: None,
             renderer,
             map_shape,
             pending: None,
             last_usage,
         })
+    }
+
+    /// Saves the working tree through `snapshot` before every prompt,
+    /// so `undo` can put it back.
+    pub fn with_snapshot(mut self, snapshot: Arc<dyn percept::Snapshot>) -> Self {
+        self.snapshot = Some(snapshot);
+        self
     }
 
     /// Replaces the policy every tool call is checked against.
@@ -547,6 +570,13 @@ impl AppService for App {
             return Err("a reply is already streaming".into());
         }
         let event = Event::message_received(actor, text, self.source.clone(), None);
+        // The tree is saved before the prompt is on the record: a
+        // snapshot that fails leaves the log without a prompt whose
+        // changes could never be undone.
+        if let Some(snapshot) = &self.snapshot {
+            snapshot.take(event.id())?;
+            self.undo_point = Some(event.id());
+        }
         self.log.append(&event)?;
         let anchor = event.id();
         let start = self.events.len();
@@ -687,6 +717,21 @@ impl AppService for App {
         }
         self.chat = self.catalog.build(descriptor)?;
         self.last_usage = None;
+        Ok(())
+    }
+
+    fn undo(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.is_replying() {
+            return Err("a reply is already streaming".into());
+        }
+        let Some(snapshot) = &self.snapshot else {
+            return Err("no snapshots are kept; run with PERCEPT_TOOLS=code".into());
+        };
+        let Some(prompt) = self.undo_point else {
+            return Err("nothing to undo".into());
+        };
+        snapshot.restore(prompt)?;
+        self.undo_point = None;
         Ok(())
     }
 }

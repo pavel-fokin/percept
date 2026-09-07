@@ -213,6 +213,36 @@ impl percept::Policy for FixedPolicy {
     }
 }
 
+/// A Snapshot that records which prompts it was asked to save the tree
+/// under and which it was asked to restore, in order.
+#[derive(Default)]
+pub struct FakeSnapshot {
+    taken: Mutex<Vec<EventId>>,
+    restored: Mutex<Vec<EventId>>,
+}
+
+impl FakeSnapshot {
+    pub fn taken(&self) -> Vec<EventId> {
+        self.taken.lock().unwrap().clone()
+    }
+
+    pub fn restored(&self) -> Vec<EventId> {
+        self.restored.lock().unwrap().clone()
+    }
+}
+
+impl percept::Snapshot for FakeSnapshot {
+    fn take(&self, prompt: EventId) -> Result<(), Box<dyn std::error::Error>> {
+        self.taken.lock().unwrap().push(prompt);
+        Ok(())
+    }
+
+    fn restore(&self, prompt: EventId) -> Result<(), Box<dyn std::error::Error>> {
+        self.restored.lock().unwrap().push(prompt);
+        Ok(())
+    }
+}
+
 /// The text of a `message.received` event, for asserting on what a turn
 /// committed.
 pub fn content(event: &Event) -> &str {

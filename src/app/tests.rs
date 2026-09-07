@@ -1,8 +1,8 @@
 use super::*;
 use crate::percept::{Actor, Chunk, Payload, Verdict};
 use crate::testing::{
-    content, node_added, source, usage, FakeCatalog, FakeLog, FakeRenderer, FakeTool, FixedPolicy,
-    Scripted,
+    content, node_added, source, usage, FakeCatalog, FakeLog, FakeRenderer, FakeSnapshot, FakeTool,
+    FixedPolicy, Scripted,
 };
 
 const SOURCE: &str = "tui";
@@ -426,6 +426,72 @@ fn an_unknown_tool_is_refused_before_the_policy_is_asked() {
 
     assert!(matches!(step, ToolStep::Continue(_)));
     assert_eq!(result_content(&app.events()[2]), "no such tool: nope");
+}
+
+fn app_with_snapshot() -> (Arc<FakeSnapshot>, App) {
+    let snapshot = Arc::new(FakeSnapshot::default());
+    let app = App::new(
+        Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        Vec::new(),
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap()
+    .with_snapshot(snapshot.clone());
+    (snapshot, app)
+}
+
+#[test]
+fn a_turn_saves_the_tree_under_its_prompt_before_asking_the_model() {
+    let (snapshot, mut app) = app_with_snapshot();
+
+    let _ = app.submit("change it".to_string()).unwrap();
+
+    assert_eq!(snapshot.taken(), vec![app.events()[0].id()]);
+}
+
+#[test]
+fn undo_restores_the_last_turn_s_snapshot_once() {
+    let (snapshot, mut app) = app_with_snapshot();
+    let _ = app.submit("change it".to_string()).unwrap();
+    app.end_stream().unwrap();
+    let prompt = app.events()[0].id();
+
+    app.undo().unwrap();
+    assert_eq!(snapshot.restored(), vec![prompt]);
+
+    assert_eq!(app.undo().unwrap_err().to_string(), "nothing to undo");
+    assert_eq!(snapshot.restored(), vec![prompt]);
+}
+
+#[test]
+fn undo_is_refused_while_a_turn_streams() {
+    let (snapshot, mut app) = app_with_snapshot();
+    let _ = app.submit("change it".to_string()).unwrap();
+
+    assert!(app.undo().is_err());
+    assert!(snapshot.restored().is_empty());
+}
+
+#[test]
+fn an_app_without_a_snapshot_takes_none_and_cannot_undo() {
+    let mut app = App::new(
+        Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        Vec::new(),
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap();
+    let _ = app.submit("hi".to_string()).unwrap();
+    app.end_stream().unwrap();
+
+    assert!(app.undo().is_err());
 }
 
 #[test]

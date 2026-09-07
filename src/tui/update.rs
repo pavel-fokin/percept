@@ -7,7 +7,7 @@ use std::sync::Arc;
 use super::commands;
 #[cfg(test)]
 use super::type_str;
-use super::{Chat, ModelsMenu, StreamEvent};
+use super::{Approval, Chat, ModelsMenu, StreamEvent};
 use crate::app::{run_tool, ToolStep};
 use crate::percept::{Chunk, ModelListing, ReplyStream, Tool, ToolOutput};
 
@@ -26,6 +26,10 @@ pub fn handle_key(
     }
     if chat.models_menu.is_some() {
         handle_models_menu_key(chat, key);
+        return Ok(false);
+    }
+    if chat.approval.is_some() {
+        handle_approval_key(chat, key, reply_tx)?;
         return Ok(false);
     }
     if handle_command_suggestion_key(chat, key) {
@@ -62,6 +66,10 @@ pub fn handle_key(
             open_models_menu(chat, reply_tx);
             Ok(false)
         }
+        (KeyCode::Enter, _) if is_undo_command(&chat.current_text()) => {
+            undo(chat);
+            Ok(false)
+        }
         (KeyCode::Enter, _) => {
             submit(chat, reply_tx)?;
             Ok(false)
@@ -74,11 +82,29 @@ pub fn handle_key(
     }
 }
 
-/// Whether `text`, trimmed, is exactly `/models` - the only slash
-/// command today. Anything else starting with `/` is ordinary chat
-/// text, so a message that happens to start with `/` is never swallowed.
+/// Whether `text`, trimmed, is exactly `/models`. Anything else
+/// starting with `/` that is not a command is ordinary chat text, so a
+/// message that happens to start with `/` is never swallowed.
 fn is_models_command(text: &str) -> bool {
     text.trim() == commands::MODELS
+}
+
+fn is_undo_command(text: &str) -> bool {
+    text.trim() == commands::UNDO
+}
+
+/// Clears the input and puts the tree back, saying so in the activity
+/// row - or saying why not. Nothing reaches the log either way.
+fn undo(chat: &mut Chat) {
+    chat.textarea.clear();
+    chat.recompute_command_suggestions();
+    match chat.app.undo() {
+        Ok(()) => {
+            chat.error = None;
+            chat.notice = Some("Working tree restored to before the last turn".to_string());
+        }
+        Err(err) => chat.error = Some(err.to_string()),
+    }
 }
 
 /// Clears the input, opens the popup in its loading state, and kicks
@@ -137,6 +163,30 @@ fn handle_models_menu_key(chat: &mut Chat, key: KeyEvent) {
     }
 }
 
+/// Key handling while a tool call waits on the user. `y` runs it the
+/// way an allowed call runs; `n` or Esc declines it, and `App` tells
+/// the model so. Every other key is swallowed: the turn is paused on
+/// this answer, and typing into the textarea would not change that.
+fn handle_approval_key(
+    chat: &mut Chat,
+    key: KeyEvent,
+    reply_tx: &UnboundedSender<StreamEvent>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    match key.code {
+        KeyCode::Char('y') | KeyCode::Char('Y') => {
+            if let Some(approval) = chat.approval.take() {
+                spawn_tool(approval.tool, approval.arguments, reply_tx.clone());
+            }
+        }
+        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+            chat.approval = None;
+            spawn_drain(chat.app.decline_tool()?, reply_tx.clone());
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Scroll the transcript in small steps, or toggle a committed thought
 /// clicked on. Mouse capture is enabled by main, because it owns the
 /// terminal rather than the presentation.
@@ -169,9 +219,8 @@ pub fn handle_stream(
         StreamEvent::Chunk(Chunk::ToolCall { tool, arguments }) => {
             match chat.app.begin_tool(&tool, arguments)? {
                 ToolStep::Run(run, arguments) => spawn_tool(run, arguments, reply_tx.clone()),
-                ToolStep::Ask(_, _) => {
-                    chat.error = Some(format!("{tool} needs approval; the TUI cannot ask yet"));
-                    spawn_drain(chat.app.decline_tool()?, reply_tx.clone());
+                ToolStep::Ask(tool, arguments) => {
+                    chat.approval = Some(Approval { tool, arguments });
                 }
                 ToolStep::Continue(stream) => spawn_drain(stream, reply_tx.clone()),
                 ToolStep::Stop => {}
@@ -264,6 +313,7 @@ fn submit(
     chat.textarea.clear();
     chat.recompute_command_suggestions();
     chat.error = None;
+    chat.notice = None;
     chat.thinking_started = Some(std::time::Instant::now());
 
     let stream = chat.app.submit(text)?;
