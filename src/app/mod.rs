@@ -99,6 +99,15 @@ pub trait AppService {
     /// replies into one event, and an append-only log keeps the damage.
     fn is_replying(&self) -> bool;
 
+    /// How far through its tool budget the streaming turn is: calls
+    /// made so far, and the cap. `None` between turns.
+    fn tool_progress(&self) -> Option<(usize, usize)>;
+
+    /// Lets `tool` run unasked for the rest of the session - the user's
+    /// standing answer once they have seen what it does. Session-only:
+    /// nothing is committed to the log.
+    fn allow_tool(&mut self, tool: &str);
+
     /// What the most recent round trip cost - set once the first
     /// `model.called` commits, and never before.
     fn last_usage(&self) -> Option<&percept::Usage>;
@@ -238,6 +247,9 @@ pub struct App {
     /// Asked before any of `tools` runs. `AllowAll` unless `with_policy`
     /// says otherwise - the map tools have always run unasked.
     policy: Arc<dyn percept::Policy>,
+    /// Tools the user has said always run, this session - checked
+    /// before `policy`, which never learns.
+    allowed: HashSet<String>,
     /// Most tool calls one turn may make - see `MAX_TOOL_CALLS`.
     tool_cap: usize,
     /// Where the working tree is saved before each prompt, when the
@@ -294,6 +306,7 @@ impl App {
             log,
             tools,
             policy: Arc::new(percept::AllowAll),
+            allowed: HashSet::new(),
             tool_cap: MAX_TOOL_CALLS,
             snapshot: None,
             undo_point: None,
@@ -626,6 +639,9 @@ impl AppService for App {
             self.commit_tool_result(output)?;
             return Ok(ToolStep::Continue(self.ask()?));
         };
+        if self.allowed.contains(tool) {
+            return Ok(ToolStep::Run(run, arguments));
+        }
         match self.policy.check(tool, &arguments) {
             percept::Verdict::Allow => Ok(ToolStep::Run(run, arguments)),
             percept::Verdict::Ask => Ok(ToolStep::Ask(run, arguments)),
@@ -674,6 +690,16 @@ impl AppService for App {
 
     fn is_replying(&self) -> bool {
         self.pending.is_some()
+    }
+
+    fn tool_progress(&self) -> Option<(usize, usize)> {
+        self.pending
+            .as_ref()
+            .map(|turn| (turn.tool_calls, self.tool_cap))
+    }
+
+    fn allow_tool(&mut self, tool: &str) {
+        self.allowed.insert(tool.to_string());
     }
 
     fn last_usage(&self) -> Option<&percept::Usage> {

@@ -98,3 +98,7 @@ Folded from the percept log for this project and rerendered on every write. Chan
   decision "50 with PERCEPT_TOOLS=code; 5 stays for maps" (model): why: "a coding task reads several files before one edit; five ends it mid-read"
 - "How is a coding turn undone?" (model)
   decision "a commit at refs/percept/snapshots/<prompt id> before each prompt when the coding tools are on; /undo restores the last one" (model): why: "scratch refs leave the branch and index alone; version control is the undo the user already knows; the id ties it to the prompt event"
+
+## 2026-09-07 · 01a07afa-976a-7553-a05a-40901ea8237f
+- "How does a user stop approving every tool call?" (model)
+  decision "a on the approval row runs the call and every later call of that tool this session; y runs once, n declines" (model): why: "one answer per tool per session; nothing is committed to the log, so the next session asks again"

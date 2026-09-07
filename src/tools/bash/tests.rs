@@ -83,6 +83,17 @@ fn a_background_process_holding_the_pipe_is_cut_off_at_the_timeout_not_waited_fo
 }
 
 #[test]
+fn a_description_field_is_accepted_and_ignored() {
+    let (_dir, tool) = tool();
+
+    let out = tool
+        .run(r#"{"command": "echo hi", "description": "say hi"}"#)
+        .unwrap();
+
+    assert_eq!(out.content, "exit 0\nhi\n");
+}
+
+#[test]
 fn the_command_runs_under_bash_so_a_bashism_works() {
     let (_dir, tool) = tool();
 

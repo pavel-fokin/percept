@@ -404,6 +404,31 @@ fn declining_an_asked_call_commits_the_refusal_as_its_result_and_asks_again() {
 }
 
 #[test]
+fn a_tool_the_user_allowed_runs_unasked_for_the_rest_of_the_session() {
+    let mut app = app_with_policy(Verdict::Ask);
+    app.allow_tool("search_events");
+
+    let _ = app.submit("go".to_string()).unwrap();
+    let step = app.begin_tool("search_events", "{}".to_string()).unwrap();
+
+    assert!(matches!(step, ToolStep::Run(..)));
+}
+
+#[test]
+fn tool_progress_counts_the_turn_s_calls_against_the_cap_and_clears_between_turns() {
+    let mut app = app_with_policy(Verdict::Allow);
+    assert_eq!(app.tool_progress(), None);
+
+    let _ = app.submit("go".to_string()).unwrap();
+    assert_eq!(app.tool_progress(), Some((0, MAX_TOOL_CALLS)));
+    run_one_tool(&mut app, "search_events", "{}");
+    assert_eq!(app.tool_progress(), Some((1, MAX_TOOL_CALLS)));
+
+    app.end_stream().unwrap();
+    assert_eq!(app.tool_progress(), None);
+}
+
+#[test]
 fn an_unknown_tool_is_refused_before_the_policy_is_asked() {
     let mut app = app_with_policy(Verdict::Ask);
 

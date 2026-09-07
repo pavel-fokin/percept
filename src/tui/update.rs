@@ -158,10 +158,12 @@ fn handle_models_menu_key(chat: &mut Chat, key: KeyEvent) {
 }
 
 /// Key handling while a tool call waits on the user. `y` runs it the
-/// way an allowed call runs; `n` or Esc declines it, and `App` tells
-/// the model so. Every other key is swallowed and the call keeps
-/// waiting: the turn is paused on this answer, and typing into the
-/// textarea would not change that.
+/// way an allowed call runs; `a` runs it and every later call of the
+/// same tool this session, so a coding turn asks once per tool and
+/// not once per command; `n` or Esc declines it, and `App` tells the
+/// model so. Every other key is swallowed and the call keeps waiting:
+/// the turn is paused on this answer, and typing into the textarea
+/// would not change that.
 fn handle_approval_key(
     chat: &mut Chat,
     approval: Approval,
@@ -170,6 +172,10 @@ fn handle_approval_key(
 ) -> Result<(), Box<dyn std::error::Error>> {
     match key.code {
         KeyCode::Char('y') | KeyCode::Char('Y') => {
+            spawn_tool(approval.tool, approval.arguments, reply_tx.clone());
+        }
+        KeyCode::Char('a') | KeyCode::Char('A') => {
+            chat.app.allow_tool(approval.tool.spec().name);
             spawn_tool(approval.tool, approval.arguments, reply_tx.clone());
         }
         KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {

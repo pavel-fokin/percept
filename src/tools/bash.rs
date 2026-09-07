@@ -58,12 +58,20 @@ const PARAMETERS: &str = r#"{
   "additionalProperties": false
 }"#;
 
+/// `description` is accepted and ignored: a model trained on another
+/// agent's tool of the same name sends one with every call, and
+/// refusing it cost nine retries in a row before the model gave up.
+/// It stays out of the schema, so a model that has not learned the
+/// habit is not taught it.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Args {
     command: String,
     #[serde(default = "default_timeout")]
     timeout_secs: u64,
+    #[serde(default)]
+    #[allow(dead_code)]
+    description: String,
 }
 
 fn default_timeout() -> u64 {
