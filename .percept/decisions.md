@@ -102,3 +102,7 @@ Folded from the percept log for this project and rerendered on every write. Chan
 ## 2026-09-07 · 01a07afa-976a-7553-a05a-40901ea8237f
 - "How does a user stop approving every tool call?" (model)
   decision "a on the approval row runs the call and every later call of that tool this session; y runs once, n declines" (model): why: "one answer per tool per session; nothing is committed to the log, so the next session asks again"
+
+## 2026-09-07 · 01a07b11-93a4-7431-b374-9c92de8bc643
+- "How does a coding turn learn the project's conventions?" (model)
+  decision "AGENTS.md at the checkout root goes into the system prompt every round under PERCEPT_TOOLS=code; absent, nothing is sent" (model): why: "the coding agent wrote banner comments, an overlong subject and skipped review because it never saw the rules; a chat over the log has no tree to follow them in and pays nothing"

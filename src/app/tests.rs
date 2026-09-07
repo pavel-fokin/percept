@@ -529,6 +529,52 @@ fn an_app_without_a_snapshot_takes_none_and_cannot_undo() {
 }
 
 #[test]
+fn instructions_go_to_the_model_as_system_text_before_the_maps_every_round() {
+    let model = Arc::new(Scripted::new(vec![], true));
+    let mut app = App::new(
+        model.clone(),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        vec![Arc::new(FakeTool)],
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap()
+    .with_instructions("Commit subjects stay under 72 chars.".to_string());
+
+    let _ = app.submit("go".to_string()).unwrap();
+    run_one_tool(&mut app, "search_events", "{}");
+
+    let sent = model.last_request();
+    // The time, then the instructions, then the decisions map.
+    assert!(sent[1].contains("Commit subjects stay under 72 chars."));
+    assert!(sent[2].starts_with("The decisions map"));
+}
+
+#[test]
+fn an_app_without_instructions_sends_none() {
+    let model = Arc::new(Scripted::new(vec![], false));
+    let mut app = App::new(
+        model.clone(),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        Vec::new(),
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap();
+
+    let _ = app.submit("hi".to_string()).unwrap();
+
+    assert!(model
+        .last_request()
+        .iter()
+        .all(|message| !message.contains("project's instructions")));
+}
+
+#[test]
 fn with_tool_cap_replaces_the_default_cap() {
     let model = Arc::new(Scripted::new(vec![], true));
     let mut app = App::new(

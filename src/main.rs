@@ -67,6 +67,12 @@ const TOOLS_VAR: &str = "PERCEPT_TOOLS";
 /// mid-read.
 const CODE_TOOL_CAP: usize = 50;
 
+/// The project's instructions to a coding agent, at the checkout
+/// root: the client-neutral file this repo keeps its own in. Read once
+/// at startup and sent every round under `PERCEPT_TOOLS=code`; a
+/// project without one gets none.
+const INSTRUCTIONS_FILE: &str = "AGENTS.md";
+
 /// Where a project's maps are rendered as Markdown, under its root -
 /// rerendered on every write, so a reader who never runs `percept`
 /// still sees the latest fold.
@@ -390,11 +396,15 @@ fn build_app(
         Toolset::Maps => App::new(model, catalog, log, tools, renderer, map_shape, source),
         Toolset::Code => {
             tools.extend(code_tools(checkout)?);
+            let app = App::new(model, catalog, log, tools, renderer, map_shape, source)?
+                .with_policy(Arc::new(AskBeforeWrites))
+                .with_tool_cap(CODE_TOOL_CAP)
+                .with_snapshot(Arc::new(GitSnapshot::open(checkout)?));
             Ok(
-                App::new(model, catalog, log, tools, renderer, map_shape, source)?
-                    .with_policy(Arc::new(AskBeforeWrites))
-                    .with_tool_cap(CODE_TOOL_CAP)
-                    .with_snapshot(Arc::new(GitSnapshot::open(checkout)?)),
+                match std::fs::read_to_string(checkout.join(INSTRUCTIONS_FILE)) {
+                    Ok(instructions) => app.with_instructions(instructions),
+                    Err(_) => app,
+                },
             )
         }
     }

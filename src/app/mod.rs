@@ -259,6 +259,10 @@ pub struct App {
     /// The prompt whose snapshot `undo` would restore: the last turn
     /// that took one, cleared once used.
     undo_point: Option<EventId>,
+    /// The project's own instructions, sent as system text every
+    /// round so the model works to the project's conventions. `None`
+    /// for a chat over the log, which has no tree to follow them in.
+    instructions: Option<String>,
     /// Rerenders a map after a tool's commits change it - see
     /// `commit_tool_result`.
     renderer: Arc<dyn percept::MapRenderer>,
@@ -310,6 +314,7 @@ impl App {
             tool_cap: MAX_TOOL_CALLS,
             snapshot: None,
             undo_point: None,
+            instructions: None,
             renderer,
             map_shape,
             pending: None,
@@ -321,6 +326,13 @@ impl App {
     /// so `undo` can put it back.
     pub fn with_snapshot(mut self, snapshot: Arc<dyn percept::Snapshot>) -> Self {
         self.snapshot = Some(snapshot);
+        self
+    }
+
+    /// Sends `instructions` - the project's own, as its AGENTS.md has
+    /// them - as system text at the head of every request.
+    pub fn with_instructions(mut self, instructions: String) -> Self {
+        self.instructions = Some(instructions);
         self
     }
 
@@ -474,6 +486,19 @@ impl App {
             role: Actor::System,
             content: format!("The current time is {}.", Timestamp::now()),
         }];
+        // Before the maps: conventions frame how the maps are read, and
+        // a system message the model sees first is the one it weighs
+        // most. Every round, like the maps, so a long turn never loses
+        // them to the window.
+        if let Some(instructions) = &self.instructions {
+            messages.push(percept::Message::Text {
+                role: Actor::System,
+                content: format!(
+                    "The project's instructions, which you follow when you read or \
+                     change its files:\n\n{instructions}"
+                ),
+            });
+        }
         for map in Map::fold_all(&self.source.scope(), &self.events)? {
             let schema = map.schema();
             let body = if map.nodes().is_empty() {
