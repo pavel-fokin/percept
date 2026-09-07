@@ -8,7 +8,6 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "make the reply stream cancellable" (model) · 2026-09-07
 - "let /undo reach the last turn after a restart" (model) · 2026-09-07
 - "make the map renderer schema-driven, not dispatched on map name" (model) · 2026-09-07
-- "default the TUI to code tools, not maps-only" (model) · 2026-09-07
 
 ## "tell a coding turn to branch from main, not HEAD" (model)
 
@@ -31,11 +30,11 @@ why: "the undo point lives in the session; the snapshot ref survives until the n
 
 why: "markdown() branches on schema.name for decisions/tasks and falls back to push_by_kind; a third log-folded schema that wants the settlement-style render would need a new branch. A RenderStyle on Schema, plus the edge roles it needs, would let a new map pick a style without touching the renderer. Deferred: only two schemas today, both one style."
 
-## "default the TUI to code tools, not maps-only" (model)
-
-why: "A TUI session that means to change code silently has no file tools unless the user exports PERCEPT_TOOLS=code, and they only find out mid-turn. Decision 'How are the coding tools switched on?' weighed always-on and rejected it for reflect and map-Q&A turns; this would supersede it by splitting the default per client - TUI to code, CLI stays maps."
-
 ## done
 - "send the project's instructions to a coding turn" (model)
   outcome "done in 1f1a9a9: AGENTS.md goes into the system prompt under PERCEPT_TOOLS=code" (model)
   ref: "1f1a9a9"
+- "default the TUI to code tools, not maps-only" (model)
+  outcome "done in 9402950" (model)
+  ref: "9402950"
+  why: "TUI defaults to the code toolset; headless stays maps; PERCEPT_TOOLS overrides either"
