@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-pub use context::{Context, Section, View};
+pub use context::{Context, Section, View, Window};
 
 use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError, Source};
 
@@ -13,11 +13,16 @@ mod context;
 /// instead of reaching for a tool that is no longer there.
 const MAX_TOOL_CALLS: usize = 5;
 
-/// How many of the most recent events the model reads as prompt text.
-/// The log outgrows this; the transcript the TUI renders does not
-/// shrink. A model that cannot hold the whole log has to search it,
-/// which is what `search_events` is for.
-const CONTEXT_EVENTS: usize = 20;
+/// How much of the transcript the model reads as prompt text: an
+/// eighth of its context window, cut back to a sixteenth. The log
+/// outgrows this; the transcript the TUI renders does not shrink. A
+/// model that cannot hold the whole log has to search it, which is
+/// what `search_events` is for.
+const WINDOW: Window = Window {
+    share: 0.125,
+    keep: 0.0625,
+    floor: 8_000,
+};
 
 /// How much of each cognitive map `Context::build` sends every turn.
 /// The map's kinds go in regardless of shape - `revise_map` needs them
@@ -59,8 +64,8 @@ pub struct Harness {
 impl Harness {
     /// `tools` and `map_shape` with today's defaults for the rest:
     /// `AllowAll`, `MAX_TOOL_CALLS`, no snapshot, no instructions, the
-    /// standard context - instructions, maps, the last `CONTEXT_EVENTS`
-    /// events, then the time. Stable first: every provider reuses a
+    /// standard context - instructions, maps, history back to `WINDOW`,
+    /// then the time. Stable first: every provider reuses a
     /// request's prefix when it matches the last one, and a tool round
     /// only appends, so what changes every round goes last.
     pub fn new(tools: Vec<Arc<dyn percept::Tool>>, map_shape: MapShape) -> Self {
@@ -74,7 +79,7 @@ impl Harness {
                 sections: vec![
                     Section::Instructions,
                     Section::Maps(map_shape),
-                    Section::History(CONTEXT_EVENTS),
+                    Section::History(WINDOW),
                     Section::Time,
                 ],
             },
@@ -385,6 +390,7 @@ impl App {
             events: &self.events,
             scope: self.source.scope(),
             turn_start: self.pending.as_ref().map(|turn| turn.start),
+            context_window: self.chat.capabilities().context_window,
             tools,
             budget_spent: self.tools_exhausted(),
         };

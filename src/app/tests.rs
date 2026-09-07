@@ -935,10 +935,19 @@ fn seeded_app_with_shape(
     (model, app)
 }
 
+/// `n` user prompts of ten tokens each, named `0` to `n-1`. The
+/// scripted model's window is 1000 tokens, so twenty-five of them
+/// overflow the eighth that history may take.
 fn filler(n: usize) -> Vec<Event> {
     (0..n)
-        .map(|i| Event::message_received(Actor::User, i.to_string(), source(SOURCE), None))
+        .map(|i| Event::message_received(Actor::User, format!("{i:<40}"), source(SOURCE), None))
         .collect()
+}
+
+/// Whether a request carries a filler prompt named `name`.
+fn has_filler(sent: &[String], name: &str) -> bool {
+    sent.iter()
+        .any(|message| message.split_whitespace().next() == Some(name))
 }
 
 #[test]
@@ -950,15 +959,13 @@ fn a_log_longer_than_the_window_sends_only_its_newest_events() {
     // The whole log stays in the transcript the TUI renders.
     assert_eq!(app.events().len(), 26);
     let sent = model.last_request();
-    // One message per map, then the window, then the time.
-    assert_eq!(sent.len(), CONTEXT_EVENTS + 1 + SCHEMAS.len());
-    assert!(!sent.contains(&"0".to_string()));
-    assert!(sent.contains(&"24".to_string()));
+    assert!(!has_filler(&sent, "0"));
+    assert!(has_filler(&sent, "24"));
     assert!(sent.contains(&"now".to_string()));
 }
 
 #[test]
-fn a_window_opening_on_a_tool_result_drops_it() {
+fn a_window_never_opens_on_a_tool_result() {
     let mut events = vec![
         Event::tool_called(
             "search_events".to_string(),
@@ -968,16 +975,13 @@ fn a_window_opening_on_a_tool_result_drops_it() {
         ),
         Event::tool_resulted("ran".to_string(), source(SOURCE), None),
     ];
-    events.extend(filler(CONTEXT_EVENTS - 2));
+    events.extend(filler(25));
 
-    // Submitting pushes the call out of the window, leaving its
-    // result as the first event the model would otherwise see.
     let (model, mut app) = seeded_app(events, Vec::new());
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
     assert!(!sent.contains(&"<result>".to_string()));
-    assert_eq!(sent.len(), CONTEXT_EVENTS + SCHEMAS.len());
 }
 
 #[test]
@@ -986,14 +990,14 @@ fn a_long_tool_loop_never_evicts_the_prompt_it_is_answering() {
 
     let _ = app.submit("the question".to_string()).unwrap();
     // Each round commits four events: thought, reply, call, result.
+    // Five hundred tokens of replies are four times what history may
+    // take of the scripted model's window.
     for _ in 0..MAX_TOOL_CALLS {
         app.append_chunk(Chunk::Thought("hm".to_string()));
-        app.append_chunk(Chunk::Reply("looking".to_string()));
+        app.append_chunk(Chunk::Reply("looking ".repeat(50)));
         run_one_tool(&mut app, "search_events", "{}");
     }
 
-    // The turn has outgrown the window on its own.
-    assert!(app.events().len() > CONTEXT_EVENTS);
     assert!(model.last_request().contains(&"the question".to_string()));
 }
 
@@ -1012,13 +1016,13 @@ fn a_map_is_sent_with_its_kinds_ahead_of_the_transcript_and_outside_the_window()
             sources: Vec::new(),
         },
     )];
-    events.extend(filler(CONTEXT_EVENTS + 5));
+    events.extend(filler(25));
     let (model, mut app) = seeded_app(events, Vec::new());
 
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    assert_eq!(sent.len(), CONTEXT_EVENTS + 1 + SCHEMAS.len());
+    assert!(!has_filler(&sent, "0"));
     assert_decisions_header(&sent[0]);
     assert!(sent[0].contains("- decision \"Rust over Go\""));
 }
@@ -1054,7 +1058,7 @@ fn a_headlines_map_sends_only_its_headline_nodes() {
         node_added("decision", "Rust over Go"),
         node_added("evidence", "benchmarks"),
     ];
-    events.extend(filler(CONTEXT_EVENTS + 5));
+    events.extend(filler(25));
     let (model, mut app) = seeded_app_with_shape(events, Vec::new(), MapShape::Headlines);
 
     let _ = app.submit("now".to_string()).unwrap();
@@ -1076,7 +1080,7 @@ fn a_tool_shape_map_sends_only_its_size() {
         node_added("decision", "Rust over Go"),
         node_added("evidence", "benchmarks"),
     ];
-    events.extend(filler(CONTEXT_EVENTS + 5));
+    events.extend(filler(25));
     let (model, mut app) = seeded_app_with_shape(events, Vec::new(), MapShape::Tool);
 
     let _ = app.submit("now".to_string()).unwrap();

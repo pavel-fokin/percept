@@ -34,6 +34,66 @@ fn is_percepts_prompt(event: &Event) -> bool {
     event.actor() == Actor::System && event.kind() == EventKind::MessageReceived
 }
 
+fn is_users_prompt(event: &Event) -> bool {
+    event.actor() == Actor::User && event.kind() == EventKind::MessageReceived
+}
+
+/// What `event` costs the model to read, at four characters a token.
+/// Zero for an event `to_messages` drops, so the window is measured in
+/// what the model sees.
+fn tokens(event: &Event) -> usize {
+    let chars = match event.payload() {
+        percept::Payload::MessageReceived { content }
+        | percept::Payload::ToolResulted { content } => content.chars().count(),
+        percept::Payload::ToolCalled { tool, arguments } => {
+            tool.chars().count() + arguments.chars().count()
+        }
+        _ => 0,
+    };
+    chars.div_ceil(4)
+}
+
+/// How far back history goes in full: a share of the model's context
+/// window. History fills to `share`, is cut back to `keep`, then holds
+/// still until it fills again. A cut moves the request's prefix and
+/// costs the provider's cache, so it lands rarely, and on a user
+/// prompt, never mid-round. For a model that reports no window,
+/// `floor` is the high mark and half of it the low.
+#[derive(Clone, Copy)]
+pub struct Window {
+    pub share: f32,
+    pub keep: f32,
+    pub floor: u32,
+}
+
+impl Window {
+    /// Where history starts: the cuts replayed over the whole
+    /// transcript, so the start is a function of the log alone and two
+    /// rounds agree on it without any state between them.
+    fn start(&self, events: &[Event], context_window: Option<u32>) -> usize {
+        let mark = |share: f32, fallback: u32| {
+            context_window.map_or(fallback, |window| (window as f32 * share) as u32) as usize
+        };
+        let (high, low) = (
+            mark(self.share, self.floor),
+            mark(self.keep, self.floor / 2),
+        );
+        let mut start = 0;
+        let mut held = 0;
+        for (i, event) in events.iter().enumerate() {
+            held += tokens(event);
+            if held <= high {
+                continue;
+            }
+            while start < i && (held > low || !is_users_prompt(&events[start])) {
+                held -= tokens(&events[start]);
+                start += 1;
+            }
+        }
+        start
+    }
+}
+
 /// One part of the request `Context::build` assembles. Order and
 /// membership are data, so a new purpose is a new list, not a new
 /// function.
@@ -45,9 +105,9 @@ pub enum Section {
     Instructions,
     /// Every map, each as its schema's purpose line and this shape.
     Maps(MapShape),
-    /// The last n events before the turn in progress, plus the whole
-    /// turn.
-    History(usize),
+    /// The transcript in full, back as far as the window reaches, plus
+    /// the whole turn in progress.
+    History(Window),
 }
 
 /// What `Context::build` needs from `App`'s state, borrowed for the
@@ -59,6 +119,8 @@ pub struct View<'a> {
     pub scope: Scope,
     /// Where the turn now streaming began in `events`, if any.
     pub turn_start: Option<usize>,
+    /// The model's context window in tokens, if it reports one.
+    pub context_window: Option<u32>,
     /// The tools to send with the request - already filtered by
     /// whether the model can use them and whether the turn's budget
     /// is spent.
@@ -138,13 +200,14 @@ impl Context {
                         });
                     }
                 }
-                Section::History(count) => {
-                    let tail = view.events.len().saturating_sub(*count);
-                    let window_start = match view.turn_start {
-                        Some(start) => tail.min(start),
-                        None => tail,
-                    };
+                Section::History(window) => {
+                    // The turn in progress is never history: a long
+                    // tool loop must not evict the question it is
+                    // answering.
                     let turn_start = view.turn_start.unwrap_or(view.events.len());
+                    let window_start = window
+                        .start(view.events, view.context_window)
+                        .min(turn_start);
                     // Percept's own prompts - a `reflect` - are
                     // history the model need not obey. Replayed as
                     // system text they would stand as an instruction
