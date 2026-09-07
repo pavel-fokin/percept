@@ -47,6 +47,10 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "How should GitHub issues integrate with the tasks and decisions maps?" (model) · 2026-09-07
 - "Can the model reach the code map through read_map?" (model) · 2026-09-07
 - "Which gpt-5.6 models does the OpenAI catalog offer, and how are they picked?" (model) · 2026-09-07
+- "How are OpenAI reasoning-effort levels exposed in the catalog?" (model) · 2026-09-07
+- "How does a reader learn a map's node and edge kinds?" (model) · 2026-09-07
+- "What does maps list --format md render per map?" (model) · 2026-09-07
+- "Does AGENTS.md list the code map's node kinds?" (model) · 2026-09-07
 
 ## "Where does the event log live?"
 
@@ -339,3 +343,29 @@ note: "Not decided. Four models sketched: A - issue as a link, a task node carri
   why: "each hosted provider already leans on one static model (see Fireworks); a headless run has no picker, and one fixed default keeps startup predictable"
 - weighed "a per-model reasoning-effort table for the gpt-5.6 family" (model)
   why: "no per-model effort mechanism exists; effort stays one global knob and all three share the 1.05M window, so global low is a safe floor"
+
+## "How are OpenAI reasoning-effort levels exposed in the catalog?" (model)
+
+- decision "ModelDescriptor carries low, medium, and high effort capabilities for OpenAI models" (model)
+  why: "the catalog tells callers which effort levels a listed model supports; the configured global effort remains what build sends"
+
+## "How does a reader learn a map's node and edge kinds?" (model)
+
+- decision "each kind carries a gloss on its Schema, shown by maps list --format md and the read_map response" (model)
+  why: "the gloss lives once beside the kind; both agent surfaces render it; AGENTS.md stops carrying a list that drifts"
+- weighed "a maps describe <map> subcommand" (model)
+  why: "maps list --format md already prints one section per map; a third verb to show what a second verb can"
+- weighed "keep the kind list in AGENTS.md prose" (model)
+  why: "it duplicated code.md, drifted, and this session's model read package:providers by the wrong meaning"
+
+## "What does maps list --format md render per map?" (model)
+
+- decision "a per-map section: purpose, counts, kinds with glosses, and one live example node and edge line" (model)
+  why: "the section holds what a table cannot; the example anchors the kind names to real strings"
+- weighed "keep the single table, add columns for kinds" (model)
+  why: "a table cell cannot hold a kind-and-gloss list plus a JSONL example line"
+
+## "Does AGENTS.md list the code map's node kinds?" (model)
+
+- decision "no; the code row points at percept maps list, and the preamble notes code keys internal code by file path" (model)
+  why: "the Package column trained the model to try package:providers this session; the kinds now live on the Schema"

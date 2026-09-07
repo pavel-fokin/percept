@@ -480,27 +480,8 @@ pub fn maps_list(
     maps.push(code::build(tree)?);
     match args.format {
         Format::Json => print_lines(maps.iter().map(store::encode_map)),
-        Format::Md => print_text(&list_markdown(&maps)),
+        Format::Md => print_text(&store::catalogue(&maps)),
     }
-}
-
-/// `maps list` as a Markdown table - one row per map.
-fn list_markdown(maps: &[Map]) -> String {
-    use std::fmt::Write as _;
-
-    let mut out = String::from("| map | purpose | nodes | edges |\n|---|---|---|---|\n");
-    for map in maps {
-        let schema = map.schema();
-        let _ = writeln!(
-            out,
-            "| {} | {} | {} | {} |",
-            schema.name,
-            schema.purpose,
-            map.nodes().len(),
-            map.edges().len()
-        );
-    }
-    out
 }
 
 /// Prints the map `args.map` names, nodes then edges. `--around` cuts

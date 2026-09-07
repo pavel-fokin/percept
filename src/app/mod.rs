@@ -529,8 +529,8 @@ impl App {
                     schema.name,
                     schema.purpose,
                     catalogue_line(&map),
-                    schema.node_kinds.join(", "),
-                    schema.edge_kinds.join(", ")
+                    schema.node_kinds_csv(),
+                    schema.edge_kinds_csv()
                 ),
             });
         }

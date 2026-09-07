@@ -13,21 +13,19 @@ shell needed. `since` has no meaning for `code` - it has no history.
 
 Binary: `~/.percept/bin/percept`, installed by `scripts/install.sh`.
 
-Nodes:
+Node kinds are `file`, `function`, `type`, and `package`; edge kinds
+`contains` and `imports`. `percept maps list --format md` glosses each
+and shows one example line - read it once rather than guessing what a
+kind holds.
 
-- `file` - named by path, `src/percept/map.rs`; property `language`.
-- `function` - path-qualified: `src/percept/map.rs::map_of` for a free
-  function, `src/percept/map.rs::Map::apply` for a method,
-  `src/percept/map.rs::Node::Display::fmt` for a trait impl method,
-  the trait keeping its arguments: `Event::From<&percept::Event>::from`.
-  Properties `public` (`"true"`/`"false"`) and `line`.
-- `type` - struct, enum, trait, or alias, `src/percept/map.rs::Map`.
-  Same properties.
-- `package` - an external crate, `serde_json`.
+Beyond the name: a `file` carries a `language` property; a `function`
+or `type` carries `public` (`"true"`/`"false"`) and `line`. A
+`function` name is path-qualified - `src/percept/map.rs::map_of` for a
+free function, `src/percept/map.rs::Map::apply` for a method,
+`Event::From<&percept::Event>::from` for a trait impl method, keeping
+the trait's arguments.
 
-Edges: `contains` from a file to each symbol in it, `imports` from a
-file to each file or package it uses. An edge line names its ends as
-`kind:name`, so it reads on its own:
+An edge line names its ends as `kind:name`, so it reads on its own:
 
     {"edge":"imports","from":"file:src/main.rs","to":"package:clap","sources":[]}
 

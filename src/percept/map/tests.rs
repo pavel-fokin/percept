@@ -653,6 +653,33 @@ fn a_schema_is_found_by_name() {
 }
 
 #[test]
+fn every_kind_of_every_schema_carries_a_gloss() {
+    for schema in SCHEMAS.iter().chain(DERIVED) {
+        for kind in schema.node_kinds.iter().chain(schema.edge_kinds) {
+            assert!(
+                !kind.gloss.is_empty(),
+                "{}: kind {:?} has no gloss",
+                schema.name,
+                kind.name
+            );
+        }
+    }
+}
+
+#[test]
+fn the_code_package_gloss_says_it_is_an_external_crate() {
+    let package = CODE
+        .node_kinds
+        .iter()
+        .find(|kind| kind.name == "package")
+        .unwrap();
+    assert!(package.gloss.contains("external crate"));
+    assert!(package
+        .gloss
+        .contains("never one of this project's own modules"));
+}
+
+#[test]
 fn keeping_kinds_drops_other_nodes_and_the_edges_that_touched_them() {
     let (_, events) = rust_over_go();
     let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
@@ -869,12 +896,47 @@ fn a_missing_node_counts_a_repeated_word_once() {
 }
 
 #[test]
-fn a_missing_node_ignores_overlaps_of_another_kind() {
+fn a_missing_node_names_a_matching_node_of_another_kind() {
     let err = chain()
         .around(&node_ref("question", "Rust over Go"), 1)
         .err()
         .unwrap();
-    assert_eq!(err.to_string(), "no question \"Rust over Go\" in the map");
+    assert_eq!(
+        err.to_string(),
+        "no question \"Rust over Go\" in the map; did you mean decision:Rust over Go"
+    );
+}
+
+#[test]
+fn a_missing_node_crosses_kinds_on_a_lone_shared_path_segment() {
+    let mut map = Map::empty(&CODE);
+    map.apply(add_node("file", "src/providers/catalog.rs"), Actor::System)
+        .unwrap();
+    map.apply(add_node("file", "src/providers/openai.rs"), Actor::System)
+        .unwrap();
+
+    let err = map
+        .around(&node_ref("package", "providers"), 1)
+        .err()
+        .unwrap();
+
+    assert_eq!(
+        err.to_string(),
+        "no package \"providers\" in the map; \
+         did you mean file:src/providers/catalog.rs, file:src/providers/openai.rs"
+    );
+}
+
+#[test]
+fn a_missing_prose_node_does_not_cross_kinds_on_one_shared_word() {
+    let err = chain()
+        .around(&node_ref("question", "Rust and Kotlin"), 1)
+        .err()
+        .unwrap();
+    assert_eq!(
+        err.to_string(),
+        "no question \"Rust and Kotlin\" in the map"
+    );
 }
 
 #[test]

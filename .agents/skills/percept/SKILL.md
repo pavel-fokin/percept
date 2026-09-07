@@ -31,12 +31,15 @@ one line on stderr: how many nodes and edges were shown of the total,
 and how many edges cross the cut. stdout is JSONL by default; `--format
 md` prints the rendered Markdown instead - the same text as
 `.percept/<map>.md`, cut to the fragment. `percept maps list --format
-md` prints the catalogue as a table.
+md` prints one section per map: its purpose and size, its node and edge
+kinds each with a line on what it is, and one example node and edge.
 
 The model's `read_map` tool takes the same `around`, `depth`, and
-`kinds`, and returns the same counts as its first line. A count says
-something was left out, not that it did not matter. Widen the cut when
-an exception, a contradiction, or a consequence could change the answer.
+`kinds`. It returns a line naming the map's kinds and their meanings,
+then the count line - what was left out, and how many edges cross the
+cut - then the nodes and edges. Read the kinds line before picking an
+`around` selector. Widen the cut when an exception, a contradiction, or
+a consequence could change the answer.
 
 Percept follows edges; it does not rank or decide. Without a relevant
 node, search the log instead of inventing one.

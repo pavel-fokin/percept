@@ -51,8 +51,8 @@ pub struct Schema {
     /// deciding whether to open it needs to hear it - what the prompt
     /// carries in place of the map.
     pub purpose: &'static str,
-    pub node_kinds: &'static [&'static str],
-    pub edge_kinds: &'static [&'static str],
+    pub node_kinds: &'static [Kind],
+    pub edge_kinds: &'static [Kind],
     /// The node kinds worth a reader's attention without opening the
     /// whole map - what `MapShape::Headlines` sends.
     pub headline_kinds: &'static [&'static str],
@@ -60,6 +60,16 @@ pub struct Schema {
     /// decision a question, an outcome a task - when the map has such
     /// a pair. A `resolves` edge between other kinds settles nothing.
     pub settlement: Option<Settlement>,
+}
+
+/// A node or edge kind and one line saying what it is, so a reader who
+/// meets the kind name in a map's output learns its meaning without a
+/// separate doc. The gloss lives here, beside the name, and nowhere
+/// else.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Kind {
+    pub name: &'static str,
+    pub gloss: &'static str,
 }
 
 /// The two node kinds a `resolves` edge joins: `by` settles `of`.
@@ -106,8 +116,46 @@ pub const OUTCOME: &str = "outcome";
 pub const DECISIONS: Schema = Schema {
     name: "decisions",
     purpose: "what was asked, what was chosen, and why, so a settled question is not reopened",
-    node_kinds: &[QUESTION, "option", "evidence", DECISION],
-    edge_kinds: &[ANSWERS, "supports", "contradicts", RESOLVES, SUPERSEDES],
+    node_kinds: &[
+        Kind {
+            name: QUESTION,
+            gloss: "a matter the project had to settle",
+        },
+        Kind {
+            name: OPTION,
+            gloss: "an alternative that was weighed and lost, saying why in its `why` property",
+        },
+        Kind {
+            name: "evidence",
+            gloss: "a fact that supports or contradicts an option",
+        },
+        Kind {
+            name: DECISION,
+            gloss: "the choice that was made, and the grounds for it",
+        },
+    ],
+    edge_kinds: &[
+        Kind {
+            name: ANSWERS,
+            gloss: "from an option to the question it was weighed for",
+        },
+        Kind {
+            name: "supports",
+            gloss: "from evidence to an option it backs",
+        },
+        Kind {
+            name: "contradicts",
+            gloss: "from evidence to an option it undercuts",
+        },
+        Kind {
+            name: RESOLVES,
+            gloss: "from a decision to the question it settles",
+        },
+        Kind {
+            name: SUPERSEDES,
+            gloss: "from a decision to an earlier one it replaces",
+        },
+    ],
     headline_kinds: &[QUESTION, DECISION],
     settlement: Some(Settlement {
         by: DECISION,
@@ -122,8 +170,15 @@ pub const DECISIONS: Schema = Schema {
 pub const TASKS: Schema = Schema {
     name: "tasks",
     purpose: "what is left to do, why it matters, and what it waits on, so a session picks up the next item without re-deriving it",
-    node_kinds: &[TASK, OUTCOME],
-    edge_kinds: &[RESOLVES, BLOCKS, SUPERSEDES],
+    node_kinds: &[
+        Kind { name: TASK, gloss: "one piece of work left to do, saying why it matters in its `why` property" },
+        Kind { name: OUTCOME, gloss: "what became of a task: done with its commit, or dropped with the reason" },
+    ],
+    edge_kinds: &[
+        Kind { name: RESOLVES, gloss: "from an outcome to the task it settles" },
+        Kind { name: BLOCKS, gloss: "from a task to the one that must wait for it" },
+        Kind { name: SUPERSEDES, gloss: "from a reworded task to the wording it replaces" },
+    ],
     headline_kinds: &[TASK],
     settlement: Some(Settlement {
         by: OUTCOME,
@@ -137,8 +192,19 @@ pub const TASKS: Schema = Schema {
 pub const CODE: Schema = Schema {
     name: "code",
     purpose: "which file defines which symbol and imports which file or package",
-    node_kinds: &["file", "function", "type", "package"],
-    edge_kinds: &["contains", "imports"],
+    node_kinds: &[
+        Kind { name: "file", gloss: "a source file, named by its repo-relative path" },
+        Kind { name: "function", gloss: "a function or method, named `path::Type::method` or `path::func`" },
+        Kind { name: "type", gloss: "a struct, enum, trait, or alias, named `path::Name`" },
+        Kind {
+            name: "package",
+            gloss: "an external crate a file imports, like `serde_json` - never one of this project's own modules",
+        },
+    ],
+    edge_kinds: &[
+        Kind { name: "contains", gloss: "from a file to a symbol it defines" },
+        Kind { name: "imports", gloss: "from a file to a file or package it uses" },
+    ],
     headline_kinds: &["file"],
     settlement: None,
 };
@@ -160,6 +226,27 @@ impl Schema {
     /// its nodes have no history: no writer, no moment they were added.
     pub fn is_derived(&self) -> bool {
         is_derived(self.name)
+    }
+
+    /// The node kind names, in schema order.
+    pub fn node_kind_names(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.node_kinds.iter().map(|kind| kind.name)
+    }
+
+    /// The edge kind names, in schema order.
+    pub fn edge_kind_names(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.edge_kinds.iter().map(|kind| kind.name)
+    }
+
+    /// The node kind names as a `, `-joined list, for a prompt line or
+    /// an "expected one of" error.
+    pub fn node_kinds_csv(&self) -> String {
+        self.node_kind_names().collect::<Vec<_>>().join(", ")
+    }
+
+    /// The edge kind names as a `, `-joined list.
+    pub fn edge_kinds_csv(&self) -> String {
+        self.edge_kind_names().collect::<Vec<_>>().join(", ")
     }
 
     /// The log-folded schema `name` names, or the error every boundary
@@ -382,13 +469,13 @@ impl fmt::Display for MapError {
                 f,
                 "no node kind {kind:?} in map {:?}; kinds are {}",
                 map.name,
-                map.node_kinds.join(", ")
+                map.node_kinds_csv()
             ),
             Self::UnknownEdgeKind { map, kind } => write!(
                 f,
                 "no edge kind {kind:?} in map {:?}; kinds are {}",
                 map.name,
-                map.edge_kinds.join(", ")
+                map.edge_kinds_csv()
             ),
             Self::BlankName => write!(f, "a node's name must not be blank"),
             Self::DuplicateNode { kind, name } => {
@@ -949,28 +1036,56 @@ impl Map {
         }
     }
 
-    /// Up to five nodes of the same kind as `node` that share at least
-    /// two `/`, `::`, or whitespace segments of its name, most overlap
-    /// first. Two is the floor: one shared word is noise in a prose
-    /// name - every `decision` shares "the" - and a weak hint in a
-    /// path. A wrong kind or an unrelated name gets no guesses.
+    /// Up to five nodes to retry with, each named `kind:name`, most
+    /// name-overlap first. The same-kind pass wants two shared `/`,
+    /// `::`, or whitespace segments: one shared word is noise in a
+    /// prose name - every `decision` shares "the" - and a weak hint in
+    /// a path. When it finds nothing, a cross-kind pass runs, since a
+    /// wrong kind is how `package:providers` misses a real
+    /// `file:src/providers/...`; there one shared segment is enough,
+    /// but only when a name has a `/` or `::` in it, so a path or
+    /// symbol lookup crosses kinds while a prose one stays silent.
     fn suggestions_for(&self, node: &NodeRef) -> Vec<String> {
+        let same_kind =
+            self.suggestions_matching(node, |n| n.kind == node.kind, |_, shared| shared >= 2);
+        if !same_kind.is_empty() {
+            return same_kind;
+        }
+        let query_is_path = is_path_like(&node.name);
+        self.suggestions_matching(
+            node,
+            |_| true,
+            |candidate, shared| {
+                shared >= 2 || (shared == 1 && (query_is_path || is_path_like(candidate)))
+            },
+        )
+    }
+
+    /// Nodes `keep` admits whose name shares segments with `node`'s
+    /// that `strong` accepts, given the candidate's name and the count
+    /// shared; scored by overlap, five at most, each named `kind:name`.
+    fn suggestions_matching(
+        &self,
+        node: &NodeRef,
+        keep: impl Fn(&Node) -> bool,
+        strong: impl Fn(&str, usize) -> bool,
+    ) -> Vec<String> {
         let wanted: HashSet<&str> = segments(&node.name).collect();
-        let mut scored: Vec<(usize, &str)> = self
+        let mut scored: Vec<(usize, &Node)> = self
             .nodes
             .iter()
-            .filter(|n| n.kind == node.kind)
+            .filter(|n| keep(n))
             .filter_map(|n| {
                 let have: HashSet<&str> = segments(&n.name).collect();
                 let shared = wanted.intersection(&have).count();
-                (shared >= 2).then_some((shared, n.name.as_str()))
+                strong(&n.name, shared).then_some((shared, n))
             })
             .collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(b.1)));
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
         scored
             .into_iter()
             .take(5)
-            .map(|(_, name)| format!("{}:{name}", node.kind))
+            .map(|(_, n)| format!("{}:{}", n.kind, n.name))
             .collect()
     }
 
@@ -982,7 +1097,7 @@ impl Map {
     }
 
     fn check_node_kind(&self, kind: &str) -> Result<(), MapError> {
-        if self.schema.node_kinds.contains(&kind) {
+        if self.schema.node_kind_names().any(|name| name == kind) {
             Ok(())
         } else {
             Err(MapError::UnknownNodeKind {
@@ -993,7 +1108,7 @@ impl Map {
     }
 
     fn check_edge_kind(&self, kind: &str) -> Result<(), MapError> {
-        if self.schema.edge_kinds.contains(&kind) {
+        if self.schema.edge_kind_names().any(|name| name == kind) {
             Ok(())
         } else {
             Err(MapError::UnknownEdgeKind {
@@ -1063,6 +1178,12 @@ impl Map {
 fn segments(name: &str) -> impl Iterator<Item = &str> {
     name.split(|c: char| c == '/' || c == ':' || c.is_whitespace())
         .filter(|part| !part.is_empty())
+}
+
+/// Whether a name reads as a path or a symbol rather than prose - a
+/// `/` or a `::` in it - so a single shared segment is a real hint.
+fn is_path_like(name: &str) -> bool {
+    name.contains('/') || name.contains("::")
 }
 
 /// Which map a payload changes, if it changes one.
