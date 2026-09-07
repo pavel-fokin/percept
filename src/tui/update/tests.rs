@@ -31,6 +31,7 @@ fn descriptor(model: &str) -> ModelDescriptor {
     ModelDescriptor {
         provider: Provider::Ollama,
         model: model.to_string(),
+        reasoning_efforts: &[],
     }
 }
 

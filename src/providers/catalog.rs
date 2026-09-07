@@ -4,7 +4,15 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use super::{client, Fireworks, Ollama, OpenAi};
-use crate::percept::{Model, ModelCatalog, ModelDescriptor, ModelListing, Provider};
+use crate::percept::{
+    Model, ModelCatalog, ModelDescriptor, ModelListing, Provider, ReasoningEffort,
+};
+
+const OPENAI_REASONING_EFFORTS: &[ReasoningEffort] = &[
+    ReasoningEffort::Low,
+    ReasoningEffort::Medium,
+    ReasoningEffort::High,
+];
 
 /// OpenAI models the catalog offers - a short static list, since
 /// OpenAI has no listing endpoint worth querying. The `/models` picker
@@ -77,6 +85,7 @@ fn parse_tags(body: &str) -> Result<Vec<ModelDescriptor>, Box<dyn Error + Send +
         .map(|model| ModelDescriptor {
             provider: Provider::Ollama,
             model: model.name,
+            reasoning_efforts: &[],
         })
         .collect())
 }
@@ -88,6 +97,10 @@ fn static_descriptors(provider: Provider, models: &[&str]) -> Vec<ModelDescripto
         .map(|model| ModelDescriptor {
             provider,
             model: model.to_string(),
+            reasoning_efforts: match provider {
+                Provider::OpenAi => OPENAI_REASONING_EFFORTS,
+                Provider::Ollama | Provider::Fireworks => &[],
+            },
         })
         .collect()
 }

@@ -125,12 +125,25 @@ impl std::fmt::Display for Provider {
     }
 }
 
+/// The amount of reasoning a model can be asked to use. A descriptor
+/// lists the levels its provider supports, while a configured model
+/// still receives the application's chosen level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReasoningEffort {
+    Low,
+    Medium,
+    High,
+}
+
 /// Names one model a catalog can build - which provider serves it, and
 /// the provider's own name for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelDescriptor {
     pub provider: Provider,
     pub model: String,
+    /// Reasoning levels the provider supports for this model. Empty
+    /// when the catalog does not know of a reasoning-effort control.
+    pub reasoning_efforts: &'static [ReasoningEffort],
 }
 
 /// Listed and built, so a caller can offer every model available

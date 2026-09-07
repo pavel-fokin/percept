@@ -1209,6 +1209,7 @@ fn set_model_swaps_the_live_model() {
     let descriptor = percept::ModelDescriptor {
         provider: percept::Provider::Ollama,
         model: "scripted".to_string(),
+        reasoning_efforts: &[],
     };
     let catalog = Arc::new(FakeCatalog::new(
         vec![descriptor.clone()],
@@ -1236,6 +1237,7 @@ fn set_model_clears_last_usage_so_the_new_model_reads_as_unasked() {
     let descriptor = percept::ModelDescriptor {
         provider: percept::Provider::Ollama,
         model: "scripted".to_string(),
+        reasoning_efforts: &[],
     };
     let catalog = Arc::new(FakeCatalog::new(
         vec![descriptor.clone()],
@@ -1266,6 +1268,7 @@ fn set_model_errs_and_leaves_the_model_in_place_while_a_turn_streams() {
     let descriptor = percept::ModelDescriptor {
         provider: percept::Provider::Ollama,
         model: "scripted".to_string(),
+        reasoning_efforts: &[],
     };
     let catalog = Arc::new(FakeCatalog::new(
         vec![descriptor.clone()],
@@ -1294,10 +1297,12 @@ async fn available_models_returns_the_catalog_s_listing() {
         percept::ModelDescriptor {
             provider: percept::Provider::Ollama,
             model: "gemma".to_string(),
+            reasoning_efforts: &[],
         },
         percept::ModelDescriptor {
             provider: percept::Provider::OpenAi,
             model: "gpt".to_string(),
+            reasoning_efforts: &[],
         },
     ];
     let catalog = Arc::new(FakeCatalog::new(descriptors.clone(), Vec::new()));

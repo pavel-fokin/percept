@@ -306,7 +306,11 @@ fn build_model(
             .into())
         }
     };
-    catalog.build(&percept::ModelDescriptor { provider, model })
+    catalog.build(&percept::ModelDescriptor {
+        provider,
+        model,
+        reasoning_efforts: &[],
+    })
 }
 
 /// `OPENAI_KEY_VAR` is read leniently here, unlike `build_model`'s
