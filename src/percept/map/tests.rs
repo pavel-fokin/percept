@@ -653,6 +653,33 @@ fn a_schema_is_found_by_name() {
 }
 
 #[test]
+fn every_kind_of_every_schema_carries_a_gloss() {
+    for schema in SCHEMAS.iter().chain(DERIVED) {
+        for kind in schema.node_kinds.iter().chain(schema.edge_kinds) {
+            assert!(
+                !kind.gloss.is_empty(),
+                "{}: kind {:?} has no gloss",
+                schema.name,
+                kind.name
+            );
+        }
+    }
+}
+
+#[test]
+fn the_code_package_gloss_says_it_is_an_external_crate() {
+    let package = CODE
+        .node_kinds
+        .iter()
+        .find(|kind| kind.name == "package")
+        .unwrap();
+    assert!(package.gloss.contains("external crate"));
+    assert!(package
+        .gloss
+        .contains("never one of this project's own modules"));
+}
+
+#[test]
 fn keeping_kinds_drops_other_nodes_and_the_edges_that_touched_them() {
     let (_, events) = rust_over_go();
     let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();

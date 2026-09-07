@@ -97,8 +97,8 @@ fn push_by_kind(out: &mut String, map: &Map) {
 /// sections in.
 fn ordered_kinds(schema: &'static Schema) -> Vec<&'static str> {
     let mut kinds: Vec<&'static str> = schema.headline_kinds.to_vec();
-    for kind in schema.node_kinds {
-        if !kinds.contains(kind) {
+    for kind in schema.node_kind_names() {
+        if !kinds.contains(&kind) {
             kinds.push(kind);
         }
     }

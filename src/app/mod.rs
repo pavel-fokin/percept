@@ -529,8 +529,8 @@ impl App {
                     schema.name,
                     schema.purpose,
                     catalogue_line(&map),
-                    schema.node_kinds.join(", "),
-                    schema.edge_kinds.join(", ")
+                    schema.node_kind_names().collect::<Vec<_>>().join(", "),
+                    schema.edge_kind_names().collect::<Vec<_>>().join(", ")
                 ),
             });
         }
