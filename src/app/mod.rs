@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-pub use context::{Context, Section, View, Window};
+use context::{Context, Section, View, Window};
 
 use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError, Source};
 
@@ -290,33 +290,18 @@ pub struct App {
     chat: Arc<dyn percept::Model>,
     catalog: Arc<dyn percept::ModelCatalog>,
     log: Arc<dyn percept::EventLog>,
-    /// The tools the model may call, sent with each request when the
-    /// model reports `tool_use`.
-    tools: Vec<Arc<dyn percept::Tool>>,
-    /// Asked before any of `tools` runs. `AllowAll` unless `Harness`
-    /// says otherwise - the map tools have always run unasked.
-    policy: Arc<dyn percept::Policy>,
+    /// The tools, the policy and cap around them, the snapshot, the
+    /// instructions, and the context - see `Harness`.
+    harness: Harness,
     /// Tools the user has said always run, this session - checked
-    /// before `policy`, which never learns.
+    /// before the harness's policy, which never learns.
     allowed: HashSet<String>,
-    /// Most tool calls one turn may make - see `MAX_TOOL_CALLS`.
-    tool_cap: usize,
-    /// Where the working tree is saved before each prompt, when the
-    /// turn can change it. `None` for a chat over the log alone: a
-    /// snapshot of a tree no tool touches would be noise.
-    snapshot: Option<Arc<dyn percept::Snapshot>>,
     /// The prompt whose snapshot `undo` would restore: the last turn
     /// that took one, cleared once used.
     undo_point: Option<EventId>,
-    /// The project's own instructions, sent as system text every
-    /// round so the model works to the project's conventions. `None`
-    /// for a chat over the log, which has no tree to follow them in.
-    instructions: Option<String>,
     /// Rerenders a map after a tool's commits change it - see
     /// `commit_tool_result`.
     renderer: Arc<dyn percept::MapRenderer>,
-    /// The shape of the request sent every turn.
-    context: Context,
     /// The turn now streaming, or None between turns.
     pending: Option<Turn>,
     /// Where the most recent `model.called` landed in `events` - the
@@ -357,15 +342,10 @@ impl App {
             chat,
             catalog,
             log,
-            tools: harness.tools,
-            policy: harness.policy,
+            harness,
             allowed: HashSet::new(),
-            tool_cap: harness.tool_cap,
-            snapshot: harness.snapshot,
             undo_point: None,
-            instructions: harness.instructions,
             renderer,
-            context: harness.context,
             pending: None,
             last_usage,
         })
@@ -393,19 +373,21 @@ impl App {
     /// sends, and what `describe_context` reports on without sending
     /// anything.
     fn view(&self) -> View<'_> {
-        let tools = if self.chat.capabilities().tool_use && !self.tools_exhausted() {
-            self.tools.iter().map(|tool| tool.spec()).collect()
+        let capabilities = self.chat.capabilities();
+        let budget_spent = self.tools_exhausted();
+        let tools = if capabilities.tool_use && !budget_spent {
+            self.harness.tools.iter().map(|tool| tool.spec()).collect()
         } else {
             Vec::new()
         };
         View {
-            instructions: self.instructions.as_deref(),
+            instructions: self.harness.instructions.as_deref(),
             events: &self.events,
             scope: self.source.scope(),
             turn_start: self.pending.as_ref().map(|turn| turn.start),
-            context_window: self.chat.capabilities().context_window,
+            context_window: capabilities.context_window,
             tools,
-            budget_spent: self.tools_exhausted(),
+            budget_spent,
         }
     }
 
@@ -413,7 +395,7 @@ impl App {
     /// Errs only when a map in the log does not fold - which is a
     /// corrupt log, not a bad turn.
     fn ask(&self) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
-        Ok(self.chat.reply(&self.context.build(self.view())?))
+        Ok(self.chat.reply(&self.harness.context.build(self.view())?))
     }
 
     /// Whether this turn has made `tool_cap` calls. Past it the request
@@ -421,7 +403,7 @@ impl App {
     fn tools_exhausted(&self) -> bool {
         self.pending
             .as_ref()
-            .is_some_and(|turn| turn.tool_calls >= self.tool_cap)
+            .is_some_and(|turn| turn.tool_calls >= self.harness.tool_cap)
     }
 
     /// Commits each of `output.commits`, caused by the open call and
@@ -549,7 +531,7 @@ impl AppService for App {
         // The tree is saved before the prompt is on the record: a
         // snapshot that fails leaves the log without a prompt whose
         // changes could never be undone.
-        if let Some(snapshot) = &self.snapshot {
+        if let Some(snapshot) = &self.harness.snapshot {
             snapshot.take(event.id())?;
             self.undo_point = Some(event.id());
         }
@@ -611,7 +593,13 @@ impl AppService for App {
         self.commit(called)?;
         self.with_pending(|turn| turn.open_call = Some((called_id, tool.to_string())));
 
-        let Some(run) = self.tools.iter().find(|t| t.spec().name == tool).cloned() else {
+        let Some(run) = self
+            .harness
+            .tools
+            .iter()
+            .find(|t| t.spec().name == tool)
+            .cloned()
+        else {
             let output = percept::ToolOutput::text(format!("no such tool: {tool}"));
             self.commit_tool_result(output)?;
             return Ok(ToolStep::Continue(self.ask()?));
@@ -619,7 +607,7 @@ impl AppService for App {
         if self.allowed.contains(tool) {
             return Ok(ToolStep::Run(run, arguments));
         }
-        match self.policy.check(tool, &arguments) {
+        match self.harness.policy.check(tool, &arguments) {
             percept::Verdict::Allow => Ok(ToolStep::Run(run, arguments)),
             percept::Verdict::Ask => Ok(ToolStep::Ask(run, arguments)),
         }
@@ -672,7 +660,7 @@ impl AppService for App {
     fn tool_progress(&self) -> Option<(usize, usize)> {
         self.pending
             .as_ref()
-            .map(|turn| (turn.tool_calls, self.tool_cap))
+            .map(|turn| (turn.tool_calls, self.harness.tool_cap))
     }
 
     fn allow_tool(&mut self, tool: &str) {
@@ -711,7 +699,7 @@ impl AppService for App {
     }
 
     fn describe_context(&self) -> Result<String, Box<dyn std::error::Error>> {
-        let sections = self.context.describe(&self.view())?;
+        let sections = self.harness.context.describe(&self.view())?;
         let last_round = match self.last_usage() {
             Some(usage) => format!(
                 "last round: {} in, {} cached",
@@ -727,7 +715,7 @@ impl AppService for App {
         if self.is_replying() {
             return Err("a reply is already streaming".into());
         }
-        let Some(snapshot) = &self.snapshot else {
+        let Some(snapshot) = &self.harness.snapshot else {
             return Err("no snapshots are kept; run with PERCEPT_TOOLS=code".into());
         };
         let Some(prompt) = self.undo_point else {

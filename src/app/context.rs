@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::app::MapShape;
-use crate::percept::{self, Actor, Event, EventId, EventKind, Map, Scope};
+use crate::percept::{self, Actor, Event, EventId, EventKind, Map, Scope, PREVIEW_CHARS};
 use crate::shared::Timestamp;
 
 /// A map's size and age in one clause, so the model can tell whether
@@ -46,24 +46,34 @@ fn estimate(chars: usize) -> usize {
     chars.div_ceil(4)
 }
 
-/// What `event` costs the model to read as history: zero for an event
-/// history leaves out, and a tool result at the size `cut` sends it.
-fn tokens(event: &Event) -> usize {
-    let chars = match event.payload() {
-        percept::Payload::MessageReceived { content } if !is_percepts_prompt(event) => {
-            content.chars().count()
-        }
-        percept::Payload::ToolResulted { content } => cut(content, event.id()).chars().count(),
-        percept::Payload::ToolCalled { tool, arguments } => {
-            tool.chars().count() + arguments.chars().count()
-        }
-        _ => 0,
-    };
-    estimate(chars)
+/// The message one event shows as in history: none for percept's own
+/// prompt, a `reflect`, which replayed as system text would stand as
+/// an instruction in every later turn; a tool result cut to its head;
+/// otherwise what `message_of` gives.
+fn history_message(event: &Event) -> Option<percept::Message> {
+    match event.payload() {
+        _ if is_percepts_prompt(event) => None,
+        percept::Payload::ToolResulted { content } => Some(percept::Message::ToolResult {
+            content: cut(content, event.id()),
+        }),
+        _ => percept::message_of(event),
+    }
 }
 
-/// How much of an event outside the window the model still reads.
-const PREVIEW_CHARS: usize = 120;
+/// What `event` costs the model to read as history.
+fn tokens(event: &Event) -> usize {
+    history_message(event).map_or(0, |message| message_tokens(&message))
+}
+
+/// A message's text: its content, or a tool call's name and arguments.
+fn text_of(message: &percept::Message) -> String {
+    match message {
+        percept::Message::Text { content, .. } | percept::Message::ToolResult { content } => {
+            content.clone()
+        }
+        percept::Message::ToolCall { tool, arguments } => format!("{tool} {arguments}"),
+    }
+}
 
 /// The first `PREVIEW_CHARS` of `text`, on one line.
 fn head(text: &str) -> String {
@@ -93,20 +103,13 @@ fn cut(content: &str, id: EventId) -> String {
 /// the id to open it. None for an event history would not show
 /// either.
 fn line(event: &Event) -> Option<String> {
-    let text = match event.payload() {
-        percept::Payload::MessageReceived { content } if !is_percepts_prompt(event) => {
-            head(content)
-        }
-        percept::Payload::ToolResulted { content } => head(content),
-        percept::Payload::ToolCalled { tool, arguments } => head(&format!("{tool} {arguments}")),
-        _ => return None,
-    };
-    let actor = match event.actor() {
-        Actor::User => "user",
-        Actor::Model => "model",
-        Actor::System => "system",
-    };
-    Some(format!("{} {actor}: {text}", event.id().as_uuid()))
+    let message = history_message(event)?;
+    Some(format!(
+        "{} {}: {}",
+        event.id().as_uuid(),
+        event.actor().name(),
+        head(&text_of(&message))
+    ))
 }
 
 /// How far back history goes in full: a share of the model's context
@@ -126,7 +129,7 @@ impl Window {
     /// The high and low marks in tokens for a model with this window.
     fn marks(&self, context_window: Option<u32>) -> (usize, usize) {
         let mark = |share: f32, fallback: u32| {
-            context_window.map_or(fallback, |window| (window as f32 * share) as u32) as usize
+            context_window.map_or(fallback as usize, |window| (window as f32 * share) as usize)
         };
         (
             mark(self.share, self.floor),
@@ -164,9 +167,8 @@ impl Window {
     }
 }
 
-/// One part of the request `Context::build` assembles. Order and
-/// membership are data, so a new purpose is a new list, not a new
-/// function. Listed stable first, the order `Harness::new` uses.
+/// One part of the request `Context::build` assembles. Listed stable
+/// first, the order `Harness::new` uses.
 #[derive(Clone, Copy)]
 pub enum Section {
     /// The harness's instructions as system text.
@@ -243,26 +245,12 @@ pub struct Context {
 
 impl Context {
     /// The request for the next `reply`: each section's messages in
-    /// list order, then the tools, then the budget-spent note if the
-    /// turn is at its cap. Errs only when a map in the log does not
+    /// list order, then the tools. Errs only when a map in the log does not
     /// fold, which is a corrupt log, not a bad turn.
     pub fn build(&self, view: View) -> Result<percept::ModelRequest, Box<dyn std::error::Error>> {
         let mut messages = Vec::new();
         for section in &self.sections {
             messages.extend(render(section, &view)?);
-        }
-
-        // Dropping the tools is not enough on its own: a model
-        // mid-turn reaches for one anyway, `begin_tool` stops the
-        // turn on it, and the reply is empty. Say the budget is spent
-        // so it answers.
-        if view.budget_spent {
-            messages.push(percept::Message::Text {
-                role: Actor::System,
-                content: "This turn's tool budget is spent. You cannot call any more \
-                          tools now. Answer with what you have."
-                    .to_string(),
-            });
         }
 
         Ok(percept::ModelRequest {
@@ -392,22 +380,7 @@ fn render(
                     ),
                 });
             }
-            // Percept's own prompts - a `reflect` - are history the
-            // model need not obey. Replayed as system text they would
-            // stand as an instruction in every later turn, so before
-            // this turn they are dropped; the turn's own prompt stays.
-            let history = before[start..]
-                .iter()
-                .filter(|event| !is_percepts_prompt(event))
-                .filter_map(|event| match event.payload() {
-                    percept::Payload::ToolResulted { content } => {
-                        Some(percept::Message::ToolResult {
-                            content: cut(content, event.id()),
-                        })
-                    }
-                    _ => percept::message_of(event),
-                });
-            messages.extend(history);
+            messages.extend(before[start..].iter().filter_map(history_message));
         }
         Section::Time => {
             let (_, turn) = view.split();
@@ -419,24 +392,27 @@ fn render(
         }
         Section::Turn => {
             let (_, turn) = view.split();
-            messages.extend(percept::to_messages(turn));
+            messages.extend(turn.iter().filter_map(percept::message_of));
+            // Dropping the tools is not enough on its own: a model
+            // mid-turn reaches for one anyway, `begin_tool` stops the
+            // turn on it, and the reply is empty. Say the budget is
+            // spent so it answers.
+            if view.budget_spent {
+                messages.push(percept::Message::Text {
+                    role: Actor::System,
+                    content: "This turn's tool budget is spent. You cannot call any more \
+                              tools now. Answer with what you have."
+                        .to_string(),
+                });
+            }
         }
     }
     Ok(messages)
 }
 
-/// What one message of the request costs to read: its text, or a tool
-/// call's name and arguments.
+/// What one message of the request costs to read.
 fn message_tokens(message: &percept::Message) -> usize {
-    let chars = match message {
-        percept::Message::Text { content, .. } | percept::Message::ToolResult { content } => {
-            content.chars().count()
-        }
-        percept::Message::ToolCall { tool, arguments } => {
-            tool.chars().count() + arguments.chars().count()
-        }
-    };
-    estimate(chars)
+    estimate(text_of(message).chars().count())
 }
 
 /// `n` as a plain number under a thousand, else in thousands or

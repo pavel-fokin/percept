@@ -148,28 +148,14 @@ pub trait ModelCatalog: Send + Sync {
     fn build(&self, descriptor: &ModelDescriptor) -> Result<Arc<dyn Model>, Box<dyn Error>>;
 }
 
-/// Converts the transcript into the form Model expects. A recorded
-/// thought is left out - it is never replayed as dialogue. A change to
-/// a cognitive map is left out too: it is a fact about the map, not
-/// something said. A `model.called` event is left out the same way: it
-/// is bookkeeping about a round trip, not something anyone said.
-/// Everything else maps to a `Message`, tool calls from another writer
-/// included, so a later turn sees what earlier ones tried.
-///
-/// Any slice replays, including one cut mid-tool-round: a leading tool
-/// result, whose call the cut left behind, is dropped. A conversation
-/// opening on a result nothing asked for is not one a provider accepts.
-/// A caller passing a whole log drops nothing.
-pub fn to_messages<'a>(events: impl IntoIterator<Item = &'a Event>) -> Vec<Message> {
-    events
-        .into_iter()
-        .filter_map(message_of)
-        .skip_while(|message| matches!(message, Message::ToolResult { .. }))
-        .collect()
-}
-
-/// The message one event replays as, or none for the kinds
-/// `to_messages` leaves out.
+/// The message one event replays as, in the form Model expects. A
+/// recorded thought is left out - it is never replayed as dialogue. A
+/// change to a cognitive map is left out too: it is a fact about the
+/// map, not something said. A `model.called` event is left out the
+/// same way: it is bookkeeping about a round trip, not something
+/// anyone said. Everything else maps to a `Message`, tool calls from
+/// another writer included, so a later turn sees what earlier ones
+/// tried.
 pub fn message_of(event: &Event) -> Option<Message> {
     match event.payload() {
         Payload::MessageReceived { content } => Some(Message::Text {

@@ -444,10 +444,14 @@ fn build_app(
         Arc::new(ReadMap::new(Arc::new(maps))),
     ];
     match build_toolset(&source, checkout)? {
-        Toolset::Maps => {
-            let harness = Harness::new(tools, map_shape);
-            App::new(model, catalog, log, harness, renderer, source)
-        }
+        Toolset::Maps => App::new(
+            model,
+            catalog,
+            log,
+            Harness::new(tools, map_shape),
+            renderer,
+            source,
+        ),
         Toolset::Code => {
             tools.extend(code_tools(checkout)?);
             let instructions = std::fs::read_to_string(checkout.join(INSTRUCTIONS_FILE)).ok();
