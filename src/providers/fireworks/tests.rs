@@ -48,6 +48,26 @@ fn a_tool_call_split_across_deltas_assembles_into_one_call() {
 }
 
 #[test]
+fn a_second_parallel_call_is_dropped_rather_than_spliced_into_the_first() {
+    let mut partial = None;
+
+    let first = r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"read_file","arguments":"{\"path\":\"a\"}"}}]}}]}"#;
+    let _ = parse_line(first, "glm-5p3", &mut partial).unwrap();
+    let second = r#"data: {"choices":[{"delta":{"tool_calls":[{"index":1,"function":{"name":"read_file","arguments":"{\"path\":\"b\"}"}}]},"finish_reason":"tool_calls"}]}"#;
+
+    match parse_line(second, "glm-5p3", &mut partial).unwrap() {
+        Line::Chunk(Chunk::ToolCall { tool, arguments }) => {
+            assert_eq!(tool, "read_file");
+            assert_eq!(
+                serde_json::from_str::<Value>(&arguments).unwrap()["path"],
+                "a"
+            );
+        }
+        _ => panic!("expected a tool call chunk"),
+    }
+}
+
+#[test]
 fn a_chunk_with_usage_ends_the_stream_carrying_its_token_counts() {
     let line = r#"data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":34}}"#;
     let mut partial = None;

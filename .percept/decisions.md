@@ -86,3 +86,29 @@ Folded from the percept log for this project and rerendered on every write. Chan
 ## 2026-09-06 · 01a0786b-a16d-7c52-9aaa-d4eb9b4ce16a
 - "Which of a project's events should percept-tui replay as its own conversation?" (model)
   decision "conversational events count only from percept-tui's own source; a map mutation counts from any source in the project" (model): why: "to_messages already replayed another client's message.received/tool.called as this session's own dialogue, since agent-hook.py stamps the same event kinds for claude-code and codex; filtering self.events by source.name alone would also drop other sources' node/edge events from the fold, hiding decisions the plan skill recorded during a Claude Code session"
+
+## 2026-09-07 · 01a07ab0-7838-7843-a5d2-0b456b01eb44
+- "How are the coding tools switched on?" (model)
+  decision "PERCEPT_TOOLS=code adds them beside the map tools; the default, maps, is today's behaviour" (model): why: "follows PERCEPT_MAPS: one env var read at the entrypoint, nothing else moves"
+- "What are the coding tools named?" (model)
+  decision "read_file, write_file, edit_file, list_files, find_files, grep_files, bash" (model): why: "verb_noun like read_event and read_map, so a bare read is never confused with them; no sed tool, edit_file covers it"
+- "Which tool calls ask the user before they run?" (model)
+  decision "write_file, edit_file and bash ask; the rest run; percept ask declines an ask unless --yes" (model): why: "reads are routine, mutation and arbitrary commands are not; a headless turn has no one to ask"
+- "How many tool calls may a coding turn make?" (model)
+  decision "50 with PERCEPT_TOOLS=code; 5 stays for maps" (model): why: "a coding task reads several files before one edit; five ends it mid-read"
+- "How is a coding turn undone?" (model)
+  decision "a commit at refs/percept/snapshots/<prompt id> before each prompt when the coding tools are on; /undo restores the last one" (model): why: "scratch refs leave the branch and index alone; version control is the undo the user already knows; the id ties it to the prompt event"
+
+## 2026-09-07 · 01a07afa-976a-7553-a05a-40901ea8237f
+- "How does a user stop approving every tool call?" (model)
+  decision "a on the approval row runs the call and every later call of that tool this session; y runs once, n declines" (model): why: "one answer per tool per session; nothing is committed to the log, so the next session asks again"
+
+## 2026-09-07 · 01a07b11-93a4-7431-b374-9c92de8bc643
+- "How does a coding turn learn the project's conventions?" (model)
+  decision "AGENTS.md at the checkout root goes into the system prompt every round under PERCEPT_TOOLS=code; absent, nothing is sent" (model): why: "the coding agent wrote banner comments, an overlong subject and skipped review because it never saw the rules; a chat over the log has no tree to follow them in and pays nothing"
+
+## 2026-09-07 · 01a07b15-4bcd-7812-88e6-083ec60104a8
+- "Where is future work tracked?" (model)
+  decision "a tasks map: task and outcome nodes; resolves, blocks and supersedes edges; every task says why" (model): why: "resolves is the word decisions already uses, so a reader learns one vocabulary; a task without a why is a todo nobody can weigh"
+- "Where does a done task go in the tasks render?" (model)
+  decision "a Done section below the open tasks, each with its outcome" (model): why: "findable without a query; the open list stays the part a session reads first"

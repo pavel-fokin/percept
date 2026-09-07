@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::percept::{Actor, EventId, Map, MapRenderer, Node, Schema, DECISIONS};
+use crate::percept::{Actor, EventId, Map, MapRenderer, Node, Schema, DECISIONS, TASKS};
 use crate::store::event::ids;
 
 /// What every rendered map opens with, so a reader who lands on the
@@ -22,19 +22,30 @@ const DECISIONS_GUIDE: &str = "Questions in the order they were raised, grouped 
     decisions --around 'question:<name>'`. What changed lately: `percept maps show decisions \
     --since 1d`.";
 
+/// What the tasks map adds to the preamble.
+const TASKS_GUIDE: &str = "Open tasks in the order they were raised, grouped under the \
+    prompt that raised them, each with what it waits on. Done and dropped tasks follow under \
+    `done`, each with its outcome. A task's own history: `percept maps show tasks --around \
+    'task:<name>'`. What changed lately: `percept maps show tasks --since 1d`.";
+
 /// `map` as Markdown: a heading and the preamble, then the map's body.
 /// The decisions map renders as a question-keyed list grouped by the
-/// prompt that raised each question - see `push_decisions`. Every
-/// other schema keeps one `## <kind>` section per node kind that holds
-/// a node and a `## edges` section - see `push_by_kind`. Empty for a
-/// map with no nodes, past the preamble.
+/// prompt that raised each question - see `push_decisions`; the tasks
+/// map as open tasks grouped the same way, then the done ones - see
+/// `push_tasks`. Every other schema keeps one `## <kind>` section per
+/// node kind that holds a node and a `## edges` section - see
+/// `push_by_kind`. Empty for a map with no nodes, past the preamble.
 pub fn markdown(map: &Map) -> String {
     let schema = map.schema();
-    let decisions = schema.name == DECISIONS.name;
     let mut out = format!("# {}\n\n{PREAMBLE}", schema.name);
-    if decisions {
+    let guide = match schema.name {
+        name if name == DECISIONS.name => Some(DECISIONS_GUIDE),
+        name if name == TASKS.name => Some(TASKS_GUIDE),
+        _ => None,
+    };
+    if let Some(guide) = guide {
         out.push(' ');
-        out.push_str(DECISIONS_GUIDE);
+        out.push_str(guide);
     }
     out.push('\n');
 
@@ -43,10 +54,10 @@ pub fn markdown(map: &Map) -> String {
         return out;
     }
 
-    if decisions {
-        push_decisions(&mut out, map);
-    } else {
-        push_by_kind(&mut out, map);
+    match schema.name {
+        name if name == DECISIONS.name => push_decisions(&mut out, map),
+        name if name == TASKS.name => push_tasks(&mut out, map),
+        _ => push_by_kind(&mut out, map),
     }
 
     out
@@ -117,14 +128,7 @@ fn push_decisions(out: &mut String, map: &Map) {
         .headlines()
         .filter(|node| node.kind == "question" || !map.settles(node.id));
 
-    let mut groups: Vec<(Option<EventId>, Vec<&Node>)> = Vec::new();
-    for item in items {
-        let key = item.sources.first().copied();
-        match groups.iter_mut().find(|(group, _)| *group == key) {
-            Some((_, nodes)) => nodes.push(item),
-            None => groups.push((key, vec![item])),
-        }
-    }
+    let groups = grouped_by_prompt(items);
     if groups.is_empty() {
         let _ = writeln!(
             out,
@@ -146,6 +150,69 @@ fn push_decisions(out: &mut String, map: &Map) {
             }
         }
     }
+}
+
+/// The tasks map's body: every open task - one no outcome resolves -
+/// grouped under the prompt that raised it, in the order raised, each
+/// with the tasks it waits on; then, under `done`, every settled task
+/// with its outcome, in the order raised. A task never moves within
+/// the open list; settling it is the one move, and the agreed one.
+fn push_tasks(out: &mut String, map: &Map) {
+    let (done, open): (Vec<&Node>, Vec<&Node>) = map
+        .headlines()
+        .partition(|task| !map.settled_by(task.id).is_empty());
+
+    let groups = grouped_by_prompt(open.into_iter());
+    if groups.is_empty() && done.is_empty() {
+        let _ = writeln!(
+            out,
+            "\n(no task yet; {} nodes of other kinds.)",
+            map.nodes().len()
+        );
+        return;
+    }
+    for (key, tasks) in groups {
+        out.push_str("\n## ");
+        push_group_heading(out, key);
+        out.push('\n');
+        for task in tasks {
+            let _ = writeln!(out, "- {}{}", marked_name(task), task.properties_line());
+            for blocker in map.blocked_by(task.id) {
+                let _ = writeln!(out, "  waits on {}", marked_name(blocker));
+            }
+        }
+    }
+    if !done.is_empty() {
+        out.push_str("\n## done\n");
+        for task in done {
+            let _ = writeln!(out, "- {}", marked_name(task));
+            for outcome in map.settled_by(task.id) {
+                let _ = writeln!(
+                    out,
+                    "  outcome {}{}",
+                    marked_name(outcome),
+                    outcome.properties_line()
+                );
+            }
+        }
+    }
+}
+
+/// `items` bucketed by the prompt each cites first - the one that
+/// raised it, which never changes - in first-seen order of both the
+/// prompts and the items under them.
+fn grouped_by_prompt<'a>(
+    items: impl Iterator<Item = &'a Node>,
+) -> Vec<(Option<EventId>, Vec<&'a Node>)> {
+    let mut groups: Vec<(Option<EventId>, Vec<&Node>)> = Vec::new();
+    for item in items {
+        let key = item.sources.first().copied();
+        match groups.iter_mut().find(|(group, _)| *group == key) {
+            Some((_, nodes)) => nodes.push(item),
+            None => groups.push((key, vec![item])),
+        }
+    }
+    groups
 }
 
 /// A group's heading: the raising prompt's date and id, the id alone

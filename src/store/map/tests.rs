@@ -52,6 +52,25 @@ fn an_option_without_a_why_is_refused_as_a_new_write() {
 }
 
 #[test]
+fn a_task_without_a_why_is_refused_as_a_new_write() {
+    let log = FakeLog::default();
+
+    let err = revise(
+        &log,
+        "tasks",
+        &scope(),
+        &[],
+        Actor::User,
+        add_node("task", "cancel a turn without quitting"),
+    )
+    .err()
+    .unwrap()
+    .to_string();
+
+    assert!(err.contains("why it matters"), "{err}");
+}
+
+#[test]
 fn an_option_with_a_why_is_recorded() {
     let log = FakeLog::default();
     let mutation = |sources| Mutation::AddNode {
@@ -168,13 +187,13 @@ fn revising_the_code_map_is_refused() {
 
 #[test]
 fn an_unknown_map_is_an_error() {
-    let err = fold_map(&FakeLog::default(), "tasks", &scope())
+    let err = fold_map(&FakeLog::default(), "glossary", &scope())
         .err()
         .unwrap();
 
     assert_eq!(
         err.to_string(),
-        "no map named \"tasks\"; maps are decisions, code"
+        "no map named \"glossary\"; maps are decisions, tasks, code"
     );
 }
 

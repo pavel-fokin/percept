@@ -1,8 +1,8 @@
 use super::*;
-use crate::percept::{Actor, Chunk, Payload};
+use crate::percept::{Actor, Chunk, Payload, Verdict, SCHEMAS};
 use crate::testing::{
-    content, node_added, scope, source, usage, FakeCatalog, FakeLog, FakeRenderer, FakeTool,
-    Scripted,
+    content, node_added, scope, source, usage, FakeCatalog, FakeLog, FakeRenderer, FakeSnapshot,
+    FakeTool, FixedPolicy, Scripted,
 };
 
 const SOURCE: &str = "tui";
@@ -409,7 +409,256 @@ fn run_one_tool(app: &mut App, name: &str, arguments: &str) {
         // `begin_tool` already committed the result (no such tool)
         // or ended the turn (cap spent).
         ToolStep::Continue(_) | ToolStep::Stop => {}
+        ToolStep::Ask(..) => panic!("the default policy never asks"),
     }
+}
+
+fn app_with_policy(policy: Verdict) -> App {
+    App::new(
+        Arc::new(Scripted::new(vec![], true)),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        vec![Arc::new(FakeTool)],
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap()
+    .with_policy(Arc::new(FixedPolicy(policy)))
+}
+
+fn result_content(event: &Event) -> &str {
+    match event.payload() {
+        Payload::ToolResulted { content } => content,
+        _ => panic!("expected a tool.resulted event"),
+    }
+}
+
+#[test]
+fn a_call_the_policy_asks_about_comes_back_as_an_ask_step_after_tool_called() {
+    let mut app = app_with_policy(Verdict::Ask);
+
+    let _ = app.submit("go".to_string()).unwrap();
+    let step = app.begin_tool("search_events", "{}".to_string()).unwrap();
+
+    assert!(matches!(step, ToolStep::Ask(_, ref args) if args == "{}"));
+    // The call is on the record; nothing has run and no result exists.
+    assert_eq!(app.events().len(), 2);
+    assert!(matches!(
+        app.events()[1].payload(),
+        Payload::ToolCalled { .. }
+    ));
+}
+
+#[test]
+fn declining_an_asked_call_commits_the_refusal_as_its_result_and_asks_again() {
+    let mut app = app_with_policy(Verdict::Ask);
+
+    let _ = app.submit("go".to_string()).unwrap();
+    let _ = app.begin_tool("search_events", "{}".to_string()).unwrap();
+    let _ = app.decline_tool().unwrap();
+
+    let events = app.events();
+    assert_eq!(events.len(), 3);
+    assert!(result_content(&events[2]).starts_with("The user declined to run search_events"));
+    assert!(events[2].causation_id() == Some(events[1].id()));
+    assert!(app.is_replying());
+}
+
+#[test]
+fn a_tool_the_user_allowed_runs_unasked_for_the_rest_of_the_session() {
+    let mut app = app_with_policy(Verdict::Ask);
+    app.allow_tool("search_events");
+
+    let _ = app.submit("go".to_string()).unwrap();
+    let step = app.begin_tool("search_events", "{}".to_string()).unwrap();
+
+    assert!(matches!(step, ToolStep::Run(..)));
+}
+
+#[test]
+fn tool_progress_counts_the_turn_s_calls_against_the_cap_and_clears_between_turns() {
+    let mut app = app_with_policy(Verdict::Allow);
+    assert_eq!(app.tool_progress(), None);
+
+    let _ = app.submit("go".to_string()).unwrap();
+    assert_eq!(app.tool_progress(), Some((0, MAX_TOOL_CALLS)));
+    run_one_tool(&mut app, "search_events", "{}");
+    assert_eq!(app.tool_progress(), Some((1, MAX_TOOL_CALLS)));
+
+    app.end_stream().unwrap();
+    assert_eq!(app.tool_progress(), None);
+}
+
+#[test]
+fn an_unknown_tool_is_refused_before_the_policy_is_asked() {
+    let mut app = app_with_policy(Verdict::Ask);
+
+    let _ = app.submit("go".to_string()).unwrap();
+    let step = app.begin_tool("nope", "{}".to_string()).unwrap();
+
+    assert!(matches!(step, ToolStep::Continue(_)));
+    assert_eq!(result_content(&app.events()[2]), "no such tool: nope");
+}
+
+fn app_with_snapshot() -> (Arc<FakeSnapshot>, App) {
+    let snapshot = Arc::new(FakeSnapshot::default());
+    let app = App::new(
+        Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        Vec::new(),
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap()
+    .with_snapshot(snapshot.clone());
+    (snapshot, app)
+}
+
+#[test]
+fn a_turn_saves_the_tree_under_its_prompt_before_asking_the_model() {
+    let (snapshot, mut app) = app_with_snapshot();
+
+    let _ = app.submit("change it".to_string()).unwrap();
+
+    assert_eq!(snapshot.taken(), vec![app.events()[0].id()]);
+}
+
+#[test]
+fn undo_restores_the_last_turn_s_snapshot_once() {
+    let (snapshot, mut app) = app_with_snapshot();
+    let _ = app.submit("change it".to_string()).unwrap();
+    app.end_stream().unwrap();
+    let prompt = app.events()[0].id();
+
+    app.undo().unwrap();
+    assert_eq!(snapshot.restored(), vec![prompt]);
+
+    assert_eq!(app.undo().unwrap_err().to_string(), "nothing to undo");
+    assert_eq!(snapshot.restored(), vec![prompt]);
+}
+
+#[test]
+fn undo_rerenders_every_map_so_the_render_follows_the_log_not_the_restored_tree() {
+    let renderer = Arc::new(FakeRenderer::default());
+    let mut app = App::new(
+        Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::seeded(vec![node_added("question", "q")])),
+        Vec::new(),
+        renderer.clone(),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap()
+    .with_snapshot(Arc::new(FakeSnapshot::default()));
+    let _ = app.submit("change it".to_string()).unwrap();
+    app.end_stream().unwrap();
+    assert!(renderer.rendered().is_empty());
+
+    app.undo().unwrap();
+
+    let mut rendered = renderer.rendered();
+    rendered.sort();
+    assert_eq!(rendered, vec!["decisions".to_string(), "tasks".to_string()]);
+}
+
+#[test]
+fn undo_is_refused_while_a_turn_streams() {
+    let (snapshot, mut app) = app_with_snapshot();
+    let _ = app.submit("change it".to_string()).unwrap();
+
+    assert!(app.undo().is_err());
+    assert!(snapshot.restored().is_empty());
+}
+
+#[test]
+fn an_app_without_a_snapshot_takes_none_and_cannot_undo() {
+    let mut app = App::new(
+        Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        Vec::new(),
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap();
+    let _ = app.submit("hi".to_string()).unwrap();
+    app.end_stream().unwrap();
+
+    assert!(app.undo().is_err());
+}
+
+#[test]
+fn instructions_go_to_the_model_as_system_text_before_the_maps_every_round() {
+    let model = Arc::new(Scripted::new(vec![], true));
+    let mut app = App::new(
+        model.clone(),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        vec![Arc::new(FakeTool)],
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap()
+    .with_instructions("Commit subjects stay under 72 chars.".to_string());
+
+    let _ = app.submit("go".to_string()).unwrap();
+    run_one_tool(&mut app, "search_events", "{}");
+
+    let sent = model.last_request();
+    // The time, then the instructions, then the decisions map.
+    assert!(sent[1].contains("Commit subjects stay under 72 chars."));
+    assert!(sent[2].starts_with("The decisions map"));
+}
+
+#[test]
+fn an_app_without_instructions_sends_none() {
+    let model = Arc::new(Scripted::new(vec![], false));
+    let mut app = App::new(
+        model.clone(),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        Vec::new(),
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap();
+
+    let _ = app.submit("hi".to_string()).unwrap();
+
+    assert!(model
+        .last_request()
+        .iter()
+        .all(|message| !message.contains("project's instructions")));
+}
+
+#[test]
+fn with_tool_cap_replaces_the_default_cap() {
+    let model = Arc::new(Scripted::new(vec![], true));
+    let mut app = App::new(
+        model.clone(),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        vec![Arc::new(FakeTool)],
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source(SOURCE),
+    )
+    .unwrap()
+    .with_tool_cap(2);
+
+    let _ = app.submit("go".to_string()).unwrap();
+    run_one_tool(&mut app, "search_events", "{}");
+    assert!(!app.tools_exhausted());
+    run_one_tool(&mut app, "search_events", "{}");
+    assert!(app.tools_exhausted());
+    assert_eq!(model.tool_counts(), vec![1, 1, 0]);
 }
 
 #[test]
@@ -691,8 +940,8 @@ fn a_log_longer_than_the_window_sends_only_its_newest_events() {
     // The whole log stays in the transcript the TUI renders.
     assert_eq!(app.events().len(), 26);
     let sent = model.last_request();
-    // The time, the decisions map, then the window.
-    assert_eq!(sent.len(), CONTEXT_EVENTS + 2);
+    // The time, one message per map, then the window.
+    assert_eq!(sent.len(), CONTEXT_EVENTS + 1 + SCHEMAS.len());
     assert!(!sent.contains(&"0".to_string()));
     assert!(sent.contains(&"24".to_string()));
     assert!(sent.contains(&"now".to_string()));
@@ -718,7 +967,7 @@ fn a_window_opening_on_a_tool_result_drops_it() {
 
     let sent = model.last_request();
     assert!(!sent.contains(&"<result>".to_string()));
-    assert_eq!(sent.len(), CONTEXT_EVENTS + 1);
+    assert_eq!(sent.len(), CONTEXT_EVENTS + SCHEMAS.len());
 }
 
 #[test]
@@ -759,7 +1008,7 @@ fn a_map_is_sent_with_its_kinds_ahead_of_the_transcript_and_outside_the_window()
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    assert_eq!(sent.len(), CONTEXT_EVENTS + 2);
+    assert_eq!(sent.len(), CONTEXT_EVENTS + 1 + SCHEMAS.len());
     assert_decisions_header(&sent[1]);
     assert!(sent[1].contains("- decision \"Rust over Go\""));
 }
@@ -783,7 +1032,8 @@ fn an_empty_map_is_still_sent_with_its_kinds() {
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    assert_eq!(sent.len(), 3);
+    // The time, one message per map, the prompt.
+    assert_eq!(sent.len(), 2 + SCHEMAS.len());
     assert!(sent[1].contains("Node kinds: question, option, evidence, decision."));
     assert!(sent[1].contains("\n(empty:"), "{}", sent[1]);
 }
@@ -935,8 +1185,8 @@ fn a_log_shorter_than_the_window_sends_all_of_it() {
 
     let _ = app.submit("now".to_string()).unwrap();
 
-    // The time, the decisions map, three events, the prompt.
-    assert_eq!(model.last_request().len(), 6);
+    // The time, one message per map, three events, the prompt.
+    assert_eq!(model.last_request().len(), 5 + SCHEMAS.len());
 }
 
 #[test]
@@ -951,10 +1201,10 @@ fn a_model_called_event_never_reaches_the_next_request() {
     let _ = app.submit("second".to_string()).unwrap();
 
     let sent = model.last_request();
-    // The time, the decisions map, "first", "ok", "second" - the
+    // The time, one message per map, "first", "ok", "second" - the
     // model.called event between "ok" and "second" is never one of
     // them.
-    assert_eq!(sent.len(), 5);
+    assert_eq!(sent.len(), 4 + SCHEMAS.len());
     assert!(sent.contains(&"first".to_string()));
     assert!(sent.contains(&"ok".to_string()));
     assert!(sent.contains(&"second".to_string()));

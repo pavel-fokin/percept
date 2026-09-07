@@ -4,8 +4,9 @@ use std::sync::Arc;
 use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError, Source};
 use crate::shared::Timestamp;
 
-/// Most tool calls one user turn may make. At the cap the next request
-/// goes out with no tools, so the model has to answer with text.
+/// Most tool calls one user turn may make, unless `with_tool_cap` says
+/// otherwise. At the cap the next request goes out with no tools, so
+/// the model has to answer with text.
 const MAX_TOOL_CALLS: usize = 5;
 
 /// How many of the most recent events the model reads as prompt text.
@@ -73,6 +74,12 @@ pub trait AppService {
         output: percept::ToolOutput,
     ) -> Result<percept::ReplyStream, Box<dyn std::error::Error>>;
 
+    /// What the caller does when the user says no to a `ToolStep::Ask`:
+    /// the refusal is committed as the call's result, in words the
+    /// model can act on, and the model is asked again. The words are
+    /// turn policy, so they live here and not in each presentation.
+    fn decline_tool(&mut self) -> Result<percept::ReplyStream, Box<dyn std::error::Error>>;
+
     /// Commits the streamed thought, if any, then the streamed reply, if
     /// any, as separate model events. Either with no chunks commits
     /// nothing. Errs if an event can't be appended to the log; a failed
@@ -91,6 +98,15 @@ pub trait AppService {
     /// ends would overwrite the first turn's cause and fuse both
     /// replies into one event, and an append-only log keeps the damage.
     fn is_replying(&self) -> bool;
+
+    /// How far through its tool budget the streaming turn is: calls
+    /// made so far, and the cap. `None` between turns.
+    fn tool_progress(&self) -> Option<(usize, usize)>;
+
+    /// Lets `tool` run unasked for the rest of the session - the user's
+    /// standing answer once they have seen what it does. Session-only:
+    /// nothing is committed to the log.
+    fn allow_tool(&mut self, tool: &str);
 
     /// What the most recent round trip cost - set once the first
     /// `model.called` commits, and never before.
@@ -112,6 +128,13 @@ pub trait AppService {
         &mut self,
         descriptor: &percept::ModelDescriptor,
     ) -> Result<(), Box<dyn std::error::Error>>;
+
+    /// Puts the working tree back as it stood before the last finished
+    /// turn, through the `Snapshot` taken at that turn's prompt. Errs
+    /// while a turn streams, when no snapshot is kept, or when nothing
+    /// is left to undo - a second `undo` in a row has no earlier
+    /// snapshot to reach, since each turn's snapshot is used once.
+    fn undo(&mut self) -> Result<(), Box<dyn std::error::Error>>;
 }
 
 /// What the caller should do after `begin_tool`. The decision - run,
@@ -120,6 +143,11 @@ pub enum ToolStep {
     /// Run this tool with these arguments off the main loop, then pass
     /// its output to `finish_tool`.
     Run(Arc<dyn percept::Tool>, String),
+    /// The policy wants the user's say. Put the call to them; on yes,
+    /// treat it as `Run`, on no, call `decline_tool`. `tool.called` is
+    /// already committed either way: the log shows what the model
+    /// asked for, and the result shows what the user let happen.
+    Ask(Arc<dyn percept::Tool>, String),
     /// Nothing to run (the name matched no tool); `App` already
     /// recorded the result. Drain this stream to continue the turn.
     Continue(percept::ReplyStream),
@@ -199,9 +227,9 @@ struct Turn {
     /// exact because the transcript is only ever appended to.
     start: usize,
     tool_calls: usize,
-    /// The `tool.called` awaiting its result, set by `begin_tool` and
-    /// taken when the result commits.
-    open_call: Option<EventId>,
+    /// The `tool.called` awaiting its result, with the tool's name, set
+    /// by `begin_tool` and taken when the result commits.
+    open_call: Option<(EventId, String)>,
     thought: String,
     reply: String,
     /// What the round trip just streamed cost, set by `append_chunk`
@@ -225,6 +253,25 @@ pub struct App {
     /// The tools the model may call, sent with each request when the
     /// model reports `tool_use`.
     tools: Vec<Arc<dyn percept::Tool>>,
+    /// Asked before any of `tools` runs. `AllowAll` unless `with_policy`
+    /// says otherwise - the map tools have always run unasked.
+    policy: Arc<dyn percept::Policy>,
+    /// Tools the user has said always run, this session - checked
+    /// before `policy`, which never learns.
+    allowed: HashSet<String>,
+    /// Most tool calls one turn may make - see `MAX_TOOL_CALLS`.
+    tool_cap: usize,
+    /// Where the working tree is saved before each prompt, when the
+    /// turn can change it. `None` for a chat over the log alone: a
+    /// snapshot of a tree no tool touches would be noise.
+    snapshot: Option<Arc<dyn percept::Snapshot>>,
+    /// The prompt whose snapshot `undo` would restore: the last turn
+    /// that took one, cleared once used.
+    undo_point: Option<EventId>,
+    /// The project's own instructions, sent as system text every
+    /// round so the model works to the project's conventions. `None`
+    /// for a chat over the log, which has no tree to follow them in.
+    instructions: Option<String>,
     /// Rerenders a map after a tool's commits change it - see
     /// `commit_tool_result`.
     renderer: Arc<dyn percept::MapRenderer>,
@@ -276,11 +323,44 @@ impl App {
             catalog,
             log,
             tools,
+            policy: Arc::new(percept::AllowAll),
+            allowed: HashSet::new(),
+            tool_cap: MAX_TOOL_CALLS,
+            snapshot: None,
+            undo_point: None,
+            instructions: None,
             renderer,
             map_shape,
             pending: None,
             last_usage,
         })
+    }
+
+    /// Saves the working tree through `snapshot` before every prompt,
+    /// so `undo` can put it back.
+    pub fn with_snapshot(mut self, snapshot: Arc<dyn percept::Snapshot>) -> Self {
+        self.snapshot = Some(snapshot);
+        self
+    }
+
+    /// Sends `instructions` - the project's own, as its AGENTS.md has
+    /// them - as system text at the head of every request.
+    pub fn with_instructions(mut self, instructions: String) -> Self {
+        self.instructions = Some(instructions);
+        self
+    }
+
+    /// Replaces the policy every tool call is checked against.
+    pub fn with_policy(mut self, policy: Arc<dyn percept::Policy>) -> Self {
+        self.policy = policy;
+        self
+    }
+
+    /// Replaces the per-turn tool cap. A coding turn reads several files
+    /// before it edits one; `MAX_TOOL_CALLS` would end it mid-read.
+    pub fn with_tool_cap(mut self, cap: usize) -> Self {
+        self.tool_cap = cap;
+        self
     }
 
     /// Appends an event, then adds it to the transcript - never the
@@ -308,12 +388,12 @@ impl App {
         Ok(self.chat.reply(&self.build_request()?))
     }
 
-    /// Whether this turn has made `MAX_TOOL_CALLS`. Past it the request
+    /// Whether this turn has made `tool_cap` calls. Past it the request
     /// carries no tools and `begin_tool` ends the turn.
     fn tools_exhausted(&self) -> bool {
         self.pending
             .as_ref()
-            .is_some_and(|turn| turn.tool_calls >= MAX_TOOL_CALLS)
+            .is_some_and(|turn| turn.tool_calls >= self.tool_cap)
     }
 
     /// Commits each of `output.commits`, caused by the open call and
@@ -325,7 +405,8 @@ impl App {
         &mut self,
         output: percept::ToolOutput,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let Some(called_id) = self.pending.as_mut().and_then(|turn| turn.open_call.take()) else {
+        let Some((called_id, _)) = self.pending.as_mut().and_then(|turn| turn.open_call.take())
+        else {
             return Ok(());
         };
         let commits: Vec<Event> = output
@@ -419,6 +500,19 @@ impl App {
             role: Actor::System,
             content: format!("The current time is {}.", Timestamp::now()),
         }];
+        // Before the maps: conventions frame how the maps are read, and
+        // a system message the model sees first is the one it weighs
+        // most. Every round, like the maps, so a long turn never loses
+        // them to the window.
+        if let Some(instructions) = &self.instructions {
+            messages.push(percept::Message::Text {
+                role: Actor::System,
+                content: format!(
+                    "The project's instructions, which you follow when you read or \
+                     change its files:\n\n{instructions}"
+                ),
+            });
+        }
         for map in Map::fold_all(&self.source.scope(), &self.events)? {
             let schema = map.schema();
             let body = if map.nodes().is_empty() {
@@ -514,6 +608,13 @@ impl AppService for App {
             return Err("a reply is already streaming".into());
         }
         let event = Event::message_received(actor, text, self.source.clone(), None);
+        // The tree is saved before the prompt is on the record: a
+        // snapshot that fails leaves the log without a prompt whose
+        // changes could never be undone.
+        if let Some(snapshot) = &self.snapshot {
+            snapshot.take(event.id())?;
+            self.undo_point = Some(event.id());
+        }
         self.log.append(&event)?;
         let anchor = event.id();
         let start = self.events.len();
@@ -570,15 +671,19 @@ impl AppService for App {
         );
         let called_id = called.id();
         self.commit(called)?;
-        self.with_pending(|turn| turn.open_call = Some(called_id));
+        self.with_pending(|turn| turn.open_call = Some((called_id, tool.to_string())));
 
-        match self.tools.iter().find(|t| t.spec().name == tool).cloned() {
-            Some(run) => Ok(ToolStep::Run(run, arguments)),
-            None => {
-                let output = percept::ToolOutput::text(format!("no such tool: {tool}"));
-                self.commit_tool_result(output)?;
-                Ok(ToolStep::Continue(self.ask()?))
-            }
+        let Some(run) = self.tools.iter().find(|t| t.spec().name == tool).cloned() else {
+            let output = percept::ToolOutput::text(format!("no such tool: {tool}"));
+            self.commit_tool_result(output)?;
+            return Ok(ToolStep::Continue(self.ask()?));
+        };
+        if self.allowed.contains(tool) {
+            return Ok(ToolStep::Run(run, arguments));
+        }
+        match self.policy.check(tool, &arguments) {
+            percept::Verdict::Allow => Ok(ToolStep::Run(run, arguments)),
+            percept::Verdict::Ask => Ok(ToolStep::Ask(run, arguments)),
         }
     }
 
@@ -588,6 +693,20 @@ impl AppService for App {
     ) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
         self.commit_tool_result(output)?;
         self.ask()
+    }
+
+    fn decline_tool(&mut self) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
+        let Some((_, tool)) = self
+            .pending
+            .as_ref()
+            .and_then(|turn| turn.open_call.as_ref())
+        else {
+            return Err("no tool call is waiting".into());
+        };
+        let output = percept::ToolOutput::text(format!(
+            "The user declined to run {tool}. Do not retry it; ask them or do something else."
+        ));
+        self.finish_tool(output)
     }
 
     fn end_stream(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -610,6 +729,16 @@ impl AppService for App {
 
     fn is_replying(&self) -> bool {
         self.pending.is_some()
+    }
+
+    fn tool_progress(&self) -> Option<(usize, usize)> {
+        self.pending
+            .as_ref()
+            .map(|turn| (turn.tool_calls, self.tool_cap))
+    }
+
+    fn allow_tool(&mut self, tool: &str) {
+        self.allowed.insert(tool.to_string());
     }
 
     fn last_usage(&self) -> Option<&percept::Usage> {
@@ -641,6 +770,28 @@ impl AppService for App {
         self.chat = self.catalog.build(descriptor)?;
         self.last_usage = None;
         Ok(())
+    }
+
+    fn undo(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.is_replying() {
+            return Err("a reply is already streaming".into());
+        }
+        let Some(snapshot) = &self.snapshot else {
+            return Err("no snapshots are kept; run with PERCEPT_TOOLS=code".into());
+        };
+        let Some(prompt) = self.undo_point else {
+            return Err("nothing to undo".into());
+        };
+        snapshot.restore(prompt)?;
+        self.undo_point = None;
+        // The restore put every rendered map back to before the turn,
+        // while the log still holds what the turn added to them: the
+        // log is the record, so the renders follow it, not the tree.
+        let every_map = percept::SCHEMAS
+            .iter()
+            .map(|schema| schema.name.to_string())
+            .collect();
+        self.render_changed(&every_map)
     }
 }
 

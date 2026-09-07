@@ -67,7 +67,7 @@ agreement.
   `edge.removed` events in the same log. A `Schema` names a map and
   the node and edge kinds it allows, and one line of purpose - what
   the map makes cheap - that the prompt carries in place of the map
-  itself. `decisions` today. Every change goes through `Map::apply`, so
+  itself. `decisions` and `tasks` today. Every change goes through `Map::apply`, so
   the rules live once. `code` is a `Map` too, but folded from the
   working tree instead of the log - see `code` below.
 - A node records who added it - `User` or `Model` - and when. A
@@ -126,13 +126,14 @@ it, never sideways or up:
 
 | Layer | Package | Owns |
 |---|---|---|
-| Domain | `percept` | `Event`, `Message`, `Model`, `Map` - entities and the capabilities they need, as interfaces. Serde-free; depends on `shared` and on `futures-core`, for the stream type its reply port returns. |
-| Application | `app` | `App` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. `MapShape` says how much of each map the prompt carries; `PERCEPT_MAPS` sets it at the entrypoint. |
-| Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. |
-| Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps`, `ask`, `reflect` - the log and its maps without the TUI. |
+| Domain | `percept` | `Event`, `Message`, `Model`, `Map`, `Tool` - entities and the capabilities they need, as interfaces. `Policy` says whether a tool call runs at once or asks the user; `Snapshot` saves the working tree under a prompt and puts it back. Serde-free; depends on `shared` and on `futures-core`, for the stream type its reply port returns. |
+| Application | `app` | `App` - orchestrates domain objects for one use case, no vocabulary beyond `percept`'s. Runs the tool loop: commits `tool.called`, asks the `Policy`, hands the caller a `ToolStep` - run, ask the user, or carry on. `MapShape` says how much of each map the prompt carries; `PERCEPT_MAPS` sets it at the entrypoint. `PERCEPT_TOOLS=code` adds the file tools, the policy that asks before a write, a cap of fifty calls, a snapshot per prompt, and the checkout's `AGENTS.md` as system text every round; `undo` restores the last one. |
+| Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. A `ToolStep::Ask` pauses the turn on a row: `y` runs once, `a` runs and allows that tool for the session, `n` declines; `/undo` puts the tree back. |
+| Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps`, `ask`, `reflect` - the log and its maps without the TUI. Headless, a call the policy would ask about is declined unless `ask --yes`. |
 | Infrastructure | `providers` | `Ollama` and `OpenAi` - implement `percept::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` carries the key. |
 | Infrastructure | `store` | The JSONL event log - the serde boundary - implements `percept::EventLog` and `EventSearch`, the four tools the model calls: `search_events`, `read_event`, `revise_map`, `read_map`, and `MarkdownFiles`, the `MapRenderer` that writes `.percept/`. |
 | Infrastructure | `code` | The `code` map: walks the working tree with `ignore`, parses each file with `tree-sitter`, and builds a `Map` of `file`, `function`, `type`, and `package` nodes - `maps list` and `maps show` read it, but it is never folded from the log and never reaches the model's prompt. |
+| Infrastructure | `tools` | The file tools the model calls under `PERCEPT_TOOLS=code`: `read_file`, `write_file`, `edit_file`, `list_files`, `find_files`, `grep_files`, native over `Workspace` - the one place a path the model gave becomes a real path, refusing any outside the checkout - and `bash`, one `sh -c` at the root with a timeout. No virtual filesystem: both routes see the one tree. `AskBeforeWrites` is the `Policy`; `GitSnapshot` the `Snapshot`, a commit under `refs/percept/snapshots/<prompt>` built through a scratch index. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 
 Wire concrete types together only at the entrypoint - `main` in Rust.
@@ -194,7 +195,10 @@ skips it.
   for more than adding one. Aim for the smallest process that still
   catches mistakes. An approach the session tried and abandoned goes
   into the decisions map as evidence, so no later session tries it
-  again.
+  again. Work the session found and left undone goes into the tasks
+  map with its why, and an issue that was an open task gets its
+  outcome there, so the next session starts from the list and not
+  from a re-read.
 
 The TUI only runs on a real terminal. `scripts/drive.py` forks a pty,
 sends timed keystrokes, and prints the frames; `--plain` strips the

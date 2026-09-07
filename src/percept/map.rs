@@ -56,6 +56,17 @@ pub struct Schema {
     /// The node kinds worth a reader's attention without opening the
     /// whole map - what `MapShape::Headlines` sends.
     pub headline_kinds: &'static [&'static str],
+    /// Which node kind settles which through a `resolves` edge - a
+    /// decision a question, an outcome a task - when the map has such
+    /// a pair. A `resolves` edge between other kinds settles nothing.
+    pub settlement: Option<Settlement>,
+}
+
+/// The two node kinds a `resolves` edge joins: `by` settles `of`.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Settlement {
+    pub by: &'static str,
+    pub of: &'static str,
 }
 
 /// The edge kind that corrects a decision: from the new one to the one
@@ -66,7 +77,10 @@ pub const SUPERSEDES: &str = "supersedes";
 /// The edge kind from a decision to the question it settles.
 pub const RESOLVES: &str = "resolves";
 
-/// The two node kinds `settled_by` joins.
+/// The edge kind from a task to the task it must land before.
+pub const BLOCKS: &str = "blocks";
+
+/// What a decision settles.
 const QUESTION: &str = "question";
 /// The one node kind `revise_map` never removes: a decision is corrected
 /// by a successor with a `supersedes` edge, so it is public.
@@ -74,6 +88,12 @@ pub const DECISION: &str = "decision";
 /// An alternative that lost. The store refuses one that does not say
 /// why, so it is public too.
 pub const OPTION: &str = "option";
+/// One piece of work left to do. The store refuses one that does not
+/// say why it matters, so it is public.
+pub const TASK: &str = "task";
+/// What became of a task: done, with the commit it landed in, or
+/// dropped, with the reason.
+pub const OUTCOME: &str = "outcome";
 
 /// The decision map: what was asked, what was weighed, what was chosen
 /// and on what grounds. An option `answers` its question, evidence
@@ -86,6 +106,26 @@ pub const DECISIONS: Schema = Schema {
     node_kinds: &[QUESTION, "option", "evidence", DECISION],
     edge_kinds: &["answers", "supports", "contradicts", RESOLVES, SUPERSEDES],
     headline_kinds: &[QUESTION, DECISION],
+    settlement: Some(Settlement {
+        by: DECISION,
+        of: QUESTION,
+    }),
+};
+
+/// The tasks map: what is left to do. A task says why it matters, an
+/// outcome `resolves` it - done, or dropped and why - a task `blocks`
+/// the one that must wait for it, and a rewritten task `supersedes`
+/// the old wording, never removes it.
+pub const TASKS: Schema = Schema {
+    name: "tasks",
+    purpose: "what is left to do, why it matters, and what it waits on, so a session picks up the next item without re-deriving it",
+    node_kinds: &[TASK, OUTCOME],
+    edge_kinds: &[RESOLVES, BLOCKS, SUPERSEDES],
+    headline_kinds: &[TASK],
+    settlement: Some(Settlement {
+        by: OUTCOME,
+        of: TASK,
+    }),
 };
 
 /// The code map: a codebase's files, the symbols they define, and what
@@ -97,10 +137,11 @@ pub const CODE: Schema = Schema {
     node_kinds: &["file", "function", "type", "package"],
     edge_kinds: &["contains", "imports"],
     headline_kinds: &["file"],
+    settlement: None,
 };
 
 /// Every map folded from the log. One map per schema, named after it.
-pub const SCHEMAS: &[&Schema] = &[&DECISIONS];
+pub const SCHEMAS: &[&Schema] = &[&DECISIONS, &TASKS];
 
 /// Every map derived from something other than the log. A reader
 /// builds one fresh; no writer commits to it.
@@ -513,11 +554,11 @@ impl Map {
         out
     }
 
-    /// The decisions that settle `question` now: each decision with a
-    /// `resolves` edge to it, followed to the end of its supersession
-    /// chain, so a correction needs no new `resolves` edge. In map
-    /// order, each once. A `resolves` edge between other kinds settles
-    /// nothing.
+    /// The nodes that settle `question` now - the decisions of a
+    /// question, the outcomes of a task: each with a `resolves` edge to
+    /// it, followed to the end of its supersession chain, so a
+    /// correction needs no new `resolves` edge. In map order, each
+    /// once. A `resolves` edge between other kinds settles nothing.
     pub fn settled_by(&self, question: NodeId) -> Vec<&Node> {
         let mut out: Vec<&Node> = Vec::new();
         for edge in self.resolving_edges() {
@@ -544,15 +585,28 @@ impl Map {
             .any(|edge| chain.contains(&edge.from))
     }
 
-    /// The `resolves` edges that run from a decision to a question.
+    /// The `resolves` edges that run between the schema's settlement
+    /// kinds - none on a map without a settlement.
     fn resolving_edges(&self) -> impl Iterator<Item = &Edge> {
-        self.edges.iter().filter(|edge| {
+        let settlement = self.schema.settlement.as_ref();
+        self.edges.iter().filter(move |edge| {
+            let Some(Settlement { by, of }) = settlement else {
+                return false;
+            };
             edge.kind == RESOLVES
-                && self
-                    .node(edge.from)
-                    .is_some_and(|node| node.kind == DECISION)
-                && self.node(edge.to).is_some_and(|node| node.kind == QUESTION)
+                && self.node(edge.from).is_some_and(|node| node.kind == *by)
+                && self.node(edge.to).is_some_and(|node| node.kind == *of)
         })
+    }
+
+    /// The tasks with a `blocks` edge to `task`, in map order - what it
+    /// waits on.
+    pub fn blocked_by(&self, task: NodeId) -> Vec<&Node> {
+        self.edges
+            .iter()
+            .filter(|edge| edge.kind == BLOCKS && edge.to == task)
+            .filter_map(|edge| self.node(edge.from))
+            .collect()
     }
 
     pub fn edges(&self) -> &[Edge] {

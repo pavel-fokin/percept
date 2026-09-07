@@ -43,11 +43,12 @@ Verify: <how to confirm the outcome>
 
 ## Steps
 
-1. **Decompose.** Split the request into issues. Order them so each one
-   builds on the last. Show the set to the user and get agreement before
-   any code. An explicit request to implement a proposal already
-   discussed supplies that agreement; ask only about choices still open
-   that the user lives with.
+1. **Decompose.** Open `.percept/tasks.md` first: a request may already
+   be an open task, with its why and what it waits on. Split the request
+   into issues. Order them so each one builds on the last. Show the set
+   to the user and get agreement before any code. An explicit request to
+   implement a proposal already discussed supplies that agreement; ask
+   only about choices still open that the user lives with.
 2. **Record.** Once the set is agreed, write each settled decision into
    the decisions map (see below). Then build.
 3. **Build.** An issue with no design left in it, touching one or two
@@ -60,7 +61,10 @@ Verify: <how to confirm the outcome>
 5. **Fix.** Small corrections: apply them yourself. Larger rework: send
    it back to `software-developer` with the specifics.
 6. **Commit.** Re-run the build and tests yourself first. One commit per
-   issue - conventional message, subject line only.
+   issue - conventional message, subject line only. An issue that was
+   an open task gets an `outcome` on the tasks map naming the commit,
+   with a `resolves` edge to it (see the percept skill). Work the
+   session found but left undone goes in as a new task, with its why.
 
 ## Recording decisions
 

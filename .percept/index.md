@@ -6,6 +6,7 @@ prints each map's purpose and current size.
 | Map | Use it for | Origin | Entry point |
 |---|---|---|---|
 | decisions | Why a choice was made: the question, the options weighed, the decision that settles it now, and the ones it superseded. | Cognitive commits in this project's event log. | [decisions.md](decisions.md), then `maps show decisions --around 'question:<name>'`. `--since 1d` for what changed since yesterday. |
+| tasks | What is left to do, why it matters, and what it waits on: open tasks first, done ones below with their outcome. | Cognitive commits in this project's event log. | [tasks.md](tasks.md), then `maps show tasks --around 'task:<name>'` for a task's blockers and outcome. |
 | code | Files, the symbols they define, what imports what. | The current working tree, rebuilt on every query. | `maps show code --around file:src/main.rs --kind file`. |
 
 A claim missing from a map may still be in the log. A fragment cut with

@@ -324,13 +324,16 @@ impl From<&percept::Event> for Event {
                 })
                 .expect("MessageBody always serializes")
             }
-            // `arguments` was validated as JSON on the way in, either by
-            // `decode_payload` parsing it or by `load` deserializing the
-            // wire event - either way, re-parsing it here cannot fail.
+            // `arguments` is JSON text when it came off the wire or
+            // through `decode_payload`, but `App` commits what a model
+            // streamed as it came, and a provider can hand over text
+            // that is not one JSON value. That text is still what the
+            // model said: it goes on the record as a JSON string, and
+            // the tool's own parse tells the model what was wrong.
             Payload::ToolCalled { tool, arguments } => serde_json::to_value(ToolCalledBody {
                 tool: tool.clone(),
                 arguments: serde_json::from_str(arguments)
-                    .expect("ToolCalled arguments is validated JSON"),
+                    .unwrap_or_else(|_| Value::String(arguments.clone())),
             })
             .expect("ToolCalledBody always serializes"),
             Payload::ToolResulted { content } => serde_json::to_value(ToolResultedBody {

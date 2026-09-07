@@ -19,6 +19,7 @@ mod store;
 mod testing;
 #[cfg(test)]
 mod tests;
+mod tools;
 mod tui;
 
 use app::{App, MapShape};
@@ -26,6 +27,10 @@ use cli::{Cli, Command, EventsCommand, MapsCommand};
 use percept::Actor;
 use providers::{Catalog, ProviderConfig, FIREWORKS_MODEL, OPENAI_MODEL};
 use store::{Jsonl, ReadEvent, ReadMap, ReviseMap, SearchEvents};
+use tools::{
+    AskBeforeWrites, Bash, EditFile, FindFiles, GitSnapshot, GrepFiles, ListFiles, ReadFile,
+    Workspace, WriteFile,
+};
 use tui::{Chat, StreamEvent};
 
 /// Names the directory percept keeps its state in - the event log, and
@@ -50,6 +55,23 @@ const CLI_SOURCE_NAME: &str = "percept-cli";
 /// Names how much of each cognitive map reaches the model each turn:
 /// `prompt` (the default, today's behaviour), `headlines`, or `tool`.
 const MAPS_VAR: &str = "PERCEPT_MAPS";
+
+/// Names which tools a turn carries: `maps` (the default) for the log
+/// and map tools alone, or `code` to add the file tools, `bash`, the
+/// policy that asks before a write, and a snapshot of the tree per
+/// prompt.
+const TOOLS_VAR: &str = "PERCEPT_TOOLS";
+
+/// Most tool calls a coding turn may make. A coding task reads several
+/// files before one edit; the map tools' cap of five would end it
+/// mid-read.
+const CODE_TOOL_CAP: usize = 50;
+
+/// The project's instructions to a coding agent, at the checkout
+/// root: the client-neutral file this repo keeps its own in. Read once
+/// at startup and sent every round under `PERCEPT_TOOLS=code`; a
+/// project without one gets none.
+const INSTRUCTIONS_FILE: &str = "AGENTS.md";
 
 /// Where a project's maps are rendered as Markdown, under its root -
 /// rerendered on every write, so a reader who never runs `percept`
@@ -308,6 +330,36 @@ fn build_catalog() -> Catalog {
     )
 }
 
+/// Which tools `TOOLS_VAR` asks for.
+enum Toolset {
+    Maps,
+    Code,
+}
+
+fn build_toolset() -> Result<Toolset, Box<dyn std::error::Error>> {
+    let tools = std::env::var(TOOLS_VAR).unwrap_or_else(|_| "maps".to_string());
+    match tools.as_str() {
+        "maps" => Ok(Toolset::Maps),
+        "code" => Ok(Toolset::Code),
+        other => Err(format!("{TOOLS_VAR}={other:?} names no toolset; use maps or code").into()),
+    }
+}
+
+/// The file tools, over the checkout being worked in - never the main
+/// checkout a worktree's `Source` names, since the files are here.
+fn code_tools(checkout: &Path) -> Result<Vec<Arc<dyn percept::Tool>>, Box<dyn std::error::Error>> {
+    let workspace = Arc::new(Workspace::new(checkout)?);
+    Ok(vec![
+        Arc::new(ReadFile::new(workspace.clone())),
+        Arc::new(WriteFile::new(workspace.clone())),
+        Arc::new(EditFile::new(workspace.clone())),
+        Arc::new(ListFiles::new(workspace.clone())),
+        Arc::new(FindFiles::new(workspace.clone())),
+        Arc::new(GrepFiles::new(workspace.clone())),
+        Arc::new(Bash::new(workspace)),
+    ])
+}
+
 fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
     let shape = std::env::var(MAPS_VAR).unwrap_or_else(|_| "prompt".to_string());
     match shape.as_str() {
@@ -322,41 +374,62 @@ fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
 
 /// Both the TUI and `ask` build the same `App` this way, differing only
 /// in the `Source` they stamp and in how they drive its reply stream.
+/// `PERCEPT_TOOLS=code` adds the file tools over `checkout`, with the
+/// policy, cap and snapshot a turn that changes files needs.
 fn build_app(
     source: percept::Source,
     renderer: Arc<dyn percept::MapRenderer>,
+    checkout: &Path,
 ) -> Result<App, Box<dyn std::error::Error>> {
     let log = Arc::new(open_log()?);
     let catalog: Arc<dyn percept::ModelCatalog> = Arc::new(build_catalog());
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
     let scope = source.scope();
-    let tools: Vec<Arc<dyn percept::Tool>> = vec![
+    let mut tools: Vec<Arc<dyn percept::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
         Arc::new(ReadEvent::new(log.clone())),
         Arc::new(ReviseMap::new(log.clone(), scope.clone())),
         Arc::new(ReadMap::new(log.clone(), scope)),
     ];
-    App::new(model, catalog, log, tools, renderer, map_shape, source)
+    match build_toolset()? {
+        Toolset::Maps => App::new(model, catalog, log, tools, renderer, map_shape, source),
+        Toolset::Code => {
+            tools.extend(code_tools(checkout)?);
+            let app = App::new(model, catalog, log, tools, renderer, map_shape, source)?
+                .with_policy(Arc::new(AskBeforeWrites))
+                .with_tool_cap(CODE_TOOL_CAP)
+                .with_snapshot(Arc::new(GitSnapshot::open(checkout)?));
+            Ok(
+                match std::fs::read_to_string(checkout.join(INSTRUCTIONS_FILE)) {
+                    Ok(instructions) => app.with_instructions(instructions),
+                    Err(_) => app,
+                },
+            )
+        }
+    }
 }
 
 /// One turn without the TUI: `ask` with the user's prompt, `reflect`
-/// with percept's own.
+/// with percept's own. `yes` is `ask --yes`.
 async fn headless_turn(
     actor: Actor,
     prompt: String,
+    yes: bool,
     source: percept::Source,
     renderer: Arc<dyn percept::MapRenderer>,
+    checkout: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let app = build_app(source, renderer)?;
-    cli::run_turn(Box::new(app), actor, prompt).await
+    let app = build_app(source, renderer, checkout)?;
+    cli::run_turn(Box::new(app), actor, prompt, yes).await
 }
 
 async fn try_main(
     source: percept::Source,
     renderer: Arc<dyn percept::MapRenderer>,
+    checkout: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let app = build_app(source, renderer)?;
+    let app = build_app(source, renderer, checkout)?;
 
     let mut terminal = ratatui::init();
     let mouse = match MouseCapture::enable() {
@@ -424,14 +497,24 @@ async fn main() {
             }
         }),
         Some(Command::Ask(args)) => {
-            headless_turn(Actor::User, args.prompt, cli_source, renderer).await
+            headless_turn(
+                Actor::User,
+                args.prompt,
+                args.yes,
+                cli_source,
+                renderer,
+                &checkout,
+            )
+            .await
         }
         Some(Command::Reflect) => {
             headless_turn(
                 Actor::System,
                 REFLECT_PROMPT.to_string(),
+                false,
                 cli_source,
                 renderer,
+                &checkout,
             )
             .await
         }
@@ -442,6 +525,7 @@ async fn main() {
                     path: root,
                 },
                 renderer,
+                &checkout,
             )
             .await
         }
@@ -451,4 +535,8 @@ async fn main() {
         eprintln!("percept: {err}");
         std::process::exit(1);
     }
+    // An explicit exit, not a fall off the end: dropping the runtime
+    // waits for every blocking task, and a `bash` call the user quit
+    // in the middle of can hold one for minutes.
+    std::process::exit(0);
 }

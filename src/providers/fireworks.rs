@@ -185,8 +185,12 @@ struct Delta {
 /// completions, sends the name once on the first fragment and the
 /// arguments split across many - never a whole call in one delta, so a
 /// call is assembled in `Accumulator` rather than read off one line.
+/// `index` says which of the round's parallel calls a fragment belongs
+/// to.
 #[derive(Deserialize)]
 struct ToolCallDelta {
+    #[serde(default)]
+    index: usize,
     #[serde(default)]
     function: ToolCallDeltaFunction,
 }
@@ -207,7 +211,11 @@ struct ChunkUsage {
 
 /// Assembles a tool call across its streamed fragments: the name from
 /// the first, arguments concatenated from every one, until a
-/// `finish_reason` of `tool_calls` says the call is whole.
+/// `finish_reason` of `tool_calls` says the call is whole. Only the
+/// round's first call, index 0, is assembled: percept runs one call
+/// per round and asks again, so a parallel call is dropped here rather
+/// than spliced into the first one's arguments - the model sees one
+/// result and asks for the rest.
 #[derive(Default)]
 struct Accumulator {
     tool: String,
@@ -239,7 +247,12 @@ fn parse_line(
     let Some(choice) = chunk.choices.into_iter().next() else {
         return Ok(Line::Empty);
     };
-    if let Some(delta) = choice.delta.tool_calls.into_iter().next() {
+    for delta in choice
+        .delta
+        .tool_calls
+        .into_iter()
+        .filter(|delta| delta.index == 0)
+    {
         let accumulator = partial.get_or_insert_with(Accumulator::default);
         if let Some(name) = delta.function.name {
             accumulator.tool = name;

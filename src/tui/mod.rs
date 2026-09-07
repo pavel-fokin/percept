@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use ratatui::style::{Color, Modifier, Style};
@@ -12,7 +13,7 @@ pub use ui::draw;
 pub use update::{handle_key, handle_mouse, handle_stream};
 
 use crate::app::AppService;
-use crate::percept::{Chunk, EventId, ModelDescriptor, ToolOutput};
+use crate::percept::{Chunk, EventId, ModelDescriptor, Tool, ToolOutput};
 
 /// Adapts the reply stream onto tokio's mpsc channel, so the main
 /// select! loop can drive it alongside terminal events. Local to tui -
@@ -63,9 +64,16 @@ pub struct Chat<'a> {
     /// Why the last reply broke, shown until the next submit. Transient
     /// tui state - it never reaches the log.
     pub error: Option<String>,
+    /// What the last command did, shown until the next submit - the
+    /// quiet counterpart of `error`. Transient like it.
+    pub notice: Option<String>,
     /// Open while the `/models` popup shows - `None` the rest of the
     /// time, when keys reach the textarea as usual.
     pub models_menu: Option<ModelsMenu>,
+    /// A tool call waiting on the user's yes or no - `App` returned
+    /// `ToolStep::Ask` and the turn is paused until a key answers.
+    /// Keys go to it, not the textarea, while it is `Some`.
+    pub approval: Option<Approval>,
     /// Commands whose name starts with the input line's prefix, while
     /// it starts with `/`. Empty otherwise, so the anchored list above
     /// the input reserves no space. Recomputed from the textarea after
@@ -113,7 +121,9 @@ impl<'a> Chat<'a> {
             follows_transcript: true,
             app,
             error: None,
+            notice: None,
             models_menu: None,
+            approval: None,
             command_suggestions: Vec::new(),
             command_selected: 0,
             next_models_token: 0,
@@ -132,6 +142,16 @@ impl<'a> Chat<'a> {
     /// know that.
     pub fn current_text(&self) -> String {
         self.textarea.lines().join("\n")
+    }
+
+    /// Consumes the input line: clears the textarea and its
+    /// suggestions, and the last command's error and notice with them,
+    /// since what they were about is over.
+    pub fn take_input(&mut self) {
+        self.textarea.clear();
+        self.recompute_command_suggestions();
+        self.error = None;
+        self.notice = None;
     }
 
     /// Refilters `command_suggestions` from the textarea's trimmed
@@ -256,6 +276,12 @@ impl<'a> Chat<'a> {
             .copied()
             .flatten()
     }
+}
+
+/// One tool call the policy put to the user, held until they answer.
+pub struct Approval {
+    pub tool: Arc<dyn Tool>,
+    pub arguments: String,
 }
 
 /// The `/models` popup's state: the fetched list, once it lands, and

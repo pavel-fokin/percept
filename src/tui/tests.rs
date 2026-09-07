@@ -82,6 +82,17 @@ fn chat() -> Chat<'static> {
 }
 
 #[test]
+fn arguments_describe_as_key_value_pairs_with_strings_unquoted() {
+    let described = ui::describe_arguments(r#"{"command":"cargo test","timeout_secs":30}"#);
+    assert_eq!(described, "command: cargo test · timeout_secs: 30");
+}
+
+#[test]
+fn arguments_that_are_not_an_object_describe_as_their_raw_text() {
+    assert_eq!(ui::describe_arguments("not json"), "not json");
+}
+
+#[test]
 fn typing_a_slash_shows_every_matching_command() {
     let mut chat = chat();
     type_str(&mut chat, "/");

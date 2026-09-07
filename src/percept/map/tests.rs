@@ -77,6 +77,29 @@ fn a_question_is_settled_by_the_current_end_of_each_resolvers_chain() {
 }
 
 #[test]
+fn an_outcome_settles_a_task_the_way_a_decision_settles_a_question() {
+    let (t, o, blocker) = (NodeId::new(), NodeId::new(), NodeId::new());
+    let events = [
+        node_added("tasks", t, "task", "cancel a turn"),
+        node_added("tasks", blocker, "task", "cancellable streams"),
+        node_added("tasks", o, "outcome", "done in 1a2b3c"),
+        edge_added("tasks", RESOLVES, o, t),
+        edge_added("tasks", "blocks", blocker, t),
+    ];
+    let map = Map::fold(&TASKS, &scope(), &events).unwrap();
+
+    assert_eq!(
+        map.settled_by(t).iter().map(|n| n.id).collect::<Vec<_>>(),
+        vec![o]
+    );
+    assert!(map.settles(o));
+    assert_eq!(
+        map.blocked_by(t).iter().map(|n| n.id).collect::<Vec<_>>(),
+        vec![blocker]
+    );
+}
+
+#[test]
 fn a_resolves_edge_between_other_kinds_settles_nothing() {
     let (o, d) = (NodeId::new(), NodeId::new());
     let events = [
@@ -604,8 +627,8 @@ fn a_map_reads_as_one_line_per_node_then_per_edge() {
 fn a_schema_is_found_by_name() {
     assert_eq!(Schema::find("decisions").unwrap().name, "decisions");
     assert_eq!(
-        Schema::find("tasks").err().unwrap().to_string(),
-        "no map named \"tasks\"; maps are decisions, code"
+        Schema::find("glossary").err().unwrap().to_string(),
+        "no map named \"glossary\"; maps are decisions, tasks, code"
     );
 }
 

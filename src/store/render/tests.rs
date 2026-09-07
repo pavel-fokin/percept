@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::percept::{Actor, EventId, Mutation, CODE, DECISIONS, SUPERSEDES};
+use crate::percept::{Actor, EventId, Mutation, CODE, DECISIONS, SUPERSEDES, TASKS};
 use crate::testing::node_ref;
 
 /// Adds a node with one `why` property when `why` is given.
@@ -384,6 +384,89 @@ fn a_map_with_no_question_or_decision_says_so() {
         format!(
             "{}\n(no question or decision yet; 1 nodes of other kinds.)\n",
             head()
+        )
+    );
+}
+
+#[test]
+fn open_tasks_group_under_their_prompt_with_what_they_wait_on_and_done_ones_follow() {
+    let mut map = Map::empty(&TASKS);
+    let (first, second) = (EventId::new(), EventId::new());
+    add(
+        &mut map,
+        "task",
+        "send AGENTS.md to a coding turn",
+        Some("the model never saw the rules"),
+        &[first],
+        Actor::Model,
+    );
+    add(
+        &mut map,
+        "task",
+        "cancel a turn without quitting",
+        Some("Esc drops the session"),
+        &[first],
+        Actor::User,
+    );
+    add(
+        &mut map,
+        "task",
+        "cancellable reply streams",
+        Some("nothing can stop a stream today"),
+        &[second],
+        Actor::User,
+    );
+    link(
+        &mut map,
+        "blocks",
+        ("task", "cancellable reply streams"),
+        ("task", "cancel a turn without quitting"),
+    );
+    add(
+        &mut map,
+        "outcome",
+        "done in 1f1a9a9",
+        None,
+        &[second],
+        Actor::User,
+    );
+    link(
+        &mut map,
+        "resolves",
+        ("outcome", "done in 1f1a9a9"),
+        ("task", "send AGENTS.md to a coding turn"),
+    );
+
+    let expected = format!(
+        "# tasks\n\
+         \n\
+         {PREAMBLE} {TASKS_GUIDE}\n\
+         \n\
+         ## {}\n\
+         - \"cancel a turn without quitting\": why: \"Esc drops the session\"\n\
+         \x20 waits on \"cancellable reply streams\"\n\
+         \n\
+         ## {}\n\
+         - \"cancellable reply streams\": why: \"nothing can stop a stream today\"\n\
+         \n\
+         ## done\n\
+         - \"send AGENTS.md to a coding turn\" (model)\n\
+         \x20 outcome \"done in 1f1a9a9\"\n",
+        heading(first),
+        heading(second)
+    );
+
+    assert_eq!(markdown(&map), expected);
+}
+
+#[test]
+fn an_empty_tasks_map_renders_its_guide_and_the_empty_notice() {
+    let text = markdown(&Map::empty(&TASKS));
+
+    assert_eq!(
+        text,
+        format!(
+            "# tasks\n\n{PREAMBLE} {TASKS_GUIDE}\n\n(empty: nothing has been recorded here yet.)\n"
         )
     );
 }

@@ -67,6 +67,27 @@ Capture an unlogged prompt with `events publish` under its real actor
 and source before citing it; never invent an id or cite an agent's
 summary as the user's words.
 
+## Record a task
+
+The tasks map holds work left to do. A `task` names one outcome and
+says in its `why` property what it costs to leave undone; the store
+refuses one without it. An `outcome` with a `resolves` edge settles it,
+done or dropped, with the commit or the reason in its `ref` or `why`
+property. A task `blocks` the one that must wait for it. Rewording a
+task is a new task with a `supersedes` edge, never a removal.
+
+```sh
+percept maps add-node tasks --actor model --kind task --name "cancel a turn without quitting" \
+  --prop why="Esc drops the whole session on a fifty-call turn" --source $id
+percept maps add-node tasks --actor model --kind outcome --name "done in 1f1a9a9" \
+  --prop ref=1f1a9a9 --source $id
+percept maps add-edge tasks --actor model --kind resolves \
+  --from 'outcome:done in 1f1a9a9' --to 'task:cancel a turn without quitting' --source $id
+```
+
+Open on `.percept/tasks.md` before planning, so the next item is picked
+rather than re-derived; add the outcome at commit.
+
 ## Revise when meaning changes
 
 Revise when evidence changes what a node means, an exception appears, a

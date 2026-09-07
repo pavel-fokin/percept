@@ -236,7 +236,11 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
         // model looked up.
         Payload::ToolCalled {
             tool, arguments, ..
-        } => tool_lines(chat, &format!("{tool} {}", clip(arguments)), width),
+        } => tool_lines(
+            chat,
+            &format!("{tool} {}", describe_arguments(arguments)),
+            width,
+        ),
         Payload::ToolResulted { content, .. } => tool_lines(chat, &clip(content), width),
         Payload::ThoughtRecorded { content } => {
             let lines = if chat.is_thought_expanded(event.id()) {
@@ -326,7 +330,14 @@ pub(super) fn turn_lines(
     width: usize,
 ) -> Vec<Line<'static>> {
     let body_width = width.saturating_sub(GUTTER.len()).max(1);
-    textwrap::wrap(content, body_width)
+    // First-fit, not textwrap's default optimal-fit: the whole
+    // transcript is re-wrapped on every frame, and a streaming thought
+    // grows by the token. Optimal fit was forty percent of a core on
+    // a coding turn; first fit is linear and reads the same in a
+    // terminal.
+    let options =
+        textwrap::Options::new(body_width).wrap_algorithm(textwrap::WrapAlgorithm::FirstFit);
+    textwrap::wrap(content, options)
         .iter()
         .enumerate()
         .map(|(i, text)| {
@@ -350,6 +361,17 @@ fn activity(chat: &Chat, width: usize) -> Vec<Line<'static>> {
         // the whole reason the error is shown.
         return turn_lines("!", chat.error_style, chat.error_style, error, width);
     }
+    if let Some(notice) = &chat.notice {
+        return turn_lines("·", chat.hint_style, chat.hint_style, notice, width);
+    }
+    if let Some(approval) = &chat.approval {
+        let question = format!(
+            "Run {} {}?",
+            approval.tool.spec().name,
+            describe_arguments(&approval.arguments)
+        );
+        return turn_lines("?", chat.user_style, Style::default(), &question, width);
+    }
     if chat.app.is_replying() {
         let frame = SPINNER[chat.spinner % SPINNER.len()];
         // A first token can be minutes away while ollama loads a
@@ -357,13 +379,18 @@ fn activity(chat: &Chat, width: usize) -> Vec<Line<'static>> {
         // The counter only covers this half too - once the reply
         // itself starts streaming, how long it takes is visible in
         // the transcript, not worth a second clock for.
-        let label = match chat.app.pending_reply() {
+        let mut label = match chat.app.pending_reply() {
             Some(_) => "Responding…".to_string(),
             None => {
                 let secs = chat.thinking_started.map_or(0, |t| t.elapsed().as_secs());
                 format!("Thinking… {secs}s")
             }
         };
+        // A coding turn can run dozens of calls; the count is what
+        // tells a long one from a stalled one.
+        if let Some((calls, cap)) = chat.app.tool_progress().filter(|(calls, _)| *calls > 0) {
+            label.push_str(&format!(" · tool call {calls} of {cap}"));
+        }
         return vec![Line::from(vec![
             Span::styled(format!("{frame} "), chat.assistant_style),
             Span::styled(label, chat.hint_style),
@@ -372,10 +399,35 @@ fn activity(chat: &Chat, width: usize) -> Vec<Line<'static>> {
     Vec::new()
 }
 
+/// A tool call's arguments as a reader wants them: `command: cargo
+/// test`, `path: src/main.rs`, one `key: value` per argument, in the
+/// order the model sent them. Falls back to the raw text when it is
+/// not a JSON object. Long values are clipped, since this is a row to
+/// glance at, not a listing.
+pub(super) fn describe_arguments(arguments: &str) -> String {
+    let Ok(serde_json::Value::Object(fields)) = serde_json::from_str(arguments) else {
+        return clip(arguments);
+    };
+    let pairs: Vec<String> = fields
+        .iter()
+        .map(|(key, value)| match value {
+            serde_json::Value::String(text) => format!("{key}: {text}"),
+            other => format!("{key}: {other}"),
+        })
+        .collect();
+    clip(&pairs.join(" · "))
+}
+
 /// The row under the input: which keys do something right now. Enter
 /// sends nothing while a reply streams, so that hint drops out instead
 /// of naming a key that's currently inert.
 fn hint(chat: &Chat) -> Line<'static> {
+    if chat.approval.is_some() {
+        return Line::from(Span::styled(
+            "y run once · a always run this tool · n decline",
+            chat.hint_style,
+        ));
+    }
     if chat.app.is_replying() {
         return Line::from(Span::styled("Esc quit", chat.hint_style));
     }

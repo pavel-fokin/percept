@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::app::{App, MapShape};
 use crate::percept::{self, ModelDescriptor, Provider};
-use crate::testing::{source, FakeCatalog, FakeLog, FakeRenderer, Scripted};
+use crate::testing::{source, FakeCatalog, FakeLog, FakeRenderer, FakeTool, FixedPolicy, Scripted};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
@@ -291,6 +291,147 @@ fn ctrl_j_newline_refreshes_stale_command_suggestions() {
     .unwrap();
 
     assert!(chat.command_suggestions.is_empty());
+}
+
+/// A chat whose model may call `search_events`, and whose policy puts
+/// every call to the user.
+fn chat_asking() -> Chat<'static> {
+    let app = App::new(
+        Arc::new(Scripted::new(vec![], true)),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        vec![Arc::new(FakeTool)],
+        Arc::new(FakeRenderer::default()),
+        MapShape::Prompt,
+        source("test"),
+    )
+    .unwrap()
+    .with_policy(Arc::new(FixedPolicy(percept::Verdict::Ask)));
+    Chat::new(Box::new(app))
+}
+
+fn tool_call() -> StreamEvent {
+    StreamEvent::Chunk(Chunk::ToolCall {
+        tool: "search_events".to_string(),
+        arguments: "{}".to_string(),
+    })
+}
+
+#[test]
+fn a_call_the_policy_asks_about_waits_on_an_approval_instead_of_running() {
+    let mut chat = chat_asking();
+    let _ = chat.app.submit("go".to_string()).unwrap();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+    handle_stream(&mut chat, tool_call(), &tx).unwrap();
+
+    assert!(chat.approval.is_some());
+    assert_eq!(chat.app.events().len(), 2);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn n_declines_the_waiting_call_and_the_turn_goes_on() {
+    let mut chat = chat_asking();
+    let _ = chat.app.submit("go".to_string()).unwrap();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    handle_stream(&mut chat, tool_call(), &tx).unwrap();
+
+    handle_key(
+        &mut chat,
+        KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE),
+        &tx,
+    )
+    .unwrap();
+
+    assert!(chat.approval.is_none());
+    assert!(matches!(
+        chat.app.events()[2].payload(),
+        percept::Payload::ToolResulted { content } if content.starts_with("The user declined")
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn y_runs_the_waiting_call_and_its_result_comes_back_as_a_stream_event() {
+    let mut chat = chat_asking();
+    let _ = chat.app.submit("go".to_string()).unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    handle_stream(&mut chat, tool_call(), &tx).unwrap();
+
+    handle_key(
+        &mut chat,
+        KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE),
+        &tx,
+    )
+    .unwrap();
+
+    assert!(chat.approval.is_none());
+    assert!(matches!(
+        rx.recv().await,
+        Some(StreamEvent::ToolResult(output)) if output.content == "ran"
+    ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_runs_the_waiting_call_and_the_next_call_of_that_tool_never_asks() {
+    let mut chat = chat_asking();
+    let _ = chat.app.submit("go".to_string()).unwrap();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    handle_stream(&mut chat, tool_call(), &tx).unwrap();
+
+    handle_key(
+        &mut chat,
+        KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE),
+        &tx,
+    )
+    .unwrap();
+
+    assert!(chat.approval.is_none());
+    let Some(StreamEvent::ToolResult(output)) = rx.recv().await else {
+        panic!("the call ran");
+    };
+    let _ = chat.app.finish_tool(output).unwrap();
+    handle_stream(&mut chat, tool_call(), &tx).unwrap();
+    assert!(chat.approval.is_none(), "the second call ran unasked");
+}
+
+#[test]
+fn typing_while_a_call_waits_reaches_neither_the_textarea_nor_the_call() {
+    let mut chat = chat_asking();
+    let _ = chat.app.submit("go".to_string()).unwrap();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    handle_stream(&mut chat, tool_call(), &tx).unwrap();
+
+    handle_key(
+        &mut chat,
+        KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE),
+        &tx,
+    )
+    .unwrap();
+
+    assert!(chat.approval.is_some());
+    assert!(chat.current_text().is_empty());
+}
+
+#[test]
+fn slash_undo_without_a_snapshot_shows_why_it_cannot() {
+    let mut chat = chat();
+    type_str(&mut chat, "/undo");
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+    handle_key(
+        &mut chat,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        &tx,
+    )
+    .unwrap();
+
+    assert!(chat.current_text().is_empty());
+    assert!(chat
+        .error
+        .as_deref()
+        .unwrap()
+        .starts_with("no snapshots are kept"));
+    assert!(chat.app.events().is_empty());
 }
 
 #[test]
