@@ -69,9 +69,9 @@ impl Harness {
     /// `tools` and `map_shape` with today's defaults for the rest:
     /// `AllowAll`, `MAX_TOOL_CALLS`, no snapshot, no instructions, the
     /// standard context - instructions, maps, history back to `WINDOW`,
-    /// then the time. Stable first: every provider reuses a
+    /// the time, then the turn. Stable first: every provider reuses a
     /// request's prefix when it matches the last one, and a tool round
-    /// only appends, so what changes every round goes last.
+    /// only appends to the turn, so what changes goes last.
     pub fn new(tools: Vec<Arc<dyn percept::Tool>>, map_shape: MapShape) -> Self {
         Self {
             tools,
@@ -88,6 +88,7 @@ impl Harness {
                         index: INDEX_EVENTS,
                     },
                     Section::Time,
+                    Section::Turn,
                 ],
             },
         }

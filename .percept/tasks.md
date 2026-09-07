@@ -12,6 +12,7 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "stop committing the rendered map Markdown, or scope its rewrite to the branch" (model) · 2026-09-07
 - "check on a real coding turn that cached tokens rise across rounds" (model) · 2026-09-07
 - "say in AGENTS.md that a reply promising to proceed, with no edit in that turn, is a false report" (model) · 2026-09-07
+- "let the instructions and maps give way under the budget on a small window" (model) · 2026-09-07
 
 ## "tell a coding turn to branch from main, not HEAD" (model)
 
@@ -49,6 +50,10 @@ why: "the harness branch orders the request stable first and sizes history in st
 ## "say in AGENTS.md that a reply promising to proceed, with no edit in that turn, is a false report" (model)
 
 why: "the session the handoff reviewed ended a build turn with 'proceeding' and no code; the harness fix keeps the plan in view, the workflow text still does not name the failure"
+
+## "let the instructions and maps give way under the budget on a small window" (model)
+
+why: "review of feat/harness: on Ollama with a 16k window this repo's AGENTS.md plus the decisions map in prompt shape exceed the window before history is counted, and the provider truncates the head of the system text, which is the instructions; only history is budgeted today, and the precedence rule in docs/harness.md names the order to apply"
 
 ## done
 - "send the project's instructions to a coding turn" (model)

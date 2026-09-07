@@ -125,14 +125,18 @@ pub enum Section {
     Instructions,
     /// Every map, each as its schema's purpose line and this shape.
     Maps(MapShape),
-    /// The transcript back as far as the window reaches, its tool
-    /// results cut to a head, plus the whole turn in progress. Before
-    /// it, one line per event for `index` events further back, so the
+    /// The transcript before the turn in progress, back as far as the
+    /// window reaches, its tool results cut to a head. Before it, one
+    /// line per event for up to `index` events further back, so the
     /// model can open with `read_event` what it can no longer see.
     History { window: Window, index: usize },
-    /// The current time, for `since` on the tools. It changes every
-    /// round, so it goes after everything a provider could cache.
+    /// The time, for `since` on the tools: the turn's prompt time
+    /// while a turn streams, so every round of it sends the same
+    /// text and the request only grows at its tail.
     Time,
+    /// The turn in progress, whole. Never cut: a long tool loop must
+    /// not evict the question it is answering.
+    Turn,
 }
 
 pub struct Context {
@@ -149,6 +153,7 @@ Context {
             index: 200,
         },
         Section::Time,
+        Section::Turn,
     ],
 }
 
@@ -189,9 +194,11 @@ and the builder keeps them apart.
 
 - **Budget priority** says who gives way when the request is too big:
   instructions, then maps, then the current turn, then history, then
-  the index. Today only history gives way, to its window; the maps
-  are unconditional and the index is a fixed count of lines. Should
-  the maps ever need to give way too, this is the order.
+  the index. Today history gives way to its window, and the index
+  takes at most what history keeps after a cut. The instructions and
+  the maps are not budgeted: on a model whose window is smaller than
+  they are, the provider truncates them itself. That is an open task,
+  and this order is what it applies.
 - **Message sequence** is the order the model reads. It is set by what
   changes least often, for the cache.
 
@@ -214,17 +221,19 @@ The message sequence, by how often each section changes:
 | Tool specs | Never, until the cap drops them at a turn's end. | With the prefix, where the provider puts them |
 | Maps | A `revise_map` commits. A fold, so identical between changes. | Second |
 | Index | Grows at its tail as events leave the window. | Third |
-| History | Grows at its tail every round; its start moves when the window slides. | Fourth |
-| Time, budget note | Every round. | Last |
+| History | Grows at its tail every turn; its start moves when the window slides. | Fourth |
+| Time | Every turn: it is the turn's prompt time. | Fifth |
+| Turn | Every round, at its tail only. | Last, with the budget note |
 
 Two rules follow from it:
 
 - **The window slides in steps, not per event.** A window that drops
   the oldest message every round moves the prefix every round. So
   history fills to `share`, cuts back to `keep`, and holds still until
-  it fills again. A cut lands on a user prompt, never inside a tool
-  round. The boundary between the index and full history moves with
-  it, in the same steps.
+  it fills again. A cut lands on a user prompt, and only the
+  transcript before the turn is counted, so a tool round can never
+  move the start mid-turn. The boundary between the index and full
+  history moves with it, in the same steps.
 - **A map's stability rule is also a cache rule.** Add beside what a
   reader has seen and never move it, which AGENTS.md asks for the
   reader's sake, is what keeps a rendered map a prefix of its next
@@ -237,8 +246,11 @@ one. Typed sections give it that point; a flat string would not.
 
 The system message a model reads first is the one it weighs most,
 which is why the instructions lead today. Stable-first ordering agrees
-with that. Only the time moves to the end, and the time is a fact, not
-an instruction.
+with that. The time moves from first to just before the turn, and it
+is the turn's prompt time rather than the clock, so a fifty-round turn
+sends one time and appends the rest. It is not the last message: a
+chat template that folds system text into the user turn would
+otherwise end every request with the time instead of the question.
 
 ### What the context does not decide
 
@@ -327,7 +339,7 @@ it would drift.
 
 These are settled before the build, not assumed.
 
-1. The `Tokens` window's defaults: share, keep, and floor. Settled:
+1. The window's defaults: share, keep, and floor. Settled:
    one eighth of the model's window, cut back to one sixteenth, and a
    floor of eight thousand tokens.
 2. The index bound. Two hundred events is a page the model can scan.

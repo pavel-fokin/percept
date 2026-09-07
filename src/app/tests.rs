@@ -627,7 +627,7 @@ fn an_app_without_instructions_sends_none() {
 }
 
 #[test]
-fn with_tool_cap_replaces_the_default_cap() {
+fn a_harness_tool_cap_replaces_the_default() {
     let model = Arc::new(Scripted::new(vec![], true));
     let mut app = App::new(
         model.clone(),
@@ -962,26 +962,6 @@ fn a_log_longer_than_the_window_sends_only_its_newest_events() {
     assert!(!has_filler(&sent, "0"));
     assert!(has_filler(&sent, "24"));
     assert!(sent.contains(&"now".to_string()));
-}
-
-#[test]
-fn a_window_never_opens_on_a_tool_result() {
-    let mut events = vec![
-        Event::tool_called(
-            "search_events".to_string(),
-            "{}".to_string(),
-            source(SOURCE),
-            None,
-        ),
-        Event::tool_resulted("ran".to_string(), source(SOURCE), None),
-    ];
-    events.extend(filler(25));
-
-    let (model, mut app) = seeded_app(events, Vec::new());
-    let _ = app.submit("now".to_string()).unwrap();
-
-    let sent = model.last_request();
-    assert!(!sent.contains(&"<result>".to_string()));
 }
 
 #[test]

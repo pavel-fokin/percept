@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::app::MapShape;
 use crate::percept::{self, Actor, Event, EventId, EventKind, Map, Scope};
 use crate::shared::Timestamp;
@@ -38,19 +40,26 @@ fn is_users_prompt(event: &Event) -> bool {
     event.actor() == Actor::User && event.kind() == EventKind::MessageReceived
 }
 
-/// What `event` costs the model to read, at four characters a token.
-/// Zero for an event `to_messages` drops, so the window is measured in
-/// what the model sees.
+/// Four characters a token: the one estimate the window, the index,
+/// and `/context` all use.
+fn estimate(chars: usize) -> usize {
+    chars.div_ceil(4)
+}
+
+/// What `event` costs the model to read as history: zero for an event
+/// history leaves out, and a tool result at the size `cut` sends it.
 fn tokens(event: &Event) -> usize {
     let chars = match event.payload() {
-        percept::Payload::MessageReceived { content }
-        | percept::Payload::ToolResulted { content } => content.chars().count(),
+        percept::Payload::MessageReceived { content } if !is_percepts_prompt(event) => {
+            content.chars().count()
+        }
+        percept::Payload::ToolResulted { content } => cut(content, event.id()).chars().count(),
         percept::Payload::ToolCalled { tool, arguments } => {
             tool.chars().count() + arguments.chars().count()
         }
         _ => 0,
     };
-    chars.div_ceil(4)
+    estimate(chars)
 }
 
 /// How much of an event outside the window the model still reads.
@@ -81,12 +90,14 @@ fn cut(content: &str, id: EventId) -> String {
 }
 
 /// One line for an event past the window: who, the head of what, and
-/// the id to open it. None for an event the model never sees as a
-/// message.
+/// the id to open it. None for an event history would not show
+/// either.
 fn line(event: &Event) -> Option<String> {
     let text = match event.payload() {
-        percept::Payload::MessageReceived { content }
-        | percept::Payload::ToolResulted { content } => head(content),
+        percept::Payload::MessageReceived { content } if !is_percepts_prompt(event) => {
+            head(content)
+        }
+        percept::Payload::ToolResulted { content } => head(content),
         percept::Payload::ToolCalled { tool, arguments } => head(&format!("{tool} {arguments}")),
         _ => return None,
     };
@@ -112,17 +123,25 @@ pub struct Window {
 }
 
 impl Window {
-    /// Where history starts: the cuts replayed over the whole
-    /// transcript, so the start is a function of the log alone and two
-    /// rounds agree on it without any state between them.
-    fn start(&self, events: &[Event], context_window: Option<u32>) -> usize {
+    /// The high and low marks in tokens for a model with this window.
+    fn marks(&self, context_window: Option<u32>) -> (usize, usize) {
         let mark = |share: f32, fallback: u32| {
             context_window.map_or(fallback, |window| (window as f32 * share) as u32) as usize
         };
-        let (high, low) = (
+        (
             mark(self.share, self.floor),
             mark(self.keep, self.floor / 2),
-        );
+        )
+    }
+
+    /// Where history starts in `events`, the transcript before the
+    /// turn in progress: the cuts replayed over all of it, so the
+    /// start is a function of the log alone and two rounds agree on
+    /// it without any state between them. The turn's own events are
+    /// not counted: they are never history, and counting them would
+    /// let a tool round move the start mid-turn.
+    fn start(&self, events: &[Event], context_window: Option<u32>) -> usize {
+        let (high, low) = self.marks(context_window);
         let mut start = 0;
         let mut held = 0;
         for (i, event) in events.iter().enumerate() {
@@ -130,10 +149,16 @@ impl Window {
             if held <= high {
                 continue;
             }
-            while start < i && (held > low || !is_users_prompt(&events[start])) {
+            while start < i && held > low {
                 held -= tokens(&events[start]);
                 start += 1;
             }
+        }
+        // A cut lands on a user prompt: a window opening on a reply, a
+        // call, or a result is a conversation the provider rejects or
+        // the model misreads.
+        while start < events.len() && !is_users_prompt(&events[start]) {
+            start += 1;
         }
         start
     }
@@ -141,27 +166,30 @@ impl Window {
 
 /// One part of the request `Context::build` assembles. Order and
 /// membership are data, so a new purpose is a new list, not a new
-/// function.
+/// function. Listed stable first, the order `Harness::new` uses.
 #[derive(Clone, Copy)]
 pub enum Section {
-    /// The current time, for `since` on the tools. It changes every
-    /// round, so it goes after everything a provider could cache.
-    Time,
     /// The harness's instructions as system text.
     Instructions,
     /// Every map, each as its schema's purpose line and this shape.
     Maps(MapShape),
-    /// The transcript back as far as the window reaches, its tool
-    /// results cut to a head, plus the whole turn in progress. Before
-    /// it, one line per event for `index` events further back, so the
+    /// The transcript before the turn in progress, back as far as the
+    /// window reaches, its tool results cut to a head. Before it, one
+    /// line per event for up to `index` events further back, so the
     /// model can open with `read_event` what it can no longer see.
     History { window: Window, index: usize },
+    /// The time, for `since` on the tools: the turn's prompt time
+    /// while a turn streams, so every round of it sends the same
+    /// text and the request only grows at its tail.
+    Time,
+    /// The turn in progress, whole. Never cut: a long tool loop must
+    /// not evict the question it is answering.
+    Turn,
 }
 
-impl std::fmt::Display for Section {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Section {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Section::Time => write!(f, "time"),
             Section::Instructions => write!(f, "instructions"),
             Section::Maps(shape) => write!(
                 f,
@@ -173,6 +201,8 @@ impl std::fmt::Display for Section {
                 }
             ),
             Section::History { .. } => write!(f, "history"),
+            Section::Time => write!(f, "time"),
+            Section::Turn => write!(f, "turn"),
         }
     }
 }
@@ -197,6 +227,14 @@ pub struct View<'a> {
     pub budget_spent: bool,
 }
 
+impl View<'_> {
+    /// The transcript before the turn in progress, and the turn.
+    fn split(&self) -> (&[Event], &[Event]) {
+        self.events
+            .split_at(self.turn_start.unwrap_or(self.events.len()))
+    }
+}
+
 /// A list of sections and the render they produce together - see
 /// `Section`.
 pub struct Context {
@@ -211,7 +249,7 @@ impl Context {
     pub fn build(&self, view: View) -> Result<percept::ModelRequest, Box<dyn std::error::Error>> {
         let mut messages = Vec::new();
         for section in &self.sections {
-            messages.extend(self.render(section, &view)?);
+            messages.extend(render(section, &view)?);
         }
 
         // Dropping the tools is not enough on its own: a model
@@ -233,122 +271,6 @@ impl Context {
         })
     }
 
-    /// What `section` contributes to the request: `build` is a loop
-    /// over this, and `describe` reads it to count and estimate one
-    /// section without sending anything.
-    fn render(
-        &self,
-        section: &Section,
-        view: &View,
-    ) -> Result<Vec<percept::Message>, Box<dyn std::error::Error>> {
-        let mut messages = Vec::new();
-        {
-            match section {
-                Section::Time => messages.push(percept::Message::Text {
-                    role: Actor::System,
-                    content: format!("The current time is {}.", Timestamp::now()),
-                }),
-                // Before the maps: conventions frame how the maps are
-                // read, and a system message the model sees first is
-                // the one it weighs most. Every round, like the maps,
-                // so a long turn never loses them to the window.
-                Section::Instructions => {
-                    if let Some(instructions) = view.instructions {
-                        messages.push(percept::Message::Text {
-                            role: Actor::System,
-                            content: format!(
-                                "The project's instructions, which you follow when you read or \
-                                 change its files:\n\n{instructions}"
-                            ),
-                        });
-                    }
-                }
-                Section::Maps(map_shape) => {
-                    // The maps sit outside the window on purpose: they
-                    // are what the model built so it need not hold the
-                    // log, so they are always in view. An empty map
-                    // still goes in, with its kinds: without them the
-                    // model guesses at what a node may be called and
-                    // every `revise_map` call fails. It says so in
-                    // words that keep the log in play: the model read
-                    // a bare "(empty)" as "nothing was ever decided"
-                    // and stopped searching.
-                    for map in Map::fold_all(&view.scope, view.events)? {
-                        let schema = map.schema();
-                        let body = if map.nodes().is_empty() {
-                            "(empty: nothing has been recorded here yet. The log may still \
-                             hold what it would.)"
-                                .to_string()
-                        } else {
-                            match map_shape {
-                                MapShape::Prompt => map.to_string(),
-                                MapShape::Headlines => headlines_body(&map),
-                                MapShape::Tool => "read_map shows it.".to_string(),
-                            }
-                        };
-                        messages.push(percept::Message::Text {
-                            role: Actor::System,
-                            content: format!(
-                                "The {} map: {}. {}. Node kinds: {}. Edge kinds: {}.\n{body}",
-                                schema.name,
-                                schema.purpose,
-                                catalogue_line(&map),
-                                schema.node_kinds_csv(),
-                                schema.edge_kinds_csv()
-                            ),
-                        });
-                    }
-                }
-                Section::History { window, index } => {
-                    // The turn in progress is never history: a long
-                    // tool loop must not evict the question it is
-                    // answering.
-                    let turn_start = view.turn_start.unwrap_or(view.events.len());
-                    let window_start = window
-                        .start(view.events, view.context_window)
-                        .min(turn_start);
-                    let lines: Vec<String> = view.events
-                        [window_start.saturating_sub(*index)..window_start]
-                        .iter()
-                        .filter_map(line)
-                        .collect();
-                    if !lines.is_empty() {
-                        messages.push(percept::Message::Text {
-                            role: Actor::System,
-                            content: format!(
-                                "Before the messages below, oldest first, one line each; \
-                                 read_event opens any by its id:\n{}",
-                                lines.join("\n")
-                            ),
-                        });
-                    }
-                    // Percept's own prompts - a `reflect` - are
-                    // history the model need not obey. Replayed as
-                    // system text they would stand as an instruction
-                    // in every later turn, so before this turn they
-                    // are dropped; the turn's own prompt stays.
-                    let history = view.events[window_start..turn_start]
-                        .iter()
-                        .filter(|event| !is_percepts_prompt(event))
-                        .filter_map(|event| match event.payload() {
-                            percept::Payload::ToolResulted { content } => {
-                                Some(percept::Message::ToolResult {
-                                    content: cut(content, event.id()),
-                                })
-                            }
-                            _ => percept::message_of(event),
-                        })
-                        .skip_while(|message| {
-                            matches!(message, percept::Message::ToolResult { .. })
-                        });
-                    messages.extend(history);
-                    messages.extend(percept::to_messages(&view.events[turn_start..]));
-                }
-            }
-        }
-        Ok(messages)
-    }
-
     /// One line per section - its name and shape, how many messages it
     /// renders, and an estimate of their cost - for `/context` to show
     /// the model's actual input without sending it. Nothing here is
@@ -356,7 +278,7 @@ impl Context {
     pub fn describe(&self, view: &View) -> Result<String, Box<dyn std::error::Error>> {
         let mut lines = Vec::new();
         for section in &self.sections {
-            let messages = self.render(section, view)?;
+            let messages = render(section, view)?;
             let tokens: usize = messages.iter().map(message_tokens).sum();
             let word = if messages.len() == 1 {
                 "message"
@@ -364,15 +286,17 @@ impl Context {
                 "messages"
             };
             let mut line = format!(
-                "{:<18}{} {word}   {} tokens",
+                "{:<16}{} {word}   {} tokens",
                 section.to_string(),
                 messages.len(),
                 format_k(tokens)
             );
             if let Section::History { window, index } = section {
+                let (high, low) = window.marks(view.context_window);
                 line.push_str(&format!(
-                    "  (share {}, keep {}, floor {}, index {index})",
-                    window.share, window.keep, window.floor
+                    "  (fills to {}, cuts back to {}; index {index})",
+                    format_k(high),
+                    format_k(low)
                 ));
             }
             lines.push(line);
@@ -381,9 +305,128 @@ impl Context {
     }
 }
 
-/// What one message of the request costs to read, at four characters a
-/// token - the same estimate `tokens` uses for a log event, applied to
-/// a `Message` instead: its text, or a tool call's name and arguments.
+/// What `section` contributes to the request: `Context::build` is a
+/// loop over this, and `describe` reads it to count and estimate one
+/// section without sending anything.
+fn render(
+    section: &Section,
+    view: &View,
+) -> Result<Vec<percept::Message>, Box<dyn std::error::Error>> {
+    let mut messages = Vec::new();
+    match section {
+        // Before the maps: conventions frame how the maps are read,
+        // and a system message the model sees first is the one it
+        // weighs most. Every round, like the maps, so a long turn
+        // never loses them to the window.
+        Section::Instructions => {
+            if let Some(instructions) = view.instructions {
+                messages.push(percept::Message::Text {
+                    role: Actor::System,
+                    content: format!(
+                        "The project's instructions, which you follow when you read or \
+                         change its files:\n\n{instructions}"
+                    ),
+                });
+            }
+        }
+        Section::Maps(map_shape) => {
+            // The maps sit outside the window on purpose: they are
+            // what the model built so it need not hold the log, so
+            // they are always in view. An empty map still goes in,
+            // with its kinds: without them the model guesses at what
+            // a node may be called and every `revise_map` call fails.
+            // It says so in words that keep the log in play: the
+            // model read a bare "(empty)" as "nothing was ever
+            // decided" and stopped searching.
+            for map in Map::fold_all(&view.scope, view.events)? {
+                let schema = map.schema();
+                let body = if map.nodes().is_empty() {
+                    "(empty: nothing has been recorded here yet. The log may still \
+                     hold what it would.)"
+                        .to_string()
+                } else {
+                    match map_shape {
+                        MapShape::Prompt => map.to_string(),
+                        MapShape::Headlines => headlines_body(&map),
+                        MapShape::Tool => "read_map shows it.".to_string(),
+                    }
+                };
+                messages.push(percept::Message::Text {
+                    role: Actor::System,
+                    content: format!(
+                        "The {} map: {}. {}. Node kinds: {}. Edge kinds: {}.\n{body}",
+                        schema.name,
+                        schema.purpose,
+                        catalogue_line(&map),
+                        schema.node_kinds_csv(),
+                        schema.edge_kinds_csv()
+                    ),
+                });
+            }
+        }
+        Section::History { window, index } => {
+            let (before, _) = view.split();
+            let start = window.start(before, view.context_window);
+            // The index takes at most what history keeps after a cut,
+            // newest first, so a page of long lines cannot outgrow
+            // the history it introduces.
+            let (_, low) = window.marks(view.context_window);
+            let mut held = 0;
+            let mut lines: Vec<String> = before[start.saturating_sub(*index)..start]
+                .iter()
+                .rev()
+                .filter_map(line)
+                .take_while(|line| {
+                    held += estimate(line.chars().count());
+                    held <= low
+                })
+                .collect();
+            lines.reverse();
+            if !lines.is_empty() {
+                messages.push(percept::Message::Text {
+                    role: Actor::System,
+                    content: format!(
+                        "Before the messages below, oldest first, one line each; \
+                         read_event opens any by its id:\n{}",
+                        lines.join("\n")
+                    ),
+                });
+            }
+            // Percept's own prompts - a `reflect` - are history the
+            // model need not obey. Replayed as system text they would
+            // stand as an instruction in every later turn, so before
+            // this turn they are dropped; the turn's own prompt stays.
+            let history = before[start..]
+                .iter()
+                .filter(|event| !is_percepts_prompt(event))
+                .filter_map(|event| match event.payload() {
+                    percept::Payload::ToolResulted { content } => {
+                        Some(percept::Message::ToolResult {
+                            content: cut(content, event.id()),
+                        })
+                    }
+                    _ => percept::message_of(event),
+                });
+            messages.extend(history);
+        }
+        Section::Time => {
+            let (_, turn) = view.split();
+            let at = turn.first().map_or_else(Timestamp::now, Event::created_at);
+            messages.push(percept::Message::Text {
+                role: Actor::System,
+                content: format!("The current time is {at}."),
+            });
+        }
+        Section::Turn => {
+            let (_, turn) = view.split();
+            messages.extend(percept::to_messages(turn));
+        }
+    }
+    Ok(messages)
+}
+
+/// What one message of the request costs to read: its text, or a tool
+/// call's name and arguments.
 fn message_tokens(message: &percept::Message) -> usize {
     let chars = match message {
         percept::Message::Text { content, .. } | percept::Message::ToolResult { content } => {
@@ -393,14 +436,16 @@ fn message_tokens(message: &percept::Message) -> usize {
             tool.chars().count() + arguments.chars().count()
         }
     };
-    chars.div_ceil(4)
+    estimate(chars)
 }
 
-/// `n` as a plain number under a thousand, or one decimal place of
-/// thousands above it - `1.2k` for a figure a reader need not read
-/// exactly.
+/// `n` as a plain number under a thousand, else in thousands or
+/// millions to one decimal place - `1.2k`, `1.1M` - for a figure a
+/// reader need not read exactly.
 pub(crate) fn format_k(n: usize) -> String {
-    if n >= 1000 {
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1000 {
         format!("{:.1}k", n as f64 / 1000.0)
     } else {
         n.to_string()
