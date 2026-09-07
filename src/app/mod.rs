@@ -4,9 +4,9 @@ use std::sync::Arc;
 use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError, Source};
 use crate::shared::Timestamp;
 
-/// Most tool calls one user turn may make, unless `with_tool_cap` says
-/// otherwise. At the cap the next request goes out with no tools and a
-/// note that the budget is spent, so the model answers with text
+/// Most tool calls one user turn may make, unless `Harness::tool_cap`
+/// says otherwise. At the cap the next request goes out with no tools
+/// and a note that the budget is spent, so the model answers with text
 /// instead of reaching for a tool that is no longer there.
 const MAX_TOOL_CALLS: usize = 5;
 
@@ -27,6 +27,45 @@ pub enum MapShape {
     Headlines,
     /// Only its size; `read_map` opens it.
     Tool,
+}
+
+/// What `App` is given besides the model, log, and renderer: the
+/// tools it may call and how the turn around them is run. Built whole
+/// in `main`, the only place concrete types are wired.
+pub struct Harness {
+    /// The tools the model may call, sent with each request when the
+    /// model reports `tool_use`.
+    pub tools: Vec<Arc<dyn percept::Tool>>,
+    /// Asked before any of `tools` runs. `AllowAll` unless `new` is
+    /// overridden - the map tools have always run unasked.
+    pub policy: Arc<dyn percept::Policy>,
+    /// Most tool calls one turn may make - see `MAX_TOOL_CALLS`.
+    pub tool_cap: usize,
+    /// Where the working tree is saved before each prompt, when the
+    /// turn can change it. `None` for a chat over the log alone: a
+    /// snapshot of a tree no tool touches would be noise.
+    pub snapshot: Option<Arc<dyn percept::Snapshot>>,
+    /// The project's own instructions, sent as system text every
+    /// round so the model works to the project's conventions. `None`
+    /// for a chat over the log, which has no tree to follow them in.
+    pub instructions: Option<String>,
+    /// How much of each map `build_request` sends every turn.
+    pub map_shape: MapShape,
+}
+
+impl Harness {
+    /// `tools` and `map_shape` with today's defaults for the rest:
+    /// `AllowAll`, `MAX_TOOL_CALLS`, no snapshot, no instructions.
+    pub fn new(tools: Vec<Arc<dyn percept::Tool>>, map_shape: MapShape) -> Self {
+        Self {
+            tools,
+            policy: Arc::new(percept::AllowAll),
+            tool_cap: MAX_TOOL_CALLS,
+            snapshot: None,
+            instructions: None,
+            map_shape,
+        }
+    }
 }
 
 /// What a presentation needs from the app layer - `tui` and `cli::ask`
@@ -254,7 +293,7 @@ pub struct App {
     /// The tools the model may call, sent with each request when the
     /// model reports `tool_use`.
     tools: Vec<Arc<dyn percept::Tool>>,
-    /// Asked before any of `tools` runs. `AllowAll` unless `with_policy`
+    /// Asked before any of `tools` runs. `AllowAll` unless `Harness`
     /// says otherwise - the map tools have always run unasked.
     policy: Arc<dyn percept::Policy>,
     /// Tools the user has said always run, this session - checked
@@ -299,9 +338,8 @@ impl App {
         chat: Arc<dyn percept::Model>,
         catalog: Arc<dyn percept::ModelCatalog>,
         log: Arc<dyn percept::EventLog>,
-        tools: Vec<Arc<dyn percept::Tool>>,
+        harness: Harness,
         renderer: Arc<dyn percept::MapRenderer>,
-        map_shape: MapShape,
         source: Source,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let scope = source.scope();
@@ -319,45 +357,18 @@ impl App {
             chat,
             catalog,
             log,
-            tools,
-            policy: Arc::new(percept::AllowAll),
+            tools: harness.tools,
+            policy: harness.policy,
             allowed: HashSet::new(),
-            tool_cap: MAX_TOOL_CALLS,
-            snapshot: None,
+            tool_cap: harness.tool_cap,
+            snapshot: harness.snapshot,
             undo_point: None,
-            instructions: None,
+            instructions: harness.instructions,
             renderer,
-            map_shape,
+            map_shape: harness.map_shape,
             pending: None,
             last_usage,
         })
-    }
-
-    /// Saves the working tree through `snapshot` before every prompt,
-    /// so `undo` can put it back.
-    pub fn with_snapshot(mut self, snapshot: Arc<dyn percept::Snapshot>) -> Self {
-        self.snapshot = Some(snapshot);
-        self
-    }
-
-    /// Sends `instructions` - the project's own, as its AGENTS.md has
-    /// them - as system text at the head of every request.
-    pub fn with_instructions(mut self, instructions: String) -> Self {
-        self.instructions = Some(instructions);
-        self
-    }
-
-    /// Replaces the policy every tool call is checked against.
-    pub fn with_policy(mut self, policy: Arc<dyn percept::Policy>) -> Self {
-        self.policy = policy;
-        self
-    }
-
-    /// Replaces the per-turn tool cap. A coding turn reads several files
-    /// before it edits one; `MAX_TOOL_CALLS` would end it mid-read.
-    pub fn with_tool_cap(mut self, cap: usize) -> Self {
-        self.tool_cap = cap;
-        self
     }
 
     /// Appends an event, then adds it to the transcript - never the

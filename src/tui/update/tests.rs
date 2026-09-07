@@ -1,7 +1,7 @@
 use super::*;
 use std::sync::Arc;
 
-use crate::app::{App, MapShape};
+use crate::app::{App, Harness, MapShape};
 use crate::percept::{self, ModelDescriptor, Provider};
 use crate::testing::{source, FakeCatalog, FakeLog, FakeRenderer, FakeTool, FixedPolicy, Scripted};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -39,9 +39,8 @@ fn chat_with_catalog(catalog: FakeCatalog) -> Chat<'static> {
         Arc::new(Scripted::new(vec![], false)),
         Arc::new(catalog),
         Arc::new(FakeLog::default()),
-        Vec::new(),
+        Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
-        MapShape::Prompt,
         source("test"),
     )
     .unwrap();
@@ -300,13 +299,14 @@ fn chat_asking() -> Chat<'static> {
         Arc::new(Scripted::new(vec![], true)),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
-        vec![Arc::new(FakeTool)],
+        Harness {
+            policy: Arc::new(FixedPolicy(percept::Verdict::Ask)),
+            ..Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt)
+        },
         Arc::new(FakeRenderer::default()),
-        MapShape::Prompt,
         source("test"),
     )
-    .unwrap()
-    .with_policy(Arc::new(FixedPolicy(percept::Verdict::Ask)));
+    .unwrap();
     Chat::new(Box::new(app))
 }
 
@@ -335,13 +335,14 @@ fn a_tool_call_past_the_budget_ends_the_turn_instead_of_hanging() {
         Arc::new(Scripted::new(vec![], true)),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
-        vec![Arc::new(FakeTool)],
+        Harness {
+            tool_cap: 0,
+            ..Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt)
+        },
         Arc::new(FakeRenderer::default()),
-        MapShape::Prompt,
         source("test"),
     )
-    .unwrap()
-    .with_tool_cap(0);
+    .unwrap();
     let mut chat = Chat::new(Box::new(app));
     let _ = chat.app.submit("go".to_string()).unwrap();
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
