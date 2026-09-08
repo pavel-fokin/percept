@@ -471,8 +471,10 @@ note: "Not decided. The core has an actor kind for the human and no identity beh
 
 ## "Where does a map's schema live?" (model)
 
-- decision ".percept/schemas/<name>.toml in the checkout; decisions and tasks ship embedded as the same TOML, and a project file of the same name overrides" (model)
-  why: "a schema is mechanism, not experience: it has no source to cite and nothing to confirm; an edit and a git diff evolve it, where a log event would need a supersede protocol for schemas; the fold already skips events of a map the checkout has no schema for, so a branch's map is invisible on main until the file merges, as any branch is; a loader in infrastructure hands core a list of schemas, so core stays serde-free"
+- decision ".percept/schemas/<name>.toml in the checkout; decisions and tasks ship embedded as the same TOML, and a project file of the same name extends one - every built-in kind, headline, and settlement kept, kinds added - never shrinks it" (model)
+  why: "the correctness review showed a project decisions.toml that drops a kind the log holds breaks every fold at startup, and the render and the never-remove rule assume the built-in kinds; extend-only keeps what a project wants from an override - purpose, glosses, an extra kind - without those failures"
+  source 01a0814f-a1cf-7041-a2fa-520b44e7bdf7
+  was ".percept/schemas/<name>.toml in the checkout; decisions and tasks ship embedded as the same TOML, and a project file of the same name overrides" (model)
 - weighed "a map.declared event in the log, recorded by a percept maps declare verb" (model)
   why: "a schema has no provenance to cite; changing one later needs a supersede protocol for schemas; the verb is a step a file edit removes"
 - weighed "Rust consts, as today" (model)

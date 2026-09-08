@@ -67,7 +67,7 @@ Small: events, maps, and the rules between them.
 A schema is data: a TOML file at `.percept/schemas/<name>.toml`,
 which a loader outside the core parses and hands in. `decisions` and
 `tasks` ship as the same TOML, embedded, and a project file of the same
-name replaces one. The core folds any schema it is handed.
+name extends one without shrinking it. The core folds any schema it is handed.
 
 Two things belong here that the code does not have yet.
 

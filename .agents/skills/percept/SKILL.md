@@ -119,8 +119,10 @@ gloss = "from a term to one it is defined against"
 ```
 
 `decisions` and `tasks` are built in as the same TOML; a project file
-of the same name replaces one. `code` cannot be declared: it is walked
-from the tree. Add a row to `.percept/index.md` so a reader finds the
+of the same name extends one - keep every kind, headline, and settles
+entry, add more - and is refused if it drops any, since the log and
+the render rest on them. `code` and `index` cannot be declared: one is
+walked from the tree, the other is this directory's index. Add a row to `.percept/index.md` so a reader finds the
 new map.
 
 ## Revise when meaning changes

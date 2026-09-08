@@ -79,7 +79,9 @@ Both are serde-free.
   itself. A schema is a TOML file at `.percept/schemas/<name>.toml`,
   so a session adds a map without a Rust change; `decisions` and
   `tasks` ship built in as the same TOML, and a project file of the
-  same name replaces one. A kind may list the properties a node must
+  same name extends one - it keeps every kind, headline, and
+  settlement the built-in declares and may add kinds - never shrinks
+  it, since the log and the render already rest on those kinds. A kind may list the properties a node must
   carry - `why` on an option or a task - and the write path refuses a
   node without them. Every change goes through `Map::apply`, so the
   rules live once. `code` is a `Map` too, but folded from the
@@ -140,7 +142,7 @@ it, never sideways or up:
 
 | Layer | Package | Owns |
 |---|---|---|
-| Domain | `core` | `Event`, `Source`, `Actor`, `Map`, `Schema`, `Selection`, `Usage` - experience and the maps folded from it, with the rules between them, plus the ports to append, load, search, and render. Serde-free; depends on `shared`. |
+| Domain | `core` | `Event`, `Source`, `Actor`, `Map`, `Schema`, `Schemas`, `Selection`, `Usage` - experience and the maps folded from it, with the rules between them, plus the ports to append, load, search, and render. Serde-free; depends on `shared`. |
 | Domain | `harness` | `Message`, `Model`, `Tool`, `Snapshot`, `Policy` - what a loop needs to drive a model over `core`. `Policy` says whether a tool call runs at once or asks the user; `Snapshot` saves the working tree under a prompt and puts it back. Depends on `core` and on `futures-core`, for the stream type its reply port returns. |
 | Application | `app` | `App` - orchestrates `core` and `harness` for one use case, no vocabulary beyond theirs. Runs the tool loop: commits `tool.called`, asks the `Policy`, hands the caller a `ToolStep` - run, ask the user, or carry on. A `Harness` groups what `App` is given: the tools, the policy, the cap, the snapshot, the instructions, and a `Context` - the list of sections the request carries, stable first for the provider's cache, with history sized to a share of the model's window and the events just past it indexed one line each. `MapShape` says how much of each map the prompt carries; `PERCEPT_MAPS` sets it at the entrypoint. `docs/harness.md` is the design. The `code` toolset - the TUI's default, `PERCEPT_TOOLS=code` elsewhere - adds the file tools, the policy that asks before a write, a cap of fifty calls, a snapshot per prompt, and the checkout's `AGENTS.md` as system text every round; `undo` restores the last one. |
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. A `ToolStep::Ask` pauses the turn on a row: `y` runs once, `a` runs and allows that tool for the session, `n` declines; `/undo` puts the tree back. |
