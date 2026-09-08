@@ -66,7 +66,7 @@ fn a_loading_menu_carries_the_token_it_opened_with() {
 
 fn chat() -> Chat<'static> {
     use crate::app::{App, Harness, MapShape};
-    use crate::core::testing::{source, FakeLog, FakeRenderer};
+    use crate::core::testing::{schemas, source, FakeLog, FakeRenderer};
     use crate::harness::testing::{FakeCatalog, Scripted};
     use std::sync::Arc;
 
@@ -74,6 +74,7 @@ fn chat() -> Chat<'static> {
         Arc::new(Scripted::new(vec![], false)),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source("test"),

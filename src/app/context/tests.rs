@@ -1,6 +1,6 @@
 use super::*;
 use crate::app::{Harness, MapShape};
-use crate::core::testing::{scope, source};
+use crate::core::testing::{schemas, scope, source};
 use crate::harness::Message;
 
 /// Each message as the one string a comparison cares about.
@@ -15,12 +15,20 @@ fn contents(messages: &[Message]) -> Vec<String> {
         .collect()
 }
 
+/// A `Schemas` living for the whole test binary, so `View`'s borrow has
+/// something to point at without every test owning one.
+fn test_schemas() -> &'static Schemas {
+    static SCHEMAS: std::sync::OnceLock<Schemas> = std::sync::OnceLock::new();
+    SCHEMAS.get_or_init(schemas)
+}
+
 /// No turn streaming and no window reported, so history is cut by the
 /// window's floor alone.
 fn view(events: &[Event]) -> View<'_> {
     View {
         instructions: Some("the rules"),
         events,
+        schemas: test_schemas(),
         scope: scope(),
         turn_start: None,
         context_window: None,

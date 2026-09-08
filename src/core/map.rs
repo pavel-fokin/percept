@@ -61,6 +61,10 @@ pub struct Schema {
     /// decision a question, an outcome a task - when the map has such
     /// a pair. A `resolves` edge between other kinds settles nothing.
     pub settlement: Option<Settlement>,
+    /// Whether this map is built from something other than the log, so
+    /// its nodes have no history: no writer, no moment they were
+    /// added. `false` for every schema but `code`.
+    pub derived: bool,
 }
 
 /// A node or edge kind and one line saying what it is, so a reader who
@@ -85,11 +89,6 @@ impl Kind {
             requires: Vec::new(),
         }
     }
-
-    fn requiring(mut self, property: &str) -> Self {
-        self.requires.push(property.to_string());
-        self
-    }
 }
 
 /// The two node kinds a `resolves` edge joins: `by` settles `of`.
@@ -113,97 +112,16 @@ pub const ANSWERS: &str = "answers";
 /// The edge kind from a task to the task it must land before.
 pub const BLOCKS: &str = "blocks";
 
-/// What a decision settles.
-const QUESTION: &str = "question";
 /// The one node kind `revise_map` never removes: a decision is corrected
 /// by a successor with a `supersedes` edge, so it is public.
 pub const DECISION: &str = "decision";
 /// An alternative that lost. The store refuses one that does not say
 /// why, so it is public too.
 pub const OPTION: &str = "option";
-/// One piece of work left to do. The store refuses one that does not
-/// say why it matters, so it is public.
-pub const TASK: &str = "task";
-/// What became of a task: done, with the commit it landed in, or
-/// dropped, with the reason.
-pub const OUTCOME: &str = "outcome";
-/// The property that carries a node's reason: on a decision, a
-/// rejected option, and a task alike.
-const WHY: &str = "why";
-
-/// The decision map: what was asked, what was weighed, what was chosen
-/// and on what grounds. An option `answers` its question, evidence
-/// `supports` or `contradicts` an option, a decision `resolves` the
-/// question, and a later decision `supersedes` an earlier one - so
-/// `--around` a question reaches everything weighed for it.
-pub fn decisions() -> Schema {
-    Schema {
-        name: "decisions".to_string(),
-        purpose: "what was asked, what was chosen, and why, so a settled question is not \
-                  reopened"
-            .to_string(),
-        node_kinds: vec![
-            Kind::new(QUESTION, "a matter the project had to settle"),
-            Kind::new(
-                OPTION,
-                "an alternative that was weighed and lost, saying why in its `why` property",
-            )
-            .requiring(WHY),
-            Kind::new("evidence", "a fact that supports or contradicts an option"),
-            Kind::new(DECISION, "the choice that was made, and the grounds for it"),
-        ],
-        edge_kinds: vec![
-            Kind::new(ANSWERS, "from an option to the question it was weighed for"),
-            Kind::new("supports", "from evidence to an option it backs"),
-            Kind::new("contradicts", "from evidence to an option it undercuts"),
-            Kind::new(RESOLVES, "from a decision to the question it settles"),
-            Kind::new(SUPERSEDES, "from a decision to an earlier one it replaces"),
-        ],
-        headline_kinds: vec![QUESTION.to_string(), DECISION.to_string()],
-        settlement: Some(Settlement {
-            by: DECISION.to_string(),
-            of: QUESTION.to_string(),
-        }),
-    }
-}
-
-/// The tasks map: what is left to do. A task says why it matters, an
-/// outcome `resolves` it - done, or dropped and why - a task `blocks`
-/// the one that must wait for it, and a rewritten task `supersedes`
-/// the old wording, never removes it.
-pub fn tasks() -> Schema {
-    Schema {
-        name: "tasks".to_string(),
-        purpose: "what is left to do, why it matters, and what it waits on, so a session picks \
-                  up the next item without re-deriving it"
-            .to_string(),
-        node_kinds: vec![
-            Kind::new(
-                TASK,
-                "one piece of work left to do, saying why it matters in its `why` property",
-            )
-            .requiring(WHY),
-            Kind::new(
-                OUTCOME,
-                "what became of a task: done with its commit, or dropped with the reason",
-            ),
-        ],
-        edge_kinds: vec![
-            Kind::new(RESOLVES, "from an outcome to the task it settles"),
-            Kind::new(BLOCKS, "from a task to the one that must wait for it"),
-            Kind::new(SUPERSEDES, "from a reworded task to the wording it replaces"),
-        ],
-        headline_kinds: vec![TASK.to_string()],
-        settlement: Some(Settlement {
-            by: OUTCOME.to_string(),
-            of: TASK.to_string(),
-        }),
-    }
-}
 
 /// The code map: a codebase's files, the symbols they define, and what
 /// imports what. Derived from the working tree, never folded from the
-/// log, so it is in `derived()` and not `schemas()`.
+/// log, so `derived` is `true`.
 pub fn code() -> Schema {
     Schema {
         name: "code".to_string(),
@@ -227,30 +145,84 @@ pub fn code() -> Schema {
         ],
         headline_kinds: vec!["file".to_string()],
         settlement: None,
+        derived: true,
     }
 }
 
-/// Every map folded from the log. One map per schema, named after it.
-pub fn schemas() -> Vec<Arc<Schema>> {
-    vec![Arc::new(decisions()), Arc::new(tasks())]
+/// The schemas a project has: every one folded from the log, plus
+/// `code`, derived from the working tree. Built once at the
+/// entrypoint from the built-in schemas and a project's own TOML
+/// files; every fold, write, and error message goes through this, so
+/// no caller keeps its own list.
+pub struct Schemas {
+    folded: Vec<Arc<Schema>>,
+    code: Arc<Schema>,
 }
 
-/// Every map derived from something other than the log. A reader
-/// builds one fresh; no writer commits to it.
-pub fn derived() -> Vec<Arc<Schema>> {
-    vec![Arc::new(code())]
-}
+impl Schemas {
+    pub fn new(folded: Vec<Arc<Schema>>, code: Arc<Schema>) -> Self {
+        Self { folded, code }
+    }
 
-/// Whether `name` names a map in `derived()`.
-fn is_derived(name: &str) -> bool {
-    derived().iter().any(|schema| schema.name == name)
+    /// The log-folded schema `name` names, or the error every boundary
+    /// that folds or writes a map by name reports. `code` is its own
+    /// error: it exists, and this is the wrong door to it.
+    pub fn find(&self, name: &str) -> Result<Arc<Schema>, MapError> {
+        if name == self.code.name {
+            return Err(MapError::Derived(name.to_string()));
+        }
+        self.folded
+            .iter()
+            .find(|schema| schema.name == name)
+            .cloned()
+            .ok_or_else(|| MapError::UnknownMap {
+                name: name.to_string(),
+                maps: self.names_csv(),
+            })
+    }
+
+    /// The map derived from the working tree, never folded from the
+    /// log.
+    pub fn code(&self) -> Arc<Schema> {
+        self.code.clone()
+    }
+
+    /// Every schema folded from the log, `code` excluded.
+    pub fn folded(&self) -> &[Arc<Schema>] {
+        &self.folded
+    }
+
+    /// Every map folded from `events` within `scope` - one per
+    /// log-folded schema; `code` is never folded, since it has no
+    /// events of its own.
+    pub fn fold_all<'a>(
+        &self,
+        scope: &Scope,
+        events: impl IntoIterator<Item = &'a Event> + Clone,
+    ) -> Result<Vec<Map>, MapError> {
+        self.folded
+            .iter()
+            .map(|schema| Map::fold(schema.clone(), scope, events.clone()))
+            .collect()
+    }
+
+    /// Every schema's name, `code` last, for an "expected one of"
+    /// error.
+    fn names_csv(&self) -> String {
+        self.folded
+            .iter()
+            .chain(std::iter::once(&self.code))
+            .map(|schema| schema.name.clone())
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
 }
 
 impl Schema {
     /// Whether this map is built from something other than the log, so
     /// its nodes have no history: no writer, no moment they were added.
     pub fn is_derived(&self) -> bool {
-        is_derived(&self.name)
+        self.derived
     }
 
     /// The node kind `name` names, when the schema has it.
@@ -277,19 +249,6 @@ impl Schema {
     /// The edge kind names as a `, `-joined list.
     pub fn edge_kinds_csv(&self) -> String {
         self.edge_kind_names().collect::<Vec<_>>().join(", ")
-    }
-
-    /// The log-folded schema `name` names, or the error every boundary
-    /// that folds or writes a map by name reports. A derived map is its
-    /// own error: it exists, and this is the wrong door to it.
-    pub fn find(name: &str) -> Result<Arc<Schema>, MapError> {
-        if is_derived(name) {
-            return Err(MapError::Derived(name.to_string()));
-        }
-        schemas()
-            .into_iter()
-            .find(|schema| schema.name == name)
-            .ok_or_else(|| MapError::UnknownMap(name.to_string()))
     }
 }
 
@@ -426,8 +385,13 @@ pub enum Mutation {
 /// carried as labels - kind and name - the way a reader knows them.
 #[derive(Debug, PartialEq, Eq)]
 pub enum MapError {
-    UnknownMap(String),
-    /// A map in `derived()`, named where only a log-folded map fits.
+    UnknownMap {
+        name: String,
+        /// Every map `Schemas` knows, `, `-joined - what the error
+        /// offers in place of a global registry.
+        maps: String,
+    },
+    /// The derived map, named where only a log-folded map fits.
     Derived(String),
     /// `since` on a derived map: it is walked fresh, so it has no
     /// "before". One rule for the CLI and the `read_map` tool.
@@ -476,16 +440,7 @@ pub enum MapError {
 impl fmt::Display for MapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnknownMap(name) => write!(
-                f,
-                "no map named {name:?}; maps are {}",
-                schemas()
-                    .iter()
-                    .chain(derived().iter())
-                    .map(|schema| schema.name.clone())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
+            Self::UnknownMap { name, maps } => write!(f, "no map named {name:?}; maps are {maps}"),
             Self::Derived(name) => write!(
                 f,
                 "{name:?} is derived from the working tree, not the log: read it \
@@ -596,17 +551,6 @@ impl Map {
                 })?;
         }
         Ok(map)
-    }
-
-    /// Every map percept knows, folded from `events` within `scope`.
-    pub fn fold_all<'a>(
-        scope: &Scope,
-        events: impl IntoIterator<Item = &'a Event> + Clone,
-    ) -> Result<Vec<Self>, MapError> {
-        schemas()
-            .into_iter()
-            .map(|schema| Self::fold(schema, scope, events.clone()))
-            .collect()
     }
 
     pub fn schema(&self) -> &Schema {

@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::testing::{node_added_at, scope, source, ROOT};
+use crate::core::testing::{decisions, node_added_at, scope, source, tasks, ROOT};
 use crate::core::Actor;
 
 fn committed(payload: Payload) -> Event {
@@ -647,16 +647,19 @@ fn a_map_reads_as_one_line_per_node_then_per_edge() {
 
 #[test]
 fn a_schema_is_found_by_name() {
-    assert_eq!(Schema::find("decisions").unwrap().name, "decisions");
+    let schemas = crate::core::testing::schemas();
+    assert_eq!(schemas.find("decisions").unwrap().name, "decisions");
     assert_eq!(
-        Schema::find("glossary").err().unwrap().to_string(),
+        schemas.find("glossary").err().unwrap().to_string(),
         "no map named \"glossary\"; maps are decisions, tasks, code"
     );
 }
 
 #[test]
 fn every_kind_of_every_schema_carries_a_gloss() {
-    for schema in schemas().iter().chain(derived().iter()) {
+    let schemas = crate::core::testing::schemas();
+    let code = schemas.code();
+    for schema in schemas.folded().iter().chain(std::iter::once(&code)) {
         for kind in schema.node_kinds.iter().chain(&schema.edge_kinds) {
             assert!(
                 !kind.gloss.is_empty(),
@@ -952,7 +955,7 @@ fn a_missing_prose_node_does_not_cross_kinds_on_one_shared_word() {
 
 #[test]
 fn a_derived_map_is_found_by_neither_fold_nor_write() {
-    let err = Schema::find("code").err().unwrap();
+    let err = crate::core::testing::schemas().find("code").err().unwrap();
     assert_eq!(err, MapError::Derived("code".to_string()));
     assert!(err
         .to_string()

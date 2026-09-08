@@ -25,17 +25,18 @@ const NAME: &str = "read_map";
 
 const DESCRIPTION: &str = "Read one cognitive map by name, whole or cut to \
     a fragment: around one node to a depth, since an instant, of some \
-    kinds. The maps are decisions, tasks, and code - the last walked \
-    fresh from the working tree. Prefer this over grep for code \
-    structure. Returns JSONL: first a line naming the map's node and edge \
-    kinds, each with one line on what it is - read it before choosing an \
-    `around` selector, since a kind's name alone can mislead. Then a line \
-    counting what was shown of the whole and how many edges cross the \
-    cut, then every node, then every edge, each with the event ids it \
-    cites. A crossing edge is where to widen when an exception or a \
-    contradiction could change the answer. Open a map before answering \
-    from it or revising it; what the conversation shows of a map may be \
-    only its headlines. `since` has no meaning for code, which has no \
+    kinds. The maps are the ones the catalogue lists; `code`, the map \
+    of files and imports, is walked fresh from the working tree. \
+    Prefer this over grep for code structure. Returns JSONL: first a \
+    line naming the map's node and edge kinds, each with one line on \
+    what it is - read it before choosing an `around` selector, since a \
+    kind's name alone can mislead. Then a line counting what was shown \
+    of the whole and how many edges cross the cut, then every node, \
+    then every edge, each with the event ids it cites. A crossing edge \
+    is where to widen when an exception or a contradiction could \
+    change the answer. Open a map before answering from it or revising \
+    it; what the conversation shows of a map may be only its \
+    headlines. `since` has no meaning for a derived map, which has no \
     history.";
 
 /// JSON Schema for `run`'s `arguments`. A string, not a `Value` - the
@@ -43,7 +44,7 @@ const DESCRIPTION: &str = "Read one cognitive map by name, whole or cut to \
 const PARAMETERS: &str = r#"{
   "type": "object",
   "properties": {
-    "map": {"type": "string", "description": "the map's name: decisions, tasks, or code"},
+    "map": {"type": "string", "description": "the map's name, as the catalogue lists it"},
     "around": {
       "type": "object",
       "description": "keep this node and what is within depth edges of it, either way",

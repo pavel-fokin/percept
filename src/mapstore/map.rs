@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::core::{
     Actor, Edge, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation, Node, NodeId,
-    NodeRef, Payload, Schema, Scope,
+    NodeRef, Payload, Schemas, Scope,
 };
 use crate::shared::Timestamp;
 use crate::store::{ids, parse_event_id};
@@ -20,28 +20,34 @@ use crate::store::{ids, parse_event_id};
 /// inside `scope`.
 pub fn fold_map(
     log: &dyn EventLog,
+    schemas: &Schemas,
     name: &str,
     scope: &Scope,
 ) -> Result<Map, Box<dyn std::error::Error>> {
-    Ok(Map::fold(Schema::find(name)?, scope, &log.load()?)?)
+    Ok(Map::fold(schemas.find(name)?, scope, &log.load()?)?)
 }
 
 /// The `MapReader` for every log-folded map. `main` wraps this to route
 /// `code` to the working-tree walk, so `store` never depends on `code`.
 pub struct LogMaps {
     log: Arc<dyn EventLog>,
+    schemas: Arc<Schemas>,
     scope: Scope,
 }
 
 impl LogMaps {
-    pub fn new(log: Arc<dyn EventLog>, scope: Scope) -> Self {
-        Self { log, scope }
+    pub fn new(log: Arc<dyn EventLog>, schemas: Arc<Schemas>, scope: Scope) -> Self {
+        Self {
+            log,
+            schemas,
+            scope,
+        }
     }
 }
 
 impl MapReader for LogMaps {
     fn read(&self, name: &str) -> Result<Map, Box<dyn std::error::Error>> {
-        fold_map(self.log.as_ref(), name, &self.scope)
+        fold_map(self.log.as_ref(), &self.schemas, name, &self.scope)
     }
 }
 
@@ -56,10 +62,11 @@ pub struct Snapshot {
 impl Snapshot {
     pub fn load(
         log: &dyn EventLog,
+        schemas: &Schemas,
         name: &str,
         scope: &Scope,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let schema = Schema::find(name)?;
+        let schema = schemas.find(name)?;
         let events = log.load()?;
         let map = Map::fold(schema, scope, &events)?;
         let ids = events.iter().map(|event| event.id().as_uuid()).collect();
@@ -100,13 +107,14 @@ impl Snapshot {
 /// fold then fails loudly.
 pub fn revise(
     log: &dyn EventLog,
+    schemas: &Schemas,
     name: &str,
     scope: &Scope,
     sources: &[String],
     actor: Actor,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
-    let mut snapshot = Snapshot::load(log, name, scope)?;
+    let mut snapshot = Snapshot::load(log, schemas, name, scope)?;
     let sources = snapshot.resolve(sources)?;
     let mutation = mutation(sources);
     // A rule for new writes only, so the options recorded before it

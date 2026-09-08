@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::core::testing::node_ref;
-use crate::core::{code, decisions, tasks, Actor, EventId, Mutation, SUPERSEDES};
+use crate::core::testing::{decisions, node_ref, tasks};
+use crate::core::{code, Actor, EventId, Mutation, SUPERSEDES};
 
 /// Adds a node with one `why` property when `why` is given.
 fn add(

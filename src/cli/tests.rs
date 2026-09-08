@@ -1,6 +1,6 @@
 use super::*;
 use crate::app::{App, Harness, MapShape};
-use crate::core::testing::{content, source, FakeLog, FakeRenderer, ROOT};
+use crate::core::testing::{content, schemas, source, FakeLog, FakeRenderer, ROOT};
 use crate::core::Payload;
 use crate::harness::testing::{FakeCatalog, FakeTool, Scripted};
 use std::path::{Path, PathBuf};
@@ -226,6 +226,7 @@ async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
         Arc::new(model),
         Arc::new(FakeCatalog::default()),
         log.clone(),
+        Arc::new(schemas()),
         Harness::new(tools, MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source("cli"),
@@ -270,6 +271,7 @@ async fn a_stream_error_ends_the_turn_but_still_commits_partial_text() {
         Arc::new(model),
         Arc::new(FakeCatalog::default()),
         log.clone(),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source("cli"),
@@ -427,6 +429,7 @@ fn every_write_verb_refuses_the_code_map() {
             prop: Vec::new(),
         },
         &log,
+        &schemas(),
         &cli_source,
         &renderer,
     );
@@ -438,6 +441,7 @@ fn every_write_verb_refuses_the_code_map() {
             reason: "gone".to_string(),
         },
         &log,
+        &schemas(),
         &cli_source,
         &renderer,
     );
@@ -453,8 +457,8 @@ fn every_write_verb_refuses_the_code_map() {
             name: "src/app/mod.rs".to_string(),
         },
     };
-    let add_edge = maps_add_edge(edge_args(), &log, &cli_source, &renderer);
-    let remove_edge = maps_remove_edge(edge_args(), &log, &cli_source, &renderer);
+    let add_edge = maps_add_edge(edge_args(), &log, &schemas(), &cli_source, &renderer);
+    let remove_edge = maps_remove_edge(edge_args(), &log, &schemas(), &cli_source, &renderer);
 
     for result in [add_node, remove_node, add_edge, remove_edge] {
         let err = result.err().unwrap();
@@ -480,6 +484,7 @@ fn maps_add_node_renders_the_map_it_changed_once() {
             prop: Vec::new(),
         },
         &log,
+        &schemas(),
         &source("cli"),
         &renderer,
     )
@@ -513,7 +518,7 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_user() {
     };
     assert!(args.target.actor == Actor::Model);
 
-    maps_add_node(args, &log, &source("cli"), &renderer).unwrap();
+    maps_add_node(args, &log, &schemas(), &source("cli"), &renderer).unwrap();
 
     let events = log.load().unwrap();
     assert!(events[0].actor() == Actor::Model);

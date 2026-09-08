@@ -1,10 +1,10 @@
 use super::*;
-use crate::core::testing::{edge_added, node_added, node_added_by, scope, source, FakeLog};
+use crate::core::testing::{edge_added, node_added, node_added_by, schemas, scope, source, FakeLog};
 use crate::core::{Actor, Event, EventId};
 
 fn tool(events: Vec<Event>) -> ReviseMap {
     let log = Arc::new(FakeLog::seeded(events));
-    ReviseMap::new(log, scope())
+    ReviseMap::new(log, Arc::new(schemas()), scope())
 }
 
 #[test]
