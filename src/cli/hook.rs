@@ -1,27 +1,31 @@
-//! `percept hook <client>` - what `scripts/agent-hook.py` used to run
-//! as a subprocess, now in-process. Reads one hook JSON object off
-//! stdin, the shape Claude Code and Codex both send, and turns it into
-//! events on the same log every other subcommand appends to. Never
-//! fails the client's turn: `main` catches every error here, prints it
-//! to stderr as `percept hook: <error>`, and still prints `{}` to
+//! `percept hook <client>` - reads one hook JSON object off stdin, the
+//! shape Claude Code and Codex both send, and turns it into events on
+//! the same log every other subcommand appends to. Never fails the
+//! client's turn: `main` catches every error here, prints it to
+//! stderr as `percept hook: <error>`, and still prints `{}` to
 //! stdout.
 //!
+//! Reading and validating the input (`read`) is split from acting on
+//! it (`run`): `main` needs the client's own `cwd` before it can find
+//! the checkout and open the log, so the input is parsed first, and
+//! everything else only afterwards.
+//!
 //! A turn's events cite one another through a per-turn state file kept
-//! beside the log, under `hook-sessions`: the id of the turn's prompt
-//! event, so a later tool call or reply can name it as its cause. The
-//! file is also the lock - held exclusively for the length of one hook
-//! call - so two hook calls for the same turn never race.
+//! beside the log, under `hook-sessions/<root>` - `root`'s slashes
+//! replaced by `%`, so one project's turns never collide with
+//! another's: the id of the turn's prompt event, so a later tool call
+//! or reply can name it as its cause. The file is also the lock - held
+//! exclusively for the length of one hook call - so two hook calls for
+//! the same turn never race.
 
-use std::collections::hash_map::DefaultHasher;
 use std::fs::{self, File, OpenOptions};
-use std::hash::{Hash, Hasher};
 use std::io::{BufRead, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 use serde_json::{json, Map as JsonMap, Value};
 
-use crate::core::{Actor, EventId, EventLog, Source};
-use crate::store;
+use crate::core::{Actor, Event, EventId, EventLog, Source};
+use crate::store::{self, Lock};
 
 /// `percept hook <client>` - `client` names the writer whose turn this
 /// is, and becomes every event's source.
@@ -32,38 +36,50 @@ pub struct HookArgs {
     pub client: String,
 }
 
-/// Reads one hook JSON object from `input`, appends the events it
-/// implies to `log` under `client`'s source, and returns the JSON
-/// object the client expects back on stdout - `{}` unless the event
-/// asks for something. `sessions_dir` holds one file per turn, created
-/// if missing.
-pub fn run(
-    client: &str,
-    input: &mut dyn Read,
-    log: &dyn EventLog,
-    sessions_dir: &Path,
-) -> Result<Value, Box<dyn std::error::Error>> {
-    if client.trim().is_empty() {
-        return Err("client name must not be empty".into());
-    }
+/// One hook JSON object's client-independent shape: `hook_event_name`,
+/// `cwd`, `session_id`, and an optional `turn_id` mean the same thing
+/// whichever client sent them, so `read` checks them once. Every other
+/// field - `prompt`, `tool_name`, `last_assistant_message`, and so on -
+/// stays in `data` for the event handlers in `run` to read.
+pub struct HookInput {
+    event: String,
+    cwd: String,
+    session: String,
+    turn: String,
+    data: JsonMap<String, Value>,
+}
 
+impl HookInput {
+    /// The client's own working directory - what `main` resolves the
+    /// checkout and project root from, since the process's own cwd may
+    /// be anywhere the client's shell happened to start it.
+    pub fn cwd(&self) -> &str {
+        &self.cwd
+    }
+}
+
+/// Reads one hook JSON object from `input` in full and validates its
+/// client-independent fields. Reading `input` to the end before
+/// returning, even on a validation error, means a caller that runs
+/// this before doing anything else never leaves the client's own pipe
+/// half read.
+pub fn read(input: &mut dyn Read) -> Result<HookInput, Box<dyn std::error::Error>> {
     let mut text = String::new();
     input.read_to_string(&mut text)?;
     let data: Value = serde_json::from_str(&text)?;
     let data = data
         .as_object()
-        .ok_or("hook input must be a JSON object")?;
+        .ok_or("hook input must be a JSON object")?
+        .clone();
 
-    let event = text_field(data, "hook_event_name")?;
+    let event = text_field(&data, "hook_event_name")?;
     if !matches!(event.as_str(), "UserPromptSubmit" | "PostToolUse" | "Stop") {
         return Err(format!("unsupported hook event {event:?}").into());
     }
 
-    let cwd = text_field(data, "cwd")?;
-    let checkout = crate::root_for(Path::new(&cwd))?;
-    let root = crate::project_of(&checkout);
+    let cwd = text_field(&data, "cwd")?;
 
-    let session = text_field(data, "session_id")?;
+    let session = text_field(&data, "session_id")?;
     if session.is_empty() {
         return Err("session_id must not be empty".into());
     }
@@ -73,35 +89,62 @@ pub fn run(
         Some(_) => return Err("turn_id must be a string".into()),
     };
 
-    fs::create_dir_all(sessions_dir)?;
-    let state_path = sessions_dir.join(state_key(client, &root, &session, &turn));
-    let mut state = OpenOptions::new()
+    Ok(HookInput {
+        event,
+        cwd,
+        session,
+        turn,
+        data,
+    })
+}
+
+/// Appends the events `input`'s event implies to `log` under `source`,
+/// and returns the JSON object the client expects back on stdout -
+/// `{}` unless the event asks for something. `client` names the
+/// writer, checked here rather than in `read` since it comes from the
+/// CLI, not the JSON; `source` is `client`'s events' project root,
+/// resolved by the caller from `input.cwd`. `sessions_dir` holds one
+/// directory per checkout root, created if missing.
+pub fn run(
+    input: HookInput,
+    client: &str,
+    source: &Source,
+    log: &dyn EventLog,
+    sessions_dir: &Path,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    if client.trim().is_empty() {
+        return Err("client name must not be empty".into());
+    }
+
+    let state_path = sessions_dir
+        .join(state_dir_name(&source.path))
+        .join(state_file_name(client, &input.session, &input.turn));
+    fs::create_dir_all(state_path.parent().expect("state path has a parent"))?;
+    let state = OpenOptions::new()
         .create(true)
         .truncate(false)
         .read(true)
         .write(true)
         .open(&state_path)?;
-    state.lock()?;
+    // Held for the whole call, so two hook calls for the same turn
+    // never race; every read and write below goes through `&File`, the
+    // shared reference this lock already borrows, the same pattern
+    // `store::Jsonl` uses over its own file.
+    let _lock = Lock::exclusive(&state)?;
 
-    let source = Source {
-        name: client.to_string(),
-        path: root,
-    };
-
-    match event.as_str() {
-        "UserPromptSubmit" => submit_prompt(data, &source, log, &mut state, &event),
+    match input.event.as_str() {
+        "UserPromptSubmit" => submit_prompt(&input.data, source, log, &state, &input.event),
         "PostToolUse" => {
-            let cause = read_cause(&mut state)?;
-            record_tool_use(data, &source, log, cause)
+            let cause = read_cause(&state)?;
+            record_tool_use(&input.data, source, log, cause)
         }
         "Stop" => {
-            let cause = read_cause(&mut state)?;
-            let output = record_stop(data, &source, log, cause);
-            drop(state);
+            let cause = read_cause(&state)?;
+            let output = record_stop(&input.data, source, log, cause);
             let _ = fs::remove_file(&state_path);
             output
         }
-        // Checked above.
+        // Checked in `read`.
         _ => unreachable!(),
     }
 }
@@ -109,7 +152,7 @@ pub fn run(
 /// The previous cause a turn's state file holds - the prompt event's
 /// id - or `None` for a turn that never recorded a prompt, or whose
 /// prompt failed and cleared it.
-fn read_cause(state: &mut File) -> Result<Option<EventId>, Box<dyn std::error::Error>> {
+fn read_cause(mut state: &File) -> Result<Option<EventId>, Box<dyn std::error::Error>> {
     state.seek(SeekFrom::Start(0))?;
     let mut text = String::new();
     state.read_to_string(&mut text)?;
@@ -130,21 +173,16 @@ fn submit_prompt(
     data: &JsonMap<String, Value>,
     source: &Source,
     log: &dyn EventLog,
-    state: &mut File,
+    mut state: &File,
     event: &str,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     state.set_len(0)?;
     state.seek(SeekFrom::Start(0))?;
 
     let prompt = text_field(data, "prompt")?;
-    let id = append(
-        log,
-        source,
-        Actor::User,
-        "message.received",
-        json!({ "content": prompt }),
-        None,
-    )?;
+    let committed = Event::message_received(Actor::User, prompt, source.clone(), None);
+    let id = committed.id();
+    log.append(&committed)?;
     state.write_all(id.as_uuid().to_string().as_bytes())?;
 
     Ok(json!({
@@ -165,6 +203,7 @@ fn record_tool_use(
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let tool = text_field(data, "tool_name")?;
     let arguments = data.get("tool_input").cloned().ok_or("missing tool_input")?;
+    let arguments = serde_json::to_string(&arguments)?;
     let response = data
         .get("tool_response")
         .cloned()
@@ -174,22 +213,11 @@ fn record_tool_use(
         other => serde_json::to_string(&other)?,
     };
 
-    let call = append(
-        log,
-        source,
-        Actor::Model,
-        "tool.called",
-        json!({ "tool": tool, "arguments": arguments }),
-        cause,
-    )?;
-    append(
-        log,
-        source,
-        Actor::System,
-        "tool.resulted",
-        json!({ "content": response }),
-        Some(call),
-    )?;
+    let call = Event::tool_called(tool, arguments, source.clone(), cause);
+    let call_id = call.id();
+    log.append(&call)?;
+    let result = Event::tool_resulted(response, source.clone(), Some(call_id));
+    log.append(&result)?;
     Ok(json!({}))
 }
 
@@ -216,33 +244,11 @@ fn record_stop(
 
     if let Some(reply) = reply {
         if !reply.trim().is_empty() {
-            append(
-                log,
-                source,
-                Actor::Model,
-                "message.received",
-                json!({ "content": reply }),
-                cause,
-            )?;
+            let committed = Event::message_received(Actor::Model, reply, source.clone(), cause);
+            log.append(&committed)?;
         }
     }
     Ok(json!({}))
-}
-
-/// Builds one event through `store::decode` - the same path
-/// `cli::publish` uses - and appends it to `log`, returning its id.
-fn append(
-    log: &dyn EventLog,
-    source: &Source,
-    actor: Actor,
-    kind: &str,
-    payload: Value,
-    causation_id: Option<EventId>,
-) -> Result<EventId, Box<dyn std::error::Error>> {
-    let event = store::decode(actor.name(), source.clone(), kind, causation_id, payload)?;
-    let id = event.id();
-    log.append(&event)?;
-    Ok(id)
 }
 
 /// The current turn's assistant text from a Claude transcript: text
@@ -312,17 +318,25 @@ fn text_field(
     }
 }
 
-/// Names a turn's state file - stable for the same client, root,
-/// session and turn, so two hook calls for one turn share it, and
-/// different turns never collide. Not cryptographic: the file is a
-/// local handle, never compared across runs of a different build.
-fn state_key(client: &str, root: &Path, session: &str, turn: &str) -> String {
-    let mut hasher = DefaultHasher::new();
-    client.hash(&mut hasher);
-    root.hash(&mut hasher);
-    session.hash(&mut hasher);
-    turn.hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+/// Names the directory a checkout root's turns live under, so two
+/// projects sharing one `hook-sessions` directory never collide: `root`
+/// with every `/` replaced by `%`, the one character neither path ever
+/// carries itself.
+fn state_dir_name(root: &Path) -> String {
+    root.to_string_lossy().replace('/', "%")
+}
+
+/// Names a turn's state file within its checkout's directory - stable
+/// for the same client, session and turn, so two hook calls for one
+/// turn share it, and different turns never collide. An empty `turn`,
+/// a client that sends no `turn_id`, drops its dash rather than
+/// leaving a trailing one.
+fn state_file_name(client: &str, session: &str, turn: &str) -> String {
+    if turn.is_empty() {
+        format!("{client}-{session}")
+    } else {
+        format!("{client}-{session}-{turn}")
+    }
 }
 
 #[cfg(test)]

@@ -806,7 +806,6 @@ fn parse_time(flag: &str, s: &str) -> Result<Timestamp, String> {
 }
 
 pub mod hook;
-pub use hook::HookArgs;
 pub mod init;
 
 #[cfg(test)]

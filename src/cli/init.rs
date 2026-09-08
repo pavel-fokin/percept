@@ -1,7 +1,6 @@
 //! `percept init <client>` - writes a coding client's project config so
-//! its hooks call `percept hook <client>`, the in-process replacement
-//! for `scripts/agent-hook.py`. Run from anywhere inside a checkout;
-//! the files land at the checkout root `main` resolves.
+//! its hooks call `percept hook <client>`. Run from anywhere inside a
+//! checkout; the files land at the checkout root `main` resolves.
 //!
 //! An existing file is merged, never overwritten: every key it already
 //! holds is kept, a hook entry naming the command to write is not
@@ -74,13 +73,18 @@ fn write_config(
     Ok(())
 }
 
-/// `path`'s parsed contents, or an empty object when it doesn't exist.
+/// `path`'s parsed contents, or an empty object when it doesn't exist
+/// or holds nothing but whitespace.
 fn read_or_empty(path: &Path) -> Result<Value, Box<dyn std::error::Error>> {
-    match fs::read_to_string(path) {
-        Ok(text) => Ok(serde_json::from_str(&text)?),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(json!({})),
-        Err(err) => Err(err.into()),
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(json!({})),
+        Err(err) => return Err(err.into()),
+    };
+    if text.trim().is_empty() {
+        return Ok(json!({}));
     }
+    Ok(serde_json::from_str(&text)?)
 }
 
 /// `.claude/settings.json`'s merge: the three hook events, plus the
@@ -135,18 +139,22 @@ fn merge_hooks(
     Ok(())
 }
 
-/// Whether `entry` - one item of a hook event's array - already runs
+/// Whether `entry` - one item of a hook event's array - is the
+/// unscoped entry `merge_hooks` writes for `command`: it must run
 /// `command`, looked up in its nested `hooks` list, the shape every
-/// entry here carries.
+/// entry here carries, and must carry no `matcher` - an entry scoped to
+/// one matcher is a different entry, even when it runs the same
+/// command, so `merge_hooks` still adds its own unscoped one beside it.
 fn has_command(entry: &Value, command: &str) -> bool {
-    entry
-        .get("hooks")
-        .and_then(Value::as_array)
-        .is_some_and(|hooks| {
-            hooks
-                .iter()
-                .any(|hook| hook.get("command").and_then(Value::as_str) == Some(command))
-        })
+    entry.get("matcher").is_none()
+        && entry
+            .get("hooks")
+            .and_then(Value::as_array)
+            .is_some_and(|hooks| {
+                hooks
+                    .iter()
+                    .any(|hook| hook.get("command").and_then(Value::as_str) == Some(command))
+            })
 }
 
 /// One hook event's entry: a single command, run with a 20 second

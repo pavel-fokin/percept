@@ -24,7 +24,7 @@ mod tui;
 
 use crate::core::Actor;
 use app::{App, Harness, MapShape};
-use cli::{Cli, Command, EventsCommand, HookArgs, MapsCommand};
+use cli::{Cli, Command, EventsCommand, MapsCommand};
 use mapstore::{LogMaps, MarkdownFiles};
 use providers::{Catalog, ProviderConfig, FIREWORKS_MODEL, OPENAI_MODEL};
 use serde_json::Value;
@@ -188,13 +188,16 @@ async fn run(
 /// mix test events into the shared log. Any other binary, installed or
 /// not, falls back to `~/.percept/percept.jsonl`. `HOME` unset is an
 /// error there: there is nowhere to put the log, and a relative default
-/// would scatter logs per directory.
-fn log_path() -> Result<PathBuf, Box<dyn std::error::Error>> {
+/// would scatter logs per directory. `checkout` is the one `main`
+/// resolved - from the client's cwd under `percept hook`, so a dev
+/// build's hook logs where the client is, not where the process was
+/// started.
+fn log_path(checkout: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
     if let Some(home) = std::env::var_os(HOME_VAR).filter(|home| !home.is_empty()) {
         return Ok(PathBuf::from(home).join(LOG_FILE));
     }
     if std::env::current_exe().is_ok_and(|exe| is_dev_build(&exe)) {
-        return Ok(checkout_root()?.join(MAPS_DIR).join(LOG_FILE));
+        return Ok(checkout.join(MAPS_DIR).join(LOG_FILE));
     }
     let home = std::env::var_os("HOME")
         .map(|home| PathBuf::from(home).join(".percept"))
@@ -215,37 +218,42 @@ fn is_dev_build(exe: &Path) -> bool {
 }
 
 /// The shared log, opened where `log_path` says.
-fn open_log() -> Result<Jsonl, Box<dyn std::error::Error>> {
-    Ok(Jsonl::open(log_path()?)?)
+fn open_log(checkout: &Path) -> Result<Jsonl, Box<dyn std::error::Error>> {
+    Ok(Jsonl::open(log_path(checkout)?)?)
 }
 
-/// Runs `percept hook`, reading the client's JSON off stdin and
-/// printing the JSON object it prescribes back on stdout - `{}` unless
-/// the event asks for something. Never lets an error reach the
-/// client's turn: prints it to stderr as `percept hook: <error>` and
-/// exits 1, the JSON on stdout either way.
-fn run_hook(args: HookArgs) {
-    let result: Result<Value, Box<dyn std::error::Error>> = open_log().and_then(|log| {
-        let sessions = log_path()?
-            .parent()
-            .expect("log path has a parent")
-            .join(HOOK_SESSIONS_DIR);
-        let mut stdin = std::io::stdin().lock();
-        cli::hook::run(&args.client, &mut stdin, &log, &sessions)
-    });
-    match result {
-        Ok(output) => {
-            println!("{output}");
-        }
-        Err(err) => {
-            eprintln!("percept hook: {err}");
-            println!("{{}}");
-            std::process::exit(1);
-        }
-    }
+/// Opens the log at `log_path()`, computed once here so the state file
+/// directory `cli::hook::run` uses is derived from the same path it
+/// appends to, and dispatches `input` to it under `client`'s source at
+/// `root`.
+fn run_hook(
+    input: cli::hook::HookInput,
+    client: &str,
+    checkout: &Path,
+    root: PathBuf,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let log_path = log_path(checkout)?;
+    let log = Jsonl::open(&log_path)?;
+    let sessions = log_path
+        .parent()
+        .expect("log path has a parent")
+        .join(HOOK_SESSIONS_DIR);
+    let source = crate::core::Source {
+        name: client.to_string(),
+        path: root,
+    };
+    cli::hook::run(input, client, &source, &log, &sessions)
 }
 
-/// The checkout the current directory is in: the first ancestor of cwd
+/// Never lets an error reach the client's turn: prints it to stderr as
+/// `percept hook: <error>` and exits 1, `{}` on stdout either way.
+fn hook_exit(err: Box<dyn std::error::Error>) -> ! {
+    eprintln!("percept hook: {err}");
+    println!("{{}}");
+    std::process::exit(1);
+}
+
+/// The checkout `cwd` is in: the first ancestor of it
 /// holding a `.git` or `.percept` entry - a repository, or a directory
 /// percept has already rendered maps into. The search stops at `$HOME`
 /// and at the filesystem root without matching either: walking a home
@@ -255,15 +263,9 @@ fn run_hook(args: HookArgs) {
 /// when nothing is found; the caller prints it and exits. cwd and
 /// `$HOME` are both canonicalized first, so a symlinked home directory
 /// still stops the walk and two writers started from a symlinked path
-/// get the same root.
-fn checkout_root() -> std::io::Result<PathBuf> {
-    root_for(&std::env::current_dir()?)
-}
-
-/// `checkout_root`'s search, rooted at `cwd` instead of the process's
-/// own current directory: `percept hook` runs it against the client's
-/// `cwd`, since the process's own may be anywhere the client's shell
-/// happened to start it from.
+/// get the same root. `main` passes the process's own directory, or
+/// the client's under `percept hook`, since the process's own may be
+/// anywhere the client's shell happened to start it from.
 fn root_for(cwd: &Path) -> std::io::Result<PathBuf> {
     let cwd = cwd.canonicalize()?;
     let home = std::env::var_os("HOME")
@@ -281,7 +283,7 @@ fn root_for(cwd: &Path) -> std::io::Result<PathBuf> {
     })
 }
 
-/// The walk `checkout_root` runs, split out so it takes cwd and `$HOME`
+/// The walk `root_for` runs, split out so it takes cwd and `$HOME`
 /// as arguments; both are already canonical, so an ancestor reached
 /// through `parent()` is too. `None` when the search reaches `home` or
 /// the filesystem root before a marker.
@@ -480,7 +482,7 @@ fn build_app(
     renderer: Arc<dyn crate::core::MapRenderer>,
     checkout: &Path,
 ) -> Result<App, Box<dyn std::error::Error>> {
-    let log = Arc::new(open_log()?);
+    let log = Arc::new(open_log(checkout)?);
     let schemas = Arc::new(mapstore::load_schemas(checkout)?);
     let catalog: Arc<dyn crate::harness::ModelCatalog> = Arc::new(build_catalog());
     let model = build_model(&*catalog)?;
@@ -561,22 +563,42 @@ async fn try_main(
 async fn main() {
     let cli = Cli::parse();
 
-    // The hook never uses the process's own cwd or project root: its
-    // `cwd` comes from the client's JSON, one field among others `run`
-    // reads, so it is handled before `checkout_root` runs against this
-    // process's own directory.
-    if let Some(Command::Hook(args)) = cli.command {
-        run_hook(args);
-        return;
-    }
+    // `percept hook` reads and validates stdin before anything else
+    // touches the filesystem, so a client's turn is never left writing
+    // to a closed pipe by some later error.
+    let hook_input = match &cli.command {
+        Some(Command::Hook(_)) => {
+            let mut stdin = std::io::stdin().lock();
+            match cli::hook::read(&mut stdin) {
+                Ok(input) => Some(input),
+                Err(err) => hook_exit(err),
+            }
+        }
+        _ => None,
+    };
 
     // `root` is the project a `Source` names and a `Scope` compares;
     // `checkout` is where the files are. They differ only in a linked
     // worktree, where the map is shared but its render, and the code
-    // map, belong to the checkout being worked in.
-    let checkout = match checkout_root() {
+    // map, belong to the checkout being worked in. `percept hook` takes
+    // its cwd from the client's own JSON, not this process's, since the
+    // client's shell may have started it anywhere.
+    let cwd = match &hook_input {
+        Some(input) => PathBuf::from(input.cwd()),
+        None => match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(err) => {
+                eprintln!("percept: {err}");
+                std::process::exit(1);
+            }
+        },
+    };
+    let checkout = match root_for(&cwd) {
         Ok(checkout) => checkout,
         Err(err) => {
+            if hook_input.is_some() {
+                hook_exit(err.into());
+            }
             eprintln!("percept: {err}");
             std::process::exit(1);
         }
@@ -590,7 +612,16 @@ async fn main() {
         Arc::new(MarkdownFiles::new(checkout.join(MAPS_DIR)));
 
     let result = match cli.command {
-        Some(Command::Events { command }) => open_log().and_then(|log| match command {
+        Some(Command::Hook(args)) => {
+            match run_hook(hook_input.expect("read above"), &args.client, &checkout, root) {
+                Ok(output) => {
+                    println!("{output}");
+                    Ok(())
+                }
+                Err(err) => hook_exit(err),
+            }
+        }
+        Some(Command::Events { command }) => open_log(&checkout).and_then(|log| match command {
             EventsCommand::Publish(args) => cli::publish(args, &log, &root),
             EventsCommand::Search(args) => cli::search(args, &log),
             EventsCommand::Show(args) => cli::show(args, &log),
@@ -600,7 +631,7 @@ async fn main() {
         Some(Command::Maps {
             command: MapsCommand::Show(args),
         }) if args.is_code() => cli::maps_show_code(args, &checkout),
-        Some(Command::Maps { command }) => open_log().and_then(|log| {
+        Some(Command::Maps { command }) => open_log(&checkout).and_then(|log| {
             let schemas = mapstore::load_schemas(&checkout)?;
             match command {
                 MapsCommand::List(args) => cli::maps_list(args, &log, &schemas, &root, &checkout),
@@ -653,8 +684,6 @@ async fn main() {
             )
             .await
         }
-        // Handled above, before `checkout_root` ran.
-        Some(Command::Hook(_)) => unreachable!(),
     };
 
     if let Err(err) = result {

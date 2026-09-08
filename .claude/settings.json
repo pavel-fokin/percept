@@ -1,12 +1,23 @@
 {
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "percept hook claude-code",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
     "PostToolUse": [
       {
         "hooks": [
           {
+            "type": "command",
             "command": "percept hook claude-code",
-            "timeout": 20,
-            "type": "command"
+            "timeout": 20
           }
         ]
       }
@@ -15,20 +26,9 @@
       {
         "hooks": [
           {
+            "type": "command",
             "command": "percept hook claude-code",
-            "timeout": 20,
-            "type": "command"
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "command": "percept hook claude-code",
-            "timeout": 20,
-            "type": "command"
+            "timeout": 20
           }
         ]
       }

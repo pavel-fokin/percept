@@ -15,6 +15,7 @@ pub use event::{
     PREVIEW_CHARS,
 };
 pub use jsonl::Jsonl;
+pub(crate) use jsonl::Lock;
 
 /// A moment as a reader types it, on the CLI or in a tool call: ISO-8601,
 /// or `<N>d`, `<N>h`, `<N>m` measured back from now. One parser, so

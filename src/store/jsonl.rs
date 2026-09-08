@@ -198,10 +198,10 @@ fn read_all(mut file: &File) -> Result<Vec<u8>, Error> {
 ///
 /// Advisory, so it binds only processes that ask for it, and it is
 /// unreliable on network filesystems.
-struct Lock<'a>(&'a File);
+pub(crate) struct Lock<'a>(&'a File);
 
 impl<'a> Lock<'a> {
-    fn exclusive(file: &'a File) -> Result<Self, Error> {
+    pub(crate) fn exclusive(file: &'a File) -> Result<Self, Error> {
         file.lock().map_err(Error::Io)?;
         Ok(Self(file))
     }

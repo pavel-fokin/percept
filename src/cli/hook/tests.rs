@@ -45,13 +45,45 @@ impl Fixture {
     }
 
     fn call(&self, client: &str, body: Value) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut input = Cursor::new(body.to_string().into_bytes());
-        run(client, &mut input, &self.log, &self.sessions)
+        self.call_raw(client, &body.to_string())
     }
 
+    /// Mirrors what `main` does before dispatching to `run`: read the
+    /// input, then resolve the checkout and project root from its own
+    /// `cwd` rather than the process's.
     fn call_raw(&self, client: &str, raw: &str) -> Result<Value, Box<dyn std::error::Error>> {
-        let mut input = Cursor::new(raw.as_bytes().to_vec());
-        run(client, &mut input, &self.log, &self.sessions)
+        let mut cursor = Cursor::new(raw.as_bytes().to_vec());
+        let input = read(&mut cursor)?;
+        let checkout = crate::root_for(Path::new(&input.cwd))?;
+        let root = crate::project_of(&checkout);
+        let source = Source {
+            name: client.to_string(),
+            path: root,
+        };
+        run(input, client, &source, &self.log, &self.sessions)
+    }
+
+    /// The number of turn state files kept anywhere under
+    /// `hook-sessions`, regardless of which checkout's directory holds
+    /// them.
+    fn state_file_count(&self) -> usize {
+        fn count(dir: &Path) -> usize {
+            let Ok(entries) = std::fs::read_dir(dir) else {
+                return 0;
+            };
+            entries
+                .flatten()
+                .map(|entry| {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        count(&path)
+                    } else {
+                        1
+                    }
+                })
+                .sum()
+        }
+        count(&self.sessions)
     }
 
     fn prompt(&self, client: &str, root: &Path, session: &str, turn: &str, text: &str) -> String {
@@ -218,7 +250,7 @@ fn stop_clears_the_turns_state() {
     let fixture = Fixture::new();
     let root = fixture.root.clone();
     fixture.prompt("codex", &root, "session", "", "hello");
-    assert_eq!(std::fs::read_dir(&fixture.sessions).unwrap().count(), 1);
+    assert_eq!(fixture.state_file_count(), 1);
 
     fixture
         .stop(
@@ -230,7 +262,7 @@ fn stop_clears_the_turns_state() {
         )
         .unwrap();
 
-    assert_eq!(std::fs::read_dir(&fixture.sessions).unwrap().count(), 0);
+    assert_eq!(fixture.state_file_count(), 0);
 }
 
 #[test]

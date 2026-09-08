@@ -96,6 +96,30 @@ fn keeps_another_command_under_the_same_event() {
 }
 
 #[test]
+fn a_matcher_scoped_entry_does_not_count_as_the_unscoped_one() {
+    let existing = json!({
+        "hooks": {
+            "PostToolUse": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [{ "type": "command", "command": "percept hook claude-code" }]
+                }
+            ],
+            "UserPromptSubmit": [],
+            "Stop": []
+        }
+    });
+
+    let root = merge_claude_code(existing, "percept hook claude-code").unwrap();
+
+    let entries = root["hooks"]["PostToolUse"].as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["matcher"], "Bash");
+    assert_eq!(entries[1]["hooks"][0]["command"], "percept hook claude-code");
+    assert!(entries[1].get("matcher").is_none());
+}
+
+#[test]
 fn second_run_is_identical() {
     let once = merge_codex(json!({}), "percept hook codex").unwrap();
     let twice = merge_codex(once.clone(), "percept hook codex").unwrap();
@@ -136,6 +160,52 @@ fn a_non_object_file_is_an_error() {
     assert!(err.to_string().contains("not a JSON object"));
     let text = std::fs::read_to_string(temp.path().join(".claude/settings.json")).unwrap();
     assert_eq!(text, "[1, 2]");
+}
+
+#[test]
+fn an_empty_file_is_treated_as_no_config() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join(".claude")).unwrap();
+    std::fs::write(temp.path().join(".claude/settings.json"), "  \n").unwrap();
+
+    run(
+        InitArgs {
+            client: "claude-code".to_string(),
+        },
+        temp.path(),
+    )
+    .unwrap();
+
+    let text = std::fs::read_to_string(temp.path().join(".claude/settings.json")).unwrap();
+    let value: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        value["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
+        "percept hook claude-code"
+    );
+}
+
+#[test]
+fn writes_events_and_entry_fields_in_declared_order() {
+    let temp = tempfile::tempdir().unwrap();
+
+    run(
+        InitArgs {
+            client: "codex".to_string(),
+        },
+        temp.path(),
+    )
+    .unwrap();
+
+    let text = std::fs::read_to_string(temp.path().join(".codex/hooks.json")).unwrap();
+    let submit = text.find("UserPromptSubmit").unwrap();
+    let post = text.find("PostToolUse").unwrap();
+    let stop = text.find("\"Stop\"").unwrap();
+    assert!(submit < post && post < stop, "events must read {}", EVENTS.join(", "));
+
+    let kind = text.find("\"type\"").unwrap();
+    let command = text.find("\"command\"").unwrap();
+    let timeout = text.find("\"timeout\"").unwrap();
+    assert!(kind < command && command < timeout, "an entry must read type, command, timeout");
 }
 
 #[test]
