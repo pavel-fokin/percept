@@ -495,3 +495,5 @@ note: "Not decided. The core has an actor kind for the human and no identity beh
 
 - decision "a requires list on the kind; option and task require why" (model)
   why: "one place beside the gloss, and the file carries it; revise checks any kind the same way, replacing the two checks that compared the schema to DECISIONS and TASKS"
+- weighed "check requires in mapstore's write path, kept out of Map::apply so old history still folds" (model)
+  why: "built first on feat/schemas-as-data and moved: a fold calls replay, never apply, so Map::apply is only ever the write path and the rule belongs there; kept outside core it reached the CLI but not the model's revise_map tool, and AGENTS.md says the rules live once in Map::apply"

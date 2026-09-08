@@ -13,6 +13,7 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "check on a real coding turn that cached tokens rise across rounds" (model) · 2026-09-07
 - "say in AGENTS.md that a reply promising to proceed, with no edit in that turn, is a false report" (model) · 2026-09-07
 - "let the instructions and maps give way under the budget on a small window" (model) · 2026-09-07
+- "drop the loader's extend-only check on built-in schemas once the renderer is schema-driven" (model) · 2026-09-08
 
 ## "tell a coding turn to branch from main, not HEAD" (model)
 
@@ -54,6 +55,11 @@ why: "the session the handoff reviewed ended a build turn with 'proceeding' and 
 ## "let the instructions and maps give way under the budget on a small window" (model)
 
 why: "review of feat/harness: on Ollama with a 16k window this repo's AGENTS.md plus the decisions map in prompt shape exceed the window before history is counted, and the provider truncates the head of the system text, which is the instructions; only history is budgeted today, and the precedence rule in docs/harness.md names the order to apply"
+
+## "drop the loader's extend-only check on built-in schemas once the renderer is schema-driven" (model)
+
+why: "check_extends in mapstore/schemas.rs forbids a project decisions.toml from renaming or dropping a kind only because push_decisions, weighed_for and the never-remove rule name question, option, answers and decision by literal; when the schema names its edge roles the check shrinks to 'the roles a schema names must be declared kinds', which parse already does for headlines and settles"
+waits on "make the map renderer schema-driven, not dispatched on map name" (model)
 
 ## done
 - "send the project's instructions to a coding turn" (model)
