@@ -4,8 +4,8 @@ use serde::Deserialize;
 
 use crate::core::{MapReader, NodeRef, Selection};
 use crate::harness::{Tool, ToolOutput, ToolSpec};
-use crate::store::map::NodeRefArgs;
-use crate::store::{encode_fragment, encode_lines, encode_schema, optional_time};
+use crate::mapstore::{encode_fragment, encode_lines, encode_schema, NodeRefArgs};
+use crate::store::optional_time;
 
 /// The `read_map` tool: one map, whole or cut to a fragment, as JSONL
 /// with event ids on every node and edge. Offered when the prompt does

@@ -1,7 +1,7 @@
 use super::*;
 use crate::core::testing::{edge_added, node_added, node_added_at, scope, FakeLog};
 use crate::core::Event;
-use crate::store::LogMaps;
+use crate::mapstore::LogMaps;
 
 /// A `read_map` over the log-folded maps, the way `main` wires it for
 /// every map but `code`.

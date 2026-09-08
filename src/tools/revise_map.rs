@@ -5,8 +5,7 @@ use serde::Deserialize;
 
 use crate::core::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Scope, DECISION};
 use crate::harness::{Tool, ToolOutput, ToolSpec};
-use crate::store::map::NodeRefArgs;
-use crate::store::Snapshot;
+use crate::mapstore::{NodeRefArgs, Snapshot};
 
 /// The `revise_map` tool: checks a batch of changes to one map against
 /// its current state, in order, and hands back the payloads to commit -

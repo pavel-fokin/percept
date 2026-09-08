@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::core::{Actor, EventId, Kind, Map, MapRenderer, Node, Schema, DECISIONS, TASKS};
-use crate::store::event::ids;
+use crate::store::ids;
 
 /// What every rendered map opens with, so a reader who lands on the
 /// file the way they'd land on a README knows not to hand-edit it.

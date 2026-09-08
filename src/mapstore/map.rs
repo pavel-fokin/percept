@@ -14,8 +14,7 @@ use crate::core::{
     NodeRef, Payload, Schema, Scope, DECISIONS, OPTION, TASK, TASKS,
 };
 use crate::shared::Timestamp;
-use crate::store::event::ids;
-use crate::store::parse_event_id;
+use crate::store::{ids, parse_event_id};
 
 /// The map `name` names, folded from every event in `log` that falls
 /// inside `scope`.
@@ -284,7 +283,7 @@ pub fn encode_lines(map: &Map) -> impl Iterator<Item = String> + '_ {
 /// `NodeRef`, but its own type since the domain stays serde-free.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct NodeRefArgs {
+pub struct NodeRefArgs {
     kind: String,
     name: String,
 }

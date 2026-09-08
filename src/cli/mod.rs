@@ -29,8 +29,10 @@ use crate::core::{
     Actor, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
 };
 use crate::harness::Chunk;
+use crate::mapstore;
 use crate::shared::Timestamp;
 use crate::store;
+use crate::tools;
 
 #[derive(Parser)]
 #[command(name = "percept")]
@@ -479,8 +481,8 @@ pub fn maps_list(
     let mut maps = Map::fold_all(&scope(args.all_projects, project), &log.load()?)?;
     maps.push(code::build(tree)?);
     match args.format {
-        Format::Json => print_lines(maps.iter().map(store::encode_map)),
-        Format::Md => print_text(&store::catalogue(&maps)),
+        Format::Json => print_lines(maps.iter().map(mapstore::encode_map)),
+        Format::Md => print_text(&mapstore::catalogue(&maps)),
     }
 }
 
@@ -492,7 +494,7 @@ pub fn maps_show(
     log: &dyn EventLog,
     root: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let map = store::fold_map(log, &args.map, &scope(args.all_projects, root))?;
+    let map = mapstore::fold_map(log, &args.map, &scope(args.all_projects, root))?;
     print_map(map, &args)
 }
 
@@ -515,16 +517,16 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
     };
     let fragment = map.select(&selection)?;
     if !selection.is_whole() {
-        eprintln!("{}", store::encode_fragment(&fragment));
+        eprintln!("{}", mapstore::encode_fragment(&fragment));
     }
     match args.format {
-        Format::Json => print_lines(store::encode_lines(fragment.map())),
-        Format::Md => print_text(&store::markdown(fragment.map())),
+        Format::Json => print_lines(mapstore::encode_lines(fragment.map())),
+        Format::Md => print_text(&mapstore::markdown(fragment.map())),
     }
 }
 
 /// One map change from the shell: `target`'s cited events resolved and
-/// `mutation` checked and applied through `store::revise`, the payload
+/// `mutation` checked and applied through `mapstore::revise`, the payload
 /// committed as actor `user` with no cause, then the map rerendered,
 /// folded fresh from the log so another writer's changes are kept.
 /// Returns the payload, for `add-node` to print the minted id.
@@ -541,9 +543,9 @@ fn write(
         actor,
     } = target;
     let scope = source.scope();
-    let payload = store::revise(log, &map, &scope, &cited, actor, mutation)?;
+    let payload = mapstore::revise(log, &map, &scope, &cited, actor, mutation)?;
     log.append(&Event::new(actor, source.clone(), None, payload.clone()))?;
-    renderer.render(&store::fold_map(log, &map, &scope)?)?;
+    renderer.render(&mapstore::fold_map(log, &map, &scope)?)?;
     Ok(payload)
 }
 
@@ -691,7 +693,7 @@ fn parse_query(args: &SearchArgs) -> Result<EventQuery, String> {
 /// sliced to it instead of the whole event.
 pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
     let (start, end) = args.range.unwrap_or_default();
-    println!("{}", store::read(log, &args.id, start, end)?);
+    println!("{}", tools::read(log, &args.id, start, end)?);
     Ok(())
 }
 

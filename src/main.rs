@@ -13,6 +13,7 @@ mod cli;
 mod code;
 mod core;
 mod harness;
+mod mapstore;
 mod providers;
 mod shared;
 mod store;
@@ -24,11 +25,12 @@ mod tui;
 use crate::core::Actor;
 use app::{App, Harness, MapShape};
 use cli::{Cli, Command, EventsCommand, MapsCommand};
+use mapstore::{LogMaps, MarkdownFiles};
 use providers::{Catalog, ProviderConfig, FIREWORKS_MODEL, OPENAI_MODEL};
-use store::{Jsonl, LogMaps, ReadEvent, ReadMap, ReviseMap, SearchEvents};
+use store::Jsonl;
 use tools::{
-    AskBeforeWrites, Bash, EditFile, FindFiles, GitSnapshot, GrepFiles, ListFiles, ReadFile,
-    Workspace, WriteFile,
+    AskBeforeWrites, Bash, EditFile, FindFiles, GitSnapshot, GrepFiles, ListFiles, ReadEvent,
+    ReadFile, ReadMap, ReviseMap, SearchEvents, Workspace, WriteFile,
 };
 use tui::{Chat, StreamEvent};
 
@@ -534,7 +536,7 @@ async fn main() {
         path: root.clone(),
     };
     let renderer: Arc<dyn crate::core::MapRenderer> =
-        Arc::new(store::MarkdownFiles::new(checkout.join(MAPS_DIR)));
+        Arc::new(MarkdownFiles::new(checkout.join(MAPS_DIR)));
 
     let result = match cli.command {
         Some(Command::Events { command }) => open_log().and_then(|log| match command {
