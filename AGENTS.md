@@ -76,8 +76,13 @@ Both are serde-free.
   `edge.removed` events in the same log. A `Schema` names a map and
   the node and edge kinds it allows, and one line of purpose - what
   the map makes cheap - that the prompt carries in place of the map
-  itself. `decisions` and `tasks` today. Every change goes through `Map::apply`, so
-  the rules live once. `code` is a `Map` too, but folded from the
+  itself. A schema is a TOML file at `.percept/schemas/<name>.toml`,
+  so a session adds a map without a Rust change; `decisions` and
+  `tasks` ship built in as the same TOML, and a project file of the
+  same name replaces one. A kind may list the properties a node must
+  carry - `why` on an option or a task - and the write path refuses a
+  node without them. Every change goes through `Map::apply`, so the
+  rules live once. `code` is a `Map` too, but folded from the
   working tree instead of the log - see `code` below.
 - A node records who added it - `User` or `Model` - and when. A
   user-written node is the human's landmark in a shared map: the model
@@ -142,7 +147,7 @@ it, never sideways or up:
 | Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps`, `ask`, `reflect` - the log and its maps without the TUI. Headless, a call the policy would ask about is declined unless `ask --yes`. |
 | Infrastructure | `providers` | `Ollama` and `OpenAi` - implement `harness::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` carries the key. |
 | Infrastructure | `store` | The JSONL event log - the serde boundary - implements `core::EventLog` and `core::EventSearch`. `event` encodes an event to a log line and back, and reads one out for display. |
-| Infrastructure | `mapstore` | Folds a log-backed cognitive map (`LogMaps`, the `core::MapReader`), revises it, and gives it an external form: `encode_*` to JSON lines, `MarkdownFiles` - the `core::MapRenderer` - to `.percept/`. `main` wraps `LogMaps` to route `code` to the tree walk. |
+| Infrastructure | `mapstore` | Loads the schemas - the built-in TOML plus `.percept/schemas/*.toml` - and folds a log-backed cognitive map (`LogMaps`, the `core::MapReader`), revises it, and gives it an external form: `encode_*` to JSON lines, `MarkdownFiles` - the `core::MapRenderer` - to `.percept/`. `main` wraps `LogMaps` to route `code` to the tree walk. |
 | Infrastructure | `code` | The `code` map: walks the working tree with `ignore`, parses each file with `tree-sitter`, and builds a `Map` of the working tree's files, the symbols they define, and what imports what. `percept maps list` names its node and edge kinds with a line on each; internal code is a `file` keyed by repo-relative path, not by this table's Package column. `maps list`, `maps show`, and `read_map` reach it; it is never folded from the log and never carried in the prompt. |
 | Infrastructure | `tools` | Every tool the model calls. `search_events`, `read_event`, `revise_map`, `read_map` run over the log and its maps through `store` and `mapstore`. `read_file`, `write_file`, `edit_file`, `list_files`, `find_files`, `grep_files` run over a working tree, native over `Workspace` - the one place a path the model gave becomes a real path, refusing any outside the checkout - and `bash`, one `sh -c` at the root with a timeout. The file tools come in under `PERCEPT_TOOLS=code`. `AskBeforeWrites` is the `Policy`; `GitSnapshot` the `Snapshot`, a commit under `refs/percept/snapshots/<prompt>` built through a scratch index. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |

@@ -94,6 +94,35 @@ percept maps add-edge tasks --actor model --kind resolves \
 Open on `.percept/tasks.md` before planning, so the next item is picked
 rather than re-derived; add the outcome at commit.
 
+## Add a map
+
+A map is declared by a TOML file at `.percept/schemas/<name>.toml`;
+the next `percept maps` command folds it, and the first write renders
+it to `.percept/<name>.md`. Kinds are lowercase, each with a gloss a
+reader meets in `maps list --format md`, and a node kind may list the
+properties a node must carry. `headlines` names the kinds the prompt
+carries; `settles` names the pair a `resolves` edge joins.
+
+```toml
+name = "glossary"
+purpose = "what a term means in this project, so a word is not redefined"
+headlines = ["term"]
+
+[[nodes]]
+name = "term"
+gloss = "a word and the meaning this project gives it, in its `meaning` property"
+requires = ["meaning"]
+
+[[edges]]
+name = "relates"
+gloss = "from a term to one it is defined against"
+```
+
+`decisions` and `tasks` are built in as the same TOML; a project file
+of the same name replaces one. `code` cannot be declared: it is walked
+from the tree. Add a row to `.percept/index.md` so a reader finds the
+new map.
+
 ## Revise when meaning changes
 
 Revise when evidence changes what a node means, an exception appears, a
