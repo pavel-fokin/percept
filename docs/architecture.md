@@ -19,6 +19,37 @@ The core adds three things a memory lacks:
 The core is what carries those three. Anything that does not is a
 surface.
 
+## The rules
+
+The core is a cognitive architecture in the sense of constraints on
+what cognition may write and read, not of a processing loop. SOAR and
+ACT-R prescribe how thinking proceeds; this does not. The loop is a
+surface's, and any model or client may run it. The core is the rules,
+and everything else is built around them.
+
+| Rule | Enforced by |
+|---|---|
+| Experience is append-only and never changes. | The log store. |
+| A claim in a map cites the experience it came from. | `source` required on every map event. |
+| A map is folded deterministically from cognitive commits, and the fold has one implementation. | `Map::apply` in Rust. Nothing stops a second fold yet. |
+| The model never removes what a user wrote; a decision is superseded, never deleted. | `Map::apply` refuses; `revise_map` says to supersede. |
+| An alternative is recorded only with the reason it lost. | The shared write path refuses an option without a why. |
+| A recorded claim is not the human's agreement; silence stays claimed. | Prose only. The surface below is the enforcement, not built. |
+| percept never ranks, summarises, or answers; output is constant-size per event. | Prose, and the habit of the search tools. |
+| One log, one writer. | `App::commit` for the loop; the CLI writes on its own. |
+
+A rule enforced only in prose is a value, not a constraint. Each such
+row is either a task, to give it a refusal in code, or an honest label
+as a value the surfaces are asked to keep. Both are fine; mixing them
+is what erodes a rule set.
+
+A rule enters the core only when a surface cannot be trusted to keep
+it, and it pays its way against one of the three budgets or one of the
+three claims. The window, the tool policy, the render, and the `code`
+map fail that test and sit outside. Schemas as data and the lifecycle
+are mechanism rather than rule, and are in the core only because the
+rules need something to attach to.
+
 ## The core
 
 Small: events, maps, and the rules between them.
