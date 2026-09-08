@@ -71,6 +71,10 @@ pub struct Schema {
 pub struct Kind {
     pub name: String,
     pub gloss: String,
+    /// The properties a new node of this kind must carry - `why` on an
+    /// option or a task. Checked on a write, never on a fold, so what
+    /// was recorded before the rule still folds.
+    pub requires: Vec<String>,
 }
 
 impl Kind {
@@ -78,7 +82,13 @@ impl Kind {
         Self {
             name: name.to_string(),
             gloss: gloss.to_string(),
+            requires: Vec::new(),
         }
+    }
+
+    fn requiring(mut self, property: &str) -> Self {
+        self.requires.push(property.to_string());
+        self
     }
 }
 
@@ -117,6 +127,9 @@ pub const TASK: &str = "task";
 /// What became of a task: done, with the commit it landed in, or
 /// dropped, with the reason.
 pub const OUTCOME: &str = "outcome";
+/// The property that carries a node's reason: on a decision, a
+/// rejected option, and a task alike.
+const WHY: &str = "why";
 
 /// The decision map: what was asked, what was weighed, what was chosen
 /// and on what grounds. An option `answers` its question, evidence
@@ -134,7 +147,8 @@ pub fn decisions() -> Schema {
             Kind::new(
                 OPTION,
                 "an alternative that was weighed and lost, saying why in its `why` property",
-            ),
+            )
+            .requiring(WHY),
             Kind::new("evidence", "a fact that supports or contradicts an option"),
             Kind::new(DECISION, "the choice that was made, and the grounds for it"),
         ],
@@ -167,7 +181,8 @@ pub fn tasks() -> Schema {
             Kind::new(
                 TASK,
                 "one piece of work left to do, saying why it matters in its `why` property",
-            ),
+            )
+            .requiring(WHY),
             Kind::new(
                 OUTCOME,
                 "what became of a task: done with its commit, or dropped with the reason",
@@ -236,6 +251,11 @@ impl Schema {
     /// its nodes have no history: no writer, no moment they were added.
     pub fn is_derived(&self) -> bool {
         is_derived(&self.name)
+    }
+
+    /// The node kind `name` names, when the schema has it.
+    pub fn node_kind(&self, name: &str) -> Option<&Kind> {
+        self.node_kinds.iter().find(|kind| kind.name == name)
     }
 
     /// The node kind names, in schema order.

@@ -18,7 +18,7 @@ pub use event_log::EventLog;
 pub use map::{decisions, tasks, SUPERSEDES};
 pub use map::{
     code, map_of, schemas, Edge, Fragment, Kind, Map, MapError, Mutation, Node, NodeId, NodeRef,
-    Schema, Scope, Selection, DECISION, OPTION, TASK,
+    Schema, Scope, Selection, DECISION,
 };
 pub use map_reader::MapReader;
 pub use render::MapRenderer;

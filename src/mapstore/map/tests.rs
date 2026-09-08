@@ -48,7 +48,8 @@ fn an_option_without_a_why_is_refused_as_a_new_write() {
     .unwrap()
     .to_string();
 
-    assert!(err.contains("why it lost"), "{err}");
+    assert!(err.contains("lacks its `why` property"), "{err}");
+    assert!(err.contains("weighed and lost"), "{err}");
 }
 
 #[test]
@@ -67,6 +68,7 @@ fn a_task_without_a_why_is_refused_as_a_new_write() {
     .unwrap()
     .to_string();
 
+    assert!(err.contains("lacks its `why` property"), "{err}");
     assert!(err.contains("why it matters"), "{err}");
 }
 

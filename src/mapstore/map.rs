@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::core::{
     Actor, Edge, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation, Node, NodeId,
-    NodeRef, Payload, Schema, Scope, OPTION, TASK,
+    NodeRef, Payload, Schema, Scope,
 };
 use crate::shared::Timestamp;
 use crate::store::{ids, parse_event_id};
@@ -119,28 +119,23 @@ pub fn revise(
     } = &mutation
     {
         let schema = snapshot.map().schema();
-        if schema.name == "decisions" && kind == OPTION && !properties.contains_key(WHY) {
-            return Err(format!(
-                "option {name:?} does not say why it lost: an option is an alternative that \
-                 was rejected, and its `why` property carries the reason; the pick is the \
-                 decision itself"
-            )
-            .into());
-        }
-        if schema.name == "tasks" && kind == TASK && !properties.contains_key(WHY) {
-            return Err(format!(
-                "task {name:?} does not say why it matters: its `why` property carries what \
-                 it costs to leave undone, which is how the next session weighs it"
-            )
-            .into());
+        if let Some(node_kind) = schema.node_kind(kind) {
+            if let Some(property) = node_kind
+                .requires
+                .iter()
+                .find(|property| !properties.contains_key(*property))
+            {
+                return Err(format!(
+                    "{kind} {name:?} lacks its `{property}` property, which every {kind} \
+                     carries: {}",
+                    node_kind.gloss
+                )
+                .into());
+            }
         }
     }
     Ok(snapshot.apply(mutation, actor)?)
 }
-
-/// The property that carries a node's reason: on a decision, a
-/// rejected option, and a task alike.
-const WHY: &str = "why";
 
 #[derive(Serialize)]
 struct MapLine<'a> {

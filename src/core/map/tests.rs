@@ -669,6 +669,14 @@ fn every_kind_of_every_schema_carries_a_gloss() {
 }
 
 #[test]
+fn an_option_and_a_task_require_a_why_and_a_question_requires_nothing() {
+    assert_eq!(decisions().node_kind("option").unwrap().requires, ["why"]);
+    assert_eq!(tasks().node_kind("task").unwrap().requires, ["why"]);
+    assert!(decisions().node_kind("question").unwrap().requires.is_empty());
+    assert!(decisions().node_kind("glossary").is_none());
+}
+
+#[test]
 fn the_code_package_gloss_says_it_is_an_external_crate() {
     let schema = code();
     let package = schema
