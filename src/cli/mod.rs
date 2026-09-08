@@ -3,8 +3,10 @@
 //! `percept events show` dereferences one event by id, `percept maps`
 //! folds a cognitive map from the log and prints it - except `code`,
 //! walked fresh from the working tree - `percept ask` runs one full
-//! turn - including the tool loop - and prints the reply, and `percept
-//! reflect` runs one asking the model to revise its maps. A
+//! turn - including the tool loop - and prints the reply, `percept
+//! reflect` runs one asking the model to revise its maps, and `percept
+//! hook <client>` records one coding client's turn from the hook JSON
+//! it reads on stdin - see `hook`. A
 //! presentation-layer peer of `tui` - it forwards parsed input to
 //! `store` and `app`, and has no chat logic of its own: `ask` drives the
 //! same `AppService` turn policy `tui` does, just inline instead of over
@@ -52,8 +54,9 @@ without it: `events publish` appends one event, `events search` and \
 `events show` query it, `maps list` and `maps show` print a cognitive \
 map folded from it - `code`, the map of files and imports, is walked \
 fresh from the working tree instead - `ask` runs one full turn and \
-prints the reply, and `reflect` runs one turn asking the model to \
-revise its maps.")]
+prints the reply, `reflect` runs one turn asking the model to \
+revise its maps, and `hook <client>` records one coding client's turn \
+from the hook JSON it reads on stdin.")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -76,6 +79,10 @@ pub enum Command {
     Ask(AskArgs),
     /// Run one turn asking the model to revise its maps from the log.
     Reflect,
+    /// Record one coding client's turn from the hook JSON it sends on
+    /// stdin. Never fails the client's turn: an error prints to
+    /// stderr and still exits with a JSON object on stdout.
+    Hook(hook::HookArgs),
 }
 
 #[derive(Subcommand)]
@@ -791,6 +798,9 @@ fn print_reply(reply: &str) -> Result<(), Box<dyn std::error::Error>> {
 fn parse_time(flag: &str, s: &str) -> Result<Timestamp, String> {
     store::parse_time(s).map_err(|_| format!("invalid --{flag} value {s}"))
 }
+
+pub mod hook;
+pub use hook::HookArgs;
 
 #[cfg(test)]
 mod tests;

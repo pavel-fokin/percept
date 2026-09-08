@@ -24,9 +24,10 @@ mod tui;
 
 use crate::core::Actor;
 use app::{App, Harness, MapShape};
-use cli::{Cli, Command, EventsCommand, MapsCommand};
+use cli::{Cli, Command, EventsCommand, HookArgs, MapsCommand};
 use mapstore::{LogMaps, MarkdownFiles};
 use providers::{Catalog, ProviderConfig, FIREWORKS_MODEL, OPENAI_MODEL};
+use serde_json::Value;
 use store::Jsonl;
 use tools::{
     AskBeforeWrites, Bash, EditFile, FindFiles, GitSnapshot, GrepFiles, ListFiles, ReadEvent,
@@ -41,6 +42,11 @@ const HOME_VAR: &str = "PERCEPT_HOME";
 /// The event log's file name under `PERCEPT_HOME`. One log for every
 /// project: an event's `source.path` says which one it came from.
 const LOG_FILE: &str = "percept.jsonl";
+
+/// Where `percept hook` keeps one file per turn - beside the log, so a
+/// hook running from any checkout finds the same state a moment later
+/// reads back.
+const HOOK_SESSIONS_DIR: &str = "hook-sessions";
 
 /// Names the provider that answers: `ollama` (the default), `openai`,
 /// or `fireworks`.
@@ -213,6 +219,32 @@ fn open_log() -> Result<Jsonl, Box<dyn std::error::Error>> {
     Ok(Jsonl::open(log_path()?)?)
 }
 
+/// Runs `percept hook`, reading the client's JSON off stdin and
+/// printing the JSON object it prescribes back on stdout - `{}` unless
+/// the event asks for something. Never lets an error reach the
+/// client's turn: prints it to stderr as `percept hook: <error>` and
+/// exits 1, the JSON on stdout either way.
+fn run_hook(args: HookArgs) {
+    let result: Result<Value, Box<dyn std::error::Error>> = open_log().and_then(|log| {
+        let sessions = log_path()?
+            .parent()
+            .expect("log path has a parent")
+            .join(HOOK_SESSIONS_DIR);
+        let mut stdin = std::io::stdin().lock();
+        cli::hook::run(&args.client, &mut stdin, &log, &sessions)
+    });
+    match result {
+        Ok(output) => {
+            println!("{output}");
+        }
+        Err(err) => {
+            eprintln!("percept hook: {err}");
+            println!("{{}}");
+            std::process::exit(1);
+        }
+    }
+}
+
 /// The checkout the current directory is in: the first ancestor of cwd
 /// holding a `.git` or `.percept` entry - a repository, or a directory
 /// percept has already rendered maps into. The search stops at `$HOME`
@@ -225,7 +257,15 @@ fn open_log() -> Result<Jsonl, Box<dyn std::error::Error>> {
 /// still stops the walk and two writers started from a symlinked path
 /// get the same root.
 fn checkout_root() -> std::io::Result<PathBuf> {
-    let cwd = std::env::current_dir()?.canonicalize()?;
+    root_for(&std::env::current_dir()?)
+}
+
+/// `checkout_root`'s search, rooted at `cwd` instead of the process's
+/// own current directory: `percept hook` runs it against the client's
+/// `cwd`, since the process's own may be anywhere the client's shell
+/// happened to start it from.
+fn root_for(cwd: &Path) -> std::io::Result<PathBuf> {
+    let cwd = cwd.canonicalize()?;
     let home = std::env::var_os("HOME")
         .map(PathBuf::from)
         .and_then(|home| home.canonicalize().ok());
@@ -521,6 +561,15 @@ async fn try_main(
 async fn main() {
     let cli = Cli::parse();
 
+    // The hook never uses the process's own cwd or project root: its
+    // `cwd` comes from the client's JSON, one field among others `run`
+    // reads, so it is handled before `checkout_root` runs against this
+    // process's own directory.
+    if let Some(Command::Hook(args)) = cli.command {
+        run_hook(args);
+        return;
+    }
+
     // `root` is the project a `Source` names and a `Scope` compares;
     // `checkout` is where the files are. They differ only in a linked
     // worktree, where the map is shared but its render, and the code
@@ -603,6 +652,8 @@ async fn main() {
             )
             .await
         }
+        // Handled above, before `checkout_root` ran.
+        Some(Command::Hook(_)) => unreachable!(),
     };
 
     if let Err(err) = result {
