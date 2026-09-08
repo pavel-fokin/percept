@@ -40,19 +40,23 @@ Code and Codex are wired today.
 | `AGENTS.md` | `CLAUDE.md` imports it | Loaded directly |
 | `.agents/skills/` | `.claude/skills/` symlinks | Discovered directly |
 | `.agents/agents/software-developer.md` | `.claude/agents/software-developer.md` | `.codex/agents/software-developer.toml` |
-| `scripts/agent-hook.py` | `.claude/settings.json` | `.codex/hooks.json` |
+| `percept hook <client>` | `.claude/settings.json` | `.codex/hooks.json` |
 
 To add a client, point its skill discovery at `.agents/skills` and its
-hooks at `scripts/agent-hook.py <client-name>`. The script records every
-event under that name as its source, so `percept events search --source
+hooks at `percept hook <client-name>`. The binary records every event
+under that name as its source, so `percept events search --source
 <client-name>` reads one client's history. It reads the hook input
 shape Claude Code and Codex share; a client that sends another shape
-needs a small translation in the script, not a script of its own.
+needs a small translation in `src/cli/hook.rs`, not a hook of its own.
 
-Install the binary with `scripts/install.sh`. Hooks need Python 3 and
-Git. Open the client from this checkout and trust the repository.
-In Codex, use `/hooks` to review and trust the three capture hooks.
-Restart an existing client session to load the project configuration.
+Install the binary with `scripts/install.sh`, which puts `percept` on
+PATH; the hooks find it there. `percept init claude-code` or `percept
+init codex` writes the client's three hook entries into the checkout,
+and for Claude Code also allows `percept maps` and `percept events`
+without a permission prompt. Both files are committed here already.
+Open the client from this checkout and trust the repository. In Codex,
+use `/hooks` to review and trust the three capture hooks. Restart an
+existing client session to load the project configuration.
 See the official [Codex hooks](https://learn.chatgpt.com/docs/hooks) and
 [skills](https://learn.chatgpt.com/docs/build-skills) documentation.
 
@@ -67,11 +71,8 @@ The hooks capture user prompts, completed tool calls and results, and
 the final reply. A prompt hook returns its event ID for later citations.
 Each client keeps its own source name, `claude-code` or `codex`.
 A capture error is printed to stderr and the hook exits non-zero, which
-is how the client shows it; the turn continues. A missing binary
-disables capture and writes nothing. Events before hooks were enabled
-are not imported automatically. A payload longer than the operating
-system allows for one argument cannot be published this way; the hook
-reports that error and the log keeps the tool call without its result.
+is how the client shows it; the turn continues. Events before hooks
+were enabled are not imported automatically.
 
 ## Comparing worktrees
 
@@ -81,14 +82,13 @@ of the shared log, launch the client with a separate state directory:
 ```sh
 cargo build --offline
 export PERCEPT_HOME="$PWD/.percept"
-export PERCEPT_BIN="$PWD/target/debug/percept"
 export PATH="$PWD/target/debug:$PATH"
 codex
 # Or:
 claude
 ```
 
-Without `PERCEPT_BIN`, hooks use `~/.percept/bin/percept`. The example
+The hooks run whichever `percept` is first on PATH, so the example
 uses this branch's binary independently of the state directory. Session
 causation is isolated by client, checkout, session, and turn where the
 client supplies it.

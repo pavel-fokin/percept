@@ -1,23 +1,12 @@
 {
   "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/agent-hook.py\" codex",
-            "timeout": 20
-          }
-        ]
-      }
-    ],
     "PostToolUse": [
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/agent-hook.py\" codex",
-            "timeout": 20
+            "command": "percept hook codex",
+            "timeout": 20,
+            "type": "command"
           }
         ]
       }
@@ -26,9 +15,20 @@
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/agent-hook.py\" codex",
-            "timeout": 20
+            "command": "percept hook codex",
+            "timeout": 20,
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "percept hook codex",
+            "timeout": 20,
+            "type": "command"
           }
         ]
       }

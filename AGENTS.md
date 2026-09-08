@@ -163,12 +163,12 @@ Codex - so the setup in this repo is client-neutral. (percept's own
 coding agent, `percept-code`, is a fourth surface, not a client: it
 reaches the log through the harness, not the CLI.) Instructions live in
 `AGENTS.md`, skills in `.agents/skills`, the subagent body in
-`.agents/agents`, and event capture in `scripts/agent-hook.py`, which
-takes the client's name as its argument and records under it as the
-source. A client's own folder - `.claude`, `.codex` - holds only
-discovery metadata and the commands that call the shared files: a
-symlink, a settings file, an adapter. A new client costs an adapter,
-never a copy. A rule only one client can follow is not a rule of this
+`.agents/agents`, and event capture in the binary as `percept hook
+<client>`, which records under the client's name as the source. A
+client's own folder - `.claude`, `.codex` - holds only discovery
+metadata and the commands that call the shared files: a symlink, a
+settings file that `percept init <client>` writes, an adapter. A new
+client costs an adapter, never a copy. A rule only one client can follow is not a rule of this
 repo.
 
 ## Workflow
