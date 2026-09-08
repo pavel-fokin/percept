@@ -42,7 +42,7 @@ const PARAMETERS: &str = r#"{
     "since": {"type": "string", "description": "lower bound, inclusive: ISO-8601, or 1d/2h/30m back from now"},
     "until": {"type": "string", "description": "upper bound, exclusive: ISO-8601, or 1d/2h/30m back from now"},
     "actors": {"type": "array", "items": {"type": "string", "enum": ["user", "model", "system"]}},
-    "sources": {"type": "array", "items": {"type": "string"}, "description": "the writer that produced the event, e.g. percept-tui or claude-code"},
+    "sources": {"type": "array", "items": {"type": "string"}, "description": "the writer that produced the event, e.g. percept-code or claude-code"},
     "kinds": {"type": "array", "items": {"type": "string", "enum": ["message.received", "thought.recorded", "tool.called", "tool.resulted", "node.added", "node.removed", "edge.added", "edge.removed", "model.called"]}},
     "contains": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "a substring, case-insensitive, that one of the event's payload strings must carry; any of the values matches"},
     "size": {"type": "integer", "description": "keep only the N most recent matches"},

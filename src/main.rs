@@ -44,8 +44,10 @@ const LOG_FILE: &str = "percept.jsonl";
 /// or `fireworks`.
 const PROVIDER_VAR: &str = "PERCEPT_PROVIDER";
 
-/// Source name the TUI stamps on every event it commits.
-const TUI_SOURCE_NAME: &str = "percept-tui";
+/// Source name percept's own coding agent stamps on every event it
+/// commits - `claude-code` and `codex` are the other coding agents,
+/// each reaching the log a different way.
+const CODE_SOURCE_NAME: &str = "percept-code";
 
 /// Source name the headless `ask`/`reflect` turns and the `maps` write
 /// verbs stamp.
@@ -353,7 +355,7 @@ fn resolve_toolset(
     configured: Option<&str>,
     snapshot_ok: bool,
 ) -> Result<Toolset, Box<dyn std::error::Error>> {
-    let default = if source_name == TUI_SOURCE_NAME && snapshot_ok {
+    let default = if source_name == CODE_SOURCE_NAME && snapshot_ok {
         "code"
     } else {
         "maps"
@@ -586,7 +588,7 @@ async fn main() {
         None => {
             try_main(
                 crate::core::Source {
-                    name: TUI_SOURCE_NAME.to_string(),
+                    name: CODE_SOURCE_NAME.to_string(),
                     path: root,
                 },
                 renderer,

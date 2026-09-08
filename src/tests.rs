@@ -4,7 +4,7 @@ use std::sync::Arc;
 use tempfile::tempdir;
 
 use super::{
-    discover_root, resolve_toolset, LogMaps, ReadMap, RoutedMaps, Toolset, TUI_SOURCE_NAME,
+    discover_root, resolve_toolset, LogMaps, ReadMap, RoutedMaps, Toolset, CODE_SOURCE_NAME,
 };
 use crate::core::testing::{scope, FakeLog};
 use crate::core::MapReader;
@@ -13,7 +13,7 @@ use crate::harness::Tool;
 #[test]
 fn tui_in_a_git_checkout_defaults_to_code_tools() {
     assert!(matches!(
-        resolve_toolset(TUI_SOURCE_NAME, None, true),
+        resolve_toolset(CODE_SOURCE_NAME, None, true),
         Ok(Toolset::Code)
     ));
 }
@@ -21,7 +21,7 @@ fn tui_in_a_git_checkout_defaults_to_code_tools() {
 #[test]
 fn tui_without_a_git_checkout_defaults_to_maps_tools() {
     assert!(matches!(
-        resolve_toolset(TUI_SOURCE_NAME, None, false),
+        resolve_toolset(CODE_SOURCE_NAME, None, false),
         Ok(Toolset::Maps)
     ));
 }
@@ -37,7 +37,7 @@ fn headless_source_defaults_to_maps_tools() {
 #[test]
 fn explicit_toolset_overrides_client_default() {
     assert!(matches!(
-        resolve_toolset(TUI_SOURCE_NAME, Some("maps"), true),
+        resolve_toolset(CODE_SOURCE_NAME, Some("maps"), true),
         Ok(Toolset::Maps)
     ));
     assert!(matches!(
@@ -48,7 +48,7 @@ fn explicit_toolset_overrides_client_default() {
 
 #[test]
 fn unknown_toolset_is_rejected() {
-    assert!(resolve_toolset(TUI_SOURCE_NAME, Some("unknown"), true).is_err());
+    assert!(resolve_toolset(CODE_SOURCE_NAME, Some("unknown"), true).is_err());
 }
 
 #[test]

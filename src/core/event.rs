@@ -18,7 +18,7 @@ pub struct Usage {
     pub cached_tokens: Option<u64>,
 }
 
-/// The writer that produced an event - `percept-tui`, `percept-cli`,
+/// The writer that produced an event - `percept-code`, `percept-cli`,
 /// `claude-code` - and where it ran from. `path` is that writer's
 /// project root, so two projects using the same tool are still told
 /// apart, and a search can filter by `name` alone.
