@@ -21,11 +21,12 @@ surface.
 
 ## The rules
 
-The core is a cognitive architecture in the sense of constraints on
-what cognition may write and read, not of a processing loop. SOAR and
-ACT-R prescribe how thinking proceeds; this does not. The loop is a
-surface's, and any model or client may run it. The core is the rules,
-and everything else is built around them.
+The core is cognitive rails: constraints on what cognition may write
+and read. It is not a cognitive architecture in the SOAR or ACT-R
+sense, which prescribes how thinking proceeds, and not a guardrail on
+what the model says. The loop is a surface's, and any model or client
+may run it. The core is the rules, and everything else is built around
+them.
 
 | Rule | Enforced by |
 |---|---|
@@ -72,23 +73,24 @@ Three things belong here that the code does not have yet.
   between which states: `resolves` makes a question settled,
   `supersedes` makes a decision past. The fold derives the state; the
   renderer stops branching on kind names.
-- **The surface between two cognitions.** Below.
+- **The surface between contours.** Below.
 
-### Two contours, one surface
+### Contours of two kinds, one surface
 
-Two cognitions share a map: the agent's and the human's. Each is a
-contour with its own boundary, and the boundaries differ in kind. The
-agent's contour is inside the log: what it searched, what it wrote,
-why. The human's is mostly outside it: their head, their notes, what
-they said elsewhere. Only what they type crosses in. One cognition is
-transparent to the system and the other is opaque, and the core models
-the human no further than what crosses.
+Several cognitions share a map: the agents that write to the log, and
+the humans who work with them. Each is a contour with its own boundary,
+and the boundaries come in two kinds. An agent's contour is inside the
+log: what it searched, what it wrote, why. A subagent is a contour of
+its own. A human's contour is mostly outside the log: their head, their
+notes, what they said elsewhere. Only what they type crosses in. One
+kind is transparent to the system and the other opaque, and the core
+models a human no further than what crosses.
 
-The surface is where the two meet: the nodes both contours have
+The surface is where contours meet: the nodes more than one has
 touched. The rule "a recorded claim is not the human's agreement" names
-it, but today it has no operation behind it. A user-written node is the
-human's, a model node is the agent's, and a model node the human has
-read and not objected to is in limbo.
+it, but today it has no operation behind it. A user-written node is a
+human's, a model node is an agent's, and a model node a human has read
+and not objected to is in limbo.
 
 The mechanism is one edge and one derived state, and it is the core's,
 not any one map's. Every schema carries it, the way every schema
@@ -96,8 +98,12 @@ carries an actor on a node.
 
 | Piece | What it is |
 |---|---|
-| `confirms`, `disputes` | An edge from a user to a node the model wrote. An event like any other: it cites its prompt and never changes. |
-| Standing | Derived by the fold: claimed, confirmed, disputed. A user-written node is confirmed by construction. |
+| `confirms`, `disputes` | An edge from a human contour to a node another contour wrote. An event like any other: it cites its prompt and never changes. |
+| Standing | Derived by the fold, per confirmer: claimed, confirmed by whom, disputed by whom. A user-written node is confirmed by its writer by construction. |
+
+Only a human contour confirms. An agent confirming another agent's node
+is a second claim from inside the log, and the rule exists for the
+cognition whose head is outside it.
 
 Standing is a lifecycle keyed by actor, where the lifecycle above is
 keyed by edge kind; the two compose. A render shows standing where it
@@ -105,13 +111,17 @@ matters, on a decision or a task, and not on evidence. Silence stays
 claimed, never rejected. Confirmation must cost a keystroke or a batch,
 or the human stops giving it and the state means nothing.
 
-The maps do not split by contour. One map per cognition doubles what a
+Who a human contour is stays open. The core has an actor kind for the
+human and no identity behind it. Standing per confirmer needs one only
+when a second person confirms, and the question waits for that person.
+
+The maps do not split by contour. One map per contour multiplies what a
 reader holds for a distinction the fold derives, so the contour is a
 view over one map and never a storage boundary. The mixing today is
 right; the surface becomes visible when it gets its one missing edge.
 
 This is what makes co-ownership an operation rather than a rule:
-agreement with provenance between two cognitions.
+agreement with provenance between contours.
 
 The domain is now two modules. `core` holds experience and maps; `harness`
 holds the ports a loop needs to drive a model over them - `Model`, `Tool`,
