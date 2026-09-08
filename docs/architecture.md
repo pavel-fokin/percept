@@ -1,0 +1,168 @@
+# The core and its surfaces
+
+A proposal, written 2026-09-08. It names what percept's core is, what
+sits outside it, and how the outside reaches it. `docs/harness.md`
+designs one surface, the native agent; this document is the level
+above it. Nothing here changes behaviour on its own.
+
+## The claim
+
+percept's value is not memory. Every coding client now keeps one.
+The core adds three things a memory lacks:
+
+| Property | What it means | Where it lives today |
+|---|---|---|
+| Evidence | A claim in a map cites the experience it came from. A reader can check it. | `source` on every node and edge event. |
+| Co-ownership | A map is shared by the human and the agent under landmark rules: a user-written node is never removed by the model, a decision is superseded and never deleted. | `Map::apply`; the `actor` on a node. |
+| One log | The log spans clients and projects. What one agent learned another can fold. | `~/.percept/percept.jsonl`, `Source` on every event. |
+
+The core is what carries those three. Anything that does not is a
+surface.
+
+## The core
+
+Small: events, maps, and the rules between them.
+
+| Part | Holds |
+|---|---|
+| Event | An append-only entry: id, actor, source, causation, time, payload. Never changes. |
+| Map, Schema | Nodes and edges folded from `node.added`, `edge.added` and their removals. A schema names the kinds it allows and one line of purpose. |
+| Rules | Who may remove what; an option needs a why; a decision is superseded, never removed. One place, `Map::apply`. |
+| Selection, Fragment | A cut of a map around a node, since an instant, of some kinds, with counts of what the cut left out. |
+| Ports | Append, load, search the log; read and render a map. |
+| Format | The JSONL line. The contract every language speaks. |
+
+Two things belong here that the code does not have yet.
+
+- **Schemas as data.** `decisions` and `tasks` are declared in Rust. A
+  surface that wants a glossary map needs a Rust change. The core folds
+  any schema it is handed.
+- **Lifecycle on a schema.** A schema says which edge kinds move a node
+  between which states: `resolves` makes a question settled,
+  `supersedes` makes a decision past. The fold derives the state; the
+  renderer stops branching on kind names.
+
+Two things sit in the core's module today and must leave it.
+
+- **The harness ports.** `Model`, `Tool`, `Snapshot`, and the policy that
+  asks before a tool runs. They are a harness's, not experience's. A
+  Python SDK that folds a map must never see a `Model` trait.
+- **The word policy.** The core keeps one policy, the collaboration
+  rule. The harness's ask-before-write rule takes another name.
+
+The `code` map is a surface feature. It folds a working tree and not
+the log, so it goes with the coding surfaces and reaches the core
+through the `MapReader` port as it does now.
+
+## The surfaces
+
+Each depends on the core and never on another surface. Each brings
+the practice of its own field.
+
+| Surface | Reaches the core through | Brings from its field |
+|---|---|---|
+| Skills and hooks for a coding client | The `percept` CLI: `events`, `maps`. Instructions in `AGENTS.md`, skills under `.agents`, a hook per client. | The client's conventions: instruction files, skill formats, hook shapes. |
+| Native agent | The harness: context sections over the log, map tools, tool policy, snapshot. | Harness practice: prefix caching, subagents, permission modes, undo. |
+| Web application | A server over the ports; the render as a page. | Sessions, sharing, review of a map by more than one person. |
+| Python and TypeScript SDKs | The format, and the one fold reached through the CLI now and WASM or a C ABI later. | Idiomatic APIs. Thin: write events, call the fold, read fragments. |
+
+The fold has one implementation, in Rust. An SDK that reimplements it
+drifts. The JSONL line is the interface to version.
+
+```
+     skills · hooks      native agent      web app      SDKs
+           │                  │              │            │
+           │ CLI              │ harness      │ server     │ format · fold
+           ▼                  ▼              ▼            ▼
+    ┌───────────────────────────────────────────────────────────┐
+    │ core                                                      │
+    │   Event · Map · Schema · rules · Selection · ports        │
+    │   the JSONL format                                        │
+    └───────────────────────────────────────────────────────────┘
+                             │
+                             ▼
+                    ~/.percept/percept.jsonl
+```
+
+## Crates and targets
+
+The module layering enforces the dependency direction already, so a
+workspace split is mechanical once the boundaries are true. It waits
+for a second consumer: a crate boundary with one consumer is cost with
+no check.
+
+| Crate | Holds | Exists when |
+|---|---|---|
+| `percept-core` | Event, Map, Schema, fold, rules, Selection, the format. | The lib target is clean of harness ports. |
+| `percept-harness` | Context, tools, tool policy, providers, snapshot, `code`. | The web app or an SDK needs the core without it. |
+| `percept` binary | CLI and TUI over both. | Now. |
+| `percept-wasm` or FFI | The fold for SDKs and the browser. | The first SDK. |
+
+The step that costs nothing and tests the shape is a library target
+beside the binary, with the harness ports moved out of the core
+module. If the lib holds no model, no tool, and no tree, the core is
+what this document describes.
+
+## Validation
+
+The two directions test different claims.
+
+| Direction | Tests | Cost | Confound |
+|---|---|---|---|
+| Skill | Whether shared maps are worth their upkeep to a human and agent pair, with the strongest model doing the cognition. | Low: it runs on every session anyway. | The client's own memory does part of the job. |
+| Native agent | Whether the log as environment beats a transcript: the model searches what it cannot hold. | High. | A weak harness fails for reasons that are not the core's. |
+
+A check for each:
+
+- **Skill.** Over a run of sessions, count decisions reopened and plan
+  steps re-derived, with the map in `AGENTS.md` and without it. Count
+  how often the human corrects a node the model wrote, and what the
+  correction cost. A core that helps shows fewer reopenings and cheap
+  corrections.
+- **Native agent.** A task whose answer sits past the window. Watch
+  whether the model reaches for `search_events` or `read_event` and
+  lands it, against a raw transcript of the same length. `/context`
+  says whether the prefix held.
+
+A result that shows only "remembering helped" validates memory, not the
+core. The three properties above are what the checks must show.
+
+## Next steps
+
+### Skill direction
+
+1. Run the check on the sessions already happening. A tally per
+   session: reopened, re-derived, corrected. No code.
+2. Fix the two strains it has already shown: the render pulls unmerged
+   branches' nodes, and the map has no budget. Both are open questions
+   in the decisions map.
+3. Schemas as data, so a session can add a map without a Rust change.
+   This is the first core addition the direction asks for.
+
+### Native agent direction
+
+1. Confirm the harness works as designed: cached tokens rise across a
+   tool round, and the window reaches a plan written before a long
+   discussion. Both are open tasks.
+2. Let instructions and maps give way under the budget on a small
+   window, so the loop runs on any model.
+3. Run the past-the-window check. Do not add subagents, plan mode, or
+   permission modes before it passes: they are harness features, and
+   the check is about the core.
+
+### Both
+
+1. The lib target with the harness ports moved out. One refactor, no
+   behaviour change, and the shape of the core becomes checkable.
+2. Lifecycle on schemas, once schemas are data.
+
+## Recommendation
+
+Validate through the skill direction first. Value has already shown
+there, the check costs nothing, and a negative result is about the
+core and not the harness. Keep the native agent as the lab for the one
+claim only it can test, the log as environment. Do not judge the core
+by how the native agent codes until the harness is level with the
+clients. If the skill direction comes back weak on evidence,
+co-ownership, and one log, the core is a memory format with extra
+ceremony, and that is worth knowing before a crate split or an SDK.
