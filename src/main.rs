@@ -22,7 +22,7 @@ mod tests;
 mod tools;
 mod tui;
 
-use app::{App, MapShape};
+use app::{App, Harness, MapShape};
 use cli::{Cli, Command, EventsCommand, MapsCommand};
 use percept::Actor;
 use providers::{Catalog, ProviderConfig, FIREWORKS_MODEL, OPENAI_MODEL};
@@ -444,19 +444,25 @@ fn build_app(
         Arc::new(ReadMap::new(Arc::new(maps))),
     ];
     match build_toolset(&source, checkout)? {
-        Toolset::Maps => App::new(model, catalog, log, tools, renderer, map_shape, source),
+        Toolset::Maps => App::new(
+            model,
+            catalog,
+            log,
+            Harness::new(tools, map_shape),
+            renderer,
+            source,
+        ),
         Toolset::Code => {
             tools.extend(code_tools(checkout)?);
-            let app = App::new(model, catalog, log, tools, renderer, map_shape, source)?
-                .with_policy(Arc::new(AskBeforeWrites))
-                .with_tool_cap(CODE_TOOL_CAP)
-                .with_snapshot(Arc::new(GitSnapshot::open(checkout)?));
-            Ok(
-                match std::fs::read_to_string(checkout.join(INSTRUCTIONS_FILE)) {
-                    Ok(instructions) => app.with_instructions(instructions),
-                    Err(_) => app,
-                },
-            )
+            let instructions = std::fs::read_to_string(checkout.join(INSTRUCTIONS_FILE)).ok();
+            let harness = Harness {
+                policy: Arc::new(AskBeforeWrites),
+                tool_cap: CODE_TOOL_CAP,
+                snapshot: Some(Arc::new(GitSnapshot::open(checkout)?)),
+                instructions,
+                ..Harness::new(tools, map_shape)
+            };
+            App::new(model, catalog, log, harness, renderer, source)
         }
     }
 }

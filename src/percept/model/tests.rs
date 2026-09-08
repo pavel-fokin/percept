@@ -10,7 +10,7 @@ fn text(message: &Message) -> &str {
 
 #[test]
 fn a_thought_recorded_event_is_filtered_out_while_a_neighbouring_message_survives() {
-    let events = vec![
+    let events = [
         Event::message_received(Actor::User, "hi".to_string(), source("tui"), None),
         Event::thought_recorded(
             Actor::Model,
@@ -21,7 +21,7 @@ fn a_thought_recorded_event_is_filtered_out_while_a_neighbouring_message_survive
         Event::message_received(Actor::Model, "done".to_string(), source("tui"), None),
     ];
 
-    let messages = to_messages(&events);
+    let messages: Vec<Message> = events.iter().filter_map(message_of).collect();
 
     assert_eq!(messages.len(), 2);
     assert_eq!(text(&messages[0]), "hi");
@@ -31,13 +31,13 @@ fn a_thought_recorded_event_is_filtered_out_while_a_neighbouring_message_survive
 #[test]
 fn a_model_called_event_is_filtered_out_while_a_neighbouring_message_survives() {
     let usage = usage();
-    let events = vec![
+    let events = [
         Event::message_received(Actor::User, "hi".to_string(), source("tui"), None),
         Event::model_called(usage, source("tui"), None),
         Event::message_received(Actor::Model, "done".to_string(), source("tui"), None),
     ];
 
-    let messages = to_messages(&events);
+    let messages: Vec<Message> = events.iter().filter_map(message_of).collect();
 
     assert_eq!(messages.len(), 2);
     assert_eq!(text(&messages[0]), "hi");
@@ -50,7 +50,7 @@ fn a_map_change_is_filtered_out_while_a_neighbouring_message_survives() {
     use std::collections::BTreeMap;
 
     let node = NodeId::new();
-    let events = vec![
+    let events = [
         Event::message_received(Actor::User, "hi".to_string(), source("tui"), None),
         Event::new(
             Actor::System,
@@ -80,7 +80,7 @@ fn a_map_change_is_filtered_out_while_a_neighbouring_message_survives() {
         Event::message_received(Actor::Model, "done".to_string(), source("tui"), None),
     ];
 
-    let messages = to_messages(&events);
+    let messages: Vec<Message> = events.iter().filter_map(message_of).collect();
 
     assert_eq!(messages.len(), 2);
     assert_eq!(text(&messages[0]), "hi");
@@ -89,7 +89,7 @@ fn a_map_change_is_filtered_out_while_a_neighbouring_message_survives() {
 
 #[test]
 fn a_tool_call_and_its_result_replay_as_tool_messages() {
-    let events = vec![
+    let events = [
         Event::message_received(Actor::User, "search".to_string(), source("tui"), None),
         Event::new(
             Actor::Model,
@@ -110,7 +110,7 @@ fn a_tool_call_and_its_result_replay_as_tool_messages() {
         ),
     ];
 
-    let messages = to_messages(&events);
+    let messages: Vec<Message> = events.iter().filter_map(message_of).collect();
 
     assert_eq!(messages.len(), 3);
     assert!(matches!(messages[0], Message::Text { .. }));
@@ -125,24 +125,4 @@ fn a_tool_call_and_its_result_replay_as_tool_messages() {
         Message::ToolResult { content } => assert_eq!(content, "3 events"),
         _ => panic!("expected a ToolResult message"),
     }
-}
-
-#[test]
-fn a_slice_opening_on_a_tool_result_drops_it() {
-    let events = vec![
-        Event::new(
-            Actor::System,
-            source("tui"),
-            None,
-            Payload::ToolResulted {
-                content: "3 events".to_string(),
-            },
-        ),
-        Event::message_received(Actor::Model, "found it".to_string(), source("tui"), None),
-    ];
-
-    let messages = to_messages(&events);
-
-    assert_eq!(messages.len(), 1);
-    assert_eq!(text(&messages[0]), "found it");
 }

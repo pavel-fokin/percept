@@ -18,9 +18,10 @@ const SPINNER: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "�
 /// activity is context, not dialogue - a peek is enough.
 const TOOL_PREVIEW: usize = 200;
 
-/// Rows the activity row may take. A wrapped error grows it; the cap
-/// keeps a long one from squeezing the transcript off the screen.
-const ACTIVITY_MAX: usize = 4;
+/// Rows the activity row may take. A wrapped error or a `/context`
+/// report grows it; the cap keeps a long one from squeezing the
+/// transcript off the screen.
+const ACTIVITY_MAX: usize = 8;
 
 /// Rows the command suggestion list may take. Caps a long prefix match
 /// - `/` alone, say - from squeezing the transcript off the screen.

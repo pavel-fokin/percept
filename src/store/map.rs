@@ -14,7 +14,7 @@ use crate::percept::{
     NodeRef, Payload, Schema, Scope, DECISIONS, OPTION, TASK, TASKS,
 };
 use crate::shared::Timestamp;
-use crate::store::event::{actor_name, ids};
+use crate::store::event::ids;
 use crate::store::parse_event_id;
 
 /// The map `name` names, folded from every event in `log` that falls
@@ -163,7 +163,7 @@ struct Stamp {
 impl Stamp {
     fn of(map: &Map, actor: Actor, added_at: Timestamp) -> Option<Self> {
         (!map.schema().is_derived()).then(|| Self {
-            actor: actor_name(actor),
+            actor: actor.name(),
             added_at: added_at.to_string(),
         })
     }

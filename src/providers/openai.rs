@@ -159,7 +159,7 @@ enum Item {
 
 /// The domain keeps no id for a tool call, but the API ties a result
 /// to its call by one. Calls are numbered in transcript order and a
-/// result cites the call before it - `to_messages` never yields a
+/// result cites the call before it - `message_of` never yields a
 /// result with no call ahead of it. The reverse happens: a call
 /// another writer logged has no result here, and the API refuses a
 /// call left unanswered, so it replays as the model's text instead.

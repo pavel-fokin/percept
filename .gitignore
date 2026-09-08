@@ -1,5 +1,7 @@
 .env
-/docs
+/docs/*
+!/docs/harness.md
+!/docs/architecture.md
 /target
 /percept.jsonl
 /.percept/percept.jsonl

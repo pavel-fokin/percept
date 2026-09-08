@@ -152,9 +152,7 @@ pub fn encode(event: &percept::Event) -> String {
     serde_json::to_string(&Event::from(event)).expect("store::Event always serializes")
 }
 
-/// Longest string kept whole in a shortened payload, and the `content`
-/// window when a caller names no other.
-pub const PREVIEW_CHARS: usize = 120;
+pub use crate::percept::PREVIEW_CHARS;
 
 /// The payload key `Payload::content` travels under - one name for the
 /// sites that cut or slice it on the wire.
@@ -400,7 +398,7 @@ impl From<&percept::Event> for Event {
 
         Self {
             id: event.id().as_uuid().to_string(),
-            actor: actor_name(event.actor()).to_string(),
+            actor: event.actor().name().to_string(),
             source: Source {
                 name: event.source().name.clone(),
                 path: event.source().path.clone(),
@@ -565,14 +563,6 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
 /// dropped silently.
 fn parse_event_ids(sources: Vec<String>) -> Result<Vec<EventId>, Error> {
     sources.iter().map(|s| parse_event_id(s)).collect()
-}
-
-pub(crate) fn actor_name(actor: Actor) -> &'static str {
-    match actor {
-        Actor::User => "user",
-        Actor::Model => "model",
-        Actor::System => "system",
-    }
 }
 
 pub fn parse_actor(s: &str) -> Result<Actor, Error> {

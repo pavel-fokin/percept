@@ -27,9 +27,24 @@ pub enum Actor {
     System,
 }
 
+impl Actor {
+    /// The word the log, its search, and a prompt use for this actor.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Model => "model",
+            Self::System => "system",
+        }
+    }
+}
+
+/// How much of a long text a reader sees when not shown the whole: a
+/// search hit's preview, and a past tool result in the prompt.
+pub const PREVIEW_CHARS: usize = 120;
+
 /// Event-specific data. One variant per kind of fact the log records.
 /// A variant carries typed fields only when the domain produces or
-/// reads them - `to_messages` needs `content`, so `MessageReceived` is
+/// reads them - `message_of` needs `content`, so `MessageReceived` is
 /// typed; `App` assembles a thought from streamed text, so
 /// `ThoughtRecorded` is; `App` runs the loop that emits `ToolCalled`
 /// and feeds `ToolResulted` back, so both are. A `ToolCalled` from

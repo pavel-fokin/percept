@@ -70,6 +70,10 @@ pub fn handle_key(
             undo(chat);
             Ok(false)
         }
+        (KeyCode::Enter, _) if is_context_command(&chat.current_text()) => {
+            show_context(chat);
+            Ok(false)
+        }
         (KeyCode::Enter, _) => {
             submit(chat, reply_tx)?;
             Ok(false)
@@ -93,12 +97,27 @@ fn is_undo_command(text: &str) -> bool {
     text.trim() == commands::UNDO
 }
 
+fn is_context_command(text: &str) -> bool {
+    text.trim() == commands::CONTEXT
+}
+
 /// Takes the input and puts the tree back, saying so in the activity
 /// row - or saying why not. Nothing reaches the log either way.
 fn undo(chat: &mut Chat) {
     chat.take_input();
     match chat.app.undo() {
         Ok(()) => chat.notice = Some("Working tree restored to before the last turn".to_string()),
+        Err(err) => chat.error = Some(err.to_string()),
+    }
+}
+
+/// Takes the input and puts what the model would be shown right now in
+/// the activity row - or the error, if the log fails to fold. Nothing
+/// reaches the log either way.
+fn show_context(chat: &mut Chat) {
+    chat.take_input();
+    match chat.app.describe_context() {
+        Ok(report) => chat.notice = Some(report),
         Err(err) => chat.error = Some(err.to_string()),
     }
 }

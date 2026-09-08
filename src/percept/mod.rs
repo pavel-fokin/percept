@@ -9,7 +9,7 @@ mod search;
 mod snapshot;
 mod tool;
 
-pub use event::{Actor, Event, EventId, EventKind, Payload, Source};
+pub use event::{Actor, Event, EventId, EventKind, Payload, Source, PREVIEW_CHARS};
 pub use event_log::EventLog;
 #[cfg(test)]
 pub use map::SUPERSEDES;
@@ -19,7 +19,7 @@ pub use map::{
 };
 pub use map_reader::MapReader;
 pub use model::{
-    to_messages, Chunk, Message, Modality, Model, ModelCapabilities, ModelCatalog, ModelDescriptor,
+    message_of, Chunk, Message, Modality, Model, ModelCapabilities, ModelCatalog, ModelDescriptor,
     ModelListing, ModelRequest, Provider, ReplyStream, Usage,
 };
 pub use policy::{AllowAll, Policy, Verdict};

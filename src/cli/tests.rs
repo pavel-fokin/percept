@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::{App, MapShape};
+use crate::app::{App, Harness, MapShape};
 use crate::percept::{self, Payload};
 use crate::testing::{
     content, source, FakeCatalog, FakeLog, FakeRenderer, FakeTool, Scripted, ROOT,
@@ -227,9 +227,8 @@ async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
         Arc::new(model),
         Arc::new(FakeCatalog::default()),
         log.clone(),
-        tools,
+        Harness::new(tools, MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
-        MapShape::Prompt,
         source("cli"),
     )
     .unwrap();
@@ -272,9 +271,8 @@ async fn a_stream_error_ends_the_turn_but_still_commits_partial_text() {
         Arc::new(model),
         Arc::new(FakeCatalog::default()),
         log.clone(),
-        Vec::new(),
+        Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
-        MapShape::Prompt,
         source("cli"),
     )
     .unwrap();
