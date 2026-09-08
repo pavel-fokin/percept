@@ -531,6 +531,8 @@ note: "Not decided. The core has an actor kind for the human and no identity beh
   why: "a dev build keeps it in the checkout with its log; one rule says where percept's local data goes"
 - weighed "$PERCEPT_HOME/hook-sessions, as the Python hook kept it" (model)
   why: "the script could not ask the binary where the log was, so it kept its own default; the binary knows"
+- weighed "a hash of client, root, session and turn as the state file's name" (model)
+  why: "std's DefaultHasher is unspecified across toolchains, so two builds mid-turn disagree and orphan the file; a readable path under hook-sessions/<root>/<client>-<session>-<turn> needs no hash; built and replaced 2026-09-08"
 
 ## "Where does percept init write a client's config?" (model)
 

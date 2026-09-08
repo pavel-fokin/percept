@@ -14,6 +14,9 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "say in AGENTS.md that a reply promising to proceed, with no edit in that turn, is a false report" (model) · 2026-09-07
 - "let the instructions and maps give way under the budget on a small window" (model) · 2026-09-07
 - "drop the loader's extend-only check on built-in schemas once the renderer is schema-driven" (model) · 2026-09-08
+- "sweep stale files under hook-sessions" (model) · 2026-09-08
+- "keep causation through a Stop hook that blocks" (model) · 2026-09-08
+- "make the crate rustfmt-clean or pin a rustfmt.toml that matches it" (model) · 2026-09-08
 
 ## "tell a coding turn to branch from main, not HEAD" (model)
 
@@ -60,6 +63,18 @@ why: "review of feat/harness: on Ollama with a 16k window this repo's AGENTS.md 
 
 why: "check_extends in mapstore/schemas.rs forbids a project decisions.toml from renaming or dropping a kind only because push_decisions, weighed_for and the never-remove rule name question, option, answers and decision by literal; when the schema names its edge roles the check shrinks to 'the roles a schema names must be declared kinds', which parse already does for headlines and settles"
 waits on "make the map renderer schema-driven, not dispatched on map name" (model)
+
+## "sweep stale files under hook-sessions" (model)
+
+why: "nothing removes a turn's state file when its Stop never fires, and the Python hook's sha256-named files from before 2026-09-08 sit there forever; a hook call could drop files older than a day"
+
+## "keep causation through a Stop hook that blocks" (model)
+
+why: "Claude Code sends no turn_id and a second Stop hook returning decision:block sends the model back for more tool calls after percept hook unlinked the turn's state, so those calls and the second reply cite no prompt; the Python hook had the same gap"
+
+## "make the crate rustfmt-clean or pin a rustfmt.toml that matches it" (model)
+
+why: "a builder ran cargo fmt over the crate on 2026-09-08 and rewrote eleven unrelated files; the code is formatted wider than rustfmt's default, so every fmt run drowns a diff until the two agree"
 
 ## done
 - "send the project's instructions to a coding turn" (model)

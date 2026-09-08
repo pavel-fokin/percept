@@ -86,8 +86,8 @@ e07  Evidence has no standing.
 
 | Client | Files | Content |
 |---|---|---|
-| Claude Code | `.claude/settings.json` | Hook lines for session start, prompt, tool use, and stop, each calling the binary with the client's name; a bash allowlist for `percept maps`. |
-| Codex | `.codex/config.toml` | The same, in its hook shape. |
+| Claude Code | `.claude/settings.json` | Hook lines for session start, prompt, tool use, and stop, each calling the binary with the client's name; a bash allowlist for `percept maps` and `percept events`. `percept init claude-code` writes them. |
+| Codex | `.codex/hooks.json` | The same, in its hook shape, without an allowlist. `percept init codex` writes it. |
 | Both | `AGENTS.md`, one skill | Three rules: look before proposing, record when the user says yes, cite the prompt id. |
 
 The plan skill goes. The trigger is "the user said yes to a proposal,"
@@ -188,7 +188,7 @@ Each row is one issue. Order is by what the others rest on.
 
 | # | Change | Why |
 |---|---|---|
-| 1 | The hook moves into the binary as `percept hook <client> <event>`. `percept init <client>` writes the config lines and the allowlist. | One installed binary and config pointing at it. No Python on the path. Without the allowlist, recording costs three permission prompts. |
+| 1 | The hook moves into the binary as `percept hook <client>`, the event read from the input. `percept init <client>` writes the config lines and the allowlist. Built 2026-09-08. | One installed binary and config pointing at it. No Python on the path. Without the allowlist, recording costs three permission prompts. |
 | 2 | A fold budget on every hook call, measured; a fold cache if the budget fails on a large log. | The log is one file for every project and grows forever. A slow start hook gets disabled, and the whole flow rests on it. |
 | 3 | A short id on every node, printed in every output and accepted by every verb. A record verb that takes a document on stdin. | A node's name is its identity, so an edge needs fifty characters reproduced inside shell quoting. The model gets it wrong. Typed arguments are the fix; MCP is one transport for them, not the only one. |
 | 4 | The start hook prints the bounded fragment above. The decisions render leaves `AGENTS.md` and is no longer committed. | Kills the map budget problem and the unmerged-branch render at once. The prompt carries a purpose line per map and a capped cut, as the harness already does. |
