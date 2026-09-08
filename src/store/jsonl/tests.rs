@@ -1,6 +1,6 @@
 use super::*;
-use crate::percept::{Actor, EventQuery, Payload};
-use crate::testing::source;
+use crate::core::testing::source;
+use crate::core::{Actor, EventQuery, Payload};
 use std::path::PathBuf;
 use uuid::Uuid;
 
@@ -42,15 +42,15 @@ impl Drop for TempLog {
     }
 }
 
-fn message(actor: Actor, content: &str) -> percept::Event {
-    percept::Event::message_received(actor, content.to_string(), source("tui"), None)
+fn message(actor: Actor, content: &str) -> crate::core::Event {
+    crate::core::Event::message_received(actor, content.to_string(), source("tui"), None)
 }
 
-fn line(event: &percept::Event) -> String {
+fn line(event: &crate::core::Event) -> String {
     serde_json::to_string(&Event::from(event)).unwrap()
 }
 
-fn content(event: &percept::Event) -> &str {
+fn content(event: &crate::core::Event) -> &str {
     match event.payload() {
         Payload::MessageReceived { content } => content,
         _ => panic!("expected a message.received event"),
@@ -69,7 +69,7 @@ fn get_finds_one_event_by_id_and_reports_a_missing_one_as_absent() {
 
     let found = log.get(wanted.id()).unwrap().expect("appended event");
     assert!(found.id() == wanted.id());
-    assert!(log.get(percept::EventId::new()).unwrap().is_none());
+    assert!(log.get(crate::core::EventId::new()).unwrap().is_none());
 }
 
 #[test]
@@ -159,10 +159,10 @@ fn an_events_source_name_and_path_round_trip_through_the_store() {
     let temp = TempLog::new();
     let log = temp.open();
 
-    let written = percept::Event::message_received(
+    let written = crate::core::Event::message_received(
         Actor::User,
         "hi".to_string(),
-        percept::Source {
+        crate::core::Source {
             name: "claude-code".to_string(),
             path: PathBuf::from("/home/pavel/project"),
         },

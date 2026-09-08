@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{Tool, ToolOutput, ToolSpec};
+use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::tools::Workspace;
 
 /// The `write_file` tool: writes a file's whole content, creating any

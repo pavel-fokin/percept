@@ -1,9 +1,8 @@
 use super::*;
-use crate::percept::{Actor, Chunk, Payload, Verdict, SCHEMAS};
-use crate::testing::{
-    content, node_added, scope, source, usage, FakeCatalog, FakeLog, FakeRenderer, FakeSnapshot,
-    FakeTool, FixedPolicy, Scripted,
-};
+use crate::core::testing::{content, node_added, scope, source, usage, FakeLog, FakeRenderer};
+use crate::core::{Actor, Payload, SCHEMAS};
+use crate::harness::testing::{FakeCatalog, FakeSnapshot, FakeTool, FixedPolicy, Scripted};
+use crate::harness::{Chunk, Verdict};
 
 const SOURCE: &str = "tui";
 
@@ -16,11 +15,11 @@ fn thought(event: &Event) -> &str {
 
 struct Silent;
 
-impl percept::Model for Silent {
-    fn capabilities(&self) -> percept::ModelCapabilities {
-        percept::ModelCapabilities {
-            input: &[percept::Modality::Text],
-            output: &[percept::Modality::Text],
+impl crate::harness::Model for Silent {
+    fn capabilities(&self) -> crate::harness::ModelCapabilities {
+        crate::harness::ModelCapabilities {
+            input: &[crate::harness::Modality::Text],
+            output: &[crate::harness::Modality::Text],
             tool_use: false,
             reasoning_efforts: &[],
             default_reasoning_effort: None,
@@ -32,7 +31,7 @@ impl percept::Model for Silent {
         "silent"
     }
 
-    fn reply(&self, _request: &percept::ModelRequest) -> percept::ReplyStream {
+    fn reply(&self, _request: &crate::harness::ModelRequest) -> crate::harness::ReplyStream {
         Box::pin(tokio_stream::empty())
     }
 }
@@ -254,7 +253,7 @@ fn another_source_s_map_mutation_in_the_same_project_still_folds() {
         None,
         Payload::NodeAdded {
             map: "decisions".to_string(),
-            node: percept::NodeId::new(),
+            node: crate::core::NodeId::new(),
             kind: "question".to_string(),
             name: "why?".to_string(),
             properties: Default::default(),
@@ -738,17 +737,20 @@ fn an_unknown_tool_name_becomes_the_result_content() {
 /// `revise_map` records what it judged from the log.
 struct Committing(Vec<Payload>);
 
-impl percept::Tool for Committing {
-    fn spec(&self) -> percept::ToolSpec {
-        percept::ToolSpec {
+impl crate::harness::Tool for Committing {
+    fn spec(&self) -> crate::harness::ToolSpec {
+        crate::harness::ToolSpec {
             name: "search_events",
             description: "a fake that commits what it was given",
             parameters: "{}",
         }
     }
 
-    fn run(&self, _arguments: &str) -> Result<percept::ToolOutput, Box<dyn std::error::Error>> {
-        Ok(percept::ToolOutput {
+    fn run(
+        &self,
+        _arguments: &str,
+    ) -> Result<crate::harness::ToolOutput, Box<dyn std::error::Error>> {
+        Ok(crate::harness::ToolOutput {
             content: "recorded".to_string(),
             commits: self.0.clone(),
         })
@@ -807,7 +809,7 @@ fn a_tool_s_map_commit_rerenders_the_map_it_changed() {
         Harness::new(
             vec![Arc::new(Committing(vec![Payload::NodeAdded {
                 map: "decisions".to_string(),
-                node: percept::NodeId::new(),
+                node: crate::core::NodeId::new(),
                 kind: "decision".to_string(),
                 name: "Rust over Go".to_string(),
                 properties: Default::default(),
@@ -915,13 +917,16 @@ fn a_model_that_cannot_use_tools_is_sent_none() {
     assert_eq!(model.tool_counts()[0], 0);
 }
 
-fn seeded_app(events: Vec<Event>, tools: Vec<Arc<dyn percept::Tool>>) -> (Arc<Scripted>, App) {
+fn seeded_app(
+    events: Vec<Event>,
+    tools: Vec<Arc<dyn crate::harness::Tool>>,
+) -> (Arc<Scripted>, App) {
     seeded_app_with_shape(events, tools, MapShape::Prompt)
 }
 
 fn seeded_app_with_shape(
     events: Vec<Event>,
-    tools: Vec<Arc<dyn percept::Tool>>,
+    tools: Vec<Arc<dyn crate::harness::Tool>>,
     map_shape: MapShape,
 ) -> (Arc<Scripted>, App) {
     let model = Arc::new(Scripted::new(vec![], true));
@@ -989,9 +994,9 @@ fn a_map_is_sent_with_its_kinds_ahead_of_the_transcript_and_outside_the_window()
         Actor::User,
         source(SOURCE),
         None,
-        percept::Payload::NodeAdded {
+        crate::core::Payload::NodeAdded {
             map: "decisions".to_string(),
-            node: percept::NodeId::new(),
+            node: crate::core::NodeId::new(),
             kind: "decision".to_string(),
             name: "Rust over Go".to_string(),
             properties: Default::default(),
@@ -1085,7 +1090,7 @@ fn a_map_header_carries_its_purpose_size_and_last_change() {
     let sent = model.last_request();
     assert!(sent[0].starts_with(&format!(
         "The decisions map: {}. It holds 1 nodes and 0 edges, last changed {changed}. Node kinds:",
-        percept::DECISIONS.purpose
+        crate::core::DECISIONS.purpose
     )));
 }
 
@@ -1109,9 +1114,9 @@ fn a_map_that_does_not_fold_fails_at_open() {
         Actor::User,
         source(SOURCE),
         None,
-        percept::Payload::NodeAdded {
+        crate::core::Payload::NodeAdded {
             map: "decisions".to_string(),
-            node: percept::NodeId::new(),
+            node: crate::core::NodeId::new(),
             kind: "goal".to_string(),
             name: "Ship".to_string(),
             properties: Default::default(),
@@ -1137,8 +1142,8 @@ fn a_tool_commit_the_transcript_cannot_fold_becomes_the_result_not_a_crash() {
     let dangling = Payload::EdgeAdded {
         map: "decisions".to_string(),
         kind: "supports".to_string(),
-        from: percept::NodeId::new(),
-        to: percept::NodeId::new(),
+        from: crate::core::NodeId::new(),
+        to: crate::core::NodeId::new(),
         sources: Vec::new(),
     };
     let (_, mut app) = seeded_app(Vec::new(), vec![Arc::new(Committing(vec![dangling]))]);
@@ -1207,9 +1212,9 @@ fn a_model_called_event_never_reaches_the_next_request() {
 
 #[test]
 fn set_model_swaps_the_live_model() {
-    let scripted: Arc<dyn percept::Model> = Arc::new(Scripted::new(vec![], true));
-    let descriptor = percept::ModelDescriptor {
-        provider: percept::Provider::Ollama,
+    let scripted: Arc<dyn crate::harness::Model> = Arc::new(Scripted::new(vec![], true));
+    let descriptor = crate::harness::ModelDescriptor {
+        provider: crate::harness::Provider::Ollama,
         model: "scripted".to_string(),
         reasoning_efforts: &[],
     };
@@ -1235,9 +1240,9 @@ fn set_model_swaps_the_live_model() {
 
 #[test]
 fn set_model_clears_last_usage_so_the_new_model_reads_as_unasked() {
-    let scripted: Arc<dyn percept::Model> = Arc::new(Scripted::new(vec![], true));
-    let descriptor = percept::ModelDescriptor {
-        provider: percept::Provider::Ollama,
+    let scripted: Arc<dyn crate::harness::Model> = Arc::new(Scripted::new(vec![], true));
+    let descriptor = crate::harness::ModelDescriptor {
+        provider: crate::harness::Provider::Ollama,
         model: "scripted".to_string(),
         reasoning_efforts: &[],
     };
@@ -1266,9 +1271,9 @@ fn set_model_clears_last_usage_so_the_new_model_reads_as_unasked() {
 
 #[test]
 fn set_model_errs_and_leaves_the_model_in_place_while_a_turn_streams() {
-    let scripted: Arc<dyn percept::Model> = Arc::new(Scripted::new(vec![], true));
-    let descriptor = percept::ModelDescriptor {
-        provider: percept::Provider::Ollama,
+    let scripted: Arc<dyn crate::harness::Model> = Arc::new(Scripted::new(vec![], true));
+    let descriptor = crate::harness::ModelDescriptor {
+        provider: crate::harness::Provider::Ollama,
         model: "scripted".to_string(),
         reasoning_efforts: &[],
     };
@@ -1293,7 +1298,7 @@ fn set_model_errs_and_leaves_the_model_in_place_while_a_turn_streams() {
     assert_eq!(app.model_name(), "silent");
 }
 
-fn app_on(model: Arc<dyn percept::Model>, catalog: FakeCatalog) -> App {
+fn app_on(model: Arc<dyn crate::harness::Model>, catalog: FakeCatalog) -> App {
     App::new(
         model,
         Arc::new(catalog),
@@ -1305,15 +1310,20 @@ fn app_on(model: Arc<dyn percept::Model>, catalog: FakeCatalog) -> App {
     .unwrap()
 }
 
-fn thinking_model() -> Arc<dyn percept::Model> {
-    Arc::new(Scripted::new(vec![], true).with_reasoning_efforts(percept::ReasoningEffort::ALL))
+fn thinking_model() -> Arc<dyn crate::harness::Model> {
+    Arc::new(
+        Scripted::new(vec![], true).with_reasoning_efforts(crate::harness::ReasoningEffort::ALL),
+    )
 }
 
 #[test]
 fn a_model_with_a_reasoning_control_starts_at_its_default_level() {
     let app = app_on(thinking_model(), FakeCatalog::default());
 
-    assert_eq!(app.reasoning_effort(), Some(percept::ReasoningEffort::Low));
+    assert_eq!(
+        app.reasoning_effort(),
+        Some(crate::harness::ReasoningEffort::Low)
+    );
 }
 
 #[test]
@@ -1321,7 +1331,7 @@ fn set_reasoning_effort_refuses_a_level_the_model_cannot_use() {
     let mut app = app_on(Arc::new(Silent), FakeCatalog::default());
 
     assert!(app
-        .set_reasoning_effort(percept::ReasoningEffort::Low)
+        .set_reasoning_effort(crate::harness::ReasoningEffort::Low)
         .is_err());
     assert_eq!(app.reasoning_effort(), None);
 }
@@ -1330,23 +1340,26 @@ fn set_reasoning_effort_refuses_a_level_the_model_cannot_use() {
 fn set_reasoning_effort_takes_a_level_the_model_supports() {
     let mut app = app_on(thinking_model(), FakeCatalog::default());
 
-    app.set_reasoning_effort(percept::ReasoningEffort::High)
+    app.set_reasoning_effort(crate::harness::ReasoningEffort::High)
         .unwrap();
 
-    assert_eq!(app.reasoning_effort(), Some(percept::ReasoningEffort::High));
+    assert_eq!(
+        app.reasoning_effort(),
+        Some(crate::harness::ReasoningEffort::High)
+    );
 }
 
 #[test]
 fn switching_to_a_model_without_a_reasoning_control_drops_the_selection() {
-    let plain: Arc<dyn percept::Model> = Arc::new(Scripted::new(vec![], true));
-    let descriptor = percept::ModelDescriptor {
-        provider: percept::Provider::Ollama,
+    let plain: Arc<dyn crate::harness::Model> = Arc::new(Scripted::new(vec![], true));
+    let descriptor = crate::harness::ModelDescriptor {
+        provider: crate::harness::Provider::Ollama,
         model: "plain".to_string(),
         reasoning_efforts: &[],
     };
     let catalog = FakeCatalog::new(vec![descriptor.clone()], vec![(descriptor.clone(), plain)]);
     let mut app = app_on(thinking_model(), catalog);
-    app.set_reasoning_effort(percept::ReasoningEffort::High)
+    app.set_reasoning_effort(crate::harness::ReasoningEffort::High)
         .unwrap();
 
     app.set_model(&descriptor).unwrap();
@@ -1356,34 +1369,37 @@ fn switching_to_a_model_without_a_reasoning_control_drops_the_selection() {
 
 #[test]
 fn switching_models_keeps_a_selected_level_the_new_model_also_supports() {
-    let descriptor = percept::ModelDescriptor {
-        provider: percept::Provider::OpenAi,
+    let descriptor = crate::harness::ModelDescriptor {
+        provider: crate::harness::Provider::OpenAi,
         model: "next".to_string(),
-        reasoning_efforts: percept::ReasoningEffort::ALL,
+        reasoning_efforts: crate::harness::ReasoningEffort::ALL,
     };
     let catalog = FakeCatalog::new(
         vec![descriptor.clone()],
         vec![(descriptor.clone(), thinking_model())],
     );
     let mut app = app_on(thinking_model(), catalog);
-    app.set_reasoning_effort(percept::ReasoningEffort::High)
+    app.set_reasoning_effort(crate::harness::ReasoningEffort::High)
         .unwrap();
 
     app.set_model(&descriptor).unwrap();
 
-    assert_eq!(app.reasoning_effort(), Some(percept::ReasoningEffort::High));
+    assert_eq!(
+        app.reasoning_effort(),
+        Some(crate::harness::ReasoningEffort::High)
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
 async fn available_models_returns_the_catalog_s_listing() {
     let descriptors = vec![
-        percept::ModelDescriptor {
-            provider: percept::Provider::Ollama,
+        crate::harness::ModelDescriptor {
+            provider: crate::harness::Provider::Ollama,
             model: "gemma".to_string(),
             reasoning_efforts: &[],
         },
-        percept::ModelDescriptor {
-            provider: percept::Provider::OpenAi,
+        crate::harness::ModelDescriptor {
+            provider: crate::harness::Provider::OpenAi,
             model: "gpt".to_string(),
             reasoning_efforts: &[],
         },
@@ -1418,7 +1434,7 @@ fn last_usage_is_the_most_recent_round_trip_not_a_sum() {
     assert!(app.last_usage().is_none());
 
     let _ = app.submit("first".to_string()).unwrap();
-    app.append_chunk(Chunk::Usage(percept::Usage {
+    app.append_chunk(Chunk::Usage(crate::core::Usage {
         input_tokens: 100,
         ..usage()
     }));
@@ -1426,7 +1442,7 @@ fn last_usage_is_the_most_recent_round_trip_not_a_sum() {
     assert_eq!(app.last_usage().unwrap().input_tokens, 100);
 
     let _ = app.submit("second".to_string()).unwrap();
-    app.append_chunk(Chunk::Usage(percept::Usage {
+    app.append_chunk(Chunk::Usage(crate::core::Usage {
         input_tokens: 250,
         ..usage()
     }));

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use context::{Context, Section, View, Window};
 
-use crate::percept::{self, Actor, Event, EventId, EventKind, Map, MapError, Source};
+use crate::core::{Actor, Event, EventId, EventKind, Map, MapError, Source};
 
 mod context;
 
@@ -47,16 +47,16 @@ pub enum MapShape {
 pub struct Harness {
     /// The tools the model may call, sent with each request when the
     /// model reports `tool_use`.
-    pub tools: Vec<Arc<dyn percept::Tool>>,
+    pub tools: Vec<Arc<dyn crate::harness::Tool>>,
     /// Asked before any of `tools` runs. `AllowAll` unless `new` is
     /// overridden - the map tools have always run unasked.
-    pub policy: Arc<dyn percept::Policy>,
+    pub policy: Arc<dyn crate::harness::Policy>,
     /// Most tool calls one turn may make - see `MAX_TOOL_CALLS`.
     pub tool_cap: usize,
     /// Where the working tree is saved before each prompt, when the
     /// turn can change it. `None` for a chat over the log alone: a
     /// snapshot of a tree no tool touches would be noise.
-    pub snapshot: Option<Arc<dyn percept::Snapshot>>,
+    pub snapshot: Option<Arc<dyn crate::harness::Snapshot>>,
     /// The project's own instructions, sent as system text every
     /// round so the model works to the project's conventions. `None`
     /// for a chat over the log, which has no tree to follow them in.
@@ -72,10 +72,10 @@ impl Harness {
     /// the time, then the turn. Stable first: every provider reuses a
     /// request's prefix when it matches the last one, and a tool round
     /// only appends to the turn, so what changes goes last.
-    pub fn new(tools: Vec<Arc<dyn percept::Tool>>, map_shape: MapShape) -> Self {
+    pub fn new(tools: Vec<Arc<dyn crate::harness::Tool>>, map_shape: MapShape) -> Self {
         Self {
             tools,
-            policy: Arc::new(percept::AllowAll),
+            policy: Arc::new(crate::harness::AllowAll),
             tool_cap: MAX_TOOL_CALLS,
             snapshot: None,
             instructions: None,
@@ -102,7 +102,10 @@ pub trait AppService {
     /// Records the user's message and returns a stream of the reply's
     /// chunks. Errs, without recording anything, if a turn is already
     /// streaming or if the event can't be appended to the log.
-    fn submit(&mut self, text: String) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
+    fn submit(
+        &mut self,
+        text: String,
+    ) -> Result<crate::harness::ReplyStream, Box<dyn std::error::Error>> {
         self.submit_as(Actor::User, text)
     }
 
@@ -113,13 +116,13 @@ pub trait AppService {
         &mut self,
         actor: Actor,
         text: String,
-    ) -> Result<percept::ReplyStream, Box<dyn std::error::Error>>;
+    ) -> Result<crate::harness::ReplyStream, Box<dyn std::error::Error>>;
 
     /// Appends a chunk - thought or reply text - to the in-progress
     /// turn. Neither is an event yet - both are committed once by
     /// `end_stream`. Call only from the task that owns the App, never
     /// from inside the task draining the stream.
-    fn append_chunk(&mut self, chunk: percept::Chunk);
+    fn append_chunk(&mut self, chunk: crate::harness::Chunk);
 
     /// Records the model's `tool.called` (after whatever it said first)
     /// and decides what happens next - see `ToolStep`. The turn's
@@ -138,14 +141,14 @@ pub trait AppService {
     /// turn.
     fn finish_tool(
         &mut self,
-        output: percept::ToolOutput,
-    ) -> Result<percept::ReplyStream, Box<dyn std::error::Error>>;
+        output: crate::harness::ToolOutput,
+    ) -> Result<crate::harness::ReplyStream, Box<dyn std::error::Error>>;
 
     /// What the caller does when the user says no to a `ToolStep::Ask`:
     /// the refusal is committed as the call's result, in words the
     /// model can act on, and the model is asked again. The words are
     /// turn policy, so they live here and not in each presentation.
-    fn decline_tool(&mut self) -> Result<percept::ReplyStream, Box<dyn std::error::Error>>;
+    fn decline_tool(&mut self) -> Result<crate::harness::ReplyStream, Box<dyn std::error::Error>>;
 
     /// Commits the streamed thought, if any, then the streamed reply, if
     /// any, as separate model events. Either with no chunks commits
@@ -177,7 +180,7 @@ pub trait AppService {
 
     /// What the most recent round trip cost - set once the first
     /// `model.called` commits, and never before.
-    fn last_usage(&self) -> Option<&percept::Usage>;
+    fn last_usage(&self) -> Option<&crate::core::Usage>;
 
     fn context_window(&self) -> Option<u32>;
 
@@ -187,22 +190,22 @@ pub trait AppService {
     /// The reasoning level in force for the next turn, when the active
     /// model has the control. `None` when it has none, or when it has
     /// one but no level is selected yet.
-    fn reasoning_effort(&self) -> Option<percept::ReasoningEffort>;
+    fn reasoning_effort(&self) -> Option<crate::harness::ReasoningEffort>;
 
     /// The reasoning levels the active model allows, in order. Empty
     /// when it has no reasoning-effort control.
-    fn supported_reasoning_efforts(&self) -> &'static [percept::ReasoningEffort];
+    fn supported_reasoning_efforts(&self) -> &'static [crate::harness::ReasoningEffort];
 
     /// Changes the reasoning effort for later turns. The caller gives
     /// a level from the active model's descriptor; unsupported models
     /// refuse it without changing the live model.
     fn set_reasoning_effort(
         &mut self,
-        effort: percept::ReasoningEffort,
+        effort: crate::harness::ReasoningEffort,
     ) -> Result<(), Box<dyn std::error::Error>>;
 
     /// Every model the catalog can reach, across providers.
-    fn available_models(&self) -> percept::ModelListing;
+    fn available_models(&self) -> crate::harness::ModelListing;
 
     /// Swaps the live model for the one `descriptor` names. Session-only:
     /// nothing is committed to the log. Refuses, leaving the current
@@ -210,7 +213,7 @@ pub trait AppService {
     /// land mid-turn.
     fn set_model(
         &mut self,
-        descriptor: &percept::ModelDescriptor,
+        descriptor: &crate::harness::ModelDescriptor,
     ) -> Result<(), Box<dyn std::error::Error>>;
 
     /// One line per section of the request the model would receive
@@ -231,15 +234,15 @@ pub trait AppService {
 pub enum ToolStep {
     /// Run this tool with these arguments off the main loop, then pass
     /// its output to `finish_tool`.
-    Run(Arc<dyn percept::Tool>, String),
+    Run(Arc<dyn crate::harness::Tool>, String),
     /// The policy wants the user's say. Put the call to them; on yes,
     /// treat it as `Run`, on no, call `decline_tool`. `tool.called` is
     /// already committed either way: the log shows what the model
     /// asked for, and the result shows what the user let happen.
-    Ask(Arc<dyn percept::Tool>, String),
+    Ask(Arc<dyn crate::harness::Tool>, String),
     /// Nothing to run (the name matched no tool); `App` already
     /// recorded the result. Drain this stream to continue the turn.
-    Continue(percept::ReplyStream),
+    Continue(crate::harness::ReplyStream),
     /// The per-turn tool cap is spent. `App` has already ended the
     /// turn: don't drain anything, and don't end it again.
     Stop,
@@ -250,9 +253,9 @@ pub enum ToolStep {
 /// as `tool.resulted` content - so it lives here rather than in each
 /// presentation that drives a turn. A failure commits nothing, the
 /// same as `ToolOutput::text`'s empty `commits`.
-pub fn run_tool(tool: &dyn percept::Tool, arguments: &str) -> percept::ToolOutput {
+pub fn run_tool(tool: &dyn crate::harness::Tool, arguments: &str) -> crate::harness::ToolOutput {
     tool.run(arguments)
-        .unwrap_or_else(|err| percept::ToolOutput::text(err.to_string()))
+        .unwrap_or_else(|err| crate::harness::ToolOutput::text(err.to_string()))
 }
 
 /// Whether `event` belongs in `App`'s own transcript cache: either it
@@ -261,7 +264,7 @@ pub fn run_tool(tool: &dyn percept::Tool, arguments: &str) -> percept::ToolOutpu
 /// matter who wrote it. A conversational event from another writer is
 /// left out, so another client's dialogue never replays as this one's.
 fn belongs_to_transcript(event: &Event, source: &Source) -> bool {
-    event.source() == source || percept::map_of(event.payload()).is_some()
+    event.source() == source || crate::core::map_of(event.payload()).is_some()
 }
 
 /// The index of the last `model.called` in `events`, so a reopened log
@@ -292,7 +295,7 @@ struct Turn {
     /// What the round trip just streamed cost, set by `append_chunk`
     /// and committed - and cleared - by `flush_pending`, after the
     /// thought and the reply it paid for.
-    usage: Option<percept::Usage>,
+    usage: Option<crate::core::Usage>,
 }
 
 /// Orchestrates a chat: turns input into events, asks Model for a
@@ -304,13 +307,13 @@ pub struct App {
     /// The writer this app records as - stamped on every event it
     /// commits, so the log can tell its events from other writers'.
     source: Source,
-    chat: Arc<dyn percept::Model>,
+    chat: Arc<dyn crate::harness::Model>,
     /// The reasoning level for the next turn: the model's configured
     /// default until `/effort` picks another, and reset to the new
     /// model's default on a switch that cannot keep the pick.
-    reasoning_effort: Option<percept::ReasoningEffort>,
-    catalog: Arc<dyn percept::ModelCatalog>,
-    log: Arc<dyn percept::EventLog>,
+    reasoning_effort: Option<crate::harness::ReasoningEffort>,
+    catalog: Arc<dyn crate::harness::ModelCatalog>,
+    log: Arc<dyn crate::core::EventLog>,
     /// The tools, the policy and cap around them, the snapshot, the
     /// instructions, and the context - see `Harness`.
     harness: Harness,
@@ -322,7 +325,7 @@ pub struct App {
     undo_point: Option<EventId>,
     /// Rerenders a map after a tool's commits change it - see
     /// `commit_tool_result`.
-    renderer: Arc<dyn percept::MapRenderer>,
+    renderer: Arc<dyn crate::core::MapRenderer>,
     /// The turn now streaming, or None between turns.
     pending: Option<Turn>,
     /// Where the most recent `model.called` landed in `events` - the
@@ -341,11 +344,11 @@ impl App {
     /// map that does not fold fails here, at open, the way a log line
     /// that does not decode does - not on the first turn.
     pub fn new(
-        chat: Arc<dyn percept::Model>,
-        catalog: Arc<dyn percept::ModelCatalog>,
-        log: Arc<dyn percept::EventLog>,
+        chat: Arc<dyn crate::harness::Model>,
+        catalog: Arc<dyn crate::harness::ModelCatalog>,
+        log: Arc<dyn crate::core::EventLog>,
         harness: Harness,
-        renderer: Arc<dyn percept::MapRenderer>,
+        renderer: Arc<dyn crate::core::MapRenderer>,
         source: Source,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let scope = source.scope();
@@ -418,7 +421,7 @@ impl App {
     /// Starts the next reply stream for the current request state.
     /// Errs only when a map in the log does not fold - which is a
     /// corrupt log, not a bad turn.
-    fn ask(&self) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
+    fn ask(&self) -> Result<crate::harness::ReplyStream, Box<dyn std::error::Error>> {
         Ok(self.chat.reply(&self.harness.context.build(self.view())?))
     }
 
@@ -437,7 +440,7 @@ impl App {
     /// open call is a no-op.
     fn commit_tool_result(
         &mut self,
-        output: percept::ToolOutput,
+        output: crate::harness::ToolOutput,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let Some((called_id, _)) = self.pending.as_mut().and_then(|turn| turn.open_call.take())
         else {
@@ -457,7 +460,7 @@ impl App {
             Ok(()) => {
                 let changed: HashSet<String> = commits
                     .iter()
-                    .filter_map(|event| percept::map_of(event.payload()))
+                    .filter_map(|event| crate::core::map_of(event.payload()))
                     .map(str::to_string)
                     .collect();
                 for event in commits {
@@ -491,7 +494,7 @@ impl App {
         let events = self.log.load()?;
         let scope = self.source.scope();
         for name in changed {
-            let map = Map::fold(percept::Schema::find(name)?, &scope, &events)?;
+            let map = Map::fold(crate::core::Schema::find(name)?, &scope, &events)?;
             self.renderer.render(&map)?;
         }
         Ok(())
@@ -547,7 +550,7 @@ impl AppService for App {
         &mut self,
         actor: Actor,
         text: String,
-    ) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
+    ) -> Result<crate::harness::ReplyStream, Box<dyn std::error::Error>> {
         if self.pending.is_some() {
             return Err("a reply is already streaming".into());
         }
@@ -576,17 +579,17 @@ impl AppService for App {
         self.ask()
     }
 
-    fn append_chunk(&mut self, chunk: percept::Chunk) {
+    fn append_chunk(&mut self, chunk: crate::harness::Chunk) {
         let Some(turn) = self.pending.as_mut() else {
             return;
         };
         match chunk {
-            percept::Chunk::Thought(text) => turn.thought.push_str(&text),
-            percept::Chunk::Reply(text) => turn.reply.push_str(&text),
-            percept::Chunk::Usage(usage) => turn.usage = Some(usage),
+            crate::harness::Chunk::Thought(text) => turn.thought.push_str(&text),
+            crate::harness::Chunk::Reply(text) => turn.reply.push_str(&text),
+            crate::harness::Chunk::Usage(usage) => turn.usage = Some(usage),
             // Every caller routes a tool call to `begin_tool`; it
             // never reaches here.
-            percept::Chunk::ToolCall { .. } => {}
+            crate::harness::Chunk::ToolCall { .. } => {}
         }
     }
 
@@ -624,7 +627,7 @@ impl AppService for App {
             .find(|t| t.spec().name == tool)
             .cloned()
         else {
-            let output = percept::ToolOutput::text(format!("no such tool: {tool}"));
+            let output = crate::harness::ToolOutput::text(format!("no such tool: {tool}"));
             self.commit_tool_result(output)?;
             return Ok(ToolStep::Continue(self.ask()?));
         };
@@ -632,20 +635,20 @@ impl AppService for App {
             return Ok(ToolStep::Run(run, arguments));
         }
         match self.harness.policy.check(tool, &arguments) {
-            percept::Verdict::Allow => Ok(ToolStep::Run(run, arguments)),
-            percept::Verdict::Ask => Ok(ToolStep::Ask(run, arguments)),
+            crate::harness::Verdict::Allow => Ok(ToolStep::Run(run, arguments)),
+            crate::harness::Verdict::Ask => Ok(ToolStep::Ask(run, arguments)),
         }
     }
 
     fn finish_tool(
         &mut self,
-        output: percept::ToolOutput,
-    ) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
+        output: crate::harness::ToolOutput,
+    ) -> Result<crate::harness::ReplyStream, Box<dyn std::error::Error>> {
         self.commit_tool_result(output)?;
         self.ask()
     }
 
-    fn decline_tool(&mut self) -> Result<percept::ReplyStream, Box<dyn std::error::Error>> {
+    fn decline_tool(&mut self) -> Result<crate::harness::ReplyStream, Box<dyn std::error::Error>> {
         let Some((_, tool)) = self
             .pending
             .as_ref()
@@ -653,7 +656,7 @@ impl AppService for App {
         else {
             return Err("no tool call is waiting".into());
         };
-        let output = percept::ToolOutput::text(format!(
+        let output = crate::harness::ToolOutput::text(format!(
             "The user declined to run {tool}. Do not retry it; ask them or do something else."
         ));
         self.finish_tool(output)
@@ -691,9 +694,9 @@ impl AppService for App {
         self.allowed.insert(tool.to_string());
     }
 
-    fn last_usage(&self) -> Option<&percept::Usage> {
+    fn last_usage(&self) -> Option<&crate::core::Usage> {
         match self.events[self.last_usage?].payload() {
-            percept::Payload::ModelCalled(usage) => Some(usage),
+            crate::core::Payload::ModelCalled(usage) => Some(usage),
             _ => None,
         }
     }
@@ -706,17 +709,17 @@ impl AppService for App {
         self.chat.name()
     }
 
-    fn reasoning_effort(&self) -> Option<percept::ReasoningEffort> {
+    fn reasoning_effort(&self) -> Option<crate::harness::ReasoningEffort> {
         self.reasoning_effort
     }
 
-    fn supported_reasoning_efforts(&self) -> &'static [percept::ReasoningEffort] {
+    fn supported_reasoning_efforts(&self) -> &'static [crate::harness::ReasoningEffort] {
         self.chat.capabilities().reasoning_efforts
     }
 
     fn set_reasoning_effort(
         &mut self,
-        effort: percept::ReasoningEffort,
+        effort: crate::harness::ReasoningEffort,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if !self.chat.capabilities().reasoning_efforts.contains(&effort) {
             return Err(format!("{} does not support reasoning effort", self.model_name()).into());
@@ -725,13 +728,13 @@ impl AppService for App {
         Ok(())
     }
 
-    fn available_models(&self) -> percept::ModelListing {
+    fn available_models(&self) -> crate::harness::ModelListing {
         self.catalog.list()
     }
 
     fn set_model(
         &mut self,
-        descriptor: &percept::ModelDescriptor,
+        descriptor: &crate::harness::ModelDescriptor,
     ) -> Result<(), Box<dyn std::error::Error>> {
         if self.is_replying() {
             return Err("a reply is already streaming".into());
@@ -779,7 +782,7 @@ impl AppService for App {
         // The restore put every rendered map back to before the turn,
         // while the log still holds what the turn added to them: the
         // log is the record, so the renders follow it, not the tree.
-        let every_map = percept::SCHEMAS
+        let every_map = crate::core::SCHEMAS
             .iter()
             .map(|schema| schema.name.to_string())
             .collect();

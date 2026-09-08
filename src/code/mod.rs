@@ -16,7 +16,7 @@ use std::path::Path;
 
 use ignore::WalkBuilder;
 
-use crate::percept::{Actor, Map, MapError, Mutation, NodeRef, CODE};
+use crate::core::{Actor, Map, MapError, Mutation, NodeRef, CODE};
 use crate::shared::to_slash;
 
 /// Builds the code map from every `.rs` file under `root`, gitignore

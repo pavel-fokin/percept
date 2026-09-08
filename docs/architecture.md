@@ -2,7 +2,7 @@
 
 A proposal, written 2026-09-08. It names what percept's core is, what
 sits outside it, and how the outside reaches it. `docs/harness.md`
-designs one surface, the native agent; this document is the level
+designs one surface, the coding agent; this document is the level
 above it. Nothing here changes behaviour on its own.
 
 ## The claim
@@ -113,13 +113,16 @@ right; the surface becomes visible when it gets its one missing edge.
 This is what makes co-ownership an operation rather than a rule:
 agreement with provenance between two cognitions.
 
-Two things sit in the core's module today and must leave it.
+The domain is now two modules. `core` holds experience and maps; `harness`
+holds the ports a loop needs to drive a model over them - `Model`, `Tool`,
+`Snapshot`, and the policy that asks before a tool runs - and depends on
+`core`. A Python SDK that folds a map never sees a `Model` trait.
 
-- **The harness ports.** `Model`, `Tool`, `Snapshot`, and the policy that
-  asks before a tool runs. They are a harness's, not experience's. A
-  Python SDK that folds a map must never see a `Model` trait.
-- **The word policy.** The core keeps one policy, the collaboration
-  rule. The harness's ask-before-write rule takes another name.
+One thing did not move. The core keeps the name `Policy` for the
+ask-before-write gate, and the collaboration rule - who may remove what,
+an option needs a why, a decision is superseded - stays inside
+`Map::apply` unnamed. Whether the core should reserve "policy" for the
+collaboration rule is open.
 
 The `code` map is a surface feature. It folds a working tree and not
 the log, so it goes with the coding surfaces and reaches the core
@@ -133,7 +136,7 @@ the practice of its own field.
 | Surface | Reaches the core through | Brings from its field |
 |---|---|---|
 | Skills and hooks for a coding client | The `percept` CLI: `events`, `maps`. Instructions in `AGENTS.md`, skills under `.agents`, a hook per client. | The client's conventions: instruction files, skill formats, hook shapes. |
-| Native agent | The harness: context sections over the log, map tools, tool policy, snapshot. | Harness practice: prefix caching, subagents, permission modes, undo. |
+| Coding agent | The harness: context sections over the log, map tools, tool policy, snapshot. | Harness practice: prefix caching, subagents, permission modes, undo. |
 | Web application | A server over the ports; the render as a page. | Sessions, sharing, review of a map by more than one person. |
 | Python and TypeScript SDKs | The format, and the one fold reached through the CLI now and WASM or a C ABI later. | Idiomatic APIs. Thin: write events, call the fold, read fragments. |
 
@@ -141,7 +144,7 @@ The fold has one implementation, in Rust. An SDK that reimplements it
 drifts. The JSONL line is the interface to version.
 
 ```
-     skills · hooks      native agent      web app      SDKs
+     skills · hooks      coding agent      web app      SDKs
            │                  │              │            │
            │ CLI              │ harness      │ server     │ format · fold
            ▼                  ▼              ▼            ▼
@@ -157,10 +160,10 @@ drifts. The JSONL line is the interface to version.
 
 ## Crates and targets
 
-The module layering enforces the dependency direction already, so a
-workspace split is mechanical once the boundaries are true. It waits
-for a second consumer: a crate boundary with one consumer is cost with
-no check.
+The `src/core` and `src/harness` modules now enforce the dependency
+direction: `core` names no model, no tool, no tree. A workspace split is
+mechanical from here. It waits for a second consumer: a crate boundary
+with one consumer is cost with no check.
 
 | Crate | Holds | Exists when |
 |---|---|---|
@@ -169,10 +172,9 @@ no check.
 | `percept` binary | CLI and TUI over both. | Now. |
 | `percept-wasm` or FFI | The fold for SDKs and the browser. | The first SDK. |
 
-The step that costs nothing and tests the shape is a library target
-beside the binary, with the harness ports moved out of the core
-module. If the lib holds no model, no tool, and no tree, the core is
-what this document describes.
+The module split that tested the shape is done: the harness ports are
+out of `core`, and it holds no model, no tool, and no tree. A library
+target beside the binary is the next step that costs nothing.
 
 ## Validation
 
@@ -181,7 +183,7 @@ The two directions test different claims.
 | Direction | Tests | Cost | Confound |
 |---|---|---|---|
 | Skill | Whether shared maps are worth their upkeep to a human and agent pair, with the strongest model doing the cognition. | Low: it runs on every session anyway. | The client's own memory does part of the job. |
-| Native agent | Whether the log as environment beats a transcript: the model searches what it cannot hold. | High. | A weak harness fails for reasons that are not the core's. |
+| Coding agent | Whether the log as environment beats a transcript: the model searches what it cannot hold. | High. | A weak harness fails for reasons that are not the core's. |
 
 A check for each:
 
@@ -190,7 +192,7 @@ A check for each:
   how often the human corrects a node the model wrote, and what the
   correction cost. A core that helps shows fewer reopenings and cheap
   corrections.
-- **Native agent.** A task whose answer sits past the window. Watch
+- **Coding agent.** A task whose answer sits past the window. Watch
   whether the model reaches for `search_events` or `read_event` and
   lands it, against a raw transcript of the same length. `/context`
   says whether the prefix held.
@@ -210,7 +212,7 @@ core. The three properties above are what the checks must show.
 3. Schemas as data, so a session can add a map without a Rust change.
    This is the first core addition the direction asks for.
 
-### Native agent direction
+### Coding agent direction
 
 1. Confirm the harness works as designed: cached tokens rise across a
    tool round, and the window reaches a plan written before a long
@@ -223,8 +225,8 @@ core. The three properties above are what the checks must show.
 
 ### Both
 
-1. The lib target with the harness ports moved out. One refactor, no
-   behaviour change, and the shape of the core becomes checkable.
+1. The lib target. The harness ports are already out of `core`; a
+   library beside the binary makes the shape checkable from outside.
 2. Lifecycle on schemas, once schemas are data.
 3. The surface: the `confirms` and `disputes` edges, standing in the
    fold, and a mark in the render. A `confirm` verb on `percept maps`
@@ -234,9 +236,9 @@ core. The three properties above are what the checks must show.
 
 Validate through the skill direction first. Value has already shown
 there, the check costs nothing, and a negative result is about the
-core and not the harness. Keep the native agent as the lab for the one
+core and not the harness. Keep the coding agent as the lab for the one
 claim only it can test, the log as environment. Do not judge the core
-by how the native agent codes until the harness is level with the
+by how the coding agent codes until the harness is level with the
 clients. If the skill direction comes back weak on evidence,
 co-ownership, and one log, the core is a memory format with extra
 ceremony, and that is worth knowing before a crate split or an SDK.

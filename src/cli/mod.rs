@@ -25,12 +25,14 @@ use tokio_stream::StreamExt;
 
 use crate::app::{run_tool, AppService, ToolStep};
 use crate::code;
-use crate::percept::{
-    self, Actor, Chunk, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef,
-    Payload,
+use crate::core::{
+    Actor, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
 };
+use crate::harness::Chunk;
+use crate::mapstore;
 use crate::shared::Timestamp;
 use crate::store;
+use crate::tools;
 
 #[derive(Parser)]
 #[command(name = "percept")]
@@ -137,7 +139,7 @@ impl ShowMapArgs {
     /// Whether this names the code map - derived from the working tree,
     /// so dispatch never opens the log to find out.
     pub fn is_code(&self) -> bool {
-        self.map == percept::CODE.name
+        self.map == crate::core::CODE.name
     }
 }
 
@@ -387,7 +389,7 @@ pub fn publish(
         .map(|id| known_event_id(id, log))
         .transpose()?;
     let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
-    let source = percept::Source {
+    let source = crate::core::Source {
         name: args.source,
         path: root.to_path_buf(),
     };
@@ -395,7 +397,7 @@ pub fn publish(
     // A raw map event would skip `Map::apply`, and one that breaks a
     // rule fails every fold from then on, with no undo in an
     // append-only log.
-    if percept::map_of(event.payload()).is_some() {
+    if crate::core::map_of(event.payload()).is_some() {
         return Err(format!(
             "{} is written through `percept maps`, not published raw",
             args.kind
@@ -409,7 +411,7 @@ pub fn publish(
 fn known_event_id(
     id: &str,
     log: &dyn EventLog,
-) -> Result<percept::EventId, Box<dyn std::error::Error>> {
+) -> Result<crate::core::EventId, Box<dyn std::error::Error>> {
     let parsed = store::parse_event_id(id)?;
     if log.get(parsed)?.is_none() {
         return Err(format!("no event with id {id}").into());
@@ -458,11 +460,11 @@ fn print_text(text: &str) -> Result<(), Box<dyn std::error::Error>> {
 
 /// The scope `maps list` and `maps show` fold: every project's events
 /// with `--all-projects`, else only `root`'s.
-fn scope(all_projects: bool, root: &Path) -> percept::Scope {
+fn scope(all_projects: bool, root: &Path) -> crate::core::Scope {
     if all_projects {
-        percept::Scope::All
+        crate::core::Scope::All
     } else {
-        percept::Scope::Project(root.to_path_buf())
+        crate::core::Scope::Project(root.to_path_buf())
     }
 }
 
@@ -479,8 +481,8 @@ pub fn maps_list(
     let mut maps = Map::fold_all(&scope(args.all_projects, project), &log.load()?)?;
     maps.push(code::build(tree)?);
     match args.format {
-        Format::Json => print_lines(maps.iter().map(store::encode_map)),
-        Format::Md => print_text(&store::catalogue(&maps)),
+        Format::Json => print_lines(maps.iter().map(mapstore::encode_map)),
+        Format::Md => print_text(&mapstore::catalogue(&maps)),
     }
 }
 
@@ -492,7 +494,7 @@ pub fn maps_show(
     log: &dyn EventLog,
     root: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let map = store::fold_map(log, &args.map, &scope(args.all_projects, root))?;
+    let map = mapstore::fold_map(log, &args.map, &scope(args.all_projects, root))?;
     print_map(map, &args)
 }
 
@@ -508,31 +510,31 @@ pub fn maps_show_code(args: ShowMapArgs, root: &Path) -> Result<(), Box<dyn std:
 /// `args`'s filters, then print it nodes-then-edges. `--since` runs
 /// after `--around`, so it reads as "what changed near this node".
 fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let selection = percept::Selection {
+    let selection = crate::core::Selection {
         around: args.around.as_ref().map(|node| (node, args.depth)),
         since: args.since,
         kinds: &args.kind,
     };
     let fragment = map.select(&selection)?;
     if !selection.is_whole() {
-        eprintln!("{}", store::encode_fragment(&fragment));
+        eprintln!("{}", mapstore::encode_fragment(&fragment));
     }
     match args.format {
-        Format::Json => print_lines(store::encode_lines(fragment.map())),
-        Format::Md => print_text(&store::markdown(fragment.map())),
+        Format::Json => print_lines(mapstore::encode_lines(fragment.map())),
+        Format::Md => print_text(&mapstore::markdown(fragment.map())),
     }
 }
 
 /// One map change from the shell: `target`'s cited events resolved and
-/// `mutation` checked and applied through `store::revise`, the payload
+/// `mutation` checked and applied through `mapstore::revise`, the payload
 /// committed as actor `user` with no cause, then the map rerendered,
 /// folded fresh from the log so another writer's changes are kept.
 /// Returns the payload, for `add-node` to print the minted id.
 fn write(
     target: MapArgs,
     log: &dyn EventLog,
-    source: &percept::Source,
-    renderer: &dyn percept::MapRenderer,
+    source: &crate::core::Source,
+    renderer: &dyn crate::core::MapRenderer,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
     let MapArgs {
@@ -541,9 +543,9 @@ fn write(
         actor,
     } = target;
     let scope = source.scope();
-    let payload = store::revise(log, &map, &scope, &cited, actor, mutation)?;
+    let payload = mapstore::revise(log, &map, &scope, &cited, actor, mutation)?;
     log.append(&Event::new(actor, source.clone(), None, payload.clone()))?;
-    renderer.render(&store::fold_map(log, &map, &scope)?)?;
+    renderer.render(&mapstore::fold_map(log, &map, &scope)?)?;
     Ok(payload)
 }
 
@@ -552,8 +554,8 @@ fn write(
 pub fn maps_add_node(
     args: AddNodeArgs,
     log: &dyn EventLog,
-    source: &percept::Source,
-    renderer: &dyn percept::MapRenderer,
+    source: &crate::core::Source,
+    renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let payload = write(args.target, log, source, renderer, |sources| {
         Mutation::AddNode {
@@ -573,8 +575,8 @@ pub fn maps_add_node(
 pub fn maps_add_edge(
     args: EdgeArgs,
     log: &dyn EventLog,
-    source: &percept::Source,
-    renderer: &dyn percept::MapRenderer,
+    source: &crate::core::Source,
+    renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     write(args.target, log, source, renderer, |sources| {
         Mutation::AddEdge {
@@ -591,8 +593,8 @@ pub fn maps_add_edge(
 pub fn maps_remove_node(
     args: RemoveNodeArgs,
     log: &dyn EventLog,
-    source: &percept::Source,
-    renderer: &dyn percept::MapRenderer,
+    source: &crate::core::Source,
+    renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     write(args.target, log, source, renderer, |sources| {
         Mutation::RemoveNode {
@@ -611,8 +613,8 @@ pub fn maps_remove_node(
 pub fn maps_remove_edge(
     args: EdgeArgs,
     log: &dyn EventLog,
-    source: &percept::Source,
-    renderer: &dyn percept::MapRenderer,
+    source: &crate::core::Source,
+    renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     write(args.target, log, source, renderer, |sources| {
         Mutation::RemoveEdge {
@@ -691,7 +693,7 @@ fn parse_query(args: &SearchArgs) -> Result<EventQuery, String> {
 /// sliced to it instead of the whole event.
 pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
     let (start, end) = args.range.unwrap_or_default();
-    println!("{}", store::read(log, &args.id, start, end)?);
+    println!("{}", tools::read(log, &args.id, start, end)?);
     Ok(())
 }
 

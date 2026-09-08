@@ -11,25 +11,26 @@ use tokio_stream::StreamExt;
 mod app;
 mod cli;
 mod code;
-mod percept;
+mod core;
+mod harness;
+mod mapstore;
 mod providers;
 mod shared;
 mod store;
-#[cfg(test)]
-mod testing;
 #[cfg(test)]
 mod tests;
 mod tools;
 mod tui;
 
+use crate::core::Actor;
 use app::{App, Harness, MapShape};
 use cli::{Cli, Command, EventsCommand, MapsCommand};
-use percept::Actor;
+use mapstore::{LogMaps, MarkdownFiles};
 use providers::{Catalog, ProviderConfig, FIREWORKS_MODEL, OPENAI_MODEL};
-use store::{Jsonl, LogMaps, ReadEvent, ReadMap, ReviseMap, SearchEvents};
+use store::Jsonl;
 use tools::{
-    AskBeforeWrites, Bash, EditFile, FindFiles, GitSnapshot, GrepFiles, ListFiles, ReadFile,
-    Workspace, WriteFile,
+    AskBeforeWrites, Bash, EditFile, FindFiles, GitSnapshot, GrepFiles, ListFiles, ReadEvent,
+    ReadFile, ReadMap, ReviseMap, SearchEvents, Workspace, WriteFile,
 };
 use tui::{Chat, StreamEvent};
 
@@ -45,8 +46,10 @@ const LOG_FILE: &str = "percept.jsonl";
 /// or `fireworks`.
 const PROVIDER_VAR: &str = "PERCEPT_PROVIDER";
 
-/// Source name the TUI stamps on every event it commits.
-const TUI_SOURCE_NAME: &str = "percept-tui";
+/// Source name percept's own coding agent stamps on every event it
+/// commits - `claude-code` and `codex` are the other coding agents,
+/// each reaching the log a different way.
+const CODE_SOURCE_NAME: &str = "percept-code";
 
 /// Source name the headless `ask`/`reflect` turns and the `maps` write
 /// verbs stamp.
@@ -285,19 +288,22 @@ fn project_of(checkout: &Path) -> PathBuf {
 /// on the first reply - but `/models` switching shouldn't need the key
 /// set just to list models, so `catalog` stays lenient about it.
 fn build_model(
-    catalog: &dyn percept::ModelCatalog,
-) -> Result<Arc<dyn percept::Model>, Box<dyn std::error::Error>> {
+    catalog: &dyn crate::harness::ModelCatalog,
+) -> Result<Arc<dyn crate::harness::Model>, Box<dyn std::error::Error>> {
     let provider = std::env::var(PROVIDER_VAR).unwrap_or_else(|_| "ollama".to_string());
     let (provider, model) = match provider.as_str() {
-        "ollama" => (percept::Provider::Ollama, OLLAMA_MODEL.to_string()),
+        "ollama" => (crate::harness::Provider::Ollama, OLLAMA_MODEL.to_string()),
         "openai" => {
             std::env::var(OPENAI_KEY_VAR).map_err(|_| format!("{OPENAI_KEY_VAR} is not set"))?;
-            (percept::Provider::OpenAi, OPENAI_MODEL.to_string())
+            (crate::harness::Provider::OpenAi, OPENAI_MODEL.to_string())
         }
         "fireworks" => {
             std::env::var(FIREWORKS_KEY_VAR)
                 .map_err(|_| format!("{FIREWORKS_KEY_VAR} is not set"))?;
-            (percept::Provider::Fireworks, FIREWORKS_MODEL.to_string())
+            (
+                crate::harness::Provider::Fireworks,
+                FIREWORKS_MODEL.to_string(),
+            )
         }
         other => {
             return Err(format!(
@@ -306,7 +312,7 @@ fn build_model(
             .into())
         }
     };
-    catalog.build(&percept::ModelDescriptor {
+    catalog.build(&crate::harness::ModelDescriptor {
         provider,
         model,
         reasoning_efforts: &[],
@@ -351,7 +357,7 @@ fn resolve_toolset(
     configured: Option<&str>,
     snapshot_ok: bool,
 ) -> Result<Toolset, Box<dyn std::error::Error>> {
-    let default = if source_name == TUI_SOURCE_NAME && snapshot_ok {
+    let default = if source_name == CODE_SOURCE_NAME && snapshot_ok {
         "code"
     } else {
         "maps"
@@ -364,7 +370,7 @@ fn resolve_toolset(
 }
 
 fn build_toolset(
-    source: &percept::Source,
+    source: &crate::core::Source,
     checkout: &Path,
 ) -> Result<Toolset, Box<dyn std::error::Error>> {
     // A `.git` entry - directory in a clone, file in a linked worktree -
@@ -379,7 +385,9 @@ fn build_toolset(
 
 /// The file tools, over the checkout being worked in - never the main
 /// checkout a worktree's `Source` names, since the files are here.
-fn code_tools(checkout: &Path) -> Result<Vec<Arc<dyn percept::Tool>>, Box<dyn std::error::Error>> {
+fn code_tools(
+    checkout: &Path,
+) -> Result<Vec<Arc<dyn crate::harness::Tool>>, Box<dyn std::error::Error>> {
     let workspace = Arc::new(Workspace::new(checkout)?);
     Ok(vec![
         Arc::new(ReadFile::new(workspace.clone())),
@@ -400,9 +408,9 @@ struct RoutedMaps {
     root: PathBuf,
 }
 
-impl percept::MapReader for RoutedMaps {
-    fn read(&self, name: &str) -> Result<percept::Map, Box<dyn std::error::Error>> {
-        if name == percept::CODE.name {
+impl crate::core::MapReader for RoutedMaps {
+    fn read(&self, name: &str) -> Result<crate::core::Map, Box<dyn std::error::Error>> {
+        if name == crate::core::CODE.name {
             Ok(code::build(&self.root)?)
         } else {
             self.folded.read(name)
@@ -428,12 +436,12 @@ fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
 /// elsewhere - adds the file tools over `checkout`, with the policy, cap
 /// and snapshot a turn that changes files needs.
 fn build_app(
-    source: percept::Source,
-    renderer: Arc<dyn percept::MapRenderer>,
+    source: crate::core::Source,
+    renderer: Arc<dyn crate::core::MapRenderer>,
     checkout: &Path,
 ) -> Result<App, Box<dyn std::error::Error>> {
     let log = Arc::new(open_log()?);
-    let catalog: Arc<dyn percept::ModelCatalog> = Arc::new(build_catalog());
+    let catalog: Arc<dyn crate::harness::ModelCatalog> = Arc::new(build_catalog());
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
     let scope = source.scope();
@@ -441,7 +449,7 @@ fn build_app(
         folded: LogMaps::new(log.clone(), scope.clone()),
         root: checkout.to_path_buf(),
     };
-    let mut tools: Vec<Arc<dyn percept::Tool>> = vec![
+    let mut tools: Vec<Arc<dyn crate::harness::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
         Arc::new(ReadEvent::new(log.clone())),
         Arc::new(ReviseMap::new(log.clone(), scope)),
@@ -477,8 +485,8 @@ async fn headless_turn(
     actor: Actor,
     prompt: String,
     yes: bool,
-    source: percept::Source,
-    renderer: Arc<dyn percept::MapRenderer>,
+    source: crate::core::Source,
+    renderer: Arc<dyn crate::core::MapRenderer>,
     checkout: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let app = build_app(source, renderer, checkout)?;
@@ -486,8 +494,8 @@ async fn headless_turn(
 }
 
 async fn try_main(
-    source: percept::Source,
-    renderer: Arc<dyn percept::MapRenderer>,
+    source: crate::core::Source,
+    renderer: Arc<dyn crate::core::MapRenderer>,
     checkout: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let app = build_app(source, renderer, checkout)?;
@@ -523,12 +531,12 @@ async fn main() {
         }
     };
     let root = project_of(&checkout);
-    let cli_source = percept::Source {
+    let cli_source = crate::core::Source {
         name: CLI_SOURCE_NAME.to_string(),
         path: root.clone(),
     };
-    let renderer: Arc<dyn percept::MapRenderer> =
-        Arc::new(store::MarkdownFiles::new(checkout.join(MAPS_DIR)));
+    let renderer: Arc<dyn crate::core::MapRenderer> =
+        Arc::new(MarkdownFiles::new(checkout.join(MAPS_DIR)));
 
     let result = match cli.command {
         Some(Command::Events { command }) => open_log().and_then(|log| match command {
@@ -581,8 +589,8 @@ async fn main() {
         }
         None => {
             try_main(
-                percept::Source {
-                    name: TUI_SOURCE_NAME.to_string(),
+                crate::core::Source {
+                    name: CODE_SOURCE_NAME.to_string(),
                     path: root,
                 },
                 renderer,

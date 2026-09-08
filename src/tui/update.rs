@@ -9,7 +9,7 @@ use super::commands;
 use super::type_str;
 use super::{effort_partial, Approval, Chat, ModelsMenu, StreamEvent};
 use crate::app::{run_tool, AppService, ToolStep};
-use crate::percept::{Chunk, ModelListing, ReasoningEffort, ReplyStream, Tool, ToolOutput};
+use crate::harness::{Chunk, ModelListing, ReasoningEffort, ReplyStream, Tool, ToolOutput};
 
 /// Handle one key press. Returns true if the app should quit. Errs if
 /// submit couldn't append its event to the log - see AppService::submit.

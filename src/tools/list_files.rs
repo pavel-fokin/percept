@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{Tool, ToolOutput, ToolSpec};
+use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::tools::Workspace;
 
 /// The `list_files` tool: one directory's immediate entries, sorted by

@@ -1,4 +1,4 @@
-//! Concrete `percept::Model` implementations.
+//! Concrete `harness::Model` implementations.
 //!
 //! What both wire formats share lives here: the same three role words,
 //! and a reply streamed as one JSON object per line over HTTP.
@@ -14,7 +14,8 @@ use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
 use tokio_stream::StreamExt;
 
-use crate::percept::{Actor, Chunk, Usage};
+use crate::core::{Actor, Usage};
+use crate::harness::Chunk;
 
 pub use catalog::{Catalog, ProviderConfig, FIREWORKS_MODEL, OPENAI_MODEL};
 pub use fireworks::Fireworks;
@@ -153,7 +154,7 @@ fn take_lines(buf: &mut Vec<u8>, chunk: &[u8]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testing::usage;
+    use crate::core::testing::usage;
 
     fn call() -> Chunk {
         Chunk::ToolCall {

@@ -5,9 +5,10 @@ use serde_json::Value;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{client, forward, role, stream_lines, Line};
-use crate::percept::{
+use crate::core::Usage;
+use crate::harness::{
     Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReasoningEffort, ReplyStream,
-    ToolSpec, Usage,
+    ToolSpec,
 };
 
 /// Sends and receives with OpenAI's `/responses`. A streamed reply is
