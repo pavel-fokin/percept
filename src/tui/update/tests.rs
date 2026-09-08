@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::app::{App, Harness, MapShape};
 use crate::percept::{self, ModelDescriptor, Provider};
 use crate::testing::{source, FakeCatalog, FakeLog, FakeRenderer, FakeTool, FixedPolicy, Scripted};
+use crate::tui::Suggestion;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 #[test]
@@ -50,6 +51,127 @@ fn chat_with_catalog(catalog: FakeCatalog) -> Chat<'static> {
 
 fn chat() -> Chat<'static> {
     chat_with_catalog(FakeCatalog::default())
+}
+
+/// A chat whose model has a reasoning-effort control over all three
+/// levels, its default `low`.
+fn chat_with_efforts() -> Chat<'static> {
+    let model = Scripted::new(vec![], false).with_reasoning_efforts(ReasoningEffort::ALL);
+    let app = App::new(
+        Arc::new(model),
+        Arc::new(FakeCatalog::default()),
+        Arc::new(FakeLog::default()),
+        Harness::new(Vec::new(), MapShape::Prompt),
+        Arc::new(FakeRenderer::default()),
+        source("test"),
+    )
+    .unwrap();
+    Chat::new(Box::new(app))
+}
+
+#[test]
+fn slash_effort_alone_is_the_effort_command() {
+    assert!(is_effort_command("/effort"));
+    assert!(is_effort_command("  /effort  "));
+    assert!(is_effort_command("/effort low"));
+}
+
+#[test]
+fn a_message_that_only_starts_like_the_effort_command_is_not_it() {
+    assert!(!is_effort_command("/effortless"));
+    assert!(!is_effort_command("/effort: my thoughts"));
+    assert!(!is_effort_command("effort low"));
+    // A real message beginning with the word, and a typo'd level, both
+    // fall through to being sent, not swallowed into the error row.
+    assert!(!is_effort_command("/effort is needed to reproduce this"));
+    assert!(!is_effort_command("/effort turbo"));
+}
+
+#[test]
+fn slash_effort_with_a_level_sets_it_and_starts_no_turn() {
+    let mut chat = chat_with_efforts();
+    type_str(&mut chat, "/effort high");
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
+    handle_key(
+        &mut chat,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        &tx,
+    )
+    .unwrap();
+
+    assert_eq!(chat.app.reasoning_effort(), Some(ReasoningEffort::High));
+    assert!(chat.current_text().is_empty());
+    assert!(chat.notice.as_deref().unwrap().contains("high"));
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn bare_slash_effort_reports_the_current_and_available_levels() {
+    let mut chat = chat_with_efforts();
+    type_str(&mut chat, "/effort");
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+    handle_key(
+        &mut chat,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        &tx,
+    )
+    .unwrap();
+
+    let notice = chat.notice.as_deref().unwrap();
+    assert!(notice.contains("low"));
+    assert!(notice.contains("medium, high"));
+    assert_eq!(chat.app.reasoning_effort(), Some(ReasoningEffort::Low));
+}
+
+#[test]
+fn slash_effort_on_a_model_without_the_control_lands_in_the_error_row() {
+    let mut chat = chat();
+    type_str(&mut chat, "/effort low");
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+    handle_key(
+        &mut chat,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        &tx,
+    )
+    .unwrap();
+
+    assert!(chat.error.is_some());
+    assert_eq!(chat.app.reasoning_effort(), None);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn slash_effort_with_a_typod_level_is_sent_as_an_ordinary_message() {
+    let mut chat = chat_with_efforts();
+    type_str(&mut chat, "/effort turbo");
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+
+    handle_key(
+        &mut chat,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE),
+        &tx,
+    )
+    .unwrap();
+
+    // Submitted, so the line clears and the pick is untouched.
+    assert!(chat.current_text().is_empty());
+    assert!(chat.error.is_none());
+    assert_eq!(chat.app.reasoning_effort(), Some(ReasoningEffort::Low));
+}
+
+#[test]
+fn typing_slash_effort_lists_the_models_levels_as_suggestions() {
+    let mut chat = chat_with_efforts();
+    type_str(&mut chat, "/effort m");
+
+    let values: Vec<&str> = chat
+        .command_suggestions
+        .iter()
+        .map(|suggestion| suggestion.value.as_str())
+        .collect();
+    assert_eq!(values, ["/effort medium"]);
 }
 
 #[test]
@@ -123,21 +245,21 @@ fn a_models_listed_event_whose_token_does_not_match_the_open_menu_is_dropped() {
     assert!(chat.models_menu.unwrap().descriptors().is_none());
 }
 
-const FIRST: commands::Command = commands::Command {
-    name: "/aaa",
-    description: "a",
-};
-const SECOND: commands::Command = commands::Command {
-    name: "/aab",
-    description: "b",
-};
-
 /// Two suggestions with no typed prefix filtering them out, so arrow
-/// movement between them can be tested independent of `COMMANDS`
-/// having only one real command today.
+/// movement between them can be tested independent of what the input
+/// line would actually match.
 fn chat_with_two_suggestions() -> Chat<'static> {
     let mut chat = chat();
-    chat.command_suggestions = vec![&FIRST, &SECOND];
+    chat.command_suggestions = vec![
+        Suggestion {
+            value: "/aaa".to_string(),
+            description: "a".to_string(),
+        },
+        Suggestion {
+            value: "/aab".to_string(),
+            description: "b".to_string(),
+        },
+    ];
     chat
 }
 

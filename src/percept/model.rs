@@ -76,6 +76,12 @@ pub struct ModelCapabilities {
     pub input: &'static [Modality],
     pub output: &'static [Modality],
     pub tool_use: bool,
+    /// Reasoning levels this model supports. Empty when it has no
+    /// reasoning-effort control.
+    pub reasoning_efforts: &'static [ReasoningEffort],
+    /// The level the configured model uses until the session selects
+    /// another supported one.
+    pub default_reasoning_effort: Option<ReasoningEffort>,
     /// Tokens of context the model holds, when the provider knows it.
     /// `None` when the model isn't one the provider can size - not a
     /// guess.
@@ -88,6 +94,9 @@ pub struct ModelCapabilities {
 pub struct ModelRequest {
     pub messages: Vec<Message>,
     pub tools: Vec<ToolSpec>,
+    /// The session's selected reasoning level, when the active model
+    /// supports choosing one.
+    pub reasoning_effort: Option<ReasoningEffort>,
 }
 
 /// Turns a conversation into a streamed reply - the domain's core
@@ -133,6 +142,29 @@ pub enum ReasoningEffort {
     Low,
     Medium,
     High,
+}
+
+impl ReasoningEffort {
+    pub const ALL: &[Self] = &[Self::Low, Self::Medium, Self::High];
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "low" => Some(Self::Low),
+            "medium" => Some(Self::Medium),
+            "high" => Some(Self::High),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ReasoningEffort {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        })
+    }
 }
 
 /// Names one model a catalog can build - which provider serves it, and

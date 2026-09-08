@@ -37,6 +37,24 @@ pub enum StreamEvent {
     ModelsListed(u32, Vec<ModelDescriptor>),
 }
 
+/// One row of the anchored suggestion list: the text that replaces the
+/// input line when it is accepted, and the help shown beside it. A
+/// command suggestion carries the command name; a `/effort` value
+/// suggestion carries the whole `/effort <level>` line.
+pub struct Suggestion {
+    pub value: String,
+    pub description: String,
+}
+
+impl Suggestion {
+    fn command(command: &commands::Command) -> Self {
+        Self {
+            value: command.name.to_string(),
+            description: command.description.to_string(),
+        }
+    }
+}
+
 /// Chat is tui's own state - textarea, styling - plus whatever fulfills
 /// AppService. It renders and forwards input; it holds no chat logic.
 pub struct Chat<'a> {
@@ -74,11 +92,13 @@ pub struct Chat<'a> {
     /// `ToolStep::Ask` and the turn is paused until a key answers.
     /// Keys go to it, not the textarea, while it is `Some`.
     pub approval: Option<Approval>,
-    /// Commands whose name starts with the input line's prefix, while
-    /// it starts with `/`. Empty otherwise, so the anchored list above
-    /// the input reserves no space. Recomputed from the textarea after
-    /// every keystroke that reaches it.
-    pub command_suggestions: Vec<&'static commands::Command>,
+    /// Rows for the anchored list above the input, while the line
+    /// starts with `/`: commands whose name matches the prefix, or the
+    /// reasoning levels the active model allows once the line is
+    /// `/effort`. Empty otherwise, so the list reserves no space.
+    /// Recomputed from the textarea after every keystroke that reaches
+    /// it.
+    pub command_suggestions: Vec<Suggestion>,
     /// Which row of `command_suggestions` is highlighted. Reset to 0
     /// whenever the list is recomputed, since a narrower or wider match
     /// makes an old row meaningless.
@@ -154,19 +174,34 @@ impl<'a> Chat<'a> {
         self.notice = None;
     }
 
-    /// Refilters `command_suggestions` from the textarea's trimmed
-    /// content: every `Command` whose name starts with it, while the
-    /// content itself starts with `/`. Empty otherwise, so content that
-    /// no longer starts with `/`, or matches nothing, hides the list.
-    /// The highlighted row resets to the top - a narrower or wider
-    /// match makes the old row meaningless.
+    /// Refilters `command_suggestions` from the textarea's content. On
+    /// the `/effort` line - the command typed, then optionally a
+    /// partial level - it lists the reasoning levels the active model
+    /// allows that the partial still matches. Otherwise, while the
+    /// trimmed content starts with `/`, it lists every `Command` whose
+    /// name starts with it. Empty otherwise, so content that no longer
+    /// starts with `/`, or matches nothing, hides the list. The
+    /// highlighted row resets to the top - a narrower or wider match
+    /// makes the old row meaningless.
     pub fn recompute_command_suggestions(&mut self) {
         let text = self.current_text();
         let prefix = text.trim();
-        self.command_suggestions = if prefix.starts_with('/') {
+        self.command_suggestions = if let Some(partial) = effort_partial(&text) {
+            self.app
+                .supported_reasoning_efforts()
+                .iter()
+                .map(|effort| effort.to_string())
+                .filter(|level| level.starts_with(partial))
+                .map(|level| Suggestion {
+                    value: format!("{} {level}", commands::EFFORT),
+                    description: "reasoning level".to_string(),
+                })
+                .collect()
+        } else if prefix.starts_with('/') {
             commands::COMMANDS
                 .iter()
                 .filter(|command| command.name.starts_with(prefix))
+                .map(Suggestion::command)
                 .collect()
         } else {
             Vec::new()
@@ -189,14 +224,14 @@ impl<'a> Chat<'a> {
     }
 
     /// Replaces the textarea's line with the highlighted suggestion's
-    /// name, then hides the dropdown. The user just accepted their
+    /// value, then hides the dropdown. The user just accepted their
     /// choice; showing it again a frame later, still matching itself as
     /// a prefix, would have nothing left to narrow.
     pub fn accept_command_suggestion(&mut self) {
-        if let Some(command) = self.command_suggestions.get(self.command_selected) {
-            let name = command.name;
+        if let Some(suggestion) = self.command_suggestions.get(self.command_selected) {
+            let value = suggestion.value.clone();
             self.textarea.clear();
-            self.textarea.insert_str(name);
+            self.textarea.insert_str(value);
         }
         self.close_command_suggestions();
     }
@@ -336,6 +371,20 @@ impl ModelsMenu {
             self.selected += 1;
         }
     }
+}
+
+/// The `/effort` argument on the trimmed input line: `Some("")` for
+/// the bare command, `Some(token)` for the one token after it. `None`
+/// when the line is not `/effort`, or carries more than one token -
+/// so the grammar of the command lives here, for both the suggestion
+/// filter and the command dispatch in `update`.
+fn effort_partial(text: &str) -> Option<&str> {
+    let rest = text.trim().strip_prefix(commands::EFFORT)?;
+    if rest.is_empty() {
+        return Some("");
+    }
+    let arg = rest.strip_prefix(char::is_whitespace)?.trim_start();
+    (!arg.contains(char::is_whitespace)).then_some(arg)
 }
 
 fn new_textarea<'a>() -> TextArea<'a> {

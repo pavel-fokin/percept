@@ -8,12 +8,6 @@ use crate::percept::{
     Model, ModelCatalog, ModelDescriptor, ModelListing, Provider, ReasoningEffort,
 };
 
-const OPENAI_REASONING_EFFORTS: &[ReasoningEffort] = &[
-    ReasoningEffort::Low,
-    ReasoningEffort::Medium,
-    ReasoningEffort::High,
-];
-
 /// OpenAI models the catalog offers - a short static list, since
 /// OpenAI has no listing endpoint worth querying. The `/models` picker
 /// shows all three; `OPENAI_MODEL` is the one `main` builds with when
@@ -97,8 +91,10 @@ fn static_descriptors(provider: Provider, models: &[&str]) -> Vec<ModelDescripto
         .map(|model| ModelDescriptor {
             provider,
             model: model.to_string(),
+            // The same set `OpenAi::capabilities` reports for a built
+            // model, so the listing and the live model never diverge.
             reasoning_efforts: match provider {
-                Provider::OpenAi => OPENAI_REASONING_EFFORTS,
+                Provider::OpenAi => ReasoningEffort::ALL,
                 Provider::Ollama | Provider::Fireworks => &[],
             },
         })

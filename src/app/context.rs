@@ -220,6 +220,8 @@ pub struct View<'a> {
     pub turn_start: Option<usize>,
     /// The model's context window in tokens, if it reports one.
     pub context_window: Option<u32>,
+    /// The model's selected reasoning level for this session.
+    pub reasoning_effort: Option<percept::ReasoningEffort>,
     /// The tools to send with the request - already filtered by
     /// whether the model can use them and whether the turn's budget
     /// is spent.
@@ -256,6 +258,7 @@ impl Context {
         Ok(percept::ModelRequest {
             messages,
             tools: view.tools,
+            reasoning_effort: view.reasoning_effort,
         })
     }
 

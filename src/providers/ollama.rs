@@ -243,6 +243,8 @@ impl Model for Ollama {
             input: &[Modality::Text],
             output: output_modalities(&self.model),
             tool_use: true,
+            reasoning_efforts: &[],
+            default_reasoning_effort: None,
             context_window: Some(CONTEXT_TOKENS),
         }
     }

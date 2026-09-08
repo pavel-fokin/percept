@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 use crate::percept::{
     self, Actor, Chunk, Event, EventId, Map, MapRenderer, Modality, Model, ModelCapabilities,
     ModelCatalog, ModelDescriptor, ModelListing, ModelRequest, NodeId, NodeRef, Payload,
-    ReplyStream, Scope, Source, Tool, ToolOutput, ToolSpec, Usage,
+    ReasoningEffort, ReplyStream, Scope, Source, Tool, ToolOutput, ToolSpec, Usage,
 };
 
 /// The project root `source` stamps, for a test that compares paths.
@@ -122,6 +122,7 @@ pub struct Scripted {
     tool_counts: Mutex<Vec<usize>>,
     message_tags: Mutex<Vec<Vec<String>>>,
     tool_use: bool,
+    reasoning_efforts: &'static [ReasoningEffort],
 }
 
 impl Scripted {
@@ -141,7 +142,15 @@ impl Scripted {
             tool_counts: Mutex::new(Vec::new()),
             message_tags: Mutex::new(Vec::new()),
             tool_use,
+            reasoning_efforts: &[],
         }
+    }
+
+    /// Gives the model a reasoning-effort control supporting `efforts`,
+    /// its first level the configured default.
+    pub fn with_reasoning_efforts(mut self, efforts: &'static [ReasoningEffort]) -> Self {
+        self.reasoning_efforts = efforts;
+        self
     }
 
     /// How many tools each request so far carried.
@@ -161,6 +170,8 @@ impl Model for Scripted {
             input: &[Modality::Text],
             output: &[Modality::Text],
             tool_use: self.tool_use,
+            reasoning_efforts: self.reasoning_efforts,
+            default_reasoning_effort: self.reasoning_efforts.first().copied(),
             context_window: Some(1000),
         }
     }

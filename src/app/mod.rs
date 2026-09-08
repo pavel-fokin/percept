@@ -184,6 +184,23 @@ pub trait AppService {
     /// The model's own name, available before any turn asks.
     fn model_name(&self) -> &str;
 
+    /// The reasoning level in force for the next turn, when the active
+    /// model has the control. `None` when it has none, or when it has
+    /// one but no level is selected yet.
+    fn reasoning_effort(&self) -> Option<percept::ReasoningEffort>;
+
+    /// The reasoning levels the active model allows, in order. Empty
+    /// when it has no reasoning-effort control.
+    fn supported_reasoning_efforts(&self) -> &'static [percept::ReasoningEffort];
+
+    /// Changes the reasoning effort for later turns. The caller gives
+    /// a level from the active model's descriptor; unsupported models
+    /// refuse it without changing the live model.
+    fn set_reasoning_effort(
+        &mut self,
+        effort: percept::ReasoningEffort,
+    ) -> Result<(), Box<dyn std::error::Error>>;
+
     /// Every model the catalog can reach, across providers.
     fn available_models(&self) -> percept::ModelListing;
 
@@ -288,6 +305,10 @@ pub struct App {
     /// commits, so the log can tell its events from other writers'.
     source: Source,
     chat: Arc<dyn percept::Model>,
+    /// The reasoning level for the next turn: the model's configured
+    /// default until `/effort` picks another, and reset to the new
+    /// model's default on a switch that cannot keep the pick.
+    reasoning_effort: Option<percept::ReasoningEffort>,
     catalog: Arc<dyn percept::ModelCatalog>,
     log: Arc<dyn percept::EventLog>,
     /// The tools, the policy and cap around them, the snapshot, the
@@ -335,11 +356,13 @@ impl App {
             .collect();
         Map::fold_all(&scope, &events)?;
         let last_usage = last_model_called(&events);
+        let reasoning_effort = chat.capabilities().default_reasoning_effort;
 
         Ok(Self {
             events,
             source,
             chat,
+            reasoning_effort,
             catalog,
             log,
             harness,
@@ -386,6 +409,7 @@ impl App {
             scope: self.source.scope(),
             turn_start: self.pending.as_ref().map(|turn| turn.start),
             context_window: capabilities.context_window,
+            reasoning_effort: self.reasoning_effort,
             tools,
             budget_spent,
         }
@@ -682,6 +706,25 @@ impl AppService for App {
         self.chat.name()
     }
 
+    fn reasoning_effort(&self) -> Option<percept::ReasoningEffort> {
+        self.reasoning_effort
+    }
+
+    fn supported_reasoning_efforts(&self) -> &'static [percept::ReasoningEffort] {
+        self.chat.capabilities().reasoning_efforts
+    }
+
+    fn set_reasoning_effort(
+        &mut self,
+        effort: percept::ReasoningEffort,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.chat.capabilities().reasoning_efforts.contains(&effort) {
+            return Err(format!("{} does not support reasoning effort", self.model_name()).into());
+        }
+        self.reasoning_effort = Some(effort);
+        Ok(())
+    }
+
     fn available_models(&self) -> percept::ModelListing {
         self.catalog.list()
     }
@@ -693,7 +736,17 @@ impl AppService for App {
         if self.is_replying() {
             return Err("a reply is already streaming".into());
         }
-        self.chat = self.catalog.build(descriptor)?;
+        let chat = self.catalog.build(descriptor)?;
+        let capabilities = chat.capabilities();
+        // Keep a pick the new model also allows; otherwise fall to its
+        // own default.
+        if !self
+            .reasoning_effort
+            .is_some_and(|effort| capabilities.reasoning_efforts.contains(&effort))
+        {
+            self.reasoning_effort = capabilities.default_reasoning_effort;
+        }
+        self.chat = chat;
         self.last_usage = None;
         Ok(())
     }

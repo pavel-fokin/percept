@@ -6,7 +6,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{client, forward, role, stream_lines, Line};
 use crate::percept::{
-    Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream, ToolSpec, Usage,
+    Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReasoningEffort, ReplyStream,
+    ToolSpec, Usage,
 };
 
 /// Sends and receives with OpenAI's `/responses`. A streamed reply is
@@ -48,6 +49,8 @@ impl Model for OpenAi {
             input: &[Modality::Text],
             output,
             tool_use: true,
+            reasoning_efforts: ReasoningEffort::ALL,
+            default_reasoning_effort: ReasoningEffort::parse(&self.reasoning_effort),
             context_window,
         }
     }
@@ -63,7 +66,7 @@ impl Model for OpenAi {
         let url = self.url.clone();
         let api_key = self.api_key.clone();
         let model = self.model.clone();
-        let request = Request::new(model.clone(), self.reasoning_effort.clone(), request);
+        let request = Request::new(model.clone(), &self.reasoning_effort, request);
 
         tokio::spawn(async move {
             let request = client.post(&url).bearer_auth(api_key).json(&request);
@@ -93,14 +96,21 @@ struct Request {
 }
 
 impl Request {
-    fn new(model: String, reasoning_effort: String, request: &ModelRequest) -> Self {
+    /// `configured_effort` is the fallback the model was built with -
+    /// kept as a string so `none` survives, since it disables
+    /// reasoning and has no `ReasoningEffort` variant. The session's
+    /// pick on the request wins when it made one.
+    fn new(model: String, configured_effort: &str, request: &ModelRequest) -> Self {
         Self {
             model,
             input: items(&request.messages),
             tools: request.tools.iter().map(tool_def).collect(),
             parallel_tool_calls: false,
             reasoning: Reasoning {
-                effort: reasoning_effort,
+                effort: request.reasoning_effort.map_or_else(
+                    || configured_effort.to_string(),
+                    |effort| effort.to_string(),
+                ),
                 summary: "auto",
             },
             stream: true,
