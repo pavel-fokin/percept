@@ -27,6 +27,7 @@ use crate::app::{run_tool, AppService, ToolStep};
 use crate::code;
 use crate::core::{
     Actor, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
+    Schemas,
 };
 use crate::harness::Chunk;
 use crate::mapstore;
@@ -139,7 +140,7 @@ impl ShowMapArgs {
     /// Whether this names the code map - derived from the working tree,
     /// so dispatch never opens the log to find out.
     pub fn is_code(&self) -> bool {
-        self.map == crate::core::CODE.name
+        self.map == crate::core::CODE
     }
 }
 
@@ -475,10 +476,11 @@ fn scope(all_projects: bool, root: &Path) -> crate::core::Scope {
 pub fn maps_list(
     args: ListMapsArgs,
     log: &dyn EventLog,
+    schemas: &Schemas,
     project: &Path,
     tree: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut maps = Map::fold_all(&scope(args.all_projects, project), &log.load()?)?;
+    let mut maps = schemas.fold_all(&scope(args.all_projects, project), &log.load()?)?;
     maps.push(code::build(tree)?);
     match args.format {
         Format::Json => print_lines(maps.iter().map(mapstore::encode_map)),
@@ -492,9 +494,10 @@ pub fn maps_list(
 pub fn maps_show(
     args: ShowMapArgs,
     log: &dyn EventLog,
+    schemas: &Schemas,
     root: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let map = mapstore::fold_map(log, &args.map, &scope(args.all_projects, root))?;
+    let map = mapstore::fold_map(log, schemas, &args.map, &scope(args.all_projects, root))?;
     print_map(map, &args)
 }
 
@@ -533,6 +536,7 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
 fn write(
     target: MapArgs,
     log: &dyn EventLog,
+    schemas: &Schemas,
     source: &crate::core::Source,
     renderer: &dyn crate::core::MapRenderer,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
@@ -543,9 +547,9 @@ fn write(
         actor,
     } = target;
     let scope = source.scope();
-    let payload = mapstore::revise(log, &map, &scope, &cited, actor, mutation)?;
+    let payload = mapstore::revise(log, schemas, &map, &scope, &cited, actor, mutation)?;
     log.append(&Event::new(actor, source.clone(), None, payload.clone()))?;
-    renderer.render(&mapstore::fold_map(log, &map, &scope)?)?;
+    renderer.render(&mapstore::fold_map(log, schemas, &map, &scope)?)?;
     Ok(payload)
 }
 
@@ -554,10 +558,11 @@ fn write(
 pub fn maps_add_node(
     args: AddNodeArgs,
     log: &dyn EventLog,
+    schemas: &Schemas,
     source: &crate::core::Source,
     renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let payload = write(args.target, log, source, renderer, |sources| {
+    let payload = write(args.target, log, schemas, source, renderer, |sources| {
         Mutation::AddNode {
             kind: args.kind,
             name: args.name,
@@ -575,10 +580,11 @@ pub fn maps_add_node(
 pub fn maps_add_edge(
     args: EdgeArgs,
     log: &dyn EventLog,
+    schemas: &Schemas,
     source: &crate::core::Source,
     renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    write(args.target, log, source, renderer, |sources| {
+    write(args.target, log, schemas, source, renderer, |sources| {
         Mutation::AddEdge {
             kind: args.kind,
             from: args.from,
@@ -593,10 +599,11 @@ pub fn maps_add_edge(
 pub fn maps_remove_node(
     args: RemoveNodeArgs,
     log: &dyn EventLog,
+    schemas: &Schemas,
     source: &crate::core::Source,
     renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    write(args.target, log, source, renderer, |sources| {
+    write(args.target, log, schemas, source, renderer, |sources| {
         Mutation::RemoveNode {
             node: NodeRef {
                 kind: args.kind,
@@ -613,10 +620,11 @@ pub fn maps_remove_node(
 pub fn maps_remove_edge(
     args: EdgeArgs,
     log: &dyn EventLog,
+    schemas: &Schemas,
     source: &crate::core::Source,
     renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    write(args.target, log, source, renderer, |sources| {
+    write(args.target, log, schemas, source, renderer, |sources| {
         Mutation::RemoveEdge {
             kind: args.kind,
             from: args.from,

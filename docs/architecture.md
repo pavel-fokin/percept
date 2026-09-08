@@ -34,7 +34,7 @@ them.
 | A claim in a map cites the experience it came from. | `source` required on every map event. |
 | A map is folded deterministically from cognitive commits, and the fold has one implementation. | `Map::apply` in Rust. Nothing stops a second fold yet. |
 | The model never removes what a user wrote; a decision is superseded, never deleted. | `Map::apply` refuses; `revise_map` says to supersede. |
-| An alternative is recorded only with the reason it lost. | The shared write path refuses an option without a why. |
+| An alternative is recorded only with the reason it lost. | `requires` on the kind in its schema; the shared write path refuses a node missing one. |
 | A recorded claim is not the human's agreement; silence stays claimed. | Prose only. The surface below is the enforcement, not built. |
 | percept never ranks, summarises, or answers; output is constant-size per event. | Prose, and the habit of the search tools. |
 | One log, one writer. | `App::commit` for the loop; the CLI writes on its own. |
@@ -64,11 +64,13 @@ Small: events, maps, and the rules between them.
 | Ports | Append, load, search the log; read and render a map. |
 | Format | The JSONL line. The contract every language speaks. |
 
-Three things belong here that the code does not have yet.
+A schema is data: a TOML file at `.percept/schemas/<name>.toml`,
+which a loader outside the core parses and hands in. `decisions` and
+`tasks` ship as the same TOML, embedded, and a project file of the same
+name extends one without shrinking it. The core folds any schema it is handed.
 
-- **Schemas as data.** `decisions` and `tasks` are declared in Rust. A
-  surface that wants a glossary map needs a Rust change. The core folds
-  any schema it is handed.
+Two things belong here that the code does not have yet.
+
 - **Lifecycle on a schema.** A schema says which edge kinds move a node
   between which states: `resolves` makes a question settled,
   `supersedes` makes a decision past. The fold derives the state; the
@@ -220,7 +222,7 @@ core. The three properties above are what the checks must show.
    branches' nodes, and the map has no budget. Both are open questions
    in the decisions map.
 3. Schemas as data, so a session can add a map without a Rust change.
-   This is the first core addition the direction asks for.
+   Done: the first core addition the direction asked for.
 
 ### Coding agent direction
 
@@ -237,7 +239,7 @@ core. The three properties above are what the checks must show.
 
 1. The lib target. The harness ports are already out of `core`; a
    library beside the binary makes the shape checkable from outside.
-2. Lifecycle on schemas, once schemas are data.
+2. Lifecycle on schemas.
 3. The surface: the `confirms` and `disputes` edges, standing in the
    fold, and a mark in the render. A `confirm` verb on `percept maps`
    and a `y` on a row in the TUI are the two cheapest ways to give it.

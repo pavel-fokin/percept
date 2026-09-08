@@ -9,6 +9,10 @@ prints each map's purpose and current size.
 | tasks | What is left to do, why it matters, and what it waits on: open tasks first, done ones below with their outcome. | Cognitive commits in this project's event log. | [tasks.md](tasks.md), then `maps show tasks --around 'task:<name>'` for a task's blockers and outcome. |
 | code | Files, the symbols they define, what imports what. | The current working tree, rebuilt on every query. | `maps show code --around file:src/main.rs --kind file`, or `read_map` with `map` `code` in a turn that has it. |
 
+A new map is a TOML file at `schemas/<name>.toml` beside this index;
+the [percept skill](../.agents/skills/percept/SKILL.md) shows the shape.
+Add its row here.
+
 A claim missing from a map may still be in the log. A fragment cut with
 `--around` stops at its edge; the stderr line says how much it left out,
 and a question's options are one hop from it. Code says what is, not

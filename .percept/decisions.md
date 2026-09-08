@@ -64,6 +64,9 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "Where does agreement between the human and the agent live?" (model) · 2026-09-08
 - "What is percept's core called?" (model) · 2026-09-08
 - "How is a human contour identified?" (model) · 2026-09-08
+- "Where does a map's schema live?" (model) · 2026-09-08
+- "What format is a schema file?" (model) · 2026-09-08
+- "How does a schema say which properties a node must carry?" (model) · 2026-09-08
 
 ## "Where does the event log live?"
 
@@ -465,3 +468,32 @@ note: "Not decided. One log holds every branch, and the render is a file in one 
 
 note: "Not decided. The core has an actor kind for the human and no identity behind it; standing per confirmer needs one only when a second person confirms. Waits for that person, and for the confirms edge to exist. Options: an id on the user actor; the source name, as agents have; a hosted log with accounts."
 - open
+
+## "Where does a map's schema live?" (model)
+
+- decision ".percept/schemas/<name>.toml in the checkout; decisions and tasks ship embedded as the same TOML, and a project file of the same name extends one - every built-in kind, headline, and settlement kept, kinds added - never shrinks it" (model)
+  why: "the correctness review showed a project decisions.toml that drops a kind the log holds breaks every fold at startup, and the render and the never-remove rule assume the built-in kinds; extend-only keeps what a project wants from an override - purpose, glosses, an extra kind - without those failures"
+  source 01a0814f-a1cf-7041-a2fa-520b44e7bdf7
+  was ".percept/schemas/<name>.toml in the checkout; decisions and tasks ship embedded as the same TOML, and a project file of the same name overrides" (model)
+- weighed "a map.declared event in the log, recorded by a percept maps declare verb" (model)
+  why: "a schema has no provenance to cite; changing one later needs a supersede protocol for schemas; the verb is a step a file edit removes"
+- weighed "Rust consts, as today" (model)
+  why: "a session that wants a glossary map needs a Rust change"
+
+## "What format is a schema file?" (model)
+
+- decision "TOML: name, purpose, headlines, settles, then [[nodes]] and [[edges]] array tables, each with a gloss and an optional requires list" (model)
+  why: "every Rust dev and coding agent writes Cargo.toml; comments; array tables keep schema order, which the render sections and maps list use; the toml crate is maintained"
+- weighed "YAML" (model)
+  why: "serde_yaml is archived and unmaintained; indentation errors and the no-becomes-false class of surprises"
+- weighed "JSON, the log's own format" (model)
+  why: "no comments and every key quoted: hostile to the hand-editing a file exists for"
+- weighed "KDL" (model)
+  why: "a node document fits nodes and edges, but few readers know it and an agent writes it worse than TOML"
+
+## "How does a schema say which properties a node must carry?" (model)
+
+- decision "a requires list on the kind; option and task require why" (model)
+  why: "one place beside the gloss, and the file carries it; revise checks any kind the same way, replacing the two checks that compared the schema to DECISIONS and TASKS"
+- weighed "check requires in mapstore's write path, kept out of Map::apply so old history still folds" (model)
+  why: "built first on feat/schemas-as-data and moved: a fold calls replay, never apply, so Map::apply is only ever the write path and the rule belongs there; kept outside core it reached the CLI but not the model's revise_map tool, and AGENTS.md says the rules live once in Map::apply"

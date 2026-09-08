@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::core::{Actor, EventId, Kind, Map, MapRenderer, Node, Schema, DECISIONS, TASKS};
+use crate::core::{Actor, EventId, Kind, Map, MapRenderer, Node, Schema};
 use crate::store::ids;
 
 /// What every rendered map opens with, so a reader who lands on the
@@ -38,9 +38,9 @@ const TASKS_GUIDE: &str = "A `## contents` list, then every open task at `##` in
 pub fn markdown(map: &Map) -> String {
     let schema = map.schema();
     let mut out = format!("# {}\n\n{PREAMBLE}", schema.name);
-    let guide = match schema.name {
-        name if name == DECISIONS.name => Some(DECISIONS_GUIDE),
-        name if name == TASKS.name => Some(TASKS_GUIDE),
+    let guide = match schema.name.as_str() {
+        "decisions" => Some(DECISIONS_GUIDE),
+        "tasks" => Some(TASKS_GUIDE),
         _ => None,
     };
     if let Some(guide) = guide {
@@ -54,9 +54,9 @@ pub fn markdown(map: &Map) -> String {
         return out;
     }
 
-    match schema.name {
-        name if name == DECISIONS.name => push_decisions(&mut out, map),
-        name if name == TASKS.name => push_tasks(&mut out, map),
+    match schema.name.as_str() {
+        "decisions" => push_decisions(&mut out, map),
+        "tasks" => push_tasks(&mut out, map),
         _ => push_by_kind(&mut out, map),
     }
 
@@ -83,17 +83,17 @@ pub fn catalogue(maps: &[Map]) -> String {
             map.nodes().len(),
             map.edges().len()
         );
-        push_kind_glosses(&mut out, "Node kinds", schema.node_kinds);
-        push_kind_glosses(&mut out, "Edge kinds", schema.edge_kinds);
+        push_kind_glosses(&mut out, "Node kinds", &schema.node_kinds);
+        push_kind_glosses(&mut out, "Edge kinds", &schema.edge_kinds);
         push_example(&mut out, map);
     }
     out
 }
 
-fn push_kind_glosses(out: &mut String, heading: &str, kinds: &'static [Kind]) {
+fn push_kind_glosses(out: &mut String, heading: &str, kinds: &[Kind]) {
     let _ = write!(out, "\n{heading}:\n");
     for kind in kinds {
-        let _ = writeln!(out, "- `{}` - {}", kind.name, kind.gloss);
+        let _ = writeln!(out, "- {} - {}", kind.label(), kind.gloss);
     }
 }
 
@@ -147,8 +147,8 @@ fn push_by_kind(out: &mut String, map: &Map) {
 /// Headline kinds first, in `headline_kinds` order, then the rest of
 /// `node_kinds` in schema order - the order a reader wants a map's
 /// sections in.
-fn ordered_kinds(schema: &'static Schema) -> Vec<&'static str> {
-    let mut kinds: Vec<&'static str> = schema.headline_kinds.to_vec();
+fn ordered_kinds(schema: &Schema) -> Vec<&str> {
+    let mut kinds: Vec<&str> = schema.headline_kinds.iter().map(String::as_str).collect();
     for kind in schema.node_kind_names() {
         if !kinds.contains(&kind) {
             kinds.push(kind);

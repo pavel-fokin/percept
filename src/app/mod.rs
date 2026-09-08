@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use context::{Context, Section, View, Window};
 
-use crate::core::{Actor, Event, EventId, EventKind, Map, MapError, Source};
+use crate::core::{Actor, Event, EventId, EventKind, Map, MapError, Schemas, Source};
 
 mod context;
 
@@ -314,6 +314,10 @@ pub struct App {
     reasoning_effort: Option<crate::harness::ReasoningEffort>,
     catalog: Arc<dyn crate::harness::ModelCatalog>,
     log: Arc<dyn crate::core::EventLog>,
+    /// The project's schemas - every one folded from the log, plus
+    /// `code` - what a fold, a write, and an error message about an
+    /// unknown map go through.
+    schemas: Arc<Schemas>,
     /// The tools, the policy and cap around them, the snapshot, the
     /// instructions, and the context - see `Harness`.
     harness: Harness,
@@ -347,6 +351,7 @@ impl App {
         chat: Arc<dyn crate::harness::Model>,
         catalog: Arc<dyn crate::harness::ModelCatalog>,
         log: Arc<dyn crate::core::EventLog>,
+        schemas: Arc<Schemas>,
         harness: Harness,
         renderer: Arc<dyn crate::core::MapRenderer>,
         source: Source,
@@ -357,7 +362,7 @@ impl App {
             .into_iter()
             .filter(|event| scope.admits(event) && belongs_to_transcript(event, &source))
             .collect();
-        Map::fold_all(&scope, &events)?;
+        schemas.fold_all(&scope, &events)?;
         let last_usage = last_model_called(&events);
         let reasoning_effort = chat.capabilities().default_reasoning_effort;
 
@@ -368,6 +373,7 @@ impl App {
             reasoning_effort,
             catalog,
             log,
+            schemas,
             harness,
             allowed: HashSet::new(),
             undo_point: None,
@@ -409,6 +415,7 @@ impl App {
         View {
             instructions: self.harness.instructions.as_deref(),
             events: &self.events,
+            schemas: &self.schemas,
             scope: self.source.scope(),
             turn_start: self.pending.as_ref().map(|turn| turn.start),
             context_window: capabilities.context_window,
@@ -494,7 +501,7 @@ impl App {
         let events = self.log.load()?;
         let scope = self.source.scope();
         for name in changed {
-            let map = Map::fold(crate::core::Schema::find(name)?, &scope, &events)?;
+            let map = Map::fold(self.schemas.find(name)?, &scope, &events)?;
             self.renderer.render(&map)?;
         }
         Ok(())
@@ -505,7 +512,9 @@ impl App {
         if new.is_empty() {
             return Ok(());
         }
-        Map::fold_all(&self.source.scope(), self.events.iter().chain(new)).map(drop)
+        self.schemas
+            .fold_all(&self.source.scope(), self.events.iter().chain(new))
+            .map(drop)
     }
 
     /// Commits the thought then the reply buffered so far, then the
@@ -782,9 +791,10 @@ impl AppService for App {
         // The restore put every rendered map back to before the turn,
         // while the log still holds what the turn added to them: the
         // log is the record, so the renders follow it, not the tree.
-        let every_map = crate::core::SCHEMAS
-            .iter()
-            .map(|schema| schema.name.to_string())
+        let every_map = self
+            .schemas
+            .folded()
+            .map(|schema| schema.name.clone())
             .collect();
         self.render_changed(&every_map)
     }

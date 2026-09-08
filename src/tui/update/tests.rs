@@ -2,7 +2,7 @@ use super::*;
 use std::sync::Arc;
 
 use crate::app::{App, Harness, MapShape};
-use crate::core::testing::{source, FakeLog, FakeRenderer};
+use crate::core::testing::{schemas, source, FakeLog, FakeRenderer};
 use crate::harness::testing::{FakeCatalog, FakeTool, FixedPolicy, Scripted};
 use crate::harness::{ModelDescriptor, Provider};
 use crate::tui::Suggestion;
@@ -42,6 +42,7 @@ fn chat_with_catalog(catalog: FakeCatalog) -> Chat<'static> {
         Arc::new(Scripted::new(vec![], false)),
         Arc::new(catalog),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source("test"),
@@ -62,6 +63,7 @@ fn chat_with_efforts() -> Chat<'static> {
         Arc::new(model),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source("test"),
@@ -423,6 +425,7 @@ fn chat_asking() -> Chat<'static> {
         Arc::new(Scripted::new(vec![], true)),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness {
             policy: Arc::new(FixedPolicy(crate::harness::Verdict::Ask)),
             ..Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt)
@@ -459,6 +462,7 @@ fn a_tool_call_past_the_budget_ends_the_turn_instead_of_hanging() {
         Arc::new(Scripted::new(vec![], true)),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness {
             tool_cap: 0,
             ..Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt)

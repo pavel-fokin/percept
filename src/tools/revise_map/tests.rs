@@ -1,10 +1,10 @@
 use super::*;
-use crate::core::testing::{edge_added, node_added, node_added_by, scope, source, FakeLog};
+use crate::core::testing::{edge_added, node_added, node_added_by, schemas, scope, source, FakeLog};
 use crate::core::{Actor, Event, EventId};
 
 fn tool(events: Vec<Event>) -> ReviseMap {
     let log = Arc::new(FakeLog::seeded(events));
-    ReviseMap::new(log, scope())
+    ReviseMap::new(log, Arc::new(schemas()), scope())
 }
 
 #[test]
@@ -23,7 +23,7 @@ fn a_valid_batch_returns_the_payloads_and_content() {
     let revise = tool(vec![cited]);
 
     let args = format!(
-        r#"{{"map":"decisions","changes":[{{"op":"add_node","kind":"option","name":"Rust","properties":{{"summary":"fast"}},"sources":["{}"]}}]}}"#,
+        r#"{{"map":"decisions","changes":[{{"op":"add_node","kind":"option","name":"Rust","properties":{{"summary":"fast","why":"lost to Go on ecosystem"}},"sources":["{}"]}}]}}"#,
         cited_id.as_uuid()
     );
 
@@ -62,7 +62,7 @@ fn a_failing_change_names_its_index_and_commits_nothing() {
     let err = revise
         .run(&format!(
             r#"{{"map":"decisions","changes":[
-                {{"op":"add_node","kind":"option","name":"Rust","sources":["{id}"]}},
+                {{"op":"add_node","kind":"option","name":"Rust","properties":{{"why":"lost to Go on ecosystem"}},"sources":["{id}"]}},
                 {{"op":"add_node","kind":"goal","name":"Ship","sources":["{id}"]}}
             ]}}"#
         ))
@@ -95,6 +95,22 @@ fn a_node_with_no_sources_is_refused_and_the_error_names_the_rule() {
             .is_err(),
         "an omitted sources list is as empty as an empty one"
     );
+}
+
+#[test]
+fn an_option_with_no_why_is_refused() {
+    let cited = Event::message_received(Actor::User, "Rust".to_string(), source("tui"), None);
+    let cited_id = cited.id();
+    let revise = tool(vec![cited]);
+
+    let args = format!(
+        r#"{{"map":"decisions","changes":[{{"op":"add_node","kind":"option","name":"Rust","sources":["{}"]}}]}}"#,
+        cited_id.as_uuid()
+    );
+
+    let err = revise.run(&args).err().unwrap();
+
+    assert!(err.to_string().contains("lacks its `why` property"), "{err}");
 }
 
 #[test]

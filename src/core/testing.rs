@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::core::{
-    Actor, Event, EventId, EventLog, Map, MapRenderer, NodeId, NodeRef, Payload, Scope, Source,
-    Usage,
+    Actor, Event, EventId, EventLog, Kind, Map, MapRenderer, NodeId, NodeRef, Payload, Schema,
+    Schemas, Scope, Settlement, Source, Usage,
 };
 
 /// The project root `source` stamps, for a test that compares paths.
@@ -211,4 +211,81 @@ pub fn edge_added(kind: &str, from: &Event, to: &Event) -> Event {
             sources: Vec::new(),
         },
     )
+}
+
+/// The built-in decisions schema, as `mapstore`'s embedded
+/// `schemas/decisions.toml` must fold to. A fixture, not production
+/// code: `core` reads no file, and production starts from that
+/// embedded TOML, replaced by a project's own
+/// `.percept/schemas/decisions.toml` when one exists.
+pub fn decisions() -> Schema {
+    Schema {
+        name: "decisions".to_string(),
+        purpose: "what was asked, what was chosen, and why, so a settled question is not \
+                  reopened"
+            .to_string(),
+        node_kinds: vec![
+            Kind::new("question", "a matter the project had to settle"),
+            Kind::new(
+                "option",
+                "an alternative that was weighed and lost, saying why in its `why` property",
+            )
+            .requiring("why"),
+            Kind::new("evidence", "a fact that supports or contradicts an option"),
+            Kind::new("decision", "the choice that was made, and the grounds for it"),
+        ],
+        edge_kinds: vec![
+            Kind::new("answers", "from an option to the question it was weighed for"),
+            Kind::new("supports", "from evidence to an option it backs"),
+            Kind::new("contradicts", "from evidence to an option it undercuts"),
+            Kind::new("resolves", "from a decision to the question it settles"),
+            Kind::new("supersedes", "from a decision to an earlier one it replaces"),
+        ],
+        headline_kinds: vec!["question".to_string(), "decision".to_string()],
+        settlement: Some(Settlement {
+            by: "decision".to_string(),
+            of: "question".to_string(),
+        }),
+        derived: false,
+    }
+}
+
+/// The built-in tasks schema, as `mapstore`'s embedded TOML must fold
+/// to - see `decisions`.
+pub fn tasks() -> Schema {
+    Schema {
+        name: "tasks".to_string(),
+        purpose: "what is left to do, why it matters, and what it waits on, so a session picks \
+                  up the next item without re-deriving it"
+            .to_string(),
+        node_kinds: vec![
+            Kind::new(
+                "task",
+                "one piece of work left to do, saying why it matters in its `why` property",
+            )
+            .requiring("why"),
+            Kind::new(
+                "outcome",
+                "what became of a task: done with its commit, or dropped with the reason",
+            ),
+        ],
+        edge_kinds: vec![
+            Kind::new("resolves", "from an outcome to the task it settles"),
+            Kind::new("blocks", "from a task to the one that must wait for it"),
+            Kind::new("supersedes", "from a reworded task to the wording it replaces"),
+        ],
+        headline_kinds: vec!["task".to_string()],
+        settlement: Some(Settlement {
+            by: "outcome".to_string(),
+            of: "task".to_string(),
+        }),
+        derived: false,
+    }
+}
+
+/// The schemas a test project has: `decisions` and `tasks` folded from
+/// the log, `code` derived - the same set `main` builds from the
+/// embedded and project TOML files, without touching a filesystem.
+pub fn schemas() -> Schemas {
+    Schemas::new(vec![decisions(), tasks()])
 }

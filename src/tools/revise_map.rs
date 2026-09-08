@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::core::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Scope, DECISION};
+use crate::core::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Schemas, Scope, DECISION};
 use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::mapstore::{NodeRefArgs, Snapshot};
 
@@ -13,12 +13,17 @@ use crate::mapstore::{NodeRefArgs, Snapshot};
 /// tool never writes the log itself.
 pub struct ReviseMap {
     log: Arc<dyn EventLog>,
+    schemas: Arc<Schemas>,
     scope: Scope,
 }
 
 impl ReviseMap {
-    pub fn new(log: Arc<dyn EventLog>, scope: Scope) -> Self {
-        Self { log, scope }
+    pub fn new(log: Arc<dyn EventLog>, schemas: Arc<Schemas>, scope: Scope) -> Self {
+        Self {
+            log,
+            schemas,
+            scope,
+        }
     }
 }
 
@@ -199,7 +204,7 @@ impl Tool for ReviseMap {
         if args.changes.is_empty() {
             return Err("changes must not be empty".into());
         }
-        let mut snapshot = Snapshot::load(self.log.as_ref(), &args.map, &self.scope)?;
+        let mut snapshot = Snapshot::load(self.log.as_ref(), &self.schemas, &args.map, &self.scope)?;
         let mut lines = Vec::with_capacity(args.changes.len());
         let mut commits = Vec::with_capacity(args.changes.len());
 

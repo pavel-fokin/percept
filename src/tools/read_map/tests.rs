@@ -1,12 +1,16 @@
 use super::*;
-use crate::core::testing::{edge_added, node_added, node_added_at, scope, FakeLog};
+use crate::core::testing::{edge_added, node_added, node_added_at, schemas, scope, FakeLog};
 use crate::core::Event;
 use crate::mapstore::LogMaps;
 
 /// A `read_map` over the log-folded maps, the way `main` wires it for
 /// every map but `code`.
 fn tool(log: FakeLog) -> ReadMap {
-    ReadMap::new(Arc::new(LogMaps::new(Arc::new(log), scope())))
+    ReadMap::new(Arc::new(LogMaps::new(
+        Arc::new(log),
+        Arc::new(schemas()),
+        scope(),
+    )))
 }
 
 #[test]

@@ -1,6 +1,6 @@
 use super::*;
-use crate::core::testing::{content, node_added, scope, source, usage, FakeLog, FakeRenderer};
-use crate::core::{Actor, Payload, SCHEMAS};
+use crate::core::testing::{content, node_added, schemas, scope, source, usage, FakeLog, FakeRenderer};
+use crate::core::{Actor, Payload};
 use crate::harness::testing::{FakeCatalog, FakeSnapshot, FakeTool, FixedPolicy, Scripted};
 use crate::harness::{Chunk, Verdict};
 
@@ -42,6 +42,7 @@ fn streamed_reply_commits_one_event_caused_by_the_prompt() {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -76,6 +77,7 @@ fn a_thought_and_a_reply_commit_as_two_model_events_thought_first() {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -108,6 +110,7 @@ fn a_plain_turn_commits_thought_reply_then_model_called_in_that_order() {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -144,6 +147,7 @@ fn a_submit_while_a_turn_streams_is_refused_and_records_nothing() {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -167,6 +171,7 @@ fn a_turn_with_a_thought_and_no_reply_still_ends() {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -187,6 +192,7 @@ fn empty_reply_commits_nothing() {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -208,6 +214,7 @@ fn preseeded_log_becomes_the_opening_transcript() {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         log,
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -235,6 +242,7 @@ fn another_source_s_conversation_in_the_same_project_stays_out_of_the_transcript
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         log,
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -265,13 +273,15 @@ fn another_source_s_map_mutation_in_the_same_project_still_folds() {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         log,
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
     )
     .unwrap();
 
-    let decisions = Map::fold_all(&scope(), app.events())
+    let decisions = schemas()
+        .fold_all(&scope(), app.events())
         .unwrap()
         .into_iter()
         .find(|map| map.schema().name == "decisions")
@@ -290,6 +300,7 @@ fn a_reopened_log_s_last_model_called_seeds_last_usage() {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         log,
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -312,6 +323,7 @@ fn a_log_with_no_model_called_leaves_last_usage_unset() {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         log,
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -329,6 +341,7 @@ fn append_failure_surfaces_as_err_and_leaves_transcript_unchanged() {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         log.clone(),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -346,6 +359,7 @@ fn a_failed_reply_append_leaves_the_reply_pending() {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         log.clone(),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -368,6 +382,7 @@ fn a_failed_thought_append_leaves_the_reply_unattempted() {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         log.clone(),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -405,6 +420,7 @@ fn app_with_policy(policy: Verdict) -> App {
         Arc::new(Scripted::new(vec![], true)),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness {
             policy: Arc::new(FixedPolicy(policy)),
             ..Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt)
@@ -495,6 +511,7 @@ fn app_with_snapshot() -> (Arc<FakeSnapshot>, App) {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness {
             snapshot: Some(snapshot.clone()),
             ..Harness::new(Vec::new(), MapShape::Prompt)
@@ -536,6 +553,7 @@ fn undo_rerenders_every_map_so_the_render_follows_the_log_not_the_restored_tree(
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::seeded(vec![node_added("question", "q")])),
+        Arc::new(schemas()),
         Harness {
             snapshot: Some(Arc::new(FakeSnapshot::default())),
             ..Harness::new(Vec::new(), MapShape::Prompt)
@@ -570,6 +588,7 @@ fn an_app_without_a_snapshot_takes_none_and_cannot_undo() {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -588,6 +607,7 @@ fn instructions_go_to_the_model_as_system_text_before_the_maps_every_round() {
         model.clone(),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness {
             instructions: Some("Commit subjects stay under 72 chars.".to_string()),
             ..Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt)
@@ -613,6 +633,7 @@ fn an_app_without_instructions_sends_none() {
         model.clone(),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -634,6 +655,7 @@ fn a_harness_tool_cap_replaces_the_default() {
         model.clone(),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness {
             tool_cap: 2,
             ..Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt)
@@ -657,6 +679,7 @@ fn a_tool_call_commits_called_then_resulted_then_the_reply() {
         Arc::new(Scripted::new(vec![], true)),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -693,6 +716,7 @@ fn a_tool_round_commits_model_called_before_tool_called() {
         Arc::new(Scripted::new(vec![], true)),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -718,6 +742,7 @@ fn an_unknown_tool_name_becomes_the_result_content() {
         Arc::new(Scripted::new(vec![], true)),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -763,6 +788,7 @@ fn a_tool_s_commits_land_between_the_call_and_the_result_caused_by_it() {
         Arc::new(Scripted::new(vec![], true)),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(
             vec![Arc::new(Committing(vec![
                 Payload::MessageReceived {
@@ -806,6 +832,7 @@ fn a_tool_s_map_commit_rerenders_the_map_it_changed() {
         Arc::new(Scripted::new(vec![], true)),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(
             vec![Arc::new(Committing(vec![Payload::NodeAdded {
                 map: "decisions".to_string(),
@@ -835,6 +862,7 @@ fn a_text_only_tool_result_renders_no_map() {
         Arc::new(Scripted::new(vec![], true)),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt),
         renderer.clone(),
         source(SOURCE),
@@ -854,6 +882,7 @@ fn the_tool_call_limit_stops_tools_being_sent_and_then_exhausts() {
         model.clone(),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -882,6 +911,7 @@ fn the_request_after_the_last_tool_call_says_the_budget_is_spent() {
         model.clone(),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -906,6 +936,7 @@ fn a_model_that_cannot_use_tools_is_sent_none() {
         model.clone(),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -934,6 +965,7 @@ fn seeded_app_with_shape(
         model.clone(),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::seeded(events)),
+        Arc::new(schemas()),
         Harness::new(tools, map_shape),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -1021,8 +1053,8 @@ fn assert_decisions_header(message: &str) {
          not reopened. It holds "
     ));
     assert!(message.contains(
-        ". Node kinds: question, option, evidence, decision. Edge kinds: answers, supports, \
-         contradicts, resolves, supersedes.\n"
+        ". Node kinds: `question`, `option` (requires `why`), `evidence`, `decision`. Edge \
+         kinds: `answers`, `supports`, `contradicts`, `resolves`, `supersedes`.\n"
     ));
 }
 
@@ -1034,8 +1066,10 @@ fn an_empty_map_is_still_sent_with_its_kinds() {
 
     let sent = model.last_request();
     // One message per map, the prompt, the time.
-    assert_eq!(sent.len(), 2 + SCHEMAS.len());
-    assert!(sent[0].contains("Node kinds: question, option, evidence, decision."));
+    assert_eq!(sent.len(), 2 + schemas().folded().count());
+    assert!(sent[0].contains(
+        "Node kinds: `question`, `option` (requires `why`), `evidence`, `decision`."
+    ));
     assert!(sent[0].contains("\n(empty:"), "{}", sent[0]);
 }
 
@@ -1090,7 +1124,7 @@ fn a_map_header_carries_its_purpose_size_and_last_change() {
     let sent = model.last_request();
     assert!(sent[0].starts_with(&format!(
         "The decisions map: {}. It holds 1 nodes and 0 edges, last changed {changed}. Node kinds:",
-        crate::core::DECISIONS.purpose
+        crate::core::testing::decisions().purpose
     )));
 }
 
@@ -1127,6 +1161,7 @@ fn a_map_that_does_not_fold_fails_at_open() {
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::seeded(events)),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -1186,7 +1221,7 @@ fn a_log_shorter_than_the_window_sends_all_of_it() {
     let _ = app.submit("now".to_string()).unwrap();
 
     // One message per map, three events, the prompt, the time.
-    assert_eq!(model.last_request().len(), 5 + SCHEMAS.len());
+    assert_eq!(model.last_request().len(), 5 + schemas().folded().count());
 }
 
 #[test]
@@ -1204,7 +1239,7 @@ fn a_model_called_event_never_reaches_the_next_request() {
     // One message per map, "first", "ok", "second", the time - the
     // model.called event between "ok" and "second" is never one of
     // them.
-    assert_eq!(sent.len(), 4 + SCHEMAS.len());
+    assert_eq!(sent.len(), 4 + schemas().folded().count());
     assert!(sent.contains(&"first".to_string()));
     assert!(sent.contains(&"ok".to_string()));
     assert!(sent.contains(&"second".to_string()));
@@ -1226,6 +1261,7 @@ fn set_model_swaps_the_live_model() {
         Arc::new(Silent),
         catalog,
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -1254,6 +1290,7 @@ fn set_model_clears_last_usage_so_the_new_model_reads_as_unasked() {
         Arc::new(Silent),
         catalog,
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -1285,6 +1322,7 @@ fn set_model_errs_and_leaves_the_model_in_place_while_a_turn_streams() {
         Arc::new(Silent),
         catalog,
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -1303,6 +1341,7 @@ fn app_on(model: Arc<dyn crate::harness::Model>, catalog: FakeCatalog) -> App {
         model,
         Arc::new(catalog),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -1409,6 +1448,7 @@ async fn available_models_returns_the_catalog_s_listing() {
         Arc::new(Silent),
         catalog,
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),
@@ -1426,6 +1466,7 @@ fn last_usage_is_the_most_recent_round_trip_not_a_sum() {
         Arc::new(Scripted::new(vec![], true)),
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
+        Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         Arc::new(FakeRenderer::default()),
         source(SOURCE),

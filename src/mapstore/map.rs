@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::core::{
     Actor, Edge, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation, Node, NodeId,
-    NodeRef, Payload, Schema, Scope, DECISIONS, OPTION, TASK, TASKS,
+    NodeRef, Payload, Schemas, Scope,
 };
 use crate::shared::Timestamp;
 use crate::store::{ids, parse_event_id};
@@ -20,28 +20,34 @@ use crate::store::{ids, parse_event_id};
 /// inside `scope`.
 pub fn fold_map(
     log: &dyn EventLog,
+    schemas: &Schemas,
     name: &str,
     scope: &Scope,
 ) -> Result<Map, Box<dyn std::error::Error>> {
-    Ok(Map::fold(Schema::find(name)?, scope, &log.load()?)?)
+    Ok(Map::fold(schemas.find(name)?, scope, &log.load()?)?)
 }
 
 /// The `MapReader` for every log-folded map. `main` wraps this to route
 /// `code` to the working-tree walk, so `store` never depends on `code`.
 pub struct LogMaps {
     log: Arc<dyn EventLog>,
+    schemas: Arc<Schemas>,
     scope: Scope,
 }
 
 impl LogMaps {
-    pub fn new(log: Arc<dyn EventLog>, scope: Scope) -> Self {
-        Self { log, scope }
+    pub fn new(log: Arc<dyn EventLog>, schemas: Arc<Schemas>, scope: Scope) -> Self {
+        Self {
+            log,
+            schemas,
+            scope,
+        }
     }
 }
 
 impl MapReader for LogMaps {
     fn read(&self, name: &str) -> Result<Map, Box<dyn std::error::Error>> {
-        fold_map(self.log.as_ref(), name, &self.scope)
+        fold_map(self.log.as_ref(), &self.schemas, name, &self.scope)
     }
 }
 
@@ -56,10 +62,11 @@ pub struct Snapshot {
 impl Snapshot {
     pub fn load(
         log: &dyn EventLog,
+        schemas: &Schemas,
         name: &str,
         scope: &Scope,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let schema = Schema::find(name)?;
+        let schema = schemas.find(name)?;
         let events = log.load()?;
         let map = Map::fold(schema, scope, &events)?;
         let ids = events.iter().map(|event| event.id().as_uuid()).collect();
@@ -100,52 +107,23 @@ impl Snapshot {
 /// fold then fails loudly.
 pub fn revise(
     log: &dyn EventLog,
+    schemas: &Schemas,
     name: &str,
     scope: &Scope,
     sources: &[String],
     actor: Actor,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
-    let mut snapshot = Snapshot::load(log, name, scope)?;
+    let mut snapshot = Snapshot::load(log, schemas, name, scope)?;
     let sources = snapshot.resolve(sources)?;
     let mutation = mutation(sources);
-    // A rule for new writes only, so the options recorded before it
-    // still fold: this is why it sits here and not in `Map::apply`.
-    if let Mutation::AddNode {
-        kind,
-        name,
-        properties,
-        ..
-    } = &mutation
-    {
-        let schema = snapshot.map().schema();
-        if schema == &DECISIONS && kind == OPTION && !properties.contains_key(WHY) {
-            return Err(format!(
-                "option {name:?} does not say why it lost: an option is an alternative that \
-                 was rejected, and its `why` property carries the reason; the pick is the \
-                 decision itself"
-            )
-            .into());
-        }
-        if schema == &TASKS && kind == TASK && !properties.contains_key(WHY) {
-            return Err(format!(
-                "task {name:?} does not say why it matters: its `why` property carries what \
-                 it costs to leave undone, which is how the next session weighs it"
-            )
-            .into());
-        }
-    }
     Ok(snapshot.apply(mutation, actor)?)
 }
 
-/// The property that carries a node's reason: on a decision, a
-/// rejected option, and a task alike.
-const WHY: &str = "why";
-
 #[derive(Serialize)]
-struct MapLine {
-    map: &'static str,
-    purpose: &'static str,
+struct MapLine<'a> {
+    map: &'a str,
+    purpose: &'a str,
     nodes: usize,
     edges: usize,
 }
@@ -161,7 +139,7 @@ struct Stamp {
 
 impl Stamp {
     fn of(map: &Map, actor: Actor, added_at: Timestamp) -> Option<Self> {
-        (!map.schema().is_derived()).then(|| Self {
+        (!map.schema().derived).then(|| Self {
             actor: actor.name(),
             added_at: added_at.to_string(),
         })
@@ -192,8 +170,8 @@ struct EdgeLine<'a> {
 /// One line naming a map and its size, for `maps list`.
 pub fn encode_map(map: &Map) -> String {
     serde_json::to_string(&MapLine {
-        map: map.schema().name,
-        purpose: map.schema().purpose,
+        map: &map.schema().name,
+        purpose: &map.schema().purpose,
         nodes: map.nodes().len(),
         edges: map.edges().len(),
     })
@@ -201,48 +179,51 @@ pub fn encode_map(map: &Map) -> String {
 }
 
 #[derive(Serialize)]
-struct KindLine {
-    name: &'static str,
-    gloss: &'static str,
+struct KindLine<'a> {
+    name: &'a str,
+    gloss: &'a str,
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    requires: &'a [String],
 }
 
-impl KindLine {
-    fn of(kinds: &'static [crate::core::Kind]) -> Vec<Self> {
+impl<'a> KindLine<'a> {
+    fn of(kinds: &'a [crate::core::Kind]) -> Vec<Self> {
         kinds
             .iter()
             .map(|kind| Self {
-                name: kind.name,
-                gloss: kind.gloss,
+                name: &kind.name,
+                gloss: &kind.gloss,
+                requires: &kind.requires,
             })
             .collect()
     }
 }
 
 #[derive(Serialize)]
-struct SchemaLine {
-    schema: &'static str,
-    purpose: &'static str,
-    node_kinds: Vec<KindLine>,
-    edge_kinds: Vec<KindLine>,
+struct SchemaLine<'a> {
+    schema: &'a str,
+    purpose: &'a str,
+    node_kinds: Vec<KindLine<'a>>,
+    edge_kinds: Vec<KindLine<'a>>,
 }
 
 /// One line describing a map's kinds, each with the gloss it carries on
 /// its `Schema` - what `read_map` returns before the fragment, so the
 /// model meets `package` or `option` with its meaning attached and does
 /// not guess a selector from a name alone.
-pub fn encode_schema(schema: &'static crate::core::Schema) -> String {
+pub fn encode_schema(schema: &crate::core::Schema) -> String {
     serde_json::to_string(&SchemaLine {
-        schema: schema.name,
-        purpose: schema.purpose,
-        node_kinds: KindLine::of(schema.node_kinds),
-        edge_kinds: KindLine::of(schema.edge_kinds),
+        schema: &schema.name,
+        purpose: &schema.purpose,
+        node_kinds: KindLine::of(&schema.node_kinds),
+        edge_kinds: KindLine::of(&schema.edge_kinds),
     })
     .expect("SchemaLine always serializes")
 }
 
 #[derive(Serialize)]
 struct FragmentLine<'a> {
-    map: &'static str,
+    map: &'a str,
     shown_nodes: usize,
     total_nodes: usize,
     shown_edges: usize,
@@ -260,7 +241,7 @@ const NOTHING_RECORDED: &str =
 pub fn encode_fragment(fragment: &Fragment) -> String {
     let map = fragment.map();
     serde_json::to_string(&FragmentLine {
-        map: map.schema().name,
+        map: &map.schema().name,
         shown_nodes: map.nodes().len(),
         total_nodes: fragment.total_nodes(),
         shown_edges: map.edges().len(),

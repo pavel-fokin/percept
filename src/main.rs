@@ -410,7 +410,7 @@ struct RoutedMaps {
 
 impl crate::core::MapReader for RoutedMaps {
     fn read(&self, name: &str) -> Result<crate::core::Map, Box<dyn std::error::Error>> {
-        if name == crate::core::CODE.name {
+        if name == crate::core::CODE {
             Ok(code::build(&self.root)?)
         } else {
             self.folded.read(name)
@@ -441,18 +441,19 @@ fn build_app(
     checkout: &Path,
 ) -> Result<App, Box<dyn std::error::Error>> {
     let log = Arc::new(open_log()?);
+    let schemas = Arc::new(mapstore::load_schemas(checkout)?);
     let catalog: Arc<dyn crate::harness::ModelCatalog> = Arc::new(build_catalog());
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
     let scope = source.scope();
     let maps = RoutedMaps {
-        folded: LogMaps::new(log.clone(), scope.clone()),
+        folded: LogMaps::new(log.clone(), schemas.clone(), scope.clone()),
         root: checkout.to_path_buf(),
     };
     let mut tools: Vec<Arc<dyn crate::harness::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
         Arc::new(ReadEvent::new(log.clone())),
-        Arc::new(ReviseMap::new(log.clone(), scope)),
+        Arc::new(ReviseMap::new(log.clone(), schemas.clone(), scope)),
         Arc::new(ReadMap::new(Arc::new(maps))),
     ];
     match build_toolset(&source, checkout)? {
@@ -460,6 +461,7 @@ fn build_app(
             model,
             catalog,
             log,
+            schemas,
             Harness::new(tools, map_shape),
             renderer,
             source,
@@ -474,7 +476,7 @@ fn build_app(
                 instructions,
                 ..Harness::new(tools, map_shape)
             };
-            App::new(model, catalog, log, harness, renderer, source)
+            App::new(model, catalog, log, schemas, harness, renderer, source)
         }
     }
 }
@@ -549,20 +551,23 @@ async fn main() {
         Some(Command::Maps {
             command: MapsCommand::Show(args),
         }) if args.is_code() => cli::maps_show_code(args, &checkout),
-        Some(Command::Maps { command }) => open_log().and_then(|log| match command {
-            MapsCommand::List(args) => cli::maps_list(args, &log, &root, &checkout),
-            MapsCommand::Show(args) => cli::maps_show(args, &log, &root),
-            MapsCommand::AddNode(args) => {
-                cli::maps_add_node(args, &log, &cli_source, renderer.as_ref())
-            }
-            MapsCommand::AddEdge(args) => {
-                cli::maps_add_edge(args, &log, &cli_source, renderer.as_ref())
-            }
-            MapsCommand::RemoveNode(args) => {
-                cli::maps_remove_node(args, &log, &cli_source, renderer.as_ref())
-            }
-            MapsCommand::RemoveEdge(args) => {
-                cli::maps_remove_edge(args, &log, &cli_source, renderer.as_ref())
+        Some(Command::Maps { command }) => open_log().and_then(|log| {
+            let schemas = mapstore::load_schemas(&checkout)?;
+            match command {
+                MapsCommand::List(args) => cli::maps_list(args, &log, &schemas, &root, &checkout),
+                MapsCommand::Show(args) => cli::maps_show(args, &log, &schemas, &root),
+                MapsCommand::AddNode(args) => {
+                    cli::maps_add_node(args, &log, &schemas, &cli_source, renderer.as_ref())
+                }
+                MapsCommand::AddEdge(args) => {
+                    cli::maps_add_edge(args, &log, &schemas, &cli_source, renderer.as_ref())
+                }
+                MapsCommand::RemoveNode(args) => {
+                    cli::maps_remove_node(args, &log, &schemas, &cli_source, renderer.as_ref())
+                }
+                MapsCommand::RemoveEdge(args) => {
+                    cli::maps_remove_edge(args, &log, &schemas, &cli_source, renderer.as_ref())
+                }
             }
         }),
         Some(Command::Ask(args)) => {

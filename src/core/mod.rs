@@ -17,8 +17,8 @@ pub use event_log::EventLog;
 #[cfg(test)]
 pub use map::SUPERSEDES;
 pub use map::{
-    map_of, Edge, Fragment, Kind, Map, MapError, Mutation, Node, NodeId, NodeRef, Schema, Scope,
-    Selection, CODE, DECISION, DECISIONS, OPTION, SCHEMAS, TASK, TASKS,
+    code, map_of, Edge, Fragment, Kind, Map, MapError, Mutation, Node, NodeId, NodeRef, Schema,
+    Schemas, Scope, Selection, Settlement, CODE, DECISION,
 };
 pub use map_reader::MapReader;
 pub use render::MapRenderer;

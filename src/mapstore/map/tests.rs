@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::core::testing::{scope, source, source_at, FakeLog};
+use crate::core::testing::{schemas, scope, source, source_at, FakeLog};
 use crate::core::{Actor, Event, NodeId, NodeRef};
 use crate::shared::Timestamp;
 
@@ -38,6 +38,7 @@ fn an_option_without_a_why_is_refused_as_a_new_write() {
 
     let err = revise(
         &log,
+        &schemas(),
         "decisions",
         &scope(),
         &[],
@@ -48,7 +49,8 @@ fn an_option_without_a_why_is_refused_as_a_new_write() {
     .unwrap()
     .to_string();
 
-    assert!(err.contains("why it lost"), "{err}");
+    assert!(err.contains("lacks its `why` property"), "{err}");
+    assert!(err.contains("weighed and lost"), "{err}");
 }
 
 #[test]
@@ -57,6 +59,7 @@ fn a_task_without_a_why_is_refused_as_a_new_write() {
 
     let err = revise(
         &log,
+        &schemas(),
         "tasks",
         &scope(),
         &[],
@@ -67,6 +70,7 @@ fn a_task_without_a_why_is_refused_as_a_new_write() {
     .unwrap()
     .to_string();
 
+    assert!(err.contains("lacks its `why` property"), "{err}");
     assert!(err.contains("why it matters"), "{err}");
 }
 
@@ -80,7 +84,7 @@ fn an_option_with_a_why_is_recorded() {
         sources,
     };
 
-    let payload = revise(&log, "decisions", &scope(), &[], Actor::User, mutation).unwrap();
+    let payload = revise(&log, &schemas(), "decisions", &scope(), &[], Actor::User, mutation).unwrap();
 
     assert!(matches!(payload, Payload::NodeAdded { .. }));
 }
@@ -91,6 +95,7 @@ fn revise_returns_the_payload_that_records_the_mutation() {
 
     let payload = revise(
         &log,
+        &schemas(),
         "decisions",
         &scope(),
         &[],
@@ -101,7 +106,7 @@ fn revise_returns_the_payload_that_records_the_mutation() {
 
     assert!(matches!(&payload, Payload::NodeAdded { name, .. } if name == "Rust"));
     record(&log, payload);
-    assert!(fold_map(&log, "decisions", &scope())
+    assert!(fold_map(&log, &schemas(), "decisions", &scope())
         .unwrap()
         .find("decision", "Rust")
         .is_some());
@@ -112,6 +117,7 @@ fn revise_loads_the_log_so_a_second_call_sees_the_first() {
     let log = FakeLog::default();
     let first = revise(
         &log,
+        &schemas(),
         "decisions",
         &scope(),
         &[],
@@ -123,6 +129,7 @@ fn revise_loads_the_log_so_a_second_call_sees_the_first() {
 
     let err = revise(
         &log,
+        &schemas(),
         "decisions",
         &scope(),
         &[],
@@ -143,6 +150,7 @@ fn revise_allows_the_same_name_under_a_different_project_s_path() {
 
     let first = revise(
         &log,
+        &schemas(),
         "decisions",
         &here,
         &[],
@@ -154,6 +162,7 @@ fn revise_allows_the_same_name_under_a_different_project_s_path() {
 
     let elsewhere = revise(
         &log,
+        &schemas(),
         "decisions",
         &there,
         &[],
@@ -163,7 +172,7 @@ fn revise_allows_the_same_name_under_a_different_project_s_path() {
     .unwrap();
     record_at(&log, "/there", elsewhere);
 
-    assert!(fold_map(&log, "decisions", &there)
+    assert!(fold_map(&log, &schemas(), "decisions", &there)
         .unwrap()
         .find("decision", "Rust")
         .is_some());
@@ -173,6 +182,7 @@ fn revise_allows_the_same_name_under_a_different_project_s_path() {
 fn revising_the_code_map_is_refused() {
     let err = revise(
         &FakeLog::default(),
+        &schemas(),
         "code",
         &scope(),
         &[],
@@ -187,7 +197,7 @@ fn revising_the_code_map_is_refused() {
 
 #[test]
 fn an_unknown_map_is_an_error() {
-    let err = fold_map(&FakeLog::default(), "glossary", &scope())
+    let err = fold_map(&FakeLog::default(), &schemas(), "glossary", &scope())
         .err()
         .unwrap();
 
@@ -206,6 +216,7 @@ fn a_source_is_checked_against_the_loaded_log() {
 
     let ok = revise(
         &log,
+        &schemas(),
         "decisions",
         &scope(),
         &[known],
@@ -215,6 +226,7 @@ fn a_source_is_checked_against_the_loaded_log() {
     .unwrap();
     let missing = revise(
         &log,
+        &schemas(),
         "decisions",
         &scope(),
         std::slice::from_ref(&unknown),
@@ -225,6 +237,7 @@ fn a_source_is_checked_against_the_loaded_log() {
     .unwrap();
     let junk = revise(
         &log,
+        &schemas(),
         "decisions",
         &scope(),
         &["user".to_string()],
@@ -241,7 +254,7 @@ fn a_source_is_checked_against_the_loaded_log() {
 
 #[test]
 fn a_node_line_carries_its_id_sources_actor_and_time() {
-    let map = Map::empty(&crate::core::DECISIONS);
+    let map = Map::empty(crate::core::testing::decisions());
     let node = Node {
         id: NodeId::new(),
         kind: "evidence".to_string(),
@@ -265,7 +278,7 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
 
 #[test]
 fn a_derived_map_s_lines_carry_no_actor_or_time() {
-    let mut map = Map::empty(&crate::core::CODE);
+    let mut map = Map::empty(crate::core::code());
     map.apply(
         Mutation::AddNode {
             kind: "file".to_string(),
@@ -286,7 +299,7 @@ fn a_derived_map_s_lines_carry_no_actor_or_time() {
 
 #[test]
 fn an_edge_line_names_its_ends_as_kind_and_name() {
-    let mut map = Map::empty(&crate::core::CODE);
+    let mut map = Map::empty(crate::core::code());
     for (kind, name) in [("file", "src/main.rs"), ("package", "clap")] {
         map.apply(
             Mutation::AddNode {
