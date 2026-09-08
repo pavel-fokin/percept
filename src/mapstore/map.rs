@@ -89,33 +89,6 @@ impl Snapshot {
     }
 
     pub fn apply(&mut self, mutation: Mutation, actor: Actor) -> Result<Payload, MapError> {
-        // A rule for new writes only, so the options recorded before it
-        // still fold: this is why it sits here and not in `Map::apply`.
-        // Both the CLI's `revise` and the model's `revise_map` tool go
-        // through `Snapshot::apply`, so the rule holds for either.
-        if let Mutation::AddNode {
-            kind,
-            name,
-            properties,
-            ..
-        } = &mutation
-        {
-            let schema = self.map.schema();
-            if let Some(node_kind) = schema.node_kind(kind) {
-                if let Some(property) = node_kind
-                    .requires
-                    .iter()
-                    .find(|property| !properties.contains_key(*property))
-                {
-                    return Err(MapError::MissingProperty {
-                        kind: kind.clone(),
-                        name: name.clone(),
-                        property: property.clone(),
-                        gloss: node_kind.gloss.clone(),
-                    });
-                }
-            }
-        }
         self.map.apply(mutation, actor)
     }
 
@@ -166,7 +139,7 @@ struct Stamp {
 
 impl Stamp {
     fn of(map: &Map, actor: Actor, added_at: Timestamp) -> Option<Self> {
-        (!map.schema().is_derived()).then(|| Self {
+        (!map.schema().derived).then(|| Self {
             actor: actor.name(),
             added_at: added_at.to_string(),
         })
@@ -209,12 +182,8 @@ pub fn encode_map(map: &Map) -> String {
 struct KindLine<'a> {
     name: &'a str,
     gloss: &'a str,
-    #[serde(skip_serializing_if = "is_empty_slice")]
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
     requires: &'a [String],
-}
-
-fn is_empty_slice(slice: &&[String]) -> bool {
-    slice.is_empty()
 }
 
 impl<'a> KindLine<'a> {

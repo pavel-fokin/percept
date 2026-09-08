@@ -13,7 +13,6 @@
 //! more.
 
 use std::path::Path;
-use std::sync::Arc;
 
 use serde::Deserialize;
 
@@ -65,44 +64,37 @@ struct KindFile {
 /// else `<project>/.percept/schemas` declares, and `code`, always
 /// derived. Each error names the file it came from.
 pub fn load(project: &Path) -> Result<Schemas, Box<dyn std::error::Error>> {
-    let mut folded = vec![
-        parse("decisions.toml", DECISIONS_TOML)?,
-        parse("tasks.toml", TASKS_TOML)?,
-    ];
-    for (file_name, text) in project_files(project)? {
-        let stem = file_name.strip_suffix(".toml").unwrap_or(&file_name);
+    let mut folded = vec![parse("decisions", DECISIONS_TOML)?, parse("tasks", TASKS_TOML)?];
+    for (stem, text) in project_files(project)? {
         if stem == CODE {
-            return Err(format!(
-                "{file_name}: code is derived from the working tree, not declared"
-            )
-            .into());
+            return Err(
+                format!("{stem}.toml: code is derived from the working tree, not declared").into(),
+            );
         }
         if stem == INDEX {
             return Err(format!(
-                "{file_name}: index.md is the hand-written map directory, not a declared map"
+                "{stem}.toml: index.md is the hand-written map directory, not a declared map"
             )
             .into());
         }
-        let schema = parse(&file_name, &text)?;
+        let schema = parse(&stem, &text)?;
         match folded.iter().position(|built_in| built_in.name == schema.name) {
             Some(at) => {
-                check_extends(&folded[at], &schema, &file_name)?;
+                check_extends(&folded[at], &schema, &stem)?;
                 folded[at] = schema;
             }
             None => folded.push(schema),
         }
     }
-    let mut schemas: Vec<Arc<Schema>> = folded.into_iter().map(Arc::new).collect();
-    schemas.push(Arc::new(crate::core::code()));
-    Ok(Schemas::new(schemas))
+    Ok(Schemas::new(folded))
 }
 
 /// Every `*.toml` file directly under `<project>/.percept/schemas`,
-/// name and contents, in a stable order. Empty when the directory does
-/// not exist: a project need not declare any schema of its own. Only
-/// regular files are read: a directory named `x.toml`, or a dangling
-/// symlink an editor's lock file leaves behind, is skipped rather than
-/// breaking every command that loads schemas.
+/// its stem and contents, in a stable order. Empty when the directory
+/// does not exist: a project need not declare any schema of its own.
+/// Only regular files are read: a directory named `x.toml`, or a
+/// dangling symlink an editor's lock file leaves behind, is skipped
+/// rather than breaking every command that loads schemas.
 fn project_files(project: &Path) -> Result<Vec<(String, String)>, Box<dyn std::error::Error>> {
     let dir = project.join(SCHEMAS_DIR);
     if !dir.is_dir() {
@@ -110,55 +102,58 @@ fn project_files(project: &Path) -> Result<Vec<(String, String)>, Box<dyn std::e
     }
     let mut names: Vec<String> = std::fs::read_dir(&dir)?
         .filter_map(|entry| entry.ok())
-        .filter(|entry| entry.file_type().map(|kind| kind.is_file()).unwrap_or(false))
+        .filter(|entry| entry.path().is_file())
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
-        .filter(|name| name.ends_with(".toml"))
+        .filter_map(|name| name.strip_suffix(".toml").map(str::to_string))
         .collect();
     names.sort();
     names
         .into_iter()
-        .map(|name| {
-            let text = std::fs::read_to_string(dir.join(&name))
-                .map_err(|err| format!("{name}: {err}"))?;
-            Ok((name, text))
+        .map(|stem| {
+            let text = std::fs::read_to_string(dir.join(format!("{stem}.toml")))
+                .map_err(|err| format!("{stem}.toml: {err}"))?;
+            Ok((stem, text))
         })
         .collect()
 }
 
-/// Refuses `project`, named by `file_name`, when it drops or changes
-/// what `built_in` declares: a missing node or edge kind, or a
-/// different `headlines` or `settles`. `project` may add more of
-/// either; the names, not the glosses or `requires`, are what must
-/// still match.
+/// Refuses `project`, named by `stem`, when it drops or changes what
+/// `built_in` declares: a missing node or edge kind, or a different
+/// `headlines` or `settles`. `project` may add more of either; the
+/// names, not the glosses or `requires`, are what must still match.
 fn check_extends(
     built_in: &Schema,
     project: &Schema,
-    file_name: &str,
+    stem: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    for (label, built_in_kinds, project_kinds) in [
-        ("node kind", &built_in.node_kinds, &project.node_kinds),
-        ("edge kind", &built_in.edge_kinds, &project.edge_kinds),
-    ] {
-        for kind in built_in_kinds {
-            if !project_kinds.iter().any(|k| k.name == kind.name) {
-                return Err(format!(
-                    "{file_name}: drops {label} {:?}, which the built-in {:?} declares",
-                    kind.name, built_in.name
-                )
-                .into());
-            }
+    for kind in &built_in.node_kinds {
+        if project.node_kind(&kind.name).is_none() {
+            return Err(format!(
+                "{stem}.toml: drops node kind {:?}, which the built-in {:?} declares",
+                kind.name, built_in.name
+            )
+            .into());
+        }
+    }
+    for kind in &built_in.edge_kinds {
+        if project.edge_kind(&kind.name).is_none() {
+            return Err(format!(
+                "{stem}.toml: drops edge kind {:?}, which the built-in {:?} declares",
+                kind.name, built_in.name
+            )
+            .into());
         }
     }
     if built_in.headline_kinds != project.headline_kinds {
         return Err(format!(
-            "{file_name}: changes headlines from {:?} to {:?}",
+            "{stem}.toml: changes headlines from {:?} to {:?}",
             built_in.headline_kinds, project.headline_kinds
         )
         .into());
     }
     if built_in.settlement != project.settlement {
         return Err(format!(
-            "{file_name}: changes settles from {:?} to {:?}",
+            "{stem}.toml: changes settles from {:?} to {:?}",
             built_in.settlement, project.settlement
         )
         .into());
@@ -166,107 +161,115 @@ fn check_extends(
     Ok(())
 }
 
-/// Parses and validates one schema file: `file_name` names it in every
+/// Parses and validates one schema file: `stem` names it in every
 /// error, so a project with several files knows which one is wrong.
-fn parse(file_name: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
-    let file: SchemaFile = toml::from_str(text).map_err(|err| format!("{file_name}: {err}"))?;
+fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
+    let file: SchemaFile = toml::from_str(text).map_err(|err| format!("{stem}.toml: {err}"))?;
 
-    let stem = file_name.strip_suffix(".toml").unwrap_or(file_name);
     if file.name != stem {
         return Err(format!(
-            "{file_name}: declares name {:?}, which does not match the file name",
+            "{stem}.toml: declares name {:?}, which does not match the file name",
             file.name
         )
         .into());
     }
     if file.nodes.is_empty() {
-        return Err(format!("{file_name}: declares no node kinds").into());
+        return Err(format!("{stem}.toml: declares no node kinds").into());
     }
 
-    check_kinds(file_name, "nodes", &file.nodes)?;
-    check_kinds(file_name, "edges", &file.edges)?;
+    check_kinds(stem, "nodes", &file.nodes)?;
+    check_kinds(stem, "edges", &file.edges)?;
 
-    let node_kinds: Vec<Kind> = file.nodes.into_iter().map(into_kind).collect();
-    let edge_kinds: Vec<Kind> = file.edges.into_iter().map(into_kind).collect();
-    let has_node_kind = |name: &str| node_kinds.iter().any(|kind| kind.name == name);
-
-    let mut seen_headlines: Vec<&str> = Vec::new();
-    for headline in &file.headlines {
-        if !has_node_kind(headline) {
-            return Err(format!(
-                "{file_name}: headlines names {headline:?}, which is not a declared node kind"
-            )
-            .into());
-        }
-        if seen_headlines.contains(&headline.as_str()) {
-            return Err(format!("{file_name}: headlines names {headline:?} twice").into());
-        }
-        seen_headlines.push(headline);
-    }
-    let settlement = match file.settles {
-        Some(SettlesFile { by, of }) => {
-            for (field, name) in [("by", &by), ("of", &of)] {
-                if !has_node_kind(name) {
-                    return Err(format!(
-                        "{file_name}: settles.{field} names {name:?}, which is not a declared \
-                         node kind"
-                    )
-                    .into());
-                }
-            }
-            Some(Settlement { by, of })
-        }
-        None => None,
+    let as_kind = |file: KindFile| Kind {
+        name: file.name,
+        gloss: file.gloss,
+        requires: file.requires,
     };
+    let node_kinds: Vec<Kind> = file.nodes.into_iter().map(as_kind).collect();
+    let edge_kinds: Vec<Kind> = file.edges.into_iter().map(as_kind).collect();
 
-    Ok(Schema {
+    let mut schema = Schema {
         name: file.name,
         purpose: file.purpose,
         node_kinds,
         edge_kinds,
-        headline_kinds: file.headlines,
-        settlement,
+        headline_kinds: file.headlines.clone(),
+        settlement: None,
         derived: false,
-    })
+    };
+
+    for headline in &file.headlines {
+        if schema.node_kind(headline).is_none() {
+            return Err(format!(
+                "{stem}.toml: headlines names {headline:?}, which is not a declared node kind"
+            )
+            .into());
+        }
+    }
+    if let Some(headline) = repeated(file.headlines.iter().map(String::as_str)) {
+        return Err(format!("{stem}.toml: headlines names {headline:?} twice").into());
+    }
+
+    if let Some(SettlesFile { by, of }) = file.settles {
+        for (field, name) in [("by", &by), ("of", &of)] {
+            if schema.node_kind(name).is_none() {
+                return Err(format!(
+                    "{stem}.toml: settles.{field} names {name:?}, which is not a declared node \
+                     kind"
+                )
+                .into());
+            }
+        }
+        schema.settlement = Some(Settlement { by, of });
+    }
+
+    Ok(schema)
 }
 
 /// Refuses a blank kind name, a name repeated within `kinds`, or a
 /// blank gloss or `requires` entry - `group` names the TOML array
 /// (`nodes` or `edges`) in the error.
-fn check_kinds(file_name: &str, group: &str, kinds: &[KindFile]) -> Result<(), Box<dyn std::error::Error>> {
-    let mut seen: Vec<&str> = Vec::new();
+fn check_kinds(
+    stem: &str,
+    group: &str,
+    kinds: &[KindFile],
+) -> Result<(), Box<dyn std::error::Error>> {
     for kind in kinds {
         if kind.name.trim().is_empty() {
-            return Err(format!("{file_name}: a {group} kind's name must not be blank").into());
+            return Err(format!("{stem}.toml: a {group} kind's name must not be blank").into());
         }
-        if seen.contains(&kind.name.as_str()) {
-            return Err(format!("{file_name}: {group} declares {:?} twice", kind.name).into());
-        }
-        seen.push(&kind.name);
         if kind.gloss.trim().is_empty() {
             return Err(format!(
-                "{file_name}: {group} kind {:?} has a blank gloss",
+                "{stem}.toml: {group} kind {:?} has a blank gloss",
                 kind.name
             )
             .into());
         }
         if kind.requires.iter().any(|property| property.trim().is_empty()) {
             return Err(format!(
-                "{file_name}: {group} kind {:?} requires a blank property",
+                "{stem}.toml: {group} kind {:?} requires a blank property",
                 kind.name
             )
             .into());
         }
     }
+    if let Some(name) = repeated(kinds.iter().map(|kind| kind.name.as_str())) {
+        return Err(format!("{stem}.toml: {group} declares {name:?} twice").into());
+    }
     Ok(())
 }
 
-fn into_kind(file: KindFile) -> Kind {
-    Kind {
-        name: file.name,
-        gloss: file.gloss,
-        requires: file.requires,
+/// The first name `names` repeats, if any - the one duplicate scan
+/// every kind and headline check shares.
+fn repeated<'a>(names: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    let mut seen: Vec<&str> = Vec::new();
+    for name in names {
+        if seen.contains(&name) {
+            return Some(name);
+        }
+        seen.push(name);
     }
+    None
 }
 
 #[cfg(test)]

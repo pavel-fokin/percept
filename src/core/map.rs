@@ -82,11 +82,33 @@ pub struct Kind {
 }
 
 impl Kind {
-    fn new(name: &str, gloss: &str) -> Self {
+    pub(crate) fn new(name: &str, gloss: &str) -> Self {
         Self {
             name: name.to_string(),
             gloss: gloss.to_string(),
             requires: Vec::new(),
+        }
+    }
+
+    /// `self`, requiring `property` on a new node of this kind. Used
+    /// only by `core::testing`'s fixture schemas today, so it is
+    /// `cfg(test)` like the rest of that module.
+    #[cfg(test)]
+    pub(crate) fn requiring(mut self, property: &str) -> Self {
+        self.requires.push(property.to_string());
+        self
+    }
+
+    /// This kind's name, backticked, alone or with the properties it
+    /// requires - `` `option` (requires `why`) `` - for a csv or a
+    /// rendered list, so the one shape is built once and read
+    /// everywhere a kind is named.
+    pub fn label(&self) -> String {
+        if self.requires.is_empty() {
+            format!("`{}`", self.name)
+        } else {
+            let requires: Vec<String> = self.requires.iter().map(|p| format!("`{p}`")).collect();
+            format!("`{}` (requires {})", self.name, requires.join(", "))
         }
     }
 }
@@ -165,7 +187,11 @@ pub struct Schemas {
 }
 
 impl Schemas {
-    pub fn new(schemas: Vec<Arc<Schema>>) -> Self {
+    /// `folded`, each wrapped in `Arc`, with the derived `code` schema
+    /// appended - the one full set every caller builds from.
+    pub fn new(folded: Vec<Schema>) -> Self {
+        let mut schemas: Vec<Arc<Schema>> = folded.into_iter().map(Arc::new).collect();
+        schemas.push(Arc::new(code()));
         Self { schemas }
     }
 
@@ -189,12 +215,8 @@ impl Schemas {
     }
 
     /// Every schema folded from the log, derived schemas excluded.
-    pub fn folded(&self) -> Vec<Arc<Schema>> {
-        self.schemas
-            .iter()
-            .filter(|schema| !schema.derived)
-            .cloned()
-            .collect()
+    pub fn folded(&self) -> impl Iterator<Item = &Arc<Schema>> + '_ {
+        self.schemas.iter().filter(|schema| !schema.derived)
     }
 
     /// Every map folded from `events` within `scope` - one per
@@ -206,19 +228,15 @@ impl Schemas {
         events: impl IntoIterator<Item = &'a Event> + Clone,
     ) -> Result<Vec<Map>, MapError> {
         self.folded()
-            .into_iter()
-            .map(|schema| Map::fold(schema, scope, events.clone()))
+            .map(|schema| Map::fold(schema.clone(), scope, events.clone()))
             .collect()
     }
 
-    /// Every schema's name, derived ones last, for an "expected one of"
+    /// Every schema's name, in stored order, for an "expected one of"
     /// error.
     fn names_csv(&self) -> String {
-        let (derived, folded): (Vec<_>, Vec<_>) =
-            self.schemas.iter().partition(|schema| schema.derived);
-        folded
-            .into_iter()
-            .chain(derived)
+        self.schemas
+            .iter()
             .map(|schema| schema.name.clone())
             .collect::<Vec<_>>()
             .join(", ")
@@ -226,15 +244,14 @@ impl Schemas {
 }
 
 impl Schema {
-    /// Whether this map is built from something other than the log, so
-    /// its nodes have no history: no writer, no moment they were added.
-    pub fn is_derived(&self) -> bool {
-        self.derived
-    }
-
     /// The node kind `name` names, when the schema has it.
     pub fn node_kind(&self, name: &str) -> Option<&Kind> {
         self.node_kinds.iter().find(|kind| kind.name == name)
+    }
+
+    /// The edge kind `name` names, when the schema has it.
+    pub fn edge_kind(&self, name: &str) -> Option<&Kind> {
+        self.edge_kinds.iter().find(|kind| kind.name == name)
     }
 
     /// The node kind names, in schema order.
@@ -247,15 +264,23 @@ impl Schema {
         self.edge_kinds.iter().map(|kind| kind.name.as_str())
     }
 
-    /// The node kind names as a `, `-joined list, for a prompt line or
-    /// an "expected one of" error.
+    /// The node kinds' labels as a `, `-joined list, for a prompt line
+    /// or an "expected one of" error.
     pub fn node_kinds_csv(&self) -> String {
-        self.node_kind_names().collect::<Vec<_>>().join(", ")
+        self.node_kinds
+            .iter()
+            .map(Kind::label)
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
-    /// The edge kind names as a `, `-joined list.
+    /// The edge kinds' labels as a `, `-joined list.
     pub fn edge_kinds_csv(&self) -> String {
-        self.edge_kind_names().collect::<Vec<_>>().join(", ")
+        self.edge_kinds
+            .iter()
+            .map(Kind::label)
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -418,7 +443,8 @@ pub enum MapError {
     /// A new node of a kind that `requires` a property the caller did
     /// not supply. A rule for new writes only, so a node recorded
     /// before its kind gained the requirement still folds; checked by
-    /// `mapstore::Snapshot::apply`, not here.
+    /// `Map::apply` on a mutation, never by `replay` on a stored
+    /// payload.
     MissingProperty {
         kind: String,
         name: String,
@@ -592,10 +618,10 @@ impl Map {
     /// superseded ones - what a reader sees of the map before opening
     /// it.
     pub fn headlines(&self) -> impl Iterator<Item = &Node> {
-        let schema = self.schema.clone();
+        let headline_kinds = &self.schema.headline_kinds;
         self.nodes
             .iter()
-            .filter(move |node| schema.headline_kinds.contains(&node.kind))
+            .filter(move |node| headline_kinds.contains(&node.kind))
             .filter(|node| !self.is_superseded(node.id))
     }
 
@@ -821,7 +847,7 @@ impl Map {
     /// the cut left out. Consumes the map: a whole selection is the map
     /// itself, not a copy.
     pub fn select(self, selection: &Selection) -> Result<Fragment, MapError> {
-        if selection.since.is_some() && self.schema.is_derived() {
+        if selection.since.is_some() && self.schema.derived {
             return Err(MapError::SinceOnDerived(self.schema.name.clone()));
         }
         let total_nodes = self.nodes.len();
@@ -884,14 +910,30 @@ impl Map {
                 name,
                 properties,
                 sources,
-            } => Payload::NodeAdded {
-                map,
-                node: NodeId::new(),
-                kind,
-                name,
-                properties,
-                sources,
-            },
+            } => {
+                if let Some(node_kind) = self.schema.node_kind(&kind) {
+                    if let Some(property) = node_kind
+                        .requires
+                        .iter()
+                        .find(|property| !properties.contains_key(*property))
+                    {
+                        return Err(MapError::MissingProperty {
+                            kind: kind.clone(),
+                            name: name.clone(),
+                            property: property.clone(),
+                            gloss: node_kind.gloss.clone(),
+                        });
+                    }
+                }
+                Payload::NodeAdded {
+                    map,
+                    node: NodeId::new(),
+                    kind,
+                    name,
+                    properties,
+                    sources,
+                }
+            }
             Mutation::RemoveNode {
                 node,
                 reason,

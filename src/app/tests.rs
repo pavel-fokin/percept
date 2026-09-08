@@ -1053,8 +1053,8 @@ fn assert_decisions_header(message: &str) {
          not reopened. It holds "
     ));
     assert!(message.contains(
-        ". Node kinds: question, option (requires why), evidence, decision. Edge kinds: \
-         answers, supports, contradicts, resolves, supersedes.\n"
+        ". Node kinds: `question`, `option` (requires `why`), `evidence`, `decision`. Edge \
+         kinds: `answers`, `supports`, `contradicts`, `resolves`, `supersedes`.\n"
     ));
 }
 
@@ -1066,8 +1066,10 @@ fn an_empty_map_is_still_sent_with_its_kinds() {
 
     let sent = model.last_request();
     // One message per map, the prompt, the time.
-    assert_eq!(sent.len(), 2 + schemas().folded().len());
-    assert!(sent[0].contains("Node kinds: question, option (requires why), evidence, decision."));
+    assert_eq!(sent.len(), 2 + schemas().folded().count());
+    assert!(sent[0].contains(
+        "Node kinds: `question`, `option` (requires `why`), `evidence`, `decision`."
+    ));
     assert!(sent[0].contains("\n(empty:"), "{}", sent[0]);
 }
 
@@ -1219,7 +1221,7 @@ fn a_log_shorter_than_the_window_sends_all_of_it() {
     let _ = app.submit("now".to_string()).unwrap();
 
     // One message per map, three events, the prompt, the time.
-    assert_eq!(model.last_request().len(), 5 + schemas().folded().len());
+    assert_eq!(model.last_request().len(), 5 + schemas().folded().count());
 }
 
 #[test]
@@ -1237,7 +1239,7 @@ fn a_model_called_event_never_reaches_the_next_request() {
     // One message per map, "first", "ok", "second", the time - the
     // model.called event between "ok" and "second" is never one of
     // them.
-    assert_eq!(sent.len(), 4 + schemas().folded().len());
+    assert_eq!(sent.len(), 4 + schemas().folded().count());
     assert!(sent.contains(&"first".to_string()));
     assert!(sent.contains(&"ok".to_string()));
     assert!(sent.contains(&"second".to_string()));

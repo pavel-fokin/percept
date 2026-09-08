@@ -7,8 +7,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use std::sync::Arc;
-
 use crate::core::{
     Actor, Event, EventId, EventLog, Kind, Map, MapRenderer, NodeId, NodeRef, Payload, Schema,
     Schemas, Scope, Settlement, Source, Usage,
@@ -215,19 +213,6 @@ pub fn edge_added(kind: &str, from: &Event, to: &Event) -> Event {
     )
 }
 
-fn kind(name: &str, gloss: &str) -> Kind {
-    Kind {
-        name: name.to_string(),
-        gloss: gloss.to_string(),
-        requires: Vec::new(),
-    }
-}
-
-fn requiring(mut k: Kind, property: &str) -> Kind {
-    k.requires.push(property.to_string());
-    k
-}
-
 /// The built-in decisions schema, as `mapstore`'s embedded
 /// `schemas/decisions.toml` must fold to. A fixture, not production
 /// code: `core` reads no file, and production starts from that
@@ -240,23 +225,21 @@ pub fn decisions() -> Schema {
                   reopened"
             .to_string(),
         node_kinds: vec![
-            kind("question", "a matter the project had to settle"),
-            requiring(
-                kind(
-                    "option",
-                    "an alternative that was weighed and lost, saying why in its `why` property",
-                ),
-                "why",
-            ),
-            kind("evidence", "a fact that supports or contradicts an option"),
-            kind("decision", "the choice that was made, and the grounds for it"),
+            Kind::new("question", "a matter the project had to settle"),
+            Kind::new(
+                "option",
+                "an alternative that was weighed and lost, saying why in its `why` property",
+            )
+            .requiring("why"),
+            Kind::new("evidence", "a fact that supports or contradicts an option"),
+            Kind::new("decision", "the choice that was made, and the grounds for it"),
         ],
         edge_kinds: vec![
-            kind("answers", "from an option to the question it was weighed for"),
-            kind("supports", "from evidence to an option it backs"),
-            kind("contradicts", "from evidence to an option it undercuts"),
-            kind("resolves", "from a decision to the question it settles"),
-            kind("supersedes", "from a decision to an earlier one it replaces"),
+            Kind::new("answers", "from an option to the question it was weighed for"),
+            Kind::new("supports", "from evidence to an option it backs"),
+            Kind::new("contradicts", "from evidence to an option it undercuts"),
+            Kind::new("resolves", "from a decision to the question it settles"),
+            Kind::new("supersedes", "from a decision to an earlier one it replaces"),
         ],
         headline_kinds: vec!["question".to_string(), "decision".to_string()],
         settlement: Some(Settlement {
@@ -276,22 +259,20 @@ pub fn tasks() -> Schema {
                   up the next item without re-deriving it"
             .to_string(),
         node_kinds: vec![
-            requiring(
-                kind(
-                    "task",
-                    "one piece of work left to do, saying why it matters in its `why` property",
-                ),
-                "why",
-            ),
-            kind(
+            Kind::new(
+                "task",
+                "one piece of work left to do, saying why it matters in its `why` property",
+            )
+            .requiring("why"),
+            Kind::new(
                 "outcome",
                 "what became of a task: done with its commit, or dropped with the reason",
             ),
         ],
         edge_kinds: vec![
-            kind("resolves", "from an outcome to the task it settles"),
-            kind("blocks", "from a task to the one that must wait for it"),
-            kind("supersedes", "from a reworded task to the wording it replaces"),
+            Kind::new("resolves", "from an outcome to the task it settles"),
+            Kind::new("blocks", "from a task to the one that must wait for it"),
+            Kind::new("supersedes", "from a reworded task to the wording it replaces"),
         ],
         headline_kinds: vec!["task".to_string()],
         settlement: Some(Settlement {
@@ -306,9 +287,5 @@ pub fn tasks() -> Schema {
 /// the log, `code` derived - the same set `main` builds from the
 /// embedded and project TOML files, without touching a filesystem.
 pub fn schemas() -> Schemas {
-    Schemas::new(vec![
-        Arc::new(decisions()),
-        Arc::new(tasks()),
-        Arc::new(crate::core::code()),
-    ])
+    Schemas::new(vec![decisions(), tasks()])
 }

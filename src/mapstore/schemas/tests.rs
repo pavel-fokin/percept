@@ -3,13 +3,13 @@ use crate::core::testing::{decisions, tasks, Fixture};
 
 #[test]
 fn the_embedded_decisions_toml_folds_to_the_decisions_fixture() {
-    let schema = parse("decisions.toml", DECISIONS_TOML).unwrap();
+    let schema = parse("decisions", DECISIONS_TOML).unwrap();
     assert_eq!(schema, decisions());
 }
 
 #[test]
 fn the_embedded_tasks_toml_folds_to_the_tasks_fixture() {
-    let schema = parse("tasks.toml", TASKS_TOML).unwrap();
+    let schema = parse("tasks", TASKS_TOML).unwrap();
     assert_eq!(schema, tasks());
 }
 
@@ -17,8 +17,7 @@ fn the_embedded_tasks_toml_folds_to_the_tasks_fixture() {
 fn a_project_with_no_schemas_directory_has_only_the_built_ins() {
     let fixture = Fixture::new();
     let schemas = load(fixture.path()).unwrap();
-    let folded = schemas.folded();
-    let names: Vec<&str> = folded.iter().map(|s| s.name.as_str()).collect();
+    let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["decisions", "tasks"]);
 }
 
@@ -39,8 +38,7 @@ fn a_project_schema_of_a_new_name_is_added() {
 
     let schemas = load(fixture.path()).unwrap();
 
-    let folded = schemas.folded();
-    let names: Vec<&str> = folded.iter().map(|s| s.name.as_str()).collect();
+    let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["decisions", "tasks", "glossary"]);
     let glossary = schemas.find("glossary").unwrap();
     assert_eq!(glossary.node_kind("term").unwrap().requires, ["meaning"]);
@@ -60,8 +58,7 @@ fn a_project_file_named_for_a_built_in_replaces_it() {
 
     let schemas = load(fixture.path()).unwrap();
 
-    let folded = schemas.folded();
-    let names: Vec<&str> = folded.iter().map(|s| s.name.as_str()).collect();
+    let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["decisions", "tasks"], "the built-in's slot, not appended");
     assert_eq!(schemas.find("decisions").unwrap().purpose, "a changed purpose");
 }
@@ -223,8 +220,7 @@ fn a_directory_named_dot_toml_is_ignored() {
 
     let schemas = load(fixture.path()).unwrap();
 
-    let folded = schemas.folded();
-    let names: Vec<&str> = folded.iter().map(|s| s.name.as_str()).collect();
+    let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["decisions", "tasks"]);
 }
 

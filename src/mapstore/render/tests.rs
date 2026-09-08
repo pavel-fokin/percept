@@ -527,7 +527,14 @@ fn an_option_with_no_answers_edge_stays_out_of_the_render() {
 fn a_resolves_edge_between_the_wrong_kinds_settles_nothing() {
     let mut map = Map::empty(decisions());
     let source = EventId::new();
-    add(&mut map, "option", "gemma4", None, &[source], Actor::User);
+    add(
+        &mut map,
+        "option",
+        "gemma4",
+        Some("slower on this hardware"),
+        &[source],
+        Actor::User,
+    );
     add(
         &mut map,
         "decision",
@@ -555,7 +562,7 @@ fn a_map_with_no_question_or_decision_says_so() {
         &mut map,
         "option",
         "Rust",
-        None,
+        Some("only alternative weighed"),
         &[EventId::new()],
         Actor::User,
     );
@@ -725,8 +732,10 @@ fn the_catalogue_names_a_kinds_required_properties() {
     let text = catalogue(&[Map::empty(decisions())]);
 
     assert!(
-        text.contains("- `option` - an alternative that was weighed and lost, saying why in its \
-                        `why` property (requires `why`)"),
+        text.contains(
+            "- `option` (requires `why`) - an alternative that was weighed and lost, saying \
+             why in its `why` property"
+        ),
         "{text}"
     );
 }

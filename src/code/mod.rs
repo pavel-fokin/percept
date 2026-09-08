@@ -2,10 +2,10 @@
 //! tree with `ignore` and parsed with `tree-sitter`, rather than folded
 //! from the event log. `build` returns a `Map` on the same `Schema` and
 //! `Map::apply` every log-backed map uses, so `maps list` and `maps
-//! show` treat it the same way once it's built - `Map::fold_all` and
-//! `schemas()` stay log-only, since nothing here is an event. A language
-//! adds one query file and one small module like `rust`; `build` is
-//! where they're dispatched.
+//! show` treat it the same way once it's built - `Schemas::fold_all`
+//! stays log-only, since nothing here is an event. A language adds one
+//! query file and one small module like `rust`; `build` is where
+//! they're dispatched.
 
 mod rust;
 

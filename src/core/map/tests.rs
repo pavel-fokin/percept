@@ -253,6 +253,18 @@ fn add_node(kind: &str, name: &str) -> Mutation {
     }
 }
 
+/// An `option` node with the `why` its kind requires - `add_node`
+/// leaves `properties` empty, which `Map::apply` now refuses for a
+/// kind that requires one.
+fn add_option(name: &str) -> Mutation {
+    Mutation::AddNode {
+        kind: "option".to_string(),
+        name: name.to_string(),
+        properties: BTreeMap::from([("why".to_string(), "because".to_string())]),
+        sources: Vec::new(),
+    }
+}
+
 fn add_edge(kind: &str, from: NodeRef, to: NodeRef) -> Mutation {
     Mutation::AddEdge {
         kind: kind.to_string(),
@@ -387,7 +399,8 @@ fn an_unknown_kind_fails_the_fold() {
             kind: "goal".to_string()
         }
         .to_string(),
-        "no node kind \"goal\" in map \"decisions\"; kinds are question, option, evidence, decision"
+        "no node kind \"goal\" in map \"decisions\"; kinds are `question`, `option` \
+         (requires `why`), `evidence`, `decision`"
     );
 }
 
@@ -510,7 +523,7 @@ fn apply_records_what_a_fold_rebuilds() {
 #[test]
 fn apply_stamps_the_node_with_the_actor_given() {
     let mut map = Map::empty(decisions());
-    map.apply(add_node("option", "Rust"), Actor::User).unwrap();
+    map.apply(add_option("Rust"), Actor::User).unwrap();
 
     let node = map.find("option", "Rust").unwrap();
 
@@ -518,20 +531,41 @@ fn apply_stamps_the_node_with_the_actor_given() {
 }
 
 #[test]
+fn apply_refuses_an_option_without_a_why() {
+    let mut map = Map::empty(decisions());
+
+    let err = map
+        .apply(add_node("option", "Rust"), Actor::User)
+        .err()
+        .unwrap();
+
+    assert_eq!(
+        err,
+        MapError::MissingProperty {
+            kind: "option".to_string(),
+            name: "Rust".to_string(),
+            property: "why".to_string(),
+            gloss: decisions().node_kind("option").unwrap().gloss.clone(),
+        }
+    );
+    assert!(map.nodes().is_empty());
+}
+
+#[test]
 fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
     let mut map = Map::empty(decisions());
-    map.apply(add_node("option", "Rust"), Actor::User).unwrap();
+    map.apply(add_option("Rust"), Actor::User).unwrap();
 
     let unknown = map
         .apply(add_node("goal", "Ship"), Actor::User)
         .err()
         .unwrap();
     let blank = map
-        .apply(add_node("option", "  "), Actor::User)
+        .apply(add_option("  "), Actor::User)
         .err()
         .unwrap();
     let duplicate = map
-        .apply(add_node("option", "Rust"), Actor::User)
+        .apply(add_option("Rust"), Actor::User)
         .err()
         .unwrap();
     let missing = map
@@ -657,9 +691,7 @@ fn a_schema_is_found_by_name() {
 
 #[test]
 fn every_kind_of_every_schema_carries_a_gloss() {
-    let schemas = crate::core::testing::schemas();
-    let code = crate::core::code();
-    for schema in schemas.folded().iter().chain(std::iter::once(&Arc::new(code))) {
+    for schema in [decisions(), tasks(), code()] {
         for kind in schema.node_kinds.iter().chain(&schema.edge_kinds) {
             assert!(
                 !kind.gloss.is_empty(),
@@ -669,16 +701,6 @@ fn every_kind_of_every_schema_carries_a_gloss() {
             );
         }
     }
-}
-
-#[test]
-fn an_option_requires_a_why() {
-    assert_eq!(decisions().node_kind("option").unwrap().requires, ["why"]);
-}
-
-#[test]
-fn a_task_requires_a_why() {
-    assert_eq!(tasks().node_kind("task").unwrap().requires, ["why"]);
 }
 
 #[test]
@@ -739,7 +761,7 @@ fn chain() -> Map {
         .unwrap();
     map.apply(add_node("evidence", "Built both"), Actor::User)
         .unwrap();
-    map.apply(add_node("option", "Go"), Actor::User).unwrap();
+    map.apply(add_option("Go"), Actor::User).unwrap();
     map.apply(
         add_edge(
             "resolves",

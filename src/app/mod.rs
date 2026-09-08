@@ -794,7 +794,6 @@ impl AppService for App {
         let every_map = self
             .schemas
             .folded()
-            .iter()
             .map(|schema| schema.name.clone())
             .collect();
         self.render_changed(&every_map)
