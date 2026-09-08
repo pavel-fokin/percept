@@ -61,6 +61,7 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "Where do design proposals live?" (model) · 2026-09-07
 - "How does the prompt stay within the model's window as the maps grow?" (model) · 2026-09-07
 - "How does a rendered map stay scoped to the branch it is committed in?" (model) · 2026-09-07
+- "Where does agreement between the human and the agent live?" (model) · 2026-09-08
 
 ## "Where does the event log live?"
 
@@ -437,3 +438,10 @@ note: "Not decided. The maps are always in view and never shrink, so the prompt 
 
 note: "Not decided. One log holds every branch, and the render is a file in one branch, so recording from any worktree rewrites the render with unmerged branches' nodes; hit in four sessions, again on feat/harness with two questions from the effort branch. Options: stop committing the render and regenerate on demand; regenerate in a pre-commit step; teach the renderer a branch scope from the events' sources or the checkout. Task: stop committing the rendered map Markdown, or scope its rewrite to the branch."
 - open
+
+## "Where does agreement between the human and the agent live?" (model)
+
+- decision "in the core, as confirms and disputes edges from a user to a model node and a standing the fold derives: claimed, confirmed, disputed; every schema carries it" (model)
+  why: "two cognitions share a map with different boundaries, the agent's inside the log and the human's mostly outside it; the rule that a recorded claim is not the human's agreement had no operation behind it, and the mechanism belongs to the core so no map defines its own; docs/architecture.md"
+- weighed "one map per cognition, merged at a shared surface" (model)
+  why: "doubles what a reader holds for a distinction the fold derives from the actor and the confirmation edge; the contour is a view over one map, never a storage boundary"

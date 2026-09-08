@@ -13,7 +13,7 @@ The core adds three things a memory lacks:
 | Property | What it means | Where it lives today |
 |---|---|---|
 | Evidence | A claim in a map cites the experience it came from. A reader can check it. | `source` on every node and edge event. |
-| Co-ownership | A map is shared by the human and the agent under landmark rules: a user-written node is never removed by the model, a decision is superseded and never deleted. | `Map::apply`; the `actor` on a node. |
+| Co-ownership | A map is shared by the human and the agent under landmark rules: a user-written node is never removed by the model, a decision is superseded and never deleted. The human confirms or disputes what the agent wrote. | `Map::apply`; the `actor` on a node. Confirmation is not built: see the surface below. |
 | One log | The log spans clients and projects. What one agent learned another can fold. | `~/.percept/percept.jsonl`, `Source` on every event. |
 
 The core is what carries those three. Anything that does not is a
@@ -32,7 +32,7 @@ Small: events, maps, and the rules between them.
 | Ports | Append, load, search the log; read and render a map. |
 | Format | The JSONL line. The contract every language speaks. |
 
-Two things belong here that the code does not have yet.
+Three things belong here that the code does not have yet.
 
 - **Schemas as data.** `decisions` and `tasks` are declared in Rust. A
   surface that wants a glossary map needs a Rust change. The core folds
@@ -41,6 +41,46 @@ Two things belong here that the code does not have yet.
   between which states: `resolves` makes a question settled,
   `supersedes` makes a decision past. The fold derives the state; the
   renderer stops branching on kind names.
+- **The surface between two cognitions.** Below.
+
+### Two contours, one surface
+
+Two cognitions share a map: the agent's and the human's. Each is a
+contour with its own boundary, and the boundaries differ in kind. The
+agent's contour is inside the log: what it searched, what it wrote,
+why. The human's is mostly outside it: their head, their notes, what
+they said elsewhere. Only what they type crosses in. One cognition is
+transparent to the system and the other is opaque, and the core models
+the human no further than what crosses.
+
+The surface is where the two meet: the nodes both contours have
+touched. The rule "a recorded claim is not the human's agreement" names
+it, but today it has no operation behind it. A user-written node is the
+human's, a model node is the agent's, and a model node the human has
+read and not objected to is in limbo.
+
+The mechanism is one edge and one derived state, and it is the core's,
+not any one map's. Every schema carries it, the way every schema
+carries an actor on a node.
+
+| Piece | What it is |
+|---|---|
+| `confirms`, `disputes` | An edge from a user to a node the model wrote. An event like any other: it cites its prompt and never changes. |
+| Standing | Derived by the fold: claimed, confirmed, disputed. A user-written node is confirmed by construction. |
+
+Standing is a lifecycle keyed by actor, where the lifecycle above is
+keyed by edge kind; the two compose. A render shows standing where it
+matters, on a decision or a task, and not on evidence. Silence stays
+claimed, never rejected. Confirmation must cost a keystroke or a batch,
+or the human stops giving it and the state means nothing.
+
+The maps do not split by contour. One map per cognition doubles what a
+reader holds for a distinction the fold derives, so the contour is a
+view over one map and never a storage boundary. The mixing today is
+right; the surface becomes visible when it gets its one missing edge.
+
+This is what makes co-ownership an operation rather than a rule:
+agreement with provenance between two cognitions.
 
 Two things sit in the core's module today and must leave it.
 
@@ -155,6 +195,9 @@ core. The three properties above are what the checks must show.
 1. The lib target with the harness ports moved out. One refactor, no
    behaviour change, and the shape of the core becomes checkable.
 2. Lifecycle on schemas, once schemas are data.
+3. The surface: the `confirms` and `disputes` edges, standing in the
+   fold, and a mark in the render. A `confirm` verb on `percept maps`
+   and a `y` on a row in the TUI are the two cheapest ways to give it.
 
 ## Recommendation
 
