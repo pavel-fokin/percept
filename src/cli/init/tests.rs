@@ -1,0 +1,185 @@
+use serde_json::json;
+
+use super::*;
+
+#[test]
+fn writes_claude_code_from_nothing() {
+    let root = merge_claude_code(json!({}), "percept hook claude-code").unwrap();
+
+    assert_eq!(
+        root["hooks"]["UserPromptSubmit"],
+        json!([{ "hooks": [{ "type": "command", "command": "percept hook claude-code", "timeout": 20 }] }])
+    );
+    assert_eq!(
+        root["hooks"]["PostToolUse"][0]["hooks"][0]["command"],
+        "percept hook claude-code"
+    );
+    assert_eq!(
+        root["hooks"]["Stop"][0]["hooks"][0]["command"],
+        "percept hook claude-code"
+    );
+    assert_eq!(
+        root["permissions"]["allow"],
+        json!(["Bash(percept maps *)", "Bash(percept events *)"])
+    );
+}
+
+#[test]
+fn writes_codex_from_nothing() {
+    let root = merge_codex(json!({}), "percept hook codex").unwrap();
+
+    for event in EVENTS {
+        assert_eq!(
+            root["hooks"][event][0]["hooks"][0]["command"],
+            "percept hook codex"
+        );
+    }
+    assert!(root.get("permissions").is_none());
+}
+
+#[test]
+fn keeps_unrelated_keys() {
+    let existing = json!({ "model": "opus", "other": { "nested": true } });
+
+    let root = merge_claude_code(existing, "percept hook claude-code").unwrap();
+
+    assert_eq!(root["model"], "opus");
+    assert_eq!(root["other"], json!({ "nested": true }));
+}
+
+#[test]
+fn does_not_duplicate_an_existing_hook_entry() {
+    let existing = merge_claude_code(json!({}), "percept hook claude-code").unwrap();
+
+    let merged = merge_claude_code(existing.clone(), "percept hook claude-code").unwrap();
+
+    assert_eq!(merged, existing);
+    assert_eq!(
+        merged["hooks"]["UserPromptSubmit"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn does_not_duplicate_an_existing_allow_entry() {
+    let existing = merge_claude_code(json!({}), "percept hook claude-code").unwrap();
+
+    let merged = merge_claude_code(existing.clone(), "percept hook claude-code").unwrap();
+
+    assert_eq!(merged["permissions"]["allow"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn keeps_another_command_under_the_same_event() {
+    let existing = json!({
+        "hooks": {
+            "UserPromptSubmit": [
+                { "hooks": [{ "type": "command", "command": "echo other", "timeout": 5 }] }
+            ],
+            "PostToolUse": [],
+            "Stop": []
+        }
+    });
+
+    let root = merge_claude_code(existing, "percept hook claude-code").unwrap();
+
+    let entries = root["hooks"]["UserPromptSubmit"].as_array().unwrap();
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0]["hooks"][0]["command"], "echo other");
+    assert_eq!(
+        entries[1]["hooks"][0]["command"],
+        "percept hook claude-code"
+    );
+}
+
+#[test]
+fn second_run_is_identical() {
+    let once = merge_codex(json!({}), "percept hook codex").unwrap();
+    let twice = merge_codex(once.clone(), "percept hook codex").unwrap();
+
+    assert_eq!(once, twice);
+}
+
+#[test]
+fn unknown_client_is_refused() {
+    let temp = tempfile::tempdir().unwrap();
+
+    let err = run(
+        InitArgs {
+            client: "cursor".to_string(),
+        },
+        temp.path(),
+    )
+    .unwrap_err();
+
+    assert!(err.to_string().contains("claude-code"));
+    assert!(err.to_string().contains("codex"));
+}
+
+#[test]
+fn a_non_object_file_is_an_error() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join(".claude")).unwrap();
+    std::fs::write(temp.path().join(".claude/settings.json"), "[1, 2]").unwrap();
+
+    let err = run(
+        InitArgs {
+            client: "claude-code".to_string(),
+        },
+        temp.path(),
+    )
+    .unwrap_err();
+
+    assert!(err.to_string().contains("not a JSON object"));
+    let text = std::fs::read_to_string(temp.path().join(".claude/settings.json")).unwrap();
+    assert_eq!(text, "[1, 2]");
+}
+
+#[test]
+fn writes_claude_code_settings_to_disk() {
+    let temp = tempfile::tempdir().unwrap();
+
+    run(
+        InitArgs {
+            client: "claude-code".to_string(),
+        },
+        temp.path(),
+    )
+    .unwrap();
+
+    let text = std::fs::read_to_string(temp.path().join(".claude/settings.json")).unwrap();
+    assert!(text.ends_with('\n'));
+    let value: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(
+        value["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
+        "percept hook claude-code"
+    );
+}
+
+#[test]
+fn running_init_twice_leaves_the_file_unchanged() {
+    let temp = tempfile::tempdir().unwrap();
+
+    run(
+        InitArgs {
+            client: "codex".to_string(),
+        },
+        temp.path(),
+    )
+    .unwrap();
+    let first = std::fs::read_to_string(temp.path().join(".codex/hooks.json")).unwrap();
+
+    run(
+        InitArgs {
+            client: "codex".to_string(),
+        },
+        temp.path(),
+    )
+    .unwrap();
+    let second = std::fs::read_to_string(temp.path().join(".codex/hooks.json")).unwrap();
+
+    assert_eq!(first, second);
+}

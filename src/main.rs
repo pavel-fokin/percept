@@ -630,6 +630,7 @@ async fn main() {
             )
             .await
         }
+        Some(Command::Init(args)) => cli::init::run(args, &checkout),
         Some(Command::Reflect) => {
             headless_turn(
                 Actor::System,

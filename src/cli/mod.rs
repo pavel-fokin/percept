@@ -4,9 +4,11 @@
 //! folds a cognitive map from the log and prints it - except `code`,
 //! walked fresh from the working tree - `percept ask` runs one full
 //! turn - including the tool loop - and prints the reply, `percept
-//! reflect` runs one asking the model to revise its maps, and `percept
+//! reflect` runs one asking the model to revise its maps, `percept
 //! hook <client>` records one coding client's turn from the hook JSON
-//! it reads on stdin - see `hook`. A
+//! it reads on stdin - see `hook` - and `percept init <client>` writes
+//! that client's project config so its hooks call `percept hook
+//! <client>` - see `init`. A
 //! presentation-layer peer of `tui` - it forwards parsed input to
 //! `store` and `app`, and has no chat logic of its own: `ask` drives the
 //! same `AppService` turn policy `tui` does, just inline instead of over
@@ -55,8 +57,9 @@ without it: `events publish` appends one event, `events search` and \
 map folded from it - `code`, the map of files and imports, is walked \
 fresh from the working tree instead - `ask` runs one full turn and \
 prints the reply, `reflect` runs one turn asking the model to \
-revise its maps, and `hook <client>` records one coding client's turn \
-from the hook JSON it reads on stdin.")]
+revise its maps, `hook <client>` records one coding client's turn \
+from the hook JSON it reads on stdin, and `init <client>` writes that \
+client's project config to call it.")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -83,6 +86,9 @@ pub enum Command {
     /// stdin. Never fails the client's turn: an error prints to
     /// stderr and still exits with a JSON object on stdout.
     Hook(hook::HookArgs),
+    /// Write a coding client's project config so its hooks call
+    /// `percept hook <client>`.
+    Init(init::InitArgs),
 }
 
 #[derive(Subcommand)]
@@ -801,6 +807,7 @@ fn parse_time(flag: &str, s: &str) -> Result<Timestamp, String> {
 
 pub mod hook;
 pub use hook::HookArgs;
+pub mod init;
 
 #[cfg(test)]
 mod tests;
