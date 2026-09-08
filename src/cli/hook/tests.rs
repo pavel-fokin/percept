@@ -54,13 +54,13 @@ impl Fixture {
     fn call_raw(&self, client: &str, raw: &str) -> Result<Value, Box<dyn std::error::Error>> {
         let mut cursor = Cursor::new(raw.as_bytes().to_vec());
         let input = read(&mut cursor)?;
-        let checkout = crate::root_for(Path::new(&input.cwd))?;
+        let checkout = crate::root_for(Path::new(input.cwd()))?;
         let root = crate::project_of(&checkout);
         let source = Source {
             name: client.to_string(),
             path: root,
         };
-        run(input, client, &source, &self.log, &self.sessions)
+        run(input, &source, &self.log, &self.sessions)
     }
 
     /// The number of turn state files kept anywhere under
@@ -86,7 +86,19 @@ impl Fixture {
         count(&self.sessions)
     }
 
-    fn prompt(&self, client: &str, root: &Path, session: &str, turn: &str, text: &str) -> String {
+    /// `prompt_at`, against this fixture's own root.
+    fn prompt(&self, client: &str, session: &str, turn: &str, text: &str) -> String {
+        self.prompt_at(client, &self.root.clone(), session, turn, text)
+    }
+
+    fn prompt_at(
+        &self,
+        client: &str,
+        root: &Path,
+        session: &str,
+        turn: &str,
+        text: &str,
+    ) -> String {
         let output = self
             .call(
                 client,
@@ -107,7 +119,18 @@ impl Fixture {
             .to_string()
     }
 
+    /// `stop_at`, against this fixture's own root.
     fn stop(
+        &self,
+        client: &str,
+        session: &str,
+        turn: &str,
+        fields: Value,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        self.stop_at(client, &self.root.clone(), session, turn, fields)
+    }
+
+    fn stop_at(
         &self,
         client: &str,
         root: &Path,
@@ -131,18 +154,49 @@ impl Fixture {
 }
 
 fn merge(base: &mut Value, extra: Value) {
-    if let (Some(base), Some(extra)) = (base.as_object_mut(), extra.as_object()) {
-        for (key, value) in extra {
-            base.insert(key.clone(), value.clone());
-        }
+    base.as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+}
+
+#[test]
+fn every_hook_event_names_itself_after_deserializing() {
+    let cases = [
+        (
+            "UserPromptSubmit",
+            json!({"hook_event_name": "UserPromptSubmit", "prompt": "hi"}),
+        ),
+        (
+            "PostToolUse",
+            json!({
+                "hook_event_name": "PostToolUse",
+                "tool_name": "Bash",
+                "tool_input": {},
+                "tool_response": {},
+            }),
+        ),
+        (
+            "Stop",
+            json!({
+                "hook_event_name": "Stop",
+                "last_assistant_message": null,
+                "transcript_path": null,
+            }),
+        ),
+    ];
+
+    assert_eq!(EVENTS.len(), cases.len());
+    for (name, body) in cases {
+        assert!(EVENTS.contains(&name));
+        let event: HookEvent = serde_json::from_value(body).unwrap();
+        assert_eq!(event.name(), name);
     }
 }
 
 #[test]
 fn prompt_context_names_the_committed_event() {
     let fixture = Fixture::new();
-    let root = fixture.root.clone();
-    let id = fixture.prompt("codex", &root, "session", "", "hello");
+    let id = fixture.prompt("codex", "session", "", "hello");
 
     let events = fixture.events();
     assert_eq!(events.len(), 1);
@@ -154,44 +208,22 @@ fn prompt_context_names_the_committed_event() {
 #[test]
 fn any_client_name_becomes_the_events_source() {
     let fixture = Fixture::new();
-    let root = fixture.root.clone();
-    fixture.prompt("opencode", &root, "session", "", "hello");
+    fixture.prompt("opencode", "session", "", "hello");
 
     assert_eq!(fixture.events()[0].source().name, "opencode");
 }
 
 #[test]
-fn an_empty_client_name_is_refused_without_blocking() {
-    let fixture = Fixture::new();
-    let root = fixture.root.clone();
-    let err = fixture
-        .call(
-            "",
-            json!({
-                "hook_event_name": "UserPromptSubmit",
-                "cwd": root.to_str().unwrap(),
-                "session_id": "session",
-                "prompt": "hello",
-            }),
-        )
-        .unwrap_err();
-
-    assert!(err.to_string().contains("client name must not be empty"));
-    assert!(fixture.events().is_empty());
-}
-
-#[test]
 fn tool_result_cites_the_call_and_the_call_cites_the_prompt() {
     let fixture = Fixture::new();
-    let root = fixture.root.clone();
-    let prompt = fixture.prompt("codex", &root, "session", "", "hello");
+    let prompt = fixture.prompt("codex", "session", "", "hello");
 
     fixture
         .call(
             "codex",
             json!({
                 "hook_event_name": "PostToolUse",
-                "cwd": root.to_str().unwrap(),
+                "cwd": fixture.root.to_str().unwrap(),
                 "session_id": "session",
                 "tool_name": "Bash",
                 "tool_input": {"command": "ls"},
@@ -222,13 +254,11 @@ fn tool_result_cites_the_call_and_the_call_cites_the_prompt() {
 #[test]
 fn stop_uses_last_assistant_message_and_the_prompts_cause() {
     let fixture = Fixture::new();
-    let root = fixture.root.clone();
-    let prompt = fixture.prompt("codex", &root, "session", "", "hello");
+    let prompt = fixture.prompt("codex", "session", "", "hello");
 
     let output = fixture
         .stop(
             "codex",
-            &root,
             "session",
             "",
             json!({"last_assistant_message": "reply"}),
@@ -248,14 +278,12 @@ fn stop_uses_last_assistant_message_and_the_prompts_cause() {
 #[test]
 fn stop_clears_the_turns_state() {
     let fixture = Fixture::new();
-    let root = fixture.root.clone();
-    fixture.prompt("codex", &root, "session", "", "hello");
+    fixture.prompt("codex", "session", "", "hello");
     assert_eq!(fixture.state_file_count(), 1);
 
     fixture
         .stop(
             "codex",
-            &root,
             "session",
             "",
             json!({"last_assistant_message": "reply"}),
@@ -283,13 +311,13 @@ fn checkouts_sessions_and_turns_keep_separate_causes() {
         .iter()
         .enumerate()
         .map(|(index, (client, root, session, turn))| {
-            fixture.prompt(client, root, session, turn, &index.to_string())
+            fixture.prompt_at(client, root, session, turn, &index.to_string())
         })
         .collect();
 
     for (index, (client, root, session, turn)) in cases.iter().enumerate() {
         fixture
-            .stop(
+            .stop_at(
                 client,
                 root,
                 session,
@@ -319,13 +347,12 @@ fn checkouts_sessions_and_turns_keep_separate_causes() {
 #[test]
 fn subdirectory_uses_the_checkout_root_and_its_existing_prompt() {
     let fixture = Fixture::new();
-    let root = fixture.root.clone();
-    let prompt = fixture.prompt("codex", &root, "session", "", "hello");
-    let nested = root.join("nested");
+    let prompt = fixture.prompt("codex", "session", "", "hello");
+    let nested = fixture.root.join("nested");
     std::fs::create_dir_all(&nested).unwrap();
 
     fixture
-        .stop(
+        .stop_at(
             "codex",
             &nested,
             "session",
@@ -339,15 +366,14 @@ fn subdirectory_uses_the_checkout_root_and_its_existing_prompt() {
         .into_iter()
         .find(|event| event.actor() == Actor::Model)
         .unwrap();
-    assert_eq!(reply.source().path, root);
+    assert_eq!(reply.source().path, fixture.root);
     assert_eq!(reply.causation_id().unwrap().as_uuid().to_string(), prompt);
 }
 
 #[test]
 fn failed_prompt_removes_the_previous_cause() {
     let fixture = Fixture::new();
-    let root = fixture.root.clone();
-    fixture.prompt("codex", &root, "session", "", "hello");
+    fixture.prompt("codex", "session", "", "hello");
     fixture.log.start_failing();
 
     let err = fixture
@@ -355,7 +381,7 @@ fn failed_prompt_removes_the_previous_cause() {
             "codex",
             json!({
                 "hook_event_name": "UserPromptSubmit",
-                "cwd": root.to_str().unwrap(),
+                "cwd": fixture.root.to_str().unwrap(),
                 "session_id": "session",
                 "prompt": "next",
             }),
@@ -363,18 +389,10 @@ fn failed_prompt_removes_the_previous_cause() {
         .unwrap_err();
     assert!(err.to_string().contains("append failed"));
 
-    // The failed append still ran through the fake log's failure
-    // switch, so flip it back before the turn's `Stop` tries to append
-    // the reply.
-    let log = FakeLog::default();
-    let fixture = Fixture {
-        log,
-        ..fixture
-    };
+    fixture.log.stop_failing();
     fixture
         .stop(
             "codex",
-            &root,
             "session",
             "",
             json!({"last_assistant_message": "reply"}),
@@ -389,28 +407,29 @@ fn failed_prompt_removes_the_previous_cause() {
 }
 
 #[test]
-fn invalid_prompt_removes_the_previous_cause() {
+fn invalid_prompt_does_not_touch_the_previous_cause() {
+    // A malformed `prompt` fails to parse before `run` ever opens the
+    // turn's state, so - unlike a well-formed prompt whose commit fails -
+    // the previous prompt's cause is left standing.
     let fixture = Fixture::new();
-    let root = fixture.root.clone();
-    fixture.prompt("codex", &root, "session", "", "hello");
+    let prompt = fixture.prompt("codex", "session", "", "hello");
 
     let err = fixture
         .call(
             "codex",
             json!({
                 "hook_event_name": "UserPromptSubmit",
-                "cwd": root.to_str().unwrap(),
+                "cwd": fixture.root.to_str().unwrap(),
                 "session_id": "session",
                 "prompt": {},
             }),
         )
         .unwrap_err();
-    assert!(err.to_string().contains("prompt must be a string"));
+    assert!(err.to_string().contains("invalid type: map, expected a string"));
 
     fixture
         .stop(
             "codex",
-            &root,
             "session",
             "",
             json!({"last_assistant_message": "reply"}),
@@ -421,19 +440,17 @@ fn invalid_prompt_removes_the_previous_cause() {
         .into_iter()
         .find(|event| event.actor() == Actor::Model)
         .unwrap();
-    assert!(reply.causation_id().is_none());
+    assert_eq!(reply.causation_id().unwrap().as_uuid().to_string(), prompt);
 }
 
 #[test]
 fn unknown_turn_does_not_inherit_another_turns_prompt() {
     let fixture = Fixture::new();
-    let root = fixture.root.clone();
-    fixture.prompt("codex", &root, "session", "earlier", "hello");
+    fixture.prompt("codex", "session", "earlier", "hello");
 
     fixture
         .stop(
             "codex",
-            &root,
             "session",
             "later",
             json!({"last_assistant_message": "reply"}),
@@ -450,11 +467,9 @@ fn unknown_turn_does_not_inherit_another_turns_prompt() {
 #[test]
 fn empty_reply_is_not_an_event() {
     let fixture = Fixture::new();
-    let root = fixture.root.clone();
     fixture
         .stop(
             "codex",
-            &root,
             "session",
             "",
             json!({"last_assistant_message": " \n"}),
@@ -467,11 +482,9 @@ fn empty_reply_is_not_an_event() {
 #[test]
 fn null_reply_is_not_an_error_or_event() {
     let fixture = Fixture::new();
-    let root = fixture.root.clone();
     let output = fixture
         .stop(
             "codex",
-            &root,
             "session",
             "",
             json!({"last_assistant_message": null}),
@@ -485,13 +498,11 @@ fn null_reply_is_not_an_error_or_event() {
 #[test]
 fn an_unreadable_transcript_is_an_error_not_an_event() {
     let fixture = Fixture::new();
-    let root = fixture.root.clone();
     let missing = fixture._temp.path().join("absent transcript.jsonl");
 
     let err = fixture
         .stop(
             "codex",
-            &root,
             "session",
             "",
             json!({"transcript_path": missing.to_str().unwrap()}),
@@ -505,7 +516,6 @@ fn an_unreadable_transcript_is_an_error_not_an_event() {
 #[test]
 fn claude_fallback_reads_only_the_current_turn_and_keeps_tool_results() {
     let fixture = Fixture::new();
-    let root = fixture.root.clone();
     let transcript = fixture._temp.path().join("transcript.jsonl");
     let entries = [
         json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "old"}]}}),
@@ -524,7 +534,6 @@ fn claude_fallback_reads_only_the_current_turn_and_keeps_tool_results() {
     fixture
         .stop(
             "claude-code",
-            &root,
             "session",
             "",
             json!({"transcript_path": transcript.to_str().unwrap(), "last_assistant_message": null}),

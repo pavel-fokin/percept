@@ -10,43 +10,44 @@
 //! the checkout and open the log, so the input is parsed first, and
 //! everything else only afterwards.
 //!
-//! A turn's events cite one another through a per-turn state file kept
-//! beside the log, under `hook-sessions/<root>` - `root`'s slashes
+//! A turn's events cite one another through a per-turn `store::TurnState`
+//! kept beside the log, under `hook-sessions/<root>` - `root`'s slashes
 //! replaced by `%`, so one project's turns never collide with
 //! another's: the id of the turn's prompt event, so a later tool call
-//! or reply can name it as its cause. The file is also the lock - held
-//! exclusively for the length of one hook call - so two hook calls for
-//! the same turn never race.
+//! or reply can name it as its cause. Opening it also takes its lock,
+//! held exclusively for the length of one hook call, so two hook calls
+//! for the same turn never race.
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, Read, Seek, SeekFrom, Write};
+use std::fs::File;
+use std::io::{BufRead, Read};
 use std::path::Path;
 
-use serde_json::{json, Map as JsonMap, Value};
+use serde::Deserialize;
+use serde_json::{json, Value};
 
 use crate::core::{Actor, Event, EventId, EventLog, Source};
-use crate::store::{self, Lock};
+use crate::store::TurnState;
 
 /// `percept hook <client>` - `client` names the writer whose turn this
 /// is, and becomes every event's source.
 #[derive(clap::Args)]
 pub struct HookArgs {
-    /// The coding client running the hook - `claude-code`, `codex`, or
-    /// any non-empty name. Becomes the event's source.
+    #[arg(value_parser = crate::cli::non_blank)]
     pub client: String,
 }
 
-/// One hook JSON object's client-independent shape: `hook_event_name`,
-/// `cwd`, `session_id`, and an optional `turn_id` mean the same thing
-/// whichever client sent them, so `read` checks them once. Every other
-/// field - `prompt`, `tool_name`, `last_assistant_message`, and so on -
-/// stays in `data` for the event handlers in `run` to read.
+/// One hook JSON object, the shape every client sends: `cwd`,
+/// `session_id`, and an optional `turn_id` mean the same thing
+/// whichever client sent them; `event` carries the fields specific to
+/// `hook_event_name`.
+#[derive(Deserialize)]
 pub struct HookInput {
-    event: String,
     cwd: String,
-    session: String,
-    turn: String,
-    data: JsonMap<String, Value>,
+    session_id: String,
+    #[serde(default)]
+    turn_id: String,
+    #[serde(flatten)]
+    event: HookEvent,
 }
 
 impl HookInput {
@@ -58,136 +59,117 @@ impl HookInput {
     }
 }
 
-/// Reads one hook JSON object from `input` in full and validates its
-/// client-independent fields. Reading `input` to the end before
-/// returning, even on a validation error, means a caller that runs
-/// this before doing anything else never leaves the client's own pipe
-/// half read.
+/// The three hook events percept understands, tagged by
+/// `hook_event_name`, each carrying only the fields `run` needs from
+/// it.
+#[derive(Deserialize)]
+#[serde(tag = "hook_event_name")]
+enum HookEvent {
+    UserPromptSubmit {
+        prompt: String,
+    },
+    PostToolUse {
+        tool_name: String,
+        tool_input: Value,
+        tool_response: Value,
+    },
+    Stop {
+        last_assistant_message: Option<String>,
+        transcript_path: Option<String>,
+    },
+}
+
+/// Every event name `HookEvent` deserialises, in the order `init`
+/// writes their config entries. `hook::tests` proves this list and
+/// `HookEvent::name` cannot drift apart.
+pub const EVENTS: [&str; 3] = ["UserPromptSubmit", "PostToolUse", "Stop"];
+
+impl HookEvent {
+    /// Used only by `hook::tests`, to prove `EVENTS` and this match
+    /// name every variant the same way.
+    #[cfg(test)]
+    fn name(&self) -> &'static str {
+        match self {
+            HookEvent::UserPromptSubmit { .. } => "UserPromptSubmit",
+            HookEvent::PostToolUse { .. } => "PostToolUse",
+            HookEvent::Stop { .. } => "Stop",
+        }
+    }
+}
+
+/// Reads one hook JSON object from `input` in full and parses it.
+/// Reading `input` to the end before returning, even on a parse error,
+/// means a caller that runs this before doing anything else never
+/// leaves the client's own pipe half read. `session_id` empty is the
+/// one check serde's shape can't express; everything else - an unknown
+/// `hook_event_name`, a missing or mistyped field - is its error.
 pub fn read(input: &mut dyn Read) -> Result<HookInput, Box<dyn std::error::Error>> {
     let mut text = String::new();
     input.read_to_string(&mut text)?;
-    let data: Value = serde_json::from_str(&text)?;
-    let data = data
-        .as_object()
-        .ok_or("hook input must be a JSON object")?
-        .clone();
-
-    let event = text_field(&data, "hook_event_name")?;
-    if !matches!(event.as_str(), "UserPromptSubmit" | "PostToolUse" | "Stop") {
-        return Err(format!("unsupported hook event {event:?}").into());
-    }
-
-    let cwd = text_field(&data, "cwd")?;
-
-    let session = text_field(&data, "session_id")?;
-    if session.is_empty() {
+    let input: HookInput = serde_json::from_str(&text)?;
+    if input.session_id.is_empty() {
         return Err("session_id must not be empty".into());
     }
-    let turn = match data.get("turn_id") {
-        None => String::new(),
-        Some(Value::String(s)) => s.clone(),
-        Some(_) => return Err("turn_id must be a string".into()),
-    };
-
-    Ok(HookInput {
-        event,
-        cwd,
-        session,
-        turn,
-        data,
-    })
+    Ok(input)
 }
 
 /// Appends the events `input`'s event implies to `log` under `source`,
 /// and returns the JSON object the client expects back on stdout -
-/// `{}` unless the event asks for something. `client` names the
-/// writer, checked here rather than in `read` since it comes from the
-/// CLI, not the JSON; `source` is `client`'s events' project root,
-/// resolved by the caller from `input.cwd`. `sessions_dir` holds one
+/// `{}` unless the event asks for something. `sessions_dir` holds one
 /// directory per checkout root, created if missing.
 pub fn run(
     input: HookInput,
-    client: &str,
     source: &Source,
     log: &dyn EventLog,
     sessions_dir: &Path,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    if client.trim().is_empty() {
-        return Err("client name must not be empty".into());
-    }
+    let dir = sessions_dir.join(state_dir_name(&source.path));
+    let name = state_file_name(&source.name, &input.session_id, &input.turn_id);
+    let mut state = TurnState::open(&dir, &name)?;
 
-    let state_path = sessions_dir
-        .join(state_dir_name(&source.path))
-        .join(state_file_name(client, &input.session, &input.turn));
-    fs::create_dir_all(state_path.parent().expect("state path has a parent"))?;
-    let state = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(&state_path)?;
-    // Held for the whole call, so two hook calls for the same turn
-    // never race; every read and write below goes through `&File`, the
-    // shared reference this lock already borrows, the same pattern
-    // `store::Jsonl` uses over its own file.
-    let _lock = Lock::exclusive(&state)?;
-
-    match input.event.as_str() {
-        "UserPromptSubmit" => submit_prompt(&input.data, source, log, &state, &input.event),
-        "PostToolUse" => {
-            let cause = read_cause(&state)?;
-            record_tool_use(&input.data, source, log, cause)
+    match input.event {
+        HookEvent::UserPromptSubmit { prompt } => submit_prompt(prompt, source, log, &mut state),
+        HookEvent::PostToolUse {
+            tool_name,
+            tool_input,
+            tool_response,
+        } => {
+            let cause = state.cause()?;
+            record_tool_use(tool_name, tool_input, tool_response, source, log, cause)
         }
-        "Stop" => {
-            let cause = read_cause(&state)?;
-            let output = record_stop(&input.data, source, log, cause);
-            let _ = fs::remove_file(&state_path);
+        HookEvent::Stop {
+            last_assistant_message,
+            transcript_path,
+        } => {
+            let cause = state.cause()?;
+            let output = record_stop(last_assistant_message, transcript_path, source, log, cause);
+            let _ = state.remove();
             output
         }
-        // Checked in `read`.
-        _ => unreachable!(),
-    }
-}
-
-/// The previous cause a turn's state file holds - the prompt event's
-/// id - or `None` for a turn that never recorded a prompt, or whose
-/// prompt failed and cleared it.
-fn read_cause(mut state: &File) -> Result<Option<EventId>, Box<dyn std::error::Error>> {
-    state.seek(SeekFrom::Start(0))?;
-    let mut text = String::new();
-    state.read_to_string(&mut text)?;
-    let text = text.trim();
-    if text.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(store::parse_event_id(text)?))
     }
 }
 
 /// `UserPromptSubmit`: clears the turn's previous cause before doing
-/// anything else, so a prompt that then fails to parse or commit never
-/// leaves a later event citing the wrong one. Records the prompt as
+/// anything else, so a prompt that then fails to commit never leaves a
+/// later event citing the wrong one. Records the prompt as
 /// `message.received` from `user`, stores its id as the turn's cause,
 /// and returns the client's expected `additionalContext`.
 fn submit_prompt(
-    data: &JsonMap<String, Value>,
+    prompt: String,
     source: &Source,
     log: &dyn EventLog,
-    mut state: &File,
-    event: &str,
+    state: &mut TurnState,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    state.set_len(0)?;
-    state.seek(SeekFrom::Start(0))?;
+    state.clear()?;
 
-    let prompt = text_field(data, "prompt")?;
     let committed = Event::message_received(Actor::User, prompt, source.clone(), None);
     let id = committed.id();
     log.append(&committed)?;
-    state.write_all(id.as_uuid().to_string().as_bytes())?;
+    state.set(id)?;
 
     Ok(json!({
         "hookSpecificOutput": {
-            "hookEventName": event,
+            "hookEventName": "UserPromptSubmit",
             "additionalContext": format!("percept event {}", id.as_uuid()),
         }
     }))
@@ -196,24 +178,20 @@ fn submit_prompt(
 /// `PostToolUse`: records the call, caused by the turn's prompt, then
 /// its result, caused by the call.
 fn record_tool_use(
-    data: &JsonMap<String, Value>,
+    tool_name: String,
+    tool_input: Value,
+    tool_response: Value,
     source: &Source,
     log: &dyn EventLog,
     cause: Option<EventId>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    let tool = text_field(data, "tool_name")?;
-    let arguments = data.get("tool_input").cloned().ok_or("missing tool_input")?;
-    let arguments = serde_json::to_string(&arguments)?;
-    let response = data
-        .get("tool_response")
-        .cloned()
-        .ok_or("missing tool_response")?;
-    let response = match response {
+    let arguments = serde_json::to_string(&tool_input)?;
+    let response = match tool_response {
         Value::String(text) => text,
         other => serde_json::to_string(&other)?,
     };
 
-    let call = Event::tool_called(tool, arguments, source.clone(), cause);
+    let call = Event::tool_called(tool_name, arguments, source.clone(), cause);
     let call_id = call.id();
     log.append(&call)?;
     let result = Event::tool_resulted(response, source.clone(), Some(call_id));
@@ -226,20 +204,19 @@ fn record_tool_use(
 /// reply is recorded as `message.received` from `model`, caused by the
 /// turn's prompt.
 fn record_stop(
-    data: &JsonMap<String, Value>,
+    last_assistant_message: Option<String>,
+    transcript_path: Option<String>,
     source: &Source,
     log: &dyn EventLog,
     cause: Option<EventId>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    let reply = match data.get("last_assistant_message") {
-        Some(Value::String(text)) => Some(text.clone()),
-        Some(Value::Null) | None => match data.get("transcript_path") {
-            Some(Value::Null) | None => None,
-            Some(Value::String(text)) if text.is_empty() => None,
-            Some(Value::String(path)) => Some(claude_reply(Path::new(path))?),
-            Some(_) => return Err("transcript_path must be a string".into()),
+    let reply = match last_assistant_message {
+        Some(text) => Some(text),
+        None => match transcript_path {
+            None => None,
+            Some(text) if text.is_empty() => None,
+            Some(path) => Some(claude_reply(Path::new(&path))?),
         },
-        Some(_) => return Err("last_assistant_message must be a string".into()),
     };
 
     if let Some(reply) = reply {
@@ -266,27 +243,22 @@ fn claude_reply(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
             continue;
         }
         let entry: Value = serde_json::from_str(&line)?;
-        let content = entry
-            .get("message")
-            .and_then(|message| message.get("content"))
-            .cloned()
-            .unwrap_or(Value::Array(Vec::new()));
+        let content = entry.get("message").and_then(|message| message.get("content"));
 
         match entry.get("type").and_then(Value::as_str) {
             Some("user") => {
-                let is_tool_result = content.as_array().is_some_and(|blocks| {
+                let is_tool_result = content.and_then(Value::as_array).is_some_and(|blocks| {
                     blocks
                         .iter()
                         .any(|block| block.get("type").and_then(Value::as_str) == Some("tool_result"))
                 });
-                if content.is_string() || !is_tool_result {
+                if !is_tool_result {
                     reply.clear();
                 }
             }
-            Some("assistant") => {
-                if let Some(text) = content.as_str() {
-                    reply.push(text.to_string());
-                } else if let Some(blocks) = content.as_array() {
+            Some("assistant") => match content {
+                Some(Value::String(text)) => reply.push(text.clone()),
+                Some(Value::Array(blocks)) => {
                     for block in blocks {
                         if block.get("type").and_then(Value::as_str) == Some("text") {
                             let text = block
@@ -297,25 +269,13 @@ fn claude_reply(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
                         }
                     }
                 }
-            }
+                _ => {}
+            },
             _ => {}
         }
     }
 
     Ok(reply.join("\n"))
-}
-
-/// Reads `data[name]` as a string, erroring when it's missing or holds
-/// another type.
-fn text_field(
-    data: &JsonMap<String, Value>,
-    name: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
-    match data.get(name) {
-        Some(Value::String(s)) => Ok(s.clone()),
-        Some(_) => Err(format!("{name} must be a string").into()),
-        None => Err(format!("missing {name}").into()),
-    }
 }
 
 /// Names the directory a checkout root's turns live under, so two

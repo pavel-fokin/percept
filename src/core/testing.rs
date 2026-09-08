@@ -88,6 +88,10 @@ impl FakeLog {
     pub fn start_failing(&self) {
         self.fail_append.store(true, Ordering::Relaxed);
     }
+
+    pub fn stop_failing(&self) {
+        self.fail_append.store(false, Ordering::Relaxed);
+    }
 }
 
 impl EventLog for FakeLog {

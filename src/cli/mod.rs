@@ -357,7 +357,7 @@ fn at_least_one(s: &str) -> Result<usize, String> {
 /// Rejects a blank value at parse time. A source that names nobody, a
 /// search term contained by everything, a prompt that asks nothing -
 /// each looks deliberate to a reader while meaning nothing.
-fn non_blank(s: &str) -> Result<String, String> {
+pub(crate) fn non_blank(s: &str) -> Result<String, String> {
     if s.trim().is_empty() {
         return Err("must not be blank".to_string());
     }

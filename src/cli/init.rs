@@ -13,104 +13,115 @@ use std::path::Path;
 
 use serde_json::{json, Map as JsonMap, Value};
 
+use crate::cli::hook::EVENTS;
+
 /// `percept init <client>` - `client` names the coding client whose
-/// project config to write: `claude-code` or `codex`.
+/// project config to write - `claude-code` or `codex`.
 #[derive(clap::Args)]
 pub struct InitArgs {
-    /// The coding client to write config for - `claude-code` or `codex`.
     pub client: String,
 }
 
-/// The hook events every client's config wires to `percept hook`.
-const EVENTS: [&str; 3] = ["UserPromptSubmit", "PostToolUse", "Stop"];
+/// One client's config: its file relative to the checkout root, and
+/// the `Bash` patterns it may run without asking - empty for a client
+/// with no such permission file.
+struct Client {
+    name: &'static str,
+    path: &'static str,
+    allow: &'static [&'static str],
+}
 
 /// The two `Bash` patterns `percept init claude-code` allows without
 /// asking, so a session can read the log and its maps on its own.
 const CLAUDE_ALLOW: [&str; 2] = ["Bash(percept maps *)", "Bash(percept events *)"];
 
-/// Writes `client`'s config under `checkout`, printing one line per
-/// file naming what it did.
+const CLIENTS: [Client; 2] = [
+    Client {
+        name: "claude-code",
+        path: ".claude/settings.json",
+        allow: &CLAUDE_ALLOW,
+    },
+    Client {
+        name: "codex",
+        path: ".codex/hooks.json",
+        allow: &[],
+    },
+];
+
+/// Writes `args.client`'s config under `checkout`, printing one line
+/// naming what it did.
 pub fn run(args: InitArgs, checkout: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    match args.client.as_str() {
-        "claude-code" => write_config(checkout, ".claude/settings.json", |root| {
-            merge_claude_code(root, "percept hook claude-code")
-        }),
-        "codex" => write_config(checkout, ".codex/hooks.json", |root| {
-            merge_codex(root, "percept hook codex")
-        }),
-        other => Err(format!(
-            "{other:?} names no client; percept init knows claude-code and codex"
-        )
-        .into()),
-    }
+    let client = CLIENTS
+        .iter()
+        .find(|client| client.name == args.client)
+        .ok_or_else(|| {
+            format!(
+                "{:?} names no client; percept init knows claude-code and codex",
+                args.client
+            )
+        })?;
+    let command = format!("percept hook {}", client.name);
+    write_config(checkout, client.path, |root| {
+        merge(root, &command, client.allow)
+    })
 }
 
 /// Reads `checkout/rel` - an empty object when it doesn't exist -
-/// applies `merge`, and writes it back only when it changed. Prints
-/// `wrote <rel>` or `unchanged <rel>`.
+/// applies `merge`, and writes it back only when the rendered text
+/// differs from what was read. Prints `wrote <rel>` or `unchanged
+/// <rel>`.
 fn write_config(
     checkout: &Path,
     rel: &str,
-    merge: impl FnOnce(Value) -> Result<Value, Box<dyn std::error::Error>>,
+    merge: impl FnOnce(JsonMap<String, Value>) -> Result<Value, Box<dyn std::error::Error>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let path = checkout.join(rel);
-    let original = read_or_empty(&path)?;
-    if !original.is_object() {
-        return Err(format!("{rel} is not a JSON object").into());
-    }
-    let updated = merge(original.clone())?;
-    if updated == original {
+    let original_text = fs::read_to_string(&path).unwrap_or_default();
+    let updated = merge(read_or_empty(&path)?)?;
+    let mut text = serde_json::to_string_pretty(&updated)?;
+    text.push('\n');
+    if text == original_text {
         println!("unchanged {rel}");
         return Ok(());
     }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let mut text = serde_json::to_string_pretty(&updated)?;
-    text.push('\n');
-    fs::write(&path, text)?;
+    fs::write(&path, &text)?;
     println!("wrote {rel}");
     Ok(())
 }
 
-/// `path`'s parsed contents, or an empty object when it doesn't exist
-/// or holds nothing but whitespace.
-fn read_or_empty(path: &Path) -> Result<Value, Box<dyn std::error::Error>> {
+/// `path`'s parsed contents as an object - empty when it doesn't exist
+/// or holds nothing but whitespace. Anything else that isn't a JSON
+/// object is an error.
+fn read_or_empty(path: &Path) -> Result<JsonMap<String, Value>, Box<dyn std::error::Error>> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(json!({})),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(JsonMap::new()),
         Err(err) => return Err(err.into()),
     };
     if text.trim().is_empty() {
-        return Ok(json!({}));
+        return Ok(JsonMap::new());
     }
-    Ok(serde_json::from_str(&text)?)
-}
-
-/// `.claude/settings.json`'s merge: the three hook events, plus the
-/// two `Bash` patterns under `permissions.allow`.
-fn merge_claude_code(root: Value, command: &str) -> Result<Value, Box<dyn std::error::Error>> {
-    let mut root = as_object(root, "settings")?;
-    merge_hooks(&mut root, command)?;
-    merge_allow(&mut root)?;
-    Ok(Value::Object(root))
-}
-
-/// `.codex/hooks.json`'s merge: the three hook events, no permissions.
-fn merge_codex(root: Value, command: &str) -> Result<Value, Box<dyn std::error::Error>> {
-    let mut root = as_object(root, "hooks file")?;
-    merge_hooks(&mut root, command)?;
-    Ok(Value::Object(root))
-}
-
-fn as_object(
-    value: Value,
-    name: &str,
-) -> Result<JsonMap<String, Value>, Box<dyn std::error::Error>> {
-    match value {
+    match serde_json::from_str(&text)? {
         Value::Object(map) => Ok(map),
-        _ => Err(format!("{name} is not a JSON object").into()),
+        _ => Err(format!("{} is not a JSON object", path.display()).into()),
     }
+}
+
+/// `root`'s merge: the three hook events, plus `allow`'s patterns under
+/// `permissions.allow` when there are any.
+fn merge(
+    mut root: JsonMap<String, Value>,
+    command: &str,
+    allow: &[&str],
+) -> Result<Value, Box<dyn std::error::Error>> {
+    merge_hooks(&mut root, command)?;
+    if !allow.is_empty() {
+        merge_allow(&mut root, allow)?;
+    }
+    Ok(Value::Object(root))
 }
 
 /// Adds `command` under `root["hooks"][event]` for every event in
@@ -128,7 +139,7 @@ fn merge_hooks(
         .ok_or("hooks is not a JSON object")?;
     for event in EVENTS {
         let entries = hooks
-            .entry(event.to_string())
+            .entry(event)
             .or_insert_with(|| Value::Array(Vec::new()))
             .as_array_mut()
             .ok_or_else(|| format!("hooks.{event} is not an array"))?;
@@ -139,12 +150,8 @@ fn merge_hooks(
     Ok(())
 }
 
-/// Whether `entry` - one item of a hook event's array - is the
-/// unscoped entry `merge_hooks` writes for `command`: it must run
-/// `command`, looked up in its nested `hooks` list, the shape every
-/// entry here carries, and must carry no `matcher` - an entry scoped to
-/// one matcher is a different entry, even when it runs the same
-/// command, so `merge_hooks` still adds its own unscoped one beside it.
+/// Whether `entry` is the unscoped entry `merge_hooks` writes for
+/// `command`: no `matcher`, and `command` among its nested `hooks` list.
 fn has_command(entry: &Value, command: &str) -> bool {
     entry.get("matcher").is_none()
         && entry
@@ -167,22 +174,25 @@ fn hook_entry(command: &str) -> Value {
     })
 }
 
-/// Adds `CLAUDE_ALLOW` under `root["permissions"]["allow"]`, skipping a
-/// string already present and keeping every other entry.
-fn merge_allow(root: &mut JsonMap<String, Value>) -> Result<(), Box<dyn std::error::Error>> {
+/// Adds `allow`'s patterns under `root["permissions"]["allow"]`,
+/// skipping a string already present and keeping every other entry.
+fn merge_allow(
+    root: &mut JsonMap<String, Value>,
+    allow: &[&str],
+) -> Result<(), Box<dyn std::error::Error>> {
     let permissions = root
         .entry("permissions")
         .or_insert_with(|| json!({}))
         .as_object_mut()
         .ok_or("permissions is not a JSON object")?;
-    let allow = permissions
-        .entry("allow".to_string())
+    let list = permissions
+        .entry("allow")
         .or_insert_with(|| Value::Array(Vec::new()))
         .as_array_mut()
         .ok_or("permissions.allow is not an array")?;
-    for pattern in CLAUDE_ALLOW {
-        if !allow.iter().any(|value| value.as_str() == Some(pattern)) {
-            allow.push(Value::String(pattern.to_string()));
+    for pattern in allow {
+        if !list.iter().any(|value| value.as_str() == Some(*pattern)) {
+            list.push(Value::String((*pattern).to_string()));
         }
     }
     Ok(())

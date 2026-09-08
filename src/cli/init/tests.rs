@@ -2,9 +2,21 @@ use serde_json::json;
 
 use super::*;
 
+fn as_map(existing: Value) -> JsonMap<String, Value> {
+    existing.as_object().unwrap().clone()
+}
+
+fn claude_code(existing: Value, command: &str) -> Value {
+    merge(as_map(existing), command, &CLAUDE_ALLOW).unwrap()
+}
+
+fn codex(existing: Value, command: &str) -> Value {
+    merge(as_map(existing), command, &[]).unwrap()
+}
+
 #[test]
 fn writes_claude_code_from_nothing() {
-    let root = merge_claude_code(json!({}), "percept hook claude-code").unwrap();
+    let root = claude_code(json!({}), "percept hook claude-code");
 
     assert_eq!(
         root["hooks"]["UserPromptSubmit"],
@@ -26,7 +38,7 @@ fn writes_claude_code_from_nothing() {
 
 #[test]
 fn writes_codex_from_nothing() {
-    let root = merge_codex(json!({}), "percept hook codex").unwrap();
+    let root = codex(json!({}), "percept hook codex");
 
     for event in EVENTS {
         assert_eq!(
@@ -41,7 +53,7 @@ fn writes_codex_from_nothing() {
 fn keeps_unrelated_keys() {
     let existing = json!({ "model": "opus", "other": { "nested": true } });
 
-    let root = merge_claude_code(existing, "percept hook claude-code").unwrap();
+    let root = claude_code(existing, "percept hook claude-code");
 
     assert_eq!(root["model"], "opus");
     assert_eq!(root["other"], json!({ "nested": true }));
@@ -49,9 +61,9 @@ fn keeps_unrelated_keys() {
 
 #[test]
 fn does_not_duplicate_an_existing_hook_entry() {
-    let existing = merge_claude_code(json!({}), "percept hook claude-code").unwrap();
+    let existing = claude_code(json!({}), "percept hook claude-code");
 
-    let merged = merge_claude_code(existing.clone(), "percept hook claude-code").unwrap();
+    let merged = claude_code(existing.clone(), "percept hook claude-code");
 
     assert_eq!(merged, existing);
     assert_eq!(
@@ -65,9 +77,9 @@ fn does_not_duplicate_an_existing_hook_entry() {
 
 #[test]
 fn does_not_duplicate_an_existing_allow_entry() {
-    let existing = merge_claude_code(json!({}), "percept hook claude-code").unwrap();
+    let existing = claude_code(json!({}), "percept hook claude-code");
 
-    let merged = merge_claude_code(existing.clone(), "percept hook claude-code").unwrap();
+    let merged = claude_code(existing.clone(), "percept hook claude-code");
 
     assert_eq!(merged["permissions"]["allow"].as_array().unwrap().len(), 2);
 }
@@ -84,7 +96,7 @@ fn keeps_another_command_under_the_same_event() {
         }
     });
 
-    let root = merge_claude_code(existing, "percept hook claude-code").unwrap();
+    let root = claude_code(existing, "percept hook claude-code");
 
     let entries = root["hooks"]["UserPromptSubmit"].as_array().unwrap();
     assert_eq!(entries.len(), 2);
@@ -110,7 +122,7 @@ fn a_matcher_scoped_entry_does_not_count_as_the_unscoped_one() {
         }
     });
 
-    let root = merge_claude_code(existing, "percept hook claude-code").unwrap();
+    let root = claude_code(existing, "percept hook claude-code");
 
     let entries = root["hooks"]["PostToolUse"].as_array().unwrap();
     assert_eq!(entries.len(), 2);
@@ -121,8 +133,8 @@ fn a_matcher_scoped_entry_does_not_count_as_the_unscoped_one() {
 
 #[test]
 fn second_run_is_identical() {
-    let once = merge_codex(json!({}), "percept hook codex").unwrap();
-    let twice = merge_codex(once.clone(), "percept hook codex").unwrap();
+    let once = codex(json!({}), "percept hook codex");
+    let twice = codex(once.clone(), "percept hook codex");
 
     assert_eq!(once, twice);
 }
