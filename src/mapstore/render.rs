@@ -93,7 +93,17 @@ pub fn catalogue(maps: &[Map]) -> String {
 fn push_kind_glosses(out: &mut String, heading: &str, kinds: &[Kind]) {
     let _ = write!(out, "\n{heading}:\n");
     for kind in kinds {
-        let _ = writeln!(out, "- `{}` - {}", kind.name, kind.gloss);
+        if kind.requires.is_empty() {
+            let _ = writeln!(out, "- `{}` - {}", kind.name, kind.gloss);
+        } else {
+            let _ = writeln!(
+                out,
+                "- `{}` - {} (requires `{}`)",
+                kind.name,
+                kind.gloss,
+                kind.requires.join("`, `")
+            );
+        }
     }
 }
 

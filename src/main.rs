@@ -405,13 +405,12 @@ fn code_tools(
 /// it is what keeps `store` from depending on `code`.
 struct RoutedMaps {
     folded: LogMaps,
-    schemas: Arc<crate::core::Schemas>,
     root: PathBuf,
 }
 
 impl crate::core::MapReader for RoutedMaps {
     fn read(&self, name: &str) -> Result<crate::core::Map, Box<dyn std::error::Error>> {
-        if name == self.schemas.code().name {
+        if name == crate::core::CODE {
             Ok(code::build(&self.root)?)
         } else {
             self.folded.read(name)
@@ -449,7 +448,6 @@ fn build_app(
     let scope = source.scope();
     let maps = RoutedMaps {
         folded: LogMaps::new(log.clone(), schemas.clone(), scope.clone()),
-        schemas: schemas.clone(),
         root: checkout.to_path_buf(),
     };
     let mut tools: Vec<Arc<dyn crate::harness::Tool>> = vec![

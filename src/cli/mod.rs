@@ -140,7 +140,7 @@ impl ShowMapArgs {
     /// Whether this names the code map - derived from the working tree,
     /// so dispatch never opens the log to find out.
     pub fn is_code(&self) -> bool {
-        self.map == crate::core::code().name
+        self.map == crate::core::CODE
     }
 }
 

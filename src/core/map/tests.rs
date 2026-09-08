@@ -658,8 +658,8 @@ fn a_schema_is_found_by_name() {
 #[test]
 fn every_kind_of_every_schema_carries_a_gloss() {
     let schemas = crate::core::testing::schemas();
-    let code = schemas.code();
-    for schema in schemas.folded().iter().chain(std::iter::once(&code)) {
+    let code = crate::core::code();
+    for schema in schemas.folded().iter().chain(std::iter::once(&Arc::new(code))) {
         for kind in schema.node_kinds.iter().chain(&schema.edge_kinds) {
             assert!(
                 !kind.gloss.is_empty(),
@@ -672,10 +672,22 @@ fn every_kind_of_every_schema_carries_a_gloss() {
 }
 
 #[test]
-fn an_option_and_a_task_require_a_why_and_a_question_requires_nothing() {
+fn an_option_requires_a_why() {
     assert_eq!(decisions().node_kind("option").unwrap().requires, ["why"]);
+}
+
+#[test]
+fn a_task_requires_a_why() {
     assert_eq!(tasks().node_kind("task").unwrap().requires, ["why"]);
+}
+
+#[test]
+fn a_question_requires_nothing() {
     assert!(decisions().node_kind("question").unwrap().requires.is_empty());
+}
+
+#[test]
+fn an_undeclared_kind_is_absent() {
     assert!(decisions().node_kind("glossary").is_none());
 }
 

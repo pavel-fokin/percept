@@ -228,10 +228,11 @@ fn requiring(mut k: Kind, property: &str) -> Kind {
     k
 }
 
-/// The built-in decisions schema, as `mapstore`'s embedded TOML must
-/// fold to. A fixture, not production code: `core` reads no file, and
-/// a project's `.percept/schemas/decisions.toml` is what production
-/// builds this from.
+/// The built-in decisions schema, as `mapstore`'s embedded
+/// `schemas/decisions.toml` must fold to. A fixture, not production
+/// code: `core` reads no file, and production starts from that
+/// embedded TOML, replaced by a project's own
+/// `.percept/schemas/decisions.toml` when one exists.
 pub fn decisions() -> Schema {
     Schema {
         name: "decisions".to_string(),
@@ -305,8 +306,9 @@ pub fn tasks() -> Schema {
 /// the log, `code` derived - the same set `main` builds from the
 /// embedded and project TOML files, without touching a filesystem.
 pub fn schemas() -> Schemas {
-    Schemas::new(
-        vec![Arc::new(decisions()), Arc::new(tasks())],
+    Schemas::new(vec![
+        Arc::new(decisions()),
+        Arc::new(tasks()),
         Arc::new(crate::core::code()),
-    )
+    ])
 }

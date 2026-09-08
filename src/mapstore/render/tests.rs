@@ -721,6 +721,17 @@ fn the_catalogue_gives_each_map_a_section_with_its_kinds_glossed() {
 }
 
 #[test]
+fn the_catalogue_names_a_kinds_required_properties() {
+    let text = catalogue(&[Map::empty(decisions())]);
+
+    assert!(
+        text.contains("- `option` - an alternative that was weighed and lost, saying why in its \
+                        `why` property (requires `why`)"),
+        "{text}"
+    );
+}
+
+#[test]
 fn the_catalogue_glosses_a_code_package_as_an_external_crate() {
     let text = catalogue(&[Map::empty(code())]);
 

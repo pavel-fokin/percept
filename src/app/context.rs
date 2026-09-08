@@ -18,6 +18,24 @@ fn catalogue_line(map: &Map) -> String {
     }
 }
 
+/// A schema's node or edge kinds, `, `-joined, each carrying its
+/// `requires` inline - `option (requires why)` - so a model reading the
+/// map's header in place of `maps list` still learns what a node of
+/// that kind must carry before it calls `revise_map`.
+fn kinds_csv_with_requires(kinds: &[crate::core::Kind]) -> String {
+    kinds
+        .iter()
+        .map(|kind| {
+            if kind.requires.is_empty() {
+                kind.name.clone()
+            } else {
+                format!("{} (requires {})", kind.name, kind.requires.join(", "))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// `MapShape::Headlines`'s body: the headline nodes as `Map`'s
 /// `Display` formats a node line, without properties - a reader
 /// deciding whether to open the map with `read_map` doesn't need them
@@ -354,8 +372,8 @@ fn render(
                         schema.name,
                         schema.purpose,
                         catalogue_line(&map),
-                        schema.node_kinds_csv(),
-                        schema.edge_kinds_csv()
+                        kinds_csv_with_requires(&schema.node_kinds),
+                        kinds_csv_with_requires(&schema.edge_kinds)
                     ),
                 });
             }

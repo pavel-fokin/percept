@@ -119,12 +119,18 @@ pub const DECISION: &str = "decision";
 /// why, so it is public too.
 pub const OPTION: &str = "option";
 
+/// The code map's name: derived from the working tree, never declared
+/// by a project TOML file, so its name is reserved - a project file
+/// named `code.toml` is refused, and every schema of this name is
+/// refused as a write or fold target.
+pub const CODE: &str = "code";
+
 /// The code map: a codebase's files, the symbols they define, and what
 /// imports what. Derived from the working tree, never folded from the
 /// log, so `derived` is `true`.
 pub fn code() -> Schema {
     Schema {
-        name: "code".to_string(),
+        name: CODE.to_string(),
         purpose: "which file defines which symbol and imports which file or package".to_string(),
         node_kinds: vec![
             Kind::new("file", "a source file, named by its repo-relative path"),
@@ -149,69 +155,70 @@ pub fn code() -> Schema {
     }
 }
 
-/// The schemas a project has: every one folded from the log, plus
-/// `code`, derived from the working tree. Built once at the
+/// The schemas a project has: every one, folded from the log or
+/// derived from the working tree, in one list. Built once at the
 /// entrypoint from the built-in schemas and a project's own TOML
 /// files; every fold, write, and error message goes through this, so
 /// no caller keeps its own list.
 pub struct Schemas {
-    folded: Vec<Arc<Schema>>,
-    code: Arc<Schema>,
+    schemas: Vec<Arc<Schema>>,
 }
 
 impl Schemas {
-    pub fn new(folded: Vec<Arc<Schema>>, code: Arc<Schema>) -> Self {
-        Self { folded, code }
+    pub fn new(schemas: Vec<Arc<Schema>>) -> Self {
+        Self { schemas }
     }
 
     /// The log-folded schema `name` names, or the error every boundary
-    /// that folds or writes a map by name reports. `code` is its own
-    /// error: it exists, and this is the wrong door to it.
+    /// that folds or writes a map by name reports. A derived schema is
+    /// its own error: it exists, and this is the wrong door to it.
     pub fn find(&self, name: &str) -> Result<Arc<Schema>, MapError> {
-        if name == self.code.name {
-            return Err(MapError::Derived(name.to_string()));
-        }
-        self.folded
+        let schema = self
+            .schemas
             .iter()
             .find(|schema| schema.name == name)
             .cloned()
             .ok_or_else(|| MapError::UnknownMap {
                 name: name.to_string(),
                 maps: self.names_csv(),
-            })
+            })?;
+        if schema.derived {
+            return Err(MapError::Derived(name.to_string()));
+        }
+        Ok(schema)
     }
 
-    /// The map derived from the working tree, never folded from the
-    /// log.
-    pub fn code(&self) -> Arc<Schema> {
-        self.code.clone()
-    }
-
-    /// Every schema folded from the log, `code` excluded.
-    pub fn folded(&self) -> &[Arc<Schema>] {
-        &self.folded
+    /// Every schema folded from the log, derived schemas excluded.
+    pub fn folded(&self) -> Vec<Arc<Schema>> {
+        self.schemas
+            .iter()
+            .filter(|schema| !schema.derived)
+            .cloned()
+            .collect()
     }
 
     /// Every map folded from `events` within `scope` - one per
-    /// log-folded schema; `code` is never folded, since it has no
-    /// events of its own.
+    /// log-folded schema; a derived schema is never folded, since it
+    /// has no events of its own.
     pub fn fold_all<'a>(
         &self,
         scope: &Scope,
         events: impl IntoIterator<Item = &'a Event> + Clone,
     ) -> Result<Vec<Map>, MapError> {
-        self.folded
-            .iter()
-            .map(|schema| Map::fold(schema.clone(), scope, events.clone()))
+        self.folded()
+            .into_iter()
+            .map(|schema| Map::fold(schema, scope, events.clone()))
             .collect()
     }
 
-    /// Every schema's name, `code` last, for an "expected one of"
+    /// Every schema's name, derived ones last, for an "expected one of"
     /// error.
     fn names_csv(&self) -> String {
-        self.folded
-            .iter()
-            .chain(std::iter::once(&self.code))
+        let (derived, folded): (Vec<_>, Vec<_>) =
+            self.schemas.iter().partition(|schema| schema.derived);
+        folded
+            .into_iter()
+            .chain(derived)
             .map(|schema| schema.name.clone())
             .collect::<Vec<_>>()
             .join(", ")
@@ -408,6 +415,16 @@ pub enum MapError {
     },
     /// A name that is blank would be a node nobody can point at.
     BlankName,
+    /// A new node of a kind that `requires` a property the caller did
+    /// not supply. A rule for new writes only, so a node recorded
+    /// before its kind gained the requirement still folds; checked by
+    /// `mapstore::Snapshot::apply`, not here.
+    MissingProperty {
+        kind: String,
+        name: String,
+        property: String,
+        gloss: String,
+    },
     DuplicateNode {
         kind: String,
         name: String,
@@ -460,6 +477,16 @@ impl fmt::Display for MapError {
                 "no edge kind {kind:?} in map {map:?}; kinds are {kinds}"
             ),
             Self::BlankName => write!(f, "a node's name must not be blank"),
+            Self::MissingProperty {
+                kind,
+                name,
+                property,
+                gloss,
+            } => write!(
+                f,
+                "{kind} {name:?} lacks its `{property}` property, which every {kind} \
+                 carries: {gloss}"
+            ),
             Self::DuplicateNode { kind, name } => {
                 write!(f, "{kind} {name:?} is already in the map")
             }

@@ -61,7 +61,6 @@ fn routed_maps_walks_the_working_tree_for_the_code_map() {
     .unwrap();
     let maps = RoutedMaps {
         folded: LogMaps::new(Arc::new(FakeLog::default()), Arc::new(schemas()), scope()),
-        schemas: Arc::new(schemas()),
         root: tree.path().to_path_buf(),
     };
 
@@ -81,7 +80,6 @@ fn routed_maps_walks_the_working_tree_for_the_code_map() {
 fn routed_maps_folds_every_other_map_from_the_log() {
     let maps = RoutedMaps {
         folded: LogMaps::new(Arc::new(FakeLog::default()), Arc::new(schemas()), scope()),
-        schemas: Arc::new(schemas()),
         root: tempdir().unwrap().path().to_path_buf(),
     };
 
@@ -95,7 +93,6 @@ fn read_map_refuses_since_on_the_code_map() {
     fs::write(tree.path().join("lib.rs"), "pub fn f() {}\n").unwrap();
     let tool = ReadMap::new(Arc::new(RoutedMaps {
         folded: LogMaps::new(Arc::new(FakeLog::default()), Arc::new(schemas()), scope()),
-        schemas: Arc::new(schemas()),
         root: tree.path().to_path_buf(),
     }));
 
