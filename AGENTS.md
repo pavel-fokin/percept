@@ -2,9 +2,11 @@
 
 ## Purpose
 
-`percept` is an experimental harness for one cognitive architecture: an
-agent keeps an immutable history of experience and a mutable set of
-maps built from it. A map is an explicit external representation - a
+`percept` is an experimental harness on cognitive rails. The rails
+constrain what an agent may write to its record and read from it.
+They prescribe no thinking loop and filter nothing the model says. On
+them an agent keeps an immutable history of experience and a mutable
+set of maps built from it. A map is an explicit external representation - a
 decision map, a task map, a glossary - and each kind makes a different
 reasoning operation cheap. The shape comes from Recursive Language
 Models (arxiv.org/abs/2512.24601), where a model holds a corpus as an

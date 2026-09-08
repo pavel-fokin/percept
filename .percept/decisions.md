@@ -62,6 +62,7 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "How does the prompt stay within the model's window as the maps grow?" (model) · 2026-09-07
 - "How does a rendered map stay scoped to the branch it is committed in?" (model) · 2026-09-07
 - "Where does agreement between the human and the agent live?" (model) · 2026-09-08
+- "What is percept's core called?" (model) · 2026-09-08
 
 ## "Where does the event log live?"
 
@@ -445,3 +446,12 @@ note: "Not decided. One log holds every branch, and the render is a file in one 
   why: "two cognitions share a map with different boundaries, the agent's inside the log and the human's mostly outside it; the rule that a recorded claim is not the human's agreement had no operation behind it, and the mechanism belongs to the core so no map defines its own; docs/architecture.md"
 - weighed "one map per cognition, merged at a shared surface" (model)
   why: "doubles what a reader holds for a distinction the fold derives from the actor and the confirmation edge; the contour is a view over one map, never a storage boundary"
+
+## "What is percept's core called?" (model)
+
+- decision "cognitive rails: constraints on what cognition may write to its record and read from it, defined at first use in AGENTS.md" (model)
+  why: "the doc argued against cognitive architecture and then used it; SOAR and ACT-R prescribe how thinking proceeds and percept does not; a term disclaimed at first use is the wrong term; the definition says rails on the record, not a guardrail on what the model says, since rails means safety filters in LLM tooling"
+- weighed "cognitive architecture" (model)
+  why: "names a processing loop in SOAR and ACT-R; a newcomer knows the term, but it had to be disclaimed at first use"
+- weighed "cognition rails" (model)
+  why: "more accurate, since the rails are not themselves cognitive, but not idiomatic; the repo already says cognitive map, commit and history in the same loose sense"

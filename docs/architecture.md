@@ -21,11 +21,12 @@ surface.
 
 ## The rules
 
-The core is a cognitive architecture in the sense of constraints on
-what cognition may write and read, not of a processing loop. SOAR and
-ACT-R prescribe how thinking proceeds; this does not. The loop is a
-surface's, and any model or client may run it. The core is the rules,
-and everything else is built around them.
+The core is cognitive rails: constraints on what cognition may write
+and read. It is not a cognitive architecture in the SOAR or ACT-R
+sense, which prescribes how thinking proceeds, and not a guardrail on
+what the model says. The loop is a surface's, and any model or client
+may run it. The core is the rules, and everything else is built around
+them.
 
 | Rule | Enforced by |
 |---|---|
