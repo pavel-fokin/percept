@@ -1,0 +1,25 @@
+//! percept's core: an append-only experience log and the cognitive
+//! maps folded from it, with the rules between them. Serde-free; knows
+//! nothing of a model, a tool, or a working tree.
+
+mod event;
+mod event_log;
+mod map;
+mod map_reader;
+mod render;
+mod search;
+
+#[cfg(test)]
+pub mod testing;
+
+pub use event::{Actor, Event, EventId, EventKind, Payload, Source, Usage, PREVIEW_CHARS};
+pub use event_log::EventLog;
+#[cfg(test)]
+pub use map::SUPERSEDES;
+pub use map::{
+    map_of, Edge, Fragment, Kind, Map, MapError, Mutation, Node, NodeId, NodeRef, Schema, Scope,
+    Selection, CODE, DECISION, DECISIONS, OPTION, SCHEMAS, TASK, TASKS,
+};
+pub use map_reader::MapReader;
+pub use render::MapRenderer;
+pub use search::{EventQuery, EventSearch};

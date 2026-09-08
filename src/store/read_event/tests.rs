@@ -1,7 +1,7 @@
 use super::*;
-use crate::percept::{Actor, Event, EventId, Payload};
+use crate::core::testing::{source, FakeLog};
+use crate::core::{Actor, Event, EventId, Payload};
 use crate::shared::Timestamp;
-use crate::testing::{source, FakeLog};
 
 fn message(content: &str) -> Event {
     Event::message_received(Actor::User, content.to_string(), source("tui"), None)

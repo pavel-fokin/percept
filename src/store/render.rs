@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::percept::{Actor, EventId, Kind, Map, MapRenderer, Node, Schema, DECISIONS, TASKS};
+use crate::core::{Actor, EventId, Kind, Map, MapRenderer, Node, Schema, DECISIONS, TASKS};
 use crate::store::event::ids;
 
 /// What every rendered map opens with, so a reader who lands on the

@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Scope, DECISION};
-use crate::percept::{Tool, ToolOutput, ToolSpec};
+use crate::core::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Scope, DECISION};
+use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::store::map::NodeRefArgs;
 use crate::store::Snapshot;
 

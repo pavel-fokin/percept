@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{EventLog, Tool, ToolOutput, ToolSpec};
+use crate::core::EventLog;
+use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::store::{encode, excerpt, parse_event_id};
 
 /// One event by its wire id, as `encode` prints it, or with `content`

@@ -6,8 +6,9 @@ use tempfile::tempdir;
 use super::{
     discover_root, resolve_toolset, LogMaps, ReadMap, RoutedMaps, Toolset, TUI_SOURCE_NAME,
 };
-use crate::percept::{MapReader, Tool};
-use crate::testing::{scope, FakeLog};
+use crate::core::testing::{scope, FakeLog};
+use crate::core::MapReader;
+use crate::harness::Tool;
 
 #[test]
 fn tui_in_a_git_checkout_defaults_to_code_tools() {

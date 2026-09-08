@@ -1,9 +1,8 @@
 use super::*;
 use crate::app::{App, Harness, MapShape};
-use crate::percept::{self, Payload};
-use crate::testing::{
-    content, source, FakeCatalog, FakeLog, FakeRenderer, FakeTool, Scripted, ROOT,
-};
+use crate::core::testing::{content, source, FakeLog, FakeRenderer, ROOT};
+use crate::core::Payload;
+use crate::harness::testing::{FakeCatalog, FakeTool, Scripted};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -34,7 +33,7 @@ fn a_publish_citing_a_cause_records_it() {
 fn a_publish_citing_a_cause_the_log_lacks_is_rejected() {
     let log = FakeLog::default();
     let mut orphan = args("model", r#"{"content":"hello"}"#);
-    orphan.causation = Some(percept::EventId::new().as_uuid().to_string());
+    orphan.causation = Some(crate::core::EventId::new().as_uuid().to_string());
     assert!(publish(orphan, &log, Path::new(ROOT)).is_err());
     assert!(log.load().unwrap().is_empty());
 }
@@ -48,7 +47,7 @@ fn a_valid_publish_appends_one_event_carrying_its_source() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].source().name, "claude-code");
     assert_eq!(events[0].source().path, Path::new(ROOT));
-    assert!(events[0].actor() == percept::Actor::User);
+    assert!(events[0].actor() == crate::core::Actor::User);
 }
 
 #[test]
@@ -112,8 +111,8 @@ fn every_flag_reaches_the_query_it_builds() {
     let query = parse_query(&args).unwrap();
 
     assert_eq!(query.sources, vec!["tui", "cli"]);
-    assert!(query.actors == vec![percept::Actor::User]);
-    assert!(query.kinds == vec![percept::EventKind::ToolCalled]);
+    assert!(query.actors == vec![crate::core::Actor::User]);
+    assert!(query.kinds == vec![crate::core::EventKind::ToolCalled]);
     assert_eq!(query.text, vec!["deploy".to_string()]);
     assert_eq!(query.size, Some(3));
     assert!(query.since.is_some() && query.until.is_none());
@@ -213,16 +212,16 @@ fn a_node_ref_with_a_blank_side_is_rejected() {
 async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
     let model = Scripted::new(
         vec![
-            vec![percept::Chunk::ToolCall {
+            vec![crate::harness::Chunk::ToolCall {
                 tool: "search_events".to_string(),
                 arguments: "{}".to_string(),
             }],
-            vec![percept::Chunk::Reply("found it".to_string())],
+            vec![crate::harness::Chunk::Reply("found it".to_string())],
         ],
         true,
     );
     let log = Arc::new(FakeLog::default());
-    let tools: Vec<Arc<dyn percept::Tool>> = vec![Arc::new(FakeTool)];
+    let tools: Vec<Arc<dyn crate::harness::Tool>> = vec![Arc::new(FakeTool)];
     let app = App::new(
         Arc::new(model),
         Arc::new(FakeCatalog::default()),
@@ -262,7 +261,7 @@ async fn a_stream_error_ends_the_turn_but_still_commits_partial_text() {
     // A reply that breaks mid-stream, after saying something.
     let model = Scripted::failing(
         vec![vec![
-            Ok(percept::Chunk::Reply("partial".to_string())),
+            Ok(crate::harness::Chunk::Reply("partial".to_string())),
             Err("connection dropped".into()),
         ]],
         false,
@@ -354,9 +353,9 @@ fn parse_show<const N: usize>(argv: [&str; N]) -> ShowMapArgs {
 fn all_projects_scopes_to_every_project_while_the_default_scopes_to_root() {
     assert_eq!(
         scope(false, Path::new(ROOT)),
-        percept::Scope::Project(PathBuf::from(ROOT))
+        crate::core::Scope::Project(PathBuf::from(ROOT))
     );
-    assert_eq!(scope(true, Path::new(ROOT)), percept::Scope::All);
+    assert_eq!(scope(true, Path::new(ROOT)), crate::core::Scope::All);
 }
 
 #[test]

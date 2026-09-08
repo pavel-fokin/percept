@@ -1,6 +1,6 @@
 use super::*;
-use crate::percept::{Actor, Event, EventId};
-use crate::testing::{edge_added, node_added, node_added_by, scope, source, FakeLog};
+use crate::core::testing::{edge_added, node_added, node_added_by, scope, source, FakeLog};
+use crate::core::{Actor, Event, EventId};
 
 fn tool(events: Vec<Event>) -> ReviseMap {
     let log = Arc::new(FakeLog::seeded(events));

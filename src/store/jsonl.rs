@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use serde::Deserialize;
 
-use crate::percept::{self, EventId, EventLog, EventQuery, EventSearch};
+use crate::core::{EventId, EventLog, EventQuery, EventSearch};
 use crate::store::{parse_event_id, Error, Event};
 
 /// A JSONL event log: one compact `store::Event` per line, appended to
@@ -76,7 +76,7 @@ impl Jsonl {
 
 impl EventLog for Jsonl {
     /// Appends one event as a compact JSON line.
-    fn append(&self, event: &percept::Event) -> Result<(), Box<dyn std::error::Error>> {
+    fn append(&self, event: &crate::core::Event) -> Result<(), Box<dyn std::error::Error>> {
         let mut line = crate::store::encode(event);
         line.push('\n');
 
@@ -104,7 +104,7 @@ impl EventLog for Jsonl {
     /// when it doesn't. Both locks are held throughout, so an `append`
     /// running on another thread or in another process can't have its
     /// half-written line read as a torn one and dropped.
-    fn load(&self) -> Result<Vec<percept::Event>, Box<dyn std::error::Error>> {
+    fn load(&self) -> Result<Vec<crate::core::Event>, Box<dyn std::error::Error>> {
         let bytes = self.with_shared(read_all)?;
 
         let mut events = Vec::new();
@@ -118,7 +118,7 @@ impl EventLog for Jsonl {
     /// the wire and stops at the match, so only the event asked for is
     /// ever built. A line whose payload the domain can't decode fails
     /// the fetch only when it is the line named.
-    fn get(&self, id: EventId) -> Result<Option<percept::Event>, Box<dyn std::error::Error>> {
+    fn get(&self, id: EventId) -> Result<Option<crate::core::Event>, Box<dyn std::error::Error>> {
         let bytes = self.with_shared(read_all)?;
 
         for (line, raw) in lines(complete_text(&bytes)?) {
@@ -141,7 +141,7 @@ impl EventSearch for Jsonl {
     fn search(
         &self,
         query: &EventQuery,
-    ) -> Result<Vec<percept::Event>, Box<dyn std::error::Error>> {
+    ) -> Result<Vec<crate::core::Event>, Box<dyn std::error::Error>> {
         Ok(query.apply(self.load()?))
     }
 }
@@ -154,9 +154,9 @@ struct WireId {
     id: String,
 }
 
-fn parse_line(raw: &str) -> Result<percept::Event, Error> {
+fn parse_line(raw: &str) -> Result<crate::core::Event, Error> {
     let wire: Event = serde_json::from_str(raw).map_err(Error::BadLine)?;
-    percept::Event::try_from(wire)
+    crate::core::Event::try_from(wire)
 }
 
 /// Everything up to the last newline. Bytes, not `read_to_string`: a

@@ -1,11 +1,22 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use super::{NodeId, Usage};
+use super::NodeId;
 use crate::shared::{Id, Timestamp};
 
 /// Identifies an Event.
 pub type EventId = Id<Event>;
+
+/// Token counts for one round trip to the model. `cached_tokens` is
+/// `None` when the provider does not report it. Carried by
+/// `Payload::ModelCalled`, so it is the core's, not the harness's.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Usage {
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_tokens: Option<u64>,
+}
 
 /// The writer that produced an event - `percept-tui`, `percept-cli`,
 /// `claude-code` - and where it ran from. `path` is that writer's

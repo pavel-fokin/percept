@@ -13,7 +13,8 @@ pub use ui::draw;
 pub use update::{handle_key, handle_mouse, handle_stream};
 
 use crate::app::AppService;
-use crate::percept::{Chunk, EventId, ModelDescriptor, Tool, ToolOutput};
+use crate::core::EventId;
+use crate::harness::{Chunk, ModelDescriptor, Tool, ToolOutput};
 
 /// Adapts the reply stream onto tokio's mpsc channel, so the main
 /// select! loop can drive it alongside terminal events. Local to tui -

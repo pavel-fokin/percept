@@ -1,7 +1,7 @@
 use serde_json::json;
 
 use super::*;
-use crate::percept::Actor;
+use crate::core::Actor;
 
 #[test]
 fn a_content_delta_parses_as_a_reply_chunk() {

@@ -9,7 +9,7 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::percept::{
+use crate::core::{
     Actor, Edge, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation, Node, NodeId,
     NodeRef, Payload, Schema, Scope, DECISIONS, OPTION, TASK, TASKS,
 };
@@ -208,7 +208,7 @@ struct KindLine {
 }
 
 impl KindLine {
-    fn of(kinds: &'static [crate::percept::Kind]) -> Vec<Self> {
+    fn of(kinds: &'static [crate::core::Kind]) -> Vec<Self> {
         kinds
             .iter()
             .map(|kind| Self {
@@ -231,7 +231,7 @@ struct SchemaLine {
 /// its `Schema` - what `read_map` returns before the fragment, so the
 /// model meets `package` or `option` with its meaning attached and does
 /// not guess a selector from a name alone.
-pub fn encode_schema(schema: &'static crate::percept::Schema) -> String {
+pub fn encode_schema(schema: &'static crate::core::Schema) -> String {
     serde_json::to_string(&SchemaLine {
         schema: schema.name,
         purpose: schema.purpose,

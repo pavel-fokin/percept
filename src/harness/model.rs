@@ -5,7 +5,8 @@ use std::sync::Arc;
 
 use futures_core::Stream;
 
-use super::{Actor, Event, Payload, ToolSpec};
+use super::ToolSpec;
+use crate::core::{Actor, Event, Payload, Usage};
 
 /// One piece of a streaming reply. A thinking model interleaves
 /// `Thought` chunks with its `Reply` text; a provider that never thinks
@@ -23,16 +24,6 @@ pub enum Chunk {
         arguments: String,
     },
     Usage(Usage),
-}
-
-/// Token counts for one round trip to the model. `cached_tokens` is
-/// `None` when the provider does not report it.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Usage {
-    pub model: String,
-    pub input_tokens: u64,
-    pub output_tokens: u64,
-    pub cached_tokens: Option<u64>,
 }
 
 /// A reply as it streams in, chunk by chunk. `Send` so it can cross

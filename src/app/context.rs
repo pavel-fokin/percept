@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::app::MapShape;
-use crate::percept::{self, Actor, Event, EventId, EventKind, Map, Scope, PREVIEW_CHARS};
+use crate::core::{Actor, Event, EventId, EventKind, Map, Scope, PREVIEW_CHARS};
 use crate::shared::Timestamp;
 
 /// A map's size and age in one clause, so the model can tell whether
@@ -50,13 +50,15 @@ fn estimate(chars: usize) -> usize {
 /// prompt, a `reflect`, which replayed as system text would stand as
 /// an instruction in every later turn; a tool result cut to its head;
 /// otherwise what `message_of` gives.
-fn history_message(event: &Event) -> Option<percept::Message> {
+fn history_message(event: &Event) -> Option<crate::harness::Message> {
     match event.payload() {
         _ if is_percepts_prompt(event) => None,
-        percept::Payload::ToolResulted { content } => Some(percept::Message::ToolResult {
-            content: cut(content, event.id()),
-        }),
-        _ => percept::message_of(event),
+        crate::core::Payload::ToolResulted { content } => {
+            Some(crate::harness::Message::ToolResult {
+                content: cut(content, event.id()),
+            })
+        }
+        _ => crate::harness::message_of(event),
     }
 }
 
@@ -66,12 +68,11 @@ fn tokens(event: &Event) -> usize {
 }
 
 /// A message's text: its content, or a tool call's name and arguments.
-fn text_of(message: &percept::Message) -> String {
+fn text_of(message: &crate::harness::Message) -> String {
     match message {
-        percept::Message::Text { content, .. } | percept::Message::ToolResult { content } => {
-            content.clone()
-        }
-        percept::Message::ToolCall { tool, arguments } => format!("{tool} {arguments}"),
+        crate::harness::Message::Text { content, .. }
+        | crate::harness::Message::ToolResult { content } => content.clone(),
+        crate::harness::Message::ToolCall { tool, arguments } => format!("{tool} {arguments}"),
     }
 }
 
@@ -221,11 +222,11 @@ pub struct View<'a> {
     /// The model's context window in tokens, if it reports one.
     pub context_window: Option<u32>,
     /// The model's selected reasoning level for this session.
-    pub reasoning_effort: Option<percept::ReasoningEffort>,
+    pub reasoning_effort: Option<crate::harness::ReasoningEffort>,
     /// The tools to send with the request - already filtered by
     /// whether the model can use them and whether the turn's budget
     /// is spent.
-    pub tools: Vec<percept::ToolSpec>,
+    pub tools: Vec<crate::harness::ToolSpec>,
     /// Whether this turn has spent its tool budget: past it the
     /// request carries no tools, so the model must be told why.
     pub budget_spent: bool,
@@ -249,13 +250,16 @@ impl Context {
     /// The request for the next `reply`: each section's messages in
     /// list order, then the tools. Errs only when a map in the log does not
     /// fold, which is a corrupt log, not a bad turn.
-    pub fn build(&self, view: View) -> Result<percept::ModelRequest, Box<dyn std::error::Error>> {
+    pub fn build(
+        &self,
+        view: View,
+    ) -> Result<crate::harness::ModelRequest, Box<dyn std::error::Error>> {
         let mut messages = Vec::new();
         for section in &self.sections {
             messages.extend(render(section, &view)?);
         }
 
-        Ok(percept::ModelRequest {
+        Ok(crate::harness::ModelRequest {
             messages,
             tools: view.tools,
             reasoning_effort: view.reasoning_effort,
@@ -302,7 +306,7 @@ impl Context {
 fn render(
     section: &Section,
     view: &View,
-) -> Result<Vec<percept::Message>, Box<dyn std::error::Error>> {
+) -> Result<Vec<crate::harness::Message>, Box<dyn std::error::Error>> {
     let mut messages = Vec::new();
     match section {
         // Before the maps: conventions frame how the maps are read,
@@ -311,7 +315,7 @@ fn render(
         // never loses them to the window.
         Section::Instructions => {
             if let Some(instructions) = view.instructions {
-                messages.push(percept::Message::Text {
+                messages.push(crate::harness::Message::Text {
                     role: Actor::System,
                     content: format!(
                         "The project's instructions, which you follow when you read or \
@@ -342,7 +346,7 @@ fn render(
                         MapShape::Tool => "read_map shows it.".to_string(),
                     }
                 };
-                messages.push(percept::Message::Text {
+                messages.push(crate::harness::Message::Text {
                     role: Actor::System,
                     content: format!(
                         "The {} map: {}. {}. Node kinds: {}. Edge kinds: {}.\n{body}",
@@ -374,7 +378,7 @@ fn render(
                 .collect();
             lines.reverse();
             if !lines.is_empty() {
-                messages.push(percept::Message::Text {
+                messages.push(crate::harness::Message::Text {
                     role: Actor::System,
                     content: format!(
                         "Before the messages below, oldest first, one line each; \
@@ -388,20 +392,20 @@ fn render(
         Section::Time => {
             let (_, turn) = view.split();
             let at = turn.first().map_or_else(Timestamp::now, Event::created_at);
-            messages.push(percept::Message::Text {
+            messages.push(crate::harness::Message::Text {
                 role: Actor::System,
                 content: format!("The current time is {at}."),
             });
         }
         Section::Turn => {
             let (_, turn) = view.split();
-            messages.extend(turn.iter().filter_map(percept::message_of));
+            messages.extend(turn.iter().filter_map(crate::harness::message_of));
             // Dropping the tools is not enough on its own: a model
             // mid-turn reaches for one anyway, `begin_tool` stops the
             // turn on it, and the reply is empty. Say the budget is
             // spent so it answers.
             if view.budget_spent {
-                messages.push(percept::Message::Text {
+                messages.push(crate::harness::Message::Text {
                     role: Actor::System,
                     content: "This turn's tool budget is spent. You cannot call any more \
                               tools now. Answer with what you have."
@@ -414,7 +418,7 @@ fn render(
 }
 
 /// What one message of the request costs to read.
-fn message_tokens(message: &percept::Message) -> usize {
+fn message_tokens(message: &crate::harness::Message) -> usize {
     estimate(text_of(message).chars().count())
 }
 

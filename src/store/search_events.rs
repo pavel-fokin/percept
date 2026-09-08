@@ -3,7 +3,8 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{EventQuery, EventSearch, Tool, ToolOutput, ToolSpec};
+use crate::core::{EventQuery, EventSearch};
+use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::store::{optional_time, parse_actor, parse_kind, summarize, PREVIEW_CHARS};
 
 /// The `search_events` tool: turns the model's JSON arguments into an

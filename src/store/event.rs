@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::percept::{self, Actor, EventId, EventKind, NodeId, Payload, Usage};
+use crate::core::{Actor, EventId, EventKind, NodeId, Payload, Usage};
 use crate::shared::Timestamp;
 use crate::store::Error;
 
@@ -148,11 +148,11 @@ pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
 }
 
 /// One event as the JSONL line `percept.jsonl` stores.
-pub fn encode(event: &percept::Event) -> String {
+pub fn encode(event: &crate::core::Event) -> String {
     serde_json::to_string(&Event::from(event)).expect("store::Event always serializes")
 }
 
-pub use crate::percept::PREVIEW_CHARS;
+pub use crate::core::PREVIEW_CHARS;
 
 /// The payload key `Payload::content` travels under - one name for the
 /// sites that cut or slice it on the wire.
@@ -195,7 +195,7 @@ struct Summary {
 /// `preview` is that window's size in characters; strings other than
 /// `content` are cut at `PREVIEW_CHARS` whatever it is, since they are
 /// the model's own short arguments, not the text a caller reads.
-pub fn summarize(event: &percept::Event, hit: Option<Range<usize>>, preview: usize) -> String {
+pub fn summarize(event: &crate::core::Event, hit: Option<Range<usize>>, preview: usize) -> String {
     let mut wire = Event::from(event);
     // `content` leaves the payload before `shorten` runs over the rest,
     // so it is cut once, here, at the caller's size.
@@ -254,7 +254,7 @@ fn window(chars: &[char], keep: Range<usize>, size: usize) -> String {
 /// never split in half. An event whose payload carries no `content` -
 /// `tool.called` - has nothing to slice.
 pub fn excerpt(
-    event: &percept::Event,
+    event: &crate::core::Event,
     start: Option<usize>,
     end: Option<usize>,
 ) -> Result<String, Error> {
@@ -312,8 +312,8 @@ pub(super) fn ids(sources: &[EventId]) -> Vec<String> {
     sources.iter().map(|id| id.as_uuid().to_string()).collect()
 }
 
-impl From<&percept::Event> for Event {
-    fn from(event: &percept::Event) -> Self {
+impl From<&crate::core::Event> for Event {
+    fn from(event: &crate::core::Event) -> Self {
         let payload = match event.payload() {
             // Both carry the same wire shape - one body, one arm.
             Payload::MessageReceived { content } | Payload::ThoughtRecorded { content } => {
@@ -411,7 +411,7 @@ impl From<&percept::Event> for Event {
     }
 }
 
-impl TryFrom<Event> for percept::Event {
+impl TryFrom<Event> for crate::core::Event {
     type Error = Error;
 
     fn try_from(event: Event) -> Result<Self, Self::Error> {
@@ -428,10 +428,10 @@ impl TryFrom<Event> for percept::Event {
             .map_err(|_| Error::BadTimestamp(event.created_at.clone()))?;
         let actor = parse_actor(&event.actor)?;
 
-        Ok(percept::Event::restore(
+        Ok(crate::core::Event::restore(
             id,
             actor,
-            percept::Source {
+            crate::core::Source {
                 name: event.source.name,
                 path: event.source.path,
             },
@@ -448,12 +448,12 @@ impl TryFrom<Event> for percept::Event {
 /// payload of each type may hold.
 pub fn decode(
     actor: &str,
-    source: percept::Source,
+    source: crate::core::Source,
     kind: &str,
     causation_id: Option<EventId>,
     payload: Value,
-) -> Result<percept::Event, Error> {
-    let event = percept::Event::new(
+) -> Result<crate::core::Event, Error> {
+    let event = crate::core::Event::new(
         parse_actor(actor)?,
         source,
         causation_id,

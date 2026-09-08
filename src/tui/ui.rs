@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, ListState, Para
 use ratatui::Frame;
 
 use super::{Chat, ModelsMenu};
-use crate::percept::{Actor, Event, EventId, EventKind, Payload};
+use crate::core::{Actor, Event, EventId, EventKind, Payload};
 
 /// One marker plus a space. Every wrapped line of a turn indents past
 /// it, so the gutter stays a column of markers and nothing else.

@@ -1,4 +1,4 @@
-use crate::percept::{Policy, Verdict};
+use crate::harness::{Policy, Verdict};
 
 /// The tools that change the tree or run a command: the ones a user
 /// wants to see before they happen. Reading is routine and runs

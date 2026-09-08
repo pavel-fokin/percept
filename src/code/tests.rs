@@ -1,5 +1,5 @@
 use super::*;
-use crate::testing::Fixture;
+use crate::core::testing::Fixture;
 
 fn build_map(fixture: &Fixture) -> Map {
     build(fixture.path()).unwrap()

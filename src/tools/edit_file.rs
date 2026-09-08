@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{Tool, ToolOutput, ToolSpec};
+use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::tools::{is_binary, Workspace};
 
 /// The `edit_file` tool: replaces `old_string` with `new_string` in a

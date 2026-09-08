@@ -3,7 +3,7 @@ use std::sync::Arc;
 use regex::Regex;
 use serde::Deserialize;
 
-use crate::percept::{Tool, ToolOutput, ToolSpec};
+use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::tools::{is_binary, join_capped, Workspace};
 
 /// Cap on matches returned, so a broad pattern can't flood the model's

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use globset::GlobBuilder;
 use serde::Deserialize;
 
-use crate::percept::{Tool, ToolOutput, ToolSpec};
+use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::tools::{join_capped, Workspace};
 
 /// Cap on matches returned, so a broad pattern can't flood the

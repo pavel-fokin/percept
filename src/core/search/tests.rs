@@ -1,8 +1,8 @@
 use super::*;
 use std::collections::BTreeMap;
 
-use crate::percept::{EventId, NodeId, Payload};
-use crate::testing::source;
+use crate::core::testing::source;
+use crate::core::{EventId, NodeId, Payload};
 
 /// A message from `name`, timestamped `offset_minutes` back.
 fn event_at(name: &str, offset_minutes: i64) -> Event {

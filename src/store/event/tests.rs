@@ -1,5 +1,5 @@
 use super::*;
-use crate::testing::{source, usage};
+use crate::core::testing::{source, usage};
 
 #[test]
 fn a_short_payload_is_left_alone() {
@@ -113,7 +113,7 @@ fn the_preview_window_is_the_callers_size() {
 
 #[test]
 fn a_cut_inside_arguments_is_not_a_preview() {
-    let call = percept::Event::restore(
+    let call = crate::core::Event::restore(
         EventId::new(),
         Actor::Model,
         source("tui"),
@@ -184,7 +184,7 @@ fn excerpt_rejects_an_inverted_range_and_names_both_ends() {
 
 #[test]
 fn excerpt_on_a_tool_called_event_is_an_error() {
-    let call = percept::Event::restore(
+    let call = crate::core::Event::restore(
         EventId::new(),
         Actor::Model,
         source("tui"),
@@ -199,8 +199,8 @@ fn excerpt_on_a_tool_called_event_is_an_error() {
     assert_eq!(err, "tool.called has no content to slice");
 }
 
-fn message(actor: Actor, content: String) -> percept::Event {
-    percept::Event::message_received(actor, content, source("tui"), None)
+fn message(actor: Actor, content: String) -> crate::core::Event {
+    crate::core::Event::message_received(actor, content, source("tui"), None)
 }
 
 #[test]
@@ -217,7 +217,7 @@ fn nested_and_array_values_are_reached() {
 #[test]
 fn round_trips_through_json() {
     let cause = EventId::new();
-    let original = percept::Event::restore(
+    let original = crate::core::Event::restore(
         EventId::new(),
         Actor::Model,
         source("tui"),
@@ -230,7 +230,7 @@ fn round_trips_through_json() {
 
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
-    let restored = percept::Event::try_from(wire).unwrap();
+    let restored = crate::core::Event::try_from(wire).unwrap();
 
     assert!(restored.id() == original.id());
     assert_eq!(restored.source(), original.source());
@@ -245,7 +245,7 @@ fn round_trips_through_json() {
 
 #[test]
 fn thought_recorded_round_trips_through_json() {
-    let original = percept::Event::restore(
+    let original = crate::core::Event::restore(
         EventId::new(),
         Actor::Model,
         source("tui"),
@@ -259,7 +259,7 @@ fn thought_recorded_round_trips_through_json() {
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "thought.recorded");
-    let restored = percept::Event::try_from(wire).unwrap();
+    let restored = crate::core::Event::try_from(wire).unwrap();
 
     match restored.payload() {
         Payload::ThoughtRecorded { content } => assert_eq!(content, "let me think"),
@@ -270,7 +270,7 @@ fn thought_recorded_round_trips_through_json() {
 #[test]
 fn tool_called_arguments_that_are_not_one_json_value_encode_as_a_string_not_a_panic() {
     let spliced = r#"{"path":"a"}{"path":"b"}"#;
-    let original = percept::Event::restore(
+    let original = crate::core::Event::restore(
         EventId::new(),
         Actor::Model,
         source("tui"),
@@ -286,7 +286,8 @@ fn tool_called_arguments_that_are_not_one_json_value_encode_as_a_string_not_a_pa
     assert_eq!(wire.payload["arguments"], spliced);
 
     let json = serde_json::to_string(&wire).unwrap();
-    let restored = percept::Event::try_from(serde_json::from_str::<Event>(&json).unwrap()).unwrap();
+    let restored =
+        crate::core::Event::try_from(serde_json::from_str::<Event>(&json).unwrap()).unwrap();
     match restored.payload() {
         Payload::ToolCalled { arguments, .. } => {
             assert_eq!(serde_json::from_str::<Value>(arguments).unwrap(), spliced);
@@ -297,7 +298,7 @@ fn tool_called_arguments_that_are_not_one_json_value_encode_as_a_string_not_a_pa
 
 #[test]
 fn tool_called_round_trips_with_arguments_as_a_nested_object() {
-    let original = percept::Event::restore(
+    let original = crate::core::Event::restore(
         EventId::new(),
         Actor::Model,
         source("tui"),
@@ -316,7 +317,7 @@ fn tool_called_round_trips_with_arguments_as_a_nested_object() {
 
     let json = serde_json::to_string(&wire).unwrap();
     let reparsed: Event = serde_json::from_str(&json).unwrap();
-    let restored = percept::Event::try_from(reparsed).unwrap();
+    let restored = crate::core::Event::try_from(reparsed).unwrap();
 
     match restored.payload() {
         Payload::ToolCalled { tool, arguments } => {
@@ -331,7 +332,7 @@ fn tool_called_round_trips_with_arguments_as_a_nested_object() {
 #[test]
 fn tool_resulted_round_trips_through_json() {
     let cause = EventId::new();
-    let original = percept::Event::restore(
+    let original = crate::core::Event::restore(
         EventId::new(),
         Actor::System,
         source("tui"),
@@ -346,7 +347,7 @@ fn tool_resulted_round_trips_through_json() {
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "tool.resulted");
     assert_eq!(wire.actor, "system");
-    let restored = percept::Event::try_from(wire).unwrap();
+    let restored = crate::core::Event::try_from(wire).unwrap();
 
     assert!(restored.actor() == Actor::System);
     assert!(restored.causation_id() == Some(cause));
@@ -359,7 +360,7 @@ fn tool_resulted_round_trips_through_json() {
 #[test]
 fn model_called_round_trips_through_json() {
     let cause = EventId::new();
-    let original = percept::Event::restore(
+    let original = crate::core::Event::restore(
         EventId::new(),
         Actor::System,
         source("tui"),
@@ -375,7 +376,7 @@ fn model_called_round_trips_through_json() {
     // Unreported cached tokens are left off the wire, not written
     // as null.
     assert!(wire.payload.get("cached_tokens").is_none());
-    let restored = percept::Event::try_from(wire).unwrap();
+    let restored = crate::core::Event::try_from(wire).unwrap();
 
     assert!(restored.actor() == Actor::System);
     assert!(restored.causation_id() == Some(cause));
@@ -394,7 +395,7 @@ fn node_added_round_trips_through_json() {
         "summary".to_string(),
         "Same features on both stacks".to_string(),
     );
-    let original = percept::Event::restore(
+    let original = crate::core::Event::restore(
         EventId::new(),
         Actor::User,
         source("cli"),
@@ -413,7 +414,7 @@ fn node_added_round_trips_through_json() {
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "node.added");
-    let restored = percept::Event::try_from(wire).unwrap();
+    let restored = crate::core::Event::try_from(wire).unwrap();
 
     match restored.payload() {
         Payload::NodeAdded {
@@ -438,7 +439,7 @@ fn node_added_round_trips_through_json() {
 #[test]
 fn node_removed_round_trips_through_json() {
     let node = NodeId::new();
-    let original = percept::Event::restore(
+    let original = crate::core::Event::restore(
         EventId::new(),
         Actor::System,
         source("cli"),
@@ -457,7 +458,7 @@ fn node_removed_round_trips_through_json() {
     assert_eq!(wire.kind, "node.removed");
     // Empty `sources` encodes as `[]`, never omitted.
     assert_eq!(wire.payload["sources"], serde_json::json!([]));
-    let restored = percept::Event::try_from(wire).unwrap();
+    let restored = crate::core::Event::try_from(wire).unwrap();
 
     match restored.payload() {
         Payload::NodeRemoved {
@@ -479,7 +480,7 @@ fn node_removed_round_trips_through_json() {
 fn edge_added_round_trips_through_json() {
     let from = NodeId::new();
     let to = NodeId::new();
-    let original = percept::Event::restore(
+    let original = crate::core::Event::restore(
         EventId::new(),
         Actor::System,
         source("cli"),
@@ -497,7 +498,7 @@ fn edge_added_round_trips_through_json() {
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "edge.added");
-    let restored = percept::Event::try_from(wire).unwrap();
+    let restored = crate::core::Event::try_from(wire).unwrap();
 
     match restored.payload() {
         Payload::EdgeAdded {
@@ -536,7 +537,7 @@ fn a_malformed_source_in_a_node_added_payload_is_an_error() {
 
 #[test]
 fn a_map_events_summary_carries_no_preview() {
-    let event = percept::Event::restore(
+    let event = crate::core::Event::restore(
         EventId::new(),
         Actor::User,
         source("cli"),
@@ -559,7 +560,7 @@ fn a_map_events_summary_carries_no_preview() {
 
 #[test]
 fn a_model_called_summary_carries_no_preview() {
-    let event = percept::Event::restore(
+    let event = crate::core::Event::restore(
         EventId::new(),
         Actor::System,
         source("tui"),
@@ -589,7 +590,7 @@ fn unknown_type_deserializes_but_has_no_domain_form() {
 
     let wire: Event = serde_json::from_str(json).expect("wire event deserializes");
     assert!(matches!(
-        percept::Event::try_from(wire),
+        crate::core::Event::try_from(wire),
         Err(Error::UnknownEventType(_))
     ));
 }

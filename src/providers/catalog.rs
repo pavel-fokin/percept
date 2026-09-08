@@ -4,7 +4,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use super::{client, Fireworks, Ollama, OpenAi};
-use crate::percept::{
+use crate::harness::{
     Model, ModelCatalog, ModelDescriptor, ModelListing, Provider, ReasoningEffort,
 };
 

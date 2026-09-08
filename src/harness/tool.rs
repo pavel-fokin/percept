@@ -1,4 +1,4 @@
-use super::Payload;
+use crate::core::Payload;
 
 /// A capability the model invokes by name during a turn. The domain
 /// owns the shape; the implementation lives in `store`, the way

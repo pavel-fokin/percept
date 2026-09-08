@@ -5,8 +5,9 @@ use serde_json::Value;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{client, forward, role, stream_lines, Line};
-use crate::percept::{
-    Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream, ToolSpec, Usage,
+use crate::core::Usage;
+use crate::harness::{
+    Chunk, Message, Modality, Model, ModelCapabilities, ModelRequest, ReplyStream, ToolSpec,
 };
 
 /// Sends and receives with a local ollama server's `/api/chat`, which

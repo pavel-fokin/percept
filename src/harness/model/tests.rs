@@ -1,5 +1,5 @@
 use super::*;
-use crate::testing::{source, usage};
+use crate::core::testing::{source, usage};
 
 fn text(message: &Message) -> &str {
     match message {
@@ -46,7 +46,7 @@ fn a_model_called_event_is_filtered_out_while_a_neighbouring_message_survives() 
 
 #[test]
 fn a_map_change_is_filtered_out_while_a_neighbouring_message_survives() {
-    use crate::percept::{EventId, NodeId};
+    use crate::core::{EventId, NodeId};
     use std::collections::BTreeMap;
 
     let node = NodeId::new();

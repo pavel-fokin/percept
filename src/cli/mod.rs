@@ -25,10 +25,10 @@ use tokio_stream::StreamExt;
 
 use crate::app::{run_tool, AppService, ToolStep};
 use crate::code;
-use crate::percept::{
-    self, Actor, Chunk, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef,
-    Payload,
+use crate::core::{
+    Actor, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
 };
+use crate::harness::Chunk;
 use crate::shared::Timestamp;
 use crate::store;
 
@@ -137,7 +137,7 @@ impl ShowMapArgs {
     /// Whether this names the code map - derived from the working tree,
     /// so dispatch never opens the log to find out.
     pub fn is_code(&self) -> bool {
-        self.map == percept::CODE.name
+        self.map == crate::core::CODE.name
     }
 }
 
@@ -387,7 +387,7 @@ pub fn publish(
         .map(|id| known_event_id(id, log))
         .transpose()?;
     let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
-    let source = percept::Source {
+    let source = crate::core::Source {
         name: args.source,
         path: root.to_path_buf(),
     };
@@ -395,7 +395,7 @@ pub fn publish(
     // A raw map event would skip `Map::apply`, and one that breaks a
     // rule fails every fold from then on, with no undo in an
     // append-only log.
-    if percept::map_of(event.payload()).is_some() {
+    if crate::core::map_of(event.payload()).is_some() {
         return Err(format!(
             "{} is written through `percept maps`, not published raw",
             args.kind
@@ -409,7 +409,7 @@ pub fn publish(
 fn known_event_id(
     id: &str,
     log: &dyn EventLog,
-) -> Result<percept::EventId, Box<dyn std::error::Error>> {
+) -> Result<crate::core::EventId, Box<dyn std::error::Error>> {
     let parsed = store::parse_event_id(id)?;
     if log.get(parsed)?.is_none() {
         return Err(format!("no event with id {id}").into());
@@ -458,11 +458,11 @@ fn print_text(text: &str) -> Result<(), Box<dyn std::error::Error>> {
 
 /// The scope `maps list` and `maps show` fold: every project's events
 /// with `--all-projects`, else only `root`'s.
-fn scope(all_projects: bool, root: &Path) -> percept::Scope {
+fn scope(all_projects: bool, root: &Path) -> crate::core::Scope {
     if all_projects {
-        percept::Scope::All
+        crate::core::Scope::All
     } else {
-        percept::Scope::Project(root.to_path_buf())
+        crate::core::Scope::Project(root.to_path_buf())
     }
 }
 
@@ -508,7 +508,7 @@ pub fn maps_show_code(args: ShowMapArgs, root: &Path) -> Result<(), Box<dyn std:
 /// `args`'s filters, then print it nodes-then-edges. `--since` runs
 /// after `--around`, so it reads as "what changed near this node".
 fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let selection = percept::Selection {
+    let selection = crate::core::Selection {
         around: args.around.as_ref().map(|node| (node, args.depth)),
         since: args.since,
         kinds: &args.kind,
@@ -531,8 +531,8 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
 fn write(
     target: MapArgs,
     log: &dyn EventLog,
-    source: &percept::Source,
-    renderer: &dyn percept::MapRenderer,
+    source: &crate::core::Source,
+    renderer: &dyn crate::core::MapRenderer,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
     let MapArgs {
@@ -552,8 +552,8 @@ fn write(
 pub fn maps_add_node(
     args: AddNodeArgs,
     log: &dyn EventLog,
-    source: &percept::Source,
-    renderer: &dyn percept::MapRenderer,
+    source: &crate::core::Source,
+    renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let payload = write(args.target, log, source, renderer, |sources| {
         Mutation::AddNode {
@@ -573,8 +573,8 @@ pub fn maps_add_node(
 pub fn maps_add_edge(
     args: EdgeArgs,
     log: &dyn EventLog,
-    source: &percept::Source,
-    renderer: &dyn percept::MapRenderer,
+    source: &crate::core::Source,
+    renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     write(args.target, log, source, renderer, |sources| {
         Mutation::AddEdge {
@@ -591,8 +591,8 @@ pub fn maps_add_edge(
 pub fn maps_remove_node(
     args: RemoveNodeArgs,
     log: &dyn EventLog,
-    source: &percept::Source,
-    renderer: &dyn percept::MapRenderer,
+    source: &crate::core::Source,
+    renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     write(args.target, log, source, renderer, |sources| {
         Mutation::RemoveNode {
@@ -611,8 +611,8 @@ pub fn maps_remove_node(
 pub fn maps_remove_edge(
     args: EdgeArgs,
     log: &dyn EventLog,
-    source: &percept::Source,
-    renderer: &dyn percept::MapRenderer,
+    source: &crate::core::Source,
+    renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     write(args.target, log, source, renderer, |sources| {
         Mutation::RemoveEdge {

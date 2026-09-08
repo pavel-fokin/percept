@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
-use crate::percept::{Tool, ToolOutput, ToolSpec};
+use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::tools::Workspace;
 
 /// How long a call runs when the model gives no `timeout_secs`.

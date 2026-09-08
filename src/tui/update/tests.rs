@@ -2,8 +2,9 @@ use super::*;
 use std::sync::Arc;
 
 use crate::app::{App, Harness, MapShape};
-use crate::percept::{self, ModelDescriptor, Provider};
-use crate::testing::{source, FakeCatalog, FakeLog, FakeRenderer, FakeTool, FixedPolicy, Scripted};
+use crate::core::testing::{source, FakeLog, FakeRenderer};
+use crate::harness::testing::{FakeCatalog, FakeTool, FixedPolicy, Scripted};
+use crate::harness::{ModelDescriptor, Provider};
 use crate::tui::Suggestion;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -210,7 +211,7 @@ fn esc_closes_the_popup_rather_than_quitting_while_it_is_open() {
 #[test]
 fn a_successful_model_switch_clears_a_stale_error_from_an_earlier_failed_pick() {
     let picked = descriptor("b");
-    let other: Arc<dyn percept::Model> = Arc::new(Scripted::new(vec![], false));
+    let other: Arc<dyn crate::harness::Model> = Arc::new(Scripted::new(vec![], false));
     let catalog = FakeCatalog::new(vec![picked.clone()], vec![(picked.clone(), other)]);
     let mut chat = chat_with_catalog(catalog);
     chat.error = Some("an earlier pick failed".to_string());
@@ -423,7 +424,7 @@ fn chat_asking() -> Chat<'static> {
         Arc::new(FakeCatalog::default()),
         Arc::new(FakeLog::default()),
         Harness {
-            policy: Arc::new(FixedPolicy(percept::Verdict::Ask)),
+            policy: Arc::new(FixedPolicy(crate::harness::Verdict::Ask)),
             ..Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt)
         },
         Arc::new(FakeRenderer::default()),
@@ -493,7 +494,7 @@ async fn n_declines_the_waiting_call_and_the_turn_goes_on() {
     assert!(chat.approval.is_none());
     assert!(matches!(
         chat.app.events()[2].payload(),
-        percept::Payload::ToolResulted { content } if content.starts_with("The user declined")
+        crate::core::Payload::ToolResulted { content } if content.starts_with("The user declined")
     ));
 }
 

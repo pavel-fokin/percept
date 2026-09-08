@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use super::EventId;
+use crate::core::EventId;
 
 /// The working tree as it stood before a prompt changed it, named by
 /// that prompt. Taken once per turn, before the model is asked, so a

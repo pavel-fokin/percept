@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::percept::{MapReader, NodeRef, Selection, Tool, ToolOutput, ToolSpec};
+use crate::core::{MapReader, NodeRef, Selection};
+use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::store::map::NodeRefArgs;
 use crate::store::{encode_fragment, encode_lines, encode_schema, optional_time};
 

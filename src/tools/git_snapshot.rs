@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
-use crate::percept::{EventId, Snapshot};
+use crate::core::EventId;
+use crate::harness::Snapshot;
 
 /// Where a turn's snapshots are kept: a ref per prompt, outside every
 /// branch, so `git log` and `git status` never show them and a branch

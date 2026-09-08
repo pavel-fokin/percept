@@ -1,6 +1,6 @@
 use super::*;
-use crate::percept::Actor;
-use crate::testing::{node_added_at, scope, source, ROOT};
+use crate::core::testing::{node_added_at, scope, source, ROOT};
+use crate::core::Actor;
 
 fn committed(payload: Payload) -> Event {
     Event::new(Actor::User, source("test"), None, payload)

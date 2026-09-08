@@ -1,7 +1,7 @@
 use super::*;
-use crate::percept::{Actor, Event, EventId, Payload};
+use crate::core::testing::source;
+use crate::core::{Actor, Event, EventId, Payload};
 use crate::shared::Timestamp;
-use crate::testing::source;
 use std::sync::Mutex;
 
 /// The filters a test asserts `run` translated correctly.

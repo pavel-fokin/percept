@@ -1,5 +1,5 @@
 use super::*;
-use crate::testing::Fixture;
+use crate::core::testing::Fixture;
 
 fn tool(fixture: &Fixture) -> GrepFiles {
     GrepFiles::new(Arc::new(Workspace::new(fixture.path()).unwrap()))

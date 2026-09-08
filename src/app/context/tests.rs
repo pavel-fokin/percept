@@ -1,7 +1,7 @@
 use super::*;
 use crate::app::{Harness, MapShape};
-use crate::percept::Message;
-use crate::testing::{scope, source};
+use crate::core::testing::{scope, source};
+use crate::harness::Message;
 
 /// Each message as the one string a comparison cares about.
 fn contents(messages: &[Message]) -> Vec<String> {
@@ -63,7 +63,7 @@ fn build_carries_the_view_s_selected_reasoning_effort_onto_the_request() {
     let context = history_only();
     let events = [prompt(Actor::User, "hi", 1)];
     let view = View {
-        reasoning_effort: Some(crate::percept::ReasoningEffort::High),
+        reasoning_effort: Some(crate::harness::ReasoningEffort::High),
         ..view(&events)
     };
 
@@ -71,7 +71,7 @@ fn build_carries_the_view_s_selected_reasoning_effort_onto_the_request() {
 
     assert_eq!(
         request.reasoning_effort,
-        Some(crate::percept::ReasoningEffort::High)
+        Some(crate::harness::ReasoningEffort::High)
     );
 }
 
