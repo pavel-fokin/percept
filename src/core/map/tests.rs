@@ -13,7 +13,7 @@ fn headlines_are_the_schema_s_headline_kinds_in_map_order() {
         node_added("decisions", NodeId::new(), "question", "Which language?"),
         node_added("decisions", NodeId::new(), "decision", "Rust"),
     ];
-    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
     let names: Vec<&str> = map.headlines().map(|node| node.name.as_str()).collect();
     assert_eq!(names, ["Which language?", "Rust"]);
 }
@@ -26,7 +26,7 @@ fn a_superseded_decision_leaves_the_headlines() {
         node_added("decisions", new, "decision", "Rust"),
         edge_added("decisions", SUPERSEDES, new, old),
     ];
-    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
     let names: Vec<&str> = map.headlines().map(|node| node.name.as_str()).collect();
     assert_eq!(names, ["Rust"]);
     assert!(map.is_superseded(old));
@@ -42,7 +42,7 @@ fn successor_follows_a_supersession_chain_to_its_end() {
         edge_added("decisions", SUPERSEDES, b, a),
         edge_added("decisions", SUPERSEDES, c, b),
     ];
-    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
     assert_eq!(map.successor(a), c);
     assert_eq!(map.successor(c), c);
@@ -64,7 +64,7 @@ fn a_question_is_settled_by_the_current_end_of_each_resolvers_chain() {
         edge_added("decisions", RESOLVES, a, q),
         edge_added("decisions", SUPERSEDES, b, a),
     ];
-    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
     let names: Vec<&str> = map
         .settled_by(q)
@@ -86,7 +86,7 @@ fn an_outcome_settles_a_task_the_way_a_decision_settles_a_question() {
         edge_added("tasks", RESOLVES, o, t),
         edge_added("tasks", "blocks", blocker, t),
     ];
-    let map = Map::fold(&TASKS, &scope(), &events).unwrap();
+    let map = Map::fold(tasks(), &scope(), &events).unwrap();
 
     assert_eq!(
         map.settled_by(t).iter().map(|n| n.id).collect::<Vec<_>>(),
@@ -111,7 +111,7 @@ fn weighed_for_lists_answering_options_but_not_ones_that_restate_the_decision() 
         edge_added("decisions", ANSWERS, restated, q),
         edge_added("decisions", RESOLVES, d, q),
     ];
-    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
     assert_eq!(
         map.weighed_for(q).iter().map(|n| n.id).collect::<Vec<_>>(),
@@ -127,7 +127,7 @@ fn a_resolves_edge_between_other_kinds_settles_nothing() {
         node_added("decisions", d, "decision", "Rust"),
         edge_added("decisions", RESOLVES, d, o),
     ];
-    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
     assert!(map.settled_by(o).is_empty());
     assert!(!map.settles(d));
@@ -159,7 +159,7 @@ fn since_keeps_what_was_added_from_that_instant_and_what_it_attached_to() {
         created_at(node_added("decisions", new, "decision", "Rust"), at),
         created_at(edge_added("decisions", "resolves", new, question), at),
     ];
-    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
     let cut = map.since(at);
 
@@ -185,7 +185,7 @@ fn since_leaves_out_an_edge_older_than_the_instant_between_kept_nodes() {
             earlier,
         ),
     ];
-    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
     let cut = map.since(at);
 
@@ -289,7 +289,7 @@ fn fold_stamps_a_node_with_its_events_actor_and_time() {
     );
     let created_at = event.created_at();
 
-    let map = Map::fold(&DECISIONS, &scope(), &[event]).unwrap();
+    let map = Map::fold(decisions(), &scope(), &[event]).unwrap();
 
     let node = map.find("option", "Rust").unwrap();
     assert_eq!(node.actor, Actor::Model);
@@ -300,7 +300,7 @@ fn fold_stamps_a_node_with_its_events_actor_and_time() {
 fn a_fold_holds_every_node_and_edge_still_present() {
     let (ids, events) = rust_over_go();
 
-    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
     assert_eq!(map.nodes().len(), 3);
     assert_eq!(map.edges().len(), 1);
@@ -317,7 +317,7 @@ fn a_fold_skips_other_maps_and_other_kinds() {
     }));
     events.push(node_added("tasks", NodeId::new(), "goal", "Ship"));
 
-    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
     assert_eq!(map.nodes().len(), 3);
 }
@@ -329,11 +329,11 @@ fn a_fold_scoped_to_a_project_skips_a_node_added_under_another_path() {
         node_added_at("/other", "option", "Go"),
     ];
 
-    let scoped = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let scoped = Map::fold(decisions(), &scope(), &events).unwrap();
     assert_eq!(scoped.nodes().len(), 1);
     assert!(scoped.find("option", "Rust").is_some());
 
-    let all = Map::fold(&DECISIONS, &Scope::All, &events).unwrap();
+    let all = Map::fold(decisions(), &Scope::All, &events).unwrap();
     assert_eq!(all.nodes().len(), 2);
 }
 
@@ -342,7 +342,7 @@ fn removing_a_node_drops_its_edges() {
     let (ids, mut events) = rust_over_go();
     events.push(node_removed("decisions", ids[0]));
 
-    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
     assert_eq!(map.nodes().len(), 2);
     assert!(map.edges().is_empty());
@@ -359,7 +359,7 @@ fn removing_an_edge_leaves_its_nodes() {
         sources: Vec::new(),
     }));
 
-    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
     assert_eq!(map.nodes().len(), 3);
     assert!(map.edges().is_empty());
@@ -370,18 +370,20 @@ fn an_unknown_kind_fails_the_fold() {
     let stray = node_added("decisions", NodeId::new(), "goal", "Ship");
     let stray_id = stray.id();
 
-    let err = Map::fold(&DECISIONS, &scope(), &[stray]).err().unwrap();
+    let err = Map::fold(decisions(), &scope(), &[stray]).err().unwrap();
 
     assert_eq!(
         rejected_with(err, stray_id),
         MapError::UnknownNodeKind {
-            map: &DECISIONS,
+            map: "decisions".to_string(),
+            kinds: decisions().node_kinds_csv(),
             kind: "goal".to_string()
         }
     );
     assert_eq!(
         MapError::UnknownNodeKind {
-            map: &DECISIONS,
+            map: "decisions".to_string(),
+            kinds: decisions().node_kinds_csv(),
             kind: "goal".to_string()
         }
         .to_string(),
@@ -394,7 +396,7 @@ fn a_blank_name_fails_the_fold() {
     let stray = node_added("decisions", NodeId::new(), "option", " ");
     let stray_id = stray.id();
 
-    let err = Map::fold(&DECISIONS, &scope(), &[stray]).err().unwrap();
+    let err = Map::fold(decisions(), &scope(), &[stray]).err().unwrap();
 
     assert_eq!(rejected_with(err, stray_id), MapError::BlankName);
 }
@@ -406,7 +408,7 @@ fn a_name_is_unique_within_its_kind_only() {
         node_added("decisions", NodeId::new(), "decision", "Rust"),
     ];
     assert_eq!(
-        Map::fold(&DECISIONS, &scope(), &events)
+        Map::fold(decisions(), &scope(), &events)
             .unwrap()
             .nodes()
             .len(),
@@ -418,7 +420,7 @@ fn a_name_is_unique_within_its_kind_only() {
     let mut events = events;
     events.push(twice);
 
-    let err = Map::fold(&DECISIONS, &scope(), &events).err().unwrap();
+    let err = Map::fold(decisions(), &scope(), &events).err().unwrap();
 
     assert_eq!(
         rejected_with(err, twice_id),
@@ -437,7 +439,7 @@ fn an_edge_needs_both_ends_and_is_stated_once() {
     let mut with_dangling = events.clone();
     with_dangling.push(dangling);
 
-    let err = Map::fold(&DECISIONS, &scope(), &with_dangling)
+    let err = Map::fold(decisions(), &scope(), &with_dangling)
         .err()
         .unwrap();
     assert!(matches!(
@@ -449,7 +451,7 @@ fn an_edge_needs_both_ends_and_is_stated_once() {
     let twice_id = twice.id();
     events.push(twice);
 
-    let err = Map::fold(&DECISIONS, &scope(), &events).err().unwrap();
+    let err = Map::fold(decisions(), &scope(), &events).err().unwrap();
     assert_eq!(
         rejected_with(err, twice_id),
         MapError::DuplicateEdge {
@@ -473,7 +475,7 @@ fn removing_an_edge_that_is_not_there_fails_the_fold() {
     let stray_id = stray.id();
     events.push(stray);
 
-    let err = Map::fold(&DECISIONS, &scope(), &events).err().unwrap();
+    let err = Map::fold(decisions(), &scope(), &events).err().unwrap();
 
     assert!(matches!(
         rejected_with(err, stray_id),
@@ -483,7 +485,7 @@ fn removing_an_edge_that_is_not_there_fails_the_fold() {
 
 #[test]
 fn apply_records_what_a_fold_rebuilds() {
-    let mut built = Map::empty(&DECISIONS);
+    let mut built = Map::empty(decisions());
     let events: Vec<Event> = vec![
         add_node("question", "Which language?"),
         add_node("decision", "Rust over Go"),
@@ -497,7 +499,7 @@ fn apply_records_what_a_fold_rebuilds() {
     .map(|m| committed(built.apply(m, Actor::User).unwrap()))
     .collect();
 
-    let folded = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let folded = Map::fold(decisions(), &scope(), &events).unwrap();
 
     let decision = folded.find("decision", "Rust over Go").unwrap();
     assert!(decision.id == built.find("decision", "Rust over Go").unwrap().id);
@@ -507,7 +509,7 @@ fn apply_records_what_a_fold_rebuilds() {
 
 #[test]
 fn apply_stamps_the_node_with_the_actor_given() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     map.apply(add_node("option", "Rust"), Actor::User).unwrap();
 
     let node = map.find("option", "Rust").unwrap();
@@ -517,7 +519,7 @@ fn apply_stamps_the_node_with_the_actor_given() {
 
 #[test]
 fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     map.apply(add_node("option", "Rust"), Actor::User).unwrap();
 
     let unknown = map
@@ -572,7 +574,7 @@ fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
 
 #[test]
 fn apply_removes_a_node_by_name_and_its_edges_with_it() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     map.apply(add_node("question", "Which language?"), Actor::User)
         .unwrap();
     map.apply(add_node("decision", "Rust over Go"), Actor::User)
@@ -605,7 +607,7 @@ fn apply_removes_a_node_by_name_and_its_edges_with_it() {
 
 #[test]
 fn a_map_reads_as_one_line_per_node_then_per_edge() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     map.apply(add_node("question", "Which language?"), Actor::User)
         .unwrap();
     map.apply(
@@ -640,7 +642,7 @@ fn a_map_reads_as_one_line_per_node_then_per_edge() {
          - decision \"Rust over Go\"\n\
          - decision \"Rust over Go\" resolves question \"Which language?\"\n"
     );
-    assert_eq!(Map::empty(&DECISIONS).to_string(), "");
+    assert_eq!(Map::empty(decisions()).to_string(), "");
 }
 
 #[test]
@@ -654,8 +656,8 @@ fn a_schema_is_found_by_name() {
 
 #[test]
 fn every_kind_of_every_schema_carries_a_gloss() {
-    for schema in SCHEMAS.iter().chain(DERIVED) {
-        for kind in schema.node_kinds.iter().chain(schema.edge_kinds) {
+    for schema in schemas().iter().chain(derived().iter()) {
+        for kind in schema.node_kinds.iter().chain(&schema.edge_kinds) {
             assert!(
                 !kind.gloss.is_empty(),
                 "{}: kind {:?} has no gloss",
@@ -668,7 +670,8 @@ fn every_kind_of_every_schema_carries_a_gloss() {
 
 #[test]
 fn the_code_package_gloss_says_it_is_an_external_crate() {
-    let package = CODE
+    let schema = code();
+    let package = schema
         .node_kinds
         .iter()
         .find(|kind| kind.name == "package")
@@ -682,7 +685,7 @@ fn the_code_package_gloss_says_it_is_an_external_crate() {
 #[test]
 fn keeping_kinds_drops_other_nodes_and_the_edges_that_touched_them() {
     let (_, events) = rust_over_go();
-    let map = Map::fold(&DECISIONS, &scope(), &events).unwrap();
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
     let cut = map.keep_kinds(&["decision".to_string()]).unwrap();
     assert_eq!(cut.nodes().len(), 1);
@@ -698,7 +701,7 @@ fn keeping_kinds_drops_other_nodes_and_the_edges_that_touched_them() {
 
 #[test]
 fn keeping_a_kind_the_schema_lacks_is_an_error() {
-    let map = Map::empty(&DECISIONS);
+    let map = Map::empty(decisions());
     let err = map.keep_kinds(&["goal".to_string()]).err().unwrap();
     assert!(matches!(err, MapError::UnknownNodeKind { .. }));
 }
@@ -706,7 +709,7 @@ fn keeping_a_kind_the_schema_lacks_is_an_error() {
 /// A chain: question <- decision <- evidence, so depth walks one
 /// step at a time and against the edge direction.
 fn chain() -> Map {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     map.apply(add_node("question", "Which language?"), Actor::User)
         .unwrap();
     map.apply(add_node("decision", "Rust over Go"), Actor::User)
@@ -796,7 +799,7 @@ fn select_on_an_empty_map_is_the_empty_map_not_a_missing_node() {
         ..Selection::default()
     };
 
-    let fragment = Map::empty(&DECISIONS).select(&selection).unwrap();
+    let fragment = Map::empty(decisions()).select(&selection).unwrap();
 
     assert_eq!(fragment.total_nodes(), 0);
     assert!(fragment.map().nodes().is_empty());
@@ -809,9 +812,9 @@ fn since_on_a_derived_map_is_refused_it_has_no_before() {
         ..Selection::default()
     };
 
-    let err = Map::empty(&CODE).select(&selection).err().unwrap();
+    let err = Map::empty(code()).select(&selection).err().unwrap();
 
-    assert_eq!(err, MapError::SinceOnDerived("code"));
+    assert_eq!(err, MapError::SinceOnDerived("code".to_string()));
 }
 
 #[test]
@@ -821,7 +824,7 @@ fn since_on_a_log_folded_map_is_fine() {
         ..Selection::default()
     };
 
-    assert!(Map::empty(&DECISIONS).select(&selection).is_ok());
+    assert!(Map::empty(decisions()).select(&selection).is_ok());
 }
 
 #[test]
@@ -885,7 +888,7 @@ fn a_missing_node_stays_silent_on_a_single_shared_word() {
 
 #[test]
 fn a_missing_node_counts_a_repeated_word_once() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     map.apply(add_node("decision", "safe safe pick"), Actor::User)
         .unwrap();
     let err = map
@@ -909,7 +912,7 @@ fn a_missing_node_names_a_matching_node_of_another_kind() {
 
 #[test]
 fn a_missing_node_crosses_kinds_on_a_lone_shared_path_segment() {
-    let mut map = Map::empty(&CODE);
+    let mut map = Map::empty(code());
     map.apply(add_node("file", "src/providers/catalog.rs"), Actor::System)
         .unwrap();
     map.apply(add_node("file", "src/providers/openai.rs"), Actor::System)

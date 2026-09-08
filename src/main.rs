@@ -410,7 +410,7 @@ struct RoutedMaps {
 
 impl crate::core::MapReader for RoutedMaps {
     fn read(&self, name: &str) -> Result<crate::core::Map, Box<dyn std::error::Error>> {
-        if name == crate::core::CODE.name {
+        if name == crate::core::code().name {
             Ok(code::build(&self.root)?)
         } else {
             self.folded.read(name)

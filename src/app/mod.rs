@@ -782,9 +782,9 @@ impl AppService for App {
         // The restore put every rendered map back to before the turn,
         // while the log still holds what the turn added to them: the
         // log is the record, so the renders follow it, not the tree.
-        let every_map = crate::core::SCHEMAS
+        let every_map = crate::core::schemas()
             .iter()
-            .map(|schema| schema.name.to_string())
+            .map(|schema| schema.name.clone())
             .collect();
         self.render_changed(&every_map)
     }

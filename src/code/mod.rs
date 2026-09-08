@@ -3,7 +3,7 @@
 //! from the event log. `build` returns a `Map` on the same `Schema` and
 //! `Map::apply` every log-backed map uses, so `maps list` and `maps
 //! show` treat it the same way once it's built - `Map::fold_all` and
-//! `SCHEMAS` stay log-only, since nothing here is an event. A language
+//! `schemas()` stay log-only, since nothing here is an event. A language
 //! adds one query file and one small module like `rust`; `build` is
 //! where they're dispatched.
 
@@ -16,20 +16,20 @@ use std::path::Path;
 
 use ignore::WalkBuilder;
 
-use crate::core::{Actor, Map, MapError, Mutation, NodeRef, CODE};
+use crate::core::{self, Actor, Map, MapError, Mutation, NodeRef};
 use crate::shared::to_slash;
 
 /// Builds the code map from every `.rs` file under `root`, gitignore
 /// rules applied the way `ignore` applies them for any tool. Node ids
 /// are minted fresh by `Map::apply`; nothing here keeps them, and
 /// nothing here opens the event log. The only error is a mutation the
-/// schema refuses, which every kind here being one `CODE` declares
+/// schema refuses, which every kind here being one `code()` declares
 /// should make impossible.
 pub fn build(root: &Path) -> Result<Map, MapError> {
     let files = rust_files(root);
     let known: HashSet<String> = files.iter().cloned().collect();
 
-    let mut map = Map::empty(&CODE);
+    let mut map = Map::empty(core::code());
     let mut packages = HashSet::new();
     for file in &files {
         map.apply(

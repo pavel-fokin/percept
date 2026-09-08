@@ -9,6 +9,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{self, Write as _};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use super::{Actor, Event, EventId, Payload, Source};
 use crate::shared::{Id, Timestamp};
@@ -46,16 +47,16 @@ impl Source {
 /// map is adding a value.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Schema {
-    pub name: &'static str,
+    pub name: String,
     /// The one reasoning operation this map makes cheap, as a reader
     /// deciding whether to open it needs to hear it - what the prompt
     /// carries in place of the map.
-    pub purpose: &'static str,
-    pub node_kinds: &'static [Kind],
-    pub edge_kinds: &'static [Kind],
+    pub purpose: String,
+    pub node_kinds: Vec<Kind>,
+    pub edge_kinds: Vec<Kind>,
     /// The node kinds worth a reader's attention without opening the
     /// whole map - what `MapShape::Headlines` sends.
-    pub headline_kinds: &'static [&'static str],
+    pub headline_kinds: Vec<String>,
     /// Which node kind settles which through a `resolves` edge - a
     /// decision a question, an outcome a task - when the map has such
     /// a pair. A `resolves` edge between other kinds settles nothing.
@@ -68,15 +69,24 @@ pub struct Schema {
 /// else.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Kind {
-    pub name: &'static str,
-    pub gloss: &'static str,
+    pub name: String,
+    pub gloss: String,
+}
+
+impl Kind {
+    fn new(name: &str, gloss: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            gloss: gloss.to_string(),
+        }
+    }
 }
 
 /// The two node kinds a `resolves` edge joins: `by` settles `of`.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Settlement {
-    pub by: &'static str,
-    pub of: &'static str,
+    pub by: String,
+    pub of: String,
 }
 
 /// The edge kind that corrects a decision: from the new one to the one
@@ -113,129 +123,129 @@ pub const OUTCOME: &str = "outcome";
 /// `supports` or `contradicts` an option, a decision `resolves` the
 /// question, and a later decision `supersedes` an earlier one - so
 /// `--around` a question reaches everything weighed for it.
-pub const DECISIONS: Schema = Schema {
-    name: "decisions",
-    purpose: "what was asked, what was chosen, and why, so a settled question is not reopened",
-    node_kinds: &[
-        Kind {
-            name: QUESTION,
-            gloss: "a matter the project had to settle",
-        },
-        Kind {
-            name: OPTION,
-            gloss: "an alternative that was weighed and lost, saying why in its `why` property",
-        },
-        Kind {
-            name: "evidence",
-            gloss: "a fact that supports or contradicts an option",
-        },
-        Kind {
-            name: DECISION,
-            gloss: "the choice that was made, and the grounds for it",
-        },
-    ],
-    edge_kinds: &[
-        Kind {
-            name: ANSWERS,
-            gloss: "from an option to the question it was weighed for",
-        },
-        Kind {
-            name: "supports",
-            gloss: "from evidence to an option it backs",
-        },
-        Kind {
-            name: "contradicts",
-            gloss: "from evidence to an option it undercuts",
-        },
-        Kind {
-            name: RESOLVES,
-            gloss: "from a decision to the question it settles",
-        },
-        Kind {
-            name: SUPERSEDES,
-            gloss: "from a decision to an earlier one it replaces",
-        },
-    ],
-    headline_kinds: &[QUESTION, DECISION],
-    settlement: Some(Settlement {
-        by: DECISION,
-        of: QUESTION,
-    }),
-};
+pub fn decisions() -> Schema {
+    Schema {
+        name: "decisions".to_string(),
+        purpose: "what was asked, what was chosen, and why, so a settled question is not \
+                  reopened"
+            .to_string(),
+        node_kinds: vec![
+            Kind::new(QUESTION, "a matter the project had to settle"),
+            Kind::new(
+                OPTION,
+                "an alternative that was weighed and lost, saying why in its `why` property",
+            ),
+            Kind::new("evidence", "a fact that supports or contradicts an option"),
+            Kind::new(DECISION, "the choice that was made, and the grounds for it"),
+        ],
+        edge_kinds: vec![
+            Kind::new(ANSWERS, "from an option to the question it was weighed for"),
+            Kind::new("supports", "from evidence to an option it backs"),
+            Kind::new("contradicts", "from evidence to an option it undercuts"),
+            Kind::new(RESOLVES, "from a decision to the question it settles"),
+            Kind::new(SUPERSEDES, "from a decision to an earlier one it replaces"),
+        ],
+        headline_kinds: vec![QUESTION.to_string(), DECISION.to_string()],
+        settlement: Some(Settlement {
+            by: DECISION.to_string(),
+            of: QUESTION.to_string(),
+        }),
+    }
+}
 
 /// The tasks map: what is left to do. A task says why it matters, an
 /// outcome `resolves` it - done, or dropped and why - a task `blocks`
 /// the one that must wait for it, and a rewritten task `supersedes`
 /// the old wording, never removes it.
-pub const TASKS: Schema = Schema {
-    name: "tasks",
-    purpose: "what is left to do, why it matters, and what it waits on, so a session picks up the next item without re-deriving it",
-    node_kinds: &[
-        Kind { name: TASK, gloss: "one piece of work left to do, saying why it matters in its `why` property" },
-        Kind { name: OUTCOME, gloss: "what became of a task: done with its commit, or dropped with the reason" },
-    ],
-    edge_kinds: &[
-        Kind { name: RESOLVES, gloss: "from an outcome to the task it settles" },
-        Kind { name: BLOCKS, gloss: "from a task to the one that must wait for it" },
-        Kind { name: SUPERSEDES, gloss: "from a reworded task to the wording it replaces" },
-    ],
-    headline_kinds: &[TASK],
-    settlement: Some(Settlement {
-        by: OUTCOME,
-        of: TASK,
-    }),
-};
+pub fn tasks() -> Schema {
+    Schema {
+        name: "tasks".to_string(),
+        purpose: "what is left to do, why it matters, and what it waits on, so a session picks \
+                  up the next item without re-deriving it"
+            .to_string(),
+        node_kinds: vec![
+            Kind::new(
+                TASK,
+                "one piece of work left to do, saying why it matters in its `why` property",
+            ),
+            Kind::new(
+                OUTCOME,
+                "what became of a task: done with its commit, or dropped with the reason",
+            ),
+        ],
+        edge_kinds: vec![
+            Kind::new(RESOLVES, "from an outcome to the task it settles"),
+            Kind::new(BLOCKS, "from a task to the one that must wait for it"),
+            Kind::new(SUPERSEDES, "from a reworded task to the wording it replaces"),
+        ],
+        headline_kinds: vec![TASK.to_string()],
+        settlement: Some(Settlement {
+            by: OUTCOME.to_string(),
+            of: TASK.to_string(),
+        }),
+    }
+}
 
 /// The code map: a codebase's files, the symbols they define, and what
 /// imports what. Derived from the working tree, never folded from the
-/// log, so it is in `DERIVED` and not `SCHEMAS`.
-pub const CODE: Schema = Schema {
-    name: "code",
-    purpose: "which file defines which symbol and imports which file or package",
-    node_kinds: &[
-        Kind { name: "file", gloss: "a source file, named by its repo-relative path" },
-        Kind { name: "function", gloss: "a function or method, named `path::Type::method` or `path::func`" },
-        Kind { name: "type", gloss: "a struct, enum, trait, or alias, named `path::Name`" },
-        Kind {
-            name: "package",
-            gloss: "an external crate a file imports, like `serde_json` - never one of this project's own modules",
-        },
-    ],
-    edge_kinds: &[
-        Kind { name: "contains", gloss: "from a file to a symbol it defines" },
-        Kind { name: "imports", gloss: "from a file to a file or package it uses" },
-    ],
-    headline_kinds: &["file"],
-    settlement: None,
-};
+/// log, so it is in `derived()` and not `schemas()`.
+pub fn code() -> Schema {
+    Schema {
+        name: "code".to_string(),
+        purpose: "which file defines which symbol and imports which file or package".to_string(),
+        node_kinds: vec![
+            Kind::new("file", "a source file, named by its repo-relative path"),
+            Kind::new(
+                "function",
+                "a function or method, named `path::Type::method` or `path::func`",
+            ),
+            Kind::new("type", "a struct, enum, trait, or alias, named `path::Name`"),
+            Kind::new(
+                "package",
+                "an external crate a file imports, like `serde_json` - never one of this \
+                 project's own modules",
+            ),
+        ],
+        edge_kinds: vec![
+            Kind::new("contains", "from a file to a symbol it defines"),
+            Kind::new("imports", "from a file to a file or package it uses"),
+        ],
+        headline_kinds: vec!["file".to_string()],
+        settlement: None,
+    }
+}
 
 /// Every map folded from the log. One map per schema, named after it.
-pub const SCHEMAS: &[&Schema] = &[&DECISIONS, &TASKS];
+pub fn schemas() -> Vec<Arc<Schema>> {
+    vec![Arc::new(decisions()), Arc::new(tasks())]
+}
 
 /// Every map derived from something other than the log. A reader
 /// builds one fresh; no writer commits to it.
-pub const DERIVED: &[&Schema] = &[&CODE];
+pub fn derived() -> Vec<Arc<Schema>> {
+    vec![Arc::new(code())]
+}
 
-/// Whether `name` names a map in `DERIVED`.
+/// Whether `name` names a map in `derived()`.
 fn is_derived(name: &str) -> bool {
-    DERIVED.iter().any(|schema| schema.name == name)
+    derived().iter().any(|schema| schema.name == name)
 }
 
 impl Schema {
     /// Whether this map is built from something other than the log, so
     /// its nodes have no history: no writer, no moment they were added.
     pub fn is_derived(&self) -> bool {
-        is_derived(self.name)
+        is_derived(&self.name)
     }
 
     /// The node kind names, in schema order.
-    pub fn node_kind_names(&self) -> impl Iterator<Item = &'static str> + '_ {
-        self.node_kinds.iter().map(|kind| kind.name)
+    pub fn node_kind_names(&self) -> impl Iterator<Item = &str> + '_ {
+        self.node_kinds.iter().map(|kind| kind.name.as_str())
     }
 
     /// The edge kind names, in schema order.
-    pub fn edge_kind_names(&self) -> impl Iterator<Item = &'static str> + '_ {
-        self.edge_kinds.iter().map(|kind| kind.name)
+    pub fn edge_kind_names(&self) -> impl Iterator<Item = &str> + '_ {
+        self.edge_kinds.iter().map(|kind| kind.name.as_str())
     }
 
     /// The node kind names as a `, `-joined list, for a prompt line or
@@ -252,13 +262,12 @@ impl Schema {
     /// The log-folded schema `name` names, or the error every boundary
     /// that folds or writes a map by name reports. A derived map is its
     /// own error: it exists, and this is the wrong door to it.
-    pub fn find(name: &str) -> Result<&'static Schema, MapError> {
+    pub fn find(name: &str) -> Result<Arc<Schema>, MapError> {
         if is_derived(name) {
             return Err(MapError::Derived(name.to_string()));
         }
-        SCHEMAS
-            .iter()
-            .copied()
+        schemas()
+            .into_iter()
             .find(|schema| schema.name == name)
             .ok_or_else(|| MapError::UnknownMap(name.to_string()))
     }
@@ -398,17 +407,19 @@ pub enum Mutation {
 #[derive(Debug, PartialEq, Eq)]
 pub enum MapError {
     UnknownMap(String),
-    /// A map in `DERIVED`, named where only a log-folded map fits.
+    /// A map in `derived()`, named where only a log-folded map fits.
     Derived(String),
-    /// `since` on a `DERIVED` map: it is walked fresh, so it has no
+    /// `since` on a derived map: it is walked fresh, so it has no
     /// "before". One rule for the CLI and the `read_map` tool.
-    SinceOnDerived(&'static str),
+    SinceOnDerived(String),
     UnknownNodeKind {
-        map: &'static Schema,
+        map: String,
+        kinds: String,
         kind: String,
     },
     UnknownEdgeKind {
-        map: &'static Schema,
+        map: String,
+        kinds: String,
         kind: String,
     },
     /// A name that is blank would be a node nobody can point at.
@@ -448,10 +459,10 @@ impl fmt::Display for MapError {
             Self::UnknownMap(name) => write!(
                 f,
                 "no map named {name:?}; maps are {}",
-                SCHEMAS
+                schemas()
                     .iter()
-                    .chain(DERIVED)
-                    .map(|schema| schema.name)
+                    .chain(derived().iter())
+                    .map(|schema| schema.name.clone())
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
@@ -465,17 +476,13 @@ impl fmt::Display for MapError {
                 "since has no meaning for {name}: it is walked fresh from the \
                  working tree and has no history"
             ),
-            Self::UnknownNodeKind { map, kind } => write!(
+            Self::UnknownNodeKind { map, kinds, kind } => write!(
                 f,
-                "no node kind {kind:?} in map {:?}; kinds are {}",
-                map.name,
-                map.node_kinds_csv()
+                "no node kind {kind:?} in map {map:?}; kinds are {kinds}"
             ),
-            Self::UnknownEdgeKind { map, kind } => write!(
+            Self::UnknownEdgeKind { map, kinds, kind } => write!(
                 f,
-                "no edge kind {kind:?} in map {:?}; kinds are {}",
-                map.name,
-                map.edge_kinds_csv()
+                "no edge kind {kind:?} in map {map:?}; kinds are {kinds}"
             ),
             Self::BlankName => write!(f, "a node's name must not be blank"),
             Self::DuplicateNode { kind, name } => {
@@ -505,7 +512,7 @@ impl std::error::Error for MapError {}
 /// A map folded from the log. Holds every node and edge still present;
 /// what was removed lives only in the events.
 pub struct Map {
-    schema: &'static Schema,
+    schema: Arc<Schema>,
     nodes: Vec<Node>,
     edges: Vec<Edge>,
     // Indexes over `nodes` and `edges`, kept in step by `replay`, so a
@@ -518,11 +525,11 @@ pub struct Map {
 }
 
 impl Map {
-    pub fn empty(schema: &'static Schema) -> Self {
-        Self::from_parts(schema, Vec::new(), Vec::new())
+    pub fn empty(schema: impl Into<Arc<Schema>>) -> Self {
+        Self::from_parts(schema.into(), Vec::new(), Vec::new())
     }
 
-    fn from_parts(schema: &'static Schema, nodes: Vec<Node>, edges: Vec<Edge>) -> Self {
+    fn from_parts(schema: Arc<Schema>, nodes: Vec<Node>, edges: Vec<Edge>) -> Self {
         let by_id = nodes.iter().enumerate().map(|(i, n)| (n.id, i)).collect();
         let by_name = nodes
             .iter()
@@ -549,16 +556,17 @@ impl Map {
     /// silently dropping it would hide that something went wrong at
     /// write time.
     pub fn fold<'a>(
-        schema: &'static Schema,
+        schema: impl Into<Arc<Schema>>,
         scope: &Scope,
         events: impl IntoIterator<Item = &'a Event>,
     ) -> Result<Self, MapError> {
-        let mut map = Self::empty(schema);
+        let schema = schema.into();
+        let mut map = Self::empty(schema.clone());
         for event in events {
             if !scope.admits(event) {
                 continue;
             }
-            if map_of(event.payload()) != Some(schema.name) {
+            if map_of(event.payload()) != Some(schema.name.as_str()) {
                 continue;
             }
             map.replay(event.payload(), event.actor(), event.created_at())
@@ -575,14 +583,14 @@ impl Map {
         scope: &Scope,
         events: impl IntoIterator<Item = &'a Event> + Clone,
     ) -> Result<Vec<Self>, MapError> {
-        SCHEMAS
-            .iter()
+        schemas()
+            .into_iter()
             .map(|schema| Self::fold(schema, scope, events.clone()))
             .collect()
     }
 
-    pub fn schema(&self) -> &'static Schema {
-        self.schema
+    pub fn schema(&self) -> &Schema {
+        &self.schema
     }
 
     pub fn nodes(&self) -> &[Node] {
@@ -593,10 +601,10 @@ impl Map {
     /// superseded ones - what a reader sees of the map before opening
     /// it.
     pub fn headlines(&self) -> impl Iterator<Item = &Node> {
-        let kinds = self.schema.headline_kinds;
+        let schema = self.schema.clone();
         self.nodes
             .iter()
-            .filter(move |node| kinds.contains(&node.kind.as_str()))
+            .filter(move |node| schema.headline_kinds.contains(&node.kind))
             .filter(|node| !self.is_superseded(node.id))
     }
 
@@ -815,7 +823,7 @@ impl Map {
             .cloned()
             .collect();
         let edges = fresh.into_iter().cloned().collect();
-        Self::from_parts(self.schema, nodes, edges)
+        Self::from_parts(self.schema.clone(), nodes, edges)
     }
 
     /// The map cut to `selection`, in its fixed order, counting what
@@ -823,7 +831,7 @@ impl Map {
     /// itself, not a copy.
     pub fn select(self, selection: &Selection) -> Result<Fragment, MapError> {
         if selection.since.is_some() && self.schema.is_derived() {
-            return Err(MapError::SinceOnDerived(self.schema.name));
+            return Err(MapError::SinceOnDerived(self.schema.name.clone()));
         }
         let total_nodes = self.nodes.len();
         let total_edges = self.edges.len();
@@ -870,7 +878,7 @@ impl Map {
             .filter(|edge| kept.contains(&edge.from) && kept.contains(&edge.to))
             .cloned()
             .collect();
-        Self::from_parts(self.schema, nodes, edges)
+        Self::from_parts(self.schema.clone(), nodes, edges)
     }
 
     /// Checks `mutation` against the schema and the map's current
@@ -1101,7 +1109,8 @@ impl Map {
             Ok(())
         } else {
             Err(MapError::UnknownNodeKind {
-                map: self.schema,
+                map: self.schema.name.clone(),
+                kinds: self.schema.node_kinds_csv(),
                 kind: kind.to_string(),
             })
         }
@@ -1112,7 +1121,8 @@ impl Map {
             Ok(())
         } else {
             Err(MapError::UnknownEdgeKind {
-                map: self.schema,
+                map: self.schema.name.clone(),
+                kinds: self.schema.edge_kinds_csv(),
                 kind: kind.to_string(),
             })
         }

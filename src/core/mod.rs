@@ -15,10 +15,10 @@ pub mod testing;
 pub use event::{Actor, Event, EventId, EventKind, Payload, Source, Usage, PREVIEW_CHARS};
 pub use event_log::EventLog;
 #[cfg(test)]
-pub use map::SUPERSEDES;
+pub use map::{decisions, tasks, SUPERSEDES};
 pub use map::{
-    map_of, Edge, Fragment, Kind, Map, MapError, Mutation, Node, NodeId, NodeRef, Schema, Scope,
-    Selection, CODE, DECISION, DECISIONS, OPTION, SCHEMAS, TASK, TASKS,
+    code, map_of, schemas, Edge, Fragment, Kind, Map, MapError, Mutation, Node, NodeId, NodeRef,
+    Schema, Scope, Selection, DECISION, OPTION, TASK,
 };
 pub use map_reader::MapReader;
 pub use render::MapRenderer;

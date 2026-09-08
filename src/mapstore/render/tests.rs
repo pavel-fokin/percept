@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 use crate::core::testing::node_ref;
-use crate::core::{Actor, EventId, Mutation, CODE, DECISIONS, SUPERSEDES, TASKS};
+use crate::core::{code, decisions, tasks, Actor, EventId, Mutation, SUPERSEDES};
 
 /// Adds a node with one `why` property when `why` is given.
 fn add(
@@ -64,14 +64,14 @@ fn contents(entries: &[(&str, EventId)]) -> String {
 #[test]
 fn an_empty_decisions_map_renders_the_preamble_and_the_empty_notice() {
     assert_eq!(
-        markdown(&Map::empty(&DECISIONS)),
+        markdown(&Map::empty(decisions())),
         format!("{}\n(empty: nothing has been recorded here yet.)\n", head())
     );
 }
 
 #[test]
 fn questions_render_flat_at_h2_in_first_seen_order() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     let (first, second) = (EventId::new(), EventId::new());
     add(
         &mut map,
@@ -141,7 +141,7 @@ fn questions_render_flat_at_h2_in_first_seen_order() {
 
 #[test]
 fn the_contents_list_names_every_question_with_its_raising_date() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     let prompt = EventId::new();
     for name in ["Which model?", "Where is the key?", "What is the URL?"] {
         add(&mut map, "question", name, None, &[prompt], Actor::User);
@@ -161,7 +161,7 @@ fn the_contents_list_names_every_question_with_its_raising_date() {
 
 #[test]
 fn a_questions_own_properties_render_under_its_heading() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     let source = EventId::new();
     add(
         &mut map,
@@ -188,7 +188,7 @@ fn a_questions_own_properties_render_under_its_heading() {
 
 #[test]
 fn a_question_without_a_decision_is_open() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     add(
         &mut map,
         "question",
@@ -215,7 +215,7 @@ fn a_question_without_a_decision_is_open() {
 
 #[test]
 fn a_superseding_decision_shows_its_predecessor_as_was() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     let source = EventId::new();
     add(
         &mut map,
@@ -270,7 +270,7 @@ fn a_superseding_decision_shows_its_predecessor_as_was() {
 
 #[test]
 fn a_supersession_chain_lists_every_predecessor_nearest_first() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     let source = EventId::new();
     add(
         &mut map,
@@ -309,7 +309,7 @@ fn a_supersession_chain_lists_every_predecessor_nearest_first() {
 
 #[test]
 fn a_decision_citing_a_different_prompt_than_its_question_names_the_source() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     let (raised, settled) = (EventId::new(), EventId::new());
     add(
         &mut map,
@@ -351,7 +351,7 @@ fn a_decision_citing_a_different_prompt_than_its_question_names_the_source() {
 
 #[test]
 fn a_model_written_question_is_marked() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     let source = EventId::new();
     add(
         &mut map,
@@ -378,7 +378,7 @@ fn a_model_written_question_is_marked() {
 
 #[test]
 fn a_decision_resolving_no_question_gets_its_own_h2() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     let source = EventId::new();
     add(
         &mut map,
@@ -405,7 +405,7 @@ fn a_decision_resolving_no_question_gets_its_own_h2() {
 
 #[test]
 fn a_question_lists_the_options_weighed_against_its_decision() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     let source = EventId::new();
     add(
         &mut map,
@@ -454,7 +454,7 @@ fn a_question_lists_the_options_weighed_against_its_decision() {
 
 #[test]
 fn an_option_that_repeats_the_winning_decision_is_not_listed_as_weighed() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     let source = EventId::new();
     add(
         &mut map,
@@ -498,7 +498,7 @@ fn an_option_that_repeats_the_winning_decision_is_not_listed_as_weighed() {
 
 #[test]
 fn an_option_with_no_answers_edge_stays_out_of_the_render() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     let source = EventId::new();
     add(
         &mut map,
@@ -525,7 +525,7 @@ fn an_option_with_no_answers_edge_stays_out_of_the_render() {
 
 #[test]
 fn a_resolves_edge_between_the_wrong_kinds_settles_nothing() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     let source = EventId::new();
     add(&mut map, "option", "gemma4", None, &[source], Actor::User);
     add(
@@ -550,7 +550,7 @@ fn a_resolves_edge_between_the_wrong_kinds_settles_nothing() {
 
 #[test]
 fn a_map_with_no_question_or_decision_says_so() {
-    let mut map = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     add(
         &mut map,
         "option",
@@ -571,7 +571,7 @@ fn a_map_with_no_question_or_decision_says_so() {
 
 #[test]
 fn open_tasks_render_flat_with_why_and_blockers_then_done() {
-    let mut map = Map::empty(&TASKS);
+    let mut map = Map::empty(tasks());
     let (first, second) = (EventId::new(), EventId::new());
     add(
         &mut map,
@@ -645,7 +645,7 @@ fn open_tasks_render_flat_with_why_and_blockers_then_done() {
 #[test]
 fn an_empty_tasks_map_renders_its_guide_and_the_empty_notice() {
     assert_eq!(
-        markdown(&Map::empty(&TASKS)),
+        markdown(&Map::empty(tasks())),
         format!(
             "{}\n(empty: nothing has been recorded here yet.)\n",
             tasks_head()
@@ -655,7 +655,7 @@ fn an_empty_tasks_map_renders_its_guide_and_the_empty_notice() {
 
 #[test]
 fn a_map_of_another_schema_renders_per_kind() {
-    let mut map = Map::empty(&CODE);
+    let mut map = Map::empty(code());
     add(&mut map, "file", "src/main.rs", None, &[], Actor::System);
     let cited = EventId::new();
     map.apply(
@@ -698,9 +698,9 @@ fn a_map_of_another_schema_renders_per_kind() {
 
 #[test]
 fn the_catalogue_gives_each_map_a_section_with_its_kinds_glossed() {
-    let mut decisions = Map::empty(&DECISIONS);
+    let mut map = Map::empty(decisions());
     add(
-        &mut decisions,
+        &mut map,
         "question",
         "Where does the log live?",
         None,
@@ -708,11 +708,11 @@ fn the_catalogue_gives_each_map_a_section_with_its_kinds_glossed() {
         Actor::User,
     );
 
-    let text = catalogue(std::slice::from_ref(&decisions));
+    let text = catalogue(std::slice::from_ref(&map));
 
     assert!(text.starts_with("# maps\n"));
     assert!(text.contains("## decisions\n"));
-    assert!(text.contains(DECISIONS.purpose));
+    assert!(text.contains(&decisions().purpose));
     assert!(text.contains("1 nodes, 0 edges.\n"));
     assert!(text.contains("\nNode kinds:\n- `question` - a matter the project had to settle\n"));
     assert!(text.contains("\nEdge kinds:\n- `answers` - from an option to the question"));
@@ -722,7 +722,7 @@ fn the_catalogue_gives_each_map_a_section_with_its_kinds_glossed() {
 
 #[test]
 fn the_catalogue_glosses_a_code_package_as_an_external_crate() {
-    let text = catalogue(&[Map::empty(&CODE)]);
+    let text = catalogue(&[Map::empty(code())]);
 
     assert!(text.contains("- `package` - an external crate a file imports"));
     assert!(text.contains("never one of this project's own modules"));
@@ -734,7 +734,7 @@ fn markdown_files_writes_the_map_named_file_in_its_directory_creating_it() {
     let temp = tempfile::tempdir().unwrap();
     let dir = temp.path().join("maps");
     let renderer = MarkdownFiles::new(&dir);
-    let map = Map::empty(&DECISIONS);
+    let map = Map::empty(decisions());
 
     renderer.render(&map).unwrap();
 

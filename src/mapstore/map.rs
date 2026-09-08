@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::core::{
     Actor, Edge, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation, Node, NodeId,
-    NodeRef, Payload, Schema, Scope, DECISIONS, OPTION, TASK, TASKS,
+    NodeRef, Payload, Schema, Scope, OPTION, TASK,
 };
 use crate::shared::Timestamp;
 use crate::store::{ids, parse_event_id};
@@ -119,7 +119,7 @@ pub fn revise(
     } = &mutation
     {
         let schema = snapshot.map().schema();
-        if schema == &DECISIONS && kind == OPTION && !properties.contains_key(WHY) {
+        if schema.name == "decisions" && kind == OPTION && !properties.contains_key(WHY) {
             return Err(format!(
                 "option {name:?} does not say why it lost: an option is an alternative that \
                  was rejected, and its `why` property carries the reason; the pick is the \
@@ -127,7 +127,7 @@ pub fn revise(
             )
             .into());
         }
-        if schema == &TASKS && kind == TASK && !properties.contains_key(WHY) {
+        if schema.name == "tasks" && kind == TASK && !properties.contains_key(WHY) {
             return Err(format!(
                 "task {name:?} does not say why it matters: its `why` property carries what \
                  it costs to leave undone, which is how the next session weighs it"
@@ -143,9 +143,9 @@ pub fn revise(
 const WHY: &str = "why";
 
 #[derive(Serialize)]
-struct MapLine {
-    map: &'static str,
-    purpose: &'static str,
+struct MapLine<'a> {
+    map: &'a str,
+    purpose: &'a str,
     nodes: usize,
     edges: usize,
 }
@@ -192,8 +192,8 @@ struct EdgeLine<'a> {
 /// One line naming a map and its size, for `maps list`.
 pub fn encode_map(map: &Map) -> String {
     serde_json::to_string(&MapLine {
-        map: map.schema().name,
-        purpose: map.schema().purpose,
+        map: &map.schema().name,
+        purpose: &map.schema().purpose,
         nodes: map.nodes().len(),
         edges: map.edges().len(),
     })
@@ -201,48 +201,48 @@ pub fn encode_map(map: &Map) -> String {
 }
 
 #[derive(Serialize)]
-struct KindLine {
-    name: &'static str,
-    gloss: &'static str,
+struct KindLine<'a> {
+    name: &'a str,
+    gloss: &'a str,
 }
 
-impl KindLine {
-    fn of(kinds: &'static [crate::core::Kind]) -> Vec<Self> {
+impl<'a> KindLine<'a> {
+    fn of(kinds: &'a [crate::core::Kind]) -> Vec<Self> {
         kinds
             .iter()
             .map(|kind| Self {
-                name: kind.name,
-                gloss: kind.gloss,
+                name: &kind.name,
+                gloss: &kind.gloss,
             })
             .collect()
     }
 }
 
 #[derive(Serialize)]
-struct SchemaLine {
-    schema: &'static str,
-    purpose: &'static str,
-    node_kinds: Vec<KindLine>,
-    edge_kinds: Vec<KindLine>,
+struct SchemaLine<'a> {
+    schema: &'a str,
+    purpose: &'a str,
+    node_kinds: Vec<KindLine<'a>>,
+    edge_kinds: Vec<KindLine<'a>>,
 }
 
 /// One line describing a map's kinds, each with the gloss it carries on
 /// its `Schema` - what `read_map` returns before the fragment, so the
 /// model meets `package` or `option` with its meaning attached and does
 /// not guess a selector from a name alone.
-pub fn encode_schema(schema: &'static crate::core::Schema) -> String {
+pub fn encode_schema(schema: &crate::core::Schema) -> String {
     serde_json::to_string(&SchemaLine {
-        schema: schema.name,
-        purpose: schema.purpose,
-        node_kinds: KindLine::of(schema.node_kinds),
-        edge_kinds: KindLine::of(schema.edge_kinds),
+        schema: &schema.name,
+        purpose: &schema.purpose,
+        node_kinds: KindLine::of(&schema.node_kinds),
+        edge_kinds: KindLine::of(&schema.edge_kinds),
     })
     .expect("SchemaLine always serializes")
 }
 
 #[derive(Serialize)]
 struct FragmentLine<'a> {
-    map: &'static str,
+    map: &'a str,
     shown_nodes: usize,
     total_nodes: usize,
     shown_edges: usize,
@@ -260,7 +260,7 @@ const NOTHING_RECORDED: &str =
 pub fn encode_fragment(fragment: &Fragment) -> String {
     let map = fragment.map();
     serde_json::to_string(&FragmentLine {
-        map: map.schema().name,
+        map: &map.schema().name,
         shown_nodes: map.nodes().len(),
         total_nodes: fragment.total_nodes(),
         shown_edges: map.edges().len(),

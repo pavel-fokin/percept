@@ -241,7 +241,7 @@ fn a_source_is_checked_against_the_loaded_log() {
 
 #[test]
 fn a_node_line_carries_its_id_sources_actor_and_time() {
-    let map = Map::empty(&crate::core::DECISIONS);
+    let map = Map::empty(crate::core::decisions());
     let node = Node {
         id: NodeId::new(),
         kind: "evidence".to_string(),
@@ -265,7 +265,7 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
 
 #[test]
 fn a_derived_map_s_lines_carry_no_actor_or_time() {
-    let mut map = Map::empty(&crate::core::CODE);
+    let mut map = Map::empty(crate::core::code());
     map.apply(
         Mutation::AddNode {
             kind: "file".to_string(),
@@ -286,7 +286,7 @@ fn a_derived_map_s_lines_carry_no_actor_or_time() {
 
 #[test]
 fn an_edge_line_names_its_ends_as_kind_and_name() {
-    let mut map = Map::empty(&crate::core::CODE);
+    let mut map = Map::empty(crate::core::code());
     for (kind, name) in [("file", "src/main.rs"), ("package", "clap")] {
         map.apply(
             Mutation::AddNode {

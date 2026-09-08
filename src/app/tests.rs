@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::testing::{content, node_added, scope, source, usage, FakeLog, FakeRenderer};
-use crate::core::{Actor, Payload, SCHEMAS};
+use crate::core::{schemas, Actor, Payload};
 use crate::harness::testing::{FakeCatalog, FakeSnapshot, FakeTool, FixedPolicy, Scripted};
 use crate::harness::{Chunk, Verdict};
 
@@ -1034,7 +1034,7 @@ fn an_empty_map_is_still_sent_with_its_kinds() {
 
     let sent = model.last_request();
     // One message per map, the prompt, the time.
-    assert_eq!(sent.len(), 2 + SCHEMAS.len());
+    assert_eq!(sent.len(), 2 + schemas().len());
     assert!(sent[0].contains("Node kinds: question, option, evidence, decision."));
     assert!(sent[0].contains("\n(empty:"), "{}", sent[0]);
 }
@@ -1090,7 +1090,7 @@ fn a_map_header_carries_its_purpose_size_and_last_change() {
     let sent = model.last_request();
     assert!(sent[0].starts_with(&format!(
         "The decisions map: {}. It holds 1 nodes and 0 edges, last changed {changed}. Node kinds:",
-        crate::core::DECISIONS.purpose
+        crate::core::decisions().purpose
     )));
 }
 
@@ -1186,7 +1186,7 @@ fn a_log_shorter_than_the_window_sends_all_of_it() {
     let _ = app.submit("now".to_string()).unwrap();
 
     // One message per map, three events, the prompt, the time.
-    assert_eq!(model.last_request().len(), 5 + SCHEMAS.len());
+    assert_eq!(model.last_request().len(), 5 + schemas().len());
 }
 
 #[test]
@@ -1204,7 +1204,7 @@ fn a_model_called_event_never_reaches_the_next_request() {
     // One message per map, "first", "ok", "second", the time - the
     // model.called event between "ok" and "second" is never one of
     // them.
-    assert_eq!(sent.len(), 4 + SCHEMAS.len());
+    assert_eq!(sent.len(), 4 + schemas().len());
     assert!(sent.contains(&"first".to_string()));
     assert!(sent.contains(&"ok".to_string()));
     assert!(sent.contains(&"second".to_string()));
