@@ -107,11 +107,11 @@ fn draw_command_suggestions(frame: &mut Frame, chat: &Chat, area: Rect) {
     let items: Vec<ListItem> = chat
         .command_suggestions
         .iter()
-        .map(|command| {
+        .map(|suggestion| {
             ListItem::new(Line::from(vec![
-                Span::styled(command.name, chat.user_style),
+                Span::styled(suggestion.value.clone(), chat.user_style),
                 Span::raw("  "),
-                Span::styled(command.description, chat.hint_style),
+                Span::styled(suggestion.description.clone(), chat.hint_style),
             ]))
         })
         .collect();

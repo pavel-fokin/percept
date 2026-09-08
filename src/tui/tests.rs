@@ -5,6 +5,7 @@ fn descriptor(model: &str) -> ModelDescriptor {
     ModelDescriptor {
         provider: Provider::Ollama,
         model: model.to_string(),
+        reasoning_efforts: &[],
     }
 }
 
@@ -117,5 +118,19 @@ fn a_narrower_prefix_still_matching_shows_the_matching_command() {
     let mut chat = chat();
     type_str(&mut chat, "/model");
     assert_eq!(chat.command_suggestions.len(), 1);
-    assert_eq!(chat.command_suggestions[0].name, commands::MODELS);
+    assert_eq!(chat.command_suggestions[0].value, commands::MODELS);
+}
+
+#[test]
+fn effort_partial_reads_the_level_being_typed_after_the_command() {
+    assert_eq!(effort_partial("/effort"), Some(""));
+    assert_eq!(effort_partial("  /effort  "), Some(""));
+    assert_eq!(effort_partial("/effort hi"), Some("hi"));
+}
+
+#[test]
+fn effort_partial_is_none_off_the_command_or_past_a_complete_argument() {
+    assert_eq!(effort_partial("/effortless"), None);
+    assert_eq!(effort_partial("/models"), None);
+    assert_eq!(effort_partial("/effort low now"), None);
 }

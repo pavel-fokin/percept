@@ -22,6 +22,8 @@ impl percept::Model for Silent {
             input: &[percept::Modality::Text],
             output: &[percept::Modality::Text],
             tool_use: false,
+            reasoning_efforts: &[],
+            default_reasoning_effort: None,
             context_window: None,
         }
     }
@@ -1209,6 +1211,7 @@ fn set_model_swaps_the_live_model() {
     let descriptor = percept::ModelDescriptor {
         provider: percept::Provider::Ollama,
         model: "scripted".to_string(),
+        reasoning_efforts: &[],
     };
     let catalog = Arc::new(FakeCatalog::new(
         vec![descriptor.clone()],
@@ -1236,6 +1239,7 @@ fn set_model_clears_last_usage_so_the_new_model_reads_as_unasked() {
     let descriptor = percept::ModelDescriptor {
         provider: percept::Provider::Ollama,
         model: "scripted".to_string(),
+        reasoning_efforts: &[],
     };
     let catalog = Arc::new(FakeCatalog::new(
         vec![descriptor.clone()],
@@ -1266,6 +1270,7 @@ fn set_model_errs_and_leaves_the_model_in_place_while_a_turn_streams() {
     let descriptor = percept::ModelDescriptor {
         provider: percept::Provider::Ollama,
         model: "scripted".to_string(),
+        reasoning_efforts: &[],
     };
     let catalog = Arc::new(FakeCatalog::new(
         vec![descriptor.clone()],
@@ -1288,16 +1293,99 @@ fn set_model_errs_and_leaves_the_model_in_place_while_a_turn_streams() {
     assert_eq!(app.model_name(), "silent");
 }
 
+fn app_on(model: Arc<dyn percept::Model>, catalog: FakeCatalog) -> App {
+    App::new(
+        model,
+        Arc::new(catalog),
+        Arc::new(FakeLog::default()),
+        Harness::new(Vec::new(), MapShape::Prompt),
+        Arc::new(FakeRenderer::default()),
+        source(SOURCE),
+    )
+    .unwrap()
+}
+
+fn thinking_model() -> Arc<dyn percept::Model> {
+    Arc::new(Scripted::new(vec![], true).with_reasoning_efforts(percept::ReasoningEffort::ALL))
+}
+
+#[test]
+fn a_model_with_a_reasoning_control_starts_at_its_default_level() {
+    let app = app_on(thinking_model(), FakeCatalog::default());
+
+    assert_eq!(app.reasoning_effort(), Some(percept::ReasoningEffort::Low));
+}
+
+#[test]
+fn set_reasoning_effort_refuses_a_level_the_model_cannot_use() {
+    let mut app = app_on(Arc::new(Silent), FakeCatalog::default());
+
+    assert!(app
+        .set_reasoning_effort(percept::ReasoningEffort::Low)
+        .is_err());
+    assert_eq!(app.reasoning_effort(), None);
+}
+
+#[test]
+fn set_reasoning_effort_takes_a_level_the_model_supports() {
+    let mut app = app_on(thinking_model(), FakeCatalog::default());
+
+    app.set_reasoning_effort(percept::ReasoningEffort::High)
+        .unwrap();
+
+    assert_eq!(app.reasoning_effort(), Some(percept::ReasoningEffort::High));
+}
+
+#[test]
+fn switching_to_a_model_without_a_reasoning_control_drops_the_selection() {
+    let plain: Arc<dyn percept::Model> = Arc::new(Scripted::new(vec![], true));
+    let descriptor = percept::ModelDescriptor {
+        provider: percept::Provider::Ollama,
+        model: "plain".to_string(),
+        reasoning_efforts: &[],
+    };
+    let catalog = FakeCatalog::new(vec![descriptor.clone()], vec![(descriptor.clone(), plain)]);
+    let mut app = app_on(thinking_model(), catalog);
+    app.set_reasoning_effort(percept::ReasoningEffort::High)
+        .unwrap();
+
+    app.set_model(&descriptor).unwrap();
+
+    assert_eq!(app.reasoning_effort(), None);
+}
+
+#[test]
+fn switching_models_keeps_a_selected_level_the_new_model_also_supports() {
+    let descriptor = percept::ModelDescriptor {
+        provider: percept::Provider::OpenAi,
+        model: "next".to_string(),
+        reasoning_efforts: percept::ReasoningEffort::ALL,
+    };
+    let catalog = FakeCatalog::new(
+        vec![descriptor.clone()],
+        vec![(descriptor.clone(), thinking_model())],
+    );
+    let mut app = app_on(thinking_model(), catalog);
+    app.set_reasoning_effort(percept::ReasoningEffort::High)
+        .unwrap();
+
+    app.set_model(&descriptor).unwrap();
+
+    assert_eq!(app.reasoning_effort(), Some(percept::ReasoningEffort::High));
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn available_models_returns_the_catalog_s_listing() {
     let descriptors = vec![
         percept::ModelDescriptor {
             provider: percept::Provider::Ollama,
             model: "gemma".to_string(),
+            reasoning_efforts: &[],
         },
         percept::ModelDescriptor {
             provider: percept::Provider::OpenAi,
             model: "gpt".to_string(),
+            reasoning_efforts: &[],
         },
     ];
     let catalog = Arc::new(FakeCatalog::new(descriptors.clone(), Vec::new()));

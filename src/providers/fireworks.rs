@@ -281,6 +281,8 @@ impl Model for Fireworks {
             input: &[Modality::Text],
             output: &[Modality::Text],
             tool_use: true,
+            reasoning_efforts: &[],
+            default_reasoning_effort: None,
             context_window: None,
         }
     }

@@ -20,7 +20,7 @@ pub use map::{
 pub use map_reader::MapReader;
 pub use model::{
     message_of, Chunk, Message, Modality, Model, ModelCapabilities, ModelCatalog, ModelDescriptor,
-    ModelListing, ModelRequest, Provider, ReplyStream, Usage,
+    ModelListing, ModelRequest, Provider, ReasoningEffort, ReplyStream, Usage,
 };
 pub use policy::{AllowAll, Policy, Verdict};
 pub use render::MapRenderer;

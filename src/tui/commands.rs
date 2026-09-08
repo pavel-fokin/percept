@@ -8,6 +8,7 @@ pub struct Command {
 pub const MODELS: &str = "/models";
 pub const UNDO: &str = "/undo";
 pub const CONTEXT: &str = "/context";
+pub const EFFORT: &str = "/effort";
 
 /// Every slash command the TUI knows, in the order suggestions show
 /// them.
@@ -23,6 +24,10 @@ pub const COMMANDS: &[Command] = &[
     Command {
         name: CONTEXT,
         description: "show what the model was shown",
+    },
+    Command {
+        name: EFFORT,
+        description: "set the model's reasoning effort for this session",
     },
 ];
 

@@ -24,6 +24,7 @@ fn view(events: &[Event]) -> View<'_> {
         scope: scope(),
         turn_start: None,
         context_window: None,
+        reasoning_effort: None,
         tools: Vec::new(),
         budget_spent: false,
     }
@@ -55,6 +56,23 @@ fn history_only() -> Context {
 
 fn first_word(message: &str) -> &str {
     message.split_whitespace().next().unwrap()
+}
+
+#[test]
+fn build_carries_the_view_s_selected_reasoning_effort_onto_the_request() {
+    let context = history_only();
+    let events = [prompt(Actor::User, "hi", 1)];
+    let view = View {
+        reasoning_effort: Some(crate::percept::ReasoningEffort::High),
+        ..view(&events)
+    };
+
+    let request = context.build(view).unwrap();
+
+    assert_eq!(
+        request.reasoning_effort,
+        Some(crate::percept::ReasoningEffort::High)
+    );
 }
 
 #[test]

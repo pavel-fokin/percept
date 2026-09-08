@@ -7,9 +7,9 @@ use std::sync::Arc;
 use super::commands;
 #[cfg(test)]
 use super::type_str;
-use super::{Approval, Chat, ModelsMenu, StreamEvent};
-use crate::app::{run_tool, ToolStep};
-use crate::percept::{Chunk, ModelListing, ReplyStream, Tool, ToolOutput};
+use super::{effort_partial, Approval, Chat, ModelsMenu, StreamEvent};
+use crate::app::{run_tool, AppService, ToolStep};
+use crate::percept::{Chunk, ModelListing, ReasoningEffort, ReplyStream, Tool, ToolOutput};
 
 /// Handle one key press. Returns true if the app should quit. Errs if
 /// submit couldn't append its event to the log - see AppService::submit.
@@ -74,6 +74,10 @@ pub fn handle_key(
             show_context(chat);
             Ok(false)
         }
+        (KeyCode::Enter, _) if is_effort_command(&chat.current_text()) => {
+            set_effort(chat);
+            Ok(false)
+        }
         (KeyCode::Enter, _) => {
             submit(chat, reply_tx)?;
             Ok(false)
@@ -99,6 +103,56 @@ fn is_undo_command(text: &str) -> bool {
 
 fn is_context_command(text: &str) -> bool {
     text.trim() == commands::CONTEXT
+}
+
+/// The `/effort` command's argument, when `text` is that command:
+/// `Some(None)` for the bare command, `Some(Some(level))` for a valid
+/// level after it. `None` for any other line - including `/effort`
+/// followed by something that is not a level, so an ordinary message
+/// that starts with the word is sent, not swallowed.
+fn effort_arg(text: &str) -> Option<Option<ReasoningEffort>> {
+    match effort_partial(text)? {
+        "" => Some(None),
+        level => ReasoningEffort::parse(level).map(Some),
+    }
+}
+
+fn is_effort_command(text: &str) -> bool {
+    effort_arg(text).is_some()
+}
+
+/// Takes the input and either reports the reasoning levels, for a bare
+/// `/effort`, or sets the one named. A model without the control lands
+/// in the error row. Nothing reaches the log.
+fn set_effort(chat: &mut Chat) {
+    let arg = effort_arg(&chat.current_text());
+    chat.take_input();
+    match arg {
+        Some(Some(effort)) => match chat.app.set_reasoning_effort(effort) {
+            Ok(()) => chat.notice = Some(format!("Reasoning effort set to {effort}")),
+            Err(err) => chat.error = Some(err.to_string()),
+        },
+        // Bare `/effort`; `None` never reaches here past the guard.
+        _ => chat.notice = Some(effort_summary(chat.app.as_ref())),
+    }
+}
+
+/// The line `/effort` with no argument shows: the level in force and
+/// the ones this model allows, or that it has no such control.
+fn effort_summary(app: &dyn AppService) -> String {
+    let supported = app.supported_reasoning_efforts();
+    if supported.is_empty() {
+        return format!("{} has no reasoning-effort control", app.model_name());
+    }
+    let available = supported
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    match app.reasoning_effort() {
+        Some(current) => format!("Reasoning effort {current}; available: {available}"),
+        None => format!("Reasoning effort unset; available: {available}"),
+    }
 }
 
 /// Takes the input and puts the tree back, saying so in the activity

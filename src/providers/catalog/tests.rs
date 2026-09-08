@@ -20,6 +20,7 @@ fn an_ollama_descriptor_builds_an_ollama_model() {
     let descriptor = ModelDescriptor {
         provider: Provider::Ollama,
         model: "gemma4".to_string(),
+        reasoning_efforts: &[],
     };
 
     let model = catalog().build(&descriptor).unwrap();
@@ -33,6 +34,7 @@ fn an_openai_descriptor_builds_an_openai_model() {
         let descriptor = ModelDescriptor {
             provider: Provider::OpenAi,
             model: name.to_string(),
+            reasoning_efforts: &[],
         };
 
         let model = catalog().build(&descriptor).unwrap();
@@ -69,11 +71,43 @@ async fn listing_offers_every_openai_model() {
     assert_eq!(openai, ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]);
 }
 
+#[tokio::test]
+async fn listing_offers_openai_reasoning_efforts() {
+    let unreachable = Catalog::new(
+        "http://127.0.0.1:1".to_string(),
+        ProviderConfig {
+            url: "https://api.openai.com/v1".to_string(),
+            api_key: "sk-test".to_string(),
+        },
+        "low".to_string(),
+        ProviderConfig {
+            url: "https://api.fireworks.ai/inference/v1".to_string(),
+            api_key: "fw-test".to_string(),
+        },
+    );
+
+    let descriptors = unreachable.list().await;
+    let openai: Vec<&ModelDescriptor> = descriptors
+        .iter()
+        .filter(|descriptor| descriptor.provider == Provider::OpenAi)
+        .collect();
+
+    assert!(openai.iter().all(|descriptor| {
+        descriptor.reasoning_efforts
+            == [
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+            ]
+    }));
+}
+
 #[test]
 fn a_fireworks_descriptor_builds_a_fireworks_model() {
     let descriptor = ModelDescriptor {
         provider: Provider::Fireworks,
         model: FIREWORKS_MODEL.to_string(),
+        reasoning_efforts: &[],
     };
 
     let model = catalog().build(&descriptor).unwrap();
@@ -93,10 +127,12 @@ fn tags_response_parses_into_ollama_descriptors() {
             ModelDescriptor {
                 provider: Provider::Ollama,
                 model: "gemma4:latest".to_string(),
+                reasoning_efforts: &[],
             },
             ModelDescriptor {
                 provider: Provider::Ollama,
                 model: "llama3".to_string(),
+                reasoning_efforts: &[],
             },
         ]
     );

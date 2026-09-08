@@ -174,6 +174,7 @@ fn a_request_carries_tools_and_asks_for_usage() {
     let request = ModelRequest {
         messages: Vec::new(),
         tools: vec![tool],
+        reasoning_effort: None,
     };
 
     let wire = serde_json::to_value(ChatRequest {

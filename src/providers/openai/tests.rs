@@ -201,10 +201,10 @@ fn a_request_carries_tools_flat_and_never_stores() {
     let request = ModelRequest {
         messages: Vec::new(),
         tools: vec![tool],
+        reasoning_effort: None,
     };
 
-    let wire =
-        serde_json::to_value(Request::new("m".to_string(), "low".to_string(), &request)).unwrap();
+    let wire = serde_json::to_value(Request::new("m".to_string(), "low", &request)).unwrap();
 
     assert_eq!(
         wire["tools"][0],
@@ -217,6 +217,29 @@ fn a_request_carries_tools_flat_and_never_stores() {
     assert_eq!(wire["store"], false);
     assert_eq!(wire["parallel_tool_calls"], false);
     assert_eq!(wire["stream"], true);
+}
+
+#[test]
+fn the_session_s_reasoning_pick_overrides_the_configured_effort_on_the_wire() {
+    fn request(effort: Option<ReasoningEffort>) -> ModelRequest {
+        ModelRequest {
+            messages: Vec::new(),
+            tools: Vec::new(),
+            reasoning_effort: effort,
+        }
+    }
+
+    let fallback =
+        serde_json::to_value(Request::new("m".to_string(), "low", &request(None))).unwrap();
+    let picked = serde_json::to_value(Request::new(
+        "m".to_string(),
+        "low",
+        &request(Some(ReasoningEffort::High)),
+    ))
+    .unwrap();
+
+    assert_eq!(fallback["reasoning"]["effort"], "low");
+    assert_eq!(picked["reasoning"]["effort"], "high");
 }
 
 fn openai(model: &str) -> OpenAi {
