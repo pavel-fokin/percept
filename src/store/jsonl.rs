@@ -10,7 +10,7 @@ use crate::store::{parse_event_id, Error, Event};
 
 /// A JSONL event log: one compact `store::Event` per line, appended to
 /// as the app runs and replayed to rebuild the transcript on start.
-/// Implements `percept::EventLog`. Each append is one unbuffered write
+/// Implements `core::EventLog`. Each append is one unbuffered write
 /// with no `fsync`: a killed process loses nothing, since the bytes are
 /// already the kernel's, but a power cut can lose the tail line.
 ///

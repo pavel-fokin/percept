@@ -1,7 +1,7 @@
 //! A map's Markdown, and where it lands on disk. `markdown` is the
 //! pure text, kept separate from `MarkdownFiles` so it is testable
 //! without touching a filesystem. `MarkdownFiles` implements
-//! `percept::MapRenderer`.
+//! `core::MapRenderer`.
 
 use std::fmt::Write as _;
 use std::fs;

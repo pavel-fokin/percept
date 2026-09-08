@@ -19,7 +19,7 @@ pub struct Source {
     pub path: PathBuf,
 }
 
-/// A `percept::Event` as it travels over the wire. Flat JSON:
+/// A `core::Event` as it travels over the wire. Flat JSON:
 /// `{ id, actor, source, type, causation_id, created_at, payload }`.
 /// `payload` shape depends on `type`.
 #[derive(Serialize, Deserialize)]

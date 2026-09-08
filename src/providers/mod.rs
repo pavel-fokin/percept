@@ -1,4 +1,4 @@
-//! Concrete `percept::Model` implementations.
+//! Concrete `harness::Model` implementations.
 //!
 //! What both wire formats share lives here: the same three role words,
 //! and a reply streamed as one JSON object per line over HTTP.

@@ -1,6 +1,6 @@
 use std::fmt;
 
-/// Why a `store::Event` couldn't become a domain `percept::Event`, or why
+/// Why a `store::Event` couldn't become a domain `core::Event`, or why
 /// the JSONL log couldn't be read or written. An unknown `type` or
 /// `actor` means the log was written by a newer build - the wire event
 /// still deserializes, it just has no domain form here.
