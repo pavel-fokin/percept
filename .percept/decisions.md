@@ -63,6 +63,7 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "How does a rendered map stay scoped to the branch it is committed in?" (model) · 2026-09-07
 - "Where does agreement between the human and the agent live?" (model) · 2026-09-08
 - "What is percept's core called?" (model) · 2026-09-08
+- "How is a human contour identified?" (model) · 2026-09-08
 
 ## "Where does the event log live?"
 
@@ -442,10 +443,14 @@ note: "Not decided. One log holds every branch, and the render is a file in one 
 
 ## "Where does agreement between the human and the agent live?" (model)
 
-- decision "in the core, as confirms and disputes edges from a user to a model node and a standing the fold derives: claimed, confirmed, disputed; every schema carries it" (model)
-  why: "two cognitions share a map with different boundaries, the agent's inside the log and the human's mostly outside it; the rule that a recorded claim is not the human's agreement had no operation behind it, and the mechanism belongs to the core so no map defines its own; docs/architecture.md"
+- decision "in the core, as confirms and disputes edges from a human contour to a node another contour wrote, and a standing the fold derives per confirmer: claimed, confirmed by whom, disputed by whom; contours are many, of two kinds" (model)
+  why: "several agents write to one log and a subagent is a contour of its own, so two was never the count; the transparent-or-opaque distinction is by kind, not number, and the mechanism is unchanged; standing per confirmer is the same fold for one person or ten, and writing two into the edge's definition would be undone when the confirms edge is built; docs/architecture.md"
+  source 01a0810c-d677-7680-909f-98bcca5b4e9a
+  was "in the core, as confirms and disputes edges from a user to a model node and a standing the fold derives: claimed, confirmed, disputed; every schema carries it" (model)
 - weighed "one map per cognition, merged at a shared surface" (model)
   why: "doubles what a reader holds for a distinction the fold derives from the actor and the confirmation edge; the contour is a view over one map, never a storage boundary"
+- weighed "agent-to-agent confirmation counts as agreement" (model)
+  why: "an agent confirming another agent's node is a second claim from inside the log, not agreement; the rule exists for the cognition whose head is outside it"
 
 ## "What is percept's core called?" (model)
 
@@ -455,3 +460,8 @@ note: "Not decided. One log holds every branch, and the render is a file in one 
   why: "names a processing loop in SOAR and ACT-R; a newcomer knows the term, but it had to be disclaimed at first use"
 - weighed "cognition rails" (model)
   why: "more accurate, since the rails are not themselves cognitive, but not idiomatic; the repo already says cognitive map, commit and history in the same loose sense"
+
+## "How is a human contour identified?" (model)
+
+note: "Not decided. The core has an actor kind for the human and no identity behind it; standing per confirmer needs one only when a second person confirms. Waits for that person, and for the confirms edge to exist. Options: an id on the user actor; the source name, as agents have; a hosted log with accounts."
+- open
