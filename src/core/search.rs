@@ -114,6 +114,7 @@ fn carries(payload: &Payload, term: &str) -> bool {
         }
         Payload::ModelCalled(usage) => has(&usage.model),
         Payload::SessionStarted => false,
+        Payload::FileCited { path, excerpt, .. } => has(&path.to_string_lossy()) || has(excerpt),
     }
 }
 

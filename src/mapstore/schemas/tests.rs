@@ -139,19 +139,6 @@ fn settles_naming_an_undeclared_kind_is_refused() {
 }
 
 #[test]
-fn a_file_named_code_is_refused() {
-    let fixture = Fixture::new();
-    fixture.write(".percept/schemas/code.toml", "name = \"code\"\npurpose = \"p\"\n");
-
-    let err = load(fixture.path()).err().unwrap().to_string();
-
-    assert_eq!(
-        err,
-        "code.toml: code is derived from the working tree, not declared"
-    );
-}
-
-#[test]
 fn a_file_named_index_is_refused() {
     let fixture = Fixture::new();
     fixture.write(".percept/schemas/index.toml", "name = \"index\"\npurpose = \"p\"\n");

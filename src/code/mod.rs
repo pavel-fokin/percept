@@ -1,11 +1,10 @@
 //! The code map: a static graph of a codebase, walked from the working
 //! tree with `ignore` and parsed with `tree-sitter`, rather than folded
-//! from the event log. `build` returns a `Map` on the same `Schema` and
-//! `Map::apply` every log-backed map uses, so `maps list` and `maps
-//! show` treat it the same way once it's built - `Schemas::fold_all`
-//! stays log-only, since nothing here is an event. A language adds one
-//! query file and one small module like `rust`; `build` is where
-//! they're dispatched.
+//! from the event log. `build` returns a `Map` on `schema()`, the same
+//! `Map::apply` every log-backed map uses, but it is reached only
+//! through the `read_code` tool - never `core::Schemas`, which knows
+//! nothing of it. A language adds one query file and one small module
+//! like `rust`; `build` is where they're dispatched.
 
 mod rust;
 
@@ -16,20 +15,55 @@ use std::path::Path;
 
 use ignore::WalkBuilder;
 
-use crate::core::{self, Actor, Map, MapError, Mutation, NodeRef};
+use crate::core::{Actor, Kind, Map, MapError, Mutation, NodeRef, Schema};
 use crate::shared::to_slash;
+
+/// The code map's schema: a codebase's files, the symbols they define,
+/// and what imports what. Owned here, not by `core`: `code` is walked
+/// fresh from the working tree by the `read_code` tool alone, never a
+/// log-folded map `core::Schemas` knows about.
+pub fn schema() -> Schema {
+    Schema {
+        name: "code".to_string(),
+        purpose: "which file defines which symbol and imports which file or package".to_string(),
+        node_kinds: vec![
+            Kind::new("file", "a source file, named by its repo-relative path"),
+            // Its default prefix, `f`, collides with `file`'s; `fn`
+            // both avoids that and reads as the keyword it names.
+            Kind {
+                prefix: "fn".to_string(),
+                ..Kind::new(
+                    "function",
+                    "a function or method, named `path::Type::method` or `path::func`",
+                )
+            },
+            Kind::new("type", "a struct, enum, trait, or alias, named `path::Name`"),
+            Kind::new(
+                "package",
+                "an external crate a file imports, like `serde_json` - never one of this \
+                 project's own modules",
+            ),
+        ],
+        edge_kinds: vec![
+            Kind::new("contains", "from a file to a symbol it defines"),
+            Kind::new("imports", "from a file to a file or package it uses"),
+        ],
+        headline_kinds: vec!["file".to_string()],
+        settlement: None,
+    }
+}
 
 /// Builds the code map from every `.rs` file under `root`, gitignore
 /// rules applied the way `ignore` applies them for any tool. Node ids
 /// are minted fresh by `Map::apply`; nothing here keeps them, and
 /// nothing here opens the event log. The only error is a mutation the
-/// schema refuses, which every kind here being one `code()` declares
+/// schema refuses, which every kind here being one `schema()` declares
 /// should make impossible.
 pub fn build(root: &Path) -> Result<Map, MapError> {
     let files = rust_files(root);
     let known: HashSet<String> = files.iter().cloned().collect();
 
-    let mut map = Map::empty(core::code());
+    let mut map = Map::empty(schema());
     let mut packages = HashSet::new();
     for file in &files {
         map.apply(

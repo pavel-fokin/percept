@@ -174,7 +174,7 @@ fn commit_allows_the_same_name_under_a_different_project_s_path() {
 }
 
 #[test]
-fn committing_to_the_code_map_is_refused() {
+fn committing_to_a_map_no_schema_declares_is_an_error() {
     let err = commit(
         &FakeLog::default(),
         &schemas(),
@@ -188,7 +188,7 @@ fn committing_to_the_code_map_is_refused() {
     .err()
     .unwrap();
 
-    assert!(err.to_string().starts_with("\"code\" is derived"), "{err}");
+    assert!(err.to_string().starts_with("no map named \"code\""), "{err}");
 }
 
 #[test]
@@ -199,7 +199,7 @@ fn an_unknown_map_is_an_error() {
 
     assert_eq!(
         err.to_string(),
-        "no map named \"glossary\"; maps are decisions, tasks, code"
+        "no map named \"glossary\"; maps are decisions, tasks"
     );
 }
 
@@ -265,7 +265,7 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
         seq: 1,
     };
 
-    let line: serde_json::Value = serde_json::from_str(&encode_node(&map, &node)).unwrap();
+    let line: serde_json::Value = serde_json::from_str(&encode_node(&map, &node, true)).unwrap();
 
     assert_eq!(line["node"], node.id.as_uuid().to_string());
     assert_eq!(line["kind"], "evidence");
@@ -291,35 +291,14 @@ fn a_node_line_carries_its_short_id() {
     .unwrap();
 
     let line: serde_json::Value =
-        serde_json::from_str(&encode_node(&map, &map.nodes()[0])).unwrap();
+        serde_json::from_str(&encode_node(&map, &map.nodes()[0], true)).unwrap();
 
     assert_eq!(line["id"], "e1");
 }
 
 #[test]
-fn a_derived_map_s_lines_carry_no_actor_or_time() {
-    let mut map = Map::empty(crate::core::code());
-    map.apply(
-        Mutation::AddNode {
-            kind: "file".to_string(),
-            name: "src/main.rs".to_string(),
-            properties: BTreeMap::new(),
-            sources: Vec::new(),
-        },
-        Actor::System,
-    )
-    .unwrap();
-
-    let line: serde_json::Value =
-        serde_json::from_str(&encode_node(&map, &map.nodes()[0])).unwrap();
-
-    assert!(line.get("actor").is_none(), "{line}");
-    assert!(line.get("added_at").is_none(), "{line}");
-}
-
-#[test]
 fn an_edge_line_names_its_ends_as_kind_and_name() {
-    let mut map = Map::empty(crate::core::code());
+    let mut map = Map::empty(crate::core::testing::files());
     for (kind, name) in [("file", "src/main.rs"), ("package", "clap")] {
         map.apply(
             Mutation::AddNode {
@@ -350,7 +329,7 @@ fn an_edge_line_names_its_ends_as_kind_and_name() {
     .unwrap();
 
     let line: serde_json::Value =
-        serde_json::from_str(&encode_edge(&map, &map.edges()[0])).unwrap();
+        serde_json::from_str(&encode_edge(&map, &map.edges()[0], true)).unwrap();
 
     assert_eq!(line["edge"], "imports");
     assert_eq!(line["from"], "file:src/main.rs");

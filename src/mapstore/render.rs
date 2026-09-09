@@ -105,10 +105,10 @@ fn push_example(out: &mut String, map: &Map) {
     }
     out.push_str("\nExample node and edge:\n\n");
     if let Some(node) = node {
-        let _ = writeln!(out, "    {}", super::map::encode_node(map, node));
+        let _ = writeln!(out, "    {}", super::map::encode_node(map, node, true));
     }
     if let Some(edge) = edge {
-        let _ = writeln!(out, "    {}", super::map::encode_edge(map, edge));
+        let _ = writeln!(out, "    {}", super::map::encode_edge(map, edge, true));
     }
 }
 

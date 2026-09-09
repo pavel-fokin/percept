@@ -159,6 +159,38 @@ impl EventLog for Jsonl {
         })
         .map_err(Into::into)
     }
+
+    /// `append_computed`, but `compute` returns a batch: every line is
+    /// built and written together, one `write_all`, before the lock
+    /// this read was taken under is released.
+    fn append_batch_computed(
+        &self,
+        compute: Box<
+            dyn FnOnce(
+                    Vec<crate::core::Event>,
+                ) -> Result<Vec<crate::core::Event>, Box<dyn std::error::Error>>
+                + '_,
+        >,
+    ) -> Result<Vec<crate::core::Event>, Box<dyn std::error::Error>> {
+        self.with_exclusive(|file| {
+            truncate_torn_tail(file)?;
+            let bytes = read_all(file)?;
+            let mut events = Vec::new();
+            for (line, raw) in lines(complete_text(&bytes)?) {
+                events.push(parse_line(raw).map_err(|source| at_line(line, source))?);
+            }
+            let batch = compute(events).map_err(Error::Compute)?;
+            let mut text = String::new();
+            for event in &batch {
+                text.push_str(&crate::store::encode(event));
+                text.push('\n');
+            }
+            let mut file = file;
+            file.write_all(text.as_bytes()).map_err(Error::Io)?;
+            Ok(batch)
+        })
+        .map_err(Into::into)
+    }
 }
 
 impl EventSearch for Jsonl {

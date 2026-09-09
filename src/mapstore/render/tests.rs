@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::core::testing::{decisions, node_ref, tasks};
-use crate::core::{code, Actor, EventId, Mutation, SUPERSEDES};
+use crate::core::testing::{decisions, files, node_ref, tasks};
+use crate::core::{Actor, EventId, Mutation, SUPERSEDES};
 
 /// Adds a node with one `why` property when `why` is given.
 fn add(
@@ -662,7 +662,7 @@ fn an_empty_tasks_map_renders_its_guide_and_the_empty_notice() {
 
 #[test]
 fn a_map_of_another_schema_renders_per_kind() {
-    let mut map = Map::empty(code());
+    let mut map = Map::empty(files());
     add(&mut map, "file", "src/main.rs", None, &[], Actor::System);
     let cited = EventId::new();
     map.apply(
@@ -683,7 +683,7 @@ fn a_map_of_another_schema_renders_per_kind() {
     );
 
     let expected = format!(
-        "# code\n\
+        "# files\n\
          \n\
          Folded from the percept log for this project and rerendered on every write. \
          Change it with `percept maps`, not by hand.\n\
@@ -741,8 +741,8 @@ fn the_catalogue_names_a_kinds_required_properties() {
 }
 
 #[test]
-fn the_catalogue_glosses_a_code_package_as_an_external_crate() {
-    let text = catalogue(&[Map::empty(code())]);
+fn the_catalogue_glosses_a_package_kind_as_an_external_crate() {
+    let text = catalogue(&[Map::empty(files())]);
 
     assert!(text.contains("- `package` - an external crate a file imports"));
     assert!(text.contains("never one of this project's own modules"));

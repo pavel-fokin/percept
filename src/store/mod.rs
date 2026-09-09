@@ -12,8 +12,8 @@ mod turn_state;
 
 pub use error::Error;
 pub use event::{
-    decode, encode, excerpt, ids, parse_actor, parse_event_id, parse_kind, summarize, Event,
-    PREVIEW_CHARS,
+    decode, encode, excerpt, ids, parse_actor, parse_event_id, parse_kind, parse_lines,
+    summarize, Event, PREVIEW_CHARS,
 };
 pub use jsonl::Jsonl;
 pub use turn_state::TurnState;

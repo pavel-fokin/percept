@@ -1,6 +1,6 @@
 ---
 name: percept
-description: Select, check, and revise percept's cognitive maps; query its experience log or code structure. Use for decision rationale, corrections, dependencies, and map maintenance.
+description: Select, check, and revise percept's cognitive maps; query its experience log. Use for decision rationale, corrections, dependencies, and map maintenance.
 ---
 
 # Using shared maps
@@ -10,8 +10,7 @@ Read [.percept/index.md](../../../.percept/index.md) to choose a map.
 binary is `~/.percept/bin/percept` and reads `~/.percept/percept.jsonl`.
 A worktree build, `target/debug/percept`, reads `<checkout>/.percept/`
 instead unless `PERCEPT_HOME` says otherwise, so set it to
-`$HOME/.percept` to query the shared log with a dev build. For code
-query patterns, read [code.md](code.md).
+`$HOME/.percept` to query the shared log with a dev build.
 
 ## Select a fragment
 
@@ -73,6 +72,33 @@ Capture an unlogged prompt with `events publish` under its real actor
 and source before citing it; never invent an id or cite an agent's
 summary as the user's words.
 
+## Cite a file
+
+A node that rests on code or a document cites the text it rested on,
+not the path alone. In a `maps record` document that is one line under
+the node, `cites src/mapstore/schema.rs:40-58` - a range where one is
+enough, the whole file only for a claim about the file itself. For a
+single node, publish what was seen first and list the printed id in
+`--source` beside the prompt:
+
+```sh
+id=$(percept events publish --actor model --source claude-code --type file.cited \
+  --payload '{"path":"src/mapstore/schema.rs","lines":"40-58"}')
+percept maps add-node decisions --actor model --kind decision --name "..." \
+  --prop why="..." --source $prompt --source $id
+```
+
+`file.cited` is experience: the file, or that range of it, as it was
+seen at that moment. Publish reads the text from the tree, so the path
+may be absolute inside the checkout or repo-relative, and refuses a
+binary file or a range past the end. That text is what the
+session-start block checks against the tree later: `changed` when it
+is no longer found, `gone` when the file is. After looking at a
+changed file, publish a new `file.cited` with `--causation $old`
+whether or not the claim still holds; the check follows that chain and
+reads the newest. If the meaning moved, record the new decision with a
+`supersedes` edge as usual, citing the new event.
+
 ## Record a task
 
 The tasks map holds work left to do. A `task` names one outcome and
@@ -121,9 +147,9 @@ gloss = "from a term to one it is defined against"
 `decisions` and `tasks` are built in as the same TOML; a project file
 of the same name extends one - keep every kind, headline, and settles
 entry, add more - and is refused if it drops any, since the log and
-the render rest on them. `code` and `index` cannot be declared: one is
-walked from the tree, the other is this directory's index. Add a row to `.percept/index.md` so a reader finds the
-new map.
+the render rest on them. `index` cannot be declared: it is this
+directory's index. Add a row to `.percept/index.md` so a reader finds
+the new map.
 
 ## Revise when meaning changes
 

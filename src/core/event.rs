@@ -133,18 +133,45 @@ pub enum Payload {
     /// learn when this source last opened the project here, so it can
     /// cut the log to what changed since then.
     SessionStarted,
+    /// A file, or a range of it, as it was when a node cited it -
+    /// experience, not judgment: this event says nothing about why the
+    /// file was read or what it shows. `path` is repo-relative,
+    /// `lines` the 1-based inclusive range read, `None` for the whole
+    /// file. `excerpt` is the text read from the tree at publish time,
+    /// so the record still reads once the file has moved on. A node
+    /// that lists this event's id in its `sources` is what cites it -
+    /// the claim lives on the node, never here.
+    FileCited {
+        path: PathBuf,
+        lines: Option<(u32, u32)>,
+        excerpt: String,
+    },
+}
+
+/// `path`, with `:from-to` appended for a ranged citation - the
+/// label a `file.cited` event reads as wherever it's shown short:
+/// the TUI, the context index, and a search preview.
+pub fn cited_label(path: &std::path::Path, lines: Option<(u32, u32)>) -> String {
+    match lines {
+        Some((from, to)) => format!("{}:{from}-{to}", path.display()),
+        None => path.display().to_string(),
+    }
 }
 
 impl Payload {
     /// The event's text - the one string that runs long, and the one a
     /// reader wants to see more of. A tool call carries none: its
     /// `tool` and `arguments` are the model's own short strings. Nor
-    /// does a map change: its fields are all short.
+    /// does a map change: its fields are all short. A `file.cited`
+    /// event's `excerpt` is this text - the file's own words, not
+    /// judgment - so a search hit inside it carries a match range and a
+    /// ranged read reaches it the same way any other long text does.
     pub fn content(&self) -> Option<&str> {
         match self {
             Self::MessageReceived { content }
             | Self::ThoughtRecorded { content }
             | Self::ToolResulted { content } => Some(content),
+            Self::FileCited { excerpt, .. } => Some(excerpt),
             Self::ToolCalled { .. }
             | Self::NodeAdded { .. }
             | Self::NodeRemoved { .. }
@@ -172,6 +199,7 @@ pub enum EventKind {
     EdgeRemoved,
     ModelCalled,
     SessionStarted,
+    FileCited,
 }
 
 /// One recorded fact in the conversation log. Append-only: a committed
@@ -341,6 +369,7 @@ impl Event {
             Payload::EdgeRemoved { .. } => EventKind::EdgeRemoved,
             Payload::ModelCalled(..) => EventKind::ModelCalled,
             Payload::SessionStarted => EventKind::SessionStarted,
+            Payload::FileCited { .. } => EventKind::FileCited,
         }
     }
 }

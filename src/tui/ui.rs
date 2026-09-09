@@ -295,6 +295,13 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
                 width,
             )
         }
+        // A file citation shows dimmed too - it's experience the
+        // model recorded, not dialogue.
+        Payload::FileCited { path, lines, .. } => tool_lines(
+            chat,
+            &format!("read {}", crate::core::cited_label(path, *lines)),
+            width,
+        ),
     }
 }
 

@@ -190,27 +190,7 @@ impl Fixture {
     /// control - and returns it so a test can point an edge at the
     /// node it minted.
     fn seed_node(&self, map: &str, kind: &str, name: &str, at: Timestamp) -> Event {
-        let event = Event::restore(
-            EventId::new(),
-            Actor::User,
-            Source {
-                name: "codex".to_string(),
-                path: self.root.clone(),
-            },
-            None,
-            at,
-            Payload::NodeAdded {
-                map: map.to_string(),
-                node: crate::core::NodeId::new(),
-                kind: kind.to_string(),
-                name: name.to_string(),
-                properties: std::collections::BTreeMap::new(),
-                sources: Vec::new(),
-                seq: 0,
-            },
-        );
-        self.log.append(&event).unwrap();
-        event
+        self.seed_node_with_sources(map, kind, name, at, Vec::new())
     }
 
     /// Appends an `edge.added` event resolving `from` against `to`, at
@@ -242,6 +222,79 @@ impl Fixture {
             },
         );
         self.log.append(&event).unwrap();
+    }
+
+    /// Appends a `file.cited` event citing `path` (repo-relative)
+    /// with `excerpt` as its text, `lines` the ranged read or `None`
+    /// for the whole file, `at` the moment it was seen, caused by
+    /// `causation` when this is a re-citation of an earlier one.
+    fn seed_citation(
+        &self,
+        path: &str,
+        lines: Option<(u32, u32)>,
+        excerpt: &str,
+        at: Timestamp,
+        causation: Option<EventId>,
+    ) -> Event {
+        let event = Event::restore(
+            EventId::new(),
+            Actor::Model,
+            Source {
+                name: "codex".to_string(),
+                path: self.root.clone(),
+            },
+            causation,
+            at,
+            Payload::FileCited {
+                path: PathBuf::from(path),
+                lines,
+                excerpt: excerpt.to_string(),
+            },
+        );
+        self.log.append(&event).unwrap();
+        event
+    }
+
+    /// `seed_node`, but with `sources` set - the ids a node cites, as a
+    /// `changed since recorded` test needs to point one at a
+    /// file.cited event.
+    fn seed_node_with_sources(
+        &self,
+        map: &str,
+        kind: &str,
+        name: &str,
+        at: Timestamp,
+        sources: Vec<EventId>,
+    ) -> Event {
+        let event = Event::restore(
+            EventId::new(),
+            Actor::User,
+            Source {
+                name: "codex".to_string(),
+                path: self.root.clone(),
+            },
+            None,
+            at,
+            Payload::NodeAdded {
+                map: map.to_string(),
+                node: crate::core::NodeId::new(),
+                kind: kind.to_string(),
+                name: name.to_string(),
+                properties: std::collections::BTreeMap::new(),
+                sources,
+                seq: 0,
+            },
+        );
+        self.log.append(&event).unwrap();
+        event
+    }
+
+    /// Writes `<root>/<path>`, creating any missing parent directories -
+    /// the working tree a `changed since recorded` test checks against.
+    fn write_file(&self, path: &str, content: &str) {
+        let full = self.root.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
     }
 }
 
@@ -846,6 +899,166 @@ fn a_map_without_settlement_has_no_open_section() {
 }
 
 #[test]
+fn an_unchanged_seen_file_reports_nothing() {
+    let fixture = Fixture::new();
+    fixture.write_file("src/a.rs", "fn one() {}\nfn two() {}\n");
+    let citation = fixture.seed_citation(
+        "src/a.rs",
+        Some((1, 1)),
+        "fn one() {}",
+        Timestamp::now(),
+        None,
+    );
+    fixture.seed_node_with_sources(
+        "decisions",
+        "question",
+        "why a?",
+        Timestamp::now(),
+        vec![citation.id()],
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(!context.contains("changed since recorded"), "{context:?}");
+}
+
+#[test]
+fn an_edited_range_reports_changed() {
+    let fixture = Fixture::new();
+    fixture.write_file("src/a.rs", "fn one() { edited }\n");
+    let citation = fixture.seed_citation(
+        "src/a.rs",
+        Some((1, 1)),
+        "fn one() {}",
+        Timestamp::now(),
+        None,
+    );
+    fixture.seed_node_with_sources(
+        "decisions",
+        "question",
+        "why a?",
+        Timestamp::now(),
+        vec![citation.id()],
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("changed since recorded"), "{context:?}");
+    assert!(context.contains("src/a.rs:1-1 changed"), "{context:?}");
+}
+
+#[test]
+fn a_deleted_file_reports_gone() {
+    let fixture = Fixture::new();
+    let citation = fixture.seed_citation(
+        "src/missing.rs",
+        None,
+        "fn gone() {}",
+        Timestamp::now(),
+        None,
+    );
+    fixture.seed_node_with_sources(
+        "tasks",
+        "task",
+        "fix it",
+        Timestamp::now(),
+        vec![citation.id()],
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("changed since recorded"), "{context:?}");
+    assert!(context.contains("src/missing.rs gone"), "{context:?}");
+}
+
+#[test]
+fn text_moved_to_other_lines_reports_nothing() {
+    let fixture = Fixture::new();
+    fixture.write_file("src/a.rs", "fn zero() {}\nfn one() {}\n");
+    let citation = fixture.seed_citation(
+        "src/a.rs",
+        Some((5, 5)),
+        "fn one() {}",
+        Timestamp::now(),
+        None,
+    );
+    fixture.seed_node_with_sources(
+        "decisions",
+        "question",
+        "why a?",
+        Timestamp::now(),
+        vec![citation.id()],
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(!context.contains("changed since recorded"), "{context:?}");
+}
+
+#[test]
+fn a_re_citation_replaces_the_one_checked() {
+    let fixture = Fixture::new();
+    fixture.write_file("src/a.rs", "fn two() {}\n");
+    let first = fixture.seed_citation(
+        "src/a.rs",
+        Some((1, 1)),
+        "fn one() {}",
+        Timestamp::now().minus_minutes(10).unwrap(),
+        None,
+    );
+    let second = fixture.seed_citation(
+        "src/a.rs",
+        Some((1, 1)),
+        "fn two() {}",
+        Timestamp::now(),
+        Some(first.id()),
+    );
+    fixture.seed_node_with_sources(
+        "decisions",
+        "question",
+        "why a?",
+        Timestamp::now(),
+        vec![first.id()],
+    );
+    let _ = second;
+
+    let context = fixture.session_start("codex");
+
+    assert!(!context.contains("changed since recorded"), "{context:?}");
+}
+
+#[test]
+fn a_superseded_decisions_seen_file_is_not_checked() {
+    let fixture = Fixture::new();
+    let citation = fixture.seed_citation(
+        "src/gone.rs",
+        None,
+        "fn gone() {}",
+        Timestamp::now(),
+        None,
+    );
+    let old = fixture.seed_node_with_sources(
+        "decisions",
+        "decision",
+        "old answer",
+        Timestamp::now(),
+        vec![citation.id()],
+    );
+    let new = fixture.seed_node_with_sources(
+        "decisions",
+        "decision",
+        "new answer",
+        Timestamp::now(),
+        Vec::new(),
+    );
+    fixture.seed_edge("decisions", "supersedes", &new, &old);
+
+    let context = fixture.session_start("codex");
+
+    assert!(!context.contains("changed since recorded"), "{context:?}");
+}
+
+#[test]
 fn pointer_names_first_open_item_in_schema_fold_order() {
     let fixture = Fixture::new();
     fixture.seed_node(
@@ -863,4 +1076,86 @@ fn pointer_names_first_open_item_in_schema_fold_order() {
         pointer.contains("percept maps show decisions --around"),
         "{pointer:?}"
     );
+}
+
+#[test]
+fn a_later_citation_of_a_different_path_does_not_replace_the_one_checked() {
+    let fixture = Fixture::new();
+    fixture.write_file("src/a.rs", "fn one() {}\n");
+    let first = fixture.seed_citation(
+        "src/a.rs",
+        None,
+        "fn one() {}",
+        Timestamp::now().minus_minutes(10).unwrap(),
+        None,
+    );
+    // Caused by `first`, but a different path - not a re-citation of
+    // `src/a.rs`, so it must not stand in for it.
+    fixture.seed_citation(
+        "src/b.rs",
+        None,
+        "fn two() {}",
+        Timestamp::now(),
+        Some(first.id()),
+    );
+    fixture.seed_node_with_sources(
+        "decisions",
+        "question",
+        "why a?",
+        Timestamp::now(),
+        vec![first.id()],
+    );
+
+    let context = fixture.session_start("codex");
+
+    // `src/a.rs` still reads as recorded, so nothing changed.
+    assert!(!context.contains("changed since recorded"), "{context:?}");
+}
+
+#[test]
+fn a_cited_file_with_one_invalid_utf8_byte_elsewhere_still_reads() {
+    let fixture = Fixture::new();
+    let mut bytes = b"fn one() {}\n// ".to_vec();
+    bytes.push(0xff);
+    bytes.extend_from_slice(b"\n");
+    let full = fixture.root.join("src/a.rs");
+    std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+    std::fs::write(&full, &bytes).unwrap();
+    let citation = fixture.seed_citation(
+        "src/a.rs",
+        Some((1, 1)),
+        "fn one() {}",
+        Timestamp::now(),
+        None,
+    );
+    fixture.seed_node_with_sources(
+        "decisions",
+        "question",
+        "why a?",
+        Timestamp::now(),
+        vec![citation.id()],
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(!context.contains("changed since recorded"), "{context:?}");
+}
+
+#[test]
+fn a_citation_whose_excerpt_is_blank_reports_changed() {
+    let fixture = Fixture::new();
+    fixture.write_file("src/a.rs", "fn one() {}\n");
+    let citation = fixture.seed_citation("src/a.rs", None, "   \n  ", Timestamp::now(), None);
+    fixture.seed_node_with_sources(
+        "decisions",
+        "question",
+        "why a?",
+        Timestamp::now(),
+        vec![citation.id()],
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("changed since recorded"), "{context:?}");
+    assert!(context.contains("src/a.rs changed"), "{context:?}");
 }

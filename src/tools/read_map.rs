@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::core::{MapReader, NodeRef, Selection};
+use crate::core::MapReader;
 use crate::harness::{Tool, ToolOutput, ToolSpec};
-use crate::mapstore::{encode_fragment, encode_lines, encode_schema, NodeRefArgs};
+use crate::mapstore::NodeRefArgs;
 use crate::store::optional_time;
+use crate::tools::read_selection;
 
 /// The `read_map` tool: one map, whole or cut to a fragment, as JSONL
 /// with event ids on every node and edge. Offered when the prompt does
@@ -25,19 +26,16 @@ const NAME: &str = "read_map";
 
 const DESCRIPTION: &str = "Read one cognitive map by name, whole or cut to \
     a fragment: around one node to a depth, since an instant, of some \
-    kinds. The maps are the ones the catalogue lists; `code`, the map \
-    of files and imports, is walked fresh from the working tree. \
-    Prefer this over grep for code structure. Returns JSONL: first a \
-    line naming the map's node and edge kinds, each with one line on \
-    what it is - read it before choosing an `around` selector, since a \
-    kind's name alone can mislead. Then a line counting what was shown \
-    of the whole and how many edges cross the cut, then every node, \
-    then every edge, each with the event ids it cites. A crossing edge \
-    is where to widen when an exception or a contradiction could \
-    change the answer. Open a map before answering from it or revising \
-    it; what the conversation shows of a map may be only its \
-    headlines. `since` has no meaning for a derived map, which has no \
-    history.";
+    kinds. The maps are the ones the catalogue lists. Returns JSONL: \
+    first a line naming the map's node and edge kinds, each with one \
+    line on what it is - read it before choosing an `around` selector, \
+    since a kind's name alone can mislead. Then a line counting what \
+    was shown of the whole and how many edges cross the cut, then \
+    every node, then every edge, each with the event ids it cites. A \
+    crossing edge is where to widen when an exception or a \
+    contradiction could change the answer. Open a map before answering \
+    from it or revising it; what the conversation shows of a map may \
+    be only its headlines.";
 
 /// JSON Schema for `run`'s `arguments`. A string, not a `Value` - the
 /// domain's `ToolSpec` is serde-free, so the provider parses this.
@@ -93,39 +91,14 @@ impl Tool for ReadMap {
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
         let map = self.maps.read(&args.map)?;
-        // Resolved against this same fold, so `select` below cuts the
-        // map this node was found in, not a second one read after it.
-        // An empty map has nothing to resolve against - `select`'s own
-        // empty-map case would skip `around` anyway, so a node named on
-        // one is not an error to report over "nothing recorded yet".
-        let around = if map.nodes().is_empty() {
-            None
-        } else {
-            args.around
-                .map(|node| -> Result<NodeRef, crate::core::MapError> {
-                    let id = node.resolve(&map)?;
-                    let node = map.node(id).expect("resolve returns a live node's id");
-                    Ok(NodeRef {
-                        kind: node.kind.clone(),
-                        name: node.name.clone(),
-                    })
-                })
-                .transpose()?
-        };
-        let selection = Selection {
-            around: around.as_ref().map(|node| (node, args.depth)),
-            since: optional_time(args.since.as_deref())?,
-            kinds: &args.kinds,
-        };
-        // `select` refuses `since` on the code map - it has no history.
-        let fragment = map.select(&selection)?;
-        let lines = [
-            encode_schema(fragment.map().schema()),
-            encode_fragment(&fragment),
-        ]
-        .into_iter()
-        .chain(encode_lines(fragment.map()));
-        Ok(ToolOutput::text(lines.collect::<Vec<_>>().join("\n")))
+        read_selection(
+            map,
+            args.around,
+            args.depth,
+            optional_time(args.since.as_deref())?,
+            &args.kinds,
+            true,
+        )
     }
 }
 

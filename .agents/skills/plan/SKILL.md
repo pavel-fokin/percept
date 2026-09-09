@@ -97,21 +97,32 @@ of this map's sources. percept stamps every event with the main
 checkout's path, worktree or not, which is why the filter asks for the
 common git dir's parent and not `--show-toplevel`.
 
-One decision, with `P="~/.percept/bin/percept maps"` and `$id` the
-prompt. Every write carries `--actor model`: the agent is recording,
-not the user, and the map shows the difference.
+One decision, as one document on stdin, with `$id` the prompt. Every
+write carries `--actor model`: the agent is recording, not the user,
+and the map shows the difference.
 
 ```
-$P add-node decisions --actor model --kind question --name "Where does the log live?" --source $id
-$P add-node decisions --actor model --kind option --name "percept.jsonl in the working directory" \
-  --prop why="one log per checkout makes cross-project search a join" --source $id
-$P add-edge decisions --actor model --kind answers \
-  --from 'option:percept.jsonl in the working directory' --to 'question:Where does the log live?' --source $id
-$P add-node decisions --actor model --kind decision --name "one log under ~/.percept" \
-  --prop why="one variable also covers the binary; cross-project search stays free" --source $id
-$P add-edge decisions --actor model --kind resolves \
-  --from 'decision:one log under ~/.percept' --to 'question:Where does the log live?' --source $id
+~/.percept/bin/percept maps record decisions --actor model --source $id <<'EOF'
+question "Where does the log live?"
+option "percept.jsonl in the working directory"
+  why "one log per checkout makes cross-project search a join"
+  answers question
+decision "one log under ~/.percept"
+  why "one variable also covers the binary; cross-project search stays free"
+  resolves question
+  cites src/main.rs:40-52
+EOF
 ```
+
+A line at the margin is a node, `kind "name"`. An indented line under
+it is a property, `why "..."`, an edge to a short id or to the latest
+node of that kind above it, `resolves question`, or `cites
+path[:from-to]`, which publishes the text as a `file.cited` event and
+adds it to the node's sources. The reply lists what was written, one
+short id per line. The document is checked whole before the first
+write; a failure after that names the node it reached, so continue
+from there rather than repeating. `add-node` and `add-edge` remain
+for a single change.
 
 An option is an alternative that lost, and it says why in `why`: the
 store refuses one without it. The pick is not an option, it is the

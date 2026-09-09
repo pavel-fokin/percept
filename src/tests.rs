@@ -1,14 +1,10 @@
 use std::fs;
-use std::sync::Arc;
 
 use tempfile::tempdir;
 
-use super::{
-    discover_root, resolve_toolset, LogMaps, ReadMap, RoutedMaps, Toolset, CODE_SOURCE_NAME,
-};
-use crate::core::testing::{schemas, scope, FakeLog};
-use crate::core::MapReader;
+use super::{code_tools, discover_root, resolve_toolset, Toolset, CODE_SOURCE_NAME};
 use crate::harness::Tool;
+use crate::tools::ReadCode;
 
 #[test]
 fn tui_in_a_git_checkout_defaults_to_code_tools() {
@@ -52,55 +48,28 @@ fn unknown_toolset_is_rejected() {
 }
 
 #[test]
-fn routed_maps_walks_the_working_tree_for_the_code_map() {
+fn code_tools_offers_read_code() {
+    let tree = tempdir().unwrap();
+
+    let tools = code_tools(tree.path()).unwrap();
+
+    assert!(tools.iter().any(|tool| tool.spec().name == "read_code"));
+}
+
+#[test]
+fn read_code_walks_the_working_tree_it_is_given() {
     let tree = tempdir().unwrap();
     fs::write(
         tree.path().join("lib.rs"),
         "pub fn answer() -> u32 { 42 }\n",
     )
     .unwrap();
-    let maps = RoutedMaps {
-        folded: LogMaps::new(Arc::new(FakeLog::default()), Arc::new(schemas()), scope()),
-        root: tree.path().to_path_buf(),
-    };
+    let tool = ReadCode::new(tree.path().to_path_buf());
 
-    let code = maps.read("code").unwrap();
+    let out = tool.run("{}").unwrap();
 
-    assert!(code
-        .nodes()
-        .iter()
-        .any(|node| node.kind == "file" && node.name == "lib.rs"));
-    assert!(code
-        .nodes()
-        .iter()
-        .any(|node| node.kind == "function" && node.name.ends_with("::answer")));
-}
-
-#[test]
-fn routed_maps_folds_every_other_map_from_the_log() {
-    let maps = RoutedMaps {
-        folded: LogMaps::new(Arc::new(FakeLog::default()), Arc::new(schemas()), scope()),
-        root: tempdir().unwrap().path().to_path_buf(),
-    };
-
-    assert_eq!(maps.read("decisions").unwrap().nodes().len(), 0);
-    assert!(maps.read("plans").is_err());
-}
-
-#[test]
-fn read_map_refuses_since_on_the_code_map() {
-    let tree = tempdir().unwrap();
-    fs::write(tree.path().join("lib.rs"), "pub fn f() {}\n").unwrap();
-    let tool = ReadMap::new(Arc::new(RoutedMaps {
-        folded: LogMaps::new(Arc::new(FakeLog::default()), Arc::new(schemas()), scope()),
-        root: tree.path().to_path_buf(),
-    }));
-
-    let Err(err) = tool.run(r#"{"map":"code","since":"1d"}"#) else {
-        panic!("expected an error")
-    };
-
-    assert!(err.to_string().contains("no meaning for"), "{err}");
+    assert!(out.content.contains("lib.rs"));
+    assert!(out.content.contains("::answer"));
 }
 
 #[test]

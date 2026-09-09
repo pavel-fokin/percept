@@ -27,8 +27,8 @@ pub fn fold_map(
     Ok(Map::fold(schemas.find(name)?, scope, &log.load()?)?)
 }
 
-/// The `MapReader` for every log-folded map. `main` wraps this to route
-/// `code` to the working-tree walk, so `store` never depends on `code`.
+/// The `MapReader` over every map `Schemas` knows, each folded from the
+/// log.
 pub struct LogMaps {
     log: Arc<dyn EventLog>,
     schemas: Arc<Schemas>,
@@ -155,6 +155,30 @@ pub fn commit(
     }))
 }
 
+/// One batch of changes to the map `name` names, minted and committed
+/// atomically: `EventLog::append_batch_computed` hands `build` a
+/// `Snapshot` folded from every event already in the log under its
+/// lock, and every event it returns - both the events `build` minted
+/// itself, a citation's `file.cited` among them, and the ones its own
+/// `Snapshot::apply` calls produced - is appended together before any
+/// other writer's own append can run. `build` errs, nothing commits: a
+/// batch is checked and applied to one in-memory fold before any of it
+/// reaches the log, so a later step's failure leaves no trace of the
+/// steps before it.
+pub fn commit_batch(
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    name: &str,
+    scope: &Scope,
+    build: impl FnOnce(&mut Snapshot) -> Result<Vec<crate::core::Event>, Box<dyn std::error::Error>>,
+) -> Result<Vec<crate::core::Event>, Box<dyn std::error::Error>> {
+    let (name, scope) = (name.to_string(), scope.clone());
+    log.append_batch_computed(Box::new(move |events| {
+        let mut snapshot = Snapshot::from_events(schemas, &name, &scope, events)?;
+        build(&mut snapshot)
+    }))
+}
+
 #[derive(Serialize)]
 struct MapLine<'a> {
     map: &'a str,
@@ -163,9 +187,9 @@ struct MapLine<'a> {
     edges: usize,
 }
 
-/// Who added a node or edge and when. Absent on a derived map's lines:
-/// its nodes were stamped by the walk that built them, and a reader
-/// would take that for the moment the code was written.
+/// Who added a node or edge and when. Absent on a line the caller asked
+/// unstamped - `read_code`'s tree walk, whose nodes were stamped by the
+/// walk that built them, not by who wrote the code or when.
 #[derive(Serialize)]
 struct Stamp {
     actor: &'static str,
@@ -173,8 +197,12 @@ struct Stamp {
 }
 
 impl Stamp {
-    fn of(map: &Map, actor: Actor, added_at: Timestamp) -> Option<Self> {
-        (!map.schema().derived).then(|| Self {
+    /// `Some` when `stamped`, else `None` - `#[serde(flatten)]` on an
+    /// `Option` omits every field of a `None` rather than writing a
+    /// null, so the caller's choice is the only branch either encoder
+    /// needs.
+    fn of(actor: Actor, added_at: Timestamp, stamped: bool) -> Option<Self> {
+        stamped.then(|| Self {
             actor: actor.name(),
             added_at: added_at.to_string(),
         })
@@ -193,7 +221,7 @@ struct NodeLine<'a> {
     name: &'a str,
     properties: &'a BTreeMap<String, String>,
     sources: Vec<String>,
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    #[serde(flatten)]
     stamp: Option<Stamp>,
 }
 
@@ -203,7 +231,7 @@ struct EdgeLine<'a> {
     from: String,
     to: String,
     sources: Vec<String>,
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    #[serde(flatten)]
     stamp: Option<Stamp>,
 }
 
@@ -293,10 +321,11 @@ pub fn encode_fragment(fragment: &Fragment) -> String {
 }
 
 /// A map as JSONL: every node, then every edge - the order `maps show`
-/// prints and `read_map` returns.
-pub fn encode_lines(map: &Map) -> impl Iterator<Item = String> + '_ {
-    let nodes = map.nodes().iter().map(move |node| encode_node(map, node));
-    let edges = map.edges().iter().map(move |edge| encode_edge(map, edge));
+/// prints and `read_map` returns. `stamped` is `false` only for
+/// `read_code`'s tree walk - see `Stamp::of`.
+pub fn encode_lines(map: &Map, stamped: bool) -> impl Iterator<Item = String> + '_ {
+    let nodes = map.nodes().iter().map(move |node| encode_node(map, node, stamped));
+    let edges = map.edges().iter().map(move |edge| encode_edge(map, edge, stamped));
     nodes.chain(edges)
 }
 
@@ -325,7 +354,7 @@ impl NodeRefArgs {
     }
 }
 
-pub fn encode_node(map: &Map, node: &Node) -> String {
+pub fn encode_node(map: &Map, node: &Node, stamped: bool) -> String {
     serde_json::to_string(&NodeLine {
         node: node.id.as_uuid().to_string(),
         id: map.short_id(node.id).unwrap_or_default(),
@@ -333,7 +362,7 @@ pub fn encode_node(map: &Map, node: &Node) -> String {
         name: &node.name,
         properties: &node.properties,
         sources: ids(&node.sources),
-        stamp: Stamp::of(map, node.actor, node.added_at),
+        stamp: Stamp::of(node.actor, node.added_at, stamped),
     })
     .expect("NodeLine always serializes")
 }
@@ -341,13 +370,13 @@ pub fn encode_node(map: &Map, node: &Node) -> String {
 /// One line per edge, its ends named `kind:name` - the way `--around`
 /// and `--from` take a node - so the line reads on its own instead of
 /// through a join on the node lines above it.
-pub fn encode_edge(map: &Map, edge: &Edge) -> String {
+pub fn encode_edge(map: &Map, edge: &Edge, stamped: bool) -> String {
     serde_json::to_string(&EdgeLine {
         edge: &edge.kind,
         from: node_ref(map, edge.from),
         to: node_ref(map, edge.to),
         sources: ids(&edge.sources),
-        stamp: Stamp::of(map, edge.actor, edge.added_at),
+        stamp: Stamp::of(edge.actor, edge.added_at, stamped),
     })
     .expect("EdgeLine always serializes")
 }

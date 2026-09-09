@@ -11,13 +11,15 @@ mod search;
 #[cfg(test)]
 pub mod testing;
 
-pub use event::{Actor, Event, EventId, EventKind, Payload, Source, Usage, PREVIEW_CHARS};
+pub use event::{
+    cited_label, Actor, Event, EventId, EventKind, Payload, Source, Usage, PREVIEW_CHARS,
+};
 pub use event_log::EventLog;
 #[cfg(test)]
 pub use map::SUPERSEDES;
 pub use map::{
-    code, default_prefix, map_of, Edge, Fragment, Kind, Map, MapError, Mutation, Node, NodeId,
-    NodeRef, Schema, Schemas, Scope, Selection, Settlement, CODE, DECISION,
+    default_prefix, map_of, Edge, Fragment, Kind, Map, MapError, Mutation, Node, NodeId, NodeRef,
+    Schema, Schemas, Scope, Selection, Settlement, DECISION,
 };
 pub use map_reader::MapReader;
 pub use search::{EventQuery, EventSearch};

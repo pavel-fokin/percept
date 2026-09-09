@@ -101,6 +101,37 @@ struct ModelCalledBody {
     cached_tokens: Option<u64>,
 }
 
+/// `lines` on the wire - `"40-58"`, or absent for the whole file.
+#[derive(Serialize, Deserialize)]
+struct FileCitedBody {
+    path: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lines: Option<String>,
+    excerpt: String,
+}
+
+/// `Payload::FileCited.lines` as `"from-to"` - the wire spelling of a
+/// 1-based inclusive range.
+fn format_lines(lines: (u32, u32)) -> String {
+    format!("{}-{}", lines.0, lines.1)
+}
+
+/// `"from-to"` back to `Payload::FileCited.lines` - shared with
+/// `cli::publish`, which parses the same shape before it ever reaches
+/// `decode`. `from` must be at least 1 and no greater than `to`: a
+/// reversed or zero-based range names no lines a file has.
+pub fn parse_lines(s: &str) -> Result<(u32, u32), Error> {
+    let (from, to) = s
+        .split_once('-')
+        .ok_or_else(|| Error::BadLines(s.to_string()))?;
+    let from: u32 = from.parse().map_err(|_| Error::BadLines(s.to_string()))?;
+    let to: u32 = to.parse().map_err(|_| Error::BadLines(s.to_string()))?;
+    if from == 0 || from > to {
+        return Err(Error::BadLines(s.to_string()));
+    }
+    Ok((from, to))
+}
+
 const MESSAGE_RECEIVED: &str = "message.received";
 const THOUGHT_RECORDED: &str = "thought.recorded";
 const TOOL_CALLED: &str = "tool.called";
@@ -111,10 +142,11 @@ const EDGE_ADDED: &str = "edge.added";
 const EDGE_REMOVED: &str = "edge.removed";
 const MODEL_CALLED: &str = "model.called";
 const SESSION_STARTED: &str = "session.started";
+const FILE_CITED: &str = "file.cited";
 
 /// Every `type` the log records, for the error that lists them when a
 /// caller names one that isn't here.
-pub const KINDS: [&str; 10] = [
+pub const KINDS: [&str; 11] = [
     MESSAGE_RECEIVED,
     THOUGHT_RECORDED,
     TOOL_CALLED,
@@ -125,6 +157,7 @@ pub const KINDS: [&str; 10] = [
     EDGE_REMOVED,
     MODEL_CALLED,
     SESSION_STARTED,
+    FILE_CITED,
 ];
 
 /// The wire `type` a kind serializes as.
@@ -140,6 +173,7 @@ fn kind(kind: EventKind) -> &'static str {
         EventKind::EdgeRemoved => EDGE_REMOVED,
         EventKind::ModelCalled => MODEL_CALLED,
         EventKind::SessionStarted => SESSION_STARTED,
+        EventKind::FileCited => FILE_CITED,
     }
 }
 
@@ -157,6 +191,7 @@ pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
         EDGE_REMOVED => Ok(EventKind::EdgeRemoved),
         MODEL_CALLED => Ok(EventKind::ModelCalled),
         SESSION_STARTED => Ok(EventKind::SessionStarted),
+        FILE_CITED => Ok(EventKind::FileCited),
         other => Err(Error::UnknownEventType(other.to_string())),
     }
 }
@@ -171,6 +206,17 @@ pub use crate::core::PREVIEW_CHARS;
 /// The payload key `Payload::content` travels under - one name for the
 /// sites that cut or slice it on the wire.
 const CONTENT: &str = "content";
+
+/// The wire field `Payload::content` travels under for `event`'s kind -
+/// `content` for every payload but `file.cited`, which calls its long
+/// text `excerpt`. One lookup, so `summarize` and `excerpt` cut and
+/// replace the same field they read.
+fn content_key(kind: EventKind) -> &'static str {
+    match kind {
+        EventKind::FileCited => "excerpt",
+        _ => CONTENT,
+    }
+}
 
 /// What a summary line says about the `content` it cut, so a caller
 /// can tell whether a second look is worth a call, and where to take it. Lives beside the
@@ -211,10 +257,11 @@ struct Summary {
 /// the model's own short arguments, not the text a caller reads.
 pub fn summarize(event: &crate::core::Event, hit: Option<Range<usize>>, preview: usize) -> String {
     let mut wire = Event::from(event);
-    // `content` leaves the payload before `shorten` runs over the rest,
-    // so it is cut once, here, at the caller's size.
+    let key = content_key(event.kind());
+    // `content` (or `excerpt`) leaves the payload before `shorten` runs
+    // over the rest, so it is cut once, here, at the caller's size.
     if let Some(fields) = wire.payload.as_object_mut() {
-        fields.remove(CONTENT);
+        fields.remove(key);
     }
     wire.payload = shorten(wire.payload);
     let preview = event.payload().content().and_then(|text| {
@@ -229,7 +276,7 @@ pub fn summarize(event: &crate::core::Event, hit: Option<Range<usize>>, preview:
         } else {
             (text.to_string(), None)
         };
-        wire.payload[CONTENT] = Value::String(shown);
+        wire.payload[key] = Value::String(shown);
         preview
     });
     serde_json::to_string(&Summary {
@@ -290,7 +337,7 @@ pub fn excerpt(
         return Err(Error::InvertedRange { start, end });
     }
 
-    wire.payload[CONTENT] = Value::String(chars[start..end].iter().collect());
+    wire.payload[content_key(event.kind())] = Value::String(chars[start..end].iter().collect());
 
     Ok(serde_json::to_string(&Summary {
         event: wire,
@@ -411,6 +458,16 @@ impl From<&crate::core::Event> for Event {
             })
             .expect("ModelCalledBody always serializes"),
             Payload::SessionStarted => Value::Object(serde_json::Map::new()),
+            Payload::FileCited {
+                path,
+                lines,
+                excerpt,
+            } => serde_json::to_value(FileCitedBody {
+                path: path.clone(),
+                lines: lines.map(format_lines),
+                excerpt: excerpt.clone(),
+            })
+            .expect("FileCitedBody always serializes"),
         };
 
         Self {
@@ -574,6 +631,14 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
             }))
         }
         EventKind::SessionStarted => Ok(Payload::SessionStarted),
+        EventKind::FileCited => {
+            let body: FileCitedBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::FileCited {
+                path: body.path,
+                lines: body.lines.as_deref().map(parse_lines).transpose()?,
+                excerpt: body.excerpt,
+            })
+        }
     }
 }
 

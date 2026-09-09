@@ -1,14 +1,13 @@
 //! The command-line surface: `percept events publish` appends one event
 //! without opening the TUI, `percept events search` queries the log,
 //! `percept events show` dereferences one event by id, `percept maps`
-//! folds a cognitive map from the log and prints it - except `code`,
-//! walked fresh from the working tree - `percept ask` runs one full
-//! turn - including the tool loop - and prints the reply, `percept
-//! reflect` runs one asking the model to revise its maps, `percept
-//! hook <client>` records one coding client's turn from the hook JSON
-//! it reads on stdin - see `hook` - and `percept init <client>` writes
-//! that client's project config so its hooks call `percept hook
-//! <client>` - see `init`. A
+//! folds a cognitive map from the log and prints it, `percept ask`
+//! runs one full turn - including the tool loop - and prints the
+//! reply, `percept reflect` runs one asking the model to revise its
+//! maps, `percept hook <client>` records one coding client's turn from
+//! the hook JSON it reads on stdin - see `hook` - and `percept init
+//! <client>` writes that client's project config so its hooks call
+//! `percept hook <client>` - see `init`. A
 //! presentation-layer peer of `tui` - it forwards parsed input to
 //! `store` and `app`, and has no chat logic of its own: `ask` drives the
 //! same `AppService` turn policy `tui` does, just inline instead of over
@@ -20,18 +19,17 @@
 //! so a caller spends tokens on the whole of one deliberately, via
 //! `--full`, `show`, or `show --range` into one `content`.
 
-use std::collections::BTreeMap;
-use std::io::{self, Write};
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap};
+use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 use tokio_stream::StreamExt;
 
 use crate::app::{run_tool, AppService, ToolStep};
-use crate::code;
 use crate::core::{
-    Actor, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
-    Schemas,
+    cited_label, Actor, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeId,
+    NodeRef, Payload, Schemas,
 };
 use crate::harness::Chunk;
 use crate::mapstore;
@@ -54,12 +52,11 @@ leave relevance to the caller.
 Run with no arguments to open the TUI. Every subcommand reaches the log \
 without it: `events publish` appends one event, `events search` and \
 `events show` query it, `maps list` and `maps show` print a cognitive \
-map folded from it - `code`, the map of files and imports, is walked \
-fresh from the working tree instead - `ask` runs one full turn and \
-prints the reply, `reflect` runs one turn asking the model to \
-revise its maps, `hook <client>` records one coding client's turn \
-from the hook JSON it reads on stdin, and `init <client>` writes that \
-client's project config to call it.")]
+map folded from it, `ask` runs one full turn and prints the reply, \
+`reflect` runs one turn asking the model to revise its maps, `hook \
+<client>` records one coding client's turn from the hook JSON it reads \
+on stdin, and `init <client>` writes that client's project config to \
+call it.")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -72,8 +69,7 @@ pub enum Command {
         #[command(subcommand)]
         command: EventsCommand,
     },
-    /// Read percept's maps - the cognitive ones folded from the log,
-    /// and `code`, walked fresh from the working tree.
+    /// Read percept's maps - the cognitive ones folded from the log.
     Maps {
         #[command(subcommand)]
         command: MapsCommand,
@@ -105,6 +101,9 @@ pub enum MapsCommand {
     RemoveNode(RemoveNodeArgs),
     /// Remove an edge from a map.
     RemoveEdge(EdgeArgs),
+    /// Add several nodes and edges from a document on stdin. Prints one
+    /// line per node, then one per edge, then one per `cites` line.
+    Record(RecordArgs),
 }
 
 /// How `maps show` and `maps list` print a map.
@@ -140,22 +139,12 @@ pub struct ShowMapArgs {
     depth: usize,
     /// Keep only what the map gained since this instant - an ISO-8601
     /// timestamp, or `<N>d`, `<N>h`, `<N>m` back from now: the nodes
-    /// added since, and the ends of the edges added since. Refused for
-    /// the code map, which is walked fresh and has no history.
+    /// added since, and the ends of the edges added since.
     #[arg(long, value_parser = |s: &str| parse_time("since", s))]
     since: Option<Timestamp>,
-    /// Fold every project's events instead of only this one's. Ignored
-    /// for the code map, which is never folded from the log.
+    /// Fold every project's events instead of only this one's.
     #[arg(long)]
     all_projects: bool,
-}
-
-impl ShowMapArgs {
-    /// Whether this names the code map - derived from the working tree,
-    /// so dispatch never opens the log to find out.
-    pub fn is_code(&self) -> bool {
-        self.map == crate::core::CODE
-    }
 }
 
 #[derive(Args)]
@@ -227,6 +216,24 @@ pub struct EdgeArgs {
     /// `kind:name` of the node the edge points to, or its short id.
     #[arg(long, value_parser = non_blank)]
     to: String,
+}
+
+#[derive(Args)]
+pub struct RecordArgs {
+    /// The map's name, as `maps list` prints it.
+    map: String,
+    /// Repeatable. An event this fact was drawn from. Added to every
+    /// node's and every edge's sources, alongside a node's own `cites`.
+    #[arg(long)]
+    source: Vec<String>,
+    /// Who is writing: `user` for a human at the terminal, `model` for an
+    /// agent recording on their behalf.
+    #[arg(long, default_value = "user", value_parser = parse_actor_arg)]
+    actor: Actor,
+    /// The id of the event a `cites` line's `file.cited` event follows
+    /// from.
+    #[arg(long)]
+    causation: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -394,6 +401,9 @@ fn resolve_ref(map: &Map, s: &str) -> Result<NodeRef, Box<dyn std::error::Error>
 /// decode, so the CLI only parses flags. `root` is the writer's project
 /// root, resolved once in `main`; `args.source` only names the writer,
 /// so `publish` pairs the two into the `Source` the event carries.
+/// `checkout` is the working tree a `file.cited` payload with no
+/// `excerpt` reads from - in a worktree it differs from `root`, which
+/// stays the project identity the event's `Source` carries.
 /// Appends one event and prints its id, so a writer can cite it as the
 /// `--causation` of the next. A cause the log lacks is an error: a typo
 /// in provenance is worse than none.
@@ -401,30 +411,110 @@ pub fn publish(
     args: PublishArgs,
     log: &dyn EventLog,
     root: &Path,
+    checkout: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let causation_id = args
         .causation
         .as_deref()
         .map(|id| known_event_id(id, log))
         .transpose()?;
-    let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
     let source = crate::core::Source {
         name: args.source,
         path: root.to_path_buf(),
     };
-    let event = store::decode(&args.actor, source, &args.kind, causation_id, payload)?;
-    // A raw map event would skip `Map::apply`, and one that breaks a
-    // rule fails every fold from then on, with no undo in an
-    // append-only log.
-    if crate::core::map_of(event.payload()).is_some() {
-        return Err(format!(
-            "{} is written through `percept maps`, not published raw",
-            args.kind
-        )
-        .into());
-    }
+
+    let event = if args.kind == "file.cited" {
+        let payload = file_cited_payload(&args.payload, checkout)?;
+        Event::new(store::parse_actor(&args.actor)?, source, causation_id, payload)
+    } else {
+        let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
+        let event = store::decode(&args.actor, source, &args.kind, causation_id, payload)?;
+        // A raw map event would skip `Map::apply`, and one that breaks
+        // a rule fails every fold from then on, with no undo in an
+        // append-only log.
+        if crate::core::map_of(event.payload()).is_some() {
+            return Err(format!(
+                "{} is written through `percept maps`, not published raw",
+                args.kind
+            )
+            .into());
+        }
+        event
+    };
     log.append(&event)?;
     print_lines(std::iter::once(event.id().as_uuid().to_string()))
+}
+
+/// The `payload` argument to `percept events publish --type file.cited`,
+/// as the caller wrote it - `excerpt` absent when the tree should
+/// supply it.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawFileCited {
+    path: String,
+    lines: Option<String>,
+    excerpt: Option<String>,
+}
+
+/// Parses the JSON `publish --type file.cited` takes and builds its
+/// payload - `build_file_cited` does the work, over a `Workspace`
+/// opened once for this one call.
+fn file_cited_payload(raw: &str, checkout: &Path) -> Result<Payload, Box<dyn std::error::Error>> {
+    let raw: RawFileCited = serde_json::from_str(raw).map_err(store::Error::BadPayload)?;
+    let lines = raw.lines.as_deref().map(store::parse_lines).transpose()?;
+    let workspace = tools::Workspace::new(checkout)?;
+    build_file_cited(&workspace, &raw.path, lines, raw.excerpt)
+}
+
+/// Resolves `path` inside `workspace`, refusing one outside it, and
+/// reads `excerpt` from the tree when the caller gave none, refusing a
+/// binary file, a range past the file's end, or an excerpt that is
+/// blank after trimming - either given or read, since a blank excerpt
+/// would match any text a later check compared it to. `path` is stored
+/// resolved and repo-relative; an `excerpt` the caller did give is
+/// otherwise stored as given.
+fn build_file_cited(
+    workspace: &tools::Workspace,
+    path: &str,
+    lines: Option<(u32, u32)>,
+    excerpt: Option<String>,
+) -> Result<Payload, Box<dyn std::error::Error>> {
+    let resolved = workspace.resolve(path)?;
+    let stored_path = PathBuf::from(workspace.relative(&resolved));
+
+    let excerpt = match excerpt {
+        Some(excerpt) => excerpt,
+        None => {
+            let text = tools::read_text_lossy(&resolved)?;
+            match lines {
+                Some((from, to)) => {
+                    let file_lines = text.lines().count();
+                    if to as usize > file_lines {
+                        return Err(format!(
+                            "lines {from}-{to} run past {}'s {file_lines} lines",
+                            stored_path.display()
+                        )
+                        .into());
+                    }
+                    text.lines()
+                        .skip(from as usize - 1)
+                        .take((to - from + 1) as usize)
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                }
+                None => text,
+            }
+        }
+    };
+    if excerpt.trim().is_empty() {
+        return Err(format!("{}'s excerpt must not be blank", stored_path.display()).into());
+    }
+
+    Ok(Payload::FileCited {
+        path: stored_path,
+        lines,
+        excerpt,
+    })
 }
 
 fn known_event_id(
@@ -489,17 +579,14 @@ fn scope(all_projects: bool, root: &Path) -> crate::core::Scope {
 
 /// Prints every map percept knows with its size: the log's maps, folded
 /// from one read of `log` and scoped to `project` unless `args` says
-/// otherwise, then the code map, walked fresh from `tree` - the
-/// checkout, which in a worktree is not the project's path.
+/// otherwise.
 pub fn maps_list(
     args: ListMapsArgs,
     log: &dyn EventLog,
     schemas: &Schemas,
     project: &Path,
-    tree: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut maps = schemas.fold_all(&scope(args.all_projects, project), &log.load()?)?;
-    maps.push(code::build(tree)?);
+    let maps = schemas.fold_all(&scope(args.all_projects, project), &log.load()?)?;
     match args.format {
         Format::Json => print_lines(maps.iter().map(mapstore::encode_map)),
         Format::Md => print_text(&mapstore::catalogue(&maps)),
@@ -519,17 +606,9 @@ pub fn maps_show(
     print_map(map, &args)
 }
 
-/// Prints the code map, walked fresh from `root` - never the log, so
-/// this runs in a directory with no `percept.jsonl`. `print_map`'s
-/// `select` refuses `--since`: every node is as old as this walk.
-pub fn maps_show_code(args: ShowMapArgs, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let map = code::build(root)?;
-    print_map(map, &args)
-}
-
-/// `maps_show` and `maps_show_code`'s shared tail: cut `map` to
-/// `args`'s filters, then print it nodes-then-edges. `--since` runs
-/// after `--around`, so it reads as "what changed near this node".
+/// `maps_show`'s tail: cut `map` to `args`'s filters, then print it
+/// nodes-then-edges. `--since` runs after `--around`, so it reads as
+/// "what changed near this node".
 fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
     // An empty map has nothing to resolve `--around` against - `select`'s
     // own empty-map case skips it anyway, so a node named on one is not
@@ -552,7 +631,7 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
         eprintln!("{}", mapstore::encode_fragment(&fragment));
     }
     match args.format {
-        Format::Json => print_lines(mapstore::encode_lines(fragment.map())),
+        Format::Json => print_lines(mapstore::encode_lines(fragment.map(), true)),
         Format::Md => print_text(&mapstore::markdown(fragment.map())),
     }
 }
@@ -664,6 +743,321 @@ pub fn maps_remove_edge(
         }
     })
     .map(drop)
+}
+
+/// One `cites` line under a node: the file it rested on, and the range
+/// within it, `None` for the whole file.
+struct DocCite {
+    path: String,
+    lines: Option<(u32, u32)>,
+}
+
+/// One edge line under a node: its kind, and the ref its target names -
+/// a short id or a bare kind name, resolved once against the map
+/// `maps_record` loaded before any write.
+struct DocEdge {
+    kind: String,
+    target: String,
+    line: usize,
+}
+
+/// One node a document names, with what is declared under it.
+struct DocNode {
+    kind: String,
+    name: String,
+    properties: BTreeMap<String, String>,
+    edges: Vec<DocEdge>,
+    cites: Vec<DocCite>,
+    line: usize,
+}
+
+/// Splits `s` at its first run of whitespace, trimming what leads the
+/// rest - `word`, then whatever follows it on the line.
+fn split_first_word(s: &str) -> Option<(&str, &str)> {
+    let (word, rest) = s.trim_start().split_once(char::is_whitespace)?;
+    Some((word, rest.trim_start()))
+}
+
+/// Parses a double-quoted value starting at `s`'s first character:
+/// `\"` inside is a literal quote, and nothing may follow the closing
+/// one but whitespace. `None` for anything else, so a caller can turn
+/// it into the line-numbered error a document's reader needs.
+fn parse_quoted(s: &str) -> Option<String> {
+    if !s.starts_with('"') {
+        return None;
+    }
+    let mut value = String::new();
+    let mut chars = s[1..].chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.clone().next() == Some('"') => {
+                chars.next();
+                value.push('"');
+            }
+            '"' => {
+                let rest: String = chars.collect();
+                return rest.trim().is_empty().then_some(value);
+            }
+            other => value.push(other),
+        }
+    }
+    None
+}
+
+/// The reverse of `parse_quoted` - `name`, quoted and with every `"`
+/// escaped, the way a node or edge line in `maps record`'s document
+/// grammar writes it.
+fn quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        if c == '"' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('"');
+    out
+}
+
+/// `s`, split at a trailing `:from-to`, when the part after the last
+/// `:` has that shape - a `cites` line's path may itself hold a `:`
+/// that isn't a range. A suffix that looks like two numbers but breaks
+/// the range's own rule (`store::parse_lines`'s) is an error rather
+/// than being read back as part of the path.
+fn split_cite_range(s: &str) -> Result<(String, Option<(u32, u32)>), Box<dyn std::error::Error>> {
+    let Some((path, range)) = s.rsplit_once(':') else {
+        return Ok((s.to_string(), None));
+    };
+    let Some((from, to)) = range.split_once('-') else {
+        return Ok((s.to_string(), None));
+    };
+    if from.parse::<u32>().is_err() || to.parse::<u32>().is_err() {
+        return Ok((s.to_string(), None));
+    }
+    Ok((path.to_string(), Some(store::parse_lines(range)?)))
+}
+
+/// Parses `maps record`'s document grammar: a node line at column 0,
+/// `<kind> "<name>"`, owns every indented line under it - a `<key>
+/// "<value>"` property, an `<edge kind> <ref>`, or a `cites
+/// <path>[:<from>-<to>]` - until the next node line or the document's
+/// end. A blank line is ignored; anything else names its line number.
+fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>> {
+    let mut nodes: Vec<DocNode> = Vec::new();
+    for (i, raw) in text.lines().enumerate() {
+        let line = i + 1;
+        if raw.trim().is_empty() {
+            continue;
+        }
+        if !raw.starts_with(char::is_whitespace) {
+            let (kind, rest) = split_first_word(raw)
+                .ok_or_else(|| format!("line {line}: expected `<kind> \"<name>\"`"))?;
+            let name = parse_quoted(rest)
+                .ok_or_else(|| format!("line {line}: expected `<kind> \"<name>\"`"))?;
+            nodes.push(DocNode {
+                kind: kind.to_string(),
+                name,
+                properties: BTreeMap::new(),
+                edges: Vec::new(),
+                cites: Vec::new(),
+                line,
+            });
+            continue;
+        }
+        let node = nodes
+            .last_mut()
+            .ok_or_else(|| format!("line {line}: indented line has no node above it"))?;
+        let (word, rest) = split_first_word(raw.trim())
+            .ok_or_else(|| format!("line {line}: expected a property, an edge, or `cites`"))?;
+        if word == "cites" {
+            let (path, lines) =
+                split_cite_range(rest).map_err(|err| format!("line {line}: {err}"))?;
+            node.cites.push(DocCite { path, lines });
+        } else if rest.starts_with('"') {
+            let value = parse_quoted(rest)
+                .ok_or_else(|| format!("line {line}: expected `{word} \"<value>\"`"))?;
+            node.properties.insert(word.to_string(), value);
+        } else {
+            node.edges.push(DocEdge {
+                kind: word.to_string(),
+                target: rest.to_string(),
+                line,
+            });
+        }
+    }
+    Ok(nodes)
+}
+
+/// Adds every node and edge a document on stdin declares to `args.map`,
+/// publishing a `file.cited` event for each `cites` line and folding its
+/// id into that node's sources. Reads the document, then hands it to
+/// `record_document`, which does the work `maps record`'s tests reach
+/// directly, without stdin between them.
+pub fn maps_record(
+    args: RecordArgs,
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &crate::core::Source,
+    checkout: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut document = String::new();
+    io::stdin().read_to_string(&mut document)?;
+    record_document(&document, args, log, schemas, source, checkout)
+}
+
+/// `maps_record`'s work, given the document text rather than reading it
+/// from stdin. Every node and edge is checked and applied to one
+/// in-memory fold of `args.map` - `Map::apply` enforces known kinds,
+/// required properties, duplicate names, and known edge kinds, so this
+/// only resolves an edge's ref, live, against the map as it stands at
+/// that line: a bare kind name to the last node of that kind this
+/// document declared above it, anything else through
+/// `Map::resolve_str`. Nothing is appended until every node and edge
+/// has passed, in one batch under the log's lock, so a failure midway,
+/// whether a duplicate name, a missing `--source`, or a bad ref, leaves
+/// nothing written; the error names the node or line it reached.
+fn record_document(
+    document: &str,
+    args: RecordArgs,
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &crate::core::Source,
+    checkout: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let nodes = parse_document(document)?;
+    let total = nodes.len();
+
+    let node_sources: Vec<EventId> = args
+        .source
+        .iter()
+        .map(|id| known_event_id(id, log))
+        .collect::<Result<_, _>>()?;
+    let causation_id = args
+        .causation
+        .as_deref()
+        .map(|id| known_event_id(id, log))
+        .transpose()?;
+    // Only opened when the document has a `cites` line to resolve - a
+    // document with none should still record against a `checkout` that
+    // does not exist, the way it always could.
+    let workspace = if nodes.iter().any(|node| !node.cites.is_empty()) {
+        Some(tools::Workspace::new(checkout)?)
+    } else {
+        None
+    };
+
+    let scope = source.scope();
+    let RecordArgs { map, actor, .. } = args;
+    let batch_source = source.clone();
+
+    let events = mapstore::commit_batch(log, schemas, &map, &scope, move |snapshot| {
+        let mut batch: Vec<Event> = Vec::new();
+        let mut last_of_kind: HashMap<String, NodeId> = HashMap::new();
+
+        for (i, node) in nodes.into_iter().enumerate() {
+            let label = format!(
+                "line {}: node {} of {total} ({} {:?})",
+                node.line,
+                i + 1,
+                node.kind,
+                node.name
+            );
+            let context = |err: Box<dyn std::error::Error>| -> Box<dyn std::error::Error> {
+                format!("{label}: {err}").into()
+            };
+
+            let mut sources = node_sources.clone();
+            for cite in &node.cites {
+                let workspace = workspace
+                    .as_ref()
+                    .expect("a cite here means the document had one, so it was opened above");
+                let payload =
+                    build_file_cited(workspace, &cite.path, cite.lines, None).map_err(context)?;
+                let event = Event::new(actor, batch_source.clone(), causation_id, payload);
+                sources.push(event.id());
+                batch.push(event);
+            }
+
+            let mutation = Mutation::AddNode {
+                kind: node.kind.clone(),
+                name: node.name.clone(),
+                properties: node.properties,
+                sources,
+            };
+            let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
+            let node_id = match payload {
+                Payload::NodeAdded { node, .. } => node,
+                _ => unreachable!("AddNode always yields NodeAdded"),
+            };
+            batch.push(Event::new(actor, batch_source.clone(), None, payload));
+            last_of_kind.insert(node.kind.clone(), node_id);
+
+            let from_ref = NodeRef {
+                kind: node.kind.clone(),
+                name: node.name.clone(),
+            };
+            for edge in node.edges {
+                let to_id = if snapshot.map().schema().node_kind(&edge.target).is_some() {
+                    last_of_kind.get(&edge.target).copied().ok_or_else(|| {
+                        format!(
+                            "line {}: no {} declared earlier in this document",
+                            edge.line, edge.target
+                        )
+                    })?
+                } else {
+                    snapshot
+                        .map()
+                        .resolve_str(&edge.target)
+                        .map_err(|err| format!("line {}: {err}", edge.line))?
+                };
+                let to_node = snapshot
+                    .map()
+                    .node(to_id)
+                    .expect("resolve_str and last_of_kind name a live node");
+                let to_ref = NodeRef {
+                    kind: to_node.kind.clone(),
+                    name: to_node.name.clone(),
+                };
+                let mutation = Mutation::AddEdge {
+                    kind: edge.kind,
+                    from: from_ref.clone(),
+                    to: to_ref,
+                    sources: node_sources.clone(),
+                };
+                let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
+                batch.push(Event::new(actor, batch_source.clone(), None, payload));
+            }
+        }
+
+        Ok(batch)
+    })?;
+
+    let map = mapstore::fold_map(log, schemas, &map, &scope)?;
+    let mut node_lines = Vec::new();
+    let mut edge_lines = Vec::new();
+    let mut cited_lines = Vec::new();
+    for event in &events {
+        match event.payload() {
+            Payload::FileCited { path, lines, .. } => cited_lines.push(format!(
+                "cited {} {}",
+                event.id().as_uuid(),
+                cited_label(path, *lines)
+            )),
+            Payload::NodeAdded { node, kind, name, .. } => {
+                let short_id = map.short_id(*node).unwrap_or_default();
+                node_lines.push(format!("{short_id} {kind} {}", quote(name)));
+            }
+            Payload::EdgeAdded { kind, from, to, .. } => {
+                let from_short = map.short_id(*from).unwrap_or_default();
+                let to_short = map.short_id(*to).unwrap_or_default();
+                edge_lines.push(format!("{kind} {from_short} -> {to_short}"));
+            }
+            _ => {}
+        }
+    }
+
+    print_lines(node_lines.into_iter().chain(edge_lines).chain(cited_lines))
 }
 
 /// A reader that stops early - `head`, or a `jq` that has seen enough -

@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::testing::{decisions, node_added_at, scope, source, tasks, ROOT};
+use crate::core::testing::{decisions, files, node_added_at, scope, source, tasks, ROOT};
 use crate::core::Actor;
 
 fn committed(payload: Payload) -> Event {
@@ -730,13 +730,13 @@ fn a_schema_is_found_by_name() {
     assert_eq!(schemas.find("decisions").unwrap().name, "decisions");
     assert_eq!(
         schemas.find("glossary").err().unwrap().to_string(),
-        "no map named \"glossary\"; maps are decisions, tasks, code"
+        "no map named \"glossary\"; maps are decisions, tasks"
     );
 }
 
 #[test]
 fn every_kind_of_every_schema_carries_a_gloss() {
-    for schema in [decisions(), tasks(), code()] {
+    for schema in [decisions(), tasks()] {
         for kind in schema.node_kinds.iter().chain(&schema.edge_kinds) {
             assert!(
                 !kind.gloss.is_empty(),
@@ -756,20 +756,6 @@ fn a_question_requires_nothing() {
 #[test]
 fn an_undeclared_kind_is_absent() {
     assert!(decisions().node_kind("glossary").is_none());
-}
-
-#[test]
-fn the_code_package_gloss_says_it_is_an_external_crate() {
-    let schema = code();
-    let package = schema
-        .node_kinds
-        .iter()
-        .find(|kind| kind.name == "package")
-        .unwrap();
-    assert!(package.gloss.contains("external crate"));
-    assert!(package
-        .gloss
-        .contains("never one of this project's own modules"));
 }
 
 #[test]
@@ -896,18 +882,6 @@ fn select_on_an_empty_map_is_the_empty_map_not_a_missing_node() {
 }
 
 #[test]
-fn since_on_a_derived_map_is_refused_it_has_no_before() {
-    let selection = Selection {
-        since: Some(Timestamp::now()),
-        ..Selection::default()
-    };
-
-    let err = Map::empty(code()).select(&selection).err().unwrap();
-
-    assert_eq!(err, MapError::SinceOnDerived("code".to_string()));
-}
-
-#[test]
 fn since_on_a_log_folded_map_is_fine() {
     let selection = Selection {
         since: Some(Timestamp::now()),
@@ -1002,7 +976,7 @@ fn a_missing_node_names_a_matching_node_of_another_kind() {
 
 #[test]
 fn a_missing_node_crosses_kinds_on_a_lone_shared_path_segment() {
-    let mut map = Map::empty(code());
+    let mut map = Map::empty(files());
     map.apply(add_node("file", "src/providers/catalog.rs"), Actor::System)
         .unwrap();
     map.apply(add_node("file", "src/providers/openai.rs"), Actor::System)
@@ -1030,15 +1004,6 @@ fn a_missing_prose_node_does_not_cross_kinds_on_one_shared_word() {
         err.to_string(),
         "no question \"Rust and Kotlin\" in the map"
     );
-}
-
-#[test]
-fn a_derived_map_is_found_by_neither_fold_nor_write() {
-    let err = crate::core::testing::schemas().find("code").err().unwrap();
-    assert_eq!(err, MapError::Derived("code".to_string()));
-    assert!(err
-        .to_string()
-        .starts_with("\"code\" is derived from the working tree"));
 }
 
 #[test]
@@ -1122,18 +1087,4 @@ fn a_node_added_event_with_no_seq_falls_back_to_its_position() {
     let b = map.find("decision", "B").unwrap().id;
     assert_eq!(map.short_id(a), Some("d1".to_string()));
     assert_eq!(map.short_id(b), Some("d2".to_string()));
-}
-
-#[test]
-fn the_code_schema_s_node_kinds_carry_distinct_prefixes() {
-    let schema = code();
-    let mut prefixes: Vec<&str> = schema.node_kinds.iter().map(|k| k.prefix.as_str()).collect();
-    let before = prefixes.len();
-    prefixes.sort_unstable();
-    prefixes.dedup();
-    assert_eq!(
-        prefixes.len(),
-        before,
-        "two node kinds share a short id prefix"
-    );
 }

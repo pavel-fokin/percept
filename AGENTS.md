@@ -59,7 +59,10 @@ Both are serde-free.
 
 - `Event` is an append-only log entry: `id`, an `actor`, a `source`, an
   optional `causation_id`, a `created_at`, and a typed `payload`. Once
-  committed it never changes.
+  committed it never changes. `file.cited` is the payload for a
+  file, or a range of it, as it was seen at that moment; a node that
+  lists its id in `sources` cites that text, and the session-start
+  block reports the node when the text is no longer in the tree.
 - `Source` names the writer that produced an event - `percept-code`,
   `percept-cli`, `claude-code`, `codex` - and the project root it ran in. The
   name is open by design, where `Actor` is closed. One log at
@@ -84,8 +87,7 @@ Both are serde-free.
   it, since the log and the render already rest on those kinds. A kind may list the properties a node must
   carry - `why` on an option or a task - and the write path refuses a
   node without them. Every change goes through `Map::apply`, so the
-  rules live once. `code` is a `Map` too, but folded from the
-  working tree instead of the log - see `code` below.
+  rules live once.
 - A node records who added it - `User` or `Model` - and when. A
   user-written node is the human's landmark in a shared map: the model
   may attach edges to it but never remove it. A decision is corrected by
@@ -151,9 +153,9 @@ it, never sideways or up:
 | Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps`, `ask`, `reflect` - the log and its maps without the TUI. `hook <client>` records a coding client's turn from the hook JSON on stdin; `init <client>` writes the client's config to call it. Headless, a call the policy would ask about is declined unless `ask --yes`. |
 | Infrastructure | `providers` | `Ollama` and `OpenAi` - implement `harness::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` carries the key. |
 | Infrastructure | `store` | The JSONL event log - the serde boundary - implements `core::EventLog` and `core::EventSearch`. `event` encodes an event to a log line and back, and reads one out for display. |
-| Infrastructure | `mapstore` | Loads the schemas - the built-in TOML plus `.percept/schemas/*.toml` - and folds a log-backed cognitive map (`LogMaps`, the `core::MapReader`), revises it, and gives it an external form: `encode_*` to JSON lines, `markdown`/`catalogue` to the text `maps show`/`maps list --format md` print - read live, never written to a file. `main` wraps `LogMaps` to route `code` to the tree walk. |
-| Infrastructure | `code` | The `code` map: walks the working tree with `ignore`, parses each file with `tree-sitter`, and builds a `Map` of the working tree's files, the symbols they define, and what imports what. `percept maps list` names its node and edge kinds with a line on each; internal code is a `file` keyed by repo-relative path, not by this table's Package column. `maps list`, `maps show`, and `read_map` reach it; it is never folded from the log and never carried in the prompt. |
-| Infrastructure | `tools` | Every tool the model calls. `search_events`, `read_event`, `revise_map`, `read_map` run over the log and its maps through `store` and `mapstore`. `read_file`, `write_file`, `edit_file`, `list_files`, `find_files`, `grep_files` run over a working tree, native over `Workspace` - the one place a path the model gave becomes a real path, refusing any outside the checkout - and `bash`, one `sh -c` at the root with a timeout. The file tools come in under `PERCEPT_TOOLS=code`. `AskBeforeWrites` is the `Policy`; `GitSnapshot` the `Snapshot`, a commit under `refs/percept/snapshots/<prompt>` built through a scratch index. |
+| Infrastructure | `mapstore` | Loads the schemas - the built-in TOML plus `.percept/schemas/*.toml` - and folds a log-backed cognitive map (`LogMaps`, the `core::MapReader`), revises it, and gives it an external form: `encode_*` to JSON lines, `markdown`/`catalogue` to the text `maps show`/`maps list --format md` print - read live, never written to a file. |
+| Infrastructure | `code` | Walks the working tree with `ignore`, parses each file with `tree-sitter`, and builds a `Map` of the tree's files, the symbols they define, and what imports what: a `file` keyed by repo-relative path, a `function` or `type` keyed by `path::Name`, a `package` per external crate. Not a map percept keeps - it has no author and no history, is never folded from the log, never in the catalogue, never carried in the prompt. It reaches the model only as the `read_code` tool. |
+| Infrastructure | `tools` | Every tool the model calls. `search_events`, `read_event`, `revise_map`, `read_map` run over the log and its maps through `store` and `mapstore`. `read_code` walks the checkout through `code` with the same `around`, `depth`, and `kinds` as `read_map`. `read_file`, `write_file`, `edit_file`, `list_files`, `find_files`, `grep_files` run over a working tree, native over `Workspace` - the one place a path the model gave becomes a real path, refusing any outside the checkout - and `bash`, one `sh -c` at the root with a timeout. The file tools and `read_code` come in under `PERCEPT_TOOLS=code`. `AskBeforeWrites` is the `Policy`; `GitSnapshot` the `Snapshot`, a commit under `refs/percept/snapshots/<prompt>` built through a scratch index. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 
 Wire concrete types together only at the entrypoint - `main` in Rust.
@@ -192,16 +194,15 @@ skips it.
   An option is recorded only for an alternative that lost, with the
   reason it lost; the pick is the decision itself. A decision that
   changes an earlier one is added with a `supersedes` edge to it; the
-  old node is never removed.
+  old node is never removed. An idea in the ideas map is a candidate,
+  never an approved issue: it is built only after the user has
+  discussed it and agreed it into the set, and an agent that finds one
+  while building leaves it there and says so.
 - **Build.** An issue with no design left in it, touching one or two
   files, the main agent builds itself. Anything larger goes to the
   `software-developer` subagent, which follows this file, writes the
   code, runs the build and tests, and reports back. It does not design,
-  choose scope, commit, or push. Explore the project's code structure -
-  what a file imports, defines, or depends on - with the code map, not
-  ad hoc `grep`: `read_map` with `map` set to `code` in a turn that has
-  it, `percept maps show code` from the shell (see
-  `.agents/skills/percept/SKILL.md` for query patterns).
+  choose scope, commit, or push.
 - **Review.** The main agent checks each diff against its issue, and
   small fixes land there; larger rework goes back to the subagent.
   Then two passes run once each over the whole branch, before the user
