@@ -119,20 +119,26 @@ pub fn read(input: &mut dyn Read) -> Result<HookInput, Box<dyn std::error::Error
 /// Appends the events `input`'s event implies to `log` under `source`,
 /// and returns the JSON object the client expects back on stdout -
 /// `{}` unless the event asks for something. `sessions_dir` holds one
-/// directory per checkout root, created if missing.
+/// directory per checkout root, created if missing. `checkout` is only
+/// read - as schemas, from `.percept/schemas/*.toml` - for
+/// `SessionStart`; a project schema that fails to load must not also
+/// break the other three events, which need no schema at all.
 pub fn run(
     input: HookInput,
     source: &Source,
     log: &dyn EventLog,
     sessions_dir: &Path,
-    schemas: &Schemas,
+    checkout: &Path,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let dir = sessions_dir.join(state_dir_name(&source.path));
     let name = state_file_name(&source.name, &input.session_id, &input.turn_id);
     let mut state = TurnState::open(&dir, &name)?;
 
     match input.event {
-        HookEvent::SessionStart {} => start_session(source, log, schemas),
+        HookEvent::SessionStart {} => {
+            let schemas = crate::mapstore::load_schemas(checkout)?;
+            start_session(source, log, &schemas)
+        }
         HookEvent::UserPromptSubmit { prompt } => submit_prompt(prompt, source, log, &mut state),
         HookEvent::PostToolUse {
             tool_name,

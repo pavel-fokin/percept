@@ -5,26 +5,24 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::*;
-use crate::core::testing::{content, decisions, tasks, FakeLog};
-use crate::core::{Kind, Payload, Schema, Schemas};
+use crate::core::testing::{content, FakeLog};
+use crate::core::Payload;
 
 /// A checkout `run` can discover a root in - a `.percept` marker is
 /// enough, so a test needs no `git init` - plus the sessions directory
-/// and log `run` is given.
+/// and log `run` is given. `run` now loads schemas itself, from this
+/// same root, exactly as production does - decisions and tasks come
+/// built in, free of any file; `with_extra_schema` adds a project one
+/// for a test that needs a map shape the built-ins don't have.
 struct Fixture {
     _temp: TempDir,
     root: PathBuf,
     sessions: PathBuf,
     log: FakeLog,
-    schemas: Schemas,
 }
 
 impl Fixture {
     fn new() -> Self {
-        Self::with_schemas(crate::core::testing::schemas())
-    }
-
-    fn with_schemas(schemas: Schemas) -> Self {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("checkout with spaces");
         std::fs::create_dir_all(root.join(".percept")).unwrap();
@@ -37,9 +35,19 @@ impl Fixture {
             sessions: temp.path().join("storage/hook-sessions"),
             root,
             log: FakeLog::default(),
-            schemas,
             _temp: temp,
         }
+    }
+
+    /// Writes `<root>/.percept/schemas/<name>.toml`, so the next
+    /// `session_start` folds a project schema alongside the built-in
+    /// decisions and tasks - the same file `load_schemas` reads in
+    /// production.
+    fn with_extra_schema(self, name: &str, toml: &str) -> Self {
+        let dir = self.root.join(".percept/schemas");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("{name}.toml")), toml).unwrap();
+        self
     }
 
     /// Another project, so a test can tell one checkout's cause from
@@ -66,7 +74,7 @@ impl Fixture {
             name: client.to_string(),
             path: root,
         };
-        run(input, &source, &self.log, &self.sessions, &self.schemas)
+        run(input, &source, &self.log, &self.sessions, &checkout)
     }
 
     /// The number of turn state files kept anywhere under
@@ -276,6 +284,19 @@ fn every_hook_event_names_itself_after_deserializing() {
         let event: HookEvent = serde_json::from_value(body).unwrap();
         assert_eq!(event.name(), name);
     }
+}
+
+#[test]
+fn a_broken_project_schema_does_not_stop_prompt_capture() {
+    // Only `SessionStart` needs schemas at all; a project's own
+    // `.percept/schemas/*.toml` failing to load must not also break
+    // recording an ordinary prompt, which reads no schema.
+    let fixture = Fixture::new().with_extra_schema("broken", "not valid toml");
+
+    let id = fixture.prompt("codex", "session", "", "hello");
+
+    assert_eq!(fixture.events().len(), 1);
+    assert_eq!(fixture.events()[0].id().as_uuid().to_string(), id);
 }
 
 #[test]
@@ -683,20 +704,18 @@ fn malformed_input_reports_an_error_without_blocking() {
     assert!(!err.to_string().is_empty());
 }
 
-/// A schema with no `Settlement` - an `ideas` map, say - so a test can
-/// prove the open section is skipped by reading the schema, never by
-/// the map's name.
-fn ideas() -> Schema {
-    Schema {
-        name: "ideas".to_string(),
-        purpose: "loose thoughts worth keeping".to_string(),
-        node_kinds: vec![Kind::new("idea", "a loose thought")],
-        edge_kinds: Vec::new(),
-        headline_kinds: vec!["idea".to_string()],
-        settlement: None,
-        derived: false,
-    }
-}
+/// A project schema with no `Settlement` - an `ideas` map, say - so a
+/// test can prove the open section is skipped by reading the schema,
+/// never by the map's name.
+const IDEAS_TOML: &str = r#"
+name = "ideas"
+purpose = "loose thoughts worth keeping"
+headlines = ["idea"]
+
+[[nodes]]
+name = "idea"
+gloss = "a loose thought"
+"#;
 
 #[test]
 fn a_first_session_with_history_shows_open_items_but_no_gained_section() {
@@ -816,8 +835,7 @@ fn a_settled_question_s_decision_does_not_itself_count_as_open() {
 
 #[test]
 fn a_map_without_settlement_has_no_open_section() {
-    let schemas = Schemas::new(vec![decisions(), tasks(), ideas()]);
-    let fixture = Fixture::with_schemas(schemas);
+    let fixture = Fixture::new().with_extra_schema("ideas", IDEAS_TOML);
     fixture.seed_node("ideas", "idea", "a loose thought", Timestamp::now());
     fixture.seed_node("decisions", "question", "settled how?", Timestamp::now());
 
