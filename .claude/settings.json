@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/agent-hook.py\" claude-code",
+            "command": "percept hook claude-code",
             "timeout": 20
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/agent-hook.py\" claude-code",
+            "command": "percept hook claude-code",
             "timeout": 20
           }
         ]
@@ -27,11 +27,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/agent-hook.py\" claude-code",
+            "command": "percept hook claude-code",
             "timeout": 20
           }
         ]
       }
+    ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(percept maps *)",
+      "Bash(percept events *)"
     ]
   }
 }

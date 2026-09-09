@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/agent-hook.py\" codex",
+            "command": "percept hook codex",
             "timeout": 20
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/agent-hook.py\" codex",
+            "command": "percept hook codex",
             "timeout": 20
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"$(git rev-parse --show-toplevel)/scripts/agent-hook.py\" codex",
+            "command": "percept hook codex",
             "timeout": 20
           }
         ]

@@ -8,6 +8,7 @@
 mod error;
 mod event;
 mod jsonl;
+mod turn_state;
 
 pub use error::Error;
 pub use event::{
@@ -15,6 +16,7 @@ pub use event::{
     PREVIEW_CHARS,
 };
 pub use jsonl::Jsonl;
+pub use turn_state::TurnState;
 
 /// A moment as a reader types it, on the CLI or in a tool call: ISO-8601,
 /// or `<N>d`, `<N>h`, `<N>m` measured back from now. One parser, so

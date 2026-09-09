@@ -67,6 +67,12 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "Where does a map's schema live?" (model) · 2026-09-08
 - "What format is a schema file?" (model) · 2026-09-08
 - "How does a schema say which properties a node must carry?" (model) · 2026-09-08
+- "How does the hook command learn which event fired?" (model) · 2026-09-08
+- "How does a hook config line find the binary?" (model) · 2026-09-08
+- "Which percept commands does init allowlist for Claude Code?" (model) · 2026-09-08
+- "Where does the hook's turn state live?" (model) · 2026-09-08
+- "Where does percept init write a client's config?" (model) · 2026-09-08
+- "How does the hook find the checkout?" (model) · 2026-09-08
 
 ## "Where does the event log live?"
 
@@ -497,3 +503,47 @@ note: "Not decided. The core has an actor kind for the human and no identity beh
   why: "one place beside the gloss, and the file carries it; revise checks any kind the same way, replacing the two checks that compared the schema to DECISIONS and TASKS"
 - weighed "check requires in mapstore's write path, kept out of Map::apply so old history still folds" (model)
   why: "built first on feat/schemas-as-data and moved: a fold calls replay, never apply, so Map::apply is only ever the write path and the rule belongs there; kept outside core it reached the CLI but not the model's revise_map tool, and AGENTS.md says the rules live once in Map::apply"
+
+## "How does the hook command learn which event fired?" (model)
+
+- decision "percept hook <client>: the event name is read from the input's hook_event_name, no event argument" (model)
+  why: "both clients put the event name in the input; an argument would be a second source of one fact"
+- weighed "percept hook <client> <event>, as docs/clients.md first wrote it" (model)
+  why: "the input already carries the event; a config line per event that must match it is a place to drift"
+
+## "How does a hook config line find the binary?" (model)
+
+- decision "percept on PATH; PERCEPT_BIN is retired" (model)
+  why: "install.sh puts the binary on PATH and the worktree recipe in the README already exports one, so one way to find the binary is enough"
+- weighed "keep PERCEPT_BIN: \"${PERCEPT_BIN:-percept}\" hook <client> in the config line" (model)
+  why: "a second way to find one binary, and a config line with shell expansion in it that every client must run through a shell"
+
+## "Which percept commands does init allowlist for Claude Code?" (model)
+
+- decision "Bash(percept maps *) and Bash(percept events *) in permissions.allow; Codex gets hooks only, it has no per-command allowlist in this shape" (model)
+  why: "recording a decision costs three permission prompts without it; maps and events only read the log or append to it"
+- weighed "Bash(percept *)" (model)
+  why: "ask --yes runs tools without asking, so an allowlisted line would let the model bypass write approval"
+
+## "Where does the hook's turn state live?" (model)
+
+- decision "beside the log, at <log dir>/hook-sessions" (model)
+  why: "a dev build keeps it in the checkout with its log; one rule says where percept's local data goes"
+- weighed "$PERCEPT_HOME/hook-sessions, as the Python hook kept it" (model)
+  why: "the script could not ask the binary where the log was, so it kept its own default; the binary knows"
+- weighed "a hash of client, root, session and turn as the state file's name" (model)
+  why: "std's DefaultHasher is unspecified across toolchains, so two builds mid-turn disagree and orphan the file; a readable path under hook-sessions/<root>/<client>-<session>-<turn> needs no hash; built and replaced 2026-09-08"
+
+## "Where does percept init write a client's config?" (model)
+
+- decision "the tracked project file, .claude/settings.json or .codex/hooks.json, merged with what is there; a second run changes nothing" (model)
+  why: "the config is the repo's, shared by everyone who opens it; merging keeps a project's other settings"
+- weighed ".claude/settings.local.json" (model)
+  why: "local is one person's overrides; a hook every session in the repo depends on is not one person's"
+
+## "How does the hook find the checkout?" (model)
+
+- decision "from the hook input's cwd, by the binary's own root walk" (model)
+  why: "a project with only .percept records too, and the rule for what a project is lives once"
+- weighed "git rev-parse --show-toplevel, as the Python hook did" (model)
+  why: "needs git on the path and records nothing in a .percept-only project"
