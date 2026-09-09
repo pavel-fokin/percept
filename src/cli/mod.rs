@@ -230,7 +230,7 @@ pub struct RecordArgs {
     /// agent recording on their behalf.
     #[arg(long, default_value = "user", value_parser = parse_actor_arg)]
     actor: Actor,
-    /// The id of the event a `cites` line's `file.seen` event follows
+    /// The id of the event a `cites` line's `file.cited` event follows
     /// from.
     #[arg(long)]
     causation: Option<String>,
@@ -401,7 +401,7 @@ fn resolve_ref(map: &Map, s: &str) -> Result<NodeRef, Box<dyn std::error::Error>
 /// decode, so the CLI only parses flags. `root` is the writer's project
 /// root, resolved once in `main`; `args.source` only names the writer,
 /// so `publish` pairs the two into the `Source` the event carries.
-/// `checkout` is the working tree a `file.seen` payload with no
+/// `checkout` is the working tree a `file.cited` payload with no
 /// `excerpt` reads from - in a worktree it differs from `root`, which
 /// stays the project identity the event's `Source` carries.
 /// Appends one event and prints its id, so a writer can cite it as the
@@ -423,8 +423,8 @@ pub fn publish(
         path: root.to_path_buf(),
     };
 
-    let event = if args.kind == "file.seen" {
-        let payload = file_seen_payload(&args.payload, checkout)?;
+    let event = if args.kind == "file.cited" {
+        let payload = file_cited_payload(&args.payload, checkout)?;
         crate::core::Event::new(
             store::parse_actor(&args.actor)?,
             source,
@@ -450,27 +450,27 @@ pub fn publish(
     print_lines(std::iter::once(event.id().as_uuid().to_string()))
 }
 
-/// The `payload` argument to `percept events publish --type file.seen`,
+/// The `payload` argument to `percept events publish --type file.cited`,
 /// as the caller wrote it - `excerpt` absent when the tree should
 /// supply it.
 #[derive(serde::Deserialize)]
-struct RawFileSeen {
+struct RawFileCited {
     path: String,
     lines: Option<String>,
     excerpt: Option<String>,
 }
 
-/// Builds a `Payload::FileSeen` from the raw JSON a caller passed
-/// `--payload`. `build_file_seen` does the work; this only parses the
-/// JSON `publish --type file.seen` takes, so `maps record`'s `cites`
-/// line can build a `RawFileSeen` straight from what it parsed instead
+/// Builds a `Payload::FileCited` from the raw JSON a caller passed
+/// `--payload`. `build_file_cited` does the work; this only parses the
+/// JSON `publish --type file.cited` takes, so `maps record`'s `cites`
+/// line can build a `RawFileCited` straight from what it parsed instead
 /// of round-tripping through JSON text.
-fn file_seen_payload(
+fn file_cited_payload(
     raw: &str,
     checkout: &Path,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
-    let raw: RawFileSeen = serde_json::from_str(raw).map_err(store::Error::BadPayload)?;
-    build_file_seen(raw, checkout)
+    let raw: RawFileCited = serde_json::from_str(raw).map_err(store::Error::BadPayload)?;
+    build_file_cited(raw, checkout)
 }
 
 /// Resolves `path` inside `checkout`, refusing one outside it, and
@@ -478,8 +478,8 @@ fn file_seen_payload(
 /// binary file and a range that is reversed, zero, or past the file's
 /// end. An `excerpt` the caller did give is stored as given - `path` is
 /// still resolved and made repo-relative.
-fn build_file_seen(
-    raw: RawFileSeen,
+fn build_file_cited(
+    raw: RawFileCited,
     checkout: &Path,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
     let workspace = tools::Workspace::new(checkout)?;
@@ -518,7 +518,7 @@ fn build_file_seen(
         }
     };
 
-    Ok(Payload::FileSeen {
+    Ok(Payload::FileCited {
         path,
         lines,
         excerpt,
@@ -761,7 +761,7 @@ struct DocCite {
 }
 
 impl DocCite {
-    /// `path[:from-to]`, the way `cites` named it, for the `seen` line
+    /// `path[:from-to]`, the way `cites` named it, for the `cited` line
     /// printed once this cite is published.
     fn display(&self) -> String {
         match self.range {
@@ -986,7 +986,7 @@ fn validate_document(
 }
 
 /// Adds every node and edge a document on stdin declares to `args.map`,
-/// publishing a `file.seen` event for each `cites` line and folding its
+/// publishing a `file.cited` event for each `cites` line and folding its
 /// id into that node's sources. Reads the document, then hands it to
 /// `record_document`, which does the work `maps record`'s tests reach
 /// directly, without stdin between them.
@@ -1030,7 +1030,7 @@ fn record_document(
     let mut written: Vec<(String, String, String)> = Vec::with_capacity(nodes.len());
     let mut node_lines = Vec::with_capacity(nodes.len());
     let mut edge_lines = Vec::new();
-    let mut seen_lines = Vec::new();
+    let mut cited_lines = Vec::new();
 
     for (i, node) in nodes.into_iter().enumerate() {
         let label = format!("node {} of {} ({} {:?})", i + 1, targets.len(), node.kind, node.name);
@@ -1040,8 +1040,8 @@ fn record_document(
 
         let mut node_sources = args.source.clone();
         for cite in &node.cites {
-            let payload = build_file_seen(
-                RawFileSeen {
+            let payload = build_file_cited(
+                RawFileCited {
                     path: cite.path.clone(),
                     lines: cite.range.map(|(from, to)| format!("{from}-{to}")),
                     excerpt: None,
@@ -1052,7 +1052,7 @@ fn record_document(
             let event = crate::core::Event::new(args.actor, source.clone(), causation_id, payload);
             log.append(&event).map_err(context)?;
             let id = event.id().as_uuid().to_string();
-            seen_lines.push(format!("seen {id} {}", cite.display()));
+            cited_lines.push(format!("cited {id} {}", cite.display()));
             node_sources.push(id);
         }
 
@@ -1123,7 +1123,7 @@ fn record_document(
         node_lines
             .into_iter()
             .chain(edge_lines)
-            .chain(seen_lines),
+            .chain(cited_lines),
     )
 }
 

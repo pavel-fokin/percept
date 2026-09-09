@@ -639,14 +639,14 @@ fn unknown_type_deserializes_but_has_no_domain_form() {
 }
 
 #[test]
-fn file_seen_with_lines_round_trips_through_json() {
+fn file_cited_with_lines_round_trips_through_json() {
     let original = crate::core::Event::restore(
         EventId::new(),
         Actor::Model,
         source("percept-cli"),
         None,
         Timestamp::now(),
-        Payload::FileSeen {
+        Payload::FileCited {
             path: "src/mapstore/schema.rs".into(),
             lines: Some((40, 58)),
             excerpt: "fn parse() {}".to_string(),
@@ -655,12 +655,12 @@ fn file_seen_with_lines_round_trips_through_json() {
 
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
-    assert_eq!(wire.kind, "file.seen");
+    assert_eq!(wire.kind, "file.cited");
     assert_eq!(wire.payload["lines"], "40-58");
     let restored = crate::core::Event::try_from(wire).unwrap();
 
     match restored.payload() {
-        Payload::FileSeen {
+        Payload::FileCited {
             path,
             lines,
             excerpt,
@@ -669,19 +669,19 @@ fn file_seen_with_lines_round_trips_through_json() {
             assert_eq!(*lines, Some((40, 58)));
             assert_eq!(excerpt, "fn parse() {}");
         }
-        _ => panic!("expected FileSeen"),
+        _ => panic!("expected FileCited"),
     }
 }
 
 #[test]
-fn file_seen_without_lines_round_trips_with_none() {
+fn file_cited_without_lines_round_trips_with_none() {
     let original = crate::core::Event::restore(
         EventId::new(),
         Actor::Model,
         source("percept-cli"),
         None,
         Timestamp::now(),
-        Payload::FileSeen {
+        Payload::FileCited {
             path: "README.md".into(),
             lines: None,
             excerpt: "the whole file".to_string(),
@@ -694,20 +694,20 @@ fn file_seen_without_lines_round_trips_with_none() {
     let restored = crate::core::Event::try_from(wire).unwrap();
 
     match restored.payload() {
-        Payload::FileSeen { lines, .. } => assert_eq!(*lines, None),
-        _ => panic!("expected FileSeen"),
+        Payload::FileCited { lines, .. } => assert_eq!(*lines, None),
+        _ => panic!("expected FileCited"),
     }
 }
 
 #[test]
-fn a_file_seen_summary_shows_the_excerpts_first_line() {
+fn a_file_cited_summary_shows_the_excerpts_first_line() {
     let event = crate::core::Event::restore(
         EventId::new(),
         Actor::Model,
         source("percept-cli"),
         None,
         Timestamp::now(),
-        Payload::FileSeen {
+        Payload::FileCited {
             path: "src/mapstore/schema.rs".into(),
             lines: Some((40, 58)),
             excerpt: "fn parse() {\n    todo!()\n}".to_string(),

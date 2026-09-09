@@ -244,11 +244,11 @@ impl Fixture {
         self.log.append(&event).unwrap();
     }
 
-    /// Appends a `file.seen` event citing `path` (repo-relative)
+    /// Appends a `file.cited` event citing `path` (repo-relative)
     /// with `excerpt` as its text, `lines` the ranged read or `None`
     /// for the whole file, `at` the moment it was seen, caused by
-    /// `causation` when this is a later sighting of an earlier one.
-    fn seed_seen(
+    /// `causation` when this is a re-citation of an earlier one.
+    fn seed_citation(
         &self,
         path: &str,
         lines: Option<(u32, u32)>,
@@ -265,7 +265,7 @@ impl Fixture {
             },
             causation,
             at,
-            Payload::FileSeen {
+            Payload::FileCited {
                 path: PathBuf::from(path),
                 lines,
                 excerpt: excerpt.to_string(),
@@ -277,7 +277,7 @@ impl Fixture {
 
     /// `seed_node`, but with `sources` set - the ids a node cites, as a
     /// `changed since recorded` test needs to point one at a
-    /// file.seen event.
+    /// file.cited event.
     fn seed_node_with_sources(
         &self,
         map: &str,
@@ -922,7 +922,7 @@ fn a_map_without_settlement_has_no_open_section() {
 fn an_unchanged_seen_file_reports_nothing() {
     let fixture = Fixture::new();
     fixture.write_file("src/a.rs", "fn one() {}\nfn two() {}\n");
-    let seen = fixture.seed_seen(
+    let citation = fixture.seed_citation(
         "src/a.rs",
         Some((1, 1)),
         "fn one() {}",
@@ -934,7 +934,7 @@ fn an_unchanged_seen_file_reports_nothing() {
         "question",
         "why a?",
         Timestamp::now(),
-        vec![seen.id()],
+        vec![citation.id()],
     );
 
     let context = fixture.session_start("codex");
@@ -946,7 +946,7 @@ fn an_unchanged_seen_file_reports_nothing() {
 fn an_edited_range_reports_changed() {
     let fixture = Fixture::new();
     fixture.write_file("src/a.rs", "fn one() { edited }\n");
-    let seen = fixture.seed_seen(
+    let citation = fixture.seed_citation(
         "src/a.rs",
         Some((1, 1)),
         "fn one() {}",
@@ -958,7 +958,7 @@ fn an_edited_range_reports_changed() {
         "question",
         "why a?",
         Timestamp::now(),
-        vec![seen.id()],
+        vec![citation.id()],
     );
 
     let context = fixture.session_start("codex");
@@ -970,7 +970,7 @@ fn an_edited_range_reports_changed() {
 #[test]
 fn a_deleted_file_reports_gone() {
     let fixture = Fixture::new();
-    let seen = fixture.seed_seen(
+    let citation = fixture.seed_citation(
         "src/missing.rs",
         None,
         "fn gone() {}",
@@ -982,7 +982,7 @@ fn a_deleted_file_reports_gone() {
         "task",
         "fix it",
         Timestamp::now(),
-        vec![seen.id()],
+        vec![citation.id()],
     );
 
     let context = fixture.session_start("codex");
@@ -995,7 +995,7 @@ fn a_deleted_file_reports_gone() {
 fn text_moved_to_other_lines_reports_nothing() {
     let fixture = Fixture::new();
     fixture.write_file("src/a.rs", "fn zero() {}\nfn one() {}\n");
-    let seen = fixture.seed_seen(
+    let citation = fixture.seed_citation(
         "src/a.rs",
         Some((5, 5)),
         "fn one() {}",
@@ -1007,7 +1007,7 @@ fn text_moved_to_other_lines_reports_nothing() {
         "question",
         "why a?",
         Timestamp::now(),
-        vec![seen.id()],
+        vec![citation.id()],
     );
 
     let context = fixture.session_start("codex");
@@ -1016,17 +1016,17 @@ fn text_moved_to_other_lines_reports_nothing() {
 }
 
 #[test]
-fn a_later_sighting_replaces_the_one_checked() {
+fn a_re_citation_replaces_the_one_checked() {
     let fixture = Fixture::new();
     fixture.write_file("src/a.rs", "fn two() {}\n");
-    let first = fixture.seed_seen(
+    let first = fixture.seed_citation(
         "src/a.rs",
         Some((1, 1)),
         "fn one() {}",
         Timestamp::now().minus_minutes(10).unwrap(),
         None,
     );
-    let second = fixture.seed_seen(
+    let second = fixture.seed_citation(
         "src/a.rs",
         Some((1, 1)),
         "fn two() {}",
@@ -1050,7 +1050,7 @@ fn a_later_sighting_replaces_the_one_checked() {
 #[test]
 fn a_superseded_decisions_seen_file_is_not_checked() {
     let fixture = Fixture::new();
-    let seen = fixture.seed_seen(
+    let citation = fixture.seed_citation(
         "src/gone.rs",
         None,
         "fn gone() {}",
@@ -1062,7 +1062,7 @@ fn a_superseded_decisions_seen_file_is_not_checked() {
         "decision",
         "old answer",
         Timestamp::now(),
-        vec![seen.id()],
+        vec![citation.id()],
     );
     let new = fixture.seed_node_with_sources(
         "decisions",
@@ -1082,7 +1082,7 @@ fn a_superseded_decisions_seen_file_is_not_checked() {
 fn the_block_is_omitted_when_nothing_changed() {
     let fixture = Fixture::new();
     fixture.write_file("src/a.rs", "fn one() {}\n");
-    let seen = fixture.seed_seen(
+    let citation = fixture.seed_citation(
         "src/a.rs",
         None,
         "fn one() {}",
@@ -1094,7 +1094,7 @@ fn the_block_is_omitted_when_nothing_changed() {
         "question",
         "why a?",
         Timestamp::now(),
-        vec![seen.id()],
+        vec![citation.id()],
     );
 
     let context = fixture.session_start("codex");

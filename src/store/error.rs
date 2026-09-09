@@ -11,7 +11,7 @@ pub enum Error {
     BadUuid(String),
     BadTimestamp(String),
     BadPayload(serde_json::Error),
-    /// `file.seen`'s `lines` wasn't `"from-to"` with both sides a
+    /// `file.cited`'s `lines` wasn't `"from-to"` with both sides a
     /// number.
     BadLines(String),
     /// A payload carried fields the event type doesn't record, so

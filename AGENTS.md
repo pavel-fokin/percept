@@ -59,7 +59,7 @@ Both are serde-free.
 
 - `Event` is an append-only log entry: `id`, an `actor`, a `source`, an
   optional `causation_id`, a `created_at`, and a typed `payload`. Once
-  committed it never changes. `file.seen` is the payload for a
+  committed it never changes. `file.cited` is the payload for a
   file, or a range of it, as it was seen at that moment; a node that
   lists its id in `sources` cites that text, and the session-start
   block reports the node when the text is no longer in the tree.

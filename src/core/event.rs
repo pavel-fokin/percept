@@ -133,7 +133,7 @@ pub enum Payload {
     /// learn when this source last opened the project here, so it can
     /// cut the log to what changed since then.
     SessionStarted,
-    /// A file, or a range of it, as it was seen at this moment -
+    /// A file, or a range of it, as it was when a node cited it -
     /// experience, not judgment: this event says nothing about why the
     /// file was read or what it shows. `path` is repo-relative,
     /// `lines` the 1-based inclusive range read, `None` for the whole
@@ -141,17 +141,17 @@ pub enum Payload {
     /// so the record still reads once the file has moved on. A node
     /// that lists this event's id in its `sources` is what cites it -
     /// the claim lives on the node, never here.
-    FileSeen {
+    FileCited {
         path: PathBuf,
         lines: Option<(u32, u32)>,
         excerpt: String,
     },
 }
 
-/// `path`, with `:from-to` appended for a ranged sighting - the
-/// label a `file.seen` event reads as wherever it's shown short:
+/// `path`, with `:from-to` appended for a ranged citation - the
+/// label a `file.cited` event reads as wherever it's shown short:
 /// the TUI, the context index, and a search preview.
-pub fn seen_label(path: &std::path::Path, lines: Option<(u32, u32)>) -> String {
+pub fn cited_label(path: &std::path::Path, lines: Option<(u32, u32)>) -> String {
     match lines {
         Some((from, to)) => format!("{}:{from}-{to}", path.display()),
         None => path.display().to_string(),
@@ -175,7 +175,7 @@ impl Payload {
             | Self::EdgeRemoved { .. }
             | Self::ModelCalled(..)
             | Self::SessionStarted
-            | Self::FileSeen { .. } => None,
+            | Self::FileCited { .. } => None,
         }
     }
 }
@@ -196,7 +196,7 @@ pub enum EventKind {
     EdgeRemoved,
     ModelCalled,
     SessionStarted,
-    FileSeen,
+    FileCited,
 }
 
 /// One recorded fact in the conversation log. Append-only: a committed
@@ -366,7 +366,7 @@ impl Event {
             Payload::EdgeRemoved { .. } => EventKind::EdgeRemoved,
             Payload::ModelCalled(..) => EventKind::ModelCalled,
             Payload::SessionStarted => EventKind::SessionStarted,
-            Payload::FileSeen { .. } => EventKind::FileSeen,
+            Payload::FileCited { .. } => EventKind::FileCited,
         }
     }
 }

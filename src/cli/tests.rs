@@ -16,18 +16,18 @@ fn args(actor: &str, payload: &str) -> PublishArgs {
     }
 }
 
-fn file_seen_args(payload: &str) -> PublishArgs {
+fn file_cited_args(payload: &str) -> PublishArgs {
     PublishArgs {
         actor: "model".to_string(),
         source: "claude-code".to_string(),
-        kind: "file.seen".to_string(),
+        kind: "file.cited".to_string(),
         payload: payload.to_string(),
         causation: None,
     }
 }
 
 /// The checkout most tests never read from - `publish` only opens it
-/// for a `file.seen` payload with no `excerpt`.
+/// for a `file.cited` payload with no `excerpt`.
 fn no_checkout() -> &'static Path {
     Path::new(ROOT)
 }
@@ -107,13 +107,13 @@ fn a_rejected_event_appends_nothing() {
 }
 
 #[test]
-fn a_file_seen_publish_reads_the_range_from_the_checkout() {
+fn a_file_cited_publish_reads_the_range_from_the_checkout() {
     let fixture = Fixture::new();
     fixture.write("src/lib.rs", "line one\nline two\nline three\nline four\n");
     let log = FakeLog::default();
     let payload = r#"{"path":"src/lib.rs","lines":"2-3"}"#;
     publish(
-        file_seen_args(payload),
+        file_cited_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path(),
@@ -122,7 +122,7 @@ fn a_file_seen_publish_reads_the_range_from_the_checkout() {
 
     let events = log.load().unwrap();
     match events[0].payload() {
-        Payload::FileSeen {
+        Payload::FileCited {
             path,
             lines,
             excerpt,
@@ -131,18 +131,18 @@ fn a_file_seen_publish_reads_the_range_from_the_checkout() {
             assert_eq!(*lines, Some((2, 3)));
             assert_eq!(excerpt, "line two\nline three");
         }
-        _ => panic!("expected FileSeen"),
+        _ => panic!("expected FileCited"),
     }
 }
 
 #[test]
-fn a_file_seen_publish_with_no_lines_reads_the_whole_file() {
+fn a_file_cited_publish_with_no_lines_reads_the_whole_file() {
     let fixture = Fixture::new();
     fixture.write("README.md", "hello\nworld\n");
     let log = FakeLog::default();
     let payload = r#"{"path":"README.md"}"#;
     publish(
-        file_seen_args(payload),
+        file_cited_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path(),
@@ -150,23 +150,23 @@ fn a_file_seen_publish_with_no_lines_reads_the_whole_file() {
     .unwrap();
 
     match log.load().unwrap()[0].payload() {
-        Payload::FileSeen { lines, excerpt, .. } => {
+        Payload::FileCited { lines, excerpt, .. } => {
             assert_eq!(*lines, None);
             assert_eq!(excerpt, "hello\nworld\n");
         }
-        _ => panic!("expected FileSeen"),
+        _ => panic!("expected FileCited"),
     }
 }
 
 #[test]
-fn a_file_seen_publish_stores_an_absolute_path_relative() {
+fn a_file_cited_publish_stores_an_absolute_path_relative() {
     let fixture = Fixture::new();
     fixture.write("src/lib.rs", "one\n");
     let log = FakeLog::default();
     let absolute = fixture.path().join("src/lib.rs");
     let payload = format!(r#"{{"path":"{}"}}"#, absolute.to_str().unwrap());
     publish(
-        file_seen_args(&payload),
+        file_cited_args(&payload),
         &log,
         Path::new(ROOT),
         fixture.path(),
@@ -174,20 +174,20 @@ fn a_file_seen_publish_stores_an_absolute_path_relative() {
     .unwrap();
 
     match log.load().unwrap()[0].payload() {
-        Payload::FileSeen { path, .. } => assert_eq!(path.to_str().unwrap(), "src/lib.rs"),
-        _ => panic!("expected FileSeen"),
+        Payload::FileCited { path, .. } => assert_eq!(path.to_str().unwrap(), "src/lib.rs"),
+        _ => panic!("expected FileCited"),
     }
 }
 
 #[test]
-fn a_file_seen_publish_with_an_excerpt_stores_it_as_given() {
+fn a_file_cited_publish_with_an_excerpt_stores_it_as_given() {
     let fixture = Fixture::new();
     let log = FakeLog::default();
     // No file on disk at all - an `excerpt` in the payload means the
     // tree is never read.
     let payload = r#"{"path":"src/missing.rs","excerpt":"whatever the caller said"}"#;
     publish(
-        file_seen_args(payload),
+        file_cited_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path(),
@@ -195,20 +195,20 @@ fn a_file_seen_publish_with_an_excerpt_stores_it_as_given() {
     .unwrap();
 
     match log.load().unwrap()[0].payload() {
-        Payload::FileSeen { excerpt, .. } => {
+        Payload::FileCited { excerpt, .. } => {
             assert_eq!(excerpt, "whatever the caller said");
         }
-        _ => panic!("expected FileSeen"),
+        _ => panic!("expected FileCited"),
     }
 }
 
 #[test]
-fn a_file_seen_publish_refuses_a_path_outside_the_checkout() {
+fn a_file_cited_publish_refuses_a_path_outside_the_checkout() {
     let fixture = Fixture::new();
     let log = FakeLog::default();
     let payload = r#"{"path":"../../etc/passwd"}"#;
     assert!(publish(
-        file_seen_args(payload),
+        file_cited_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path()
@@ -218,14 +218,14 @@ fn a_file_seen_publish_refuses_a_path_outside_the_checkout() {
 }
 
 #[test]
-fn a_file_seen_publish_refuses_a_binary_file() {
+fn a_file_cited_publish_refuses_a_binary_file() {
     let fixture = Fixture::new();
     let full = fixture.path().join("bin");
     std::fs::write(&full, [0u8, 1, 2, 0, 3]).unwrap();
     let log = FakeLog::default();
     let payload = r#"{"path":"bin"}"#;
     let err = publish(
-        file_seen_args(payload),
+        file_cited_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path(),
@@ -236,13 +236,13 @@ fn a_file_seen_publish_refuses_a_binary_file() {
 }
 
 #[test]
-fn a_file_seen_publish_refuses_a_reversed_range() {
+fn a_file_cited_publish_refuses_a_reversed_range() {
     let fixture = Fixture::new();
     fixture.write("f.txt", "a\nb\nc\n");
     let log = FakeLog::default();
     let payload = r#"{"path":"f.txt","lines":"3-1"}"#;
     assert!(publish(
-        file_seen_args(payload),
+        file_cited_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path()
@@ -252,13 +252,13 @@ fn a_file_seen_publish_refuses_a_reversed_range() {
 }
 
 #[test]
-fn a_file_seen_publish_refuses_a_zero_line() {
+fn a_file_cited_publish_refuses_a_zero_line() {
     let fixture = Fixture::new();
     fixture.write("f.txt", "a\nb\nc\n");
     let log = FakeLog::default();
     let payload = r#"{"path":"f.txt","lines":"0-1"}"#;
     assert!(publish(
-        file_seen_args(payload),
+        file_cited_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path()
@@ -268,13 +268,13 @@ fn a_file_seen_publish_refuses_a_zero_line() {
 }
 
 #[test]
-fn a_file_seen_publish_refuses_a_range_past_the_end() {
+fn a_file_cited_publish_refuses_a_range_past_the_end() {
     let fixture = Fixture::new();
     fixture.write("f.txt", "a\nb\nc\n");
     let log = FakeLog::default();
     let payload = r#"{"path":"f.txt","lines":"1-9000"}"#;
     let err = publish(
-        file_seen_args(payload),
+        file_cited_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path(),
@@ -761,7 +761,7 @@ fn a_document_writes_its_nodes_and_edges_in_order() {
 }
 
 #[test]
-fn a_cites_line_publishes_a_file_seen_event_and_cites_it() {
+fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
     let fixture = Fixture::new();
     fixture.write("src/cli/mod.rs", "one\ntwo\nthree\n");
     let log = FakeLog::default();
@@ -782,7 +782,7 @@ fn a_cites_line_publishes_a_file_seen_event_and_cites_it() {
     // The `cites` event is published before the node it cites - `record`
     // writes a node's cites first - so it lands second, right after the
     // question node.
-    assert!(matches!(events[1].payload(), Payload::FileSeen { .. }));
+    assert!(matches!(events[1].payload(), Payload::FileCited { .. }));
     let cite_id = events[1].id();
     let scope = crate::core::testing::scope();
     let map = Map::fold(crate::core::testing::decisions(), &scope, &events).unwrap();

@@ -104,15 +104,15 @@ fn cut(content: &str, id: EventId) -> String {
 /// the id to open it. None for an event history would not show
 /// either.
 fn line(event: &Event) -> Option<String> {
-    // A seen file is never a message, so it has no
+    // A cited file is never a message, so it has no
     // `history_message` - it still names what was read, one line, same
     // as any other event past the window.
-    if let crate::core::Payload::FileSeen { path, lines, .. } = event.payload() {
+    if let crate::core::Payload::FileCited { path, lines, .. } = event.payload() {
         return Some(format!(
             "{} {}: read {}",
             event.id().as_uuid(),
             event.actor().name(),
-            crate::core::seen_label(path, *lines)
+            crate::core::cited_label(path, *lines)
         ));
     }
     let message = history_message(event)?;
