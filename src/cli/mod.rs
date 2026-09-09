@@ -20,7 +20,7 @@
 //! `--full`, `show`, or `show --range` into one `content`.
 
 use std::collections::BTreeMap;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};
@@ -101,6 +101,9 @@ pub enum MapsCommand {
     RemoveNode(RemoveNodeArgs),
     /// Remove an edge from a map.
     RemoveEdge(EdgeArgs),
+    /// Add several nodes and edges from a document on stdin. Prints one
+    /// line per node, then one per edge, then one per `cites` line.
+    Record(RecordArgs),
 }
 
 /// How `maps show` and `maps list` print a map.
@@ -213,6 +216,24 @@ pub struct EdgeArgs {
     /// `kind:name` of the node the edge points to, or its short id.
     #[arg(long, value_parser = non_blank)]
     to: String,
+}
+
+#[derive(Args)]
+pub struct RecordArgs {
+    /// The map's name, as `maps list` prints it.
+    map: String,
+    /// Repeatable. An event this fact was drawn from. Added to every
+    /// node's and every edge's sources, alongside a node's own `cites`.
+    #[arg(long)]
+    source: Vec<String>,
+    /// Who is writing: `user` for a human at the terminal, `model` for an
+    /// agent recording on their behalf.
+    #[arg(long, default_value = "user", value_parser = parse_actor_arg)]
+    actor: Actor,
+    /// The id of the event a `cites` line's `file.seen` event follows
+    /// from.
+    #[arg(long)]
+    causation: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -440,16 +461,27 @@ struct RawFileSeen {
 }
 
 /// Builds a `Payload::FileSeen` from the raw JSON a caller passed
-/// `--payload`: resolves `path` inside `checkout`, refusing one
-/// outside it, and reads `excerpt` from the tree when the caller gave
-/// none, refusing a binary file and a range that is reversed, zero, or
-/// past the file's end. An `excerpt` the caller did give is stored as
-/// given - `path` is still resolved and made repo-relative.
+/// `--payload`. `build_file_seen` does the work; this only parses the
+/// JSON `publish --type file.seen` takes, so `maps record`'s `cites`
+/// line can build a `RawFileSeen` straight from what it parsed instead
+/// of round-tripping through JSON text.
 fn file_seen_payload(
     raw: &str,
     checkout: &Path,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
     let raw: RawFileSeen = serde_json::from_str(raw).map_err(store::Error::BadPayload)?;
+    build_file_seen(raw, checkout)
+}
+
+/// Resolves `path` inside `checkout`, refusing one outside it, and
+/// reads `excerpt` from the tree when the caller gave none, refusing a
+/// binary file and a range that is reversed, zero, or past the file's
+/// end. An `excerpt` the caller did give is stored as given - `path` is
+/// still resolved and made repo-relative.
+fn build_file_seen(
+    raw: RawFileSeen,
+    checkout: &Path,
+) -> Result<Payload, Box<dyn std::error::Error>> {
     let workspace = tools::Workspace::new(checkout)?;
     let resolved = workspace.resolve(&raw.path)?;
     let path = PathBuf::from(workspace.relative(&resolved));
@@ -719,6 +751,380 @@ pub fn maps_remove_edge(
         }
     })
     .map(drop)
+}
+
+/// One `cites` line under a node: the file it rested on, and the range
+/// within it, `None` for the whole file.
+struct DocCite {
+    path: String,
+    range: Option<(u32, u32)>,
+}
+
+impl DocCite {
+    /// `path[:from-to]`, the way `cites` named it, for the `seen` line
+    /// printed once this cite is published.
+    fn display(&self) -> String {
+        match self.range {
+            Some((from, to)) => format!("{}:{from}-{to}", self.path),
+            None => self.path.clone(),
+        }
+    }
+}
+
+/// One edge line under a node: its kind, and the ref its target names -
+/// a short id or a bare kind name, resolved once against the map
+/// `maps_record` loaded before any write.
+struct DocEdge {
+    kind: String,
+    target: String,
+    line: usize,
+}
+
+/// One node a document names, with what is declared under it.
+struct DocNode {
+    kind: String,
+    name: String,
+    properties: BTreeMap<String, String>,
+    edges: Vec<DocEdge>,
+    cites: Vec<DocCite>,
+    line: usize,
+}
+
+/// Splits `s` at its first run of whitespace, trimming what leads the
+/// rest - `word`, then whatever follows it on the line.
+fn split_first_word(s: &str) -> Option<(&str, &str)> {
+    let s = s.trim_start();
+    let at = s.find(char::is_whitespace)?;
+    Some((&s[..at], s[at..].trim_start()))
+}
+
+/// Parses a double-quoted value starting at `s`'s first character:
+/// `\"` inside is a literal quote, and nothing may follow the closing
+/// one but whitespace. `None` for anything else, so a caller can turn
+/// it into the line-numbered error a document's reader needs.
+fn parse_quoted(s: &str) -> Option<String> {
+    if !s.starts_with('"') {
+        return None;
+    }
+    let mut value = String::new();
+    let mut chars = s[1..].chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if chars.clone().next() == Some('"') => {
+                chars.next();
+                value.push('"');
+            }
+            '"' => {
+                let rest: String = chars.collect();
+                return rest.trim().is_empty().then_some(value);
+            }
+            other => value.push(other),
+        }
+    }
+    None
+}
+
+/// The reverse of `parse_quoted` - `name`, quoted and with every `"`
+/// escaped, the way a node or edge line in `maps record`'s document
+/// grammar writes it.
+fn quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        if c == '"' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('"');
+    out
+}
+
+/// `s`, split at a trailing `:from-to`, when the part after the last
+/// `:` parses as one - a `cites` line's path may itself hold a `:` that
+/// isn't a range.
+fn split_cite_range(s: &str) -> (String, Option<(u32, u32)>) {
+    if let Some((path, range)) = s.rsplit_once(':') {
+        if let Ok(range) = store::parse_lines(range) {
+            return (path.to_string(), Some(range));
+        }
+    }
+    (s.to_string(), None)
+}
+
+/// Parses `maps record`'s document grammar: a node line at column 0,
+/// `<kind> "<name>"`, owns every indented line under it - a `<key>
+/// "<value>"` property, an `<edge kind> <ref>`, or a `cites
+/// <path>[:<from>-<to>]` - until the next node line or the document's
+/// end. A blank line is ignored; anything else names its line number.
+fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>> {
+    let mut nodes: Vec<DocNode> = Vec::new();
+    for (i, raw) in text.lines().enumerate() {
+        let line = i + 1;
+        if raw.trim().is_empty() {
+            continue;
+        }
+        if !raw.starts_with(char::is_whitespace) {
+            let (kind, rest) = split_first_word(raw)
+                .ok_or_else(|| format!("line {line}: expected `<kind> \"<name>\"`"))?;
+            let name = parse_quoted(rest)
+                .ok_or_else(|| format!("line {line}: expected `<kind> \"<name>\"`"))?;
+            nodes.push(DocNode {
+                kind: kind.to_string(),
+                name,
+                properties: BTreeMap::new(),
+                edges: Vec::new(),
+                cites: Vec::new(),
+                line,
+            });
+            continue;
+        }
+        let node = nodes
+            .last_mut()
+            .ok_or_else(|| format!("line {line}: indented line has no node above it"))?;
+        let (word, rest) = split_first_word(raw.trim())
+            .ok_or_else(|| format!("line {line}: expected a property, an edge, or `cites`"))?;
+        if word == "cites" {
+            let (path, range) = split_cite_range(rest);
+            node.cites.push(DocCite { path, range });
+        } else if rest.starts_with('"') {
+            let value = parse_quoted(rest)
+                .ok_or_else(|| format!("line {line}: expected `{word} \"<value>\"`"))?;
+            node.properties.insert(word.to_string(), value);
+        } else {
+            node.edges.push(DocEdge {
+                kind: word.to_string(),
+                target: rest.to_string(),
+                line,
+            });
+        }
+    }
+    Ok(nodes)
+}
+
+/// Where an edge's `to` resolves: a node this document declares, by its
+/// index, or a node the map already carried, named the way `NodeRef`
+/// takes it and printed by the short id it already has.
+enum Target {
+    Doc(usize),
+    Existing { node_ref: NodeRef, short_id: String },
+}
+
+/// Checks `nodes` against `map`'s schema before any of it is written:
+/// every kind known, every required property present, and every edge's
+/// ref resolved - a short id against `map` as it stood before this
+/// document ran, a bare kind name against the nodes this document
+/// declares earlier than the edge that names it. Returns each edge's
+/// resolved target, indexed the way `nodes` holds them, so the write
+/// pass below never re-resolves a ref against a state new nodes have
+/// since changed.
+fn validate_document(
+    map: &Map,
+    nodes: &[DocNode],
+) -> Result<Vec<Vec<Target>>, Box<dyn std::error::Error>> {
+    let schema = map.schema();
+    let mut targets = Vec::with_capacity(nodes.len());
+    for (i, node) in nodes.iter().enumerate() {
+        let kind = schema.node_kind(&node.kind).ok_or_else(|| {
+            format!(
+                "line {}: no node kind {:?} in map {:?}; kinds are {}",
+                node.line,
+                node.kind,
+                schema.name,
+                schema.node_kinds_csv()
+            )
+        })?;
+        if let Some(property) = kind
+            .requires
+            .iter()
+            .find(|property| !node.properties.contains_key(*property))
+        {
+            return Err(format!(
+                "line {}: {} {:?} is missing its `{property}` property",
+                node.line, node.kind, node.name
+            )
+            .into());
+        }
+        let mut edge_targets = Vec::with_capacity(node.edges.len());
+        for edge in &node.edges {
+            if schema.edge_kind(&edge.kind).is_none() {
+                return Err(format!(
+                    "line {}: no edge kind {:?} in map {:?}; kinds are {}",
+                    edge.line,
+                    edge.kind,
+                    schema.name,
+                    schema.edge_kinds_csv()
+                )
+                .into());
+            }
+            edge_targets.push(if schema.node_kind(&edge.target).is_some() {
+                let declared = nodes[..i].iter().rposition(|n| n.kind == edge.target);
+                let at = declared.ok_or_else(|| {
+                    format!(
+                        "line {}: no {} declared earlier in this document",
+                        edge.line, edge.target
+                    )
+                })?;
+                Target::Doc(at)
+            } else {
+                let id = map.resolve_str(&edge.target).map_err(|err| {
+                    format!("line {}: {err}", edge.line)
+                })?;
+                let found = map.node(id).expect("resolve_str returns a live node's id");
+                Target::Existing {
+                    node_ref: NodeRef {
+                        kind: found.kind.clone(),
+                        name: found.name.clone(),
+                    },
+                    short_id: map.short_id(id).unwrap_or_default(),
+                }
+            });
+        }
+        targets.push(edge_targets);
+    }
+    Ok(targets)
+}
+
+/// Adds every node and edge a document on stdin declares to `args.map`,
+/// publishing a `file.seen` event for each `cites` line and folding its
+/// id into that node's sources. Reads the document, then hands it to
+/// `record_document`, which does the work `maps record`'s tests reach
+/// directly, without stdin between them.
+pub fn maps_record(
+    args: RecordArgs,
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &crate::core::Source,
+    checkout: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut document = String::new();
+    io::stdin().read_to_string(&mut document)?;
+    record_document(&document, args, log, schemas, source, checkout)
+}
+
+/// `maps_record`'s work, given the document text rather than reading it
+/// from stdin. Validated whole before any of it is written; from there,
+/// writing follows document order, one node's `cites` events, then the
+/// node, then its edges, so a failure midway names the node it reached
+/// and leaves what came before it standing in the log.
+fn record_document(
+    document: &str,
+    args: RecordArgs,
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &crate::core::Source,
+    checkout: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let nodes = parse_document(document)?;
+
+    let scope = source.scope();
+    let map = mapstore::fold_map(log, schemas, &args.map, &scope)?;
+    let targets = validate_document(&map, &nodes)?;
+
+    let causation_id = args
+        .causation
+        .as_deref()
+        .map(|id| known_event_id(id, log))
+        .transpose()?;
+
+    let mut written: Vec<(String, String, String)> = Vec::with_capacity(nodes.len());
+    let mut node_lines = Vec::with_capacity(nodes.len());
+    let mut edge_lines = Vec::new();
+    let mut seen_lines = Vec::new();
+
+    for (i, node) in nodes.into_iter().enumerate() {
+        let label = format!("node {} of {} ({} {:?})", i + 1, targets.len(), node.kind, node.name);
+        let context = |err: Box<dyn std::error::Error>| -> Box<dyn std::error::Error> {
+            format!("{label}: {err}").into()
+        };
+
+        let mut node_sources = args.source.clone();
+        for cite in &node.cites {
+            let payload = build_file_seen(
+                RawFileSeen {
+                    path: cite.path.clone(),
+                    lines: cite.range.map(|(from, to)| format!("{from}-{to}")),
+                    excerpt: None,
+                },
+                checkout,
+            )
+            .map_err(context)?;
+            let event = crate::core::Event::new(args.actor, source.clone(), causation_id, payload);
+            log.append(&event).map_err(context)?;
+            let id = event.id().as_uuid().to_string();
+            seen_lines.push(format!("seen {id} {}", cite.display()));
+            node_sources.push(id);
+        }
+
+        let target = MapArgs {
+            map: args.map.clone(),
+            source: node_sources,
+            actor: args.actor,
+        };
+        let (kind, name, properties) = (node.kind, node.name, node.properties);
+        let payload = write(target, log, schemas, source, |sources| Mutation::AddNode {
+            kind: kind.clone(),
+            name: name.clone(),
+            properties,
+            sources,
+        })
+        .map_err(context)?;
+        let seq = match payload {
+            Payload::NodeAdded { seq, .. } => seq,
+            _ => unreachable!("AddNode always yields NodeAdded"),
+        };
+        let short_id = format!(
+            "{}{seq}",
+            map.schema()
+                .node_kind(&kind)
+                .expect("validate_document checked this kind")
+                .prefix
+        );
+        node_lines.push(format!("{short_id} {kind} {}", quote(&name)));
+        written.push((kind.clone(), name.clone(), short_id.clone()));
+
+        for (edge, target) in node.edges.into_iter().zip(&targets[i]) {
+            let (to_ref, to_short) = match target {
+                Target::Doc(at) => {
+                    let (kind, name, short_id) = &written[*at];
+                    (
+                        NodeRef {
+                            kind: kind.clone(),
+                            name: name.clone(),
+                        },
+                        short_id.clone(),
+                    )
+                }
+                Target::Existing { node_ref, short_id } => (node_ref.clone(), short_id.clone()),
+            };
+            let from_ref = NodeRef {
+                kind: kind.clone(),
+                name: name.clone(),
+            };
+            let edge_target = MapArgs {
+                map: args.map.clone(),
+                source: args.source.clone(),
+                actor: args.actor,
+            };
+            write(edge_target, log, schemas, source, |sources| {
+                Mutation::AddEdge {
+                    kind: edge.kind.clone(),
+                    from: from_ref,
+                    to: to_ref,
+                    sources,
+                }
+            })
+            .map_err(context)?;
+            edge_lines.push(format!("{} {short_id} -> {to_short}", edge.kind));
+        }
+    }
+
+    print_lines(
+        node_lines
+            .into_iter()
+            .chain(edge_lines)
+            .chain(seen_lines),
+    )
 }
 
 /// A reader that stops early - `head`, or a `jq` that has seen enough -

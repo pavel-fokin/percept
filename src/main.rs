@@ -603,6 +603,9 @@ async fn main() {
                 MapsCommand::RemoveEdge(args) => {
                     cli::maps_remove_edge(args, &log, &schemas, &cli_source)
                 }
+                MapsCommand::Record(args) => {
+                    cli::maps_record(args, &log, &schemas, &cli_source, &checkout)
+                }
             }
         }),
         Some(Command::Ask(args)) => {

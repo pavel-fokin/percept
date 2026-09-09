@@ -1,6 +1,6 @@
 use super::*;
 use crate::app::{App, Harness, MapShape};
-use crate::core::testing::{content, schemas, source, FakeLog, Fixture, ROOT};
+use crate::core::testing::{content, node_added, schemas, source, FakeLog, Fixture, ROOT};
 use crate::core::Payload;
 use crate::harness::testing::{FakeCatalog, FakeTool, Scripted};
 use std::path::{Path, PathBuf};
@@ -718,4 +718,149 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_user() {
         panic!("expected maps add-node")
     };
     assert!(args.target.actor == Actor::User);
+}
+
+fn record_args(map: &str) -> RecordArgs {
+    RecordArgs {
+        map: map.to_string(),
+        source: Vec::new(),
+        actor: Actor::User,
+        causation: None,
+    }
+}
+
+#[test]
+fn a_document_writes_its_nodes_and_edges_in_order() {
+    let log = FakeLog::default();
+    let document = "question \"Does record work?\"\n\
+                     decision \"yes\"\n  why \"it ran\"\n  resolves question\n";
+    record_document(
+        document,
+        record_args("decisions"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    assert_eq!(events.len(), 3);
+    let scope = crate::core::testing::scope();
+    let map = Map::fold(
+        crate::core::testing::decisions(),
+        &scope,
+        &log.load().unwrap(),
+    )
+    .unwrap();
+    assert!(map.find("question", "Does record work?").is_some());
+    let decision = map.find("decision", "yes").unwrap();
+    assert_eq!(decision.properties.get("why").unwrap(), "it ran");
+    assert_eq!(map.edges().len(), 1);
+    assert_eq!(map.edges()[0].kind, "resolves");
+}
+
+#[test]
+fn a_cites_line_publishes_a_file_seen_event_and_cites_it() {
+    let fixture = Fixture::new();
+    fixture.write("src/cli/mod.rs", "one\ntwo\nthree\n");
+    let log = FakeLog::default();
+    let document = "question \"Does record work?\"\n\
+                     decision \"yes\"\n  why \"it ran\"\n  resolves question\n  \
+                     cites src/cli/mod.rs:1-3\n";
+    record_document(
+        document,
+        record_args("decisions"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        fixture.path(),
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    // The `cites` event is published before the node it cites - `record`
+    // writes a node's cites first - so it lands second, right after the
+    // question node.
+    assert!(matches!(events[1].payload(), Payload::FileSeen { .. }));
+    let cite_id = events[1].id();
+    let scope = crate::core::testing::scope();
+    let map = Map::fold(crate::core::testing::decisions(), &scope, &events).unwrap();
+    let decision = map.find("decision", "yes").unwrap();
+    assert!(decision.sources.contains(&cite_id));
+}
+
+#[test]
+fn a_ref_to_an_existing_short_id_resolves() {
+    let log = FakeLog::default();
+    log.append(&node_added("question", "Does record work?")).unwrap();
+    let document = "decision \"yes\"\n  why \"it ran\"\n  resolves q1\n";
+    record_document(
+        document,
+        record_args("decisions"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    let scope = crate::core::testing::scope();
+    let map = Map::fold(crate::core::testing::decisions(), &scope, &events).unwrap();
+    assert_eq!(map.edges().len(), 1);
+    assert_eq!(map.edges()[0].kind, "resolves");
+}
+
+#[test]
+fn an_unknown_node_kind_fails_before_anything_is_written() {
+    let log = FakeLog::default();
+    let document = "riddle \"what?\"\n";
+    let err = record_document(
+        document,
+        record_args("decisions"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("riddle"), "{err}");
+    assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
+fn a_missing_required_property_fails_before_anything_is_written() {
+    let log = FakeLog::default();
+    let document = "question \"Does record work?\"\n\
+                     option \"maybe\"\n  answers question\n";
+    let err = record_document(
+        document,
+        record_args("decisions"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("why"), "{err}");
+    assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
+fn a_bad_ref_names_its_line_number() {
+    let log = FakeLog::default();
+    let document = "question \"Does record work?\"\n\
+                     decision \"yes\"\n  why \"it ran\"\n  resolves q9\n";
+    let err = record_document(
+        document,
+        record_args("decisions"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().starts_with("line 4:"), "{err}");
+    assert!(log.load().unwrap().is_empty());
 }
