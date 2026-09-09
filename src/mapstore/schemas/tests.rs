@@ -296,6 +296,71 @@ fn a_duplicate_headline_is_refused() {
 }
 
 #[test]
+fn a_node_kind_with_no_prefix_defaults_to_its_first_letter() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n[[nodes]]\nname = \"term\"\ngloss = \"g\"\n",
+    );
+
+    let schemas = load(fixture.path()).unwrap();
+
+    let glossary = schemas.find("glossary").unwrap();
+    assert_eq!(glossary.node_kind("term").unwrap().prefix, "t");
+}
+
+#[test]
+fn a_node_kind_with_an_explicit_prefix_keeps_it() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[nodes]]\nname = \"term\"\ngloss = \"g\"\nprefix = \"tm\"\n",
+    );
+
+    let schemas = load(fixture.path()).unwrap();
+
+    let glossary = schemas.find("glossary").unwrap();
+    assert_eq!(glossary.node_kind("term").unwrap().prefix, "tm");
+}
+
+#[test]
+fn two_node_kinds_defaulting_to_the_same_prefix_are_refused() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[nodes]]\nname = \"term\"\ngloss = \"g\"\n\n\
+         [[nodes]]\nname = \"taxonomy\"\ngloss = \"g2\"\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert_eq!(
+        err,
+        "glossary.toml: node kinds \"term\" and \"taxonomy\" both take the short id prefix \"t\""
+    );
+}
+
+#[test]
+fn an_explicit_prefix_colliding_with_a_default_is_refused() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[nodes]]\nname = \"term\"\ngloss = \"g\"\n\n\
+         [[nodes]]\nname = \"acronym\"\ngloss = \"g2\"\nprefix = \"t\"\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert_eq!(
+        err,
+        "glossary.toml: node kinds \"term\" and \"acronym\" both take the short id prefix \"t\""
+    );
+}
+
+#[test]
 fn a_blank_requires_entry_is_refused() {
     let fixture = Fixture::new();
     fixture.write(

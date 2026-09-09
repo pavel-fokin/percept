@@ -30,7 +30,7 @@ use tokio_stream::StreamExt;
 use crate::app::{run_tool, AppService, ToolStep};
 use crate::code;
 use crate::core::{
-    Actor, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
+    Actor, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
     Schemas,
 };
 use crate::harness::Chunk;
@@ -130,10 +130,11 @@ pub struct ShowMapArgs {
     /// between them.
     #[arg(long)]
     kind: Vec<String>,
-    /// `kind:name` of a node. Keep only it and its neighbourhood,
-    /// reached along edges in either direction.
-    #[arg(long, value_parser = parse_node_ref)]
-    around: Option<NodeRef>,
+    /// `kind:name` of a node, or the short id its map shows it as,
+    /// `d41`. Keep only it and its neighbourhood, reached along edges
+    /// in either direction.
+    #[arg(long, value_parser = non_blank)]
+    around: Option<String>,
     /// How many edges out `--around` reaches; 0 is the node alone.
     #[arg(long, default_value_t = 1, requires = "around")]
     depth: usize,
@@ -204,10 +205,10 @@ pub struct AddNodeArgs {
 pub struct RemoveNodeArgs {
     #[command(flatten)]
     target: MapArgs,
-    #[arg(long)]
-    kind: String,
-    #[arg(long)]
-    name: String,
+    /// `kind:name` of the node to remove, or the short id its map
+    /// shows it as, `d41`.
+    #[arg(long, value_parser = non_blank)]
+    node: String,
     #[arg(long, value_parser = non_blank)]
     reason: String,
 }
@@ -219,12 +220,13 @@ pub struct EdgeArgs {
     target: MapArgs,
     #[arg(long)]
     kind: String,
-    /// `kind:name` of the node the edge starts at.
-    #[arg(long, value_parser = parse_node_ref)]
-    from: NodeRef,
-    /// `kind:name` of the node the edge points to.
-    #[arg(long, value_parser = parse_node_ref)]
-    to: NodeRef,
+    /// `kind:name` of the node the edge starts at, or the short id its
+    /// map shows it as, `d41`.
+    #[arg(long, value_parser = non_blank)]
+    from: String,
+    /// `kind:name` of the node the edge points to, or its short id.
+    #[arg(long, value_parser = non_blank)]
+    to: String,
 }
 
 #[derive(Subcommand)]
@@ -373,15 +375,18 @@ fn parse_prop(s: &str) -> Result<(String, String), String> {
     Ok((non_blank(key)?, value.to_string()))
 }
 
-/// Parses `kind:name` for `--from`/`--to`, split on the first `:` so a
-/// name may carry one itself.
-fn parse_node_ref(s: &str) -> Result<NodeRef, String> {
-    let (kind, name) = s
-        .split_once(':')
-        .ok_or_else(|| format!("invalid {s:?}, expected kind:name"))?;
+/// `s` - `kind:name`, or the short id `map`'s own render shows it as -
+/// resolved to the canonical `kind:name` a `Mutation` takes.
+/// `Map::apply` resolves it again, against whatever the log holds by
+/// the time the commit under its lock runs; the gap between this fold
+/// and that one is the same one a plain `kind:name` reference always
+/// lived with.
+fn resolve_ref(map: &Map, s: &str) -> Result<NodeRef, Box<dyn std::error::Error>> {
+    let id = map.resolve_str(s)?;
+    let node = map.node(id).expect("resolve_str returns a live node's id");
     Ok(NodeRef {
-        kind: non_blank(kind)?,
-        name: non_blank(name)?,
+        kind: node.kind.clone(),
+        name: node.name.clone(),
     })
 }
 
@@ -526,8 +531,19 @@ pub fn maps_show_code(args: ShowMapArgs, root: &Path) -> Result<(), Box<dyn std:
 /// `args`'s filters, then print it nodes-then-edges. `--since` runs
 /// after `--around`, so it reads as "what changed near this node".
 fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
+    // An empty map has nothing to resolve `--around` against - `select`'s
+    // own empty-map case skips it anyway, so a node named on one is not
+    // an error to report over "nothing recorded yet".
+    let around = if map.nodes().is_empty() {
+        None
+    } else {
+        args.around
+            .as_deref()
+            .map(|s| resolve_ref(&map, s))
+            .transpose()?
+    };
     let selection = crate::core::Selection {
-        around: args.around.as_ref().map(|node| (node, args.depth)),
+        around: around.as_ref().map(|node| (node, args.depth)),
         since: args.since,
         kinds: &args.kind,
     };
@@ -542,10 +558,11 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
 }
 
 /// One map change from the shell: `target`'s cited events resolved and
-/// `mutation` checked and applied through `mapstore::revise`, the payload
-/// committed as actor `user` with no cause, then the map rerendered,
-/// folded fresh from the log so another writer's changes are kept.
-/// Returns the payload, for `add-node` to print the minted id.
+/// `mutation` checked, applied, and committed as actor `user` with no
+/// cause, all under `mapstore::commit`'s one lock, then the map
+/// rerendered, folded fresh from the log so another writer's changes
+/// are kept. Returns the payload, for `add-node` to print the minted
+/// id.
 fn write(
     target: MapArgs,
     log: &dyn EventLog,
@@ -560,10 +577,9 @@ fn write(
         actor,
     } = target;
     let scope = source.scope();
-    let payload = mapstore::revise(log, schemas, &map, &scope, &cited, actor, mutation)?;
-    log.append(&Event::new(actor, source.clone(), None, payload.clone()))?;
+    let event = mapstore::commit(log, schemas, &map, &scope, source, &cited, actor, mutation)?;
     renderer.render(&mapstore::fold_map(log, schemas, &map, &scope)?)?;
-    Ok(payload)
+    Ok(event.payload().clone())
 }
 
 /// Adds a node to a map and prints its minted id, so a shell script can
@@ -589,7 +605,9 @@ pub fn maps_add_node(
     Ok(())
 }
 
-/// Adds an edge between two nodes already in a map.
+/// Adds an edge between two nodes already in a map. `--from` and `--to`
+/// are resolved against one fold of the map, taken before the write's
+/// own atomic commit re-folds it.
 pub fn maps_add_edge(
     args: EdgeArgs,
     log: &dyn EventLog,
@@ -597,11 +615,15 @@ pub fn maps_add_edge(
     source: &crate::core::Source,
     renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let scope = source.scope();
+    let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
+    let from = resolve_ref(&map, &args.from)?;
+    let to = resolve_ref(&map, &args.to)?;
     write(args.target, log, schemas, source, renderer, |sources| {
         Mutation::AddEdge {
             kind: args.kind,
-            from: args.from,
-            to: args.to,
+            from,
+            to,
             sources,
         }
     })
@@ -616,12 +638,12 @@ pub fn maps_remove_node(
     source: &crate::core::Source,
     renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let scope = source.scope();
+    let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
+    let node = resolve_ref(&map, &args.node)?;
     write(args.target, log, schemas, source, renderer, |sources| {
         Mutation::RemoveNode {
-            node: NodeRef {
-                kind: args.kind,
-                name: args.name,
-            },
+            node,
             reason: args.reason,
             sources,
         }
@@ -637,11 +659,15 @@ pub fn maps_remove_edge(
     source: &crate::core::Source,
     renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let scope = source.scope();
+    let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
+    let from = resolve_ref(&map, &args.from)?;
+    let to = resolve_ref(&map, &args.to)?;
     write(args.target, log, schemas, source, renderer, |sources| {
         Mutation::RemoveEdge {
             kind: args.kind,
-            from: args.from,
-            to: args.to,
+            from,
+            to,
             sources,
         }
     })

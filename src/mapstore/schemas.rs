@@ -16,7 +16,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::core::{Kind, Schema, Schemas, Settlement, CODE};
+use crate::core::{default_prefix, Kind, Schema, Schemas, Settlement, CODE};
 
 const DECISIONS_TOML: &str = include_str!("schemas/decisions.toml");
 const TASKS_TOML: &str = include_str!("schemas/tasks.toml");
@@ -57,6 +57,10 @@ struct KindFile {
     gloss: String,
     #[serde(default)]
     requires: Vec<String>,
+    /// A node kind's short id prefix, `d` for `decision` - optional,
+    /// since `default_prefix` covers the common case. Ignored on an
+    /// edge kind, which is never referenced by a short id.
+    prefix: Option<String>,
 }
 
 /// Every schema `project` has: `decisions` and `tasks`, each replaced
@@ -180,12 +184,17 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
     check_kinds(stem, "nodes", &file.nodes)?;
     check_kinds(stem, "edges", &file.edges)?;
 
-    let as_kind = |file: KindFile| Kind {
-        name: file.name,
-        gloss: file.gloss,
-        requires: file.requires,
+    let as_kind = |file: KindFile| {
+        let prefix = file.prefix.unwrap_or_else(|| default_prefix(&file.name));
+        Kind {
+            prefix,
+            name: file.name,
+            gloss: file.gloss,
+            requires: file.requires,
+        }
     };
     let node_kinds: Vec<Kind> = file.nodes.into_iter().map(as_kind).collect();
+    check_prefixes(stem, &node_kinds)?;
     let edge_kinds: Vec<Kind> = file.edges.into_iter().map(as_kind).collect();
 
     let mut schema = Schema {
@@ -255,6 +264,24 @@ fn check_kinds(
     }
     if let Some(name) = repeated(kinds.iter().map(|kind| kind.name.as_str())) {
         return Err(format!("{stem}.toml: {group} declares {name:?} twice").into());
+    }
+    Ok(())
+}
+
+/// Refuses two node kinds - explicit or defaulted - that resolve to
+/// the same short id prefix: a schema load error, so the collision is
+/// caught once, not the first time two nodes' short ids clash.
+fn check_prefixes(stem: &str, node_kinds: &[Kind]) -> Result<(), Box<dyn std::error::Error>> {
+    let mut seen: Vec<&Kind> = Vec::new();
+    for kind in node_kinds {
+        if let Some(other) = seen.iter().find(|other| other.prefix == kind.prefix) {
+            return Err(format!(
+                "{stem}.toml: node kinds {:?} and {:?} both take the short id prefix {:?}",
+                other.name, kind.name, kind.prefix
+            )
+            .into());
+        }
+        seen.push(kind);
     }
     Ok(())
 }

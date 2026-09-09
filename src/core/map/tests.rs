@@ -7,6 +7,17 @@ fn committed(payload: Payload) -> Event {
 }
 
 #[test]
+fn default_prefix_is_the_name_s_first_letter_lowercased() {
+    assert_eq!(default_prefix("Decision"), "d");
+    assert_eq!(default_prefix("task"), "t");
+}
+
+#[test]
+fn kind_new_defaults_its_prefix() {
+    assert_eq!(Kind::new("evidence", "g").prefix, "e");
+}
+
+#[test]
 fn headlines_are_the_schema_s_headline_kinds_in_map_order() {
     let events = [
         node_added("decisions", NodeId::new(), "option", "Go"),
@@ -195,6 +206,9 @@ fn since_leaves_out_an_edge_older_than_the_instant_between_kept_nodes() {
 }
 
 fn node_added(map: &str, node: NodeId, kind: &str, name: &str) -> Event {
+    // `seq` at its sentinel: these fixtures build a few nodes at most,
+    // so `Map::replay`'s positional fallback mints the same numbers a
+    // fresh `apply` would, and every test here is about something else.
     committed(Payload::NodeAdded {
         map: map.to_string(),
         node,
@@ -202,6 +216,7 @@ fn node_added(map: &str, node: NodeId, kind: &str, name: &str) -> Event {
         name: name.to_string(),
         properties: BTreeMap::new(),
         sources: Vec::new(),
+        seq: 0,
     })
 }
 
@@ -297,6 +312,7 @@ fn fold_stamps_a_node_with_its_events_actor_and_time() {
             name: "Rust".to_string(),
             properties: BTreeMap::new(),
             sources: Vec::new(),
+            seq: 0,
         },
     );
     let created_at = event.created_at();
@@ -994,4 +1010,101 @@ fn a_derived_map_is_found_by_neither_fold_nor_write() {
     assert!(err
         .to_string()
         .starts_with("\"code\" is derived from the working tree"));
+}
+
+#[test]
+fn a_short_id_is_its_kind_s_prefix_and_its_mint_order() {
+    let mut map = Map::empty(decisions());
+    map.apply(add_node("question", "Which language?"), Actor::User)
+        .unwrap();
+    map.apply(add_node("decision", "Rust"), Actor::User)
+        .unwrap();
+    map.apply(add_node("decision", "Go"), Actor::User).unwrap();
+
+    let question = map.find("question", "Which language?").unwrap().id;
+    let rust = map.find("decision", "Rust").unwrap().id;
+    let go = map.find("decision", "Go").unwrap().id;
+
+    assert_eq!(map.short_id(question), Some("q1".to_string()));
+    assert_eq!(map.short_id(rust), Some("d1".to_string()));
+    assert_eq!(map.short_id(go), Some("d2".to_string()));
+}
+
+/// `next_seq_by_kind` tracks a high-water mark per kind, never rolled
+/// back on `NodeRemoved` - a short id is cited in chat, PR comments,
+/// and committed text, so a removed node's number must never come back
+/// under a different node.
+#[test]
+fn a_removed_node_s_number_is_never_reused() {
+    let mut map = Map::empty(decisions());
+    map.apply(add_node("decision", "Go"), Actor::User).unwrap();
+    map.apply(
+        Mutation::RemoveNode {
+            node: node_ref("decision", "Go"),
+            reason: "reconsidered".to_string(),
+            sources: Vec::new(),
+        },
+        Actor::User,
+    )
+    .unwrap();
+    map.apply(add_node("decision", "Rust"), Actor::User)
+        .unwrap();
+
+    let rust = map.find("decision", "Rust").unwrap().id;
+
+    assert_eq!(map.short_id(rust), Some("d2".to_string()));
+}
+
+#[test]
+fn resolve_str_takes_a_short_id_or_a_kind_and_name() {
+    let mut map = Map::empty(decisions());
+    map.apply(add_node("decision", "Rust over Go"), Actor::User)
+        .unwrap();
+    let id = map.find("decision", "Rust over Go").unwrap().id;
+
+    assert_eq!(map.resolve_str("d1").unwrap(), id);
+    assert_eq!(map.resolve_str("decision:Rust over Go").unwrap(), id);
+}
+
+#[test]
+fn resolve_str_rejects_an_unknown_prefix_or_number() {
+    let map = chain();
+
+    assert!(matches!(
+        map.resolve_str("z1"),
+        Err(MapError::UnknownShortId(s)) if s == "z1"
+    ));
+    assert!(matches!(
+        map.resolve_str("d99"),
+        Err(MapError::UnknownShortId(s)) if s == "d99"
+    ));
+}
+
+#[test]
+fn a_node_added_event_with_no_seq_falls_back_to_its_position() {
+    let events = [
+        node_added("decisions", NodeId::new(), "decision", "A"),
+        node_added("decisions", NodeId::new(), "decision", "B"),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    let a = map.find("decision", "A").unwrap().id;
+    let b = map.find("decision", "B").unwrap().id;
+    assert_eq!(map.short_id(a), Some("d1".to_string()));
+    assert_eq!(map.short_id(b), Some("d2".to_string()));
+}
+
+#[test]
+fn the_code_schema_s_node_kinds_carry_distinct_prefixes() {
+    let schema = code();
+    let mut prefixes: Vec<&str> = schema.node_kinds.iter().map(|k| k.prefix.as_str()).collect();
+    let before = prefixes.len();
+    prefixes.sort_unstable();
+    prefixes.dedup();
+    assert_eq!(
+        prefixes.len(),
+        before,
+        "two node kinds share a short id prefix"
+    );
 }

@@ -83,7 +83,14 @@ pub enum Payload {
         content: String,
     },
     /// A node added to a cognitive map. `sources` names the events the
-    /// node was folded from.
+    /// node was folded from. `seq` is the node's short id number within
+    /// its kind - `d41` is `d` plus this - minted once by `Map::apply`
+    /// and carried here so a later fold reads back the same number
+    /// rather than recomputing it from its own position, which a
+    /// `Scope` can change. `0` on the wire means an event recorded
+    /// before short ids existed; `Map::replay` falls back to counting
+    /// its position among nodes of its kind for those, so an old log
+    /// still folds without a migration.
     NodeAdded {
         map: String,
         node: NodeId,
@@ -91,6 +98,7 @@ pub enum Payload {
         name: String,
         properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
+        seq: u32,
     },
     /// A node removed from a cognitive map, with why.
     NodeRemoved {

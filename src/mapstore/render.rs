@@ -132,7 +132,7 @@ fn push_by_kind(out: &mut String, map: &Map) {
         out.push_str(kind);
         out.push('\n');
         for node in nodes {
-            push_node(out, node);
+            push_node(out, map, node);
         }
     }
 
@@ -160,8 +160,8 @@ fn ordered_kinds(schema: &Schema) -> Vec<&str> {
 /// One node's bullet - its name and properties, the kind being the
 /// section's - then, on its own indented line, the sources it cites,
 /// when it cites any.
-fn push_node(out: &mut String, node: &Node) {
-    let _ = writeln!(out, "- {}{}", marked_name(node), node.properties_line());
+fn push_node(out: &mut String, map: &Map, node: &Node) {
+    let _ = writeln!(out, "- {}{}", marked_name(map, node), node.properties_line());
     if !node.sources.is_empty() {
         let _ = writeln!(out, "  sources: {}", ids(&node.sources).join(", "));
     }
@@ -190,9 +190,9 @@ fn push_decisions(out: &mut String, map: &Map) {
         return;
     }
 
-    push_contents(out, &headlines);
+    push_contents(out, map, &headlines);
     for node in headlines {
-        let _ = write!(out, "\n## {}\n\n", marked_name(node));
+        let _ = write!(out, "\n## {}\n\n", marked_name(map, node));
         if node.kind == "question" {
             push_question_body(out, map, node);
         } else {
@@ -222,21 +222,21 @@ fn push_tasks(out: &mut String, map: &Map) {
         return;
     }
     if !open.is_empty() {
-        push_contents(out, &open);
+        push_contents(out, map, &open);
     }
     for task in open {
-        let _ = write!(out, "\n## {}\n\n", marked_name(task));
+        let _ = write!(out, "\n## {}\n\n", marked_name(map, task));
         push_props(out, task, "");
         for blocker in map.blocked_by(task.id) {
-            let _ = writeln!(out, "waits on {}", marked_name(blocker));
+            let _ = writeln!(out, "waits on {}", marked_name(map, blocker));
         }
     }
     if !done.is_empty() {
         out.push_str("\n## done\n");
         for task in done {
-            let _ = writeln!(out, "- {}", marked_name(task));
+            let _ = writeln!(out, "- {}", marked_name(map, task));
             for outcome in map.settled_by(task.id) {
-                let _ = writeln!(out, "  outcome {}", marked_name(outcome));
+                let _ = writeln!(out, "  outcome {}", marked_name(map, outcome));
                 push_props(out, outcome, "  ");
             }
         }
@@ -246,10 +246,10 @@ fn push_tasks(out: &mut String, map: &Map) {
 /// One `## contents` line per headline - its text and the date its
 /// raising prompt was minted, in first-seen order - the overview a
 /// reader scans before the entries.
-fn push_contents(out: &mut String, headlines: &[&Node]) {
+fn push_contents(out: &mut String, map: &Map, headlines: &[&Node]) {
     out.push_str("\n## contents\n");
     for node in headlines {
-        let _ = write!(out, "- {}", marked_name(node));
+        let _ = write!(out, "- {}", marked_name(map, node));
         match node.sources.first().and_then(|id| id.minted_at()) {
             Some(at) => {
                 let _ = writeln!(out, " \u{b7} {}", at.date());
@@ -280,7 +280,7 @@ fn push_question_body(out: &mut String, map: &Map, question: &Node) {
         push_decision(out, map, decision, question.sources.first().copied());
     }
     for option in map.weighed_for(question.id) {
-        let _ = writeln!(out, "- weighed {}", marked_name(option));
+        let _ = writeln!(out, "- weighed {}", marked_name(map, option));
         push_props(out, option, "  ");
     }
 }
@@ -290,7 +290,7 @@ fn push_question_body(out: &mut String, map: &Map, question: &Node) {
 /// headline this sits under - and one `was` line per decision it
 /// superseded, nearest first.
 fn push_decision(out: &mut String, map: &Map, decision: &Node, raised_by: Option<EventId>) {
-    let _ = writeln!(out, "- decision {}", marked_name(decision));
+    let _ = writeln!(out, "- decision {}", marked_name(map, decision));
     push_props(out, decision, "  ");
     if let Some(source) = decision
         .sources
@@ -300,14 +300,19 @@ fn push_decision(out: &mut String, map: &Map, decision: &Node, raised_by: Option
         let _ = writeln!(out, "  source {}", source.as_uuid());
     }
     for was in map.predecessors(decision.id) {
-        let _ = writeln!(out, "  was {}", marked_name(was));
+        let _ = writeln!(out, "  was {}", marked_name(map, was));
     }
 }
 
-/// A node's quoted name, marked `(model)` when the model wrote it -
-/// `Actor::User` and `Actor::System` are unmarked.
-fn marked_name(node: &Node) -> String {
-    let mut label = format!("{:?}", node.name);
+/// A node's short id and quoted name, marked `(model)` when the model
+/// wrote it - `Actor::User` and `Actor::System` are unmarked. The short
+/// id is the same `d41` `--around`, `--from`/`--to`, and a bare short
+/// id in `revise_map`'s arguments all resolve.
+fn marked_name(map: &Map, node: &Node) -> String {
+    let mut label = match map.short_id(node.id) {
+        Some(id) => format!("{id} {:?}", node.name),
+        None => format!("{:?}", node.name),
+    };
     if matches!(node.actor, Actor::Model) {
         label.push_str(" (model)");
     }

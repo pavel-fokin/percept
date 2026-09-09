@@ -61,6 +61,16 @@ struct NodeAddedBody {
     name: String,
     properties: BTreeMap<String, String>,
     sources: Vec<String>,
+    /// Missing on a line written before short ids existed - `default`
+    /// reads that as `0`, `Map::replay`'s sentinel for "not recorded".
+    /// Omitted on encode at that same sentinel, so a payload a caller
+    /// built with no `seq` at all still round-trips through `decode`.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    seq: u32,
+}
+
+fn is_zero(seq: &u32) -> bool {
+    *seq == 0
 }
 
 #[derive(Serialize, Deserialize)]
@@ -345,6 +355,7 @@ impl From<&crate::core::Event> for Event {
                 name,
                 properties,
                 sources,
+                seq,
             } => serde_json::to_value(NodeAddedBody {
                 map: map.clone(),
                 node: node.as_uuid().to_string(),
@@ -352,6 +363,7 @@ impl From<&crate::core::Event> for Event {
                 name: name.clone(),
                 properties: properties.clone(),
                 sources: ids(sources),
+                seq: *seq,
             })
             .expect("NodeAddedBody always serializes"),
             Payload::NodeRemoved {
@@ -509,6 +521,7 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 name: body.name,
                 properties: body.properties,
                 sources: parse_event_ids(body.sources)?,
+                seq: body.seq,
             })
         }
         EventKind::NodeRemoved => {

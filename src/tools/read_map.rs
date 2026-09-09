@@ -46,11 +46,16 @@ const PARAMETERS: &str = r#"{
   "properties": {
     "map": {"type": "string", "description": "the map's name, as the catalogue lists it"},
     "around": {
-      "type": "object",
       "description": "keep this node and what is within depth edges of it, either way",
-      "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
-      "required": ["kind", "name"],
-      "additionalProperties": false
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
+          "required": ["kind", "name"],
+          "additionalProperties": false
+        },
+        {"type": "string", "description": "a short id like d41, as this map's own nodes are shown"}
+      ]
     },
     "depth": {"type": "integer", "minimum": 0, "description": "edges out from around, default 1; nothing without around"},
     "since": {"type": "string", "description": "ISO-8601, or 1d/2h/30m back from now; keep what the map gained since then"},
@@ -87,14 +92,33 @@ impl Tool for ReadMap {
 
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
-        let around = args.around.map(NodeRef::from);
+        let map = self.maps.read(&args.map)?;
+        // Resolved against this same fold, so `select` below cuts the
+        // map this node was found in, not a second one read after it.
+        // An empty map has nothing to resolve against - `select`'s own
+        // empty-map case would skip `around` anyway, so a node named on
+        // one is not an error to report over "nothing recorded yet".
+        let around = if map.nodes().is_empty() {
+            None
+        } else {
+            args.around
+                .map(|node| -> Result<NodeRef, crate::core::MapError> {
+                    let id = node.resolve(&map)?;
+                    let node = map.node(id).expect("resolve returns a live node's id");
+                    Ok(NodeRef {
+                        kind: node.kind.clone(),
+                        name: node.name.clone(),
+                    })
+                })
+                .transpose()?
+        };
         let selection = Selection {
             around: around.as_ref().map(|node| (node, args.depth)),
             since: optional_time(args.since.as_deref())?,
             kinds: &args.kinds,
         };
         // `select` refuses `since` on the code map - it has no history.
-        let fragment = self.maps.read(&args.map)?.select(&selection)?;
+        let fragment = map.select(&selection)?;
         let lines = [
             encode_schema(fragment.map().schema()),
             encode_fragment(&fragment),

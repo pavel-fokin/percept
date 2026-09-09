@@ -79,11 +79,28 @@ pub struct Kind {
     /// option or a task. Checked on a write, never on a fold, so what
     /// was recorded before the rule still folds.
     pub requires: Vec<String>,
+    /// A node kind's short id prefix - `d` for `decision`, so a node
+    /// reads as `d41` rather than its full id. Meaningless on an edge
+    /// kind, which is never referenced by a short id; left at its
+    /// default there and never shown.
+    pub prefix: String,
+}
+
+/// A kind's prefix when its schema names none: the name's own first
+/// character, lowercased - `d` for `decision`, `t` for `task`. Used
+/// both by `Kind::new` and by the TOML loader, so the one rule for
+/// "no prefix given" lives once.
+pub fn default_prefix(name: &str) -> String {
+    name.chars()
+        .next()
+        .map(|c| c.to_lowercase().to_string())
+        .unwrap_or_default()
 }
 
 impl Kind {
     pub(crate) fn new(name: &str, gloss: &str) -> Self {
         Self {
+            prefix: default_prefix(name),
             name: name.to_string(),
             gloss: gloss.to_string(),
             requires: Vec::new(),
@@ -156,10 +173,15 @@ pub fn code() -> Schema {
         purpose: "which file defines which symbol and imports which file or package".to_string(),
         node_kinds: vec![
             Kind::new("file", "a source file, named by its repo-relative path"),
-            Kind::new(
-                "function",
-                "a function or method, named `path::Type::method` or `path::func`",
-            ),
+            // Its default prefix, `f`, collides with `file`'s; `fn`
+            // both avoids that and reads as the keyword it names.
+            Kind {
+                prefix: "fn".to_string(),
+                ..Kind::new(
+                    "function",
+                    "a function or method, named `path::Type::method` or `path::func`",
+                )
+            },
             Kind::new("type", "a struct, enum, trait, or alias, named `path::Name`"),
             Kind::new(
                 "package",
@@ -301,6 +323,10 @@ pub struct Node {
     pub actor: Actor,
     /// When this node was added - that event's `created_at`.
     pub added_at: Timestamp,
+    /// This node's number within its kind, minted once when it was
+    /// added - `d41` is its kind's prefix plus this. See
+    /// `Payload::NodeAdded`.
+    pub seq: u32,
 }
 
 /// A node as a writer names it: kind and quoted name, never the id.
@@ -463,6 +489,9 @@ pub enum MapError {
     },
     /// A stored event names a node id the fold never saw.
     NoSuchNodeId(NodeId),
+    /// A short id that names no node kind's prefix, or a number the map
+    /// never minted for it.
+    UnknownShortId(String),
     DuplicateEdge {
         kind: String,
         from: String,
@@ -524,6 +553,7 @@ impl fmt::Display for MapError {
                 Ok(())
             }
             Self::NoSuchNodeId(id) => write!(f, "no node with id {}", id.as_uuid()),
+            Self::UnknownShortId(s) => write!(f, "no node with the short id {s:?}"),
             Self::DuplicateEdge { kind, from, to } => {
                 write!(f, "{from} {kind} {to} is already in the map")
             }
@@ -549,6 +579,16 @@ pub struct Map {
     // thousands of them.
     by_id: HashMap<NodeId, usize>,
     by_name: HashMap<(String, String), NodeId>,
+    // A node's short id, by kind and its minted number - what
+    // `resolve_str` looks a short id up in, kept in step wherever
+    // `by_name` is.
+    by_seq: HashMap<(String, u32), NodeId>,
+    // The next short id number `next_seq` mints per kind. Tracked apart
+    // from `nodes`, and never rolled back on a `NodeRemoved`: a short
+    // id is cited in chat, PR comments, and committed text, so a
+    // removal freeing its number for reuse would make an old citation
+    // point at the wrong node.
+    next_seq_by_kind: HashMap<String, u32>,
     edge_keys: HashSet<(String, NodeId, NodeId)>,
 }
 
@@ -563,6 +603,15 @@ impl Map {
             .iter()
             .map(|n| ((n.kind.clone(), n.name.clone()), n.id))
             .collect();
+        let by_seq = nodes
+            .iter()
+            .map(|n| ((n.kind.clone(), n.seq), n.id))
+            .collect();
+        let mut next_seq_by_kind: HashMap<String, u32> = HashMap::new();
+        for node in &nodes {
+            let next = next_seq_by_kind.entry(node.kind.clone()).or_insert(1);
+            *next = (*next).max(node.seq + 1);
+        }
         let edge_keys = edges
             .iter()
             .map(|e| (e.kind.clone(), e.from, e.to))
@@ -573,6 +622,8 @@ impl Map {
             edges,
             by_id,
             by_name,
+            by_seq,
+            next_seq_by_kind,
             edge_keys,
         }
     }
@@ -778,6 +829,62 @@ impl Map {
         self.node(*id)
     }
 
+    /// The next short id number for a fresh `kind` node. `apply` mints
+    /// with this; `replay` falls back to it only for a `NodeAdded`
+    /// whose event carried no `seq` of its own. Tracked in
+    /// `next_seq_by_kind`, never by counting live nodes: a `NodeRemoved`
+    /// must not free a number for reuse, or an old citation of it would
+    /// point at whatever node minted it next.
+    fn next_seq(&self, kind: &str) -> u32 {
+        self.next_seq_by_kind.get(kind).copied().unwrap_or(1)
+    }
+
+    /// `id`'s short id - its kind's prefix and the number minted for it,
+    /// `d41`. `None` when the map holds no such node.
+    pub fn short_id(&self, id: NodeId) -> Option<String> {
+        let node = self.node(id)?;
+        let kind = self.schema.node_kind(&node.kind)?;
+        Some(format!("{}{}", kind.prefix, node.seq))
+    }
+
+    /// Resolves `s` to a node id, either way a writer may name one:
+    /// `kind:name`, or the short id this map's own render shows it as.
+    /// A short id never contains `:`, so the two forms cannot collide.
+    pub fn resolve_str(&self, s: &str) -> Result<NodeId, MapError> {
+        match s.split_once(':') {
+            Some((kind, name)) => self.resolve(NodeRef {
+                kind: kind.to_string(),
+                name: name.to_string(),
+            }),
+            None => self.resolve_short_id(s),
+        }
+    }
+
+    /// `resolve_str`'s short-id half: `s` split at its first digit into
+    /// a node kind's prefix and a sequence number, looked up in
+    /// `by_seq`. Anything that doesn't take that shape, names no
+    /// kind's prefix, or names a number the map never minted is the
+    /// one error - a short id has nothing else to suggest instead of.
+    fn resolve_short_id(&self, s: &str) -> Result<NodeId, MapError> {
+        let unknown = || MapError::UnknownShortId(s.to_string());
+        let at = s.find(|c: char| c.is_ascii_digit()).filter(|&at| at > 0);
+        let (prefix, digits) = at.map(|at| s.split_at(at)).ok_or_else(unknown)?;
+        if !digits.chars().all(|c| c.is_ascii_digit()) {
+            return Err(unknown());
+        }
+        let kind = self
+            .schema
+            .node_kinds
+            .iter()
+            .find(|kind| kind.prefix == prefix)
+            .ok_or_else(unknown)?;
+        let seq: u32 = digits.parse().map_err(|_| unknown())?;
+        self.by_seq
+            .get(&(kind.name.clone(), seq))
+            .copied()
+            .ok_or_else(unknown)
+    }
+
     /// The map cut to nodes of `kinds`, keeping only the edges whose
     /// both ends survived. A kind the schema lacks is an error, so an
     /// empty result means the map holds none of that kind.
@@ -928,6 +1035,7 @@ impl Map {
                 Payload::NodeAdded {
                     map,
                     node: NodeId::new(),
+                    seq: self.next_seq(&kind),
                     kind,
                     name,
                     properties,
@@ -986,6 +1094,7 @@ impl Map {
                 name,
                 properties,
                 sources,
+                seq,
                 ..
             } => {
                 self.check_node_kind(kind)?;
@@ -998,8 +1107,16 @@ impl Map {
                         name: name.clone(),
                     });
                 }
+                // `0` is an event from before short ids existed - the
+                // same count `apply` would have minted for it, taken
+                // here from its position among nodes of its kind, since
+                // nothing recorded one at the time.
+                let seq = if *seq == 0 { self.next_seq(kind) } else { *seq };
+                let next = self.next_seq_by_kind.entry(kind.clone()).or_insert(1);
+                *next = (*next).max(seq + 1);
                 self.by_id.insert(*node, self.nodes.len());
                 self.by_name.insert((kind.clone(), name.clone()), *node);
+                self.by_seq.insert((kind.clone(), seq), *node);
                 self.nodes.push(Node {
                     id: *node,
                     kind: kind.clone(),
@@ -1008,12 +1125,15 @@ impl Map {
                     sources: sources.clone(),
                     actor,
                     added_at: at,
+                    seq,
                 });
             }
             Payload::NodeRemoved { node, .. } => {
                 let removed = self.node(*node).ok_or(MapError::NoSuchNodeId(*node))?;
                 let key = (removed.kind.clone(), removed.name.clone());
+                let seq_key = (removed.kind.clone(), removed.seq);
                 self.by_name.remove(&key);
+                self.by_seq.remove(&seq_key);
                 self.nodes.retain(|n| n.id != *node);
                 self.by_id = self
                     .nodes

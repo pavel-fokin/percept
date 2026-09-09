@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::core::{
     Actor, Edge, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation, Node, NodeId,
-    NodeRef, Payload, Schemas, Scope,
+    Payload, Schemas, Scope,
 };
 use crate::shared::Timestamp;
 use crate::store::{ids, parse_event_id};
@@ -66,8 +66,20 @@ impl Snapshot {
         name: &str,
         scope: &Scope,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::from_events(schemas, name, scope, log.load()?)
+    }
+
+    /// `load`, given the events already read rather than reading them
+    /// itself - what `revise` and `commit` share, so a caller holding
+    /// events `EventLog::append_computed` handed it under its lock
+    /// folds them the same way a fresh `load` would.
+    fn from_events(
+        schemas: &Schemas,
+        name: &str,
+        scope: &Scope,
+        events: Vec<crate::core::Event>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let schema = schemas.find(name)?;
-        let events = log.load()?;
         let map = Map::fold(schema, scope, &events)?;
         let ids = events.iter().map(|event| event.id().as_uuid()).collect();
         Ok(Self { map, ids })
@@ -99,25 +111,48 @@ impl Snapshot {
     }
 }
 
-/// One change to the map `name` names, as the payload that records
-/// it: `sources` resolved, the `Mutation` built from them checked and
-/// applied. The caller commits the payload under its own actor and
-/// source. The load and that append are not one locked step, so two
-/// writers racing to add the same name can both succeed; the next
-/// fold then fails loudly.
-pub fn revise(
-    log: &dyn EventLog,
+/// `commit`'s check-and-apply, given the events its closure was handed
+/// by `EventLog::append_computed` under the log's lock: `sources`
+/// resolved against them, the `Mutation` built from them checked and
+/// applied to their fold.
+fn revised(
     schemas: &Schemas,
     name: &str,
     scope: &Scope,
+    events: Vec<crate::core::Event>,
     sources: &[String],
     actor: Actor,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
-    let mut snapshot = Snapshot::load(log, schemas, name, scope)?;
+    let mut snapshot = Snapshot::from_events(schemas, name, scope, events)?;
     let sources = snapshot.resolve(sources)?;
     let mutation = mutation(sources);
     Ok(snapshot.apply(mutation, actor)?)
+}
+
+/// One change to the map `name` names, minted and committed atomically:
+/// `EventLog::append_computed` hands `compute` every event already in
+/// the log under its lock, `revised` checks and applies `mutation`
+/// against that exact fold, and the event built from the payload it
+/// returns is appended before any other writer's own `append_computed`
+/// call can run. Two writers each loading the log on their own could
+/// both count the same kind's existing nodes and mint the same short
+/// id; this is the seam that stops them.
+pub fn commit(
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    name: &str,
+    scope: &Scope,
+    source: &crate::core::Source,
+    sources: &[String],
+    actor: Actor,
+    mutation: impl FnOnce(Vec<EventId>) -> Mutation,
+) -> Result<crate::core::Event, Box<dyn std::error::Error>> {
+    let (name, scope, source) = (name.to_string(), scope.clone(), source.clone());
+    log.append_computed(Box::new(move |events| {
+        let payload = revised(schemas, &name, &scope, events, sources, actor, mutation)?;
+        Ok(crate::core::Event::new(actor, source, None, payload))
+    }))
 }
 
 #[derive(Serialize)]
@@ -149,6 +184,11 @@ impl Stamp {
 #[derive(Serialize)]
 struct NodeLine<'a> {
     node: String,
+    /// This node's short id - its kind's prefix and the number minted
+    /// for it, `d41` - the form `--around`, `--from`/`--to`, and a
+    /// short id in `revise_map`'s arguments all resolve, alongside
+    /// `kind:name`.
+    id: String,
     kind: &'a str,
     name: &'a str,
     properties: &'a BTreeMap<String, String>,
@@ -260,27 +300,35 @@ pub fn encode_lines(map: &Map) -> impl Iterator<Item = String> + '_ {
     nodes.chain(edges)
 }
 
-/// A node named the way a writer knows it - by kind and name - matching
-/// `NodeRef`, but its own type since the domain stays serde-free.
+/// A node the way a tool call names it - `{kind, name}`, matching
+/// `NodeRef`, or a bare short id string, `d41`, the way this map's own
+/// render shows a node. Untagged: which JSON shape the caller sent
+/// decides the match. Its own type since the domain stays serde-free.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NodeRefArgs {
-    kind: String,
-    name: String,
+#[serde(untagged)]
+pub enum NodeRefArgs {
+    Named { kind: String, name: String },
+    ShortId(String),
 }
 
-impl From<NodeRefArgs> for NodeRef {
-    fn from(node: NodeRefArgs) -> Self {
-        NodeRef {
-            kind: node.kind,
-            name: node.name,
-        }
+impl NodeRefArgs {
+    /// Resolves this reference against `map` to the node id it names.
+    /// `{kind, name}` and a short id both go through `Map::resolve_str`,
+    /// so a `kind:name` string typed straight into a bare short id's
+    /// place still works the way it always has.
+    pub fn resolve(self, map: &Map) -> Result<NodeId, MapError> {
+        let s = match self {
+            Self::Named { kind, name } => format!("{kind}:{name}"),
+            Self::ShortId(s) => s,
+        };
+        map.resolve_str(&s)
     }
 }
 
 pub fn encode_node(map: &Map, node: &Node) -> String {
     serde_json::to_string(&NodeLine {
         node: node.id.as_uuid().to_string(),
+        id: map.short_id(node.id).unwrap_or_default(),
         kind: &node.kind,
         name: &node.name,
         properties: &node.properties,

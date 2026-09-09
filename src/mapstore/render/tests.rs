@@ -49,13 +49,14 @@ fn tasks_head() -> String {
     format!("# tasks\n\n{PREAMBLE} {TASKS_GUIDE}\n")
 }
 
-/// A `## contents` block: one `- "name" · date` line per entry.
-fn contents(entries: &[(&str, EventId)]) -> String {
+/// A `## contents` block: one `- id "name" · date` line per entry,
+/// `id` the short id its kind's prefix and mint order give it.
+fn contents(entries: &[(&str, &str, EventId)]) -> String {
     let mut out = "\n## contents\n".to_string();
-    for (name, id) in entries {
+    for (id, name, source) in entries {
         out.push_str(&format!(
-            "- {name:?} \u{b7} {}\n",
-            id.minted_at().unwrap().date()
+            "- {id} {name:?} \u{b7} {}\n",
+            source.minted_at().unwrap().date()
         ));
     }
     out
@@ -120,19 +121,19 @@ fn questions_render_flat_at_h2_in_first_seen_order() {
 
     let expected = format!(
         "{}{}\n\
-         ## \"Where does the event log live?\"\n\
+         ## q1 \"Where does the event log live?\"\n\
          \n\
-         - decision \"one log under ~/.percept\"\n\
+         - decision d1 \"one log under ~/.percept\"\n\
          \x20 why: \"PERCEPT_HOME also holds the binary\"\n\
          \n\
-         ## \"How is a decision corrected?\"\n\
+         ## q2 \"How is a decision corrected?\"\n\
          \n\
-         - decision \"add the new decision with a supersedes edge\"\n\
+         - decision d2 \"add the new decision with a supersedes edge\"\n\
          \x20 why: \"the old landmark stays one hop away\"\n",
         head(),
         contents(&[
-            ("Where does the event log live?", first),
-            ("How is a decision corrected?", second),
+            ("q1", "Where does the event log live?", first),
+            ("q2", "How is a decision corrected?", second),
         ]),
     );
 
@@ -151,10 +152,10 @@ fn the_contents_list_names_every_question_with_its_raising_date() {
 
     assert!(text.contains(&format!(
         "\n## contents\n\
-         - \"Which model?\" \u{b7} {date}\n\
-         - \"Where is the key?\" \u{b7} {date}\n\
-         - \"What is the URL?\" \u{b7} {date}\n\
-         \n## \"Which model?\"\n",
+         - q1 \"Which model?\" \u{b7} {date}\n\
+         - q2 \"Where is the key?\" \u{b7} {date}\n\
+         - q3 \"What is the URL?\" \u{b7} {date}\n\
+         \n## q1 \"Which model?\"\n",
         date = prompt.minted_at().unwrap().date()
     )));
 }
@@ -176,12 +177,12 @@ fn a_questions_own_properties_render_under_its_heading() {
         markdown(&map),
         format!(
             "{}{}\n\
-             ## \"How should X integrate?\"\n\
+             ## q1 \"How should X integrate?\"\n\
              \n\
              why: \"not decided; three models sketched\"\n\
              - open\n",
             head(),
-            contents(&[("How should X integrate?", source)]),
+            contents(&[("q1", "How should X integrate?", source)]),
         )
     );
 }
@@ -203,9 +204,9 @@ fn a_question_without_a_decision_is_open() {
         format!(
             "{}\n\
              ## contents\n\
-             - \"Which key accepts a suggestion?\" \u{b7} uncited\n\
+             - q1 \"Which key accepts a suggestion?\" \u{b7} uncited\n\
              \n\
-             ## \"Which key accepts a suggestion?\"\n\
+             ## q1 \"Which key accepts a suggestion?\"\n\
              \n\
              - open\n",
             head()
@@ -258,12 +259,12 @@ fn a_superseding_decision_shows_its_predecessor_as_was() {
         markdown(&map),
         format!(
             "{}{}\n\
-             ## \"Which model is default?\"\n\
+             ## q1 \"Which model is default?\"\n\
              \n\
-             - decision \"gemma4 by default\"\n\
-             \x20 was \"gpt3 by default\"\n",
+             - decision d2 \"gemma4 by default\"\n\
+             \x20 was d1 \"gpt3 by default\"\n",
             head(),
-            contents(&[("Which model is default?", source)]),
+            contents(&[("q1", "Which model is default?", source)]),
         )
     );
 }
@@ -296,13 +297,13 @@ fn a_supersession_chain_lists_every_predecessor_nearest_first() {
         markdown(&map),
         format!(
             "{}{}\n\
-             ## \"Which model?\"\n\
+             ## q1 \"Which model?\"\n\
              \n\
-             - decision \"C\"\n\
-             \x20 was \"B\"\n\
-             \x20 was \"A\"\n",
+             - decision d3 \"C\"\n\
+             \x20 was d2 \"B\"\n\
+             \x20 was d1 \"A\"\n",
             head(),
-            contents(&[("Which model?", source)]),
+            contents(&[("q1", "Which model?", source)]),
         )
     );
 }
@@ -338,12 +339,12 @@ fn a_decision_citing_a_different_prompt_than_its_question_names_the_source() {
         markdown(&map),
         format!(
             "{}{}\n\
-             ## \"Which model?\"\n\
+             ## q1 \"Which model?\"\n\
              \n\
-             - decision \"gemma4\"\n\
+             - decision d1 \"gemma4\"\n\
              \x20 source {}\n",
             head(),
-            contents(&[("Which model?", raised)]),
+            contents(&[("q1", "Which model?", raised)]),
             settled.as_uuid()
         )
     );
@@ -366,11 +367,11 @@ fn a_model_written_question_is_marked() {
         markdown(&map),
         format!(
             "{}{}\n\
-             ## \"Which key accepts a suggestion?\" (model)\n\
+             ## q1 \"Which key accepts a suggestion?\" (model)\n\
              \n\
              - open\n",
             head(),
-            contents(&[("Which key accepts a suggestion?", source)])
+            contents(&[("q1", "Which key accepts a suggestion?", source)])
                 .replace(" \u{b7} ", " (model) \u{b7} "),
         )
     );
@@ -393,12 +394,13 @@ fn a_decision_resolving_no_question_gets_its_own_h2() {
         markdown(&map),
         format!(
             "{}{}\n\
-             ## \"gemma4 by default\" (model)\n\
+             ## d1 \"gemma4 by default\" (model)\n\
              \n\
-             - decision \"gemma4 by default\" (model)\n\
+             - decision d1 \"gemma4 by default\" (model)\n\
              \x20 why: \"the local model\"\n",
             head(),
-            contents(&[("gemma4 by default", source)]).replace(" \u{b7} ", " (model) \u{b7} "),
+            contents(&[("d1", "gemma4 by default", source)])
+                .replace(" \u{b7} ", " (model) \u{b7} "),
         )
     );
 }
@@ -445,9 +447,9 @@ fn a_question_lists_the_options_weighed_against_its_decision() {
     );
 
     assert!(markdown(&map).contains(
-        "- decision \"its own wire parser\"\n\
+        "- decision d1 \"its own wire parser\"\n\
          \x20 why: \"a different SSE shape\"\n\
-         - weighed \"reuse the OpenAi struct\"\n\
+         - weighed o1 \"reuse the OpenAi struct\"\n\
          \x20 why: \"the wire shapes differ\"\n"
     ));
 }
@@ -550,9 +552,7 @@ fn a_resolves_edge_between_the_wrong_kinds_settles_nothing() {
         ("option", "gemma4"),
     );
 
-    assert!(
-        markdown(&map).contains("## \"gemma4 by default\"\n\n- decision \"gemma4 by default\"\n")
-    );
+    assert!(markdown(&map).contains("## d1 \"gemma4 by default\"\n\n- decision d1 \"gemma4 by default\"\n"));
 }
 
 #[test]
@@ -627,22 +627,22 @@ fn open_tasks_render_flat_with_why_and_blockers_then_done() {
 
     let expected = format!(
         "{}{}\n\
-         ## \"cancel a turn without quitting\"\n\
+         ## t2 \"cancel a turn without quitting\"\n\
          \n\
          why: \"Esc drops the session\"\n\
-         waits on \"cancellable reply streams\"\n\
+         waits on t3 \"cancellable reply streams\"\n\
          \n\
-         ## \"cancellable reply streams\"\n\
+         ## t3 \"cancellable reply streams\"\n\
          \n\
          why: \"nothing can stop a stream today\"\n\
          \n\
          ## done\n\
-         - \"send AGENTS.md to a coding turn\" (model)\n\
-         \x20 outcome \"done in 1f1a9a9\"\n",
+         - t1 \"send AGENTS.md to a coding turn\" (model)\n\
+         \x20 outcome o1 \"done in 1f1a9a9\"\n",
         tasks_head(),
         contents(&[
-            ("cancel a turn without quitting", first),
-            ("cancellable reply streams", second),
+            ("t2", "cancel a turn without quitting", first),
+            ("t3", "cancellable reply streams", second),
         ]),
     );
 
@@ -689,10 +689,10 @@ fn a_map_of_another_schema_renders_per_kind() {
          Change it with `percept maps`, not by hand.\n\
          \n\
          ## file\n\
-         - \"src/main.rs\"\n\
+         - f1 \"src/main.rs\"\n\
          \n\
          ## function\n\
-         - \"main\": returns: \"()\"\n\
+         - fn1 \"main\": returns: \"()\"\n\
          \x20 sources: {}\n\
          \n\
          ## edges\n\

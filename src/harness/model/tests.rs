@@ -63,6 +63,7 @@ fn a_map_change_is_filtered_out_while_a_neighbouring_message_survives() {
                 name: "Both built in parallel".to_string(),
                 properties: BTreeMap::new(),
                 sources: vec![EventId::new()],
+                seq: 1,
             },
         ),
         Event::new(

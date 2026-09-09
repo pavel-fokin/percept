@@ -266,6 +266,7 @@ fn another_source_s_map_mutation_in_the_same_project_still_folds() {
             name: "why?".to_string(),
             properties: Default::default(),
             sources: Vec::new(),
+            seq: 1,
         },
     )];
     let log = Arc::new(FakeLog::seeded(seeded));
@@ -841,6 +842,7 @@ fn a_tool_s_map_commit_rerenders_the_map_it_changed() {
                 name: "Rust over Go".to_string(),
                 properties: Default::default(),
                 sources: Vec::new(),
+                seq: 1,
             }]))],
             MapShape::Prompt,
         ),
@@ -1033,6 +1035,7 @@ fn a_map_is_sent_with_its_kinds_ahead_of_the_transcript_and_outside_the_window()
             name: "Rust over Go".to_string(),
             properties: Default::default(),
             sources: Vec::new(),
+            seq: 1,
         },
     )];
     events.extend(filler(25));
@@ -1155,6 +1158,7 @@ fn a_map_that_does_not_fold_fails_at_open() {
             name: "Ship".to_string(),
             properties: Default::default(),
             sources: Vec::new(),
+            seq: 1,
         },
     )];
     let err = App::new(

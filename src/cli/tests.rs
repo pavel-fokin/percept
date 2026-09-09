@@ -190,22 +190,39 @@ fn a_prop_with_no_equals_sign_is_rejected() {
     assert!(parse_prop("summary").is_err());
 }
 
+fn map_with_a_decision() -> Map {
+    let mut map = Map::empty(crate::core::testing::decisions());
+    map.apply(
+        Mutation::AddNode {
+            kind: "decision".to_string(),
+            name: "Rust over Go".to_string(),
+            properties: Default::default(),
+            sources: Vec::new(),
+        },
+        Actor::User,
+    )
+    .unwrap();
+    map
+}
+
 #[test]
 fn a_node_ref_splits_on_the_first_colon() {
-    let node = parse_node_ref("option:Rust:the language").unwrap();
-    assert_eq!(node.kind, "option");
-    assert_eq!(node.name, "Rust:the language");
+    let node = resolve_ref(&map_with_a_decision(), "decision:Rust over Go").unwrap();
+    assert_eq!(node.kind, "decision");
+    assert_eq!(node.name, "Rust over Go");
 }
 
 #[test]
-fn a_node_ref_with_no_colon_is_rejected() {
-    assert!(parse_node_ref("option").is_err());
+fn a_node_ref_resolves_by_its_short_id_too() {
+    let node = resolve_ref(&map_with_a_decision(), "d1").unwrap();
+    assert_eq!(node.kind, "decision");
+    assert_eq!(node.name, "Rust over Go");
 }
 
 #[test]
-fn a_node_ref_with_a_blank_side_is_rejected() {
-    assert!(parse_node_ref(":Rust").is_err());
-    assert!(parse_node_ref("option: ").is_err());
+fn an_unknown_node_ref_is_rejected() {
+    assert!(resolve_ref(&map_with_a_decision(), "decision:Go alone").is_err());
+    assert!(resolve_ref(&map_with_a_decision(), "d9").is_err());
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -436,8 +453,7 @@ fn every_write_verb_refuses_the_code_map() {
     let remove_node = maps_remove_node(
         RemoveNodeArgs {
             target: target(),
-            kind: "file".to_string(),
-            name: "src/main.rs".to_string(),
+            node: "file:src/main.rs".to_string(),
             reason: "gone".to_string(),
         },
         &log,
@@ -448,14 +464,8 @@ fn every_write_verb_refuses_the_code_map() {
     let edge_args = || EdgeArgs {
         target: target(),
         kind: "imports".to_string(),
-        from: NodeRef {
-            kind: "file".to_string(),
-            name: "src/main.rs".to_string(),
-        },
-        to: NodeRef {
-            kind: "file".to_string(),
-            name: "src/app/mod.rs".to_string(),
-        },
+        from: "file:src/main.rs".to_string(),
+        to: "file:src/app/mod.rs".to_string(),
     };
     let add_edge = maps_add_edge(edge_args(), &log, &schemas(), &cli_source, &renderer);
     let remove_edge = maps_remove_edge(edge_args(), &log, &schemas(), &cli_source, &renderer);
