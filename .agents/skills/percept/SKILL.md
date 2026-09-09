@@ -28,10 +28,11 @@ what was added from that instant, and cuts after `--around`, so the two
 together read as "what changed near this node". A filtered read prints
 one line on stderr: how many nodes and edges were shown of the total,
 and how many edges cross the cut. stdout is JSONL by default; `--format
-md` prints the rendered Markdown instead - the same text as
-`.percept/<map>.md`, cut to the fragment. `percept maps list --format
-md` prints one section per map: its purpose and size, its node and edge
-kinds each with a line on what it is, and one example node and edge.
+md` prints the rendered Markdown instead, cut to the fragment. A map
+is folded live from the log on every read; no file holds a render.
+`percept maps list --format md` prints one section per map: its
+purpose and size, its node and edge kinds each with a line on what it
+is, and one example node and edge.
 
 The model's `read_map` tool takes the same `around`, `depth`, and
 `kinds`. It returns a line naming the map's kinds and their meanings,
@@ -66,8 +67,8 @@ The recipe is in the [plan skill](../plan/SKILL.md): a `question`, the
 `decision` with a `resolves` edge, and an `option` with an `answers`
 edge for each alternative that lost, saying why in its `why` property.
 Every node cites the prompt that settled it and is written as
-`--actor model`. Write through `percept maps` or `revise_map`, never
-by editing the rendered Markdown.
+`--actor model`. Write several nodes at once with `percept maps
+record`, one with `add-node`, or mid-turn with `revise_map`.
 Capture an unlogged prompt with `events publish` under its real actor
 and source before citing it; never invent an id or cite an agent's
 summary as the user's words.
