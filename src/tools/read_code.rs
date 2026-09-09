@@ -1,47 +1,45 @@
-use std::sync::Arc;
+use std::path::PathBuf;
 
 use serde::Deserialize;
 
-use crate::core::{MapReader, NodeRef, Selection};
+use crate::code;
+use crate::core::{NodeRef, Selection};
 use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::mapstore::{encode_fragment, encode_lines, encode_schema, NodeRefArgs};
-use crate::store::optional_time;
 
-/// The `read_map` tool: one map, whole or cut to a fragment, as JSONL
-/// with event ids on every node and edge. Offered when the prompt does
-/// not carry the map whole, so the model opens what it judges relevant
-/// instead of reading every map every turn.
-pub struct ReadMap {
-    maps: Arc<dyn MapReader>,
+/// The `read_code` tool: the code map - a codebase's files, the
+/// symbols they define, and what imports what - walked fresh from the
+/// working tree on every call, whole or cut to a fragment. Offered
+/// only in the `code` toolset, beside the file tools.
+pub struct ReadCode {
+    root: PathBuf,
 }
 
-impl ReadMap {
-    pub fn new(maps: Arc<dyn MapReader>) -> Self {
-        Self { maps }
+impl ReadCode {
+    pub fn new(root: PathBuf) -> Self {
+        Self { root }
     }
 }
 
-const NAME: &str = "read_map";
+const NAME: &str = "read_code";
 
-const DESCRIPTION: &str = "Read one cognitive map by name, whole or cut to \
-    a fragment: around one node to a depth, since an instant, of some \
-    kinds. The maps are the ones the catalogue lists. Returns JSONL: \
-    first a line naming the map's node and edge kinds, each with one \
-    line on what it is - read it before choosing an `around` selector, \
-    since a kind's name alone can mislead. Then a line counting what \
-    was shown of the whole and how many edges cross the cut, then \
-    every node, then every edge, each with the event ids it cites. A \
-    crossing edge is where to widen when an exception or a \
-    contradiction could change the answer. Open a map before answering \
-    from it or revising it; what the conversation shows of a map may \
-    be only its headlines.";
+const DESCRIPTION: &str = "Read the code map: which file defines which \
+    symbol and imports which file or package, walked fresh from the \
+    working tree on every call. Whole, or cut to a fragment: around \
+    one node to a depth, of some kinds. Prefer this over grep for code \
+    structure. Returns JSONL: first a line naming the map's node and \
+    edge kinds, each with one line on what it is - read it before \
+    choosing an `around` selector, since a kind's name alone can \
+    mislead. Then a line counting what was shown of the whole and how \
+    many edges cross the cut, then every node, then every edge. A \
+    crossing edge is where to widen when the answer needs more than \
+    what was shown.";
 
 /// JSON Schema for `run`'s `arguments`. A string, not a `Value` - the
 /// domain's `ToolSpec` is serde-free, so the provider parses this.
 const PARAMETERS: &str = r#"{
   "type": "object",
   "properties": {
-    "map": {"type": "string", "description": "the map's name, as the catalogue lists it"},
     "around": {
       "description": "keep this node and what is within depth edges of it, either way",
       "oneOf": [
@@ -51,25 +49,21 @@ const PARAMETERS: &str = r#"{
           "required": ["kind", "name"],
           "additionalProperties": false
         },
-        {"type": "string", "description": "a short id like d41, as this map's own nodes are shown"}
+        {"type": "string", "description": "a short id like fn3, as this map's own nodes are shown"}
       ]
     },
     "depth": {"type": "integer", "minimum": 0, "description": "edges out from around, default 1; nothing without around"},
-    "since": {"type": "string", "description": "ISO-8601, or 1d/2h/30m back from now; keep what the map gained since then"},
     "kinds": {"type": "array", "items": {"type": "string"}, "description": "keep only these node kinds"}
   },
-  "required": ["map"],
   "additionalProperties": false
 }"#;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Args {
-    map: String,
     around: Option<NodeRefArgs>,
     #[serde(default = "one")]
     depth: usize,
-    since: Option<String>,
     #[serde(default)]
     kinds: Vec<String>,
 }
@@ -78,7 +72,7 @@ fn one() -> usize {
     1
 }
 
-impl Tool for ReadMap {
+impl Tool for ReadCode {
     fn spec(&self) -> ToolSpec {
         ToolSpec {
             name: NAME,
@@ -89,12 +83,12 @@ impl Tool for ReadMap {
 
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
-        let map = self.maps.read(&args.map)?;
-        // Resolved against this same fold, so `select` below cuts the
-        // map this node was found in, not a second one read after it.
+        let map = code::build(&self.root)?;
+        // Resolved against this same walk, so `select` below cuts the
+        // map this node was found in, not a second one built after it.
         // An empty map has nothing to resolve against - `select`'s own
         // empty-map case would skip `around` anyway, so a node named on
-        // one is not an error to report over "nothing recorded yet".
+        // one is not an error to report over "nothing found yet".
         let around = if map.nodes().is_empty() {
             None
         } else {
@@ -111,7 +105,7 @@ impl Tool for ReadMap {
         };
         let selection = Selection {
             around: around.as_ref().map(|node| (node, args.depth)),
-            since: optional_time(args.since.as_deref())?,
+            since: None,
             kinds: &args.kinds,
         };
         let fragment = map.select(&selection)?;

@@ -27,8 +27,8 @@ pub fn fold_map(
     Ok(Map::fold(schemas.find(name)?, scope, &log.load()?)?)
 }
 
-/// The `MapReader` for every log-folded map. `main` wraps this to route
-/// `code` to the working-tree walk, so `store` never depends on `code`.
+/// The `MapReader` over every map `Schemas` knows, each folded from the
+/// log.
 pub struct LogMaps {
     log: Arc<dyn EventLog>,
     schemas: Arc<Schemas>,
@@ -163,9 +163,7 @@ struct MapLine<'a> {
     edges: usize,
 }
 
-/// Who added a node or edge and when. Absent on a derived map's lines:
-/// its nodes were stamped by the walk that built them, and a reader
-/// would take that for the moment the code was written.
+/// Who added a node or edge and when.
 #[derive(Serialize)]
 struct Stamp {
     actor: &'static str,
@@ -173,11 +171,11 @@ struct Stamp {
 }
 
 impl Stamp {
-    fn of(map: &Map, actor: Actor, added_at: Timestamp) -> Option<Self> {
-        (!map.schema().derived).then(|| Self {
+    fn of(actor: Actor, added_at: Timestamp) -> Self {
+        Self {
             actor: actor.name(),
             added_at: added_at.to_string(),
-        })
+        }
     }
 }
 
@@ -193,8 +191,8 @@ struct NodeLine<'a> {
     name: &'a str,
     properties: &'a BTreeMap<String, String>,
     sources: Vec<String>,
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    stamp: Option<Stamp>,
+    #[serde(flatten)]
+    stamp: Stamp,
 }
 
 #[derive(Serialize)]
@@ -203,8 +201,8 @@ struct EdgeLine<'a> {
     from: String,
     to: String,
     sources: Vec<String>,
-    #[serde(flatten, skip_serializing_if = "Option::is_none")]
-    stamp: Option<Stamp>,
+    #[serde(flatten)]
+    stamp: Stamp,
 }
 
 /// One line naming a map and its size, for `maps list`.
@@ -333,7 +331,7 @@ pub fn encode_node(map: &Map, node: &Node) -> String {
         name: &node.name,
         properties: &node.properties,
         sources: ids(&node.sources),
-        stamp: Stamp::of(map, node.actor, node.added_at),
+        stamp: Stamp::of(node.actor, node.added_at),
     })
     .expect("NodeLine always serializes")
 }
@@ -347,7 +345,7 @@ pub fn encode_edge(map: &Map, edge: &Edge) -> String {
         from: node_ref(map, edge.from),
         to: node_ref(map, edge.to),
         sources: ids(&edge.sources),
-        stamp: Stamp::of(map, edge.actor, edge.added_at),
+        stamp: Stamp::of(edge.actor, edge.added_at),
     })
     .expect("EdgeLine always serializes")
 }

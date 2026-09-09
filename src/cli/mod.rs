@@ -1,14 +1,13 @@
 //! The command-line surface: `percept events publish` appends one event
 //! without opening the TUI, `percept events search` queries the log,
 //! `percept events show` dereferences one event by id, `percept maps`
-//! folds a cognitive map from the log and prints it - except `code`,
-//! walked fresh from the working tree - `percept ask` runs one full
-//! turn - including the tool loop - and prints the reply, `percept
-//! reflect` runs one asking the model to revise its maps, `percept
-//! hook <client>` records one coding client's turn from the hook JSON
-//! it reads on stdin - see `hook` - and `percept init <client>` writes
-//! that client's project config so its hooks call `percept hook
-//! <client>` - see `init`. A
+//! folds a cognitive map from the log and prints it, `percept ask`
+//! runs one full turn - including the tool loop - and prints the
+//! reply, `percept reflect` runs one asking the model to revise its
+//! maps, `percept hook <client>` records one coding client's turn from
+//! the hook JSON it reads on stdin - see `hook` - and `percept init
+//! <client>` writes that client's project config so its hooks call
+//! `percept hook <client>` - see `init`. A
 //! presentation-layer peer of `tui` - it forwards parsed input to
 //! `store` and `app`, and has no chat logic of its own: `ask` drives the
 //! same `AppService` turn policy `tui` does, just inline instead of over
@@ -28,7 +27,6 @@ use clap::{Args, Parser, Subcommand};
 use tokio_stream::StreamExt;
 
 use crate::app::{run_tool, AppService, ToolStep};
-use crate::code;
 use crate::core::{
     Actor, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
     Schemas,
@@ -54,12 +52,11 @@ leave relevance to the caller.
 Run with no arguments to open the TUI. Every subcommand reaches the log \
 without it: `events publish` appends one event, `events search` and \
 `events show` query it, `maps list` and `maps show` print a cognitive \
-map folded from it - `code`, the map of files and imports, is walked \
-fresh from the working tree instead - `ask` runs one full turn and \
-prints the reply, `reflect` runs one turn asking the model to \
-revise its maps, `hook <client>` records one coding client's turn \
-from the hook JSON it reads on stdin, and `init <client>` writes that \
-client's project config to call it.")]
+map folded from it, `ask` runs one full turn and prints the reply, \
+`reflect` runs one turn asking the model to revise its maps, `hook \
+<client>` records one coding client's turn from the hook JSON it reads \
+on stdin, and `init <client>` writes that client's project config to \
+call it.")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -72,8 +69,7 @@ pub enum Command {
         #[command(subcommand)]
         command: EventsCommand,
     },
-    /// Read percept's maps - the cognitive ones folded from the log,
-    /// and `code`, walked fresh from the working tree.
+    /// Read percept's maps - the cognitive ones folded from the log.
     Maps {
         #[command(subcommand)]
         command: MapsCommand,
@@ -140,22 +136,12 @@ pub struct ShowMapArgs {
     depth: usize,
     /// Keep only what the map gained since this instant - an ISO-8601
     /// timestamp, or `<N>d`, `<N>h`, `<N>m` back from now: the nodes
-    /// added since, and the ends of the edges added since. Refused for
-    /// the code map, which is walked fresh and has no history.
+    /// added since, and the ends of the edges added since.
     #[arg(long, value_parser = |s: &str| parse_time("since", s))]
     since: Option<Timestamp>,
-    /// Fold every project's events instead of only this one's. Ignored
-    /// for the code map, which is never folded from the log.
+    /// Fold every project's events instead of only this one's.
     #[arg(long)]
     all_projects: bool,
-}
-
-impl ShowMapArgs {
-    /// Whether this names the code map - derived from the working tree,
-    /// so dispatch never opens the log to find out.
-    pub fn is_code(&self) -> bool {
-        self.map == crate::core::CODE
-    }
 }
 
 #[derive(Args)]
@@ -489,17 +475,14 @@ fn scope(all_projects: bool, root: &Path) -> crate::core::Scope {
 
 /// Prints every map percept knows with its size: the log's maps, folded
 /// from one read of `log` and scoped to `project` unless `args` says
-/// otherwise, then the code map, walked fresh from `tree` - the
-/// checkout, which in a worktree is not the project's path.
+/// otherwise.
 pub fn maps_list(
     args: ListMapsArgs,
     log: &dyn EventLog,
     schemas: &Schemas,
     project: &Path,
-    tree: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut maps = schemas.fold_all(&scope(args.all_projects, project), &log.load()?)?;
-    maps.push(code::build(tree)?);
+    let maps = schemas.fold_all(&scope(args.all_projects, project), &log.load()?)?;
     match args.format {
         Format::Json => print_lines(maps.iter().map(mapstore::encode_map)),
         Format::Md => print_text(&mapstore::catalogue(&maps)),
@@ -519,17 +502,9 @@ pub fn maps_show(
     print_map(map, &args)
 }
 
-/// Prints the code map, walked fresh from `root` - never the log, so
-/// this runs in a directory with no `percept.jsonl`. `print_map`'s
-/// `select` refuses `--since`: every node is as old as this walk.
-pub fn maps_show_code(args: ShowMapArgs, root: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let map = code::build(root)?;
-    print_map(map, &args)
-}
-
-/// `maps_show` and `maps_show_code`'s shared tail: cut `map` to
-/// `args`'s filters, then print it nodes-then-edges. `--since` runs
-/// after `--around`, so it reads as "what changed near this node".
+/// `maps_show`'s tail: cut `map` to `args`'s filters, then print it
+/// nodes-then-edges. `--since` runs after `--around`, so it reads as
+/// "what changed near this node".
 fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
     // An empty map has nothing to resolve `--around` against - `select`'s
     // own empty-map case skips it anyway, so a node named on one is not

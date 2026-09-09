@@ -245,7 +245,6 @@ pub fn decisions() -> Schema {
             by: "decision".to_string(),
             of: "question".to_string(),
         }),
-        derived: false,
     }
 }
 
@@ -278,13 +277,43 @@ pub fn tasks() -> Schema {
             by: "outcome".to_string(),
             of: "task".to_string(),
         }),
-        derived: false,
     }
 }
 
-/// The schemas a test project has: `decisions` and `tasks` folded from
-/// the log, `code` derived - the same set `main` builds from the
-/// embedded and project TOML files, without touching a filesystem.
+/// The schemas a test project has: `decisions` and `tasks`, the same
+/// set `main` builds from the embedded and project TOML files, without
+/// touching a filesystem.
 pub fn schemas() -> Schemas {
     Schemas::new(vec![decisions(), tasks()])
+}
+
+/// A schema fixture with `file`, `function`, and `package` node kinds
+/// and `contains`/`imports` edge kinds - what a test needs when it
+/// exercises the shape the code map used to have, now that `code` is
+/// walked fresh by `read_code` and is not one of `core`'s schemas.
+pub fn files() -> Schema {
+    Schema {
+        name: "files".to_string(),
+        purpose: "test fixture".to_string(),
+        node_kinds: vec![
+            Kind::new("file", "a source file"),
+            // Its default prefix, `f`, collides with `file`'s; `fn`
+            // both avoids that and reads as the keyword it names.
+            Kind {
+                prefix: "fn".to_string(),
+                ..Kind::new("function", "a function or method")
+            },
+            Kind::new(
+                "package",
+                "an external crate a file imports, like `serde_json` - never one of this \
+                 project's own modules",
+            ),
+        ],
+        edge_kinds: vec![
+            Kind::new("contains", "from a file to a symbol it defines"),
+            Kind::new("imports", "from a file to what it imports"),
+        ],
+        headline_kinds: vec!["file".to_string()],
+        settlement: None,
+    }
 }

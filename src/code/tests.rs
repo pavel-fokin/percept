@@ -289,3 +289,35 @@ fn two_impls_of_one_generic_trait_keep_their_methods_apart() {
         .find("function", "src/main.rs::E::From<B>::from")
         .is_some());
 }
+
+#[test]
+fn every_kind_of_the_schema_carries_a_gloss() {
+    let s = schema();
+    for kind in s.node_kinds.iter().chain(&s.edge_kinds) {
+        assert!(!kind.gloss.is_empty(), "kind {:?} has no gloss", kind.name);
+    }
+}
+
+#[test]
+fn the_package_gloss_says_it_is_an_external_crate() {
+    let s = schema();
+    let package = s.node_kind("package").unwrap();
+    assert!(package.gloss.contains("external crate"));
+    assert!(package
+        .gloss
+        .contains("never one of this project's own modules"));
+}
+
+#[test]
+fn the_schema_s_node_kinds_carry_distinct_prefixes() {
+    let s = schema();
+    let mut prefixes: Vec<&str> = s.node_kinds.iter().map(|k| k.prefix.as_str()).collect();
+    let before = prefixes.len();
+    prefixes.sort_unstable();
+    prefixes.dedup();
+    assert_eq!(
+        prefixes.len(),
+        before,
+        "two node kinds share a short id prefix"
+    );
+}

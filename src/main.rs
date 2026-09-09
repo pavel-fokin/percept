@@ -29,8 +29,8 @@ use mapstore::LogMaps;
 use providers::{Catalog, ProviderConfig, FIREWORKS_MODEL, OPENAI_MODEL};
 use store::Jsonl;
 use tools::{
-    AskBeforeWrites, Bash, EditFile, FindFiles, GitSnapshot, GrepFiles, ListFiles, ReadEvent,
-    ReadFile, ReadMap, ReviseMap, SearchEvents, Workspace, WriteFile,
+    AskBeforeWrites, Bash, EditFile, FindFiles, GitSnapshot, GrepFiles, ListFiles, ReadCode,
+    ReadEvent, ReadFile, ReadMap, ReviseMap, SearchEvents, Workspace, WriteFile,
 };
 use tui::{Chat, StreamEvent};
 
@@ -434,7 +434,8 @@ fn build_toolset(
 }
 
 /// The file tools, over the checkout being worked in - never the main
-/// checkout a worktree's `Source` names, since the files are here.
+/// checkout a worktree's `Source` names, since the files are here -
+/// plus `read_code`, which walks the same checkout fresh on every call.
 fn code_tools(
     checkout: &Path,
 ) -> Result<Vec<Arc<dyn crate::harness::Tool>>, Box<dyn std::error::Error>> {
@@ -447,25 +448,8 @@ fn code_tools(
         Arc::new(FindFiles::new(workspace.clone())),
         Arc::new(GrepFiles::new(workspace.clone())),
         Arc::new(Bash::new(workspace)),
+        Arc::new(ReadCode::new(checkout.to_path_buf())),
     ])
-}
-
-/// Routes `read_map` by name: the `code` map is walked fresh from the
-/// working tree, every other map is folded from the log. Wiring only -
-/// it is what keeps `store` from depending on `code`.
-struct RoutedMaps {
-    folded: LogMaps,
-    root: PathBuf,
-}
-
-impl crate::core::MapReader for RoutedMaps {
-    fn read(&self, name: &str) -> Result<crate::core::Map, Box<dyn std::error::Error>> {
-        if name == crate::core::CODE {
-            Ok(code::build(&self.root)?)
-        } else {
-            self.folded.read(name)
-        }
-    }
 }
 
 fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
@@ -495,10 +479,7 @@ fn build_app(
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
     let scope = source.scope();
-    let maps = RoutedMaps {
-        folded: LogMaps::new(log.clone(), schemas.clone(), scope.clone()),
-        root: checkout.to_path_buf(),
-    };
+    let maps = LogMaps::new(log.clone(), schemas.clone(), scope.clone());
     let mut tools: Vec<Arc<dyn crate::harness::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone())),
         Arc::new(ReadEvent::new(log.clone())),
@@ -605,15 +586,10 @@ async fn main() {
             EventsCommand::Search(args) => cli::search(args, &log),
             EventsCommand::Show(args) => cli::show(args, &log),
         }),
-        // `maps show code` is walked fresh from the working tree, never
-        // the log, so it must not even open the log.
-        Some(Command::Maps {
-            command: MapsCommand::Show(args),
-        }) if args.is_code() => cli::maps_show_code(args, &checkout),
         Some(Command::Maps { command }) => open_log(&checkout).and_then(|log| {
             let schemas = mapstore::load_schemas(&checkout)?;
             match command {
-                MapsCommand::List(args) => cli::maps_list(args, &log, &schemas, &root, &checkout),
+                MapsCommand::List(args) => cli::maps_list(args, &log, &schemas, &root),
                 MapsCommand::Show(args) => cli::maps_show(args, &log, &schemas, &root),
                 MapsCommand::AddNode(args) => {
                     cli::maps_add_node(args, &log, &schemas, &cli_source)

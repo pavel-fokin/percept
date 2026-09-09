@@ -1,13 +1,14 @@
 //! Every tool the model calls. `search_events`, `read_event`,
 //! `revise_map`, and `read_map` run over the event log and its maps,
 //! through `store` and `mapstore`. `read_file`, `list_files`,
-//! `find_files`, `grep_files`, `write_file`, `edit_file`, and `bash`
-//! run over a working tree; `Workspace` is the one place a path the
-//! model gave becomes a real path, shared by every file tool. Beside
-//! them, what a turn over the tree needs: `AskBeforeWrites`, the
-//! `Policy` that puts a write or a command to the user, and
-//! `GitSnapshot`, the `Snapshot` that saves the tree before each
-//! prompt.
+//! `find_files`, `grep_files`, `write_file`, `edit_file`, `bash`, and
+//! `read_code` run over a working tree; `Workspace` is the one place a
+//! path the model gave becomes a real path, shared by every file tool.
+//! `read_code` walks the tree fresh through `code::build` on every
+//! call. Beside them, what a turn over the tree needs:
+//! `AskBeforeWrites`, the `Policy` that puts a write or a command to
+//! the user, and `GitSnapshot`, the `Snapshot` that saves the tree
+//! before each prompt.
 
 mod bash;
 mod edit_file;
@@ -16,6 +17,7 @@ mod git_snapshot;
 mod grep_files;
 mod list_files;
 mod policy;
+mod read_code;
 mod read_event;
 mod read_file;
 mod read_map;
@@ -31,6 +33,7 @@ pub use git_snapshot::GitSnapshot;
 pub use grep_files::GrepFiles;
 pub use list_files::ListFiles;
 pub use policy::AskBeforeWrites;
+pub use read_code::ReadCode;
 pub use read_event::{read, ReadEvent};
 pub use read_file::ReadFile;
 pub use read_map::ReadMap;

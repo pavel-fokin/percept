@@ -126,7 +126,7 @@ fn an_unknown_map_is_an_error() {
 }
 
 #[test]
-fn the_code_map_is_refused_the_same_as_the_cli() {
+fn a_map_named_code_fails_the_same_as_any_unknown_map() {
     let revise = tool(Vec::new());
 
     let err = revise
@@ -134,10 +134,7 @@ fn the_code_map_is_refused_the_same_as_the_cli() {
         .err()
         .unwrap();
 
-    assert!(
-        err.to_string().contains("derived from the working tree"),
-        "{err}"
-    );
+    assert!(err.to_string().contains("no map named \"code\""), "{err}");
 }
 
 #[test]

@@ -408,25 +408,7 @@ fn since_on_maps_show_parses_like_events_search() {
 }
 
 #[test]
-fn since_is_refused_for_the_code_map() {
-    let cli = Cli::try_parse_from(["percept", "maps", "show", "code", "--since", "1d"]).unwrap();
-    let Some(Command::Maps {
-        command: MapsCommand::Show(args),
-    }) = cli.command
-    else {
-        panic!("expected maps show");
-    };
-
-    let err = maps_show_code(args, Path::new(ROOT))
-        .err()
-        .unwrap()
-        .to_string();
-
-    assert!(err.contains("no history"), "{err}");
-}
-
-#[test]
-fn every_write_verb_refuses_the_code_map() {
+fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
     let log = FakeLog::default();
     let target = || MapArgs {
         map: "code".to_string(),
@@ -467,7 +449,7 @@ fn every_write_verb_refuses_the_code_map() {
 
     for result in [add_node, remove_node, add_edge, remove_edge] {
         let err = result.err().unwrap();
-        assert!(err.to_string().starts_with("\"code\" is derived"), "{err}");
+        assert!(err.to_string().starts_with("no map named \"code\""), "{err}");
     }
     assert!(log.load().unwrap().is_empty());
 }
