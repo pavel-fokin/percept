@@ -21,7 +21,7 @@
 
 use std::collections::BTreeMap;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};
 use tokio_stream::StreamExt;
@@ -380,6 +380,9 @@ fn resolve_ref(map: &Map, s: &str) -> Result<NodeRef, Box<dyn std::error::Error>
 /// decode, so the CLI only parses flags. `root` is the writer's project
 /// root, resolved once in `main`; `args.source` only names the writer,
 /// so `publish` pairs the two into the `Source` the event carries.
+/// `checkout` is the working tree a `file.registered` payload with no
+/// `excerpt` reads from - in a worktree it differs from `root`, which
+/// stays the project identity the event's `Source` carries.
 /// Appends one event and prints its id, so a writer can cite it as the
 /// `--causation` of the next. A cause the log lacks is an error: a typo
 /// in provenance is worse than none.
@@ -387,30 +390,107 @@ pub fn publish(
     args: PublishArgs,
     log: &dyn EventLog,
     root: &Path,
+    checkout: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let causation_id = args
         .causation
         .as_deref()
         .map(|id| known_event_id(id, log))
         .transpose()?;
-    let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
     let source = crate::core::Source {
         name: args.source,
         path: root.to_path_buf(),
     };
-    let event = store::decode(&args.actor, source, &args.kind, causation_id, payload)?;
-    // A raw map event would skip `Map::apply`, and one that breaks a
-    // rule fails every fold from then on, with no undo in an
-    // append-only log.
-    if crate::core::map_of(event.payload()).is_some() {
-        return Err(format!(
-            "{} is written through `percept maps`, not published raw",
-            args.kind
+
+    let event = if args.kind == "file.registered" {
+        let payload = file_registered_payload(&args.payload, checkout)?;
+        crate::core::Event::new(
+            store::parse_actor(&args.actor)?,
+            source,
+            causation_id,
+            payload,
         )
-        .into());
-    }
+    } else {
+        let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
+        let event = store::decode(&args.actor, source, &args.kind, causation_id, payload)?;
+        // A raw map event would skip `Map::apply`, and one that breaks
+        // a rule fails every fold from then on, with no undo in an
+        // append-only log.
+        if crate::core::map_of(event.payload()).is_some() {
+            return Err(format!(
+                "{} is written through `percept maps`, not published raw",
+                args.kind
+            )
+            .into());
+        }
+        event
+    };
     log.append(&event)?;
     print_lines(std::iter::once(event.id().as_uuid().to_string()))
+}
+
+/// The `payload` argument to `percept events publish --type file.registered`,
+/// as the caller wrote it - `excerpt` absent when the tree should
+/// supply it.
+#[derive(serde::Deserialize)]
+struct RawFileRegistered {
+    path: String,
+    lines: Option<String>,
+    excerpt: Option<String>,
+}
+
+/// Builds a `Payload::FileRegistered` from the raw JSON a caller passed
+/// `--payload`: resolves `path` inside `checkout`, refusing one
+/// outside it, and reads `excerpt` from the tree when the caller gave
+/// none, refusing a binary file and a range that is reversed, zero, or
+/// past the file's end. An `excerpt` the caller did give is stored as
+/// given - `path` is still resolved and made repo-relative.
+fn file_registered_payload(
+    raw: &str,
+    checkout: &Path,
+) -> Result<Payload, Box<dyn std::error::Error>> {
+    let raw: RawFileRegistered = serde_json::from_str(raw).map_err(store::Error::BadPayload)?;
+    let workspace = tools::Workspace::new(checkout)?;
+    let resolved = workspace.resolve(&raw.path)?;
+    let path = PathBuf::from(workspace.relative(&resolved));
+    let lines = raw.lines.as_deref().map(store::parse_lines).transpose()?;
+    if let Some((from, to)) = lines {
+        if from == 0 || from > to {
+            return Err(format!("invalid lines {from}-{to}").into());
+        }
+    }
+
+    let excerpt = match raw.excerpt {
+        Some(excerpt) => excerpt,
+        None => {
+            let bytes = std::fs::read(&resolved)?;
+            if tools::is_binary(&bytes) {
+                return Err(format!("{} is binary", path.display()).into());
+            }
+            let text = String::from_utf8_lossy(&bytes).into_owned();
+            match lines {
+                Some((from, to)) => {
+                    let file_lines: Vec<&str> = text.lines().collect();
+                    if to as usize > file_lines.len() {
+                        return Err(format!(
+                            "lines {from}-{to} run past {}'s {} lines",
+                            path.display(),
+                            file_lines.len()
+                        )
+                        .into());
+                    }
+                    file_lines[(from - 1) as usize..to as usize].join("\n")
+                }
+                None => text,
+            }
+        }
+    };
+
+    Ok(Payload::FileRegistered {
+        path,
+        lines,
+        excerpt,
+    })
 }
 
 fn known_event_id(

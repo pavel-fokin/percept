@@ -11,6 +11,9 @@ pub enum Error {
     BadUuid(String),
     BadTimestamp(String),
     BadPayload(serde_json::Error),
+    /// `file.registered`'s `lines` wasn't `"from-to"` with both sides a
+    /// number.
+    BadLines(String),
     /// A payload carried fields the event type doesn't record, so
     /// storing it would silently drop them.
     UnrecordedPayloadFields(String),
@@ -54,6 +57,7 @@ impl fmt::Display for Error {
             Self::BadUuid(s) => write!(f, "malformed uuid: {s}"),
             Self::BadTimestamp(s) => write!(f, "malformed timestamp: {s}"),
             Self::BadPayload(e) => write!(f, "malformed payload: {e}"),
+            Self::BadLines(s) => write!(f, "malformed lines {s:?}, expected \"from-to\""),
             Self::UnrecordedPayloadFields(t) => {
                 write!(f, "payload has fields {t} does not record")
             }

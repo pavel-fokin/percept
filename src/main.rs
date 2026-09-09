@@ -582,7 +582,7 @@ async fn main() {
         // `hook_main` above exits before this match is ever reached.
         Some(Command::Hook(_)) => unreachable!(),
         Some(Command::Events { command }) => open_log(&checkout).and_then(|log| match command {
-            EventsCommand::Publish(args) => cli::publish(args, &log, &root),
+            EventsCommand::Publish(args) => cli::publish(args, &log, &root, &checkout),
             EventsCommand::Search(args) => cli::search(args, &log),
             EventsCommand::Show(args) => cli::show(args, &log),
         }),

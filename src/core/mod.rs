@@ -11,7 +11,9 @@ mod search;
 #[cfg(test)]
 pub mod testing;
 
-pub use event::{Actor, Event, EventId, EventKind, Payload, Source, Usage, PREVIEW_CHARS};
+pub use event::{
+    registration_label, Actor, Event, EventId, EventKind, Payload, Source, Usage, PREVIEW_CHARS,
+};
 pub use event_log::EventLog;
 #[cfg(test)]
 pub use map::SUPERSEDES;

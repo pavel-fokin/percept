@@ -48,7 +48,7 @@ const BINARY_SNIFF_BYTES: usize = 8192;
 
 /// Whether `bytes` are a binary file: a NUL in the first 8 KiB. What
 /// `read_file`, `edit_file` and `grep_files` all refuse or skip.
-fn is_binary(bytes: &[u8]) -> bool {
+pub(crate) fn is_binary(bytes: &[u8]) -> bool {
     bytes[..bytes.len().min(BINARY_SNIFF_BYTES)].contains(&0)
 }
 

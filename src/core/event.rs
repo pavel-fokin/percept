@@ -133,6 +133,29 @@ pub enum Payload {
     /// learn when this source last opened the project here, so it can
     /// cut the log to what changed since then.
     SessionStarted,
+    /// A file, or a range of it, as it was seen at this moment -
+    /// experience, not judgment: this event says nothing about why the
+    /// file was read or what it shows. `path` is repo-relative,
+    /// `lines` the 1-based inclusive range read, `None` for the whole
+    /// file. `excerpt` is the text read from the tree at publish time,
+    /// so the record still reads once the file has moved on. A node
+    /// that lists this event's id in its `sources` is what cites it -
+    /// the claim lives on the node, never here.
+    FileRegistered {
+        path: PathBuf,
+        lines: Option<(u32, u32)>,
+        excerpt: String,
+    },
+}
+
+/// `path`, with `:from-to` appended for a ranged registration - the
+/// label a `file.registered` event reads as wherever it's shown short:
+/// the TUI, the context index, and a search preview.
+pub fn registration_label(path: &std::path::Path, lines: Option<(u32, u32)>) -> String {
+    match lines {
+        Some((from, to)) => format!("{}:{from}-{to}", path.display()),
+        None => path.display().to_string(),
+    }
 }
 
 impl Payload {
@@ -151,7 +174,8 @@ impl Payload {
             | Self::EdgeAdded { .. }
             | Self::EdgeRemoved { .. }
             | Self::ModelCalled(..)
-            | Self::SessionStarted => None,
+            | Self::SessionStarted
+            | Self::FileRegistered { .. } => None,
         }
     }
 }
@@ -172,6 +196,7 @@ pub enum EventKind {
     EdgeRemoved,
     ModelCalled,
     SessionStarted,
+    FileRegistered,
 }
 
 /// One recorded fact in the conversation log. Append-only: a committed
@@ -341,6 +366,7 @@ impl Event {
             Payload::EdgeRemoved { .. } => EventKind::EdgeRemoved,
             Payload::ModelCalled(..) => EventKind::ModelCalled,
             Payload::SessionStarted => EventKind::SessionStarted,
+            Payload::FileRegistered { .. } => EventKind::FileRegistered,
         }
     }
 }

@@ -1,6 +1,6 @@
 use super::*;
 use crate::app::{App, Harness, MapShape};
-use crate::core::testing::{content, schemas, source, FakeLog, ROOT};
+use crate::core::testing::{content, schemas, source, FakeLog, Fixture, ROOT};
 use crate::core::Payload;
 use crate::harness::testing::{FakeCatalog, FakeTool, Scripted};
 use std::path::{Path, PathBuf};
@@ -16,15 +16,37 @@ fn args(actor: &str, payload: &str) -> PublishArgs {
     }
 }
 
+fn file_registered_args(payload: &str) -> PublishArgs {
+    PublishArgs {
+        actor: "model".to_string(),
+        source: "claude-code".to_string(),
+        kind: "file.registered".to_string(),
+        payload: payload.to_string(),
+        causation: None,
+    }
+}
+
+/// The checkout most tests never read from - `publish` only opens it
+/// for a `file.registered` payload with no `excerpt`.
+fn no_checkout() -> &'static Path {
+    Path::new(ROOT)
+}
+
 #[test]
 fn a_publish_citing_a_cause_records_it() {
     let log = FakeLog::default();
-    publish(args("user", r#"{"content":"hi"}"#), &log, Path::new(ROOT)).unwrap();
+    publish(
+        args("user", r#"{"content":"hi"}"#),
+        &log,
+        Path::new(ROOT),
+        no_checkout(),
+    )
+    .unwrap();
     let cause = log.load().unwrap()[0].id();
 
     let mut reply = args("model", r#"{"content":"hello"}"#);
     reply.causation = Some(cause.as_uuid().to_string());
-    publish(reply, &log, Path::new(ROOT)).unwrap();
+    publish(reply, &log, Path::new(ROOT), no_checkout()).unwrap();
 
     assert!(log.load().unwrap()[1].causation_id() == Some(cause));
 }
@@ -34,14 +56,20 @@ fn a_publish_citing_a_cause_the_log_lacks_is_rejected() {
     let log = FakeLog::default();
     let mut orphan = args("model", r#"{"content":"hello"}"#);
     orphan.causation = Some(crate::core::EventId::new().as_uuid().to_string());
-    assert!(publish(orphan, &log, Path::new(ROOT)).is_err());
+    assert!(publish(orphan, &log, Path::new(ROOT), no_checkout()).is_err());
     assert!(log.load().unwrap().is_empty());
 }
 
 #[test]
 fn a_valid_publish_appends_one_event_carrying_its_source() {
     let log = FakeLog::default();
-    publish(args("user", r#"{"content":"hi"}"#), &log, Path::new(ROOT)).unwrap();
+    publish(
+        args("user", r#"{"content":"hi"}"#),
+        &log,
+        Path::new(ROOT),
+        no_checkout(),
+    )
+    .unwrap();
 
     let events = log.load().unwrap();
     assert_eq!(events.len(), 1);
@@ -54,15 +82,205 @@ fn a_valid_publish_appends_one_event_carrying_its_source() {
 fn a_payload_field_the_type_does_not_record_is_rejected() {
     let log = FakeLog::default();
     let extra = r#"{"content":"hi","meta":{"thread":42}}"#;
-    assert!(publish(args("user", extra), &log, Path::new(ROOT)).is_err());
+    assert!(publish(args("user", extra), &log, Path::new(ROOT), no_checkout()).is_err());
     assert!(log.load().unwrap().is_empty());
 }
 
 #[test]
 fn a_rejected_event_appends_nothing() {
     let log = FakeLog::default();
-    assert!(publish(args("robot", r#"{"content":"hi"}"#), &log, Path::new(ROOT)).is_err());
-    assert!(publish(args("user", "not json"), &log, Path::new(ROOT)).is_err());
+    assert!(publish(
+        args("robot", r#"{"content":"hi"}"#),
+        &log,
+        Path::new(ROOT),
+        no_checkout()
+    )
+    .is_err());
+    assert!(publish(
+        args("user", "not json"),
+        &log,
+        Path::new(ROOT),
+        no_checkout()
+    )
+    .is_err());
+    assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
+fn a_file_registered_publish_reads_the_range_from_the_checkout() {
+    let fixture = Fixture::new();
+    fixture.write("src/lib.rs", "line one\nline two\nline three\nline four\n");
+    let log = FakeLog::default();
+    let payload = r#"{"path":"src/lib.rs","lines":"2-3"}"#;
+    publish(
+        file_registered_args(payload),
+        &log,
+        Path::new(ROOT),
+        fixture.path(),
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    match events[0].payload() {
+        Payload::FileRegistered {
+            path,
+            lines,
+            excerpt,
+        } => {
+            assert_eq!(path.to_str().unwrap(), "src/lib.rs");
+            assert_eq!(*lines, Some((2, 3)));
+            assert_eq!(excerpt, "line two\nline three");
+        }
+        _ => panic!("expected FileRegistered"),
+    }
+}
+
+#[test]
+fn a_file_registered_publish_with_no_lines_reads_the_whole_file() {
+    let fixture = Fixture::new();
+    fixture.write("README.md", "hello\nworld\n");
+    let log = FakeLog::default();
+    let payload = r#"{"path":"README.md"}"#;
+    publish(
+        file_registered_args(payload),
+        &log,
+        Path::new(ROOT),
+        fixture.path(),
+    )
+    .unwrap();
+
+    match log.load().unwrap()[0].payload() {
+        Payload::FileRegistered { lines, excerpt, .. } => {
+            assert_eq!(*lines, None);
+            assert_eq!(excerpt, "hello\nworld\n");
+        }
+        _ => panic!("expected FileRegistered"),
+    }
+}
+
+#[test]
+fn a_file_registered_publish_stores_an_absolute_path_relative() {
+    let fixture = Fixture::new();
+    fixture.write("src/lib.rs", "one\n");
+    let log = FakeLog::default();
+    let absolute = fixture.path().join("src/lib.rs");
+    let payload = format!(r#"{{"path":"{}"}}"#, absolute.to_str().unwrap());
+    publish(
+        file_registered_args(&payload),
+        &log,
+        Path::new(ROOT),
+        fixture.path(),
+    )
+    .unwrap();
+
+    match log.load().unwrap()[0].payload() {
+        Payload::FileRegistered { path, .. } => assert_eq!(path.to_str().unwrap(), "src/lib.rs"),
+        _ => panic!("expected FileRegistered"),
+    }
+}
+
+#[test]
+fn a_file_registered_publish_with_an_excerpt_stores_it_as_given() {
+    let fixture = Fixture::new();
+    let log = FakeLog::default();
+    // No file on disk at all - an `excerpt` in the payload means the
+    // tree is never read.
+    let payload = r#"{"path":"src/missing.rs","excerpt":"whatever the caller said"}"#;
+    publish(
+        file_registered_args(payload),
+        &log,
+        Path::new(ROOT),
+        fixture.path(),
+    )
+    .unwrap();
+
+    match log.load().unwrap()[0].payload() {
+        Payload::FileRegistered { excerpt, .. } => {
+            assert_eq!(excerpt, "whatever the caller said");
+        }
+        _ => panic!("expected FileRegistered"),
+    }
+}
+
+#[test]
+fn a_file_registered_publish_refuses_a_path_outside_the_checkout() {
+    let fixture = Fixture::new();
+    let log = FakeLog::default();
+    let payload = r#"{"path":"../../etc/passwd"}"#;
+    assert!(publish(
+        file_registered_args(payload),
+        &log,
+        Path::new(ROOT),
+        fixture.path()
+    )
+    .is_err());
+    assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
+fn a_file_registered_publish_refuses_a_binary_file() {
+    let fixture = Fixture::new();
+    let full = fixture.path().join("bin");
+    std::fs::write(&full, [0u8, 1, 2, 0, 3]).unwrap();
+    let log = FakeLog::default();
+    let payload = r#"{"path":"bin"}"#;
+    let err = publish(
+        file_registered_args(payload),
+        &log,
+        Path::new(ROOT),
+        fixture.path(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("binary"), "{err}");
+    assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
+fn a_file_registered_publish_refuses_a_reversed_range() {
+    let fixture = Fixture::new();
+    fixture.write("f.txt", "a\nb\nc\n");
+    let log = FakeLog::default();
+    let payload = r#"{"path":"f.txt","lines":"3-1"}"#;
+    assert!(publish(
+        file_registered_args(payload),
+        &log,
+        Path::new(ROOT),
+        fixture.path()
+    )
+    .is_err());
+    assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
+fn a_file_registered_publish_refuses_a_zero_line() {
+    let fixture = Fixture::new();
+    fixture.write("f.txt", "a\nb\nc\n");
+    let log = FakeLog::default();
+    let payload = r#"{"path":"f.txt","lines":"0-1"}"#;
+    assert!(publish(
+        file_registered_args(payload),
+        &log,
+        Path::new(ROOT),
+        fixture.path()
+    )
+    .is_err());
+    assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
+fn a_file_registered_publish_refuses_a_range_past_the_end() {
+    let fixture = Fixture::new();
+    fixture.write("f.txt", "a\nb\nc\n");
+    let log = FakeLog::default();
+    let payload = r#"{"path":"f.txt","lines":"1-9000"}"#;
+    let err = publish(
+        file_registered_args(payload),
+        &log,
+        Path::new(ROOT),
+        fixture.path(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("past"), "{err}");
     assert!(log.load().unwrap().is_empty());
 }
 

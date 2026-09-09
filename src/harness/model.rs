@@ -211,7 +211,8 @@ pub fn message_of(event: &Event) -> Option<Message> {
         | Payload::EdgeAdded { .. }
         | Payload::EdgeRemoved { .. }
         | Payload::ModelCalled(..)
-        | Payload::SessionStarted => None,
+        | Payload::SessionStarted
+        | Payload::FileRegistered { .. } => None,
     }
 }
 

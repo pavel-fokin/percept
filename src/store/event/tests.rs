@@ -625,7 +625,7 @@ fn unknown_type_deserializes_but_has_no_domain_form() {
         "seq": 1,
         "actor": "user",
         "source": {"name": "tui", "path": "/test"},
-        "type": "file.registered",
+        "type": "file.moved",
         "causation_id": null,
         "created_at": "2026-08-30T00:00:00Z",
         "payload": { "path": "/tmp/x" }
@@ -636,6 +636,89 @@ fn unknown_type_deserializes_but_has_no_domain_form() {
         crate::core::Event::try_from(wire),
         Err(Error::UnknownEventType(_))
     ));
+}
+
+#[test]
+fn file_registered_with_lines_round_trips_through_json() {
+    let original = crate::core::Event::restore(
+        EventId::new(),
+        Actor::Model,
+        source("percept-cli"),
+        None,
+        Timestamp::now(),
+        Payload::FileRegistered {
+            path: "src/mapstore/schema.rs".into(),
+            lines: Some((40, 58)),
+            excerpt: "fn parse() {}".to_string(),
+        },
+    );
+
+    let json = serde_json::to_string(&Event::from(&original)).unwrap();
+    let wire: Event = serde_json::from_str(&json).unwrap();
+    assert_eq!(wire.kind, "file.registered");
+    assert_eq!(wire.payload["lines"], "40-58");
+    let restored = crate::core::Event::try_from(wire).unwrap();
+
+    match restored.payload() {
+        Payload::FileRegistered {
+            path,
+            lines,
+            excerpt,
+        } => {
+            assert_eq!(path.to_str().unwrap(), "src/mapstore/schema.rs");
+            assert_eq!(*lines, Some((40, 58)));
+            assert_eq!(excerpt, "fn parse() {}");
+        }
+        _ => panic!("expected FileRegistered"),
+    }
+}
+
+#[test]
+fn file_registered_without_lines_round_trips_with_none() {
+    let original = crate::core::Event::restore(
+        EventId::new(),
+        Actor::Model,
+        source("percept-cli"),
+        None,
+        Timestamp::now(),
+        Payload::FileRegistered {
+            path: "README.md".into(),
+            lines: None,
+            excerpt: "the whole file".to_string(),
+        },
+    );
+
+    let json = serde_json::to_string(&Event::from(&original)).unwrap();
+    let wire: Event = serde_json::from_str(&json).unwrap();
+    assert!(wire.payload.get("lines").is_none());
+    let restored = crate::core::Event::try_from(wire).unwrap();
+
+    match restored.payload() {
+        Payload::FileRegistered { lines, .. } => assert_eq!(*lines, None),
+        _ => panic!("expected FileRegistered"),
+    }
+}
+
+#[test]
+fn a_file_registered_summary_shows_the_excerpts_first_line() {
+    let event = crate::core::Event::restore(
+        EventId::new(),
+        Actor::Model,
+        source("percept-cli"),
+        None,
+        Timestamp::now(),
+        Payload::FileRegistered {
+            path: "src/mapstore/schema.rs".into(),
+            lines: Some((40, 58)),
+            excerpt: "fn parse() {\n    todo!()\n}".to_string(),
+        },
+    );
+
+    let line: Value = serde_json::from_str(&summarize(&event, None, PREVIEW_CHARS)).unwrap();
+    assert_eq!(line["payload"]["path"], "src/mapstore/schema.rs");
+    assert_eq!(line["payload"]["lines"], "40-58");
+    assert_eq!(line["payload"]["excerpt"], "fn parse() {");
+    assert_eq!(line["preview"]["len"], 26);
 }
 
 /// The wire format before `source` carried a path. There is no
