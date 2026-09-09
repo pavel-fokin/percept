@@ -25,7 +25,7 @@ use std::path::Path;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::core::{Actor, Event, EventId, EventLog, Payload, Source};
+use crate::core::{Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source};
 use crate::shared::Timestamp;
 use crate::store::TurnState;
 
@@ -125,13 +125,14 @@ pub fn run(
     source: &Source,
     log: &dyn EventLog,
     sessions_dir: &Path,
+    schemas: &Schemas,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let dir = sessions_dir.join(state_dir_name(&source.path));
     let name = state_file_name(&source.name, &input.session_id, &input.turn_id);
     let mut state = TurnState::open(&dir, &name)?;
 
     match input.event {
-        HookEvent::SessionStart {} => start_session(source, log),
+        HookEvent::SessionStart {} => start_session(source, log, schemas),
         HookEvent::UserPromptSubmit { prompt } => submit_prompt(prompt, source, log, &mut state),
         HookEvent::PostToolUse {
             tool_name,
@@ -156,11 +157,17 @@ pub fn run(
 /// `SessionStart`: finds the previous `session.started` event this
 /// source recorded against this project, if any - what a fragment cuts
 /// the log to since - records a fresh one for the next call to find,
-/// and returns the cut as `additionalContext`. The since line here is
-/// the seam a fuller fragment (what each map gained, what is still
-/// open) extends; this alone already tells the model whether it is
-/// opening the project for the first time.
-fn start_session(source: &Source, log: &dyn EventLog) -> Result<Value, Box<dyn std::error::Error>> {
+/// and folds every log-backed schema to report what each map gained
+/// since then, what is still open on it, and one concrete next step.
+/// What "gained" and "open" mean is read off `Schema` - `headline_kinds`
+/// and `settlement` - never off a map's name, so a project's own
+/// schema (an `ideas` map with no settlement, say) reports without any
+/// code naming it.
+fn start_session(
+    source: &Source,
+    log: &dyn EventLog,
+    schemas: &Schemas,
+) -> Result<Value, Box<dyn std::error::Error>> {
     let events = log.load()?;
     let since = last_session(&events, source);
 
@@ -172,12 +179,115 @@ fn start_session(source: &Source, log: &dyn EventLog) -> Result<Value, Box<dyn s
         None => format!("percept · project {project}\nfirst session here"),
     };
 
+    let maps = schemas.fold_all(&source.scope(), &events)?;
+
+    let mut sections = vec![header];
+    if let Some(at) = since {
+        sections.push(gained_block(&maps, at));
+    }
+    let (open_blocks, pointer) = open_blocks_and_pointer(&maps);
+    sections.extend(open_blocks);
+    sections.extend(pointer);
+
     Ok(json!({
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
-            "additionalContext": header,
+            "additionalContext": sections.join("\n\n"),
         }
     }))
+}
+
+/// The short id `node` has on `map`, or a `kind:name` fallback for the
+/// unexpected case a headline node carries none.
+fn line_id(map: &Map, node: &Node) -> String {
+    map.short_id(node.id)
+        .unwrap_or_else(|| format!("{}:{}", node.kind, node.name))
+}
+
+/// What each folded map gained since `since`: a counts line for every
+/// map, in fold order, then up to five lines per map that gained
+/// anything - a node's `added_at` is compared directly, not
+/// `Map::since`, which would also surface an older node a fresh edge
+/// only touched.
+fn gained_block(maps: &[Map], since: Timestamp) -> String {
+    let counts = maps
+        .iter()
+        .map(|map| {
+            let gained = map.headlines().filter(|node| node.added_at >= since).count();
+            format!("{} +{gained}", map.schema().name)
+        })
+        .collect::<Vec<_>>()
+        .join("   ");
+
+    let mut lines = vec![counts];
+    for map in maps {
+        let gained: Vec<&Node> = map.headlines().filter(|node| node.added_at >= since).collect();
+        if gained.is_empty() {
+            continue;
+        }
+        for node in gained.iter().take(5) {
+            lines.push(format!("{} {} {:?}", line_id(map, node), node.kind, node.name));
+        }
+        if gained.len() > 5 {
+            lines.push(format!("+{} more", gained.len() - 5));
+        }
+    }
+    lines.join("\n")
+}
+
+/// One `open {of} (...)` block per settled map that has open items - a
+/// map without a `Settlement` (an `ideas` map, say) is skipped entirely,
+/// never by name - plus the fragment pointer at the first open item
+/// found, walking maps in fold order.
+fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
+    let mut blocks = Vec::new();
+    let mut pointer = None;
+
+    for map in maps {
+        let Some(settlement) = map.schema().settlement.as_ref() else {
+            continue;
+        };
+        // Headlines include both the settled kind and the settling one
+        // - `question` and `decision` on the decisions map - and only
+        // the settled kind (`settlement.of`) can ever be open: nothing
+        // resolves a decision itself, so `settled_by` on one is always
+        // empty and every decision would otherwise misreport as open.
+        let open: Vec<&Node> = map
+            .headlines()
+            .filter(|node| node.kind == settlement.of)
+            .filter(|node| map.settled_by(node.id).is_empty())
+            .collect();
+        if open.is_empty() {
+            continue;
+        }
+
+        let total = open.len();
+        let header = if total > 5 {
+            format!("open {} ({total}, showing 5)", settlement.of)
+        } else {
+            format!("open {} ({total})", settlement.of)
+        };
+        let mut lines = vec![header];
+        for node in open.iter().take(5) {
+            lines.push(format!("{} {:?}", line_id(map, node), node.name));
+        }
+        if total > 5 {
+            lines.push(format!("+{} more", total - 5));
+        }
+        blocks.push(lines.join("\n"));
+
+        if pointer.is_none() {
+            if let Some(first) = open.first() {
+                pointer = Some(format!(
+                    "fragment: percept maps show {} --around {}",
+                    map.schema().name,
+                    line_id(map, first)
+                ));
+            }
+        }
+    }
+
+    (blocks, pointer)
 }
 
 /// The latest `session.started` event this exact source (client name

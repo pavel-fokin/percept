@@ -258,7 +258,8 @@ fn hook_run(args: cli::hook::HookArgs) -> Result<serde_json::Value, Box<dyn std:
     };
     let log = open_log(&checkout)?;
     let sessions = data_dir(&checkout)?.join(HOOK_SESSIONS_DIR);
-    cli::hook::run(input, &source, &log, &sessions)
+    let schemas = mapstore::load_schemas(&checkout)?;
+    cli::hook::run(input, &source, &log, &sessions, &schemas)
 }
 
 /// The checkout `cwd` is in: the first ancestor of it
