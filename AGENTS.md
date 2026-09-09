@@ -194,7 +194,10 @@ skips it.
   An option is recorded only for an alternative that lost, with the
   reason it lost; the pick is the decision itself. A decision that
   changes an earlier one is added with a `supersedes` edge to it; the
-  old node is never removed.
+  old node is never removed. An idea in the ideas map is a candidate,
+  never an approved issue: it is built only after the user has
+  discussed it and agreed it into the set, and an agent that finds one
+  while building leaves it there and says so.
 - **Build.** An issue with no design left in it, touching one or two
   files, the main agent builds itself. Anything larger goes to the
   `software-developer` subagent, which follows this file, writes the
