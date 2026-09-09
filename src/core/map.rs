@@ -79,11 +79,28 @@ pub struct Kind {
     /// option or a task. Checked on a write, never on a fold, so what
     /// was recorded before the rule still folds.
     pub requires: Vec<String>,
+    /// A node kind's short id prefix - `d` for `decision`, so a node
+    /// reads as `d41` rather than its full id. Meaningless on an edge
+    /// kind, which is never referenced by a short id; left at its
+    /// default there and never shown.
+    pub prefix: String,
+}
+
+/// A kind's prefix when its schema names none: the name's own first
+/// character, lowercased - `d` for `decision`, `t` for `task`. Used
+/// both by `Kind::new` and by the TOML loader, so the one rule for
+/// "no prefix given" lives once.
+pub fn default_prefix(name: &str) -> String {
+    name.chars()
+        .next()
+        .map(|c| c.to_lowercase().to_string())
+        .unwrap_or_default()
 }
 
 impl Kind {
     pub(crate) fn new(name: &str, gloss: &str) -> Self {
         Self {
+            prefix: default_prefix(name),
             name: name.to_string(),
             gloss: gloss.to_string(),
             requires: Vec::new(),
