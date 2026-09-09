@@ -749,6 +749,21 @@ impl Map {
         out
     }
 
+    /// The headline nodes of the schema's settled kind - `question` on
+    /// `decisions`, `task` on `tasks` - that nothing settles yet.
+    /// Empty on a map with no `Settlement`. Headlines also include the
+    /// settling kind itself (`decision` is a headline on `decisions`
+    /// too, so `--around` and the render can name it directly), and
+    /// nothing ever settles a settling-kind node, so filtering to the
+    /// settled kind first is what keeps every one of those out of this
+    /// list.
+    pub fn open(&self) -> impl Iterator<Item = &Node> {
+        let of = self.schema.settlement.as_ref().map(|s| s.of.as_str());
+        self.headlines()
+            .filter(move |node| Some(node.kind.as_str()) == of)
+            .filter(|node| self.settled_by(node.id).is_empty())
+    }
+
     /// Whether `decision`, or a decision it supersedes, has a
     /// `resolves` edge to a question - so it belongs under one in a
     /// render rather than on its own.

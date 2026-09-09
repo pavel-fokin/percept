@@ -210,41 +210,56 @@ fn line_id(map: &Map, node: &Node) -> String {
         .unwrap_or_else(|| format!("{}:{}", node.kind, node.name))
 }
 
+/// How many lines of a gained or open list `gained_block` and
+/// `open_blocks_and_pointer` show before folding the rest into a
+/// trailing count.
+const LIMIT: usize = 5;
+
+/// Up to `LIMIT` of `items`, each turned into a line by `line`, with a
+/// trailing `+N more` when there were more - the one truncation rule
+/// both blocks below share.
+fn capped_lines(items: &[&Node], line: impl Fn(&Node) -> String) -> Vec<String> {
+    let mut lines: Vec<String> = items.iter().take(LIMIT).map(|node| line(node)).collect();
+    if items.len() > LIMIT {
+        lines.push(format!("+{} more", items.len() - LIMIT));
+    }
+    lines
+}
+
 /// What each folded map gained since `since`: a counts line for every
-/// map, in fold order, then up to five lines per map that gained
+/// map, in fold order, then up to `LIMIT` lines per map that gained
 /// anything - a node's `added_at` is compared directly, not
 /// `Map::since`, which would also surface an older node a fresh edge
 /// only touched.
 fn gained_block(maps: &[Map], since: Timestamp) -> String {
+    let per_map: Vec<Vec<&Node>> = maps
+        .iter()
+        .map(|map| map.headlines().filter(|node| node.added_at >= since).collect())
+        .collect();
+
     let counts = maps
         .iter()
-        .map(|map| {
-            let gained = map.headlines().filter(|node| node.added_at >= since).count();
-            format!("{} +{gained}", map.schema().name)
-        })
+        .zip(&per_map)
+        .map(|(map, gained)| format!("{} +{}", map.schema().name, gained.len()))
         .collect::<Vec<_>>()
         .join("   ");
 
     let mut lines = vec![counts];
-    for map in maps {
-        let gained: Vec<&Node> = map.headlines().filter(|node| node.added_at >= since).collect();
+    for (map, gained) in maps.iter().zip(&per_map) {
         if gained.is_empty() {
             continue;
         }
-        for node in gained.iter().take(5) {
-            lines.push(format!("{} {} {:?}", line_id(map, node), node.kind, node.name));
-        }
-        if gained.len() > 5 {
-            lines.push(format!("+{} more", gained.len() - 5));
-        }
+        lines.extend(capped_lines(gained, |node| {
+            format!("{} {} {:?}", line_id(map, node), node.kind, node.name)
+        }));
     }
     lines.join("\n")
 }
 
 /// One `open {of} (...)` block per settled map that has open items - a
 /// map without a `Settlement` (an `ideas` map, say) is skipped entirely,
-/// never by name - plus the fragment pointer at the first open item
-/// found, walking maps in fold order.
+/// never by name, since `Map::open` is empty there - plus the fragment
+/// pointer at the first open item found, walking maps in fold order.
 fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
     let mut blocks = Vec::new();
     let mut pointer = None;
@@ -253,44 +268,28 @@ fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
         let Some(settlement) = map.schema().settlement.as_ref() else {
             continue;
         };
-        // Headlines include both the settled kind and the settling one
-        // - `question` and `decision` on the decisions map - and only
-        // the settled kind (`settlement.of`) can ever be open: nothing
-        // resolves a decision itself, so `settled_by` on one is always
-        // empty and every decision would otherwise misreport as open.
-        let open: Vec<&Node> = map
-            .headlines()
-            .filter(|node| node.kind == settlement.of)
-            .filter(|node| map.settled_by(node.id).is_empty())
-            .collect();
+        let open: Vec<&Node> = map.open().collect();
         if open.is_empty() {
             continue;
         }
 
         let total = open.len();
-        let header = if total > 5 {
-            format!("open {} ({total}, showing 5)", settlement.of)
+        let header = if total > LIMIT {
+            format!("open {} ({total}, showing {LIMIT})", settlement.of)
         } else {
             format!("open {} ({total})", settlement.of)
         };
         let mut lines = vec![header];
-        for node in open.iter().take(5) {
-            lines.push(format!("{} {:?}", line_id(map, node), node.name));
-        }
-        if total > 5 {
-            lines.push(format!("+{} more", total - 5));
-        }
+        lines.extend(capped_lines(&open, |node| format!("{} {:?}", line_id(map, node), node.name)));
         blocks.push(lines.join("\n"));
 
-        if pointer.is_none() {
-            if let Some(first) = open.first() {
-                pointer = Some(format!(
-                    "fragment: percept maps show {} --around {}",
-                    map.schema().name,
-                    line_id(map, first)
-                ));
-            }
-        }
+        pointer.get_or_insert_with(|| {
+            format!(
+                "fragment: percept maps show {} --around {}",
+                map.schema().name,
+                line_id(map, open[0])
+            )
+        });
     }
 
     (blocks, pointer)
