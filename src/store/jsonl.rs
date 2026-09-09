@@ -131,6 +131,34 @@ impl EventLog for Jsonl {
         }
         Ok(None)
     }
+
+    /// `load`'s read and `append`'s write, joined under one hold of the
+    /// exclusive lock: `compute` sees exactly the events another
+    /// `append_computed` call could not have raced ahead of, since
+    /// nothing between this read and this write releases the lock.
+    fn append_computed(
+        &self,
+        compute: Box<
+            dyn FnOnce(Vec<crate::core::Event>) -> Result<crate::core::Event, Box<dyn std::error::Error>>
+                + '_,
+        >,
+    ) -> Result<crate::core::Event, Box<dyn std::error::Error>> {
+        self.with_exclusive(|file| {
+            truncate_torn_tail(file)?;
+            let bytes = read_all(file)?;
+            let mut events = Vec::new();
+            for (line, raw) in lines(complete_text(&bytes)?) {
+                events.push(parse_line(raw).map_err(|source| at_line(line, source))?);
+            }
+            let event = compute(events).map_err(Error::Compute)?;
+            let mut text = crate::store::encode(&event);
+            text.push('\n');
+            let mut file = file;
+            file.write_all(text.as_bytes()).map_err(Error::Io)?;
+            Ok(event)
+        })
+        .map_err(Into::into)
+    }
 }
 
 impl EventSearch for Jsonl {

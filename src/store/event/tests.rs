@@ -408,12 +408,14 @@ fn node_added_round_trips_through_json() {
             name: "Both built in parallel".to_string(),
             properties: properties.clone(),
             sources: vec![cited],
+            seq: 3,
         },
     );
 
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "node.added");
+    assert_eq!(wire.payload["seq"], 3);
     let restored = crate::core::Event::try_from(wire).unwrap();
 
     match restored.payload() {
@@ -424,6 +426,7 @@ fn node_added_round_trips_through_json() {
             name,
             properties: restored_properties,
             sources,
+            seq,
         } => {
             assert_eq!(map, "decisions");
             assert!(*restored_node == node);
@@ -431,9 +434,27 @@ fn node_added_round_trips_through_json() {
             assert_eq!(name, "Both built in parallel");
             assert_eq!(*restored_properties, properties);
             assert!(sources == &vec![cited]);
+            assert_eq!(*seq, 3);
         }
         _ => panic!("expected NodeAdded"),
     }
+}
+
+#[test]
+fn a_node_added_line_with_no_seq_decodes_to_the_sentinel() {
+    let node = NodeId::new();
+    let json = serde_json::json!({
+        "map": "decisions",
+        "node": node.as_uuid().to_string(),
+        "kind": "evidence",
+        "name": "x",
+        "properties": {},
+        "sources": [],
+    });
+
+    let event = decode("user", source("cli"), "node.added", None, json).unwrap();
+
+    assert!(matches!(event.payload(), Payload::NodeAdded { seq: 0, .. }));
 }
 
 #[test]
@@ -550,6 +571,7 @@ fn a_map_events_summary_carries_no_preview() {
             name: "Both built in parallel".to_string(),
             properties: BTreeMap::new(),
             sources: Vec::new(),
+            seq: 1,
         },
     );
 

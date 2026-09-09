@@ -111,6 +111,22 @@ impl EventLog for FakeLog {
         let events = self.events.lock().unwrap();
         Ok(events.iter().find(|event| event.id() == id).cloned())
     }
+
+    /// Holds the events lock for the whole of `compute` and the push
+    /// that follows, so two threads sharing one `FakeLog` see the same
+    /// ordering `Jsonl`'s file lock gives two processes.
+    fn append_computed(
+        &self,
+        compute: Box<dyn FnOnce(Vec<Event>) -> Result<Event, Box<dyn std::error::Error>> + '_>,
+    ) -> Result<Event, Box<dyn std::error::Error>> {
+        if self.fail_append.load(Ordering::Relaxed) {
+            return Err("append failed".into());
+        }
+        let mut events = self.events.lock().unwrap();
+        let event = compute(events.clone())?;
+        events.push(event.clone());
+        Ok(event)
+    }
 }
 
 /// A MapRenderer that records the name of every map it was asked to
@@ -188,6 +204,9 @@ fn node_added_payload(kind: &str, name: &str) -> Payload {
         name: name.to_string(),
         properties: BTreeMap::new(),
         sources: vec![EventId::new()],
+        // Left at the sentinel: nothing here has more than one node of
+        // a kind, so a positional fallback and a minted one agree.
+        seq: 0,
     }
 }
 

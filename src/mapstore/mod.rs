@@ -1,6 +1,7 @@
 //! Folds a cognitive map from the event log and gives it an external
 //! form. `LogMaps` is the `core::MapReader` the log-backed maps are
-//! opened through; `fold_map` and `revise` build and change one;
+//! opened through; `fold_map` builds one and `commit` mints and
+//! applies one change to it atomically, under the log's own lock;
 //! `encode_*` serialize a map or a fragment to JSON lines; `markdown`
 //! and `MarkdownFiles` render it to `.percept/` as Markdown. The tools
 //! that call these live in `src/tools`.
@@ -10,7 +11,7 @@ mod render;
 mod schemas;
 
 pub use map::{
-    encode_fragment, encode_lines, encode_map, encode_schema, fold_map, revise, LogMaps,
+    commit, encode_fragment, encode_lines, encode_map, encode_schema, fold_map, LogMaps,
     NodeRefArgs, Snapshot,
 };
 pub use render::{catalogue, markdown, MarkdownFiles};

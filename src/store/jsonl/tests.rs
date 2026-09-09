@@ -1,7 +1,9 @@
 use super::*;
 use crate::core::testing::source;
-use crate::core::{Actor, EventQuery, Payload};
+use crate::core::{Actor, EventQuery, NodeId, Payload};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// A log file on a temp path, removed when the test ends - a
@@ -220,6 +222,67 @@ fn open_creates_missing_parent_directory() {
     assert_eq!(log.load().unwrap().len(), 1);
 
     fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Counts the `node.added` events of `kind` already in `events` and
+/// builds one more, minted with the next number - the same count
+/// `Map::apply` would take, done here without a `Map` so the test
+/// stays a seam-level check on `append_computed` alone.
+fn mint(events: Vec<crate::core::Event>, kind: &str) -> Result<crate::core::Event, Box<dyn std::error::Error>> {
+    let seq = events
+        .iter()
+        .filter(|event| matches!(event.payload(), Payload::NodeAdded { kind: k, .. } if k == kind))
+        .count() as u32
+        + 1;
+    Ok(crate::core::Event::new(
+        Actor::User,
+        source("cli"),
+        None,
+        Payload::NodeAdded {
+            map: "decisions".to_string(),
+            node: NodeId::new(),
+            kind: kind.to_string(),
+            name: format!("mint {seq}"),
+            properties: BTreeMap::new(),
+            sources: Vec::new(),
+            seq,
+        },
+    ))
+}
+
+#[test]
+fn concurrent_mints_of_the_same_kind_never_agree_on_a_number() {
+    let temp = TempLog::new();
+    let log = Arc::new(temp.open());
+    let threads = 16;
+
+    let handles: Vec<_> = (0..threads)
+        .map(|_| {
+            let log = Arc::clone(&log);
+            std::thread::spawn(move || {
+                log.append_computed(Box::new(|events| mint(events, "decision")))
+                    .unwrap();
+            })
+        })
+        .collect();
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    let minted: Vec<u32> = log
+        .load()
+        .unwrap()
+        .iter()
+        .map(|event| match event.payload() {
+            Payload::NodeAdded { seq, .. } => *seq,
+            _ => panic!("expected a node.added event"),
+        })
+        .collect();
+
+    let mut sorted = minted.clone();
+    sorted.sort_unstable();
+    let expected: Vec<u32> = (1..=threads as u32).collect();
+    assert_eq!(sorted, expected, "every mint got a distinct, dense number");
 }
 
 #[test]

@@ -75,12 +75,22 @@ const PARAMETERS: &str = r#"{
             "type": "object",
             "properties": {
               "op": {"const": "remove_node"},
-              "kind": {"type": "string"},
-              "name": {"type": "string"},
+              "node": {
+                "description": "the node to remove: {kind, name}, or the short id its map shows it as, e.g. d41",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
+                    "required": ["kind", "name"],
+                    "additionalProperties": false
+                  },
+                  {"type": "string"}
+                ]
+              },
               "reason": {"type": "string"},
               "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"}
             },
-            "required": ["op", "kind", "name", "reason"],
+            "required": ["op", "node", "reason"],
             "additionalProperties": false
           },
           {
@@ -89,16 +99,28 @@ const PARAMETERS: &str = r#"{
               "op": {"const": "add_edge"},
               "kind": {"type": "string"},
               "from": {
-                "type": "object",
-                "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
-                "required": ["kind", "name"],
-                "additionalProperties": false
+                "description": "{kind, name}, or the short id its map shows it as, e.g. d41",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
+                    "required": ["kind", "name"],
+                    "additionalProperties": false
+                  },
+                  {"type": "string"}
+                ]
               },
               "to": {
-                "type": "object",
-                "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
-                "required": ["kind", "name"],
-                "additionalProperties": false
+                "description": "{kind, name}, or the short id its map shows it as, e.g. d41",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
+                    "required": ["kind", "name"],
+                    "additionalProperties": false
+                  },
+                  {"type": "string"}
+                ]
               },
               "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"}
             },
@@ -111,16 +133,28 @@ const PARAMETERS: &str = r#"{
               "op": {"const": "remove_edge"},
               "kind": {"type": "string"},
               "from": {
-                "type": "object",
-                "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
-                "required": ["kind", "name"],
-                "additionalProperties": false
+                "description": "{kind, name}, or the short id its map shows it as, e.g. d41",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
+                    "required": ["kind", "name"],
+                    "additionalProperties": false
+                  },
+                  {"type": "string"}
+                ]
               },
               "to": {
-                "type": "object",
-                "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
-                "required": ["kind", "name"],
-                "additionalProperties": false
+                "description": "{kind, name}, or the short id its map shows it as, e.g. d41",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
+                    "required": ["kind", "name"],
+                    "additionalProperties": false
+                  },
+                  {"type": "string"}
+                ]
               },
               "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"}
             },
@@ -150,8 +184,7 @@ enum ChangeArgs {
         sources: Vec<String>,
     },
     RemoveNode {
-        kind: String,
-        name: String,
+        node: NodeRefArgs,
         reason: String,
         #[serde(default)]
         sources: Vec<String>,
@@ -258,12 +291,11 @@ fn apply(
             (mutation, line)
         }
         ChangeArgs::RemoveNode {
-            kind,
-            name,
+            node,
             reason,
             sources,
         } => {
-            let node = NodeRef { kind, name };
+            let node = node_ref(snapshot.map(), node)?;
             if node.kind == DECISION {
                 return Err(format!(
                     "{node} is a decision, and a decision is never removed; add the one \
@@ -294,7 +326,8 @@ fn apply(
             to,
             sources,
         } => {
-            let (from, to): (NodeRef, NodeRef) = (from.into(), to.into());
+            let from = node_ref(snapshot.map(), from)?;
+            let to = node_ref(snapshot.map(), to)?;
             if !adding_edge && user_wrote_edge(snapshot.map(), &kind, &from, &to) {
                 return Err(format!(
                     "edge {from} {kind} {to} was written by the user and the model may not remove it"
@@ -328,6 +361,18 @@ fn apply(
         _ => line,
     };
     Ok((line, payload))
+}
+
+/// Resolves `args` - `{kind, name}` or a short id - against `map` to
+/// the `kind:name` a `Mutation` takes, the way the CLI's own `--from`,
+/// `--to`, and node arguments do.
+fn node_ref(map: &Map, args: NodeRefArgs) -> Result<NodeRef, Box<dyn std::error::Error>> {
+    let id = args.resolve(map)?;
+    let node = map.node(id).expect("resolve returns a live node's id");
+    Ok(NodeRef {
+        kind: node.kind.clone(),
+        name: node.name.clone(),
+    })
 }
 
 /// Why the model may not remove `node`, if the user's marks stand in

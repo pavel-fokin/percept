@@ -191,7 +191,7 @@ fn removing_a_user_written_node_is_refused_and_says_to_supersede() {
     let revise = tool(vec![node_added("question", "Which language?")]);
 
     let err = revise
-        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","kind":"question","name":"Which language?","reason":"wrong"}]}"#)
+        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"question","name":"Which language?"},"reason":"wrong"}]}"#)
         .err()
         .unwrap()
         .to_string();
@@ -224,7 +224,7 @@ fn removing_a_model_node_that_a_user_edge_touches_is_refused() {
     let revise = tool(vec![model_node, question, user_edge]);
 
     let err = revise
-        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","kind":"option","name":"Rust","reason":"wrong"}]}"#)
+        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"option","name":"Rust"},"reason":"wrong"}]}"#)
         .err()
         .unwrap()
         .to_string();
@@ -237,7 +237,7 @@ fn removing_a_model_written_node_is_allowed() {
     let revise = tool(vec![node_added_by(Actor::Model, "option", "Go")]);
 
     let output = revise
-        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","kind":"option","name":"Go","reason":"wrong"}]}"#)
+        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"option","name":"Go"},"reason":"wrong"}]}"#)
         .unwrap();
 
     assert!(matches!(output.commits[0], Payload::NodeRemoved { .. }));
@@ -248,7 +248,7 @@ fn removing_a_decision_is_refused_whoever_wrote_it() {
     let revise = tool(vec![node_added_by(Actor::Model, "decision", "Go")]);
 
     let err = revise
-        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","kind":"decision","name":"Go","reason":"wrong"}]}"#)
+        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"decision","name":"Go"},"reason":"wrong"}]}"#)
         .err()
         .unwrap()
         .to_string();

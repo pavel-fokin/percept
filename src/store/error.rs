@@ -32,6 +32,9 @@ pub enum Error {
     /// its `type`.
     BadLine(serde_json::Error),
     Io(std::io::Error),
+    /// `EventLog::append_computed`'s `compute` refused what it was
+    /// given - a mutation `Map::apply` rejected, most often.
+    Compute(Box<dyn std::error::Error>),
     /// Wraps any of the above with the 1-based line number it came from.
     AtLine {
         line: usize,
@@ -64,6 +67,7 @@ impl fmt::Display for Error {
             }
             Self::BadLine(e) => write!(f, "malformed line: {e}"),
             Self::Io(e) => write!(f, "{e}"),
+            Self::Compute(e) => write!(f, "{e}"),
             Self::AtLine { line, source } => write!(f, "line {line}: {source}"),
         }
     }

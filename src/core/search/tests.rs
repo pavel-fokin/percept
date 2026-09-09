@@ -247,6 +247,7 @@ fn a_text_term_matches_every_payload_kind() {
             name: "Deploy by Friday".to_string(),
             properties: BTreeMap::new(),
             sources: Vec::new(),
+            seq: 1,
         },
         Payload::NodeAdded {
             map: "tasks".to_string(),
@@ -255,6 +256,7 @@ fn a_text_term_matches_every_payload_kind() {
             name: "Ship".to_string(),
             properties: BTreeMap::from([("note".to_string(), "deploy first".to_string())]),
             sources: Vec::new(),
+            seq: 2,
         },
         Payload::NodeRemoved {
             map: "tasks".to_string(),

@@ -15,32 +15,16 @@ fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
     }
 }
 
-/// Commits what `revise` returns the way the CLI does.
-fn record(log: &FakeLog, payload: Payload) {
-    record_at(log, "/test", payload);
-}
-
-/// `record`, stamping the commit as coming from `path` - for a test
-/// that revises the same map from more than one project.
-fn record_at(log: &FakeLog, path: &str, payload: Payload) {
-    log.append(&Event::new(
-        Actor::User,
-        source_at("cli", path),
-        None,
-        payload,
-    ))
-    .unwrap();
-}
-
 #[test]
 fn an_option_without_a_why_is_refused_as_a_new_write() {
     let log = FakeLog::default();
 
-    let err = revise(
+    let err = commit(
         &log,
         &schemas(),
         "decisions",
         &scope(),
+        &source("cli"),
         &[],
         Actor::User,
         add_node("option", "SQLite"),
@@ -57,11 +41,12 @@ fn an_option_without_a_why_is_refused_as_a_new_write() {
 fn a_task_without_a_why_is_refused_as_a_new_write() {
     let log = FakeLog::default();
 
-    let err = revise(
+    let err = commit(
         &log,
         &schemas(),
         "tasks",
         &scope(),
+        &source("cli"),
         &[],
         Actor::User,
         add_node("task", "cancel a turn without quitting"),
@@ -84,28 +69,38 @@ fn an_option_with_a_why_is_recorded() {
         sources,
     };
 
-    let payload = revise(&log, &schemas(), "decisions", &scope(), &[], Actor::User, mutation).unwrap();
-
-    assert!(matches!(payload, Payload::NodeAdded { .. }));
-}
-
-#[test]
-fn revise_returns_the_payload_that_records_the_mutation() {
-    let log = FakeLog::default();
-
-    let payload = revise(
+    let event = commit(
         &log,
         &schemas(),
         "decisions",
         &scope(),
+        &source("cli"),
+        &[],
+        Actor::User,
+        mutation,
+    )
+    .unwrap();
+
+    assert!(matches!(event.payload(), Payload::NodeAdded { .. }));
+}
+
+#[test]
+fn commit_appends_the_event_that_records_the_mutation() {
+    let log = FakeLog::default();
+
+    let event = commit(
+        &log,
+        &schemas(),
+        "decisions",
+        &scope(),
+        &source("cli"),
         &[],
         Actor::User,
         add_node("decision", "Rust"),
     )
     .unwrap();
 
-    assert!(matches!(&payload, Payload::NodeAdded { name, .. } if name == "Rust"));
-    record(&log, payload);
+    assert!(matches!(event.payload(), Payload::NodeAdded { name, .. } if name == "Rust"));
     assert!(fold_map(&log, &schemas(), "decisions", &scope())
         .unwrap()
         .find("decision", "Rust")
@@ -113,25 +108,26 @@ fn revise_returns_the_payload_that_records_the_mutation() {
 }
 
 #[test]
-fn revise_loads_the_log_so_a_second_call_sees_the_first() {
+fn commit_loads_the_log_so_a_second_call_sees_the_first() {
     let log = FakeLog::default();
-    let first = revise(
+    commit(
         &log,
         &schemas(),
         "decisions",
         &scope(),
+        &source("cli"),
         &[],
         Actor::User,
         add_node("decision", "Rust"),
     )
     .unwrap();
-    record(&log, first);
 
-    let err = revise(
+    let err = commit(
         &log,
         &schemas(),
         "decisions",
         &scope(),
+        &source("cli"),
         &[],
         Actor::User,
         add_node("decision", "Rust"),
@@ -143,34 +139,33 @@ fn revise_loads_the_log_so_a_second_call_sees_the_first() {
 }
 
 #[test]
-fn revise_allows_the_same_name_under_a_different_project_s_path() {
+fn commit_allows_the_same_name_under_a_different_project_s_path() {
     let log = FakeLog::default();
     let here = Scope::Project(PathBuf::from("/here"));
     let there = Scope::Project(PathBuf::from("/there"));
 
-    let first = revise(
+    commit(
         &log,
         &schemas(),
         "decisions",
         &here,
+        &source_at("cli", "/here"),
         &[],
         Actor::User,
         add_node("decision", "Rust"),
     )
     .unwrap();
-    record_at(&log, "/here", first);
-
-    let elsewhere = revise(
+    commit(
         &log,
         &schemas(),
         "decisions",
         &there,
+        &source_at("cli", "/there"),
         &[],
         Actor::User,
         add_node("decision", "Rust"),
     )
     .unwrap();
-    record_at(&log, "/there", elsewhere);
 
     assert!(fold_map(&log, &schemas(), "decisions", &there)
         .unwrap()
@@ -179,12 +174,13 @@ fn revise_allows_the_same_name_under_a_different_project_s_path() {
 }
 
 #[test]
-fn revising_the_code_map_is_refused() {
-    let err = revise(
+fn committing_to_the_code_map_is_refused() {
+    let err = commit(
         &FakeLog::default(),
         &schemas(),
         "code",
         &scope(),
+        &source("cli"),
         &[],
         Actor::User,
         add_node("file", "src/main.rs"),
@@ -214,32 +210,35 @@ fn a_source_is_checked_against_the_loaded_log() {
     let log = FakeLog::seeded(vec![cited]);
     let unknown = Uuid::now_v7().to_string();
 
-    let ok = revise(
+    let ok = commit(
         &log,
         &schemas(),
         "decisions",
         &scope(),
+        &source("cli"),
         &[known],
         Actor::User,
         add_node("decision", "Rust"),
     )
     .unwrap();
-    let missing = revise(
+    let missing = commit(
         &log,
         &schemas(),
         "decisions",
         &scope(),
+        &source("cli"),
         std::slice::from_ref(&unknown),
         Actor::User,
         add_node("decision", "Go"),
     )
     .err()
     .unwrap();
-    let junk = revise(
+    let junk = commit(
         &log,
         &schemas(),
         "decisions",
         &scope(),
+        &source("cli"),
         &["user".to_string()],
         Actor::User,
         add_node("decision", "Go"),
@@ -247,7 +246,7 @@ fn a_source_is_checked_against_the_loaded_log() {
     .err()
     .unwrap();
 
-    assert!(matches!(ok, Payload::NodeAdded { sources, .. } if sources.len() == 1));
+    assert!(matches!(ok.payload(), Payload::NodeAdded { sources, .. } if sources.len() == 1));
     assert_eq!(missing.to_string(), format!("no event with id {unknown}"));
     assert_eq!(junk.to_string(), "\"user\" is not an event id");
 }
@@ -263,6 +262,7 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
         sources: vec![EventId::new()],
         actor: Actor::User,
         added_at: Timestamp::now(),
+        seq: 1,
     };
 
     let line: serde_json::Value = serde_json::from_str(&encode_node(&map, &node)).unwrap();
@@ -274,6 +274,26 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
     assert_eq!(line["sources"][0], node.sources[0].as_uuid().to_string());
     assert_eq!(line["actor"], "user");
     assert_eq!(line["added_at"], node.added_at.to_string());
+}
+
+#[test]
+fn a_node_line_carries_its_short_id() {
+    let mut map = Map::empty(crate::core::testing::decisions());
+    map.apply(
+        Mutation::AddNode {
+            kind: "evidence".to_string(),
+            name: "Built both".to_string(),
+            properties: BTreeMap::new(),
+            sources: Vec::new(),
+        },
+        Actor::User,
+    )
+    .unwrap();
+
+    let line: serde_json::Value =
+        serde_json::from_str(&encode_node(&map, &map.nodes()[0])).unwrap();
+
+    assert_eq!(line["id"], "e1");
 }
 
 #[test]
@@ -336,4 +356,57 @@ fn an_edge_line_names_its_ends_as_kind_and_name() {
     assert_eq!(line["from"], "file:src/main.rs");
     assert_eq!(line["to"], "package:clap");
     assert_eq!(line["sources"], serde_json::json!([]));
+}
+
+fn map_with_a_decision() -> Map {
+    let mut map = Map::empty(crate::core::testing::decisions());
+    map.apply(
+        Mutation::AddNode {
+            kind: "decision".to_string(),
+            name: "Rust over Go".to_string(),
+            properties: BTreeMap::new(),
+            sources: Vec::new(),
+        },
+        Actor::User,
+    )
+    .unwrap();
+    map
+}
+
+#[test]
+fn node_ref_args_resolves_a_kind_and_name_object() {
+    let map = map_with_a_decision();
+    let args: NodeRefArgs =
+        serde_json::from_str(r#"{"kind":"decision","name":"Rust over Go"}"#).unwrap();
+
+    let node = args.resolve(&map).unwrap();
+
+    assert_eq!(map.node(node).unwrap().name, "Rust over Go");
+}
+
+#[test]
+fn node_ref_args_resolves_a_bare_short_id_string() {
+    let map = map_with_a_decision();
+    let args: NodeRefArgs = serde_json::from_str(r#""d1""#).unwrap();
+
+    let node = args.resolve(&map).unwrap();
+
+    assert_eq!(map.node(node).unwrap().name, "Rust over Go");
+}
+
+#[test]
+fn node_ref_args_resolves_a_bare_kind_colon_name_string_too() {
+    let map = map_with_a_decision();
+    let args: NodeRefArgs = serde_json::from_str(r#""decision:Rust over Go""#).unwrap();
+
+    let node = args.resolve(&map).unwrap();
+
+    assert_eq!(map.node(node).unwrap().name, "Rust over Go");
+}
+
+#[test]
+fn node_ref_args_object_form_rejects_a_field_neither_shape_has() {
+    let result: Result<NodeRefArgs, _> = serde_json::from_str(r#"{"kind":"decision"}"#);
+
+    assert!(result.is_err(), "name is required and cannot default");
 }

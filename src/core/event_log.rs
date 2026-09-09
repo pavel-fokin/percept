@@ -16,4 +16,17 @@ pub trait EventLog: Send + Sync {
     /// An id the log doesn't carry is an absence, not an error - the
     /// caller decides what to make of it.
     fn get(&self, id: EventId) -> Result<Option<Event>, Box<dyn std::error::Error>>;
+
+    /// Loads every event, hands them to `compute`, and appends the
+    /// event it builds - all under the same lock `append` takes, so a
+    /// second writer's own `compute` can never run between this one's
+    /// load and its append. The seam a mint that must stay unique
+    /// closes through: a `NodeAdded` payload's `seq` is counted from
+    /// the events `compute` is given, so two writers racing to mint the
+    /// next number for one kind can never agree - the second always
+    /// sees the first's event already committed.
+    fn append_computed(
+        &self,
+        compute: Box<dyn FnOnce(Vec<Event>) -> Result<Event, Box<dyn std::error::Error>> + '_>,
+    ) -> Result<Event, Box<dyn std::error::Error>>;
 }
