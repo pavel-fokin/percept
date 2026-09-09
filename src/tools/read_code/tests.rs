@@ -30,6 +30,27 @@ fn a_read_returns_the_walk_s_files_and_symbols() {
 }
 
 #[test]
+fn a_node_line_carries_no_actor_or_time() {
+    let tree = tempdir().unwrap();
+    fs::write(
+        tree.path().join("lib.rs"),
+        "pub fn answer() -> u32 { 42 }\n",
+    )
+    .unwrap();
+
+    let out = ReadCode::new(tree.path().to_path_buf()).run("{}").unwrap();
+
+    let line = out
+        .content
+        .lines()
+        .find(|line| line.contains("\"node\""))
+        .expect("a node line");
+    let json: serde_json::Value = serde_json::from_str(line).unwrap();
+    assert!(json.get("actor").is_none(), "{json}");
+    assert!(json.get("added_at").is_none(), "{json}");
+}
+
+#[test]
 fn every_call_walks_the_tree_fresh() {
     let tree = tempdir().unwrap();
     let tool = ReadCode::new(tree.path().to_path_buf());

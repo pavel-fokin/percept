@@ -295,7 +295,7 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
                 width,
             )
         }
-        // A file registration shows dimmed too - it's experience the
+        // A file citation shows dimmed too - it's experience the
         // model recorded, not dialogue.
         Payload::FileCited { path, lines, .. } => tool_lines(
             chat,

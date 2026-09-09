@@ -236,6 +236,40 @@ fn a_file_cited_publish_refuses_a_binary_file() {
 }
 
 #[test]
+fn a_file_cited_publish_refuses_an_unknown_field() {
+    let fixture = Fixture::new();
+    let log = FakeLog::default();
+    // `line` instead of `lines` - the unknown-field guard every other
+    // payload shape already gets from `store::decode`.
+    let payload = r#"{"path":"f.txt","line":"1-1"}"#;
+    let err = publish(
+        file_cited_args(payload),
+        &log,
+        Path::new(ROOT),
+        fixture.path(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("line"), "{err}");
+    assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
+fn a_file_cited_publish_refuses_a_blank_excerpt() {
+    let fixture = Fixture::new();
+    let log = FakeLog::default();
+    let payload = r#"{"path":"src/missing.rs","excerpt":"   \n  "}"#;
+    let err = publish(
+        file_cited_args(payload),
+        &log,
+        Path::new(ROOT),
+        fixture.path(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("blank"), "{err}");
+    assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
 fn a_file_cited_publish_refuses_a_reversed_range() {
     let fixture = Fixture::new();
     fixture.write("f.txt", "a\nb\nc\n");
@@ -862,5 +896,42 @@ fn a_bad_ref_names_its_line_number() {
     )
     .unwrap_err();
     assert!(err.to_string().starts_with("line 4:"), "{err}");
+    assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
+fn a_duplicate_name_in_a_later_node_writes_nothing() {
+    let log = FakeLog::default();
+    let document = "question \"Does record work?\"\n\
+                     question \"Does record work?\"\n";
+    let err = record_document(
+        document,
+        record_args("decisions"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("already in the map"), "{err}");
+    assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
+fn a_source_id_the_log_lacks_writes_nothing() {
+    let log = FakeLog::default();
+    let document = "question \"Does record work?\"\n";
+    let mut args = record_args("decisions");
+    args.source = vec![crate::core::EventId::new().as_uuid().to_string()];
+    let err = record_document(
+        document,
+        args,
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("no event with id"), "{err}");
     assert!(log.load().unwrap().is_empty());
 }

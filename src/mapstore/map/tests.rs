@@ -265,7 +265,7 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
         seq: 1,
     };
 
-    let line: serde_json::Value = serde_json::from_str(&encode_node(&map, &node)).unwrap();
+    let line: serde_json::Value = serde_json::from_str(&encode_node(&map, &node, true)).unwrap();
 
     assert_eq!(line["node"], node.id.as_uuid().to_string());
     assert_eq!(line["kind"], "evidence");
@@ -291,7 +291,7 @@ fn a_node_line_carries_its_short_id() {
     .unwrap();
 
     let line: serde_json::Value =
-        serde_json::from_str(&encode_node(&map, &map.nodes()[0])).unwrap();
+        serde_json::from_str(&encode_node(&map, &map.nodes()[0], true)).unwrap();
 
     assert_eq!(line["id"], "e1");
 }
@@ -329,7 +329,7 @@ fn an_edge_line_names_its_ends_as_kind_and_name() {
     .unwrap();
 
     let line: serde_json::Value =
-        serde_json::from_str(&encode_edge(&map, &map.edges()[0])).unwrap();
+        serde_json::from_str(&encode_edge(&map, &map.edges()[0], true)).unwrap();
 
     assert_eq!(line["edge"], "imports");
     assert_eq!(line["from"], "file:src/main.rs");

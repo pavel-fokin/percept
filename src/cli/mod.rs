@@ -19,7 +19,7 @@
 //! so a caller spends tokens on the whole of one deliberately, via
 //! `--full`, `show`, or `show --range` into one `content`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -28,8 +28,8 @@ use tokio_stream::StreamExt;
 
 use crate::app::{run_tool, AppService, ToolStep};
 use crate::core::{
-    Actor, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeRef, Payload,
-    Schemas,
+    cited_label, Actor, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeId,
+    NodeRef, Payload, Schemas,
 };
 use crate::harness::Chunk;
 use crate::mapstore;
@@ -425,12 +425,7 @@ pub fn publish(
 
     let event = if args.kind == "file.cited" {
         let payload = file_cited_payload(&args.payload, checkout)?;
-        crate::core::Event::new(
-            store::parse_actor(&args.actor)?,
-            source,
-            causation_id,
-            payload,
-        )
+        Event::new(store::parse_actor(&args.actor)?, source, causation_id, payload)
     } else {
         let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
         let event = store::decode(&args.actor, source, &args.kind, causation_id, payload)?;
@@ -454,72 +449,69 @@ pub fn publish(
 /// as the caller wrote it - `excerpt` absent when the tree should
 /// supply it.
 #[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawFileCited {
     path: String,
     lines: Option<String>,
     excerpt: Option<String>,
 }
 
-/// Builds a `Payload::FileCited` from the raw JSON a caller passed
-/// `--payload`. `build_file_cited` does the work; this only parses the
-/// JSON `publish --type file.cited` takes, so `maps record`'s `cites`
-/// line can build a `RawFileCited` straight from what it parsed instead
-/// of round-tripping through JSON text.
-fn file_cited_payload(
-    raw: &str,
-    checkout: &Path,
-) -> Result<Payload, Box<dyn std::error::Error>> {
+/// Parses the JSON `publish --type file.cited` takes and builds its
+/// payload - `build_file_cited` does the work, over a `Workspace`
+/// opened once for this one call.
+fn file_cited_payload(raw: &str, checkout: &Path) -> Result<Payload, Box<dyn std::error::Error>> {
     let raw: RawFileCited = serde_json::from_str(raw).map_err(store::Error::BadPayload)?;
-    build_file_cited(raw, checkout)
+    let lines = raw.lines.as_deref().map(store::parse_lines).transpose()?;
+    let workspace = tools::Workspace::new(checkout)?;
+    build_file_cited(&workspace, &raw.path, lines, raw.excerpt)
 }
 
-/// Resolves `path` inside `checkout`, refusing one outside it, and
+/// Resolves `path` inside `workspace`, refusing one outside it, and
 /// reads `excerpt` from the tree when the caller gave none, refusing a
-/// binary file and a range that is reversed, zero, or past the file's
-/// end. An `excerpt` the caller did give is stored as given - `path` is
-/// still resolved and made repo-relative.
+/// binary file, a range past the file's end, or an excerpt that is
+/// blank after trimming - either given or read, since a blank excerpt
+/// would match any text a later check compared it to. `path` is stored
+/// resolved and repo-relative; an `excerpt` the caller did give is
+/// otherwise stored as given.
 fn build_file_cited(
-    raw: RawFileCited,
-    checkout: &Path,
+    workspace: &tools::Workspace,
+    path: &str,
+    lines: Option<(u32, u32)>,
+    excerpt: Option<String>,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
-    let workspace = tools::Workspace::new(checkout)?;
-    let resolved = workspace.resolve(&raw.path)?;
-    let path = PathBuf::from(workspace.relative(&resolved));
-    let lines = raw.lines.as_deref().map(store::parse_lines).transpose()?;
-    if let Some((from, to)) = lines {
-        if from == 0 || from > to {
-            return Err(format!("invalid lines {from}-{to}").into());
-        }
-    }
+    let resolved = workspace.resolve(path)?;
+    let stored_path = PathBuf::from(workspace.relative(&resolved));
 
-    let excerpt = match raw.excerpt {
+    let excerpt = match excerpt {
         Some(excerpt) => excerpt,
         None => {
-            let bytes = std::fs::read(&resolved)?;
-            if tools::is_binary(&bytes) {
-                return Err(format!("{} is binary", path.display()).into());
-            }
-            let text = String::from_utf8_lossy(&bytes).into_owned();
+            let text = tools::read_text_lossy(&resolved)?;
             match lines {
                 Some((from, to)) => {
-                    let file_lines: Vec<&str> = text.lines().collect();
-                    if to as usize > file_lines.len() {
+                    let file_lines = text.lines().count();
+                    if to as usize > file_lines {
                         return Err(format!(
-                            "lines {from}-{to} run past {}'s {} lines",
-                            path.display(),
-                            file_lines.len()
+                            "lines {from}-{to} run past {}'s {file_lines} lines",
+                            stored_path.display()
                         )
                         .into());
                     }
-                    file_lines[(from - 1) as usize..to as usize].join("\n")
+                    text.lines()
+                        .skip(from as usize - 1)
+                        .take((to - from + 1) as usize)
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 }
                 None => text,
             }
         }
     };
+    if excerpt.trim().is_empty() {
+        return Err(format!("{}'s excerpt must not be blank", stored_path.display()).into());
+    }
 
     Ok(Payload::FileCited {
-        path,
+        path: stored_path,
         lines,
         excerpt,
     })
@@ -639,7 +631,7 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
         eprintln!("{}", mapstore::encode_fragment(&fragment));
     }
     match args.format {
-        Format::Json => print_lines(mapstore::encode_lines(fragment.map())),
+        Format::Json => print_lines(mapstore::encode_lines(fragment.map(), true)),
         Format::Md => print_text(&mapstore::markdown(fragment.map())),
     }
 }
@@ -757,18 +749,7 @@ pub fn maps_remove_edge(
 /// within it, `None` for the whole file.
 struct DocCite {
     path: String,
-    range: Option<(u32, u32)>,
-}
-
-impl DocCite {
-    /// `path[:from-to]`, the way `cites` named it, for the `cited` line
-    /// printed once this cite is published.
-    fn display(&self) -> String {
-        match self.range {
-            Some((from, to)) => format!("{}:{from}-{to}", self.path),
-            None => self.path.clone(),
-        }
-    }
+    lines: Option<(u32, u32)>,
 }
 
 /// One edge line under a node: its kind, and the ref its target names -
@@ -793,9 +774,8 @@ struct DocNode {
 /// Splits `s` at its first run of whitespace, trimming what leads the
 /// rest - `word`, then whatever follows it on the line.
 fn split_first_word(s: &str) -> Option<(&str, &str)> {
-    let s = s.trim_start();
-    let at = s.find(char::is_whitespace)?;
-    Some((&s[..at], s[at..].trim_start()))
+    let (word, rest) = s.trim_start().split_once(char::is_whitespace)?;
+    Some((word, rest.trim_start()))
 }
 
 /// Parses a double-quoted value starting at `s`'s first character:
@@ -841,15 +821,21 @@ fn quote(s: &str) -> String {
 }
 
 /// `s`, split at a trailing `:from-to`, when the part after the last
-/// `:` parses as one - a `cites` line's path may itself hold a `:` that
-/// isn't a range.
-fn split_cite_range(s: &str) -> (String, Option<(u32, u32)>) {
-    if let Some((path, range)) = s.rsplit_once(':') {
-        if let Ok(range) = store::parse_lines(range) {
-            return (path.to_string(), Some(range));
-        }
+/// `:` has that shape - a `cites` line's path may itself hold a `:`
+/// that isn't a range. A suffix that looks like two numbers but breaks
+/// the range's own rule (`store::parse_lines`'s) is an error rather
+/// than being read back as part of the path.
+fn split_cite_range(s: &str) -> Result<(String, Option<(u32, u32)>), Box<dyn std::error::Error>> {
+    let Some((path, range)) = s.rsplit_once(':') else {
+        return Ok((s.to_string(), None));
+    };
+    let Some((from, to)) = range.split_once('-') else {
+        return Ok((s.to_string(), None));
+    };
+    if from.parse::<u32>().is_err() || to.parse::<u32>().is_err() {
+        return Ok((s.to_string(), None));
     }
-    (s.to_string(), None)
+    Ok((path.to_string(), Some(store::parse_lines(range)?)))
 }
 
 /// Parses `maps record`'s document grammar: a node line at column 0,
@@ -885,8 +871,9 @@ fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>
         let (word, rest) = split_first_word(raw.trim())
             .ok_or_else(|| format!("line {line}: expected a property, an edge, or `cites`"))?;
         if word == "cites" {
-            let (path, range) = split_cite_range(rest);
-            node.cites.push(DocCite { path, range });
+            let (path, lines) =
+                split_cite_range(rest).map_err(|err| format!("line {line}: {err}"))?;
+            node.cites.push(DocCite { path, lines });
         } else if rest.starts_with('"') {
             let value = parse_quoted(rest)
                 .ok_or_else(|| format!("line {line}: expected `{word} \"<value>\"`"))?;
@@ -900,89 +887,6 @@ fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>
         }
     }
     Ok(nodes)
-}
-
-/// Where an edge's `to` resolves: a node this document declares, by its
-/// index, or a node the map already carried, named the way `NodeRef`
-/// takes it and printed by the short id it already has.
-enum Target {
-    Doc(usize),
-    Existing { node_ref: NodeRef, short_id: String },
-}
-
-/// Checks `nodes` against `map`'s schema before any of it is written:
-/// every kind known, every required property present, and every edge's
-/// ref resolved - a short id against `map` as it stood before this
-/// document ran, a bare kind name against the nodes this document
-/// declares earlier than the edge that names it. Returns each edge's
-/// resolved target, indexed the way `nodes` holds them, so the write
-/// pass below never re-resolves a ref against a state new nodes have
-/// since changed.
-fn validate_document(
-    map: &Map,
-    nodes: &[DocNode],
-) -> Result<Vec<Vec<Target>>, Box<dyn std::error::Error>> {
-    let schema = map.schema();
-    let mut targets = Vec::with_capacity(nodes.len());
-    for (i, node) in nodes.iter().enumerate() {
-        let kind = schema.node_kind(&node.kind).ok_or_else(|| {
-            format!(
-                "line {}: no node kind {:?} in map {:?}; kinds are {}",
-                node.line,
-                node.kind,
-                schema.name,
-                schema.node_kinds_csv()
-            )
-        })?;
-        if let Some(property) = kind
-            .requires
-            .iter()
-            .find(|property| !node.properties.contains_key(*property))
-        {
-            return Err(format!(
-                "line {}: {} {:?} is missing its `{property}` property",
-                node.line, node.kind, node.name
-            )
-            .into());
-        }
-        let mut edge_targets = Vec::with_capacity(node.edges.len());
-        for edge in &node.edges {
-            if schema.edge_kind(&edge.kind).is_none() {
-                return Err(format!(
-                    "line {}: no edge kind {:?} in map {:?}; kinds are {}",
-                    edge.line,
-                    edge.kind,
-                    schema.name,
-                    schema.edge_kinds_csv()
-                )
-                .into());
-            }
-            edge_targets.push(if schema.node_kind(&edge.target).is_some() {
-                let declared = nodes[..i].iter().rposition(|n| n.kind == edge.target);
-                let at = declared.ok_or_else(|| {
-                    format!(
-                        "line {}: no {} declared earlier in this document",
-                        edge.line, edge.target
-                    )
-                })?;
-                Target::Doc(at)
-            } else {
-                let id = map.resolve_str(&edge.target).map_err(|err| {
-                    format!("line {}: {err}", edge.line)
-                })?;
-                let found = map.node(id).expect("resolve_str returns a live node's id");
-                Target::Existing {
-                    node_ref: NodeRef {
-                        kind: found.kind.clone(),
-                        name: found.name.clone(),
-                    },
-                    short_id: map.short_id(id).unwrap_or_default(),
-                }
-            });
-        }
-        targets.push(edge_targets);
-    }
-    Ok(targets)
 }
 
 /// Adds every node and edge a document on stdin declares to `args.map`,
@@ -1003,10 +907,16 @@ pub fn maps_record(
 }
 
 /// `maps_record`'s work, given the document text rather than reading it
-/// from stdin. Validated whole before any of it is written; from there,
-/// writing follows document order, one node's `cites` events, then the
-/// node, then its edges, so a failure midway names the node it reached
-/// and leaves what came before it standing in the log.
+/// from stdin. Every node and edge is checked and applied to one
+/// in-memory fold of `args.map` - `Map::apply` enforces known kinds,
+/// required properties, duplicate names, and known edge kinds, so this
+/// only resolves an edge's ref, live, against the map as it stands at
+/// that line: a bare kind name to the last node of that kind this
+/// document declared above it, anything else through
+/// `Map::resolve_str`. Nothing is appended until every node and edge
+/// has passed, in one batch under the log's lock, so a failure midway,
+/// whether a duplicate name, a missing `--source`, or a bad ref, leaves
+/// nothing written; the error names the node or line it reached.
 fn record_document(
     document: &str,
     args: RecordArgs,
@@ -1016,115 +926,138 @@ fn record_document(
     checkout: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let nodes = parse_document(document)?;
+    let total = nodes.len();
 
-    let scope = source.scope();
-    let map = mapstore::fold_map(log, schemas, &args.map, &scope)?;
-    let targets = validate_document(&map, &nodes)?;
-
+    let node_sources: Vec<EventId> = args
+        .source
+        .iter()
+        .map(|id| known_event_id(id, log))
+        .collect::<Result<_, _>>()?;
     let causation_id = args
         .causation
         .as_deref()
         .map(|id| known_event_id(id, log))
         .transpose()?;
+    // Only opened when the document has a `cites` line to resolve - a
+    // document with none should still record against a `checkout` that
+    // does not exist, the way it always could.
+    let workspace = if nodes.iter().any(|node| !node.cites.is_empty()) {
+        Some(tools::Workspace::new(checkout)?)
+    } else {
+        None
+    };
 
-    let mut written: Vec<(String, String, String)> = Vec::with_capacity(nodes.len());
-    let mut node_lines = Vec::with_capacity(nodes.len());
-    let mut edge_lines = Vec::new();
-    let mut cited_lines = Vec::new();
+    let scope = source.scope();
+    let RecordArgs { map, actor, .. } = args;
+    let batch_source = source.clone();
 
-    for (i, node) in nodes.into_iter().enumerate() {
-        let label = format!("node {} of {} ({} {:?})", i + 1, targets.len(), node.kind, node.name);
-        let context = |err: Box<dyn std::error::Error>| -> Box<dyn std::error::Error> {
-            format!("{label}: {err}").into()
-        };
+    let events = mapstore::commit_batch(log, schemas, &map, &scope, move |snapshot| {
+        let mut batch: Vec<Event> = Vec::new();
+        let mut last_of_kind: HashMap<String, NodeId> = HashMap::new();
 
-        let mut node_sources = args.source.clone();
-        for cite in &node.cites {
-            let payload = build_file_cited(
-                RawFileCited {
-                    path: cite.path.clone(),
-                    lines: cite.range.map(|(from, to)| format!("{from}-{to}")),
-                    excerpt: None,
-                },
-                checkout,
-            )
-            .map_err(context)?;
-            let event = crate::core::Event::new(args.actor, source.clone(), causation_id, payload);
-            log.append(&event).map_err(context)?;
-            let id = event.id().as_uuid().to_string();
-            cited_lines.push(format!("cited {id} {}", cite.display()));
-            node_sources.push(id);
+        for (i, node) in nodes.into_iter().enumerate() {
+            let label = format!(
+                "line {}: node {} of {total} ({} {:?})",
+                node.line,
+                i + 1,
+                node.kind,
+                node.name
+            );
+            let context = |err: Box<dyn std::error::Error>| -> Box<dyn std::error::Error> {
+                format!("{label}: {err}").into()
+            };
+
+            let mut sources = node_sources.clone();
+            for cite in &node.cites {
+                let workspace = workspace
+                    .as_ref()
+                    .expect("a cite here means the document had one, so it was opened above");
+                let payload =
+                    build_file_cited(workspace, &cite.path, cite.lines, None).map_err(context)?;
+                let event = Event::new(actor, batch_source.clone(), causation_id, payload);
+                sources.push(event.id());
+                batch.push(event);
+            }
+
+            let mutation = Mutation::AddNode {
+                kind: node.kind.clone(),
+                name: node.name.clone(),
+                properties: node.properties,
+                sources,
+            };
+            let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
+            let node_id = match payload {
+                Payload::NodeAdded { node, .. } => node,
+                _ => unreachable!("AddNode always yields NodeAdded"),
+            };
+            batch.push(Event::new(actor, batch_source.clone(), None, payload));
+            last_of_kind.insert(node.kind.clone(), node_id);
+
+            let from_ref = NodeRef {
+                kind: node.kind.clone(),
+                name: node.name.clone(),
+            };
+            for edge in node.edges {
+                let to_id = if snapshot.map().schema().node_kind(&edge.target).is_some() {
+                    last_of_kind.get(&edge.target).copied().ok_or_else(|| {
+                        format!(
+                            "line {}: no {} declared earlier in this document",
+                            edge.line, edge.target
+                        )
+                    })?
+                } else {
+                    snapshot
+                        .map()
+                        .resolve_str(&edge.target)
+                        .map_err(|err| format!("line {}: {err}", edge.line))?
+                };
+                let to_node = snapshot
+                    .map()
+                    .node(to_id)
+                    .expect("resolve_str and last_of_kind name a live node");
+                let to_ref = NodeRef {
+                    kind: to_node.kind.clone(),
+                    name: to_node.name.clone(),
+                };
+                let mutation = Mutation::AddEdge {
+                    kind: edge.kind,
+                    from: from_ref.clone(),
+                    to: to_ref,
+                    sources: node_sources.clone(),
+                };
+                let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
+                batch.push(Event::new(actor, batch_source.clone(), None, payload));
+            }
         }
 
-        let target = MapArgs {
-            map: args.map.clone(),
-            source: node_sources,
-            actor: args.actor,
-        };
-        let (kind, name, properties) = (node.kind, node.name, node.properties);
-        let payload = write(target, log, schemas, source, |sources| Mutation::AddNode {
-            kind: kind.clone(),
-            name: name.clone(),
-            properties,
-            sources,
-        })
-        .map_err(context)?;
-        let seq = match payload {
-            Payload::NodeAdded { seq, .. } => seq,
-            _ => unreachable!("AddNode always yields NodeAdded"),
-        };
-        let short_id = format!(
-            "{}{seq}",
-            map.schema()
-                .node_kind(&kind)
-                .expect("validate_document checked this kind")
-                .prefix
-        );
-        node_lines.push(format!("{short_id} {kind} {}", quote(&name)));
-        written.push((kind.clone(), name.clone(), short_id.clone()));
+        Ok(batch)
+    })?;
 
-        for (edge, target) in node.edges.into_iter().zip(&targets[i]) {
-            let (to_ref, to_short) = match target {
-                Target::Doc(at) => {
-                    let (kind, name, short_id) = &written[*at];
-                    (
-                        NodeRef {
-                            kind: kind.clone(),
-                            name: name.clone(),
-                        },
-                        short_id.clone(),
-                    )
-                }
-                Target::Existing { node_ref, short_id } => (node_ref.clone(), short_id.clone()),
-            };
-            let from_ref = NodeRef {
-                kind: kind.clone(),
-                name: name.clone(),
-            };
-            let edge_target = MapArgs {
-                map: args.map.clone(),
-                source: args.source.clone(),
-                actor: args.actor,
-            };
-            write(edge_target, log, schemas, source, |sources| {
-                Mutation::AddEdge {
-                    kind: edge.kind.clone(),
-                    from: from_ref,
-                    to: to_ref,
-                    sources,
-                }
-            })
-            .map_err(context)?;
-            edge_lines.push(format!("{} {short_id} -> {to_short}", edge.kind));
+    let map = mapstore::fold_map(log, schemas, &map, &scope)?;
+    let mut node_lines = Vec::new();
+    let mut edge_lines = Vec::new();
+    let mut cited_lines = Vec::new();
+    for event in &events {
+        match event.payload() {
+            Payload::FileCited { path, lines, .. } => cited_lines.push(format!(
+                "cited {} {}",
+                event.id().as_uuid(),
+                cited_label(path, *lines)
+            )),
+            Payload::NodeAdded { node, kind, name, .. } => {
+                let short_id = map.short_id(*node).unwrap_or_default();
+                node_lines.push(format!("{short_id} {kind} {}", quote(name)));
+            }
+            Payload::EdgeAdded { kind, from, to, .. } => {
+                let from_short = map.short_id(*from).unwrap_or_default();
+                let to_short = map.short_id(*to).unwrap_or_default();
+                edge_lines.push(format!("{kind} {from_short} -> {to_short}"));
+            }
+            _ => {}
         }
     }
 
-    print_lines(
-        node_lines
-            .into_iter()
-            .chain(edge_lines)
-            .chain(cited_lines),
-    )
+    print_lines(node_lines.into_iter().chain(edge_lines).chain(cited_lines))
 }
 
 /// A reader that stops early - `head`, or a `jq` that has seen enough -

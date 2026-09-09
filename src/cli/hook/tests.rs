@@ -190,27 +190,7 @@ impl Fixture {
     /// control - and returns it so a test can point an edge at the
     /// node it minted.
     fn seed_node(&self, map: &str, kind: &str, name: &str, at: Timestamp) -> Event {
-        let event = Event::restore(
-            EventId::new(),
-            Actor::User,
-            Source {
-                name: "codex".to_string(),
-                path: self.root.clone(),
-            },
-            None,
-            at,
-            Payload::NodeAdded {
-                map: map.to_string(),
-                node: crate::core::NodeId::new(),
-                kind: kind.to_string(),
-                name: name.to_string(),
-                properties: std::collections::BTreeMap::new(),
-                sources: Vec::new(),
-                seq: 0,
-            },
-        );
-        self.log.append(&event).unwrap();
-        event
+        self.seed_node_with_sources(map, kind, name, at, Vec::new())
     }
 
     /// Appends an `edge.added` event resolving `from` against `to`, at
@@ -1079,12 +1059,71 @@ fn a_superseded_decisions_seen_file_is_not_checked() {
 }
 
 #[test]
-fn the_block_is_omitted_when_nothing_changed() {
+fn pointer_names_first_open_item_in_schema_fold_order() {
+    let fixture = Fixture::new();
+    fixture.seed_node(
+        "tasks",
+        "task",
+        "an older task",
+        Timestamp::now().minus_minutes(60).unwrap(),
+    );
+    fixture.seed_node("decisions", "question", "a newer question", Timestamp::now());
+
+    let context = fixture.session_start("codex");
+
+    let pointer = context.lines().find(|line| line.starts_with("fragment:")).unwrap();
+    assert!(
+        pointer.contains("percept maps show decisions --around"),
+        "{pointer:?}"
+    );
+}
+
+#[test]
+fn a_later_citation_of_a_different_path_does_not_replace_the_one_checked() {
     let fixture = Fixture::new();
     fixture.write_file("src/a.rs", "fn one() {}\n");
-    let citation = fixture.seed_citation(
+    let first = fixture.seed_citation(
         "src/a.rs",
         None,
+        "fn one() {}",
+        Timestamp::now().minus_minutes(10).unwrap(),
+        None,
+    );
+    // Caused by `first`, but a different path - not a re-citation of
+    // `src/a.rs`, so it must not stand in for it.
+    fixture.seed_citation(
+        "src/b.rs",
+        None,
+        "fn two() {}",
+        Timestamp::now(),
+        Some(first.id()),
+    );
+    fixture.seed_node_with_sources(
+        "decisions",
+        "question",
+        "why a?",
+        Timestamp::now(),
+        vec![first.id()],
+    );
+
+    let context = fixture.session_start("codex");
+
+    // `src/a.rs` still reads as recorded, so nothing changed.
+    assert!(!context.contains("changed since recorded"), "{context:?}");
+}
+
+#[test]
+fn a_cited_file_with_one_invalid_utf8_byte_elsewhere_still_reads() {
+    let fixture = Fixture::new();
+    let mut bytes = b"fn one() {}\n// ".to_vec();
+    bytes.push(0xff);
+    bytes.extend_from_slice(b"\n");
+    let full = fixture.root.join("src/a.rs");
+    std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+    std::fs::write(&full, &bytes).unwrap();
+    let citation = fixture.seed_citation(
+        "src/a.rs",
+        Some((1, 1)),
         "fn one() {}",
         Timestamp::now(),
         None,
@@ -1103,21 +1142,20 @@ fn the_block_is_omitted_when_nothing_changed() {
 }
 
 #[test]
-fn pointer_names_first_open_item_in_schema_fold_order() {
+fn a_citation_whose_excerpt_is_blank_reports_changed() {
     let fixture = Fixture::new();
-    fixture.seed_node(
-        "tasks",
-        "task",
-        "an older task",
-        Timestamp::now().minus_minutes(60).unwrap(),
+    fixture.write_file("src/a.rs", "fn one() {}\n");
+    let citation = fixture.seed_citation("src/a.rs", None, "   \n  ", Timestamp::now(), None);
+    fixture.seed_node_with_sources(
+        "decisions",
+        "question",
+        "why a?",
+        Timestamp::now(),
+        vec![citation.id()],
     );
-    fixture.seed_node("decisions", "question", "a newer question", Timestamp::now());
 
     let context = fixture.session_start("codex");
 
-    let pointer = context.lines().find(|line| line.starts_with("fragment:")).unwrap();
-    assert!(
-        pointer.contains("percept maps show decisions --around"),
-        "{pointer:?}"
-    );
+    assert!(context.contains("changed since recorded"), "{context:?}");
+    assert!(context.contains("src/a.rs changed"), "{context:?}");
 }

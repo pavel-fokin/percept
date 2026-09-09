@@ -11,8 +11,8 @@ mod render;
 mod schemas;
 
 pub use map::{
-    commit, encode_fragment, encode_lines, encode_map, encode_schema, fold_map, LogMaps,
-    NodeRefArgs, Snapshot,
+    commit, commit_batch, encode_fragment, encode_lines, encode_map, encode_schema, fold_map,
+    LogMaps, NodeRefArgs, Snapshot,
 };
 pub use render::{catalogue, markdown};
 pub use schemas::load as load_schemas;

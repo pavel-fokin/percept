@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::core::{MapReader, NodeRef, Selection};
+use crate::core::MapReader;
 use crate::harness::{Tool, ToolOutput, ToolSpec};
-use crate::mapstore::{encode_fragment, encode_lines, encode_schema, NodeRefArgs};
+use crate::mapstore::NodeRefArgs;
 use crate::store::optional_time;
+use crate::tools::read_selection;
 
 /// The `read_map` tool: one map, whole or cut to a fragment, as JSONL
 /// with event ids on every node and edge. Offered when the prompt does
@@ -90,38 +91,14 @@ impl Tool for ReadMap {
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
         let map = self.maps.read(&args.map)?;
-        // Resolved against this same fold, so `select` below cuts the
-        // map this node was found in, not a second one read after it.
-        // An empty map has nothing to resolve against - `select`'s own
-        // empty-map case would skip `around` anyway, so a node named on
-        // one is not an error to report over "nothing recorded yet".
-        let around = if map.nodes().is_empty() {
-            None
-        } else {
-            args.around
-                .map(|node| -> Result<NodeRef, crate::core::MapError> {
-                    let id = node.resolve(&map)?;
-                    let node = map.node(id).expect("resolve returns a live node's id");
-                    Ok(NodeRef {
-                        kind: node.kind.clone(),
-                        name: node.name.clone(),
-                    })
-                })
-                .transpose()?
-        };
-        let selection = Selection {
-            around: around.as_ref().map(|node| (node, args.depth)),
-            since: optional_time(args.since.as_deref())?,
-            kinds: &args.kinds,
-        };
-        let fragment = map.select(&selection)?;
-        let lines = [
-            encode_schema(fragment.map().schema()),
-            encode_fragment(&fragment),
-        ]
-        .into_iter()
-        .chain(encode_lines(fragment.map()));
-        Ok(ToolOutput::text(lines.collect::<Vec<_>>().join("\n")))
+        read_selection(
+            map,
+            args.around,
+            args.depth,
+            optional_time(args.since.as_deref())?,
+            &args.kinds,
+            true,
+        )
     }
 }
 

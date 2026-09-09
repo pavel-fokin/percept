@@ -3,9 +3,9 @@ use std::path::PathBuf;
 use serde::Deserialize;
 
 use crate::code;
-use crate::core::{NodeRef, Selection};
 use crate::harness::{Tool, ToolOutput, ToolSpec};
-use crate::mapstore::{encode_fragment, encode_lines, encode_schema, NodeRefArgs};
+use crate::mapstore::NodeRefArgs;
+use crate::tools::read_selection;
 
 /// The `read_code` tool: the code structure - a codebase's files, the
 /// symbols they define, and what imports what - walked fresh from the
@@ -84,38 +84,10 @@ impl Tool for ReadCode {
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
         let map = code::build(&self.root)?;
-        // Resolved against this same walk, so `select` below cuts the
-        // map this node was found in, not a second one built after it.
-        // An empty map has nothing to resolve against - `select`'s own
-        // empty-map case would skip `around` anyway, so a node named on
-        // one is not an error to report over "nothing found yet".
-        let around = if map.nodes().is_empty() {
-            None
-        } else {
-            args.around
-                .map(|node| -> Result<NodeRef, crate::core::MapError> {
-                    let id = node.resolve(&map)?;
-                    let node = map.node(id).expect("resolve returns a live node's id");
-                    Ok(NodeRef {
-                        kind: node.kind.clone(),
-                        name: node.name.clone(),
-                    })
-                })
-                .transpose()?
-        };
-        let selection = Selection {
-            around: around.as_ref().map(|node| (node, args.depth)),
-            since: None,
-            kinds: &args.kinds,
-        };
-        let fragment = map.select(&selection)?;
-        let lines = [
-            encode_schema(fragment.map().schema()),
-            encode_fragment(&fragment),
-        ]
-        .into_iter()
-        .chain(encode_lines(fragment.map()));
-        Ok(ToolOutput::text(lines.collect::<Vec<_>>().join("\n")))
+        // No stamp: a `read_code` node was stamped by the walk that
+        // built it, not by who wrote the code or when, and showing one
+        // would mislead a reader into taking it for that.
+        read_selection(map, args.around, args.depth, None, &args.kinds, false)
     }
 }
 

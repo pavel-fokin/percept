@@ -18,10 +18,10 @@
 //! held exclusively for the length of one hook call, so two hook calls
 //! for the same turn never race.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -31,6 +31,7 @@ use crate::core::{
 };
 use crate::shared::Timestamp;
 use crate::store::TurnState;
+use crate::tools;
 
 /// `percept hook <client>` - `client` names the writer whose turn this
 /// is, and becomes every event's source.
@@ -217,18 +218,17 @@ fn line_id(map: &Map, node: &Node) -> String {
         .unwrap_or_else(|| format!("{}:{}", node.kind, node.name))
 }
 
-/// How many lines of a gained or open list `gained_block` and
-/// `open_blocks_and_pointer` show before folding the rest into a
-/// trailing count.
+/// How many lines of a gained, changed, or open list a block shows
+/// before folding the rest into a trailing count.
 const LIMIT: usize = 5;
 
-/// Up to `LIMIT` of `items`, each turned into a line by `line`, with a
-/// trailing `+N more` when there were more - the one truncation rule
-/// both blocks below share.
-fn capped_lines(items: &[&Node], line: impl Fn(&Node) -> String) -> Vec<String> {
-    let mut lines: Vec<String> = items.iter().take(LIMIT).map(|node| line(node)).collect();
-    if items.len() > LIMIT {
-        lines.push(format!("+{} more", items.len() - LIMIT));
+/// Up to `LIMIT` of `lines`, with a trailing `+N more` when there were
+/// more - the one truncation rule every block below shares.
+fn capped_lines(mut lines: Vec<String>) -> Vec<String> {
+    let total = lines.len();
+    lines.truncate(LIMIT);
+    if total > LIMIT {
+        lines.push(format!("+{} more", total - LIMIT));
     }
     lines
 }
@@ -256,9 +256,12 @@ fn gained_block(maps: &[Map], since: Timestamp) -> String {
         if gained.is_empty() {
             continue;
         }
-        lines.extend(capped_lines(gained, |node| {
-            format!("{} {} {:?}", line_id(map, node), node.kind, node.name)
-        }));
+        lines.extend(capped_lines(
+            gained
+                .iter()
+                .map(|node| format!("{} {} {:?}", line_id(map, node), node.kind, node.name))
+                .collect(),
+        ));
     }
     lines.join("\n")
 }
@@ -268,27 +271,33 @@ fn gained_block(maps: &[Map], since: Timestamp) -> String {
 /// seen. `None` when nothing changed, so `start_session` omits
 /// the block entirely rather than printing an empty one.
 ///
-/// Builds two indexes over `events` once - id to event, and
-/// causation id to the `file.cited` events it caused - so no
-/// node's check re-reads the log: `id_to_event` resolves a node's
-/// `sources` entries, `later_citations` walks a citation forward
-/// to the newest re-citation of the same file before it is
-/// checked against the tree.
+/// Builds two indexes over `events` once, both over `file.cited`
+/// events only - id to event, and causation id to the events it
+/// caused - so no node's check re-reads the log: `id_to_event`
+/// resolves a node's `sources` entries, `later_citations` walks a
+/// citation forward to the newest re-citation of the same file before
+/// it is checked against the tree. `cache` memoises each cited path's
+/// normalised tree text - `None` for one that is gone - for the rest
+/// of this call, so a path cited by more than one node is read once.
 fn changed_since_recorded_block(maps: &[Map], events: &[Event], checkout: &Path) -> Option<String> {
-    let id_to_event: HashMap<EventId, &Event> = events.iter().map(|event| (event.id(), event)).collect();
+    let file_cited: Vec<&Event> = events
+        .iter()
+        .filter(|event| matches!(event.payload(), Payload::FileCited { .. }))
+        .collect();
+    let id_to_event: HashMap<EventId, &Event> =
+        file_cited.iter().map(|event| (event.id(), *event)).collect();
     let mut later_citations: HashMap<EventId, Vec<&Event>> = HashMap::new();
-    for event in events {
-        if matches!(event.payload(), Payload::FileCited { .. }) {
-            if let Some(cause) = event.causation_id() {
-                later_citations.entry(cause).or_default().push(event);
-            }
+    for event in &file_cited {
+        if let Some(cause) = event.causation_id() {
+            later_citations.entry(cause).or_default().push(event);
         }
     }
 
+    let mut cache: HashMap<PathBuf, Option<String>> = HashMap::new();
     let mut lines: Vec<String> = Vec::new();
     for map in maps {
         for node in map.headlines() {
-            let findings = node_changes(node, &id_to_event, &later_citations, checkout);
+            let findings = node_changes(node, &id_to_event, &later_citations, checkout, &mut cache);
             if !findings.is_empty() {
                 lines.push(format!("{} cites {}", line_id(map, node), findings.join(", ")));
             }
@@ -301,15 +310,12 @@ fn changed_since_recorded_block(maps: &[Map], events: &[Event], checkout: &Path)
 
     let total = lines.len();
     let header = if total > LIMIT {
-        format!("changed since recorded ({total})")
+        format!("changed since recorded ({total}, showing {LIMIT})")
     } else {
         "changed since recorded".to_string()
     };
     let mut block = vec![header];
-    block.extend(lines.into_iter().take(LIMIT));
-    if total > LIMIT {
-        block.push(format!("+{} more", total - LIMIT));
-    }
+    block.extend(capped_lines(lines));
     Some(block.join("\n"))
 }
 
@@ -320,78 +326,85 @@ fn node_changes(
     id_to_event: &HashMap<EventId, &Event>,
     later_citations: &HashMap<EventId, Vec<&Event>>,
     checkout: &Path,
+    cache: &mut HashMap<PathBuf, Option<String>>,
 ) -> Vec<String> {
     node.sources
         .iter()
-        .filter_map(|source_id| id_to_event.get(source_id).copied())
-        .filter(|event| matches!(event.payload(), Payload::FileCited { .. }))
-        .filter_map(|event| {
+        .filter_map(|source_id| {
+            let event = id_to_event.get(source_id)?;
             let newest = newest_citation(event, later_citations);
             let Payload::FileCited { path, lines, excerpt } = newest.payload() else {
-                unreachable!("filtered to file.cited above")
+                return None;
             };
-            citation_status(checkout, path, excerpt)
+            citation_status(cache, checkout, path, excerpt)
                 .map(|status| format!("{} {status}", cited_label(path, *lines)))
         })
         .collect()
 }
 
 /// Follows `event` forward through `later_citations`, each hop the
-/// latest re-citation caused by the one before it, stopping when
-/// none names it as their cause.
+/// latest re-citation of the same file caused by the one before it -
+/// a later citation of a different path is not a re-citation of this
+/// one, so it is ignored. A visited set stops a causation cycle a
+/// hand-edited log could hold from spinning forever.
 fn newest_citation<'a>(
-    mut event: &'a Event,
+    event: &'a Event,
     later_citations: &HashMap<EventId, Vec<&'a Event>>,
 ) -> &'a Event {
+    let Payload::FileCited { path, .. } = event.payload() else {
+        return event;
+    };
+    let mut current = event;
+    let mut visited = HashSet::from([event.id()]);
     while let Some(next) = later_citations
-        .get(&event.id())
-        .and_then(|candidates| candidates.iter().max_by_key(|candidate| candidate.created_at()))
+        .get(&current.id())
+        .into_iter()
+        .flatten()
+        .filter(|candidate| {
+            matches!(candidate.payload(), Payload::FileCited { path: p, .. } if p == path)
+        })
+        .filter(|candidate| visited.insert(candidate.id()))
+        .max_by_key(|candidate| candidate.created_at())
     {
-        event = next;
+        current = next;
     }
-    event
+    current
 }
 
-/// `gone` when `path` under `checkout` is missing, unreadable, or not
-/// valid UTF-8 (treated as binary); `changed` when it no longer
-/// contains `excerpt` as a substring, both sides normalised - `\r\n`
-/// folded to `\n`, each line's trailing whitespace stripped, and the
-/// excerpt's leading and trailing blank lines dropped; `None` when the
-/// excerpt still reads.
-fn citation_status(checkout: &Path, path: &Path, excerpt: &str) -> Option<&'static str> {
-    let text = match std::fs::read(checkout.join(path)) {
-        Ok(bytes) => bytes,
-        Err(_) => return Some("gone"),
-    };
-    let Ok(text) = String::from_utf8(text) else {
-        return Some("gone");
-    };
-
-    if normalize_text(&text).contains(&normalize_excerpt(excerpt)) {
-        None
-    } else {
-        Some("changed")
+/// `gone` when `path` under `checkout` is missing or binary; `changed`
+/// when it no longer contains `excerpt` as a substring, or `excerpt`
+/// normalises to nothing to compare against; `None` when it still
+/// reads. Both sides go through `normalize`; the tree's side is read
+/// through `cache`, so a path more than one citation names is read and
+/// normalised once.
+fn citation_status(
+    cache: &mut HashMap<PathBuf, Option<String>>,
+    checkout: &Path,
+    path: &Path,
+    excerpt: &str,
+) -> Option<&'static str> {
+    let excerpt = normalize(excerpt);
+    if excerpt.is_empty() {
+        return Some("changed");
+    }
+    let text = cache
+        .entry(path.to_path_buf())
+        .or_insert_with(|| tools::read_text_lossy(&checkout.join(path)).ok().map(|t| normalize(&t)));
+    match text {
+        Some(text) if text.contains(&excerpt) => None,
+        _ => Some(if text.is_some() { "changed" } else { "gone" }),
     }
 }
 
-/// Every line with its trailing whitespace stripped, rejoined - the
-/// side of the comparison read fresh from the tree.
-fn normalize_text(text: &str) -> String {
-    text.lines().map(|line| line.trim_end()).collect::<Vec<_>>().join("\n")
-}
-
-/// `normalize_text`, plus the excerpt's own leading and trailing blank
-/// lines dropped, so a citation whose stored excerpt padded its
-/// range with context still matches.
-fn normalize_excerpt(excerpt: &str) -> String {
-    let mut lines: Vec<&str> = excerpt.lines().map(|line| line.trim_end()).collect();
-    while lines.first().is_some_and(|line| line.is_empty()) {
-        lines.remove(0);
-    }
-    while lines.last().is_some_and(|line| line.is_empty()) {
-        lines.pop();
-    }
-    lines.join("\n")
+/// Each line's trailing whitespace stripped, then leading and trailing
+/// blank lines trimmed - the one normalisation both sides of a
+/// `changed since recorded` comparison go through, so a citation whose
+/// stored excerpt padded its range with context still matches.
+fn normalize(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().map(|line| line.trim_end()).collect();
+    let start = lines.iter().position(|line| !line.is_empty()).unwrap_or(lines.len());
+    let end = lines.iter().rposition(|line| !line.is_empty()).map_or(start, |i| i + 1);
+    lines[start..end].join("\n")
 }
 
 /// One `open {of} (...)` block per settled map that has open items - a
@@ -418,7 +431,11 @@ fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
             format!("open {} ({total})", settlement.of)
         };
         let mut lines = vec![header];
-        lines.extend(capped_lines(&open, |node| format!("{} {:?}", line_id(map, node), node.name)));
+        lines.extend(capped_lines(
+            open.iter()
+                .map(|node| format!("{} {:?}", line_id(map, node), node.name))
+                .collect(),
+        ));
         blocks.push(lines.join("\n"));
 
         pointer.get_or_insert_with(|| {

@@ -700,7 +700,7 @@ fn file_cited_without_lines_round_trips_with_none() {
 }
 
 #[test]
-fn a_file_cited_summary_shows_the_excerpts_first_line() {
+fn a_short_excerpt_summary_shows_it_whole() {
     let event = crate::core::Event::restore(
         EventId::new(),
         Actor::Model,
@@ -717,8 +717,54 @@ fn a_file_cited_summary_shows_the_excerpts_first_line() {
     let line: Value = serde_json::from_str(&summarize(&event, None, PREVIEW_CHARS)).unwrap();
     assert_eq!(line["payload"]["path"], "src/mapstore/schema.rs");
     assert_eq!(line["payload"]["lines"], "40-58");
-    assert_eq!(line["payload"]["excerpt"], "fn parse() {");
-    assert_eq!(line["preview"]["len"], 26);
+    assert_eq!(line["payload"]["excerpt"], "fn parse() {\n    todo!()\n}");
+    assert!(line.get("preview").is_none(), "{line}");
+}
+
+#[test]
+fn a_search_hit_inside_a_long_excerpt_carries_a_match_range() {
+    let excerpt = format!("{}needle{}", "a".repeat(80), "b".repeat(80));
+    let event = crate::core::Event::restore(
+        EventId::new(),
+        Actor::Model,
+        source("percept-cli"),
+        None,
+        Timestamp::now(),
+        Payload::FileCited {
+            path: "src/mapstore/schema.rs".into(),
+            lines: None,
+            excerpt: excerpt.clone(),
+        },
+    );
+
+    let hit = 80..86;
+    let line: Value =
+        serde_json::from_str(&summarize(&event, Some(hit.clone()), PREVIEW_CHARS)).unwrap();
+
+    assert_eq!(line["preview"]["len"], excerpt.chars().count());
+    assert_eq!(line["preview"]["match"], hit.start);
+    assert!(line["payload"]["excerpt"].as_str().unwrap().contains("needle"));
+}
+
+#[test]
+fn a_ranged_read_on_a_citation_returns_those_lines() {
+    let event = crate::core::Event::restore(
+        EventId::new(),
+        Actor::Model,
+        source("percept-cli"),
+        None,
+        Timestamp::now(),
+        Payload::FileCited {
+            path: "src/mapstore/schema.rs".into(),
+            lines: None,
+            excerpt: "one\ntwo\nthree".to_string(),
+        },
+    );
+
+    let line: Value = serde_json::from_str(&excerpt(&event, Some(4), Some(7)).unwrap()).unwrap();
+
+    assert_eq!(line["payload"]["excerpt"], "two");
+    assert_eq!(line["preview"]["len"], 13);
 }
 
 /// The wire format before `source` carried a path. There is no
@@ -736,4 +782,30 @@ fn a_bare_string_source_fails_to_deserialize() {
     }"#;
 
     assert!(serde_json::from_str::<Event>(json).is_err());
+}
+
+#[test]
+fn parse_lines_accepts_a_valid_range() {
+    assert_eq!(parse_lines("2-3").unwrap(), (2, 3));
+}
+
+#[test]
+fn parse_lines_rejects_a_reversed_range() {
+    assert!(matches!(parse_lines("3-1"), Err(Error::BadLines(_))));
+}
+
+#[test]
+fn parse_lines_rejects_a_zero_start() {
+    assert!(matches!(parse_lines("0-1"), Err(Error::BadLines(_))));
+}
+
+#[test]
+fn a_file_cited_payload_with_a_reversed_range_fails_to_decode() {
+    let source = source("percept-cli");
+    let payload = serde_json::json!({
+        "path": "src/lib.rs",
+        "lines": "3-1",
+        "excerpt": "text",
+    });
+    assert!(decode("model", source, "file.cited", None, payload).is_err());
 }

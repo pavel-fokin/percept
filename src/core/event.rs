@@ -162,20 +162,23 @@ impl Payload {
     /// The event's text - the one string that runs long, and the one a
     /// reader wants to see more of. A tool call carries none: its
     /// `tool` and `arguments` are the model's own short strings. Nor
-    /// does a map change: its fields are all short.
+    /// does a map change: its fields are all short. A `file.cited`
+    /// event's `excerpt` is this text - the file's own words, not
+    /// judgment - so a search hit inside it carries a match range and a
+    /// ranged read reaches it the same way any other long text does.
     pub fn content(&self) -> Option<&str> {
         match self {
             Self::MessageReceived { content }
             | Self::ThoughtRecorded { content }
             | Self::ToolResulted { content } => Some(content),
+            Self::FileCited { excerpt, .. } => Some(excerpt),
             Self::ToolCalled { .. }
             | Self::NodeAdded { .. }
             | Self::NodeRemoved { .. }
             | Self::EdgeAdded { .. }
             | Self::EdgeRemoved { .. }
             | Self::ModelCalled(..)
-            | Self::SessionStarted
-            | Self::FileCited { .. } => None,
+            | Self::SessionStarted => None,
         }
     }
 }

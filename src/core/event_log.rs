@@ -29,4 +29,15 @@ pub trait EventLog: Send + Sync {
         &self,
         compute: Box<dyn FnOnce(Vec<Event>) -> Result<Event, Box<dyn std::error::Error>> + '_>,
     ) -> Result<Event, Box<dyn std::error::Error>>;
+
+    /// As `append_computed`, but `compute` builds a whole batch: every
+    /// event it returns is appended in order, under the one lock hold
+    /// that also covers the load `compute` was handed - so a writer
+    /// that must check and mint several events together, a document's
+    /// worth of nodes and edges, sees them all committed or none, and
+    /// no other writer's own append can land in between.
+    fn append_batch_computed(
+        &self,
+        compute: Box<dyn FnOnce(Vec<Event>) -> Result<Vec<Event>, Box<dyn std::error::Error>> + '_>,
+    ) -> Result<Vec<Event>, Box<dyn std::error::Error>>;
 }

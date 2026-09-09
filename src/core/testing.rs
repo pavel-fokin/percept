@@ -127,6 +127,22 @@ impl EventLog for FakeLog {
         events.push(event.clone());
         Ok(event)
     }
+
+    /// `append_computed`'s batch form: holds the events lock for
+    /// `compute` and every push that follows, the same guarantee
+    /// `Jsonl`'s file lock gives two processes.
+    fn append_batch_computed(
+        &self,
+        compute: Box<dyn FnOnce(Vec<Event>) -> Result<Vec<Event>, Box<dyn std::error::Error>> + '_>,
+    ) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
+        if self.fail_append.load(Ordering::Relaxed) {
+            return Err("append failed".into());
+        }
+        let mut events = self.events.lock().unwrap();
+        let batch = compute(events.clone())?;
+        events.extend(batch.iter().cloned());
+        Ok(batch)
+    }
 }
 
 /// The text of a `message.received` event, for asserting on what a turn

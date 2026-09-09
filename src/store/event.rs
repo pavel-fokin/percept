@@ -118,13 +118,17 @@ fn format_lines(lines: (u32, u32)) -> String {
 
 /// `"from-to"` back to `Payload::FileCited.lines` - shared with
 /// `cli::publish`, which parses the same shape before it ever reaches
-/// `decode`.
+/// `decode`. `from` must be at least 1 and no greater than `to`: a
+/// reversed or zero-based range names no lines a file has.
 pub fn parse_lines(s: &str) -> Result<(u32, u32), Error> {
     let (from, to) = s
         .split_once('-')
         .ok_or_else(|| Error::BadLines(s.to_string()))?;
     let from: u32 = from.parse().map_err(|_| Error::BadLines(s.to_string()))?;
     let to: u32 = to.parse().map_err(|_| Error::BadLines(s.to_string()))?;
+    if from == 0 || from > to {
+        return Err(Error::BadLines(s.to_string()));
+    }
     Ok((from, to))
 }
 
@@ -203,6 +207,17 @@ pub use crate::core::PREVIEW_CHARS;
 /// sites that cut or slice it on the wire.
 const CONTENT: &str = "content";
 
+/// The wire field `Payload::content` travels under for `event`'s kind -
+/// `content` for every payload but `file.cited`, which calls its long
+/// text `excerpt`. One lookup, so `summarize` and `excerpt` cut and
+/// replace the same field they read.
+fn content_key(kind: EventKind) -> &'static str {
+    match kind {
+        EventKind::FileCited => "excerpt",
+        _ => CONTENT,
+    }
+}
+
 /// What a summary line says about the `content` it cut, so a caller
 /// can tell whether a second look is worth a call, and where to take it. Lives beside the
 /// payload, not in it: the payload stays exactly what the log stores,
@@ -241,14 +256,12 @@ struct Summary {
 /// `content` are cut at `PREVIEW_CHARS` whatever it is, since they are
 /// the model's own short arguments, not the text a caller reads.
 pub fn summarize(event: &crate::core::Event, hit: Option<Range<usize>>, preview: usize) -> String {
-    if let Payload::FileCited { excerpt, .. } = event.payload() {
-        return summarize_citation(event, excerpt, preview);
-    }
     let mut wire = Event::from(event);
-    // `content` leaves the payload before `shorten` runs over the rest,
-    // so it is cut once, here, at the caller's size.
+    let key = content_key(event.kind());
+    // `content` (or `excerpt`) leaves the payload before `shorten` runs
+    // over the rest, so it is cut once, here, at the caller's size.
     if let Some(fields) = wire.payload.as_object_mut() {
-        fields.remove(CONTENT);
+        fields.remove(key);
     }
     wire.payload = shorten(wire.payload);
     let preview = event.payload().content().and_then(|text| {
@@ -263,34 +276,12 @@ pub fn summarize(event: &crate::core::Event, hit: Option<Range<usize>>, preview:
         } else {
             (text.to_string(), None)
         };
-        wire.payload[CONTENT] = Value::String(shown);
+        wire.payload[key] = Value::String(shown);
         preview
     });
     serde_json::to_string(&Summary {
         event: wire,
         preview,
-    })
-    .expect("store::Event always serializes")
-}
-
-/// `summarize`'s shape for `file.cited`: `path` and `lines` are
-/// already short fields on the wire, so only `excerpt` needs cutting -
-/// to its first line, further cut to `preview` characters if that line
-/// itself runs long.
-fn summarize_citation(event: &crate::core::Event, excerpt: &str, preview: usize) -> String {
-    let mut wire = Event::from(event);
-    let len = excerpt.chars().count();
-    let first = excerpt.lines().next().unwrap_or("");
-    let chars: Vec<char> = first.chars().collect();
-    let shown = if chars.len() > preview {
-        window(&chars, 0..0, preview)
-    } else {
-        first.to_string()
-    };
-    wire.payload["excerpt"] = Value::String(shown);
-    serde_json::to_string(&Summary {
-        event: wire,
-        preview: Some(Preview { len, hit: None }),
     })
     .expect("store::Event always serializes")
 }
@@ -346,7 +337,7 @@ pub fn excerpt(
         return Err(Error::InvertedRange { start, end });
     }
 
-    wire.payload[CONTENT] = Value::String(chars[start..end].iter().collect());
+    wire.payload[content_key(event.kind())] = Value::String(chars[start..end].iter().collect());
 
     Ok(serde_json::to_string(&Summary {
         event: wire,
