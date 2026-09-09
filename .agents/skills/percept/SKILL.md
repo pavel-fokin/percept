@@ -72,6 +72,31 @@ Capture an unlogged prompt with `events publish` under its real actor
 and source before citing it; never invent an id or cite an agent's
 summary as the user's words.
 
+## Cite a file
+
+A node that rests on code or a document cites the text it rested on,
+not the path alone. Publish what was seen first - a range where one is
+enough, the whole file only for a claim about the file itself - and
+list the printed id in `--source` beside the prompt:
+
+```sh
+id=$(percept events publish --actor model --source claude-code --type file.seen \
+  --payload '{"path":"src/mapstore/schema.rs","lines":"40-58"}')
+percept maps add-node decisions --actor model --kind decision --name "..." \
+  --prop why="..." --source $prompt --source $id
+```
+
+`file.seen` is experience: the file, or that range of it, as it was
+seen at that moment. Publish reads the text from the tree, so the path
+may be absolute inside the checkout or repo-relative, and refuses a
+binary file or a range past the end. That text is what the
+session-start block checks against the tree later: `changed` when it
+is no longer found, `gone` when the file is. After looking at a
+changed file, publish a new `file.seen` with `--causation $old`
+whether or not the claim still holds; the check follows that chain and
+reads the newest. If the meaning moved, record the new decision with a
+`supersedes` edge as usual, citing the new event.
+
 ## Record a task
 
 The tasks map holds work left to do. A `task` names one outcome and

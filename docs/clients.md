@@ -195,7 +195,7 @@ Each row is one issue. Order is by what the others rest on.
 | 5 | A push hook at the yes moment: open questions and the decisions that cite the files the plan names. | Told once is not a habit. The model records against what it was just shown, not what it remembered to look up. Matching a name is a fact; percept may do it. |
 | 6 | `disputes` and `confirms` edges from the human, a `review.finished` event naming the cut, and standing derived in the fold: claimed, seen, confirmed, disputed. An `asks` mark the agent sets on a claim it wants read. A comment is a user-written note attached by an edge. | Seen is the batch, derived from the cut and costing nothing per claim. Wrong is the one action. A note is the human's landmark, so the model may not remove it. |
 | 7 | `percept review`: a local page served by the binary, a cut sized to a sitting, one action per claim and one to finish. Reachable from the branch and, as a projection, from a PR comment listing the claims. The page is designed below. | A static render cannot write. A web app waits for a second person. The human's best moment is reading the diff, so the page meets them there. |
-| 8 | A decision may cite a code node. The start hook counts decisions whose cited files changed. | Gives reflect a fact to start from, so it does not reread the whole map. |
+| 8 | A node cites a file through a `file.seen` event - the text as it was seen - listed in its sources. The start hook prints `changed since recorded`: current headline nodes whose seen text is no longer in the tree. Built 2026-09-09 as decisions d76 to d82. | Gives reflect a fact to start from, so it does not reread the whole map. The event is experience, not a claim, so a client's read could write one one day without the model publishing it. |
 | 9 | Reflect runs in-session as the last thing the model does, over the fragment it touched. It writes evidence and opens a question only when a fact changed. It never confirms or disputes. | Only a human confirms. The model's reflect feeds the review queue; a stingy reflect keeps that queue readable. |
 
 ## The surface
@@ -384,6 +384,9 @@ decisions reopened, plan steps re-derived, and claims the human
 corrected. Two things make it cheaper here. The stop list gives the
 session's claims to tally against. The review page records the
 corrections as events, so the third count is a fold, not a memory.
+A fourth count, decisions recorded with no file.seen event in their
+sources, says whether citing has become a habit; if it stays high, the
+fix is a `cites` line on the record verb, not a rule in the skill.
 
 ## Recommendation
 
