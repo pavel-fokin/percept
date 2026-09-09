@@ -297,9 +297,9 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
         }
         // A file registration shows dimmed too - it's experience the
         // model recorded, not dialogue.
-        Payload::FileRegistered { path, lines, .. } => tool_lines(
+        Payload::FileSeen { path, lines, .. } => tool_lines(
             chat,
-            &format!("read {}", crate::core::registration_label(path, *lines)),
+            &format!("read {}", crate::core::seen_label(path, *lines)),
             width,
         ),
     }

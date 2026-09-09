@@ -141,17 +141,17 @@ pub enum Payload {
     /// so the record still reads once the file has moved on. A node
     /// that lists this event's id in its `sources` is what cites it -
     /// the claim lives on the node, never here.
-    FileRegistered {
+    FileSeen {
         path: PathBuf,
         lines: Option<(u32, u32)>,
         excerpt: String,
     },
 }
 
-/// `path`, with `:from-to` appended for a ranged registration - the
-/// label a `file.registered` event reads as wherever it's shown short:
+/// `path`, with `:from-to` appended for a ranged sighting - the
+/// label a `file.seen` event reads as wherever it's shown short:
 /// the TUI, the context index, and a search preview.
-pub fn registration_label(path: &std::path::Path, lines: Option<(u32, u32)>) -> String {
+pub fn seen_label(path: &std::path::Path, lines: Option<(u32, u32)>) -> String {
     match lines {
         Some((from, to)) => format!("{}:{from}-{to}", path.display()),
         None => path.display().to_string(),
@@ -175,7 +175,7 @@ impl Payload {
             | Self::EdgeRemoved { .. }
             | Self::ModelCalled(..)
             | Self::SessionStarted
-            | Self::FileRegistered { .. } => None,
+            | Self::FileSeen { .. } => None,
         }
     }
 }
@@ -196,7 +196,7 @@ pub enum EventKind {
     EdgeRemoved,
     ModelCalled,
     SessionStarted,
-    FileRegistered,
+    FileSeen,
 }
 
 /// One recorded fact in the conversation log. Append-only: a committed
@@ -366,7 +366,7 @@ impl Event {
             Payload::EdgeRemoved { .. } => EventKind::EdgeRemoved,
             Payload::ModelCalled(..) => EventKind::ModelCalled,
             Payload::SessionStarted => EventKind::SessionStarted,
-            Payload::FileRegistered { .. } => EventKind::FileRegistered,
+            Payload::FileSeen { .. } => EventKind::FileSeen,
         }
     }
 }

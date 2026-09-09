@@ -27,7 +27,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::core::{
-    registration_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source,
+    seen_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source,
 };
 use crate::shared::Timestamp;
 use crate::store::TurnState;
@@ -265,22 +265,22 @@ fn gained_block(maps: &[Map], since: Timestamp) -> String {
 
 /// What every current headline node cites that no longer matches the
 /// working tree - a citation whose file moved on since it was
-/// registered. `None` when nothing changed, so `start_session` omits
+/// seen. `None` when nothing changed, so `start_session` omits
 /// the block entirely rather than printing an empty one.
 ///
 /// Builds two indexes over `events` once - id to event, and
-/// causation id to the `file.registered` events it caused - so no
+/// causation id to the `file.seen` events it caused - so no
 /// node's check re-reads the log: `id_to_event` resolves a node's
-/// `sources` entries, `later_registrations` walks a citation forward
-/// to the newest re-registration of the same file before it is
+/// `sources` entries, `later_seen` walks a citation forward
+/// to the newest later sighting of the same file before it is
 /// checked against the tree.
 fn changed_since_recorded_block(maps: &[Map], events: &[Event], checkout: &Path) -> Option<String> {
     let id_to_event: HashMap<EventId, &Event> = events.iter().map(|event| (event.id(), event)).collect();
-    let mut later_registrations: HashMap<EventId, Vec<&Event>> = HashMap::new();
+    let mut later_seen: HashMap<EventId, Vec<&Event>> = HashMap::new();
     for event in events {
-        if matches!(event.payload(), Payload::FileRegistered { .. }) {
+        if matches!(event.payload(), Payload::FileSeen { .. }) {
             if let Some(cause) = event.causation_id() {
-                later_registrations.entry(cause).or_default().push(event);
+                later_seen.entry(cause).or_default().push(event);
             }
         }
     }
@@ -288,7 +288,7 @@ fn changed_since_recorded_block(maps: &[Map], events: &[Event], checkout: &Path)
     let mut lines: Vec<String> = Vec::new();
     for map in maps {
         for node in map.headlines() {
-            let findings = node_changes(node, &id_to_event, &later_registrations, checkout);
+            let findings = node_changes(node, &id_to_event, &later_seen, checkout);
             if !findings.is_empty() {
                 lines.push(format!("{} cites {}", line_id(map, node), findings.join(", ")));
             }
@@ -314,36 +314,36 @@ fn changed_since_recorded_block(maps: &[Map], events: &[Event], checkout: &Path)
 }
 
 /// `node`'s own `changed`/`gone` findings, one per source that names a
-/// `file.registered` event, checked at its newest re-registration.
+/// `file.seen` event, checked at its newest sighting.
 fn node_changes(
     node: &Node,
     id_to_event: &HashMap<EventId, &Event>,
-    later_registrations: &HashMap<EventId, Vec<&Event>>,
+    later_seen: &HashMap<EventId, Vec<&Event>>,
     checkout: &Path,
 ) -> Vec<String> {
     node.sources
         .iter()
         .filter_map(|source_id| id_to_event.get(source_id).copied())
-        .filter(|event| matches!(event.payload(), Payload::FileRegistered { .. }))
+        .filter(|event| matches!(event.payload(), Payload::FileSeen { .. }))
         .filter_map(|event| {
-            let newest = newest_registration(event, later_registrations);
-            let Payload::FileRegistered { path, lines, excerpt } = newest.payload() else {
-                unreachable!("filtered to file.registered above")
+            let newest = newest_seen(event, later_seen);
+            let Payload::FileSeen { path, lines, excerpt } = newest.payload() else {
+                unreachable!("filtered to file.seen above")
             };
-            registration_status(checkout, path, excerpt)
-                .map(|status| format!("{} {status}", registration_label(path, *lines)))
+            seen_status(checkout, path, excerpt)
+                .map(|status| format!("{} {status}", seen_label(path, *lines)))
         })
         .collect()
 }
 
-/// Follows `event` forward through `later_registrations`, each hop the
-/// latest re-registration caused by the one before it, stopping when
+/// Follows `event` forward through `later_seen`, each hop the
+/// latest sighting caused by the one before it, stopping when
 /// none names it as their cause.
-fn newest_registration<'a>(
+fn newest_seen<'a>(
     mut event: &'a Event,
-    later_registrations: &HashMap<EventId, Vec<&'a Event>>,
+    later_seen: &HashMap<EventId, Vec<&'a Event>>,
 ) -> &'a Event {
-    while let Some(next) = later_registrations
+    while let Some(next) = later_seen
         .get(&event.id())
         .and_then(|candidates| candidates.iter().max_by_key(|candidate| candidate.created_at()))
     {
@@ -358,7 +358,7 @@ fn newest_registration<'a>(
 /// folded to `\n`, each line's trailing whitespace stripped, and the
 /// excerpt's leading and trailing blank lines dropped; `None` when the
 /// excerpt still reads.
-fn registration_status(checkout: &Path, path: &Path, excerpt: &str) -> Option<&'static str> {
+fn seen_status(checkout: &Path, path: &Path, excerpt: &str) -> Option<&'static str> {
     let text = match std::fs::read(checkout.join(path)) {
         Ok(bytes) => bytes,
         Err(_) => return Some("gone"),
@@ -381,7 +381,7 @@ fn normalize_text(text: &str) -> String {
 }
 
 /// `normalize_text`, plus the excerpt's own leading and trailing blank
-/// lines dropped, so a registration whose stored excerpt padded its
+/// lines dropped, so a sighting whose stored excerpt padded its
 /// range with context still matches.
 fn normalize_excerpt(excerpt: &str) -> String {
     let mut lines: Vec<&str> = excerpt.lines().map(|line| line.trim_end()).collect();

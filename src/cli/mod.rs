@@ -380,7 +380,7 @@ fn resolve_ref(map: &Map, s: &str) -> Result<NodeRef, Box<dyn std::error::Error>
 /// decode, so the CLI only parses flags. `root` is the writer's project
 /// root, resolved once in `main`; `args.source` only names the writer,
 /// so `publish` pairs the two into the `Source` the event carries.
-/// `checkout` is the working tree a `file.registered` payload with no
+/// `checkout` is the working tree a `file.seen` payload with no
 /// `excerpt` reads from - in a worktree it differs from `root`, which
 /// stays the project identity the event's `Source` carries.
 /// Appends one event and prints its id, so a writer can cite it as the
@@ -402,8 +402,8 @@ pub fn publish(
         path: root.to_path_buf(),
     };
 
-    let event = if args.kind == "file.registered" {
-        let payload = file_registered_payload(&args.payload, checkout)?;
+    let event = if args.kind == "file.seen" {
+        let payload = file_seen_payload(&args.payload, checkout)?;
         crate::core::Event::new(
             store::parse_actor(&args.actor)?,
             source,
@@ -429,27 +429,27 @@ pub fn publish(
     print_lines(std::iter::once(event.id().as_uuid().to_string()))
 }
 
-/// The `payload` argument to `percept events publish --type file.registered`,
+/// The `payload` argument to `percept events publish --type file.seen`,
 /// as the caller wrote it - `excerpt` absent when the tree should
 /// supply it.
 #[derive(serde::Deserialize)]
-struct RawFileRegistered {
+struct RawFileSeen {
     path: String,
     lines: Option<String>,
     excerpt: Option<String>,
 }
 
-/// Builds a `Payload::FileRegistered` from the raw JSON a caller passed
+/// Builds a `Payload::FileSeen` from the raw JSON a caller passed
 /// `--payload`: resolves `path` inside `checkout`, refusing one
 /// outside it, and reads `excerpt` from the tree when the caller gave
 /// none, refusing a binary file and a range that is reversed, zero, or
 /// past the file's end. An `excerpt` the caller did give is stored as
 /// given - `path` is still resolved and made repo-relative.
-fn file_registered_payload(
+fn file_seen_payload(
     raw: &str,
     checkout: &Path,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
-    let raw: RawFileRegistered = serde_json::from_str(raw).map_err(store::Error::BadPayload)?;
+    let raw: RawFileSeen = serde_json::from_str(raw).map_err(store::Error::BadPayload)?;
     let workspace = tools::Workspace::new(checkout)?;
     let resolved = workspace.resolve(&raw.path)?;
     let path = PathBuf::from(workspace.relative(&resolved));
@@ -486,7 +486,7 @@ fn file_registered_payload(
         }
     };
 
-    Ok(Payload::FileRegistered {
+    Ok(Payload::FileSeen {
         path,
         lines,
         excerpt,

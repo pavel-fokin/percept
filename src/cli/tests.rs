@@ -16,18 +16,18 @@ fn args(actor: &str, payload: &str) -> PublishArgs {
     }
 }
 
-fn file_registered_args(payload: &str) -> PublishArgs {
+fn file_seen_args(payload: &str) -> PublishArgs {
     PublishArgs {
         actor: "model".to_string(),
         source: "claude-code".to_string(),
-        kind: "file.registered".to_string(),
+        kind: "file.seen".to_string(),
         payload: payload.to_string(),
         causation: None,
     }
 }
 
 /// The checkout most tests never read from - `publish` only opens it
-/// for a `file.registered` payload with no `excerpt`.
+/// for a `file.seen` payload with no `excerpt`.
 fn no_checkout() -> &'static Path {
     Path::new(ROOT)
 }
@@ -107,13 +107,13 @@ fn a_rejected_event_appends_nothing() {
 }
 
 #[test]
-fn a_file_registered_publish_reads_the_range_from_the_checkout() {
+fn a_file_seen_publish_reads_the_range_from_the_checkout() {
     let fixture = Fixture::new();
     fixture.write("src/lib.rs", "line one\nline two\nline three\nline four\n");
     let log = FakeLog::default();
     let payload = r#"{"path":"src/lib.rs","lines":"2-3"}"#;
     publish(
-        file_registered_args(payload),
+        file_seen_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path(),
@@ -122,7 +122,7 @@ fn a_file_registered_publish_reads_the_range_from_the_checkout() {
 
     let events = log.load().unwrap();
     match events[0].payload() {
-        Payload::FileRegistered {
+        Payload::FileSeen {
             path,
             lines,
             excerpt,
@@ -131,18 +131,18 @@ fn a_file_registered_publish_reads_the_range_from_the_checkout() {
             assert_eq!(*lines, Some((2, 3)));
             assert_eq!(excerpt, "line two\nline three");
         }
-        _ => panic!("expected FileRegistered"),
+        _ => panic!("expected FileSeen"),
     }
 }
 
 #[test]
-fn a_file_registered_publish_with_no_lines_reads_the_whole_file() {
+fn a_file_seen_publish_with_no_lines_reads_the_whole_file() {
     let fixture = Fixture::new();
     fixture.write("README.md", "hello\nworld\n");
     let log = FakeLog::default();
     let payload = r#"{"path":"README.md"}"#;
     publish(
-        file_registered_args(payload),
+        file_seen_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path(),
@@ -150,23 +150,23 @@ fn a_file_registered_publish_with_no_lines_reads_the_whole_file() {
     .unwrap();
 
     match log.load().unwrap()[0].payload() {
-        Payload::FileRegistered { lines, excerpt, .. } => {
+        Payload::FileSeen { lines, excerpt, .. } => {
             assert_eq!(*lines, None);
             assert_eq!(excerpt, "hello\nworld\n");
         }
-        _ => panic!("expected FileRegistered"),
+        _ => panic!("expected FileSeen"),
     }
 }
 
 #[test]
-fn a_file_registered_publish_stores_an_absolute_path_relative() {
+fn a_file_seen_publish_stores_an_absolute_path_relative() {
     let fixture = Fixture::new();
     fixture.write("src/lib.rs", "one\n");
     let log = FakeLog::default();
     let absolute = fixture.path().join("src/lib.rs");
     let payload = format!(r#"{{"path":"{}"}}"#, absolute.to_str().unwrap());
     publish(
-        file_registered_args(&payload),
+        file_seen_args(&payload),
         &log,
         Path::new(ROOT),
         fixture.path(),
@@ -174,20 +174,20 @@ fn a_file_registered_publish_stores_an_absolute_path_relative() {
     .unwrap();
 
     match log.load().unwrap()[0].payload() {
-        Payload::FileRegistered { path, .. } => assert_eq!(path.to_str().unwrap(), "src/lib.rs"),
-        _ => panic!("expected FileRegistered"),
+        Payload::FileSeen { path, .. } => assert_eq!(path.to_str().unwrap(), "src/lib.rs"),
+        _ => panic!("expected FileSeen"),
     }
 }
 
 #[test]
-fn a_file_registered_publish_with_an_excerpt_stores_it_as_given() {
+fn a_file_seen_publish_with_an_excerpt_stores_it_as_given() {
     let fixture = Fixture::new();
     let log = FakeLog::default();
     // No file on disk at all - an `excerpt` in the payload means the
     // tree is never read.
     let payload = r#"{"path":"src/missing.rs","excerpt":"whatever the caller said"}"#;
     publish(
-        file_registered_args(payload),
+        file_seen_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path(),
@@ -195,20 +195,20 @@ fn a_file_registered_publish_with_an_excerpt_stores_it_as_given() {
     .unwrap();
 
     match log.load().unwrap()[0].payload() {
-        Payload::FileRegistered { excerpt, .. } => {
+        Payload::FileSeen { excerpt, .. } => {
             assert_eq!(excerpt, "whatever the caller said");
         }
-        _ => panic!("expected FileRegistered"),
+        _ => panic!("expected FileSeen"),
     }
 }
 
 #[test]
-fn a_file_registered_publish_refuses_a_path_outside_the_checkout() {
+fn a_file_seen_publish_refuses_a_path_outside_the_checkout() {
     let fixture = Fixture::new();
     let log = FakeLog::default();
     let payload = r#"{"path":"../../etc/passwd"}"#;
     assert!(publish(
-        file_registered_args(payload),
+        file_seen_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path()
@@ -218,14 +218,14 @@ fn a_file_registered_publish_refuses_a_path_outside_the_checkout() {
 }
 
 #[test]
-fn a_file_registered_publish_refuses_a_binary_file() {
+fn a_file_seen_publish_refuses_a_binary_file() {
     let fixture = Fixture::new();
     let full = fixture.path().join("bin");
     std::fs::write(&full, [0u8, 1, 2, 0, 3]).unwrap();
     let log = FakeLog::default();
     let payload = r#"{"path":"bin"}"#;
     let err = publish(
-        file_registered_args(payload),
+        file_seen_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path(),
@@ -236,13 +236,13 @@ fn a_file_registered_publish_refuses_a_binary_file() {
 }
 
 #[test]
-fn a_file_registered_publish_refuses_a_reversed_range() {
+fn a_file_seen_publish_refuses_a_reversed_range() {
     let fixture = Fixture::new();
     fixture.write("f.txt", "a\nb\nc\n");
     let log = FakeLog::default();
     let payload = r#"{"path":"f.txt","lines":"3-1"}"#;
     assert!(publish(
-        file_registered_args(payload),
+        file_seen_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path()
@@ -252,13 +252,13 @@ fn a_file_registered_publish_refuses_a_reversed_range() {
 }
 
 #[test]
-fn a_file_registered_publish_refuses_a_zero_line() {
+fn a_file_seen_publish_refuses_a_zero_line() {
     let fixture = Fixture::new();
     fixture.write("f.txt", "a\nb\nc\n");
     let log = FakeLog::default();
     let payload = r#"{"path":"f.txt","lines":"0-1"}"#;
     assert!(publish(
-        file_registered_args(payload),
+        file_seen_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path()
@@ -268,13 +268,13 @@ fn a_file_registered_publish_refuses_a_zero_line() {
 }
 
 #[test]
-fn a_file_registered_publish_refuses_a_range_past_the_end() {
+fn a_file_seen_publish_refuses_a_range_past_the_end() {
     let fixture = Fixture::new();
     fixture.write("f.txt", "a\nb\nc\n");
     let log = FakeLog::default();
     let payload = r#"{"path":"f.txt","lines":"1-9000"}"#;
     let err = publish(
-        file_registered_args(payload),
+        file_seen_args(payload),
         &log,
         Path::new(ROOT),
         fixture.path(),

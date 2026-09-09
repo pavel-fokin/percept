@@ -103,20 +103,20 @@ struct ModelCalledBody {
 
 /// `lines` on the wire - `"40-58"`, or absent for the whole file.
 #[derive(Serialize, Deserialize)]
-struct FileRegisteredBody {
+struct FileSeenBody {
     path: PathBuf,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     lines: Option<String>,
     excerpt: String,
 }
 
-/// `Payload::FileRegistered.lines` as `"from-to"` - the wire spelling of a
+/// `Payload::FileSeen.lines` as `"from-to"` - the wire spelling of a
 /// 1-based inclusive range.
 fn format_lines(lines: (u32, u32)) -> String {
     format!("{}-{}", lines.0, lines.1)
 }
 
-/// `"from-to"` back to `Payload::FileRegistered.lines` - shared with
+/// `"from-to"` back to `Payload::FileSeen.lines` - shared with
 /// `cli::publish`, which parses the same shape before it ever reaches
 /// `decode`.
 pub fn parse_lines(s: &str) -> Result<(u32, u32), Error> {
@@ -138,7 +138,7 @@ const EDGE_ADDED: &str = "edge.added";
 const EDGE_REMOVED: &str = "edge.removed";
 const MODEL_CALLED: &str = "model.called";
 const SESSION_STARTED: &str = "session.started";
-const FILE_REGISTERED: &str = "file.registered";
+const FILE_SEEN: &str = "file.seen";
 
 /// Every `type` the log records, for the error that lists them when a
 /// caller names one that isn't here.
@@ -153,7 +153,7 @@ pub const KINDS: [&str; 11] = [
     EDGE_REMOVED,
     MODEL_CALLED,
     SESSION_STARTED,
-    FILE_REGISTERED,
+    FILE_SEEN,
 ];
 
 /// The wire `type` a kind serializes as.
@@ -169,7 +169,7 @@ fn kind(kind: EventKind) -> &'static str {
         EventKind::EdgeRemoved => EDGE_REMOVED,
         EventKind::ModelCalled => MODEL_CALLED,
         EventKind::SessionStarted => SESSION_STARTED,
-        EventKind::FileRegistered => FILE_REGISTERED,
+        EventKind::FileSeen => FILE_SEEN,
     }
 }
 
@@ -187,7 +187,7 @@ pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
         EDGE_REMOVED => Ok(EventKind::EdgeRemoved),
         MODEL_CALLED => Ok(EventKind::ModelCalled),
         SESSION_STARTED => Ok(EventKind::SessionStarted),
-        FILE_REGISTERED => Ok(EventKind::FileRegistered),
+        FILE_SEEN => Ok(EventKind::FileSeen),
         other => Err(Error::UnknownEventType(other.to_string())),
     }
 }
@@ -241,8 +241,8 @@ struct Summary {
 /// `content` are cut at `PREVIEW_CHARS` whatever it is, since they are
 /// the model's own short arguments, not the text a caller reads.
 pub fn summarize(event: &crate::core::Event, hit: Option<Range<usize>>, preview: usize) -> String {
-    if let Payload::FileRegistered { excerpt, .. } = event.payload() {
-        return summarize_registration(event, excerpt, preview);
+    if let Payload::FileSeen { excerpt, .. } = event.payload() {
+        return summarize_seen(event, excerpt, preview);
     }
     let mut wire = Event::from(event);
     // `content` leaves the payload before `shorten` runs over the rest,
@@ -273,11 +273,11 @@ pub fn summarize(event: &crate::core::Event, hit: Option<Range<usize>>, preview:
     .expect("store::Event always serializes")
 }
 
-/// `summarize`'s shape for `file.registered`: `path` and `lines` are
+/// `summarize`'s shape for `file.seen`: `path` and `lines` are
 /// already short fields on the wire, so only `excerpt` needs cutting -
 /// to its first line, further cut to `preview` characters if that line
 /// itself runs long.
-fn summarize_registration(event: &crate::core::Event, excerpt: &str, preview: usize) -> String {
+fn summarize_seen(event: &crate::core::Event, excerpt: &str, preview: usize) -> String {
     let mut wire = Event::from(event);
     let len = excerpt.chars().count();
     let first = excerpt.lines().next().unwrap_or("");
@@ -467,16 +467,16 @@ impl From<&crate::core::Event> for Event {
             })
             .expect("ModelCalledBody always serializes"),
             Payload::SessionStarted => Value::Object(serde_json::Map::new()),
-            Payload::FileRegistered {
+            Payload::FileSeen {
                 path,
                 lines,
                 excerpt,
-            } => serde_json::to_value(FileRegisteredBody {
+            } => serde_json::to_value(FileSeenBody {
                 path: path.clone(),
                 lines: lines.map(format_lines),
                 excerpt: excerpt.clone(),
             })
-            .expect("FileRegisteredBody always serializes"),
+            .expect("FileSeenBody always serializes"),
         };
 
         Self {
@@ -640,9 +640,9 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
             }))
         }
         EventKind::SessionStarted => Ok(Payload::SessionStarted),
-        EventKind::FileRegistered => {
-            let body: FileRegisteredBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
-            Ok(Payload::FileRegistered {
+        EventKind::FileSeen => {
+            let body: FileSeenBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::FileSeen {
                 path: body.path,
                 lines: body.lines.as_deref().map(parse_lines).transpose()?,
                 excerpt: body.excerpt,
