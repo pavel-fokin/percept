@@ -26,8 +26,9 @@ that nothing else bears on it.
 `prompt` (the default), `headlines`, or `tool`. In every shape the
 prompt carries one line per map with its purpose, size, and last
 change, and `read_map` is offered, so the model can cut a map around
-one node even when the whole map is in the prompt. The code map never
-reaches the model.
+one node even when the whole map is in the prompt. The code walk is
+not a map: it reaches the model only as `read_code`, under the code
+toolset.
 
 ## Coding agents
 

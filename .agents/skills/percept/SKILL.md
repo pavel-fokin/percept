@@ -1,6 +1,6 @@
 ---
 name: percept
-description: Select, check, and revise percept's cognitive maps; query its experience log or code structure. Use for decision rationale, corrections, dependencies, and map maintenance.
+description: Select, check, and revise percept's cognitive maps; query its experience log. Use for decision rationale, corrections, dependencies, and map maintenance.
 ---
 
 # Using shared maps
@@ -10,8 +10,7 @@ Read [.percept/index.md](../../../.percept/index.md) to choose a map.
 binary is `~/.percept/bin/percept` and reads `~/.percept/percept.jsonl`.
 A worktree build, `target/debug/percept`, reads `<checkout>/.percept/`
 instead unless `PERCEPT_HOME` says otherwise, so set it to
-`$HOME/.percept` to query the shared log with a dev build. For code
-query patterns, read [code.md](code.md).
+`$HOME/.percept` to query the shared log with a dev build.
 
 ## Select a fragment
 
@@ -121,9 +120,9 @@ gloss = "from a term to one it is defined against"
 `decisions` and `tasks` are built in as the same TOML; a project file
 of the same name extends one - keep every kind, headline, and settles
 entry, add more - and is refused if it drops any, since the log and
-the render rest on them. `code` and `index` cannot be declared: one is
-walked from the tree, the other is this directory's index. Add a row to `.percept/index.md` so a reader finds the
-new map.
+the render rest on them. `index` cannot be declared: it is this
+directory's index. Add a row to `.percept/index.md` so a reader finds
+the new map.
 
 ## Revise when meaning changes
 
