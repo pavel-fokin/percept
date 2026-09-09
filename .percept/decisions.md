@@ -73,6 +73,8 @@ Folded from the percept log for this project and rerendered on every write. Chan
 - "Where does the hook's turn state live?" (model) · 2026-09-08
 - "Where does percept init write a client's config?" (model) · 2026-09-08
 - "How does the hook find the checkout?" (model) · 2026-09-08
+- "When does the shared log outgrow a full-file fold, and what fixes it?" (model) · 2026-09-09
+- "How is a short id minted and displayed for a node?" (model) · 2026-09-09
 
 ## "Where does the event log live?"
 
@@ -547,3 +549,19 @@ note: "Not decided. The core has an actor kind for the human and no identity beh
   why: "a project with only .percept records too, and the rule for what a project is lives once"
 - weighed "git rev-parse --show-toplevel, as the Python hook did" (model)
   why: "needs git on the path and records nothing in a .percept-only project"
+
+## "When does the shared log outgrow a full-file fold, and what fixes it?" (model)
+
+note: "Not decided. Log growing ~15MB/3700 events per day (60MB/14866 events over 4 days, 2026-09-05 to 2026-09-09); at that pace ~5GB/1.3M events a year. A fold today (log.load + Map::fold, one project) already reads and discards every other project's events too, since EventLog::load has no way to skip past what Scope will reject - cost scales with total activity across every project on the machine, not the one queried. Fold itself is fast now (67ms at 60MB, ~900MB/s parse). SQLite would help by indexing source.path so a query skips straight to one project's rows, but drops the one-file/jq-pipeable property events search and show rely on, and needs a migration. A cheaper first move: a sidecar index (project path to byte ranges) that load() consults, kept incremental on append, no format change. Revisit once the log crosses roughly 500MB-1GB; not a problem at today's size."
+- open
+
+## "How is a short id minted and displayed for a node?" (model)
+
+- decision "a per-kind sequence number minted once at creation and stored on the node; the display prefix is an optional schema field, defaulting to the kind name's first letter" (model)
+  why: "the number is what gets cited in chat, PR comments, and committed text, and must never change; the prefix is cosmetic and a project may rename it without a Rust change or a migration, since resolution reads the schema fresh each time. Minting is a local per-project counter, not merge-safe against independent offline writers - that is left to whenever a distributed-log merge design is actually built, tied to the still-open \"How is a human contour identified?\" question"
+- weighed "ids computed fresh from fold order at display time, never stored" (model)
+  why: "Scope changes fold order - a project-scoped and an --all-projects show fold different subsets, so the same node gets a different ordinal in each view; not stable enough to cite in chat or commit to a file"
+- weighed "a short hash of the node's uuid" (model)
+  why: "unmemorable, and collision-prone at a length short enough to stay readable"
+- weighed "a hardcoded kind-to-letter table in Rust" (model)
+  why: "a project could not rename or add a prefix without a Rust change, unlike gloss and requires which already live in the schema"
