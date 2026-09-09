@@ -95,13 +95,16 @@ Both are serde-free.
   and compactness: a map may grow, but what a reader has seen does not
   move.
 - `Scope` says which project's events a fold reads: the current one by
-  default, every one with `--all-projects`. A `MapRenderer` writes a
-  map somewhere a reader finds it; today that is
-  `<project>/.percept/<map>.md`, rewritten on every write. The
-  decisions render lists questions in the order they were raised,
-  grouped under the prompt that raised them, each with the decision
-  that settles it now; options and evidence stay out of it and are
-  reached with `percept maps show decisions --around question:<name>`.
+  default, every one with `--all-projects`. A map is read live, never
+  rendered to a file a session commits: one log holds every branch, so
+  a committed render would carry whichever branch's fold wrote it
+  last. `percept maps show <map> --format md` from the shell,
+  `read_map` mid-turn, or the bounded fragment a session-start hook
+  prints give the same Markdown a render once did. The decisions
+  render lists questions in the order they were raised, each with the
+  decision that settles it now; options and evidence stay out of it
+  and are reached with `percept maps show decisions --around
+  question:<name>`.
   `--since <time>` on `maps show` lists what a map gained since a
   reader last looked. A `Selection` - around a node, since an instant,
   of some kinds - cuts a map to a `Fragment`, which counts what the cut
@@ -128,12 +131,11 @@ never move or merge it without the user's say.
 
 ## Decisions
 
-The decisions map for this repo, rendered by percept from its own log.
-Every node cites the event it was drawn from. It is the record of why;
-where it disagrees with a rule above, the rule wins and the map says
-what the rule cost.
-
-@.percept/decisions.md
+The decisions map for this repo, folded live from percept's own log:
+`percept maps show decisions --format md`, or the bounded fragment a
+session start prints. Every node cites the event it was drawn from. It
+is the record of why; where it disagrees with a rule above, the rule
+wins and the map says what the rule cost.
 
 ## Architecture
 

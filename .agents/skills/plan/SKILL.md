@@ -43,9 +43,10 @@ Verify: <how to confirm the outcome>
 
 ## Steps
 
-1. **Decompose.** Open `.percept/tasks.md` first: a request may already
-   be an open task, with its why and what it waits on. Split the request
-   into issues. Order them so each one builds on the last. Show the set
+1. **Decompose.** Open `percept maps show tasks --format md` first: a
+   request may already be an open task, with its why and what it
+   waits on. Split the request into issues. Order them so each one
+   builds on the last. Show the set
    to the user and get agreement before any code. An explicit request to
    implement a proposal already discussed supplies that agreement; ask
    only about choices still open that the user lives with.
@@ -68,9 +69,11 @@ Verify: <how to confirm the outcome>
 
 ## Recording decisions
 
-The decisions map is percept's record of why. It is rendered to
-`.percept/decisions.md`, which AGENTS.md includes, so the next session
-starts with it. Every node cites the event it came from.
+The decisions map is percept's record of why, folded live from the
+log - `percept maps show decisions --format md`, or the bounded
+fragment a session start prints - so the next session starts from it
+without a committed file to go stale on the wrong branch. Every node
+cites the event it came from.
 
 What to record: a decision the user lives with - a path, a filename, a
 flag, a default, a name - settled in this plan. Not where a function
@@ -118,9 +121,9 @@ record the question and the decision alone. Every option gets its
 alternatives weighed for it. A name that starts with `--` is passed as
 `--name=<name>`, or clap reads it as a flag.
 
-A node whose name already exists is refused, so read
-`.percept/decisions.md` before adding to a question it holds.
-The render shows questions and decisions only; `percept maps show
+A node whose name already exists is refused, so read `percept maps
+show decisions --format md` before adding to a question it holds.
+That render shows questions and decisions only; `percept maps show
 decisions --around 'question:<name>'` shows a question's options and
 evidence, and `--since 1d` shows what the map gained today.
 

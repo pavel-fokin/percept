@@ -91,17 +91,17 @@ percept maps add-edge tasks --actor model --kind resolves \
   --from 'outcome:done in 1f1a9a9' --to 'task:cancel a turn without quitting' --source $id
 ```
 
-Open on `.percept/tasks.md` before planning, so the next item is picked
-rather than re-derived; add the outcome at commit.
+Open on `percept maps show tasks --format md` before planning, so the
+next item is picked rather than re-derived; add the outcome at commit.
 
 ## Add a map
 
 A map is declared by a TOML file at `.percept/schemas/<name>.toml`;
-the next `percept maps` command folds it, and the first write renders
-it to `.percept/<name>.md`. Kinds are lowercase, each with a gloss a
-reader meets in `maps list --format md`, and a node kind may list the
-properties a node must carry. `headlines` names the kinds the prompt
-carries; `settles` names the pair a `resolves` edge joins.
+the next `percept maps` command folds it. Kinds are lowercase, each
+with a gloss a reader meets in `maps list --format md`, and a node
+kind may list the properties a node must carry. `headlines` names the
+kinds the prompt carries; `settles` names the pair a `resolves` edge
+joins.
 
 ```toml
 name = "glossary"
