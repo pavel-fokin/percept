@@ -111,6 +111,35 @@ fn an_outcome_settles_a_task_the_way_a_decision_settles_a_question() {
 }
 
 #[test]
+fn open_lists_only_the_settled_kind_never_the_settling_one() {
+    // decisions' headline_kinds is ["question", "decision"], and
+    // nothing ever settles a decision node itself - `open` must filter
+    // to the settled kind (`settlement.of`) first, or every decision
+    // would misreport as open alongside the real open question.
+    let (settled, decision, open) = (NodeId::new(), NodeId::new(), NodeId::new());
+    let events = [
+        node_added("decisions", settled, "question", "settled one"),
+        node_added("decisions", decision, "decision", "the answer"),
+        edge_added("decisions", RESOLVES, decision, settled),
+        node_added("decisions", open, "question", "still open"),
+    ];
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    let names: Vec<&str> = map.open().map(|node| node.name.as_str()).collect();
+    assert_eq!(names, ["still open"]);
+}
+
+#[test]
+fn open_is_empty_on_a_map_with_no_settlement() {
+    let mut schema = decisions();
+    schema.settlement = None;
+    let events = [node_added("decisions", NodeId::new(), "question", "Which?")];
+    let map = Map::fold(schema, &scope(), &events).unwrap();
+
+    assert_eq!(map.open().count(), 0);
+}
+
+#[test]
 fn weighed_for_lists_answering_options_but_not_ones_that_restate_the_decision() {
     let (q, lost, restated, d) = (NodeId::new(), NodeId::new(), NodeId::new(), NodeId::new());
     let events = [

@@ -25,7 +25,8 @@ use std::path::Path;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::core::{Actor, Event, EventId, EventLog, Source};
+use crate::core::{Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source};
+use crate::shared::Timestamp;
 use crate::store::TurnState;
 
 /// `percept hook <client>` - `client` names the writer whose turn this
@@ -59,12 +60,13 @@ impl HookInput {
     }
 }
 
-/// The three hook events percept understands, tagged by
+/// The four hook events percept understands, tagged by
 /// `hook_event_name`, each carrying only the fields `run` needs from
 /// it.
 #[derive(Deserialize)]
 #[serde(tag = "hook_event_name")]
 enum HookEvent {
+    SessionStart {},
     UserPromptSubmit {
         prompt: String,
     },
@@ -82,7 +84,7 @@ enum HookEvent {
 /// Every event name `HookEvent` deserialises, in the order `init`
 /// writes their config entries. `hook::tests` proves this list and
 /// `HookEvent::name` cannot drift apart.
-pub const EVENTS: [&str; 3] = ["UserPromptSubmit", "PostToolUse", "Stop"];
+pub const EVENTS: [&str; 4] = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"];
 
 impl HookEvent {
     /// Used only by `hook::tests`, to prove `EVENTS` and this match
@@ -90,6 +92,7 @@ impl HookEvent {
     #[cfg(test)]
     fn name(&self) -> &'static str {
         match self {
+            HookEvent::SessionStart { .. } => "SessionStart",
             HookEvent::UserPromptSubmit { .. } => "UserPromptSubmit",
             HookEvent::PostToolUse { .. } => "PostToolUse",
             HookEvent::Stop { .. } => "Stop",
@@ -116,18 +119,26 @@ pub fn read(input: &mut dyn Read) -> Result<HookInput, Box<dyn std::error::Error
 /// Appends the events `input`'s event implies to `log` under `source`,
 /// and returns the JSON object the client expects back on stdout -
 /// `{}` unless the event asks for something. `sessions_dir` holds one
-/// directory per checkout root, created if missing.
+/// directory per checkout root, created if missing. `checkout` is only
+/// read - as schemas, from `.percept/schemas/*.toml` - for
+/// `SessionStart`; a project schema that fails to load must not also
+/// break the other three events, which need no schema at all.
 pub fn run(
     input: HookInput,
     source: &Source,
     log: &dyn EventLog,
     sessions_dir: &Path,
+    checkout: &Path,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let dir = sessions_dir.join(state_dir_name(&source.path));
     let name = state_file_name(&source.name, &input.session_id, &input.turn_id);
     let mut state = TurnState::open(&dir, &name)?;
 
     match input.event {
+        HookEvent::SessionStart {} => {
+            let schemas = crate::mapstore::load_schemas(checkout)?;
+            start_session(source, log, &schemas)
+        }
         HookEvent::UserPromptSubmit { prompt } => submit_prompt(prompt, source, log, &mut state),
         HookEvent::PostToolUse {
             tool_name,
@@ -147,6 +158,166 @@ pub fn run(
             output
         }
     }
+}
+
+/// `SessionStart`: finds the previous `session.started` event this
+/// source recorded against this project, if any - what a fragment cuts
+/// the log to since - records a fresh one for the next call to find,
+/// and folds every log-backed schema to report what each map gained
+/// since then, what is still open on it, and one concrete next step.
+/// What "gained" and "open" mean is read off `Schema` - `headline_kinds`
+/// and `settlement` - never off a map's name, so a project's own
+/// schema (an `ideas` map with no settlement, say) reports without any
+/// code naming it.
+fn start_session(
+    source: &Source,
+    log: &dyn EventLog,
+    schemas: &Schemas,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let events = log.load()?;
+    let since = last_session(&events, source);
+
+    log.append(&Event::session_started(source.clone()))?;
+
+    let project = project_name(source);
+    let header = match since {
+        Some(at) => format!("percept · project {project}\nsince your last session here ({at})"),
+        None => format!("percept · project {project}\nfirst session here"),
+    };
+
+    let maps = schemas.fold_all(&source.scope(), &events)?;
+
+    let mut sections = vec![header];
+    if let Some(at) = since {
+        sections.push(gained_block(&maps, at));
+    }
+    let (open_blocks, pointer) = open_blocks_and_pointer(&maps);
+    sections.extend(open_blocks);
+    sections.extend(pointer);
+
+    Ok(json!({
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": sections.join("\n\n"),
+        }
+    }))
+}
+
+/// The short id `node` has on `map`, or a `kind:name` fallback for the
+/// unexpected case a headline node carries none.
+fn line_id(map: &Map, node: &Node) -> String {
+    map.short_id(node.id)
+        .unwrap_or_else(|| format!("{}:{}", node.kind, node.name))
+}
+
+/// How many lines of a gained or open list `gained_block` and
+/// `open_blocks_and_pointer` show before folding the rest into a
+/// trailing count.
+const LIMIT: usize = 5;
+
+/// Up to `LIMIT` of `items`, each turned into a line by `line`, with a
+/// trailing `+N more` when there were more - the one truncation rule
+/// both blocks below share.
+fn capped_lines(items: &[&Node], line: impl Fn(&Node) -> String) -> Vec<String> {
+    let mut lines: Vec<String> = items.iter().take(LIMIT).map(|node| line(node)).collect();
+    if items.len() > LIMIT {
+        lines.push(format!("+{} more", items.len() - LIMIT));
+    }
+    lines
+}
+
+/// What each folded map gained since `since`: a counts line for every
+/// map, in fold order, then up to `LIMIT` lines per map that gained
+/// anything - a node's `added_at` is compared directly, not
+/// `Map::since`, which would also surface an older node a fresh edge
+/// only touched.
+fn gained_block(maps: &[Map], since: Timestamp) -> String {
+    let per_map: Vec<Vec<&Node>> = maps
+        .iter()
+        .map(|map| map.headlines().filter(|node| node.added_at >= since).collect())
+        .collect();
+
+    let counts = maps
+        .iter()
+        .zip(&per_map)
+        .map(|(map, gained)| format!("{} +{}", map.schema().name, gained.len()))
+        .collect::<Vec<_>>()
+        .join("   ");
+
+    let mut lines = vec![counts];
+    for (map, gained) in maps.iter().zip(&per_map) {
+        if gained.is_empty() {
+            continue;
+        }
+        lines.extend(capped_lines(gained, |node| {
+            format!("{} {} {:?}", line_id(map, node), node.kind, node.name)
+        }));
+    }
+    lines.join("\n")
+}
+
+/// One `open {of} (...)` block per settled map that has open items - a
+/// map without a `Settlement` (an `ideas` map, say) is skipped entirely,
+/// never by name, since `Map::open` is empty there - plus the fragment
+/// pointer at the first open item found, walking maps in fold order.
+fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
+    let mut blocks = Vec::new();
+    let mut pointer = None;
+
+    for map in maps {
+        let Some(settlement) = map.schema().settlement.as_ref() else {
+            continue;
+        };
+        let open: Vec<&Node> = map.open().collect();
+        if open.is_empty() {
+            continue;
+        }
+
+        let total = open.len();
+        let header = if total > LIMIT {
+            format!("open {} ({total}, showing {LIMIT})", settlement.of)
+        } else {
+            format!("open {} ({total})", settlement.of)
+        };
+        let mut lines = vec![header];
+        lines.extend(capped_lines(&open, |node| format!("{} {:?}", line_id(map, node), node.name)));
+        blocks.push(lines.join("\n"));
+
+        pointer.get_or_insert_with(|| {
+            format!(
+                "fragment: percept maps show {} --around {}",
+                map.schema().name,
+                line_id(map, open[0])
+            )
+        });
+    }
+
+    (blocks, pointer)
+}
+
+/// The latest `session.started` event this exact source (client name
+/// and project path) recorded, if any - `None` on a project's first
+/// session with this client.
+fn last_session(events: &[Event], source: &Source) -> Option<Timestamp> {
+    events
+        .iter()
+        .filter(|event| {
+            matches!(event.payload(), Payload::SessionStarted)
+                && event.source().name == source.name
+                && event.source().path == source.path
+        })
+        .map(Event::created_at)
+        .max()
+}
+
+/// `source.path`'s last component, the name a reader knows the project
+/// by - falling back to the whole path on the rare root with none.
+fn project_name(source: &Source) -> String {
+    source
+        .path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| source.path.display().to_string())
 }
 
 /// `UserPromptSubmit`: clears the turn's previous cause before doing

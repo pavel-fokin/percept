@@ -253,6 +253,8 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
         }
         // Bookkeeping about a round trip, not something to show.
         Payload::ModelCalled(..) => Vec::new(),
+        // Bookkeeping about a session opening, not something to show.
+        Payload::SessionStarted => Vec::new(),
         // A map change shows dimmed too - it's context the model built,
         // not dialogue.
         Payload::NodeAdded {

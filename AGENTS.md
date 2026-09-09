@@ -95,13 +95,16 @@ Both are serde-free.
   and compactness: a map may grow, but what a reader has seen does not
   move.
 - `Scope` says which project's events a fold reads: the current one by
-  default, every one with `--all-projects`. A `MapRenderer` writes a
-  map somewhere a reader finds it; today that is
-  `<project>/.percept/<map>.md`, rewritten on every write. The
-  decisions render lists questions in the order they were raised,
-  grouped under the prompt that raised them, each with the decision
-  that settles it now; options and evidence stay out of it and are
-  reached with `percept maps show decisions --around question:<name>`.
+  default, every one with `--all-projects`. A map is read live, never
+  rendered to a file a session commits: one log holds every branch, so
+  a committed render would carry whichever branch's fold wrote it
+  last. `percept maps show <map> --format md` from the shell,
+  `read_map` mid-turn, or the bounded fragment a session-start hook
+  prints give the same Markdown a render once did. The decisions
+  render lists questions in the order they were raised, each with the
+  decision that settles it now; options and evidence stay out of it
+  and are reached with `percept maps show decisions --around
+  question:<name>`.
   `--since <time>` on `maps show` lists what a map gained since a
   reader last looked. A `Selection` - around a node, since an instant,
   of some kinds - cuts a map to a `Fragment`, which counts what the cut
@@ -128,12 +131,11 @@ never move or merge it without the user's say.
 
 ## Decisions
 
-The decisions map for this repo, rendered by percept from its own log.
-Every node cites the event it was drawn from. It is the record of why;
-where it disagrees with a rule above, the rule wins and the map says
-what the rule cost.
-
-@.percept/decisions.md
+The decisions map for this repo, folded live from percept's own log:
+`percept maps show decisions --format md`, or the bounded fragment a
+session start prints. Every node cites the event it was drawn from. It
+is the record of why; where it disagrees with a rule above, the rule
+wins and the map says what the rule cost.
 
 ## Architecture
 
@@ -149,7 +151,7 @@ it, never sideways or up:
 | Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps`, `ask`, `reflect` - the log and its maps without the TUI. `hook <client>` records a coding client's turn from the hook JSON on stdin; `init <client>` writes the client's config to call it. Headless, a call the policy would ask about is declined unless `ask --yes`. |
 | Infrastructure | `providers` | `Ollama` and `OpenAi` - implement `harness::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` carries the key. |
 | Infrastructure | `store` | The JSONL event log - the serde boundary - implements `core::EventLog` and `core::EventSearch`. `event` encodes an event to a log line and back, and reads one out for display. |
-| Infrastructure | `mapstore` | Loads the schemas - the built-in TOML plus `.percept/schemas/*.toml` - and folds a log-backed cognitive map (`LogMaps`, the `core::MapReader`), revises it, and gives it an external form: `encode_*` to JSON lines, `MarkdownFiles` - the `core::MapRenderer` - to `.percept/`. `main` wraps `LogMaps` to route `code` to the tree walk. |
+| Infrastructure | `mapstore` | Loads the schemas - the built-in TOML plus `.percept/schemas/*.toml` - and folds a log-backed cognitive map (`LogMaps`, the `core::MapReader`), revises it, and gives it an external form: `encode_*` to JSON lines, `markdown`/`catalogue` to the text `maps show`/`maps list --format md` print - read live, never written to a file. `main` wraps `LogMaps` to route `code` to the tree walk. |
 | Infrastructure | `code` | The `code` map: walks the working tree with `ignore`, parses each file with `tree-sitter`, and builds a `Map` of the working tree's files, the symbols they define, and what imports what. `percept maps list` names its node and edge kinds with a line on each; internal code is a `file` keyed by repo-relative path, not by this table's Package column. `maps list`, `maps show`, and `read_map` reach it; it is never folded from the log and never carried in the prompt. |
 | Infrastructure | `tools` | Every tool the model calls. `search_events`, `read_event`, `revise_map`, `read_map` run over the log and its maps through `store` and `mapstore`. `read_file`, `write_file`, `edit_file`, `list_files`, `find_files`, `grep_files` run over a working tree, native over `Workspace` - the one place a path the model gave becomes a real path, refusing any outside the checkout - and `bash`, one `sh -c` at the root with a timeout. The file tools come in under `PERCEPT_TOOLS=code`. `AskBeforeWrites` is the `Policy`; `GitSnapshot` the `Snapshot`, a commit under `refs/percept/snapshots/<prompt>` built through a scratch index. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |

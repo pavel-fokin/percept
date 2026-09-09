@@ -1,6 +1,6 @@
-//! Fakes and builders for the core ports - an `EventLog`, a
-//! `MapRenderer` - and the value helpers every layer's tests share.
-//! Each fake implements one core port and nothing more.
+//! Fakes and builders for the core ports - an `EventLog` - and the
+//! value helpers every layer's tests share. Each fake implements one
+//! core port and nothing more.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::core::{
-    Actor, Event, EventId, EventLog, Kind, Map, MapRenderer, NodeId, NodeRef, Payload, Schema,
-    Schemas, Scope, Settlement, Source, Usage,
+    Actor, Event, EventId, EventLog, Kind, NodeId, NodeRef, Payload, Schema, Schemas, Scope,
+    Settlement, Source, Usage,
 };
 
 /// The project root `source` stamps, for a test that compares paths.
@@ -126,30 +126,6 @@ impl EventLog for FakeLog {
         let event = compute(events.clone())?;
         events.push(event.clone());
         Ok(event)
-    }
-}
-
-/// A MapRenderer that records the name of every map it was asked to
-/// render, in order, so a test can assert what got rerendered without
-/// touching a filesystem.
-#[derive(Default)]
-pub struct FakeRenderer {
-    rendered: Mutex<Vec<String>>,
-}
-
-impl FakeRenderer {
-    pub fn rendered(&self) -> Vec<String> {
-        self.rendered.lock().unwrap().clone()
-    }
-}
-
-impl MapRenderer for FakeRenderer {
-    fn render(&self, map: &Map) -> Result<(), Box<dyn std::error::Error>> {
-        self.rendered
-            .lock()
-            .unwrap()
-            .push(map.schema().name.to_string());
-        Ok(())
     }
 }
 

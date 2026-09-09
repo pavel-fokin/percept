@@ -128,6 +128,11 @@ pub enum Payload {
     /// dialogue. Caused by the turn's anchor, the same event a thought
     /// or a reply from that round trip is caused by.
     ModelCalled(Usage),
+    /// A coding client's session opened against this project - always
+    /// `System`. The marker a later `SessionStart` hook call finds to
+    /// learn when this source last opened the project here, so it can
+    /// cut the log to what changed since then.
+    SessionStarted,
 }
 
 impl Payload {
@@ -145,7 +150,8 @@ impl Payload {
             | Self::NodeRemoved { .. }
             | Self::EdgeAdded { .. }
             | Self::EdgeRemoved { .. }
-            | Self::ModelCalled(..) => None,
+            | Self::ModelCalled(..)
+            | Self::SessionStarted => None,
         }
     }
 }
@@ -165,6 +171,7 @@ pub enum EventKind {
     EdgeAdded,
     EdgeRemoved,
     ModelCalled,
+    SessionStarted,
 }
 
 /// One recorded fact in the conversation log. Append-only: a committed
@@ -270,6 +277,13 @@ impl Event {
         )
     }
 
+    /// A `session.started` event - always percept recording that a
+    /// coding client opened a session against this project, never the
+    /// model's own words.
+    pub fn session_started(source: Source) -> Self {
+        Self::new(Actor::System, source, None, Payload::SessionStarted)
+    }
+
     /// Rebuilds an Event from stored fields - the persistence boundary,
     /// where `id` and `created_at` come from storage rather than being
     /// minted fresh.
@@ -326,6 +340,7 @@ impl Event {
             Payload::EdgeAdded { .. } => EventKind::EdgeAdded,
             Payload::EdgeRemoved { .. } => EventKind::EdgeRemoved,
             Payload::ModelCalled(..) => EventKind::ModelCalled,
+            Payload::SessionStarted => EventKind::SessionStarted,
         }
     }
 }

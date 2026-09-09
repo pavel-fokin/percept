@@ -210,7 +210,8 @@ pub fn message_of(event: &Event) -> Option<Message> {
         | Payload::NodeRemoved { .. }
         | Payload::EdgeAdded { .. }
         | Payload::EdgeRemoved { .. }
-        | Payload::ModelCalled(..) => None,
+        | Payload::ModelCalled(..)
+        | Payload::SessionStarted => None,
     }
 }
 

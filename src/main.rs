@@ -25,7 +25,7 @@ mod tui;
 use crate::core::Actor;
 use app::{App, Harness, MapShape};
 use cli::{Cli, Command, EventsCommand, MapsCommand};
-use mapstore::{LogMaps, MarkdownFiles};
+use mapstore::LogMaps;
 use providers::{Catalog, ProviderConfig, FIREWORKS_MODEL, OPENAI_MODEL};
 use store::Jsonl;
 use tools::{
@@ -258,7 +258,7 @@ fn hook_run(args: cli::hook::HookArgs) -> Result<serde_json::Value, Box<dyn std:
     };
     let log = open_log(&checkout)?;
     let sessions = data_dir(&checkout)?.join(HOOK_SESSIONS_DIR);
-    cli::hook::run(input, &source, &log, &sessions)
+    cli::hook::run(input, &source, &log, &sessions, &checkout)
 }
 
 /// The checkout `cwd` is in: the first ancestor of it
@@ -487,7 +487,6 @@ fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
 /// and snapshot a turn that changes files needs.
 fn build_app(
     source: crate::core::Source,
-    renderer: Arc<dyn crate::core::MapRenderer>,
     checkout: &Path,
 ) -> Result<App, Box<dyn std::error::Error>> {
     let log = Arc::new(open_log(checkout)?);
@@ -513,7 +512,6 @@ fn build_app(
             log,
             schemas,
             Harness::new(tools, map_shape),
-            renderer,
             source,
         ),
         Toolset::Code => {
@@ -526,7 +524,7 @@ fn build_app(
                 instructions,
                 ..Harness::new(tools, map_shape)
             };
-            App::new(model, catalog, log, schemas, harness, renderer, source)
+            App::new(model, catalog, log, schemas, harness, source)
         }
     }
 }
@@ -538,19 +536,17 @@ async fn headless_turn(
     prompt: String,
     yes: bool,
     source: crate::core::Source,
-    renderer: Arc<dyn crate::core::MapRenderer>,
     checkout: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let app = build_app(source, renderer, checkout)?;
+    let app = build_app(source, checkout)?;
     cli::run_turn(Box::new(app), actor, prompt, yes).await
 }
 
 async fn try_main(
     source: crate::core::Source,
-    renderer: Arc<dyn crate::core::MapRenderer>,
     checkout: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let app = build_app(source, renderer, checkout)?;
+    let app = build_app(source, checkout)?;
 
     let mut terminal = ratatui::init();
     let mouse = match MouseCapture::enable() {
@@ -601,9 +597,6 @@ async fn main() {
         name: CLI_SOURCE_NAME.to_string(),
         path: root.clone(),
     };
-    let renderer: Arc<dyn crate::core::MapRenderer> =
-        Arc::new(MarkdownFiles::new(checkout.join(MAPS_DIR)));
-
     let result = match cli.command {
         // `hook_main` above exits before this match is ever reached.
         Some(Command::Hook(_)) => unreachable!(),
@@ -623,29 +616,21 @@ async fn main() {
                 MapsCommand::List(args) => cli::maps_list(args, &log, &schemas, &root, &checkout),
                 MapsCommand::Show(args) => cli::maps_show(args, &log, &schemas, &root),
                 MapsCommand::AddNode(args) => {
-                    cli::maps_add_node(args, &log, &schemas, &cli_source, renderer.as_ref())
+                    cli::maps_add_node(args, &log, &schemas, &cli_source)
                 }
                 MapsCommand::AddEdge(args) => {
-                    cli::maps_add_edge(args, &log, &schemas, &cli_source, renderer.as_ref())
+                    cli::maps_add_edge(args, &log, &schemas, &cli_source)
                 }
                 MapsCommand::RemoveNode(args) => {
-                    cli::maps_remove_node(args, &log, &schemas, &cli_source, renderer.as_ref())
+                    cli::maps_remove_node(args, &log, &schemas, &cli_source)
                 }
                 MapsCommand::RemoveEdge(args) => {
-                    cli::maps_remove_edge(args, &log, &schemas, &cli_source, renderer.as_ref())
+                    cli::maps_remove_edge(args, &log, &schemas, &cli_source)
                 }
             }
         }),
         Some(Command::Ask(args)) => {
-            headless_turn(
-                Actor::User,
-                args.prompt,
-                args.yes,
-                cli_source,
-                renderer,
-                &checkout,
-            )
-            .await
+            headless_turn(Actor::User, args.prompt, args.yes, cli_source, &checkout).await
         }
         Some(Command::Init(args)) => cli::init::run(args, &checkout),
         Some(Command::Reflect) => {
@@ -654,7 +639,6 @@ async fn main() {
                 REFLECT_PROMPT.to_string(),
                 false,
                 cli_source,
-                renderer,
                 &checkout,
             )
             .await
@@ -665,7 +649,6 @@ async fn main() {
                     name: CODE_SOURCE_NAME.to_string(),
                     path: root,
                 },
-                renderer,
                 &checkout,
             )
             .await

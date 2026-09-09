@@ -113,6 +113,7 @@ fn carries(payload: &Payload, term: &str) -> bool {
             has(map) || has(kind)
         }
         Payload::ModelCalled(usage) => has(&usage.model),
+        Payload::SessionStarted => false,
     }
 }
 

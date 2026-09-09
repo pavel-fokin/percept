@@ -6,10 +6,10 @@ maps.
 
 ## Reading decisions
 
-`.percept/decisions.md` lists questions in the order they were raised,
-grouped under the prompt that raised them, each with the decision that
-settles it now. Options, evidence, and superseded decisions stay in the
-map and are one query away:
+`percept maps show decisions --format md` lists questions in the order
+they were raised, each with the decision that settles it now. Options,
+evidence, and superseded decisions stay in the map and are one query
+away:
 
 ```sh
 percept maps list

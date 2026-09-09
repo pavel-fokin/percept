@@ -10,7 +10,10 @@ use crate::core::Payload;
 
 /// A checkout `run` can discover a root in - a `.percept` marker is
 /// enough, so a test needs no `git init` - plus the sessions directory
-/// and log `run` is given.
+/// and log `run` is given. `run` now loads schemas itself, from this
+/// same root, exactly as production does - decisions and tasks come
+/// built in, free of any file; `with_extra_schema` adds a project one
+/// for a test that needs a map shape the built-ins don't have.
 struct Fixture {
     _temp: TempDir,
     root: PathBuf,
@@ -34,6 +37,17 @@ impl Fixture {
             log: FakeLog::default(),
             _temp: temp,
         }
+    }
+
+    /// Writes `<root>/.percept/schemas/<name>.toml`, so the next
+    /// `session_start` folds a project schema alongside the built-in
+    /// decisions and tasks - the same file `load_schemas` reads in
+    /// production.
+    fn with_extra_schema(self, name: &str, toml: &str) -> Self {
+        let dir = self.root.join(".percept/schemas");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(format!("{name}.toml")), toml).unwrap();
+        self
     }
 
     /// Another project, so a test can tell one checkout's cause from
@@ -60,7 +74,7 @@ impl Fixture {
             name: client.to_string(),
             path: root,
         };
-        run(input, &source, &self.log, &self.sessions)
+        run(input, &source, &self.log, &self.sessions, &checkout)
     }
 
     /// The number of turn state files kept anywhere under
@@ -84,6 +98,25 @@ impl Fixture {
                 .sum()
         }
         count(&self.sessions)
+    }
+
+    /// Fires `SessionStart` for `client` against this fixture's own
+    /// root, returning the `additionalContext` block.
+    fn session_start(&self, client: &str) -> String {
+        let output = self
+            .call(
+                client,
+                json!({
+                    "hook_event_name": "SessionStart",
+                    "cwd": self.root.to_str().unwrap(),
+                    "session_id": "session",
+                }),
+            )
+            .unwrap();
+        output["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .to_string()
     }
 
     /// `prompt_at`, against this fixture's own root.
@@ -151,6 +184,65 @@ impl Fixture {
     fn events(&self) -> Vec<crate::core::Event> {
         self.log.load().unwrap()
     }
+
+    /// Appends a `node.added` event for this fixture's own project,
+    /// `at` a given moment - the moment a "gained since" test needs to
+    /// control - and returns it so a test can point an edge at the
+    /// node it minted.
+    fn seed_node(&self, map: &str, kind: &str, name: &str, at: Timestamp) -> Event {
+        let event = Event::restore(
+            EventId::new(),
+            Actor::User,
+            Source {
+                name: "codex".to_string(),
+                path: self.root.clone(),
+            },
+            None,
+            at,
+            Payload::NodeAdded {
+                map: map.to_string(),
+                node: crate::core::NodeId::new(),
+                kind: kind.to_string(),
+                name: name.to_string(),
+                properties: std::collections::BTreeMap::new(),
+                sources: Vec::new(),
+                seq: 0,
+            },
+        );
+        self.log.append(&event).unwrap();
+        event
+    }
+
+    /// Appends an `edge.added` event resolving `from` against `to`, at
+    /// the same moment as `from` was recorded.
+    fn seed_edge(&self, map: &str, kind: &str, from: &Event, to: &Event) {
+        let from_id = match from.payload() {
+            Payload::NodeAdded { node, .. } => *node,
+            _ => panic!("expected a node.added event"),
+        };
+        let to_id = match to.payload() {
+            Payload::NodeAdded { node, .. } => *node,
+            _ => panic!("expected a node.added event"),
+        };
+        let event = Event::restore(
+            EventId::new(),
+            Actor::User,
+            Source {
+                name: "codex".to_string(),
+                path: self.root.clone(),
+            },
+            None,
+            from.created_at(),
+            Payload::EdgeAdded {
+                map: map.to_string(),
+                kind: kind.to_string(),
+                from: from_id,
+                to: to_id,
+                sources: Vec::new(),
+            },
+        );
+        self.log.append(&event).unwrap();
+    }
 }
 
 fn merge(base: &mut Value, extra: Value) {
@@ -162,6 +254,7 @@ fn merge(base: &mut Value, extra: Value) {
 #[test]
 fn every_hook_event_names_itself_after_deserializing() {
     let cases = [
+        ("SessionStart", json!({"hook_event_name": "SessionStart"})),
         (
             "UserPromptSubmit",
             json!({"hook_event_name": "UserPromptSubmit", "prompt": "hi"}),
@@ -194,6 +287,19 @@ fn every_hook_event_names_itself_after_deserializing() {
 }
 
 #[test]
+fn a_broken_project_schema_does_not_stop_prompt_capture() {
+    // Only `SessionStart` needs schemas at all; a project's own
+    // `.percept/schemas/*.toml` failing to load must not also break
+    // recording an ordinary prompt, which reads no schema.
+    let fixture = Fixture::new().with_extra_schema("broken", "not valid toml");
+
+    let id = fixture.prompt("codex", "session", "", "hello");
+
+    assert_eq!(fixture.events().len(), 1);
+    assert_eq!(fixture.events()[0].id().as_uuid().to_string(), id);
+}
+
+#[test]
 fn prompt_context_names_the_committed_event() {
     let fixture = Fixture::new();
     let id = fixture.prompt("codex", "session", "", "hello");
@@ -203,6 +309,53 @@ fn prompt_context_names_the_committed_event() {
     assert_eq!(events[0].id().as_uuid().to_string(), id);
     assert_eq!(content(&events[0]), "hello");
     assert!(events[0].actor() == Actor::User);
+}
+
+#[test]
+fn a_first_session_here_records_the_marker_and_says_so() {
+    let fixture = Fixture::new();
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("first session here"), "{context:?}");
+    let events = fixture.events();
+    assert_eq!(events.len(), 1);
+    assert!(matches!(events[0].payload(), Payload::SessionStarted));
+    assert_eq!(events[0].actor(), Actor::System);
+}
+
+#[test]
+fn a_returning_session_reports_since_the_previous_one() {
+    let fixture = Fixture::new();
+    fixture.session_start("codex");
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("since your last session here"), "{context:?}");
+    assert!(!context.contains("first session here"), "{context:?}");
+    assert_eq!(fixture.events().len(), 2);
+}
+
+#[test]
+fn a_different_client_or_project_sees_its_own_first_session() {
+    let fixture = Fixture::new();
+    fixture.session_start("codex");
+
+    assert!(fixture.session_start("claude-code").contains("first session here"));
+
+    let other = fixture.other_root();
+    let output = fixture
+        .call(
+            "codex",
+            json!({
+                "hook_event_name": "SessionStart",
+                "cwd": other.to_str().unwrap(),
+                "session_id": "session",
+            }),
+        )
+        .unwrap();
+    let context = output["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(context.contains("first session here"), "{context:?}");
 }
 
 #[test]
@@ -549,4 +702,165 @@ fn malformed_input_reports_an_error_without_blocking() {
     let fixture = Fixture::new();
     let err = fixture.call_raw("codex", "{broken").unwrap_err();
     assert!(!err.to_string().is_empty());
+}
+
+/// A project schema with no `Settlement` - an `ideas` map, say - so a
+/// test can prove the open section is skipped by reading the schema,
+/// never by the map's name.
+const IDEAS_TOML: &str = r#"
+name = "ideas"
+purpose = "loose thoughts worth keeping"
+headlines = ["idea"]
+
+[[nodes]]
+name = "idea"
+gloss = "a loose thought"
+"#;
+
+#[test]
+fn a_first_session_with_history_shows_open_items_but_no_gained_section() {
+    let fixture = Fixture::new();
+    fixture.seed_node("decisions", "question", "why blue?", Timestamp::now());
+    fixture.seed_node("tasks", "task", "ship it", Timestamp::now());
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("open question (1)"), "{context:?}");
+    assert!(context.contains("open task (1)"), "{context:?}");
+    assert!(!context.contains("decisions +"), "{context:?}");
+    assert!(!context.contains("tasks +"), "{context:?}");
+}
+
+#[test]
+fn a_returning_session_reports_counts_and_excludes_older_gains() {
+    let fixture = Fixture::new();
+    fixture.session_start("codex");
+    let since = fixture
+        .events()
+        .into_iter()
+        .find(|event| matches!(event.payload(), Payload::SessionStarted))
+        .unwrap()
+        .created_at();
+
+    fixture.seed_node("decisions", "question", "an older one", since.minus_minutes(60).unwrap());
+    fixture.seed_node(
+        "decisions",
+        "question",
+        "a fresh one",
+        since.minus_minutes(-60).unwrap(),
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("decisions +1"), "{context:?}");
+    assert!(context.contains("tasks +0"), "{context:?}");
+    // The gained line for a question names its kind; the open section's
+    // line for the same node does not, so this pattern only ever comes
+    // from the gained block.
+    assert!(context.contains("question \"a fresh one\""), "{context:?}");
+    assert!(!context.contains("question \"an older one\""), "{context:?}");
+}
+
+#[test]
+fn resolving_an_old_question_does_not_report_it_as_gained() {
+    // `Map::since` would also surface `question` here, since a fresh
+    // `resolves` edge touches it; the gained block compares `added_at`
+    // directly instead, so only the decision itself counts as new.
+    let fixture = Fixture::new();
+    fixture.session_start("codex");
+    let since = fixture
+        .events()
+        .into_iter()
+        .find(|event| matches!(event.payload(), Payload::SessionStarted))
+        .unwrap()
+        .created_at();
+
+    let question = fixture.seed_node(
+        "decisions",
+        "question",
+        "an old question",
+        since.minus_minutes(120).unwrap(),
+    );
+    let decision = fixture.seed_node(
+        "decisions",
+        "decision",
+        "a fresh decision",
+        since.minus_minutes(-30).unwrap(),
+    );
+    fixture.seed_edge("decisions", "resolves", &decision, &question);
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("decisions +1"), "{context:?}");
+    assert!(context.contains("decision \"a fresh decision\""), "{context:?}");
+    assert!(!context.contains("an old question"), "{context:?}");
+}
+
+#[test]
+fn more_than_five_open_items_shows_five_and_a_correct_more_count() {
+    let fixture = Fixture::new();
+    for n in 1..=6 {
+        fixture.seed_node("decisions", "question", &format!("question {n}"), Timestamp::now());
+    }
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("open question (6, showing 5)"), "{context:?}");
+    for n in 1..=5 {
+        assert!(context.contains(&format!("question {n}")), "{context:?}");
+    }
+    assert!(!context.contains("question 6"), "{context:?}");
+    assert!(context.contains("+1 more"), "{context:?}");
+}
+
+#[test]
+fn a_settled_question_s_decision_does_not_itself_count_as_open() {
+    // decisions' headline_kinds is ["question", "decision"], and
+    // nothing ever resolves a decision node itself - only the settled
+    // kind (`settlement.of`, "question" here) can be open, or every
+    // decision misreports as one.
+    let fixture = Fixture::new();
+    let question = fixture.seed_node("decisions", "question", "settled one", Timestamp::now());
+    let decision = fixture.seed_node("decisions", "decision", "the answer", Timestamp::now());
+    fixture.seed_edge("decisions", "resolves", &decision, &question);
+    fixture.seed_node("decisions", "question", "still open", Timestamp::now());
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("open question (1)"), "{context:?}");
+    assert!(context.contains("still open"), "{context:?}");
+    assert!(!context.contains("settled one"), "{context:?}");
+    assert!(!context.contains("the answer"), "{context:?}");
+}
+
+#[test]
+fn a_map_without_settlement_has_no_open_section() {
+    let fixture = Fixture::new().with_extra_schema("ideas", IDEAS_TOML);
+    fixture.seed_node("ideas", "idea", "a loose thought", Timestamp::now());
+    fixture.seed_node("decisions", "question", "settled how?", Timestamp::now());
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("open question (1)"), "{context:?}");
+    assert!(!context.contains("open idea"), "{context:?}");
+}
+
+#[test]
+fn pointer_names_first_open_item_in_schema_fold_order() {
+    let fixture = Fixture::new();
+    fixture.seed_node(
+        "tasks",
+        "task",
+        "an older task",
+        Timestamp::now().minus_minutes(60).unwrap(),
+    );
+    fixture.seed_node("decisions", "question", "a newer question", Timestamp::now());
+
+    let context = fixture.session_start("codex");
+
+    let pointer = context.lines().find(|line| line.starts_with("fragment:")).unwrap();
+    assert!(
+        pointer.contains("percept maps show decisions --around"),
+        "{pointer:?}"
+    );
 }

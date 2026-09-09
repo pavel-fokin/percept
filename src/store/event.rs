@@ -110,10 +110,11 @@ const NODE_REMOVED: &str = "node.removed";
 const EDGE_ADDED: &str = "edge.added";
 const EDGE_REMOVED: &str = "edge.removed";
 const MODEL_CALLED: &str = "model.called";
+const SESSION_STARTED: &str = "session.started";
 
 /// Every `type` the log records, for the error that lists them when a
 /// caller names one that isn't here.
-pub const KINDS: [&str; 9] = [
+pub const KINDS: [&str; 10] = [
     MESSAGE_RECEIVED,
     THOUGHT_RECORDED,
     TOOL_CALLED,
@@ -123,6 +124,7 @@ pub const KINDS: [&str; 9] = [
     EDGE_ADDED,
     EDGE_REMOVED,
     MODEL_CALLED,
+    SESSION_STARTED,
 ];
 
 /// The wire `type` a kind serializes as.
@@ -137,6 +139,7 @@ fn kind(kind: EventKind) -> &'static str {
         EventKind::EdgeAdded => EDGE_ADDED,
         EventKind::EdgeRemoved => EDGE_REMOVED,
         EventKind::ModelCalled => MODEL_CALLED,
+        EventKind::SessionStarted => SESSION_STARTED,
     }
 }
 
@@ -153,6 +156,7 @@ pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
         EDGE_ADDED => Ok(EventKind::EdgeAdded),
         EDGE_REMOVED => Ok(EventKind::EdgeRemoved),
         MODEL_CALLED => Ok(EventKind::ModelCalled),
+        SESSION_STARTED => Ok(EventKind::SessionStarted),
         other => Err(Error::UnknownEventType(other.to_string())),
     }
 }
@@ -406,6 +410,7 @@ impl From<&crate::core::Event> for Event {
                 cached_tokens: usage.cached_tokens,
             })
             .expect("ModelCalledBody always serializes"),
+            Payload::SessionStarted => Value::Object(serde_json::Map::new()),
         };
 
         Self {
@@ -568,6 +573,7 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 cached_tokens: body.cached_tokens,
             }))
         }
+        EventKind::SessionStarted => Ok(Payload::SessionStarted),
     }
 }
 

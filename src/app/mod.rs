@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use context::{Context, Section, View, Window};
 
-use crate::core::{Actor, Event, EventId, EventKind, Map, MapError, Schemas, Source};
+use crate::core::{Actor, Event, EventId, EventKind, MapError, Schemas, Source};
 
 mod context;
 
@@ -41,8 +41,8 @@ pub enum MapShape {
     Tool,
 }
 
-/// What `App` is given besides the model, log, and renderer: the
-/// tools it may call and how the turn around them is run. Built whole
+/// What `App` is given besides the model and log: the tools it may
+/// call and how the turn around them is run. Built whole
 /// in `main`, the only place concrete types are wired.
 pub struct Harness {
     /// The tools the model may call, sent with each request when the
@@ -327,9 +327,6 @@ pub struct App {
     /// The prompt whose snapshot `undo` would restore: the last turn
     /// that took one, cleared once used.
     undo_point: Option<EventId>,
-    /// Rerenders a map after a tool's commits change it - see
-    /// `commit_tool_result`.
-    renderer: Arc<dyn crate::core::MapRenderer>,
     /// The turn now streaming, or None between turns.
     pending: Option<Turn>,
     /// Where the most recent `model.called` landed in `events` - the
@@ -353,7 +350,6 @@ impl App {
         log: Arc<dyn crate::core::EventLog>,
         schemas: Arc<Schemas>,
         harness: Harness,
-        renderer: Arc<dyn crate::core::MapRenderer>,
         source: Source,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let scope = source.scope();
@@ -377,7 +373,6 @@ impl App {
             harness,
             allowed: HashSet::new(),
             undo_point: None,
-            renderer,
             pending: None,
             last_usage,
         })
@@ -463,19 +458,14 @@ impl App {
         // Checked again here, against what the next request will fold,
         // so a mismatch reaches the model as the call's result instead
         // of ending the run at the next `build_request`.
-        let (content, changed) = match self.fits_maps(&commits) {
+        let content = match self.fits_maps(&commits) {
             Ok(()) => {
-                let changed: HashSet<String> = commits
-                    .iter()
-                    .filter_map(|event| crate::core::map_of(event.payload()))
-                    .map(str::to_string)
-                    .collect();
                 for event in commits {
                     self.commit(event)?;
                 }
-                (output.content, changed)
+                output.content
             }
-            Err(err) => (err.to_string(), HashSet::new()),
+            Err(err) => err.to_string(),
         };
         let resulted = Event::tool_resulted(content, self.source.clone(), Some(called_id));
         let resulted_id = resulted.id();
@@ -484,26 +474,6 @@ impl App {
             turn.anchor = resulted_id;
             turn.tool_calls += 1;
         });
-        self.render_changed(&changed)
-    }
-
-    /// Rerenders every map named in `changed`. Runs once `tool.resulted`
-    /// is committed, so a render that fails leaves the log whole: the
-    /// map is in the log, and only its view is stale. Folds from the
-    /// log file, not this transcript, because another writer may have
-    /// appended since startup and the render must not lose what it
-    /// wrote. A tool round that touched no map folds and renders
-    /// nothing.
-    fn render_changed(&self, changed: &HashSet<String>) -> Result<(), Box<dyn std::error::Error>> {
-        if changed.is_empty() {
-            return Ok(());
-        }
-        let events = self.log.load()?;
-        let scope = self.source.scope();
-        for name in changed {
-            let map = Map::fold(self.schemas.find(name)?, &scope, &events)?;
-            self.renderer.render(&map)?;
-        }
         Ok(())
     }
 
@@ -788,15 +758,7 @@ impl AppService for App {
         };
         snapshot.restore(prompt)?;
         self.undo_point = None;
-        // The restore put every rendered map back to before the turn,
-        // while the log still holds what the turn added to them: the
-        // log is the record, so the renders follow it, not the tree.
-        let every_map = self
-            .schemas
-            .folded()
-            .map(|schema| schema.name.clone())
-            .collect();
-        self.render_changed(&every_map)
+        Ok(())
     }
 }
 

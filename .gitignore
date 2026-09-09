@@ -8,6 +8,9 @@
 /percept.jsonl
 /.percept/percept.jsonl
 /.percept/hook-sessions/
+/.percept/decisions.md
+/.percept/tasks.md
+/.percept/ideas.md
 **/__pycache__/
 
 # Experiment run output — regenerate with the run scripts
