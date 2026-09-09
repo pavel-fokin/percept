@@ -18,6 +18,7 @@
 //! held exclusively for the length of one hook call, so two hook calls
 //! for the same turn never race.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, Read};
 use std::path::Path;
@@ -25,7 +26,9 @@ use std::path::Path;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::core::{Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source};
+use crate::core::{
+    registration_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source,
+};
 use crate::shared::Timestamp;
 use crate::store::TurnState;
 
@@ -137,7 +140,7 @@ pub fn run(
     match input.event {
         HookEvent::SessionStart {} => {
             let schemas = crate::mapstore::load_schemas(checkout)?;
-            start_session(source, log, &schemas)
+            start_session(source, log, &schemas, checkout)
         }
         HookEvent::UserPromptSubmit { prompt } => submit_prompt(prompt, source, log, &mut state),
         HookEvent::PostToolUse {
@@ -173,6 +176,7 @@ fn start_session(
     source: &Source,
     log: &dyn EventLog,
     schemas: &Schemas,
+    checkout: &Path,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let events = log.load()?;
     let since = last_session(&events, source);
@@ -190,6 +194,9 @@ fn start_session(
     let mut sections = vec![header];
     if let Some(at) = since {
         sections.push(gained_block(&maps, at));
+    }
+    if let Some(block) = changed_since_recorded_block(&maps, &events, checkout) {
+        sections.push(block);
     }
     let (open_blocks, pointer) = open_blocks_and_pointer(&maps);
     sections.extend(open_blocks);
@@ -252,6 +259,137 @@ fn gained_block(maps: &[Map], since: Timestamp) -> String {
         lines.extend(capped_lines(gained, |node| {
             format!("{} {} {:?}", line_id(map, node), node.kind, node.name)
         }));
+    }
+    lines.join("\n")
+}
+
+/// What every current headline node cites that no longer matches the
+/// working tree - a citation whose file moved on since it was
+/// registered. `None` when nothing changed, so `start_session` omits
+/// the block entirely rather than printing an empty one.
+///
+/// Builds two indexes over `events` once - id to event, and
+/// causation id to the `file.registered` events it caused - so no
+/// node's check re-reads the log: `id_to_event` resolves a node's
+/// `sources` entries, `later_registrations` walks a citation forward
+/// to the newest re-registration of the same file before it is
+/// checked against the tree.
+fn changed_since_recorded_block(maps: &[Map], events: &[Event], checkout: &Path) -> Option<String> {
+    let id_to_event: HashMap<EventId, &Event> = events.iter().map(|event| (event.id(), event)).collect();
+    let mut later_registrations: HashMap<EventId, Vec<&Event>> = HashMap::new();
+    for event in events {
+        if matches!(event.payload(), Payload::FileRegistered { .. }) {
+            if let Some(cause) = event.causation_id() {
+                later_registrations.entry(cause).or_default().push(event);
+            }
+        }
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    for map in maps {
+        for node in map.headlines() {
+            let findings = node_changes(node, &id_to_event, &later_registrations, checkout);
+            if !findings.is_empty() {
+                lines.push(format!("{} cites {}", line_id(map, node), findings.join(", ")));
+            }
+        }
+    }
+
+    if lines.is_empty() {
+        return None;
+    }
+
+    let total = lines.len();
+    let header = if total > LIMIT {
+        format!("changed since recorded ({total})")
+    } else {
+        "changed since recorded".to_string()
+    };
+    let mut block = vec![header];
+    block.extend(lines.into_iter().take(LIMIT));
+    if total > LIMIT {
+        block.push(format!("+{} more", total - LIMIT));
+    }
+    Some(block.join("\n"))
+}
+
+/// `node`'s own `changed`/`gone` findings, one per source that names a
+/// `file.registered` event, checked at its newest re-registration.
+fn node_changes(
+    node: &Node,
+    id_to_event: &HashMap<EventId, &Event>,
+    later_registrations: &HashMap<EventId, Vec<&Event>>,
+    checkout: &Path,
+) -> Vec<String> {
+    node.sources
+        .iter()
+        .filter_map(|source_id| id_to_event.get(source_id).copied())
+        .filter(|event| matches!(event.payload(), Payload::FileRegistered { .. }))
+        .filter_map(|event| {
+            let newest = newest_registration(event, later_registrations);
+            let Payload::FileRegistered { path, lines, excerpt } = newest.payload() else {
+                unreachable!("filtered to file.registered above")
+            };
+            registration_status(checkout, path, excerpt)
+                .map(|status| format!("{} {status}", registration_label(path, *lines)))
+        })
+        .collect()
+}
+
+/// Follows `event` forward through `later_registrations`, each hop the
+/// latest re-registration caused by the one before it, stopping when
+/// none names it as their cause.
+fn newest_registration<'a>(
+    mut event: &'a Event,
+    later_registrations: &HashMap<EventId, Vec<&'a Event>>,
+) -> &'a Event {
+    while let Some(next) = later_registrations
+        .get(&event.id())
+        .and_then(|candidates| candidates.iter().max_by_key(|candidate| candidate.created_at()))
+    {
+        event = next;
+    }
+    event
+}
+
+/// `gone` when `path` under `checkout` is missing, unreadable, or not
+/// valid UTF-8 (treated as binary); `changed` when it no longer
+/// contains `excerpt` as a substring, both sides normalised - `\r\n`
+/// folded to `\n`, each line's trailing whitespace stripped, and the
+/// excerpt's leading and trailing blank lines dropped; `None` when the
+/// excerpt still reads.
+fn registration_status(checkout: &Path, path: &Path, excerpt: &str) -> Option<&'static str> {
+    let text = match std::fs::read(checkout.join(path)) {
+        Ok(bytes) => bytes,
+        Err(_) => return Some("gone"),
+    };
+    let Ok(text) = String::from_utf8(text) else {
+        return Some("gone");
+    };
+
+    if normalize_text(&text).contains(&normalize_excerpt(excerpt)) {
+        None
+    } else {
+        Some("changed")
+    }
+}
+
+/// Every line with its trailing whitespace stripped, rejoined - the
+/// side of the comparison read fresh from the tree.
+fn normalize_text(text: &str) -> String {
+    text.lines().map(|line| line.trim_end()).collect::<Vec<_>>().join("\n")
+}
+
+/// `normalize_text`, plus the excerpt's own leading and trailing blank
+/// lines dropped, so a registration whose stored excerpt padded its
+/// range with context still matches.
+fn normalize_excerpt(excerpt: &str) -> String {
+    let mut lines: Vec<&str> = excerpt.lines().map(|line| line.trim_end()).collect();
+    while lines.first().is_some_and(|line| line.is_empty()) {
+        lines.remove(0);
+    }
+    while lines.last().is_some_and(|line| line.is_empty()) {
+        lines.pop();
     }
     lines.join("\n")
 }

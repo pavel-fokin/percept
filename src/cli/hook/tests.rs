@@ -243,6 +243,79 @@ impl Fixture {
         );
         self.log.append(&event).unwrap();
     }
+
+    /// Appends a `file.registered` event citing `path` (repo-relative)
+    /// with `excerpt` as its text, `lines` the ranged read or `None`
+    /// for the whole file, `at` the moment it was seen, caused by
+    /// `causation` when this is a re-registration of an earlier one.
+    fn seed_registration(
+        &self,
+        path: &str,
+        lines: Option<(u32, u32)>,
+        excerpt: &str,
+        at: Timestamp,
+        causation: Option<EventId>,
+    ) -> Event {
+        let event = Event::restore(
+            EventId::new(),
+            Actor::Model,
+            Source {
+                name: "codex".to_string(),
+                path: self.root.clone(),
+            },
+            causation,
+            at,
+            Payload::FileRegistered {
+                path: PathBuf::from(path),
+                lines,
+                excerpt: excerpt.to_string(),
+            },
+        );
+        self.log.append(&event).unwrap();
+        event
+    }
+
+    /// `seed_node`, but with `sources` set - the ids a node cites, as a
+    /// `changed since recorded` test needs to point one at a
+    /// registration.
+    fn seed_node_with_sources(
+        &self,
+        map: &str,
+        kind: &str,
+        name: &str,
+        at: Timestamp,
+        sources: Vec<EventId>,
+    ) -> Event {
+        let event = Event::restore(
+            EventId::new(),
+            Actor::User,
+            Source {
+                name: "codex".to_string(),
+                path: self.root.clone(),
+            },
+            None,
+            at,
+            Payload::NodeAdded {
+                map: map.to_string(),
+                node: crate::core::NodeId::new(),
+                kind: kind.to_string(),
+                name: name.to_string(),
+                properties: std::collections::BTreeMap::new(),
+                sources,
+                seq: 0,
+            },
+        );
+        self.log.append(&event).unwrap();
+        event
+    }
+
+    /// Writes `<root>/<path>`, creating any missing parent directories -
+    /// the working tree a `changed since recorded` test checks against.
+    fn write_file(&self, path: &str, content: &str) {
+        let full = self.root.join(path);
+        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
+        std::fs::write(full, content).unwrap();
+    }
 }
 
 fn merge(base: &mut Value, extra: Value) {
@@ -843,6 +916,190 @@ fn a_map_without_settlement_has_no_open_section() {
 
     assert!(context.contains("open question (1)"), "{context:?}");
     assert!(!context.contains("open idea"), "{context:?}");
+}
+
+#[test]
+fn an_unchanged_registration_reports_nothing() {
+    let fixture = Fixture::new();
+    fixture.write_file("src/a.rs", "fn one() {}\nfn two() {}\n");
+    let registration = fixture.seed_registration(
+        "src/a.rs",
+        Some((1, 1)),
+        "fn one() {}",
+        Timestamp::now(),
+        None,
+    );
+    fixture.seed_node_with_sources(
+        "decisions",
+        "question",
+        "why a?",
+        Timestamp::now(),
+        vec![registration.id()],
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(!context.contains("changed since recorded"), "{context:?}");
+}
+
+#[test]
+fn an_edited_range_reports_changed() {
+    let fixture = Fixture::new();
+    fixture.write_file("src/a.rs", "fn one() { edited }\n");
+    let registration = fixture.seed_registration(
+        "src/a.rs",
+        Some((1, 1)),
+        "fn one() {}",
+        Timestamp::now(),
+        None,
+    );
+    fixture.seed_node_with_sources(
+        "decisions",
+        "question",
+        "why a?",
+        Timestamp::now(),
+        vec![registration.id()],
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("changed since recorded"), "{context:?}");
+    assert!(context.contains("src/a.rs:1-1 changed"), "{context:?}");
+}
+
+#[test]
+fn a_deleted_file_reports_gone() {
+    let fixture = Fixture::new();
+    let registration = fixture.seed_registration(
+        "src/missing.rs",
+        None,
+        "fn gone() {}",
+        Timestamp::now(),
+        None,
+    );
+    fixture.seed_node_with_sources(
+        "tasks",
+        "task",
+        "fix it",
+        Timestamp::now(),
+        vec![registration.id()],
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("changed since recorded"), "{context:?}");
+    assert!(context.contains("src/missing.rs gone"), "{context:?}");
+}
+
+#[test]
+fn text_moved_to_other_lines_reports_nothing() {
+    let fixture = Fixture::new();
+    fixture.write_file("src/a.rs", "fn zero() {}\nfn one() {}\n");
+    let registration = fixture.seed_registration(
+        "src/a.rs",
+        Some((5, 5)),
+        "fn one() {}",
+        Timestamp::now(),
+        None,
+    );
+    fixture.seed_node_with_sources(
+        "decisions",
+        "question",
+        "why a?",
+        Timestamp::now(),
+        vec![registration.id()],
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(!context.contains("changed since recorded"), "{context:?}");
+}
+
+#[test]
+fn a_re_registration_replaces_the_one_checked() {
+    let fixture = Fixture::new();
+    fixture.write_file("src/a.rs", "fn two() {}\n");
+    let first = fixture.seed_registration(
+        "src/a.rs",
+        Some((1, 1)),
+        "fn one() {}",
+        Timestamp::now().minus_minutes(10).unwrap(),
+        None,
+    );
+    let second = fixture.seed_registration(
+        "src/a.rs",
+        Some((1, 1)),
+        "fn two() {}",
+        Timestamp::now(),
+        Some(first.id()),
+    );
+    fixture.seed_node_with_sources(
+        "decisions",
+        "question",
+        "why a?",
+        Timestamp::now(),
+        vec![first.id()],
+    );
+    let _ = second;
+
+    let context = fixture.session_start("codex");
+
+    assert!(!context.contains("changed since recorded"), "{context:?}");
+}
+
+#[test]
+fn a_superseded_decisions_registration_is_not_checked() {
+    let fixture = Fixture::new();
+    let registration = fixture.seed_registration(
+        "src/gone.rs",
+        None,
+        "fn gone() {}",
+        Timestamp::now(),
+        None,
+    );
+    let old = fixture.seed_node_with_sources(
+        "decisions",
+        "decision",
+        "old answer",
+        Timestamp::now(),
+        vec![registration.id()],
+    );
+    let new = fixture.seed_node_with_sources(
+        "decisions",
+        "decision",
+        "new answer",
+        Timestamp::now(),
+        Vec::new(),
+    );
+    fixture.seed_edge("decisions", "supersedes", &new, &old);
+
+    let context = fixture.session_start("codex");
+
+    assert!(!context.contains("changed since recorded"), "{context:?}");
+}
+
+#[test]
+fn the_block_is_omitted_when_nothing_changed() {
+    let fixture = Fixture::new();
+    fixture.write_file("src/a.rs", "fn one() {}\n");
+    let registration = fixture.seed_registration(
+        "src/a.rs",
+        None,
+        "fn one() {}",
+        Timestamp::now(),
+        None,
+    );
+    fixture.seed_node_with_sources(
+        "decisions",
+        "question",
+        "why a?",
+        Timestamp::now(),
+        vec![registration.id()],
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(!context.contains("changed since recorded"), "{context:?}");
 }
 
 #[test]
