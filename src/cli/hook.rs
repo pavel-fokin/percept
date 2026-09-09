@@ -25,7 +25,8 @@ use std::path::Path;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::core::{Actor, Event, EventId, EventLog, Source};
+use crate::core::{Actor, Event, EventId, EventLog, Payload, Source};
+use crate::shared::Timestamp;
 use crate::store::TurnState;
 
 /// `percept hook <client>` - `client` names the writer whose turn this
@@ -59,12 +60,13 @@ impl HookInput {
     }
 }
 
-/// The three hook events percept understands, tagged by
+/// The four hook events percept understands, tagged by
 /// `hook_event_name`, each carrying only the fields `run` needs from
 /// it.
 #[derive(Deserialize)]
 #[serde(tag = "hook_event_name")]
 enum HookEvent {
+    SessionStart {},
     UserPromptSubmit {
         prompt: String,
     },
@@ -82,7 +84,7 @@ enum HookEvent {
 /// Every event name `HookEvent` deserialises, in the order `init`
 /// writes their config entries. `hook::tests` proves this list and
 /// `HookEvent::name` cannot drift apart.
-pub const EVENTS: [&str; 3] = ["UserPromptSubmit", "PostToolUse", "Stop"];
+pub const EVENTS: [&str; 4] = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"];
 
 impl HookEvent {
     /// Used only by `hook::tests`, to prove `EVENTS` and this match
@@ -90,6 +92,7 @@ impl HookEvent {
     #[cfg(test)]
     fn name(&self) -> &'static str {
         match self {
+            HookEvent::SessionStart { .. } => "SessionStart",
             HookEvent::UserPromptSubmit { .. } => "UserPromptSubmit",
             HookEvent::PostToolUse { .. } => "PostToolUse",
             HookEvent::Stop { .. } => "Stop",
@@ -128,6 +131,7 @@ pub fn run(
     let mut state = TurnState::open(&dir, &name)?;
 
     match input.event {
+        HookEvent::SessionStart {} => start_session(source, log),
         HookEvent::UserPromptSubmit { prompt } => submit_prompt(prompt, source, log, &mut state),
         HookEvent::PostToolUse {
             tool_name,
@@ -147,6 +151,58 @@ pub fn run(
             output
         }
     }
+}
+
+/// `SessionStart`: finds the previous `session.started` event this
+/// source recorded against this project, if any - what a fragment cuts
+/// the log to since - records a fresh one for the next call to find,
+/// and returns the cut as `additionalContext`. The since line here is
+/// the seam a fuller fragment (what each map gained, what is still
+/// open) extends; this alone already tells the model whether it is
+/// opening the project for the first time.
+fn start_session(source: &Source, log: &dyn EventLog) -> Result<Value, Box<dyn std::error::Error>> {
+    let events = log.load()?;
+    let since = last_session(&events, source);
+
+    log.append(&Event::session_started(source.clone()))?;
+
+    let project = project_name(source);
+    let header = match since {
+        Some(at) => format!("percept · project {project}\nsince your last session here ({at})"),
+        None => format!("percept · project {project}\nfirst session here"),
+    };
+
+    Ok(json!({
+        "hookSpecificOutput": {
+            "hookEventName": "SessionStart",
+            "additionalContext": header,
+        }
+    }))
+}
+
+/// The latest `session.started` event this exact source (client name
+/// and project path) recorded, if any - `None` on a project's first
+/// session with this client.
+fn last_session(events: &[Event], source: &Source) -> Option<Timestamp> {
+    events
+        .iter()
+        .filter(|event| {
+            matches!(event.payload(), Payload::SessionStarted)
+                && event.source().name == source.name
+                && event.source().path == source.path
+        })
+        .map(Event::created_at)
+        .max()
+}
+
+/// `source.path`'s last component, the name a reader knows the project
+/// by - falling back to the whole path on the rare root with none.
+fn project_name(source: &Source) -> String {
+    source
+        .path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| source.path.display().to_string())
 }
 
 /// `UserPromptSubmit`: clears the turn's previous cause before doing

@@ -387,6 +387,27 @@ fn model_called_round_trips_through_json() {
 }
 
 #[test]
+fn session_started_round_trips_through_json() {
+    let original = crate::core::Event::restore(
+        EventId::new(),
+        Actor::System,
+        source("claude-code"),
+        None,
+        Timestamp::now(),
+        Payload::SessionStarted,
+    );
+
+    let json = serde_json::to_string(&Event::from(&original)).unwrap();
+    let wire: Event = serde_json::from_str(&json).unwrap();
+    assert_eq!(wire.kind, "session.started");
+    assert_eq!(wire.actor, "system");
+    let restored = crate::core::Event::try_from(wire).unwrap();
+
+    assert!(restored.actor() == Actor::System);
+    assert!(matches!(restored.payload(), Payload::SessionStarted));
+}
+
+#[test]
 fn node_added_round_trips_through_json() {
     let cited = EventId::new();
     let node = NodeId::new();

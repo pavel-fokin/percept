@@ -86,6 +86,25 @@ impl Fixture {
         count(&self.sessions)
     }
 
+    /// Fires `SessionStart` for `client` against this fixture's own
+    /// root, returning the `additionalContext` block.
+    fn session_start(&self, client: &str) -> String {
+        let output = self
+            .call(
+                client,
+                json!({
+                    "hook_event_name": "SessionStart",
+                    "cwd": self.root.to_str().unwrap(),
+                    "session_id": "session",
+                }),
+            )
+            .unwrap();
+        output["hookSpecificOutput"]["additionalContext"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    }
+
     /// `prompt_at`, against this fixture's own root.
     fn prompt(&self, client: &str, session: &str, turn: &str, text: &str) -> String {
         self.prompt_at(client, &self.root.clone(), session, turn, text)
@@ -162,6 +181,7 @@ fn merge(base: &mut Value, extra: Value) {
 #[test]
 fn every_hook_event_names_itself_after_deserializing() {
     let cases = [
+        ("SessionStart", json!({"hook_event_name": "SessionStart"})),
         (
             "UserPromptSubmit",
             json!({"hook_event_name": "UserPromptSubmit", "prompt": "hi"}),
@@ -203,6 +223,53 @@ fn prompt_context_names_the_committed_event() {
     assert_eq!(events[0].id().as_uuid().to_string(), id);
     assert_eq!(content(&events[0]), "hello");
     assert!(events[0].actor() == Actor::User);
+}
+
+#[test]
+fn a_first_session_here_records_the_marker_and_says_so() {
+    let fixture = Fixture::new();
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("first session here"), "{context:?}");
+    let events = fixture.events();
+    assert_eq!(events.len(), 1);
+    assert!(matches!(events[0].payload(), Payload::SessionStarted));
+    assert_eq!(events[0].actor(), Actor::System);
+}
+
+#[test]
+fn a_returning_session_reports_since_the_previous_one() {
+    let fixture = Fixture::new();
+    fixture.session_start("codex");
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("since your last session here"), "{context:?}");
+    assert!(!context.contains("first session here"), "{context:?}");
+    assert_eq!(fixture.events().len(), 2);
+}
+
+#[test]
+fn a_different_client_or_project_sees_its_own_first_session() {
+    let fixture = Fixture::new();
+    fixture.session_start("codex");
+
+    assert!(fixture.session_start("claude-code").contains("first session here"));
+
+    let other = fixture.other_root();
+    let output = fixture
+        .call(
+            "codex",
+            json!({
+                "hook_event_name": "SessionStart",
+                "cwd": other.to_str().unwrap(),
+                "session_id": "session",
+            }),
+        )
+        .unwrap();
+    let context = output["hookSpecificOutput"]["additionalContext"]
+        .as_str()
+        .unwrap();
+    assert!(context.contains("first session here"), "{context:?}");
 }
 
 #[test]
