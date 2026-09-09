@@ -7,7 +7,7 @@ use crate::core::{NodeRef, Selection};
 use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::mapstore::{encode_fragment, encode_lines, encode_schema, NodeRefArgs};
 
-/// The `read_code` tool: the code map - a codebase's files, the
+/// The `read_code` tool: the code structure - a codebase's files, the
 /// symbols they define, and what imports what - walked fresh from the
 /// working tree on every call, whole or cut to a fragment. Offered
 /// only in the `code` toolset, beside the file tools.
@@ -23,7 +23,7 @@ impl ReadCode {
 
 const NAME: &str = "read_code";
 
-const DESCRIPTION: &str = "Read the code map: which file defines which \
+const DESCRIPTION: &str = "Read the code structure: which file defines which \
     symbol and imports which file or package, walked fresh from the \
     working tree on every call. Whole, or cut to a fragment: around \
     one node to a depth, of some kinds. Prefer this over grep for code \
