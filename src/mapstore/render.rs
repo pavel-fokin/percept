@@ -1,13 +1,10 @@
-//! A map's Markdown, and where it lands on disk. `markdown` is the
-//! pure text, kept separate from `MarkdownFiles` so it is testable
-//! without touching a filesystem. `MarkdownFiles` implements
-//! `core::MapRenderer`.
+//! A map's Markdown: `markdown` renders one map, `catalogue` a
+//! summary of several - the text powering `maps show --format md`
+//! and `maps list --format md`.
 
 use std::fmt::Write as _;
-use std::fs;
-use std::path::PathBuf;
 
-use crate::core::{Actor, EventId, Kind, Map, MapRenderer, Node, Schema};
+use crate::core::{Actor, EventId, Kind, Map, Node, Schema};
 use crate::store::ids;
 
 /// What every rendered map opens with, so a reader who lands on the
@@ -317,29 +314,6 @@ fn marked_name(map: &Map, node: &Node) -> String {
         label.push_str(" (model)");
     }
     label
-}
-
-/// Renders a map to `<dir>/<schema name>.md`, replacing whatever was
-/// there.
-pub struct MarkdownFiles {
-    dir: PathBuf,
-}
-
-impl MarkdownFiles {
-    pub fn new(dir: impl Into<PathBuf>) -> Self {
-        Self { dir: dir.into() }
-    }
-}
-
-impl MapRenderer for MarkdownFiles {
-    fn render(&self, map: &Map) -> Result<(), Box<dyn std::error::Error>> {
-        fs::create_dir_all(&self.dir)?;
-        fs::write(
-            self.dir.join(format!("{}.md", map.schema().name)),
-            markdown(map),
-        )?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]

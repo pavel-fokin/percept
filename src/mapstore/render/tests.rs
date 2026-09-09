@@ -748,16 +748,3 @@ fn the_catalogue_glosses_a_code_package_as_an_external_crate() {
     assert!(text.contains("never one of this project's own modules"));
     assert!(text.contains("\nExample: nothing recorded here yet.\n"));
 }
-
-#[test]
-fn markdown_files_writes_the_map_named_file_in_its_directory_creating_it() {
-    let temp = tempfile::tempdir().unwrap();
-    let dir = temp.path().join("maps");
-    let renderer = MarkdownFiles::new(&dir);
-    let map = Map::empty(decisions());
-
-    renderer.render(&map).unwrap();
-
-    let written = fs::read_to_string(dir.join("decisions.md")).unwrap();
-    assert_eq!(written, markdown(&map));
-}

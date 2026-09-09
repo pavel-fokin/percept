@@ -1,6 +1,6 @@
 use super::*;
 use crate::app::{App, Harness, MapShape};
-use crate::core::testing::{content, schemas, source, FakeLog, FakeRenderer, ROOT};
+use crate::core::testing::{content, schemas, source, FakeLog, ROOT};
 use crate::core::Payload;
 use crate::harness::testing::{FakeCatalog, FakeTool, Scripted};
 use std::path::{Path, PathBuf};
@@ -245,7 +245,6 @@ async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
         log.clone(),
         Arc::new(schemas()),
         Harness::new(tools, MapShape::Prompt),
-        Arc::new(FakeRenderer::default()),
         source("cli"),
     )
     .unwrap();
@@ -290,7 +289,6 @@ async fn a_stream_error_ends_the_turn_but_still_commits_partial_text() {
         log.clone(),
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
-        Arc::new(FakeRenderer::default()),
         source("cli"),
     )
     .unwrap();
@@ -430,7 +428,6 @@ fn since_is_refused_for_the_code_map() {
 #[test]
 fn every_write_verb_refuses_the_code_map() {
     let log = FakeLog::default();
-    let renderer = FakeRenderer::default();
     let target = || MapArgs {
         map: "code".to_string(),
         source: Vec::new(),
@@ -448,7 +445,6 @@ fn every_write_verb_refuses_the_code_map() {
         &log,
         &schemas(),
         &cli_source,
-        &renderer,
     );
     let remove_node = maps_remove_node(
         RemoveNodeArgs {
@@ -459,7 +455,6 @@ fn every_write_verb_refuses_the_code_map() {
         &log,
         &schemas(),
         &cli_source,
-        &renderer,
     );
     let edge_args = || EdgeArgs {
         target: target(),
@@ -467,8 +462,8 @@ fn every_write_verb_refuses_the_code_map() {
         from: "file:src/main.rs".to_string(),
         to: "file:src/app/mod.rs".to_string(),
     };
-    let add_edge = maps_add_edge(edge_args(), &log, &schemas(), &cli_source, &renderer);
-    let remove_edge = maps_remove_edge(edge_args(), &log, &schemas(), &cli_source, &renderer);
+    let add_edge = maps_add_edge(edge_args(), &log, &schemas(), &cli_source);
+    let remove_edge = maps_remove_edge(edge_args(), &log, &schemas(), &cli_source);
 
     for result in [add_node, remove_node, add_edge, remove_edge] {
         let err = result.err().unwrap();
@@ -478,35 +473,8 @@ fn every_write_verb_refuses_the_code_map() {
 }
 
 #[test]
-fn maps_add_node_renders_the_map_it_changed_once() {
-    let log = FakeLog::default();
-    let renderer = FakeRenderer::default();
-
-    maps_add_node(
-        AddNodeArgs {
-            target: MapArgs {
-                map: "decisions".to_string(),
-                source: Vec::new(),
-                actor: Actor::User,
-            },
-            kind: "decision".to_string(),
-            name: "Rust over Go".to_string(),
-            prop: Vec::new(),
-        },
-        &log,
-        &schemas(),
-        &source("cli"),
-        &renderer,
-    )
-    .unwrap();
-
-    assert_eq!(renderer.rendered(), vec!["decisions".to_string()]);
-}
-
-#[test]
 fn a_map_write_commits_as_the_actor_given_and_defaults_to_user() {
     let log = FakeLog::default();
-    let renderer = FakeRenderer::default();
     let cli = Cli::try_parse_from([
         "percept",
         "maps",
@@ -528,7 +496,7 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_user() {
     };
     assert!(args.target.actor == Actor::Model);
 
-    maps_add_node(args, &log, &schemas(), &source("cli"), &renderer).unwrap();
+    maps_add_node(args, &log, &schemas(), &source("cli")).unwrap();
 
     let events = log.load().unwrap();
     assert!(events[0].actor() == Actor::Model);

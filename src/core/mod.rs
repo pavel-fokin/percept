@@ -6,7 +6,6 @@ mod event;
 mod event_log;
 mod map;
 mod map_reader;
-mod render;
 mod search;
 
 #[cfg(test)]
@@ -21,5 +20,4 @@ pub use map::{
     NodeRef, Schema, Schemas, Scope, Selection, Settlement, CODE, DECISION,
 };
 pub use map_reader::MapReader;
-pub use render::MapRenderer;
 pub use search::{EventQuery, EventSearch};

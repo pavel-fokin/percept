@@ -559,16 +559,13 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
 
 /// One map change from the shell: `target`'s cited events resolved and
 /// `mutation` checked, applied, and committed as actor `user` with no
-/// cause, all under `mapstore::commit`'s one lock, then the map
-/// rerendered, folded fresh from the log so another writer's changes
-/// are kept. Returns the payload, for `add-node` to print the minted
-/// id.
+/// cause, all under `mapstore::commit`'s one lock. Returns the
+/// payload, for `add-node` to print the minted id.
 fn write(
     target: MapArgs,
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
-    renderer: &dyn crate::core::MapRenderer,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
     let MapArgs {
@@ -578,7 +575,6 @@ fn write(
     } = target;
     let scope = source.scope();
     let event = mapstore::commit(log, schemas, &map, &scope, source, &cited, actor, mutation)?;
-    renderer.render(&mapstore::fold_map(log, schemas, &map, &scope)?)?;
     Ok(event.payload().clone())
 }
 
@@ -589,9 +585,8 @@ pub fn maps_add_node(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
-    renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let payload = write(args.target, log, schemas, source, renderer, |sources| {
+    let payload = write(args.target, log, schemas, source, |sources| {
         Mutation::AddNode {
             kind: args.kind,
             name: args.name,
@@ -613,13 +608,12 @@ pub fn maps_add_edge(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
-    renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let scope = source.scope();
     let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
     let from = resolve_ref(&map, &args.from)?;
     let to = resolve_ref(&map, &args.to)?;
-    write(args.target, log, schemas, source, renderer, |sources| {
+    write(args.target, log, schemas, source, |sources| {
         Mutation::AddEdge {
             kind: args.kind,
             from,
@@ -636,12 +630,11 @@ pub fn maps_remove_node(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
-    renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let scope = source.scope();
     let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
     let node = resolve_ref(&map, &args.node)?;
-    write(args.target, log, schemas, source, renderer, |sources| {
+    write(args.target, log, schemas, source, |sources| {
         Mutation::RemoveNode {
             node,
             reason: args.reason,
@@ -657,13 +650,12 @@ pub fn maps_remove_edge(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
-    renderer: &dyn crate::core::MapRenderer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let scope = source.scope();
     let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
     let from = resolve_ref(&map, &args.from)?;
     let to = resolve_ref(&map, &args.to)?;
-    write(args.target, log, schemas, source, renderer, |sources| {
+    write(args.target, log, schemas, source, |sources| {
         Mutation::RemoveEdge {
             kind: args.kind,
             from,
