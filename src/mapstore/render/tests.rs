@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::core::testing::{decisions, files, human, node_ref, tasks};
+use crate::core::testing::{decisions, edge_added, files, human, node_added_citing, node_ref, tasks};
 use crate::core::{Actor, EventId, Mutation, REOPENS, SUPERSEDES};
 
 /// Adds a node with one `why` property when `why` is given.
@@ -22,6 +22,26 @@ fn add(
             name: name.to_string(),
             properties,
             sources: sources.to_vec(),
+        },
+        actor,
+    )
+    .unwrap();
+}
+
+/// Changes a node already in `map`, merging `properties` into its own.
+fn change(
+    map: &mut Map,
+    kind: &str,
+    name: &str,
+    properties: BTreeMap<String, String>,
+    actor: Actor,
+) {
+    map.apply(
+        Mutation::ChangeNode {
+            node: node_ref(kind, name),
+            name: None,
+            properties,
+            sources: Vec::new(),
         },
         actor,
     )
@@ -636,30 +656,14 @@ fn an_option_with_no_answers_edge_stays_out_of_the_render() {
 
 #[test]
 fn a_resolves_edge_between_the_wrong_kinds_settles_nothing() {
-    let mut map = Map::empty(decisions());
-    let source = EventId::new();
-    add(
-        &mut map,
-        "option",
-        "gemma4",
-        Some("slower on this hardware"),
-        &[source],
-        Actor::Human(human()),
-    );
-    add(
-        &mut map,
-        "decision",
-        "gemma4 by default",
-        None,
-        &[source],
-        Actor::Human(human()),
-    );
-    link(
-        &mut map,
-        "resolves",
-        ("decision", "gemma4 by default"),
-        ("option", "gemma4"),
-    );
+    // Built from raw events, not `link` (`Map::apply`): a `resolves`
+    // edge to an `option` end would now be refused on write. `replay`
+    // never checks ends, so this shape still folds from history
+    // written before the rule, and the render must still cope with it.
+    let option = node_added_citing(Actor::Human(human()), "option", "gemma4", vec![]);
+    let decision = node_added_citing(Actor::Human(human()), "decision", "gemma4 by default", vec![]);
+    let edge = edge_added("resolves", &decision, &option);
+    let map = folded(&[option, decision, edge]);
 
     assert!(markdown(&map).contains("## d1 \"gemma4 by default\"\n\n- decision d1 \"gemma4 by default\"\n"));
 }
@@ -686,7 +690,7 @@ fn a_map_with_no_question_or_decision_says_so() {
 }
 
 #[test]
-fn open_tasks_render_flat_with_why_and_blockers_then_done() {
+fn open_tasks_render_flat_with_why_and_blockers_then_by_state() {
     let mut map = Map::empty(tasks());
     let (first, second) = (EventId::new(), EventId::new());
     add(
@@ -719,19 +723,15 @@ fn open_tasks_render_flat_with_why_and_blockers_then_done() {
         ("task", "cancellable reply streams"),
         ("task", "cancel a turn without quitting"),
     );
-    add(
+    change(
         &mut map,
-        "outcome",
-        "done in 1f1a9a9",
-        None,
-        &[second],
-        Actor::Human(human()),
-    );
-    link(
-        &mut map,
-        "resolves",
-        ("outcome", "done in 1f1a9a9"),
-        ("task", "send AGENTS.md to a coding turn"),
+        "task",
+        "send AGENTS.md to a coding turn",
+        BTreeMap::from([
+            ("state".to_string(), "done".to_string()),
+            ("outcome".to_string(), "done in 1f1a9a9".to_string()),
+        ]),
+        Actor::Agent,
     );
 
     let expected = format!(
@@ -747,12 +747,50 @@ fn open_tasks_render_flat_with_why_and_blockers_then_done() {
          \n\
          ## done\n\
          - t1 \"send AGENTS.md to a coding turn\" (agent)\n\
-         \x20 outcome o1 \"done in 1f1a9a9\"\n",
+         \x20 outcome: \"done in 1f1a9a9\"\n\
+         \x20 state: \"done\"\n\
+         \x20 why: \"the model never saw the rules\"\n",
         tasks_head(),
         contents(&[
             ("t2", "cancel a turn without quitting", first),
             ("t3", "cancellable reply streams", second),
         ]),
+    );
+
+    assert_eq!(markdown(&map), expected);
+}
+
+#[test]
+fn a_dropped_task_renders_under_dropped_with_its_outcome() {
+    let mut map = Map::empty(tasks());
+    let first = EventId::new();
+    add(
+        &mut map,
+        "task",
+        "rewrite the render in wasm",
+        Some("faster paint"),
+        &[first],
+        Actor::Human(human()),
+    );
+    change(
+        &mut map,
+        "task",
+        "rewrite the render in wasm",
+        BTreeMap::from([
+            ("state".to_string(), "dropped".to_string()),
+            ("outcome".to_string(), "not worth the build complexity".to_string()),
+        ]),
+        Actor::Human(human()),
+    );
+
+    let expected = format!(
+        "{}\n\
+         ## dropped\n\
+         - t1 \"rewrite the render in wasm\"\n\
+         \x20 outcome: \"not worth the build complexity\"\n\
+         \x20 state: \"dropped\"\n\
+         \x20 why: \"faster paint\"\n",
+        tasks_head(),
     );
 
     assert_eq!(markdown(&map), expected);
@@ -831,7 +869,9 @@ fn the_catalogue_gives_each_map_a_section_with_its_kinds_glossed() {
     assert!(text.contains(&decisions().purpose));
     assert!(text.contains("1 nodes, 0 edges.\n"));
     assert!(text.contains("\nNode kinds:\n- `question` - a matter the project had to settle\n"));
-    assert!(text.contains("\nEdge kinds:\n- `answers` - from an option to the question"));
+    assert!(text.contains(
+        "\nEdge kinds:\n- `answers` (option -> question) - from an option to the question"
+    ));
     assert!(text.contains("\nExample node and edge:\n\n    {\"node\":"));
     assert!(text.contains("\"name\":\"Where does the log live?\""));
 }

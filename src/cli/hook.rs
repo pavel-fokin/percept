@@ -233,9 +233,10 @@ recording
       answers question
     EOF
 - A claim that rests on a file cites the text it read: an indented line, cites src/path.rs:10-20, under the node.
-- A decision that changes an earlier one adds a supersedes <id> line under it; never remove a node.
+- A decision that changes an earlier one adds a supersedes <id> line under it; nothing is ever removed from a map.
 - A decision that no longer seems to fit is not yours to rewrite: raise a question with a reopens <id> line under it, and let the user settle it.
 - A node marked disputed carries the human's why: never propose it again; a correction the user agrees is a new decision with a supersedes line.
+- Close a task by changing it, not by adding a node: t4 on its own line, then state \"done\" and outcome \"<commit>: what happened\" indented under it (state \"dropped\" and why for one dropped, state \"open\" to reopen one). A task the user wrote takes only state and outcome from you; its name and why are theirs.
 - Close the session with one line naming what was recorded: Recorded to decisions: q1, d1, o1.";
 
 /// What each folded map gained since `since`: a counts line for every
@@ -246,7 +247,7 @@ recording
 fn gained_block(maps: &[Map], since: Timestamp) -> String {
     let per_map: Vec<Vec<&Node>> = maps
         .iter()
-        .map(|map| map.headlines().filter(|node| node.added_at >= since).collect())
+        .map(|map| map.headlines().filter(|node| node.changed_at >= since).collect())
         .collect();
 
     let counts = maps
@@ -406,24 +407,22 @@ fn normalize(text: &str) -> String {
     lines[start..end].join("\n")
 }
 
-/// One `open {of} (...)` block per settled map that has open items - a
-/// map without a `Settlement` (an `ideas` map, say) is skipped entirely,
-/// never by name, since `Map::open` is empty there - plus the fragment
-/// pointer at the first open item found, walking maps in fold order.
+/// One `open {kind} (...)` block per map that has open items - a map
+/// with neither a `Settlement` nor a headline kind that declares
+/// states (an `ideas` map, say) is skipped entirely, never by name,
+/// since `Map::open` is empty there - plus the fragment pointer at the
+/// first open item found, walking maps in fold order.
 fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
     let mut blocks = Vec::new();
     let mut pointer = None;
 
     for map in maps {
-        let Some(settlement) = map.schema().settlement.as_ref() else {
+        let open: Vec<&Node> = map.open().collect();
+        let Some(first) = open.first() else {
             continue;
         };
-        let open: Vec<&Node> = map.open().collect();
-        if open.is_empty() {
-            continue;
-        }
 
-        let mut lines = vec![block_header(&format!("open {}", settlement.of), open.len())];
+        let mut lines = vec![block_header(&format!("open {}", first.kind), open.len())];
         lines.extend(capped_lines(
             open.iter()
                 .map(|node| {

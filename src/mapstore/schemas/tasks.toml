@@ -1,30 +1,20 @@
-# The tasks map: what is left to do. A task says why it matters, an
-# outcome resolves it - done, or dropped and why - a task blocks the
-# one that must wait for it, and a rewritten task supersedes the old
-# wording, never removes it.
+# The tasks map: what is left to do. A task says why it matters, its
+# state says what became of it - done with its outcome property, or
+# dropped with the reason - a task blocks the one that must wait for
+# it, and a reworded task changes its name in place.
 
 name = "tasks"
 purpose = "what is left to do, why it matters, and what it waits on, so a session picks up the next item without re-deriving it"
 headlines = ["task"]
-settles = { by = "outcome", of = "task" }
 
-[[nodes]]
+[[node]]
 name = "task"
 gloss = "one piece of work left to do, saying why it matters in its `why` property"
 requires = ["why"]
+state = ["open", "done", "dropped"]
 
-[[nodes]]
-name = "outcome"
-gloss = "what became of a task: done with its commit, or dropped with the reason"
-
-[[edges]]
-name = "resolves"
-gloss = "from an outcome to the task it settles"
-
-[[edges]]
+[[edge]]
 name = "blocks"
 gloss = "from a task to the one that must wait for it"
-
-[[edges]]
-name = "supersedes"
-gloss = "from a reworded task to the wording it replaces"
+from = "task"
+to = "task"

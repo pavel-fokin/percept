@@ -207,9 +207,8 @@ pub fn message_of(event: &Event) -> Option<Message> {
         }),
         Payload::ThoughtRecorded { .. }
         | Payload::NodeAdded { .. }
-        | Payload::NodeRemoved { .. }
+        | Payload::NodeChanged { .. }
         | Payload::EdgeAdded { .. }
-        | Payload::EdgeRemoved { .. }
         | Payload::ModelCalled(..)
         | Payload::SessionStarted
         | Payload::FileCited { .. }

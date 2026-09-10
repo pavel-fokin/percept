@@ -129,24 +129,24 @@ pub enum Payload {
         sources: Vec<EventId>,
         seq: u32,
     },
-    /// A node removed from a cognitive map, with why.
-    NodeRemoved {
+    /// A node changed in place: a rename, a property merge, or both -
+    /// how a task is closed, dropped, reopened, or reworded. A decision
+    /// is never corrected this way: it gets a successor with a
+    /// `supersedes` edge. `name` is `Some` only on a rename;
+    /// `properties` are merged into the node's own, last write wins, a
+    /// key present here replacing that key alone; `sources` join the
+    /// node's. The fold clears whatever the human had judged on the
+    /// node, since the text they judged has changed.
+    NodeChanged {
         map: String,
         node: NodeId,
-        reason: String,
+        name: Option<String>,
+        properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
     },
     /// An edge added to a cognitive map. Carries no id of its own -
     /// `kind`, `from`, and `to` identify one.
     EdgeAdded {
-        map: String,
-        kind: String,
-        from: NodeId,
-        to: NodeId,
-        sources: Vec<EventId>,
-    },
-    /// An edge removed from a cognitive map.
-    EdgeRemoved {
         map: String,
         kind: String,
         from: NodeId,
@@ -224,9 +224,8 @@ impl Payload {
             Self::FileCited { excerpt, .. } => Some(excerpt),
             Self::ToolCalled { .. }
             | Self::NodeAdded { .. }
-            | Self::NodeRemoved { .. }
+            | Self::NodeChanged { .. }
             | Self::EdgeAdded { .. }
-            | Self::EdgeRemoved { .. }
             | Self::ModelCalled(..)
             | Self::SessionStarted
             | Self::ClaimConfirmed { .. }
@@ -247,9 +246,8 @@ pub enum EventKind {
     ToolCalled,
     ToolResulted,
     NodeAdded,
-    NodeRemoved,
+    NodeChanged,
     EdgeAdded,
-    EdgeRemoved,
     ModelCalled,
     SessionStarted,
     FileCited,
@@ -268,9 +266,8 @@ impl EventKind {
             Self::ToolCalled => "tool.called",
             Self::ToolResulted => "tool.resulted",
             Self::NodeAdded => "node.added",
-            Self::NodeRemoved => "node.removed",
+            Self::NodeChanged => "node.changed",
             Self::EdgeAdded => "edge.added",
-            Self::EdgeRemoved => "edge.removed",
             Self::ModelCalled => "model.called",
             Self::SessionStarted => "session.started",
             Self::FileCited => "file.cited",
@@ -497,9 +494,8 @@ impl Event {
             Payload::ToolCalled { .. } => EventKind::ToolCalled,
             Payload::ToolResulted { .. } => EventKind::ToolResulted,
             Payload::NodeAdded { .. } => EventKind::NodeAdded,
-            Payload::NodeRemoved { .. } => EventKind::NodeRemoved,
+            Payload::NodeChanged { .. } => EventKind::NodeChanged,
             Payload::EdgeAdded { .. } => EventKind::EdgeAdded,
-            Payload::EdgeRemoved { .. } => EventKind::EdgeRemoved,
             Payload::ModelCalled(..) => EventKind::ModelCalled,
             Payload::SessionStarted => EventKind::SessionStarted,
             Payload::FileCited { .. } => EventKind::FileCited,

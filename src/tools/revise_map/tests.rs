@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::testing::{edge_added, human, node_added, node_added_by, schemas, scope, source, FakeLog};
+use crate::core::testing::{human, node_added_by, node_id, schemas, scope, source, FakeLog};
 use crate::core::{Actor, Event, EventId};
 
 fn tool(events: Vec<Event>) -> ReviseMap {
@@ -51,6 +51,37 @@ fn a_valid_batch_returns_the_payloads_and_content() {
         output.content,
         format!("added option \"Rust\" as {}", node_id.as_uuid())
     );
+}
+
+#[test]
+fn a_change_node_op_applies() {
+    let added = node_added_by(Actor::Agent, "option", "Rust");
+    let id = node_id(&added);
+    let source = added.id();
+    let revise = tool(vec![added]);
+
+    let args = format!(
+        r#"{{"map":"decisions","changes":[{{"op":"change_node","node":{{"kind":"option","name":"Rust"}},"properties":{{"summary":"fast"}},"sources":["{}"]}}]}}"#,
+        source.as_uuid()
+    );
+
+    let output = revise.run(&args).unwrap();
+
+    assert_eq!(output.commits.len(), 1);
+    match &output.commits[0] {
+        Payload::NodeChanged {
+            node,
+            name,
+            properties,
+            ..
+        } => {
+            assert_eq!(*node, id);
+            assert!(name.is_none());
+            assert_eq!(properties["summary"], "fast");
+        }
+        _ => panic!("expected a NodeChanged payload"),
+    }
+    assert_eq!(output.content, "changed option \"Rust\"");
 }
 
 #[test]
@@ -184,72 +215,28 @@ fn a_change_can_reference_a_node_an_earlier_change_just_added() {
 }
 
 #[test]
-fn removing_a_user_written_node_is_refused_and_says_to_supersede() {
-    let revise = tool(vec![node_added("question", "Which language?")]);
+fn a_change_node_op_citing_no_sources_is_refused() {
+    let revise = tool(vec![node_added_by(Actor::Agent, "option", "Rust")]);
 
-    let err = revise
-        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"question","name":"Which language?"},"reason":"wrong"}]}"#)
-        .err()
-        .unwrap()
-        .to_string();
+    let args = r#"{"map":"decisions","changes":[{"op":"change_node","node":{"kind":"option","name":"Rust"},"properties":{"summary":"fast"},"sources":[]}]}"#;
 
-    assert!(err.contains("written by the user"), "{err}");
-    assert!(err.contains("supersedes"), "{err}");
+    let err = revise.run(args).err().expect("refused");
+
+    assert!(err.to_string().contains("cites no sources"), "{err}");
 }
 
 #[test]
-fn removing_a_user_written_edge_is_refused() {
-    let decision = node_added("decision", "Rust");
-    let question = node_added("question", "Which language?");
-    let edge = edge_added("resolves", &decision, &question);
-    let revise = tool(vec![decision, question, edge]);
+fn a_change_node_op_renaming_a_decision_is_refused() {
+    let added = node_added_by(Actor::Agent, "decision", "use axum");
+    let source = added.id();
+    let revise = tool(vec![added]);
 
-    let err = revise
-        .run(r#"{"map":"decisions","changes":[{"op":"remove_edge","kind":"resolves","from":{"kind":"decision","name":"Rust"},"to":{"kind":"question","name":"Which language?"}}]}"#)
-        .err()
-        .unwrap()
-        .to_string();
+    let args = format!(
+        r#"{{"map":"decisions","changes":[{{"op":"change_node","node":{{"kind":"decision","name":"use axum"}},"name":"use actix","sources":["{}"]}}]}}"#,
+        source.as_uuid()
+    );
 
-    assert!(err.contains("written by the user"), "{err}");
-}
+    let err = revise.run(&args).err().expect("refused");
 
-#[test]
-fn removing_a_model_node_that_a_user_edge_touches_is_refused() {
-    let model_node = node_added_by(Actor::Agent, "option", "Rust");
-    let question = node_added("question", "Which language?");
-    let user_edge = edge_added("answers", &model_node, &question);
-    let revise = tool(vec![model_node, question, user_edge]);
-
-    let err = revise
-        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"option","name":"Rust"},"reason":"wrong"}]}"#)
-        .err()
-        .unwrap()
-        .to_string();
-
-    assert!(err.contains("the user wrote the edge"), "{err}");
-}
-
-#[test]
-fn removing_a_model_written_node_is_allowed() {
-    let revise = tool(vec![node_added_by(Actor::Agent, "option", "Go")]);
-
-    let output = revise
-        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"option","name":"Go"},"reason":"wrong"}]}"#)
-        .unwrap();
-
-    assert!(matches!(output.commits[0], Payload::NodeRemoved { .. }));
-}
-
-#[test]
-fn removing_a_decision_is_refused_whoever_wrote_it() {
-    let revise = tool(vec![node_added_by(Actor::Agent, "decision", "Go")]);
-
-    let err = revise
-        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"decision","name":"Go"},"reason":"wrong"}]}"#)
-        .err()
-        .unwrap()
-        .to_string();
-
-    assert!(err.contains("never removed"), "{err}");
-    assert!(err.contains("supersedes"), "{err}");
+    assert!(err.to_string().contains("supersedes"), "{err}");
 }

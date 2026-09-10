@@ -260,12 +260,6 @@ async fn main() {
                 MapsCommand::AddEdge(args) => {
                     cli::maps_add_edge(args, &log, &schemas, &cli_source, me)
                 }
-                MapsCommand::RemoveNode(args) => {
-                    cli::maps_remove_node(args, &log, &schemas, &cli_source, me)
-                }
-                MapsCommand::RemoveEdge(args) => {
-                    cli::maps_remove_edge(args, &log, &schemas, &cli_source, me)
-                }
                 MapsCommand::Record(args) => {
                     cli::maps_record(args, &log, &schemas, &cli_source, &checkout, me)
                 }

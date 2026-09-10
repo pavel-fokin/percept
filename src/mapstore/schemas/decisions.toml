@@ -9,43 +9,55 @@ purpose = "what was asked, what was chosen, and why, so a settled question is no
 headlines = ["question", "decision"]
 settles = { by = "decision", of = "question" }
 
-[[nodes]]
+[[node]]
 name = "question"
 gloss = "a matter the project had to settle"
 
-[[nodes]]
+[[node]]
 name = "option"
 gloss = "an alternative that was weighed and lost, saying why in its `why` property"
 requires = ["why"]
 
-[[nodes]]
+[[node]]
 name = "evidence"
 gloss = "a fact that supports or contradicts an option"
 
-[[nodes]]
+[[node]]
 name = "decision"
 gloss = "the choice that was made, and the grounds for it"
 
-[[edges]]
+[[edge]]
 name = "answers"
 gloss = "from an option to the question it was weighed for"
+from = "option"
+to = "question"
 
-[[edges]]
+[[edge]]
 name = "supports"
 gloss = "from evidence to an option it backs"
+from = "evidence"
+to = "option"
 
-[[edges]]
+[[edge]]
 name = "contradicts"
 gloss = "from evidence to an option it undercuts"
+from = "evidence"
+to = "option"
 
-[[edges]]
+[[edge]]
 name = "resolves"
 gloss = "from a decision to the question it settles"
+from = "decision"
+to = "question"
 
-[[edges]]
+[[edge]]
 name = "supersedes"
 gloss = "from a decision to an earlier one it replaces"
+from = "decision"
+to = "decision"
 
-[[edges]]
+[[edge]]
 name = "reopens"
 gloss = "from a question to a decision it puts in doubt; the decision stands until a new one supersedes it"
+from = "question"
+to = "decision"

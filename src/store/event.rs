@@ -94,16 +94,20 @@ fn is_zero(seq: &u32) -> bool {
     *seq == 0
 }
 
+/// `Payload::NodeChanged` on the wire. `name` is present only on a
+/// rename.
 #[derive(Serialize, Deserialize)]
-struct NodeRemovedBody {
+struct NodeChangedBody {
     map: String,
     node: String,
-    reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    properties: BTreeMap<String, String>,
     sources: Vec<String>,
 }
 
-/// The shared shape of `EdgeAdded` and `EdgeRemoved` - an edge carries
-/// no id of its own, so `kind`, `from`, and `to` are all either needs.
+/// The wire shape of `EdgeAdded` - an edge carries no id of its own,
+/// so `kind`, `from`, and `to` are all either needs.
 #[derive(Serialize, Deserialize)]
 struct EdgeBody {
     map: String,
@@ -177,9 +181,8 @@ const THOUGHT_RECORDED: &str = "thought.recorded";
 const TOOL_CALLED: &str = "tool.called";
 const TOOL_RESULTED: &str = "tool.resulted";
 const NODE_ADDED: &str = "node.added";
-const NODE_REMOVED: &str = "node.removed";
+const NODE_CHANGED: &str = "node.changed";
 const EDGE_ADDED: &str = "edge.added";
-const EDGE_REMOVED: &str = "edge.removed";
 const MODEL_CALLED: &str = "model.called";
 const SESSION_STARTED: &str = "session.started";
 const FILE_CITED: &str = "file.cited";
@@ -189,15 +192,14 @@ const REVIEW_FINISHED: &str = "review.finished";
 
 /// Every `type` the log records, for the error that lists them when a
 /// caller names one that isn't here.
-pub const KINDS: [&str; 14] = [
+pub const KINDS: [&str; 13] = [
     MESSAGE_RECEIVED,
     THOUGHT_RECORDED,
     TOOL_CALLED,
     TOOL_RESULTED,
     NODE_ADDED,
-    NODE_REMOVED,
+    NODE_CHANGED,
     EDGE_ADDED,
-    EDGE_REMOVED,
     MODEL_CALLED,
     SESSION_STARTED,
     FILE_CITED,
@@ -215,9 +217,8 @@ pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
         TOOL_CALLED => Ok(EventKind::ToolCalled),
         TOOL_RESULTED => Ok(EventKind::ToolResulted),
         NODE_ADDED => Ok(EventKind::NodeAdded),
-        NODE_REMOVED => Ok(EventKind::NodeRemoved),
+        NODE_CHANGED => Ok(EventKind::NodeChanged),
         EDGE_ADDED => Ok(EventKind::EdgeAdded),
-        EDGE_REMOVED => Ok(EventKind::EdgeRemoved),
         MODEL_CALLED => Ok(EventKind::ModelCalled),
         SESSION_STARTED => Ok(EventKind::SessionStarted),
         FILE_CITED => Ok(EventKind::FileCited),
@@ -489,26 +490,21 @@ impl From<&crate::core::Event> for Event {
                 seq: *seq,
             })
             .expect("NodeAddedBody always serializes"),
-            Payload::NodeRemoved {
+            Payload::NodeChanged {
                 map,
                 node,
-                reason,
+                name,
+                properties,
                 sources,
-            } => serde_json::to_value(NodeRemovedBody {
+            } => serde_json::to_value(NodeChangedBody {
                 map: map.clone(),
                 node: node.as_uuid().to_string(),
-                reason: reason.clone(),
+                name: name.clone(),
+                properties: properties.clone(),
                 sources: ids(sources),
             })
-            .expect("NodeRemovedBody always serializes"),
+            .expect("NodeChangedBody always serializes"),
             Payload::EdgeAdded {
-                map,
-                kind,
-                from,
-                to,
-                sources,
-            }
-            | Payload::EdgeRemoved {
                 map,
                 kind,
                 from,
@@ -678,38 +674,25 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 seq: body.seq,
             })
         }
-        EventKind::NodeRemoved => {
-            let body: NodeRemovedBody =
+        EventKind::NodeChanged => {
+            let body: NodeChangedBody =
                 serde_json::from_value(payload).map_err(Error::BadPayload)?;
-            Ok(Payload::NodeRemoved {
+            Ok(Payload::NodeChanged {
                 map: body.map,
                 node: parse_node_id(&body.node)?,
-                reason: body.reason,
+                name: body.name,
+                properties: body.properties,
                 sources: parse_event_ids(body.sources)?,
             })
         }
-        kind @ (EventKind::EdgeAdded | EventKind::EdgeRemoved) => {
+        EventKind::EdgeAdded => {
             let body: EdgeBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
-            let (map, kind_name) = (body.map, body.kind);
-            let from = parse_node_id(&body.from)?;
-            let to = parse_node_id(&body.to)?;
-            let sources = parse_event_ids(body.sources)?;
-            Ok(if kind == EventKind::EdgeAdded {
-                Payload::EdgeAdded {
-                    map,
-                    kind: kind_name,
-                    from,
-                    to,
-                    sources,
-                }
-            } else {
-                Payload::EdgeRemoved {
-                    map,
-                    kind: kind_name,
-                    from,
-                    to,
-                    sources,
-                }
+            Ok(Payload::EdgeAdded {
+                map: body.map,
+                kind: body.kind,
+                from: parse_node_id(&body.from)?,
+                to: parse_node_id(&body.to)?,
+                sources: parse_event_ids(body.sources)?,
             })
         }
         EventKind::ModelCalled => {

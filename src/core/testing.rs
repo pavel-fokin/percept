@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::core::{
-    Actor, Event, EventId, EventLog, HumanId, Kind, NodeId, NodeRef, Payload, Schema, Schemas,
-    Scope, Settlement, Source, Usage,
+    Actor, EdgeKind, Event, EventId, EventLog, HumanId, NodeId, NodeKind, NodeRef, Payload,
+    Schema, Schemas, Scope, Settlement, Source, Usage,
 };
 use crate::shared::Timestamp;
 
@@ -277,25 +277,52 @@ pub fn decisions() -> Schema {
                   reopened"
             .to_string(),
         node_kinds: vec![
-            Kind::new("question", "a matter the project had to settle"),
-            Kind::new(
+            NodeKind::new("question", "a matter the project had to settle"),
+            NodeKind::new(
                 "option",
                 "an alternative that was weighed and lost, saying why in its `why` property",
             )
             .requiring("why"),
-            Kind::new("evidence", "a fact that supports or contradicts an option"),
-            Kind::new("decision", "the choice that was made, and the grounds for it"),
+            NodeKind::new("evidence", "a fact that supports or contradicts an option"),
+            NodeKind::new("decision", "the choice that was made, and the grounds for it"),
         ],
         edge_kinds: vec![
-            Kind::new("answers", "from an option to the question it was weighed for"),
-            Kind::new("supports", "from evidence to an option it backs"),
-            Kind::new("contradicts", "from evidence to an option it undercuts"),
-            Kind::new("resolves", "from a decision to the question it settles"),
-            Kind::new("supersedes", "from a decision to an earlier one it replaces"),
-            Kind::new(
+            EdgeKind::new(
+                "answers",
+                "from an option to the question it was weighed for",
+                &["option"],
+                &["question"],
+            ),
+            EdgeKind::new(
+                "supports",
+                "from evidence to an option it backs",
+                &["evidence"],
+                &["option"],
+            ),
+            EdgeKind::new(
+                "contradicts",
+                "from evidence to an option it undercuts",
+                &["evidence"],
+                &["option"],
+            ),
+            EdgeKind::new(
+                "resolves",
+                "from a decision to the question it settles",
+                &["decision"],
+                &["question"],
+            ),
+            EdgeKind::new(
+                "supersedes",
+                "from a decision to an earlier one it replaces",
+                &["decision"],
+                &["decision"],
+            ),
+            EdgeKind::new(
                 "reopens",
                 "from a question to a decision it puts in doubt; the decision stands until a \
                  new one supersedes it",
+                &["question"],
+                &["decision"],
             ),
         ],
         headline_kinds: vec!["question".to_string(), "decision".to_string()],
@@ -315,26 +342,21 @@ pub fn tasks() -> Schema {
                   up the next item without re-deriving it"
             .to_string(),
         node_kinds: vec![
-            Kind::new(
+            NodeKind::new(
                 "task",
                 "one piece of work left to do, saying why it matters in its `why` property",
             )
-            .requiring("why"),
-            Kind::new(
-                "outcome",
-                "what became of a task: done with its commit, or dropped with the reason",
-            ),
+            .requiring("why")
+            .with_states(&["open", "done", "dropped"]),
         ],
-        edge_kinds: vec![
-            Kind::new("resolves", "from an outcome to the task it settles"),
-            Kind::new("blocks", "from a task to the one that must wait for it"),
-            Kind::new("supersedes", "from a reworded task to the wording it replaces"),
-        ],
+        edge_kinds: vec![EdgeKind::new(
+            "blocks",
+            "from a task to the one that must wait for it",
+            &["task"],
+            &["task"],
+        )],
         headline_kinds: vec!["task".to_string()],
-        settlement: Some(Settlement {
-            by: "outcome".to_string(),
-            of: "task".to_string(),
-        }),
+        settlement: None,
     }
 }
 
@@ -354,22 +376,32 @@ pub fn files() -> Schema {
         name: "files".to_string(),
         purpose: "test fixture".to_string(),
         node_kinds: vec![
-            Kind::new("file", "a source file"),
+            NodeKind::new("file", "a source file"),
             // Its default prefix, `f`, collides with `file`'s; `fn`
             // both avoids that and reads as the keyword it names.
-            Kind {
+            NodeKind {
                 prefix: "fn".to_string(),
-                ..Kind::new("function", "a function or method")
+                ..NodeKind::new("function", "a function or method")
             },
-            Kind::new(
+            NodeKind::new(
                 "package",
                 "an external crate a file imports, like `serde_json` - never one of this \
                  project's own modules",
             ),
         ],
         edge_kinds: vec![
-            Kind::new("contains", "from a file to a symbol it defines"),
-            Kind::new("imports", "from a file to what it imports"),
+            EdgeKind::new(
+                "contains",
+                "from a file to a symbol it defines",
+                &["file"],
+                &["function"],
+            ),
+            EdgeKind::new(
+                "imports",
+                "from a file to what it imports",
+                &["file"],
+                &["file", "package"],
+            ),
         ],
         headline_kinds: vec!["file".to_string()],
         settlement: None,

@@ -12,9 +12,9 @@
 
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
-use crate::core::{default_prefix, Kind, Schema, Schemas, Settlement};
+use crate::core::{default_prefix, EdgeKind, NodeKind, Schema, Schemas, Settlement};
 
 const DECISIONS_TOML: &str = include_str!("schemas/decisions.toml");
 const TASKS_TOML: &str = include_str!("schemas/tasks.toml");
@@ -35,10 +35,10 @@ struct SchemaFile {
     #[serde(default)]
     headlines: Vec<String>,
     settles: Option<SettlesFile>,
-    #[serde(default)]
-    nodes: Vec<KindFile>,
-    #[serde(default)]
-    edges: Vec<KindFile>,
+    #[serde(default, rename = "node")]
+    nodes: Vec<NodeFile>,
+    #[serde(default, rename = "edge")]
+    edges: Vec<EdgeFile>,
 }
 
 #[derive(Deserialize)]
@@ -50,15 +50,48 @@ struct SettlesFile {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct KindFile {
+struct NodeFile {
     name: String,
     gloss: String,
     #[serde(default)]
     requires: Vec<String>,
     /// A node kind's short id prefix, `d` for `decision` - optional,
-    /// since `default_prefix` covers the common case. Ignored on an
-    /// edge kind, which is never referenced by a short id.
+    /// since `default_prefix` covers the common case.
     prefix: Option<String>,
+    /// The values a `state` property on a node of this kind may hold,
+    /// first listed the open one - `state = ["open", "done",
+    /// "dropped"]`. Empty when the kind carries no state.
+    #[serde(default, rename = "state")]
+    states: Vec<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EdgeFile {
+    name: String,
+    gloss: String,
+    #[serde(deserialize_with = "one_or_many")]
+    from: Vec<String>,
+    #[serde(deserialize_with = "one_or_many")]
+    to: Vec<String>,
+}
+
+/// An edge end as TOML may write it: one node kind's name, or a list of
+/// several - `from = "decision"` or `to = ["function", "type"]`.
+fn one_or_many<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match OneOrMany::deserialize(deserializer)? {
+        OneOrMany::One(name) => vec![name],
+        OneOrMany::Many(names) => names,
+    })
 }
 
 /// Every schema `project` has: `decisions` and `tasks`, each replaced
@@ -124,10 +157,17 @@ fn check_extends(
     stem: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for kind in &built_in.node_kinds {
-        if project.node_kind(&kind.name).is_none() {
+        let Some(project_kind) = project.node_kind(&kind.name) else {
             return Err(format!(
                 "{stem}.toml: drops node kind {:?}, which the built-in {:?} declares",
                 kind.name, built_in.name
+            )
+            .into());
+        };
+        if project_kind.states != kind.states {
+            return Err(format!(
+                "{stem}.toml: changes node kind {:?}'s states from {:?} to {:?}",
+                kind.name, kind.states, project_kind.states
             )
             .into());
         }
@@ -174,21 +214,79 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
         return Err(format!("{stem}.toml: declares no node kinds").into());
     }
 
-    check_kinds(stem, "nodes", &file.nodes)?;
-    check_kinds(stem, "edges", &file.edges)?;
-
-    let as_kind = |file: KindFile| {
-        let prefix = file.prefix.unwrap_or_else(|| default_prefix(&file.name));
-        Kind {
-            prefix,
-            name: file.name,
-            gloss: file.gloss,
-            requires: file.requires,
+    check_names_and_glosses(
+        stem,
+        "node",
+        file.nodes.iter().map(|n| (n.name.as_str(), n.gloss.as_str())),
+    )?;
+    check_names_and_glosses(
+        stem,
+        "edge",
+        file.edges.iter().map(|e| (e.name.as_str(), e.gloss.as_str())),
+    )?;
+    for node in &file.nodes {
+        if node.requires.iter().any(|property| property.trim().is_empty()) {
+            return Err(format!(
+                "{stem}.toml: node kind {:?} requires a blank property",
+                node.name
+            )
+            .into());
         }
-    };
-    let node_kinds: Vec<Kind> = file.nodes.into_iter().map(as_kind).collect();
+        if !node.states.is_empty() {
+            if node.states.len() < 2 {
+                return Err(format!(
+                    "{stem}.toml: node kind {:?} declares fewer than two states",
+                    node.name
+                )
+                .into());
+            }
+            if node.states.iter().any(|state| state.trim().is_empty()) {
+                return Err(format!(
+                    "{stem}.toml: node kind {:?} declares a blank state",
+                    node.name
+                )
+                .into());
+            }
+            if let Some(state) = repeated(node.states.iter().map(String::as_str)) {
+                return Err(format!(
+                    "{stem}.toml: node kind {:?} declares the state {state:?} twice",
+                    node.name
+                )
+                .into());
+            }
+        }
+    }
+
+    let node_kinds: Vec<NodeKind> = file
+        .nodes
+        .into_iter()
+        .map(|node| {
+            let prefix = node.prefix.unwrap_or_else(|| default_prefix(&node.name));
+            NodeKind {
+                prefix,
+                name: node.name,
+                gloss: node.gloss,
+                requires: node.requires,
+                states: node.states,
+            }
+        })
+        .collect();
     check_prefixes(stem, &node_kinds)?;
-    let edge_kinds: Vec<Kind> = file.edges.into_iter().map(as_kind).collect();
+
+    let edge_kinds: Vec<EdgeKind> = file
+        .edges
+        .into_iter()
+        .map(|edge| {
+            check_edge_end(stem, &edge.name, "from", &edge.from, &node_kinds)?;
+            check_edge_end(stem, &edge.name, "to", &edge.to, &node_kinds)?;
+            Ok(EdgeKind {
+                name: edge.name,
+                gloss: edge.gloss,
+                from: edge.from,
+                to: edge.to,
+            })
+        })
+        .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
 
     let mut schema = Schema {
         name: file.name,
@@ -228,34 +326,50 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
 }
 
 /// Refuses a blank kind name, a name repeated within `kinds`, or a
-/// blank gloss or `requires` entry - `group` names the TOML array
-/// (`nodes` or `edges`) in the error.
-fn check_kinds(
+/// blank gloss - `group` names the kind (`node` or `edge`) in the
+/// error.
+fn check_names_and_glosses<'a>(
     stem: &str,
     group: &str,
-    kinds: &[KindFile],
+    kinds: impl Iterator<Item = (&'a str, &'a str)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    for kind in kinds {
-        if kind.name.trim().is_empty() {
+    let mut names: Vec<&str> = Vec::new();
+    for (name, gloss) in kinds {
+        if name.trim().is_empty() {
             return Err(format!("{stem}.toml: a {group} kind's name must not be blank").into());
         }
-        if kind.gloss.trim().is_empty() {
-            return Err(format!(
-                "{stem}.toml: {group} kind {:?} has a blank gloss",
-                kind.name
-            )
-            .into());
+        if gloss.trim().is_empty() {
+            return Err(format!("{stem}.toml: {group} kind {name:?} has a blank gloss").into());
         }
-        if kind.requires.iter().any(|property| property.trim().is_empty()) {
-            return Err(format!(
-                "{stem}.toml: {group} kind {:?} requires a blank property",
-                kind.name
-            )
-            .into());
-        }
+        names.push(name);
     }
-    if let Some(name) = repeated(kinds.iter().map(|kind| kind.name.as_str())) {
+    if let Some(name) = repeated(names.into_iter()) {
         return Err(format!("{stem}.toml: {group} declares {name:?} twice").into());
+    }
+    Ok(())
+}
+
+/// Refuses `end` (`from` or `to`) of edge kind `name` when it is empty
+/// or names a node kind `node_kinds` does not declare - a blank name
+/// falls in the latter, since no declared kind is blank.
+fn check_edge_end(
+    stem: &str,
+    edge: &str,
+    end: &str,
+    kinds: &[String],
+    node_kinds: &[NodeKind],
+) -> Result<(), Box<dyn std::error::Error>> {
+    if kinds.is_empty() {
+        return Err(format!("{stem}.toml: edge kind {edge:?}'s {end} names no node kind").into());
+    }
+    for kind in kinds {
+        if !node_kinds.iter().any(|node| node.name == *kind) {
+            return Err(format!(
+                "{stem}.toml: edge kind {edge:?}'s {end} names {kind:?}, which is not a \
+                 declared node kind"
+            )
+            .into());
+        }
     }
     Ok(())
 }
@@ -263,8 +377,8 @@ fn check_kinds(
 /// Refuses two node kinds - explicit or defaulted - that resolve to
 /// the same short id prefix: a schema load error, so the collision is
 /// caught once, not the first time two nodes' short ids clash.
-fn check_prefixes(stem: &str, node_kinds: &[Kind]) -> Result<(), Box<dyn std::error::Error>> {
-    let mut seen: Vec<&Kind> = Vec::new();
+fn check_prefixes(stem: &str, node_kinds: &[NodeKind]) -> Result<(), Box<dyn std::error::Error>> {
+    let mut seen: Vec<&NodeKind> = Vec::new();
     for kind in node_kinds {
         if let Some(other) = seen.iter().find(|other| other.prefix == kind.prefix) {
             return Err(format!(

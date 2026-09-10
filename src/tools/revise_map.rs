@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::core::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Schemas, Scope, DECISION};
+use crate::core::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Schemas, Scope};
 use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::mapstore::{NodeRefArgs, Snapshot};
 
@@ -41,9 +41,12 @@ const DESCRIPTION: &str = "Record into a named map what you have judged \
     even when what you are recording is in front of you. Read the map \
     first, from the conversation or with read_map, and do not add a \
     node that is already there; a node is named by its kind and name, \
-    not by an id you choose. Correct a decision by adding the new one \
-    with a supersedes edge to the old, not by removing the old: a node \
-    the user wrote cannot be removed by you at all.";
+    not by an id you choose. Nothing is ever removed from a map. A \
+    wrong node is changed in place with change_node; a decision is \
+    corrected by adding the new one with a supersedes edge to the old, \
+    never reworded; a task is dropped by setting its state to \
+    \"dropped\". A node the user wrote may have its state or outcome \
+    changed by you, but nothing else.";
 
 /// JSON Schema for `run`'s `arguments`. A string, not a `Value` - the
 /// domain's `ToolSpec` is serde-free, so the provider parses this. The
@@ -74,9 +77,9 @@ const PARAMETERS: &str = r#"{
           {
             "type": "object",
             "properties": {
-              "op": {"const": "remove_node"},
+              "op": {"const": "change_node"},
               "node": {
-                "description": "the node to remove: {kind, name}, or the short id its map shows it as, e.g. d41",
+                "description": "the node to change: {kind, name}, or the short id its map shows it as, e.g. d41",
                 "oneOf": [
                   {
                     "type": "object",
@@ -87,50 +90,17 @@ const PARAMETERS: &str = r#"{
                   {"type": "string"}
                 ]
               },
-              "reason": {"type": "string"},
+              "name": {"type": "string", "description": "a rename, if any"},
+              "properties": {"type": "object", "additionalProperties": {"type": "string"}, "description": "merged into the node's own; a key given here replaces that key alone"},
               "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"}
             },
-            "required": ["op", "node", "reason"],
+            "required": ["op", "node"],
             "additionalProperties": false
           },
           {
             "type": "object",
             "properties": {
               "op": {"const": "add_edge"},
-              "kind": {"type": "string"},
-              "from": {
-                "description": "{kind, name}, or the short id its map shows it as, e.g. d41",
-                "oneOf": [
-                  {
-                    "type": "object",
-                    "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
-                    "required": ["kind", "name"],
-                    "additionalProperties": false
-                  },
-                  {"type": "string"}
-                ]
-              },
-              "to": {
-                "description": "{kind, name}, or the short id its map shows it as, e.g. d41",
-                "oneOf": [
-                  {
-                    "type": "object",
-                    "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
-                    "required": ["kind", "name"],
-                    "additionalProperties": false
-                  },
-                  {"type": "string"}
-                ]
-              },
-              "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"}
-            },
-            "required": ["op", "kind", "from", "to"],
-            "additionalProperties": false
-          },
-          {
-            "type": "object",
-            "properties": {
-              "op": {"const": "remove_edge"},
               "kind": {"type": "string"},
               "from": {
                 "description": "{kind, name}, or the short id its map shows it as, e.g. d41",
@@ -183,20 +153,15 @@ enum ChangeArgs {
         #[serde(default)]
         sources: Vec<String>,
     },
-    RemoveNode {
+    ChangeNode {
         node: NodeRefArgs,
-        reason: String,
+        name: Option<String>,
+        #[serde(default)]
+        properties: BTreeMap<String, String>,
         #[serde(default)]
         sources: Vec<String>,
     },
     AddEdge {
-        kind: String,
-        from: NodeRefArgs,
-        to: NodeRefArgs,
-        #[serde(default)]
-        sources: Vec<String>,
-    },
-    RemoveEdge {
         kind: String,
         from: NodeRefArgs,
         to: NodeRefArgs,
@@ -263,7 +228,6 @@ fn apply(
     snapshot: &mut Snapshot,
     change: ChangeArgs,
 ) -> Result<(String, Payload), Box<dyn std::error::Error>> {
-    let adding_edge = matches!(change, ChangeArgs::AddEdge { .. });
     let (mutation, line) = match change {
         ChangeArgs::AddNode {
             kind,
@@ -271,16 +235,7 @@ fn apply(
             properties,
             sources,
         } => {
-            // The model is held to the design's rule that a cognitive
-            // commit cites experience; the shell is not, so the check is
-            // here and not in `Map::apply`. An edge joins two cited
-            // nodes and inherits their provenance.
-            if sources.is_empty() {
-                return Err(format!(
-                    "{kind} {name:?} cites no sources; a node needs at least one event id, as search_events returns them"
-                )
-                .into());
-            }
+            cited(&sources, format_args!("{kind} {name:?}"))?;
             let line = format!("added {kind} {name:?}");
             let mutation = Mutation::AddNode {
                 kind,
@@ -290,26 +245,22 @@ fn apply(
             };
             (mutation, line)
         }
-        ChangeArgs::RemoveNode {
+        ChangeArgs::ChangeNode {
             node,
-            reason,
+            name,
+            properties,
             sources,
         } => {
             let node = node_ref(snapshot.map(), node)?;
-            if node.kind == DECISION {
-                return Err(format!(
-                    "{node} is a decision, and a decision is never removed; add the one \
-                     that replaces it with a supersedes edge to this one"
-                )
-                .into());
-            }
-            if let Some(why) = user_guards_node(snapshot.map(), &node) {
-                return Err(why.into());
-            }
-            let line = format!("removed {node}");
-            let mutation = Mutation::RemoveNode {
+            cited(&sources, format_args!("{node}"))?;
+            let line = match &name {
+                Some(new_name) => format!("changed {node} to {new_name:?}"),
+                None => format!("changed {node}"),
+            };
+            let mutation = Mutation::ChangeNode {
                 node,
-                reason,
+                name,
+                properties,
                 sources: snapshot.resolve(&sources)?,
             };
             (mutation, line)
@@ -319,38 +270,16 @@ fn apply(
             from,
             to,
             sources,
-        }
-        | ChangeArgs::RemoveEdge {
-            kind,
-            from,
-            to,
-            sources,
         } => {
             let from = node_ref(snapshot.map(), from)?;
             let to = node_ref(snapshot.map(), to)?;
-            if !adding_edge && user_wrote_edge(snapshot.map(), &kind, &from, &to) {
-                return Err(format!(
-                    "edge {from} {kind} {to} was written by the user and the model may not remove it"
-                )
-                .into());
-            }
             let sources = snapshot.resolve(&sources)?;
-            let verb = if adding_edge { "added" } else { "removed" };
-            let line = format!("{verb} edge {from} {kind} {to}");
-            let mutation = if adding_edge {
-                Mutation::AddEdge {
-                    kind,
-                    from,
-                    to,
-                    sources,
-                }
-            } else {
-                Mutation::RemoveEdge {
-                    kind,
-                    from,
-                    to,
-                    sources,
-                }
+            let line = format!("added edge {from} {kind} {to}");
+            let mutation = Mutation::AddEdge {
+                kind,
+                from,
+                to,
+                sources,
             };
             (mutation, line)
         }
@@ -375,43 +304,18 @@ fn node_ref(map: &Map, args: NodeRefArgs) -> Result<NodeRef, Box<dyn std::error:
     })
 }
 
-/// Why the model may not remove `node`, if the user's marks stand in
-/// the way: the node is the user's, or a user-written edge touches it -
-/// removing a node drops its edges, so that edge guards its ends too.
-/// `None` when the node is free to go, or the map lacks it - `apply`
-/// reports that.
-fn user_guards_node(map: &Map, node: &NodeRef) -> Option<String> {
-    let found = map.find(&node.kind, &node.name)?;
-    if matches!(found.actor, Actor::Human(_)) {
-        return Some(format!(
-            "{node} was written by the user and the model may not remove it; \
-             add the corrected node and a supersedes edge from it to this one instead"
-        ));
+/// The model is held to the design's rule that a cognitive commit
+/// cites experience; the shell is not, so the check is here and not in
+/// `Map::apply`. An edge joins two cited nodes and inherits their
+/// provenance, so only a node's add and change go through this.
+fn cited(sources: &[String], what: std::fmt::Arguments<'_>) -> Result<(), Box<dyn std::error::Error>> {
+    if sources.is_empty() {
+        return Err(format!(
+            "{what} cites no sources; at least one event id is needed, as search_events returns them"
+        )
+        .into());
     }
-    map.edges()
-        .iter()
-        .find(|edge| matches!(edge.actor, Actor::Human(_)) && (edge.from == found.id || edge.to == found.id))
-        .map(|edge| {
-            format!(
-                "{node} cannot be removed by the model: the user wrote the edge {}, \
-                 which removing the node would drop",
-                map.edge_line(edge)
-            )
-        })
-}
-
-/// Whether `map` holds the edge `from kind to` and the user wrote it. An
-/// edge the map lacks is not the user's; `apply` reports it missing.
-fn user_wrote_edge(map: &Map, kind: &str, from: &NodeRef, to: &NodeRef) -> bool {
-    let Some(from) = map.find(&from.kind, &from.name) else {
-        return false;
-    };
-    let Some(to) = map.find(&to.kind, &to.name) else {
-        return false;
-    };
-    map.edges().iter().any(|edge| {
-        edge.kind == kind && edge.from == from.id && edge.to == to.id && matches!(edge.actor, Actor::Human(_))
-    })
+    Ok(())
 }
 
 #[cfg(test)]

@@ -16,7 +16,7 @@ fn default_prefix_is_the_name_s_first_letter_lowercased() {
 
 #[test]
 fn kind_new_defaults_its_prefix() {
-    assert_eq!(Kind::new("evidence", "g").prefix, "e");
+    assert_eq!(NodeKind::new("evidence", "g").prefix, "e");
 }
 
 #[test]
@@ -90,25 +90,22 @@ fn a_question_is_settled_by_the_current_end_of_each_resolvers_chain() {
 }
 
 #[test]
-fn an_outcome_settles_a_task_the_way_a_decision_settles_a_question() {
-    let (t, o, blocker) = (NodeId::new(), NodeId::new(), NodeId::new());
+fn a_task_s_open_list_names_the_ones_it_blocks_on() {
+    let (t, blocker) = (NodeId::new(), NodeId::new());
     let events = [
         node_added("tasks", t, "task", "cancel a turn"),
         node_added("tasks", blocker, "task", "cancellable streams"),
-        node_added("tasks", o, "outcome", "done in 1a2b3c"),
-        edge_added("tasks", RESOLVES, o, t),
         edge_added("tasks", "blocks", blocker, t),
     ];
     let map = Map::fold(tasks(), &scope(), &events).unwrap();
 
     assert_eq!(
-        map.settled_by(t).iter().map(|n| n.id).collect::<Vec<_>>(),
-        vec![o]
-    );
-    assert!(map.settles(o));
-    assert_eq!(
         map.blocked_by(t).iter().map(|n| n.id).collect::<Vec<_>>(),
         vec![blocker]
+    );
+    assert_eq!(
+        map.open().map(|n| n.id).collect::<Vec<_>>(),
+        vec![t, blocker]
     );
 }
 
@@ -242,6 +239,30 @@ fn since_leaves_out_an_edge_older_than_the_instant_between_kept_nodes() {
     assert!(cut.edges().is_empty());
 }
 
+#[test]
+fn since_includes_a_node_changed_after_at() {
+    let t = NodeId::new();
+    let at = Timestamp::now();
+    let earlier = at.minus_minutes(1).unwrap();
+    let events = [
+        created_at(node_added("tasks", t, "task", "cancel a turn"), earlier),
+        created_at(
+            node_changed(
+                "tasks",
+                t,
+                None,
+                BTreeMap::from([("state".to_string(), "done".to_string())]),
+            ),
+            at,
+        ),
+    ];
+    let map = Map::fold(tasks(), &scope(), &events).unwrap();
+
+    let cut = map.since(at);
+
+    assert_eq!(cut.nodes().len(), 1);
+}
+
 fn node_added(map: &str, node: NodeId, kind: &str, name: &str) -> Event {
     // `seq` at its sentinel: these fixtures build a few nodes at most,
     // so `Map::replay`'s positional fallback mints the same numbers a
@@ -267,11 +288,17 @@ fn edge_added(map: &str, kind: &str, from: NodeId, to: NodeId) -> Event {
     })
 }
 
-fn node_removed(map: &str, node: NodeId) -> Event {
-    committed(Payload::NodeRemoved {
+fn node_changed(
+    map: &str,
+    node: NodeId,
+    name: Option<&str>,
+    properties: BTreeMap<String, String>,
+) -> Event {
+    committed(Payload::NodeChanged {
         map: map.to_string(),
         node,
-        reason: "gone".to_string(),
+        name: name.map(str::to_string),
+        properties,
         sources: Vec::new(),
     })
 }
@@ -322,6 +349,25 @@ fn add_edge(kind: &str, from: NodeRef, to: NodeRef) -> Mutation {
         kind: kind.to_string(),
         from,
         to,
+        sources: Vec::new(),
+    }
+}
+
+/// A `task` node with the `why` its kind requires.
+fn add_task(name: &str) -> Mutation {
+    Mutation::AddNode {
+        kind: "task".to_string(),
+        name: name.to_string(),
+        properties: BTreeMap::from([("why".to_string(), "because".to_string())]),
+        sources: Vec::new(),
+    }
+}
+
+fn change_node(kind: &str, name: &str, rename: Option<&str>, properties: BTreeMap<String, String>) -> Mutation {
+    Mutation::ChangeNode {
+        node: node_ref(kind, name),
+        name: rename.map(str::to_string),
+        properties,
         sources: Vec::new(),
     }
 }
@@ -400,34 +446,6 @@ fn a_fold_scoped_to_a_project_skips_a_node_added_under_another_path() {
 
     let all = Map::fold(decisions(), &Scope::All, &events).unwrap();
     assert_eq!(all.nodes().len(), 2);
-}
-
-#[test]
-fn removing_a_node_drops_its_edges() {
-    let (ids, mut events) = rust_over_go();
-    events.push(node_removed("decisions", ids[0]));
-
-    let map = Map::fold(decisions(), &scope(), &events).unwrap();
-
-    assert_eq!(map.nodes().len(), 2);
-    assert!(map.edges().is_empty());
-}
-
-#[test]
-fn removing_an_edge_leaves_its_nodes() {
-    let (ids, mut events) = rust_over_go();
-    events.push(committed(Payload::EdgeRemoved {
-        map: "decisions".to_string(),
-        kind: "resolves".to_string(),
-        from: ids[2],
-        to: ids[0],
-        sources: Vec::new(),
-    }));
-
-    let map = Map::fold(decisions(), &scope(), &events).unwrap();
-
-    assert_eq!(map.nodes().len(), 3);
-    assert!(map.edges().is_empty());
 }
 
 #[test]
@@ -529,27 +547,6 @@ fn an_edge_needs_both_ends_and_is_stated_once() {
 }
 
 #[test]
-fn removing_an_edge_that_is_not_there_fails_the_fold() {
-    let (ids, mut events) = rust_over_go();
-    let stray = committed(Payload::EdgeRemoved {
-        map: "decisions".to_string(),
-        kind: "supports".to_string(),
-        from: ids[1],
-        to: ids[0],
-        sources: Vec::new(),
-    });
-    let stray_id = stray.id();
-    events.push(stray);
-
-    let err = Map::fold(decisions(), &scope(), &events).err().unwrap();
-
-    assert!(matches!(
-        rejected_with(err, stray_id),
-        MapError::NoSuchEdge { .. }
-    ));
-}
-
-#[test]
 fn apply_records_what_a_fold_rebuilds() {
     let mut built = Map::empty(decisions());
     let events: Vec<Event> = vec![
@@ -633,19 +630,6 @@ fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
         )
         .err()
         .unwrap();
-    let no_edge = map
-        .apply(
-            Mutation::RemoveEdge {
-                kind: "supports".to_string(),
-                from: node_ref("option", "Rust"),
-                to: node_ref("option", "Rust"),
-                sources: Vec::new(),
-            },
-            Actor::Human(human()),
-        )
-        .err()
-        .unwrap();
-
     assert!(matches!(unknown, MapError::UnknownNodeKind { .. }));
     assert_eq!(blank, MapError::BlankName);
     assert!(matches!(duplicate, MapError::DuplicateNode { .. }));
@@ -655,42 +639,285 @@ fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
             if node == &node_ref("evidence", "Nope") && suggestions.is_empty()
     ));
     assert_eq!(missing.to_string(), "no evidence \"Nope\" in the map");
-    assert!(matches!(no_edge, MapError::NoSuchEdge { .. }));
     assert_eq!(map.nodes().len(), 1);
     assert!(map.edges().is_empty());
 }
 
 #[test]
-fn apply_removes_a_node_by_name_and_its_edges_with_it() {
-    let mut map = Map::empty(decisions());
-    map.apply(add_node("question", "Which language?"), Actor::Human(human()))
+fn change_merges_one_property_and_keeps_the_rest() {
+    let mut map = Map::empty(tasks());
+    map.apply(add_task("cancel a turn"), Actor::Human(human()))
         .unwrap();
-    map.apply(add_node("decision", "Rust over Go"), Actor::Human(human()))
-        .unwrap();
+
     map.apply(
-        add_edge(
-            "resolves",
-            node_ref("decision", "Rust over Go"),
-            node_ref("question", "Which language?"),
+        change_node(
+            "task",
+            "cancel a turn",
+            None,
+            BTreeMap::from([("state".to_string(), "done".to_string())]),
         ),
         Actor::Human(human()),
     )
     .unwrap();
 
-    let payload = map
+    let node = map.find("task", "cancel a turn").unwrap();
+    assert_eq!(node.properties.get("why").unwrap(), "because");
+    assert_eq!(node.properties.get("state").unwrap(), "done");
+}
+
+#[test]
+fn a_rename_updates_lookup_by_the_new_name_and_frees_the_old() {
+    let mut map = Map::empty(tasks());
+    map.apply(add_task("cancel a turn"), Actor::Human(human()))
+        .unwrap();
+
+    map.apply(
+        change_node("task", "cancel a turn", Some("cancel a turn cleanly"), BTreeMap::new()),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    assert!(map.find("task", "cancel a turn").is_none());
+    assert!(map.find("task", "cancel a turn cleanly").is_some());
+}
+
+#[test]
+fn a_rename_to_a_taken_name_is_refused() {
+    let mut map = Map::empty(tasks());
+    map.apply(add_task("a"), Actor::Human(human())).unwrap();
+    map.apply(add_task("b"), Actor::Human(human())).unwrap();
+
+    let err = map
         .apply(
-            Mutation::RemoveNode {
-                node: node_ref("question", "Which language?"),
-                reason: "answered".to_string(),
+            change_node("task", "a", Some("b"), BTreeMap::new()),
+            Actor::Human(human()),
+        )
+        .err()
+        .unwrap();
+
+    assert_eq!(
+        err,
+        MapError::DuplicateNode {
+            kind: "task".to_string(),
+            name: "b".to_string(),
+        }
+    );
+}
+
+#[test]
+fn a_state_off_the_list_is_refused_on_add_and_on_change() {
+    let mut map = Map::empty(tasks());
+    let states = vec!["open".to_string(), "done".to_string(), "dropped".to_string()];
+
+    let on_add = map
+        .apply(
+            Mutation::AddNode {
+                kind: "task".to_string(),
+                name: "a".to_string(),
+                properties: BTreeMap::from([
+                    ("why".to_string(), "because".to_string()),
+                    ("state".to_string(), "urgent".to_string()),
+                ]),
                 sources: Vec::new(),
             },
             Actor::Human(human()),
         )
+        .err()
+        .unwrap();
+    assert_eq!(
+        on_add,
+        MapError::UnknownState {
+            kind: "task".to_string(),
+            value: "urgent".to_string(),
+            states: states.clone(),
+        }
+    );
+
+    map.apply(add_task("a"), Actor::Human(human())).unwrap();
+    let on_change = map
+        .apply(
+            change_node(
+                "task",
+                "a",
+                None,
+                BTreeMap::from([("state".to_string(), "urgent".to_string())]),
+            ),
+            Actor::Human(human()),
+        )
+        .err()
+        .unwrap();
+    assert_eq!(
+        on_change,
+        MapError::UnknownState {
+            kind: "task".to_string(),
+            value: "urgent".to_string(),
+            states,
+        }
+    );
+}
+
+#[test]
+fn a_state_on_a_kind_with_no_states_is_refused() {
+    let mut map = Map::empty(decisions());
+
+    let err = map
+        .apply(
+            Mutation::AddNode {
+                kind: "option".to_string(),
+                name: "Rust".to_string(),
+                properties: BTreeMap::from([
+                    ("why".to_string(), "because".to_string()),
+                    ("state".to_string(), "open".to_string()),
+                ]),
+                sources: Vec::new(),
+            },
+            Actor::Human(human()),
+        )
+        .err()
         .unwrap();
 
-    assert!(matches!(payload, Payload::NodeRemoved { .. }));
-    assert_eq!(map.nodes().len(), 1);
+    assert_eq!(
+        err,
+        MapError::UnknownState {
+            kind: "option".to_string(),
+            value: "open".to_string(),
+            states: Vec::new(),
+        }
+    );
+}
+
+#[test]
+fn an_agent_changing_a_humans_node_may_set_state_and_outcome_and_is_refused_a_name_or_why() {
+    let mut map = Map::empty(tasks());
+    map.apply(add_task("cancel a turn"), Actor::Human(human()))
+        .unwrap();
+
+    map.apply(
+        change_node(
+            "task",
+            "cancel a turn",
+            None,
+            BTreeMap::from([
+                ("state".to_string(), "done".to_string()),
+                ("outcome".to_string(), "3f2a9c1: done".to_string()),
+            ]),
+        ),
+        Actor::Agent,
+    )
+    .unwrap();
+
+    let renamed = map
+        .apply(
+            change_node("task", "cancel a turn", Some("renamed"), BTreeMap::new()),
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
+    assert!(matches!(renamed, MapError::HumansNode { .. }));
+
+    let other_property = map
+        .apply(
+            change_node(
+                "task",
+                "cancel a turn",
+                None,
+                BTreeMap::from([("why".to_string(), "different".to_string())]),
+            ),
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
+    assert!(matches!(other_property, MapError::HumansNode { .. }));
+}
+
+#[test]
+fn a_human_may_change_anything_on_a_humans_node() {
+    let mut map = Map::empty(tasks());
+    map.apply(add_task("cancel a turn"), Actor::Human(human()))
+        .unwrap();
+
+    map.apply(
+        change_node(
+            "task",
+            "cancel a turn",
+            Some("cancel a turn cleanly"),
+            BTreeMap::from([("why".to_string(), "different".to_string())]),
+        ),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    let node = map.find("task", "cancel a turn cleanly").unwrap();
+    assert_eq!(node.properties.get("why").unwrap(), "different");
+}
+
+#[test]
+fn open_on_the_tasks_fixture_lists_first_state_tasks_only() {
+    let mut map = Map::empty(tasks());
+    map.apply(add_task("a"), Actor::Human(human())).unwrap();
+    map.apply(add_task("b"), Actor::Human(human())).unwrap();
+    map.apply(
+        change_node(
+            "task",
+            "b",
+            None,
+            BTreeMap::from([("state".to_string(), "done".to_string())]),
+        ),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    let names: Vec<&str> = map.open().map(|node| node.name.as_str()).collect();
+    assert_eq!(names, ["a"]);
+}
+
+#[test]
+fn apply_refuses_an_edge_whose_from_node_is_the_wrong_kind() {
+    let mut map = Map::empty(decisions());
+    map.apply(add_node("question", "Which language?"), Actor::Human(human()))
+        .unwrap();
+    map.apply(add_option("Go"), Actor::Human(human())).unwrap();
+
+    let err = map
+        .apply(
+            add_edge(
+                "resolves",
+                node_ref("option", "Go"),
+                node_ref("question", "Which language?"),
+            ),
+            Actor::Human(human()),
+        )
+        .err()
+        .unwrap();
+
+    assert_eq!(
+        err,
+        MapError::WrongEdgeEnd {
+            edge_kind: "resolves".to_string(),
+            end: EdgeEnd::From,
+            allowed: vec!["decision".to_string()],
+            found: "option".to_string(),
+        }
+    );
     assert!(map.edges().is_empty());
+}
+
+#[test]
+fn a_fold_still_accepts_an_edge_between_the_wrong_kinds_from_history() {
+    // `check_edge_ends` runs only from `apply`; `replay`, which `fold`
+    // uses, never calls it, so an edge recorded before its kind
+    // declared ends - or written by a race `apply` did not see - still
+    // folds rather than breaking every read of the map.
+    let (question, option) = (NodeId::new(), NodeId::new());
+    let events = [
+        node_added("decisions", question, "question", "Which language?"),
+        node_added("decisions", option, "option", "Go"),
+        edge_added("decisions", "resolves", option, question),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.edges().len(), 1);
 }
 
 #[test]
@@ -746,7 +973,15 @@ fn a_schema_is_found_by_name() {
 #[test]
 fn every_kind_of_every_schema_carries_a_gloss() {
     for schema in [decisions(), tasks()] {
-        for kind in schema.node_kinds.iter().chain(&schema.edge_kinds) {
+        for kind in &schema.node_kinds {
+            assert!(
+                !kind.gloss.is_empty(),
+                "{}: kind {:?} has no gloss",
+                schema.name,
+                kind.name
+            );
+        }
+        for kind in &schema.edge_kinds {
             assert!(
                 !kind.gloss.is_empty(),
                 "{}: kind {:?} has no gloss",
@@ -791,8 +1026,12 @@ fn keeping_a_kind_the_schema_lacks_is_an_error() {
     assert!(matches!(err, MapError::UnknownNodeKind { .. }));
 }
 
-/// A chain: question <- decision <- evidence, so depth walks one
-/// step at a time and against the edge direction.
+/// A chain: question <- decision, question <- option <- evidence, plus
+/// an unlinked option, so depth walks one step at a time, against the
+/// edge direction, and a genuinely unlinked node stays out at any
+/// depth. `resolves`, `answers`, and `supports` are the only edge
+/// kinds that can build it, since `Map::apply` now refuses an edge
+/// whose ends are not of the kinds its edge kind declares.
 fn chain() -> Map {
     let mut map = Map::empty(decisions());
     map.apply(add_node("question", "Which language?"), Actor::Human(human()))
@@ -802,6 +1041,7 @@ fn chain() -> Map {
     map.apply(add_node("evidence", "Built both"), Actor::Human(human()))
         .unwrap();
     map.apply(add_option("Go"), Actor::Human(human())).unwrap();
+    map.apply(add_option("Java"), Actor::Human(human())).unwrap();
     map.apply(
         add_edge(
             "resolves",
@@ -813,9 +1053,18 @@ fn chain() -> Map {
     .unwrap();
     map.apply(
         add_edge(
+            "answers",
+            node_ref("option", "Go"),
+            node_ref("question", "Which language?"),
+        ),
+        Actor::Human(human()),
+    )
+    .unwrap();
+    map.apply(
+        add_edge(
             "supports",
             node_ref("evidence", "Built both"),
-            node_ref("decision", "Rust over Go"),
+            node_ref("option", "Go"),
         ),
         Actor::Human(human()),
     )
@@ -839,14 +1088,14 @@ fn around_follows_edges_both_ways_one_step_per_depth() {
         .around(&node_ref("question", "Which language?"), 1)
         .unwrap();
     let names: Vec<&str> = one.nodes().iter().map(|n| n.name.as_str()).collect();
-    assert_eq!(names, ["Which language?", "Rust over Go"]);
-    assert_eq!(one.edges().len(), 1);
+    assert_eq!(names, ["Which language?", "Rust over Go", "Go"]);
+    assert_eq!(one.edges().len(), 2);
 
     let two = map
         .around(&node_ref("question", "Which language?"), 2)
         .unwrap();
-    assert_eq!(two.nodes().len(), 3, "the unlinked option stays out");
-    assert_eq!(two.edges().len(), 2);
+    assert_eq!(two.nodes().len(), 4, "the unlinked option stays out");
+    assert_eq!(two.edges().len(), 3);
 }
 
 #[test]
@@ -861,10 +1110,14 @@ fn select_counts_the_whole_and_the_edges_crossing_the_cut() {
 
     let fragment = whole.select(&selection).unwrap();
 
-    assert_eq!(fragment.map().nodes().len(), 2);
+    assert_eq!(fragment.map().nodes().len(), 3);
     assert_eq!(fragment.total_nodes(), nodes);
     assert_eq!(fragment.total_edges(), edges);
-    assert_eq!(fragment.boundary_edges(), 1, "the decision's edge onward");
+    assert_eq!(
+        fragment.boundary_edges(),
+        1,
+        "the option's edge onward to evidence"
+    );
 }
 
 #[test]
@@ -921,7 +1174,7 @@ fn select_walks_around_before_it_keeps_kinds() {
     assert_eq!(
         names,
         ["Built both"],
-        "reached through the decision, then kept alone"
+        "reached through the option, then kept alone"
     );
     assert_eq!(fragment.boundary_edges(), 1);
 }
@@ -1033,31 +1286,6 @@ fn a_short_id_is_its_kind_s_prefix_and_its_mint_order() {
     assert_eq!(map.short_id(go), Some("d2".to_string()));
 }
 
-/// `next_seq_by_kind` tracks a high-water mark per kind, never rolled
-/// back on `NodeRemoved` - a short id is cited in chat, PR comments,
-/// and committed text, so a removed node's number must never come back
-/// under a different node.
-#[test]
-fn a_removed_node_s_number_is_never_reused() {
-    let mut map = Map::empty(decisions());
-    map.apply(add_node("decision", "Go"), Actor::Human(human())).unwrap();
-    map.apply(
-        Mutation::RemoveNode {
-            node: node_ref("decision", "Go"),
-            reason: "reconsidered".to_string(),
-            sources: Vec::new(),
-        },
-        Actor::Human(human()),
-    )
-    .unwrap();
-    map.apply(add_node("decision", "Rust"), Actor::Human(human()))
-        .unwrap();
-
-    let rust = map.find("decision", "Rust").unwrap().id;
-
-    assert_eq!(map.short_id(rust), Some("d2".to_string()));
-}
-
 #[test]
 fn resolve_str_takes_a_short_id_or_a_kind_and_name() {
     let mut map = Map::empty(decisions());
@@ -1146,6 +1374,57 @@ fn a_model_written_node_starts_claimed() {
 
     assert_eq!(map.standing(node), Some(Standing::Claimed));
     assert_eq!(map.dispute(node), None);
+}
+
+#[test]
+fn a_decision_is_not_renamed_in_place_by_anyone() {
+    let mut map = Map::empty(decisions());
+    map.apply(add_node("decision", "use axum"), Actor::Human(human()))
+        .unwrap();
+
+    let err = map
+        .apply(
+            change_node("decision", "use axum", Some("use actix"), BTreeMap::new()),
+            Actor::Human(human()),
+        )
+        .err()
+        .unwrap();
+
+    assert!(matches!(err, MapError::DecisionRenamed { .. }), "{err}");
+}
+
+#[test]
+fn a_change_joins_its_sources_to_the_nodes() {
+    let node = NodeId::new();
+    let cited = EventId::new();
+    let events = [
+        node_added_by(Actor::Agent, "decisions", node, "decision", "Rust"),
+        committed(Payload::NodeChanged {
+            map: "decisions".to_string(),
+            node,
+            name: None,
+            properties: BTreeMap::new(),
+            sources: vec![cited],
+        }),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.node(node).unwrap().sources, vec![cited]);
+}
+
+#[test]
+fn a_change_after_a_confirmation_puts_the_node_back_to_claimed() {
+    let node = NodeId::new();
+    let events = [
+        node_added_by(Actor::Agent, "decisions", node, "decision", "Rust"),
+        claim_confirmed("decisions", node),
+        node_changed("decisions", node, Some("Rust, stable"), BTreeMap::new()),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.standing(node), Some(Standing::Claimed));
 }
 
 #[test]

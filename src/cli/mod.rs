@@ -26,8 +26,8 @@ use std::path::{Path, PathBuf};
 use clap::{Args, Parser, Subcommand};
 
 use crate::core::{
-    cited_label, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeId, NodeRef,
-    Payload, Schemas,
+    cited_label, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, Node, NodeId,
+    NodeRef, Payload, Schemas,
 };
 use crate::mapstore;
 use crate::shared::Timestamp;
@@ -103,12 +103,11 @@ pub enum MapsCommand {
     AddNode(AddNodeArgs),
     /// Add an edge between two nodes already in a map.
     AddEdge(EdgeArgs),
-    /// Remove a node from a map, dropping the edges that touch it.
-    RemoveNode(RemoveNodeArgs),
-    /// Remove an edge from a map.
-    RemoveEdge(EdgeArgs),
-    /// Add several nodes and edges from a document on stdin. Prints one
-    /// line per node, then one per edge, then one per `cites` line.
+    /// Add several nodes and edges from a document on stdin, or change
+    /// one already in the map - a margin line naming a short id, `t4`,
+    /// starts a change block: `state "done"` under it sets a property,
+    /// `name "..."` renames it. Prints one line per node or change,
+    /// then one per edge, then one per `cites` line.
     Record(RecordArgs),
     /// Mark a node's claim confirmed - always the human's own judgment.
     /// Prints the committed event's id.
@@ -209,19 +208,7 @@ pub struct AddNodeArgs {
     prop: Vec<(String, String)>,
 }
 
-#[derive(Args)]
-pub struct RemoveNodeArgs {
-    #[command(flatten)]
-    target: MapArgs,
-    /// `kind:name` of the node to remove, or the short id its map
-    /// shows it as, `d41`.
-    #[arg(long, value_parser = non_blank)]
-    node: String,
-    #[arg(long, value_parser = non_blank)]
-    reason: String,
-}
-
-/// An edge to add or remove - the same three things name it either way.
+/// An edge to add - the same three things name it.
 #[derive(Args)]
 pub struct EdgeArgs {
     #[command(flatten)]
@@ -419,12 +406,18 @@ fn parse_prop(s: &str) -> Result<(String, String), String> {
 /// and that one is the same one a plain `kind:name` reference always
 /// lived with.
 fn resolve_ref(map: &Map, s: &str) -> Result<NodeRef, Box<dyn std::error::Error>> {
-    let id = map.resolve_str(s)?;
-    let node = map.node(id).expect("resolve_str returns a live node's id");
+    let node = resolve_node(map, s)?;
     Ok(NodeRef {
         kind: node.kind.clone(),
         name: node.name.clone(),
     })
+}
+
+/// The node `s` names - see `resolve_ref` - for a caller that needs
+/// more of it than its ref.
+fn resolve_node<'a>(map: &'a Map, s: &str) -> Result<&'a Node, Box<dyn std::error::Error>> {
+    let id = map.resolve_str(s)?;
+    Ok(map.node(id).expect("resolve_str returns a live node's id"))
 }
 
 /// Appends one event built from `args` to `log`. `store` owns the
@@ -744,49 +737,6 @@ pub fn maps_add_edge(
     .map(drop)
 }
 
-/// Removes a node from a map, dropping the edges that touch it.
-pub fn maps_remove_node(
-    args: RemoveNodeArgs,
-    log: &dyn EventLog,
-    schemas: &Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let scope = source.scope();
-    let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
-    let node = resolve_ref(&map, &args.node)?;
-    write(args.target, log, schemas, source, me, |sources| {
-        Mutation::RemoveNode {
-            node,
-            reason: args.reason,
-            sources,
-        }
-    })
-    .map(drop)
-}
-
-/// Removes an edge from a map.
-pub fn maps_remove_edge(
-    args: EdgeArgs,
-    log: &dyn EventLog,
-    schemas: &Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let scope = source.scope();
-    let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
-    let from = resolve_ref(&map, &args.from)?;
-    let to = resolve_ref(&map, &args.to)?;
-    write(args.target, log, schemas, source, me, |sources| {
-        Mutation::RemoveEdge {
-            kind: args.kind,
-            from,
-            to,
-            sources,
-        }
-    })
-    .map(drop)
-}
 
 /// Marks `args.node`'s claim confirmed - always the human's own
 /// judgment, never the model's. Prints the committed event's id.
@@ -838,10 +788,14 @@ struct DocEdge {
     line: usize,
 }
 
-/// One node a document names, with what is declared under it.
+/// One node a document names, with what is declared under it - a fresh
+/// node (`kind` its node kind, `name` its name) or, when `is_change` is
+/// set, a change to one already in the map (`kind` its short id,
+/// `name` unused).
 struct DocNode {
     kind: String,
     name: String,
+    is_change: bool,
     properties: BTreeMap<String, String>,
     edges: Vec<DocEdge>,
     cites: Vec<DocCite>,
@@ -916,10 +870,13 @@ fn split_cite_range(s: &str) -> Result<(String, Option<(u32, u32)>), Box<dyn std
 }
 
 /// Parses `maps record`'s document grammar: a node line at column 0,
-/// `<kind> "<name>"`, owns every indented line under it - a `<key>
-/// "<value>"` property, an `<edge kind> <ref>`, or a `cites
-/// <path>[:<from>-<to>]` - until the next node line or the document's
-/// end. A blank line is ignored; anything else names its line number.
+/// either `<kind> "<name>"`, which adds a node, or a bare short id,
+/// `t4`, which starts a change to the node it names - each owns every
+/// indented line under it - a `<key> "<value>"` property (`name
+/// "<value>"` is a rename, only meaningful under a change), an `<edge
+/// kind> <ref>`, or a `cites <path>[:<from>-<to>]` - until the next
+/// node line or the document's end. A blank line is ignored; anything
+/// else names its line number.
 fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>> {
     let mut nodes: Vec<DocNode> = Vec::new();
     for (i, raw) in text.lines().enumerate() {
@@ -928,13 +885,22 @@ fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>
             continue;
         }
         if !raw.starts_with(char::is_whitespace) {
-            let (kind, rest) = split_first_word(raw)
-                .ok_or_else(|| format!("line {line}: expected `<kind> \"<name>\"`"))?;
-            let name = parse_quoted(rest)
-                .ok_or_else(|| format!("line {line}: expected `<kind> \"<name>\"`"))?;
+            let (word, rest) = match split_first_word(raw) {
+                Some((word, rest)) => (word.to_string(), rest),
+                None => (raw.trim().to_string(), ""),
+            };
+            let (kind, name, is_change) = if rest.is_empty() {
+                (word, String::new(), true)
+            } else {
+                let name = parse_quoted(rest).ok_or_else(|| {
+                    format!("line {line}: expected `<kind> \"<name>\"`, or a short id alone")
+                })?;
+                (word, name, false)
+            };
             nodes.push(DocNode {
-                kind: kind.to_string(),
+                kind,
                 name,
+                is_change,
                 properties: BTreeMap::new(),
                 edges: Vec::new(),
                 cites: Vec::new(),
@@ -1036,13 +1002,17 @@ fn record_document(
         let mut last_of_kind: HashMap<String, NodeId> = HashMap::new();
 
         for (i, node) in nodes.into_iter().enumerate() {
-            let label = format!(
-                "line {}: node {} of {total} ({} {:?})",
-                node.line,
-                i + 1,
-                node.kind,
-                node.name
-            );
+            let label = if node.is_change {
+                format!("line {}: change {} of {total} ({})", node.line, i + 1, node.kind)
+            } else {
+                format!(
+                    "line {}: node {} of {total} ({} {:?})",
+                    node.line,
+                    i + 1,
+                    node.kind,
+                    node.name
+                )
+            };
             let context = |err: Box<dyn std::error::Error>| -> Box<dyn std::error::Error> {
                 format!("{label}: {err}").into()
             };
@@ -1059,24 +1029,42 @@ fn record_document(
                 batch.push(event);
             }
 
-            let mutation = Mutation::AddNode {
-                kind: node.kind.clone(),
-                name: node.name.clone(),
-                properties: node.properties,
-                sources,
+            // Either arm yields the mutation and the kind and name the
+            // node has once it lands, so one tail applies both.
+            let (mutation, kind, name) = if node.is_change {
+                let target = resolve_node(snapshot.map(), &node.kind).map_err(context)?;
+                let (kind, old_name) = (target.kind.clone(), target.name.clone());
+                let mut properties = node.properties;
+                let rename = properties.remove("name");
+                let name = rename.clone().unwrap_or_else(|| old_name.clone());
+                let mutation = Mutation::ChangeNode {
+                    node: NodeRef {
+                        kind: kind.clone(),
+                        name: old_name,
+                    },
+                    name: rename,
+                    properties,
+                    sources,
+                };
+                (mutation, kind, name)
+            } else {
+                let mutation = Mutation::AddNode {
+                    kind: node.kind.clone(),
+                    name: node.name.clone(),
+                    properties: node.properties,
+                    sources,
+                };
+                (mutation, node.kind, node.name)
             };
             let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
-            let node_id = match payload {
-                Payload::NodeAdded { node, .. } => node,
-                _ => unreachable!("AddNode always yields NodeAdded"),
+            let node_id = match &payload {
+                Payload::NodeAdded { node, .. } | Payload::NodeChanged { node, .. } => *node,
+                _ => unreachable!("AddNode and ChangeNode yield a node payload"),
             };
             batch.push(Event::new(actor, batch_source.clone(), None, payload));
-            last_of_kind.insert(node.kind.clone(), node_id);
+            last_of_kind.insert(kind.clone(), node_id);
+            let from_ref = NodeRef { kind, name };
 
-            let from_ref = NodeRef {
-                kind: node.kind.clone(),
-                name: node.name.clone(),
-            };
             for edge in node.edges {
                 let to_id = if snapshot.map().schema().node_kind(&edge.target).is_some() {
                     last_of_kind.get(&edge.target).copied().ok_or_else(|| {
@@ -1127,6 +1115,13 @@ fn record_document(
             Payload::NodeAdded { node, kind, name, .. } => {
                 let short_id = map.short_id(*node).unwrap_or_default();
                 node_lines.push(format!("{short_id} {kind} {}", quote(name)));
+            }
+            Payload::NodeChanged { node, name, .. } => {
+                let short_id = map.short_id(*node).unwrap_or_default();
+                match name {
+                    Some(name) => node_lines.push(format!("{short_id} changed to {}", quote(name))),
+                    None => node_lines.push(format!("{short_id} changed")),
+                }
             }
             Payload::EdgeAdded { kind, from, to, .. } => {
                 let from_short = map.short_id(*from).unwrap_or_default();
