@@ -16,10 +16,15 @@ use serde_json::{json, Map as JsonMap, Value};
 use crate::cli::hook::EVENTS;
 
 /// `percept init <client>` - `client` names the coding client whose
-/// project config to write - `claude-code` or `codex`.
+/// project config to write - `claude-code` or `codex`. `--capture`
+/// adds the tool-use hook, so every tool call and its result land in
+/// the log beside the prompts and replies; without it the log holds
+/// what a claim can cite and none of the files the agent read.
 #[derive(clap::Args)]
 pub struct InitArgs {
     pub client: String,
+    #[arg(long)]
+    pub capture: bool,
 }
 
 /// One client's config: its file relative to the checkout root, and
@@ -61,9 +66,20 @@ pub fn run(args: InitArgs, checkout: &Path) -> Result<(), Box<dyn std::error::Er
             )
         })?;
     let command = format!("percept hook {}", client.name);
+    let events = hook_events(args.capture);
     write_config(checkout, client.path, |root| {
-        merge(root, &command, client.allow)
+        merge(root, &command, &events, client.allow)
     })
+}
+
+/// The hook events `init` writes: every one in `EVENTS` with
+/// `capture`, and all but `PostToolUse` without it.
+fn hook_events(capture: bool) -> Vec<&'static str> {
+    EVENTS
+        .iter()
+        .copied()
+        .filter(|event| capture || *event != "PostToolUse")
+        .collect()
 }
 
 /// Reads `checkout/rel` - an empty object when it doesn't exist -
@@ -110,14 +126,15 @@ fn read_or_empty(path: &Path) -> Result<JsonMap<String, Value>, Box<dyn std::err
     }
 }
 
-/// `root`'s merge: the three hook events, plus `allow`'s patterns under
-/// `permissions.allow` when there are any.
+/// `root`'s merge: a hook entry per event in `events`, plus `allow`'s
+/// patterns under `permissions.allow` when there are any.
 fn merge(
     mut root: JsonMap<String, Value>,
     command: &str,
+    events: &[&str],
     allow: &[&str],
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    merge_hooks(&mut root, command)?;
+    merge_hooks(&mut root, command, events)?;
     if !allow.is_empty() {
         merge_allow(&mut root, allow)?;
     }
@@ -125,19 +142,20 @@ fn merge(
 }
 
 /// Adds `command` under `root["hooks"][event]` for every event in
-/// `EVENTS`, one entry each, skipping an event that already carries a
+/// `events`, one entry each, skipping an event that already carries a
 /// hook entry naming `command`; any other entry under the same event
-/// is kept.
+/// is kept, so an entry `init` no longer writes is never removed.
 fn merge_hooks(
     root: &mut JsonMap<String, Value>,
     command: &str,
+    events: &[&str],
 ) -> Result<(), Box<dyn std::error::Error>> {
     let hooks = root
         .entry("hooks")
         .or_insert_with(|| json!({}))
         .as_object_mut()
         .ok_or("hooks is not a JSON object")?;
-    for event in EVENTS {
+    for event in events.iter().copied() {
         let entries = hooks
             .entry(event)
             .or_insert_with(|| Value::Array(Vec::new()))

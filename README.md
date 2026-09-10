@@ -51,7 +51,7 @@ Record a Claude Code session and read what it left behind:
 ```sh
 cd your-project
 percept init claude-code       # writes .claude/settings.json hooks
-claude                         # work as usual; every turn is recorded
+claude                         # work as usual; prompts and replies are recorded
 
 percept events search --since 1h
 percept maps show decisions --format md
@@ -150,10 +150,14 @@ the checkout and trust the repository; in Codex, `/hooks` reviews the
 capture hooks. Restart a running session to load the configuration.
 
 The hooks call `percept hook <client>` on session start, each prompt,
-each completed tool call, and each reply. Session start prints a
-bounded fragment of every map into the client's context: what changed
-since the last session, what is open, and whether any cited file has
-changed. The other three append events under the client's name. A
+and each reply. `percept init <client> --capture` adds each completed
+tool call and its result, which fills the log with every file the
+agent read; this repo's own configs carry it, a project that only
+wants its decisions does not. Session start prints a bounded fragment
+of every map into the client's context: what changed since the last
+session, what is open, and whether any cited file has changed, then
+the recording rules. The other hooks append events under the client's
+name. A
 capture error goes to stderr and the hook exits non-zero, which is how
 the client shows it; the turn continues.
 
