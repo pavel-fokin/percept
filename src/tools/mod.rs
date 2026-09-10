@@ -3,7 +3,9 @@
 //! through `store` and `mapstore`. `read_file`, `list_files`,
 //! `find_files`, `grep_files`, `write_file`, `edit_file`, `bash`, and
 //! `read_code` run over a working tree; `Workspace` is the one place a
-//! path the model gave becomes a real path, shared by every file tool.
+//! path the model gave becomes a real path, shared by every file tool
+//! and by the CLI's citations, so it and the text reader build without
+//! the `lab` feature the tools need.
 //! `read_code` walks the tree fresh through `code::build` on every
 //! call. Beside them, what a turn over the tree needs:
 //! `AskBeforeWrites`, the `Policy` that puts a write or a command to

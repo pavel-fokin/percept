@@ -181,18 +181,18 @@ with one consumer is cost with no check.
 |---|---|---|
 | `percept-core` | Event, Map, Schema, fold, rules, Selection, the format. | The lib target is clean of harness ports. |
 | `percept-harness` | Context, tools, tool policy, providers, snapshot, `code`. | The web app or an SDK needs the core without it. |
-| `percept` binary | CLI and TUI over both. | Now. |
+| `percept` binary | CLI over the core; the TUI under `--features lab`. | Now. |
 | `percept-wasm` or FFI | The fold for SDKs and the browser. | The first SDK. |
 
 The module split that tested the shape is done: the harness ports are
 out of `core`, and it holds no model, no tool, and no tree. A library
 target beside the binary is the next step that costs nothing.
 
-Until then the split is a Cargo feature. `app`, `harness`, `tools`,
-`code`, `tui`, and `providers` build only under `--features lab`, off
-by default, so the binary a developer installs is `core`, `store`,
-`mapstore`, and the CLI, and a core change that breaks the lab fails
-in the same build.
+Until then the split is a Cargo feature. `app`, `harness`, `code`,
+`tui`, `providers`, and the tools the model calls build only under
+`--features lab`, off by default, so the binary a developer installs
+is `core`, `store`, `mapstore`, and the CLI, and a core change that
+breaks the lab fails in the same tree.
 
 ## Validation
 

@@ -58,6 +58,7 @@ from it, `maps record`, `confirm`, and `dispute` change one, `hook \
 <client>` records one coding client's turn from the hook JSON it reads \
 on stdin, and `init <client>` writes that client's project config to \
 call it.")]
+#[cfg_attr(not(feature = "lab"), command(arg_required_else_help = true))]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,

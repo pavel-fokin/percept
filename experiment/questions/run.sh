@@ -46,7 +46,7 @@ questions=(
   'open|Which question is still undecided?|map;cap|size|limit'
 )
 
-cargo build --release --manifest-path "$root/Cargo.toml" -q
+cargo build --release --features lab --manifest-path "$root/Cargo.toml" -q
 percept="$root/target/release/percept"
 
 if ! curl -s -m 2 localhost:11434/api/tags >/dev/null; then

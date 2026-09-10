@@ -699,11 +699,10 @@ async fn main() {
             )
             .await
         }
+        // Without the lab, clap's `arg_required_else_help` on `Cli`
+        // has already printed help and exited.
         #[cfg(not(feature = "lab"))]
-        None => {
-            let _ = <Cli as clap::CommandFactory>::command().print_help();
-            std::process::exit(2);
-        }
+        None => unreachable!(),
     };
 
     if let Err(err) = result {

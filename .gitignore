@@ -9,6 +9,8 @@
 /percept.jsonl
 /.percept/percept.jsonl
 /.percept/hook-sessions/
+/.percept/log-id
+/.percept/me
 /.percept/decisions.md
 /.percept/tasks.md
 /.percept/ideas.md

@@ -196,12 +196,16 @@ mix test events into the shared log. `PERCEPT_HOME` overrides both.
 
 ```sh
 cargo build --offline
+cargo test --offline
+cargo clippy --offline --all-targets -- -D warnings
 cargo test --offline --all-features
 cargo clippy --offline --all-features --all-targets -- -D warnings
 ```
 
 The default build is the binary above. `--all-features` adds the lab,
-so a change to the core that breaks it fails here and not later.
+so a change to the core that breaks it fails here and not later. Run
+both: what the lab gates is dead code in the default build, and only
+that build sees it.
 
 Worktrees are the same project as far as the log is concerned. To keep
 an experiment's events apart, run it with its own `PERCEPT_HOME`. A
@@ -252,6 +256,7 @@ write and snapshots the tree before each prompt. `PERCEPT_MAPS` says
 how much of each map the prompt carries; in every shape the model can
 cut a map around one node with `read_map`.
 
-The TUI needs a real terminal. `scripts/drive.py` forks a pty, sends
+The TUI needs a real terminal. `scripts/drive.py` forks a pty over
+the lab build, sends
 timed keystrokes, and prints the frames; `--plain` strips the escapes
 so the text can be grepped.
