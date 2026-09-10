@@ -12,6 +12,9 @@ use crate::core::{
 use crate::mapstore;
 use crate::shared::Timestamp;
 
+mod sources;
+use sources::EventIndex;
+
 /// The edge kind names the built-in schemas fix a settlement to: a
 /// `by` node resolves its `of` node over `RESOLVES`, an option answers
 /// its question over `ANSWERS`, and a correction points at what it
@@ -37,10 +40,11 @@ pub fn cut(
     let events = log.load()?;
     let scope = source.scope();
     let maps = schemas.fold_all(&scope, &events)?;
+    let index = EventIndex::new(&events);
     let map_values: Vec<Value> = maps
         .iter()
         .filter(|map| !map.schema().headline_kinds.is_empty())
-        .map(|map| map_json(map, &scope, &events))
+        .map(|map| map_json(map, &scope, &events, &index))
         .collect();
     let next = last_session(&events, &scope).and_then(|at| mapstore::judged_since_block(&maps, at));
     Ok(json!({ "maps": map_values, "next": next }))
@@ -152,7 +156,7 @@ pub fn finish(
 }
 
 /// One map's queue: its `since`, and its claims grouped by question.
-fn map_json(map: &Map, scope: &Scope, events: &[Event]) -> Value {
+fn map_json(map: &Map, scope: &Scope, events: &[Event], index: &EventIndex) -> Value {
     let schema = map.schema();
     let since = last_finished(events, scope, &schema.name);
     let claims: Vec<&Node> = map
@@ -170,7 +174,7 @@ fn map_json(map: &Map, scope: &Scope, events: &[Event]) -> Value {
         "name": schema.name,
         "purpose": schema.purpose,
         "since": since.map(|at| at.to_string()),
-        "groups": groups.iter().map(|group| group_json(map, group)).collect::<Vec<_>>(),
+        "groups": groups.iter().map(|group| group_json(map, group, index)).collect::<Vec<_>>(),
     })
 }
 
@@ -296,7 +300,7 @@ fn answers(map: &Map, question: NodeId) -> Vec<&Node> {
 }
 
 /// One group as JSON: its heading, and its rows by `added_at` ascending.
-fn group_json(map: &Map, group: &Group) -> Value {
+fn group_json(map: &Map, group: &Group, index: &EventIndex) -> Value {
     let (id, title, raised_at) = match group.of_node {
         Some(node) => (
             map.short_id(node.id).unwrap_or_default(),
@@ -312,14 +316,14 @@ fn group_json(map: &Map, group: &Group) -> Value {
         "id": id,
         "title": title,
         "raised_at": raised_at,
-        "claims": rows.iter().map(|node| row_json(map, node, question)).collect::<Vec<_>>(),
+        "claims": rows.iter().map(|node| row_json(map, node, question, index)).collect::<Vec<_>>(),
     })
 }
 
 /// One row: the claim itself, what it replaced and reopens, and the
 /// alternatives weighed against `question` when the row's group has
 /// one.
-fn row_json(map: &Map, node: &Node, question: Option<NodeId>) -> Value {
+fn row_json(map: &Map, node: &Node, question: Option<NodeId>, index: &EventIndex) -> Value {
     let was = supersedes_target(map, node.id).and_then(|id| map.node(id)).map(|was| {
         json!({ "id": map.short_id(was.id).unwrap_or_default(), "name": was.name })
     });
@@ -329,7 +333,12 @@ fn row_json(map: &Map, node: &Node, question: Option<NodeId>) -> Value {
         .map(|decision| json!({ "id": map.short_id(decision.id).unwrap_or_default(), "name": decision.name }))
         .collect();
     let options: Vec<Value> = question
-        .map(|question| answers(map, question).into_iter().map(|option| option_json(map, option)).collect())
+        .map(|question| {
+            answers(map, question)
+                .into_iter()
+                .map(|option| option_json(map, option, index))
+                .collect()
+        })
         .unwrap_or_default();
     json!({
         "id": map.short_id(node.id).unwrap_or_default(),
@@ -342,11 +351,12 @@ fn row_json(map: &Map, node: &Node, question: Option<NodeId>) -> Value {
         "was": was,
         "reopens": reopens,
         "options": options,
+        "sources": index.sources_json(&node.sources),
     })
 }
 
 /// One alternative under a row's `options`.
-fn option_json(map: &Map, node: &Node) -> Value {
+fn option_json(map: &Map, node: &Node, index: &EventIndex) -> Value {
     json!({
         "id": map.short_id(node.id).unwrap_or_default(),
         "kind": node.kind,
@@ -354,6 +364,7 @@ fn option_json(map: &Map, node: &Node) -> Value {
         "why": node.properties.get("why"),
         "standing": map.standing(node.id).map(|standing| standing.to_string()),
         "dispute": map.dispute(node.id),
+        "sources": index.sources_json(&node.sources),
     })
 }
 

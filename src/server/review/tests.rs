@@ -1,11 +1,56 @@
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
 use serde_json::Value;
 
 use super::*;
 use crate::core::testing::{
-    edge_added, human, node_added_by, node_id, schemas, source, FakeLog,
+    edge_added, human, node_added_by, node_id, schemas, source, source_at, FakeLog,
 };
-use crate::core::{Actor, Event, NodeId, Payload};
+use crate::core::{Actor, Event, EventId, NodeId, Payload};
 use crate::shared::Timestamp;
+
+/// A `node.added` event on the decisions map, citing `sources` - the
+/// one way a test points a row at events of its own choosing, since
+/// `core::testing::node_added_by` mints a source id no event answers
+/// to.
+fn node_added_with_sources(actor: Actor, kind: &str, name: &str, sources: Vec<EventId>) -> Event {
+    Event::new(
+        actor,
+        source("test"),
+        None,
+        Payload::NodeAdded {
+            map: "decisions".to_string(),
+            node: NodeId::new(),
+            kind: kind.to_string(),
+            name: name.to_string(),
+            properties: BTreeMap::new(),
+            sources,
+            seq: 0,
+        },
+    )
+}
+
+fn message_received(actor: Actor, content: &str) -> Event {
+    Event::new(actor, source("test"), None, Payload::MessageReceived { content: content.to_string() })
+}
+
+fn message_received_at(source: Source, actor: Actor, content: &str) -> Event {
+    Event::new(actor, source, None, Payload::MessageReceived { content: content.to_string() })
+}
+
+fn file_cited(path: &str, lines: Option<(u32, u32)>, excerpt: &str) -> Event {
+    Event::new(
+        Actor::Agent,
+        source("test"),
+        None,
+        Payload::FileCited {
+            path: PathBuf::from(path),
+            lines,
+            excerpt: excerpt.to_string(),
+        },
+    )
+}
 
 fn review_finished(map: &str, nodes: Vec<NodeId>) -> Event {
     Event::new(
@@ -197,4 +242,104 @@ fn an_option_that_answers_the_question_is_listed_under_the_decisions_row() {
     assert_eq!(options.len(), 1);
     assert_eq!(options[0]["name"], "Go");
     assert_eq!(options[0]["standing"], "claimed");
+}
+
+#[test]
+fn a_decision_citing_a_human_prompt_carries_the_prompts_content_and_the_agent_reply_before_it_as_its_proposal(
+) {
+    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let t0 = Timestamp::now();
+    let proposal = created_at(message_received(Actor::Agent, "Recommendation: Rust."), t0);
+    let t1 = t0.minus_minutes(-10).unwrap();
+    let prompt = created_at(message_received(Actor::Human(human()), "Yes, Rust."), t1);
+    let decision = node_added_with_sources(Actor::Agent, "decision", "Rust", vec![prompt.id()]);
+    let resolves = edge_added("resolves", &decision, &question);
+
+    let map = cut_decisions(vec![question, proposal, prompt, decision, resolves]);
+
+    let claims = groups_of(&map)[0]["claims"].as_array().unwrap();
+    let sources = claims[0]["sources"].as_array().unwrap();
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0]["kind"], "message");
+    assert_eq!(sources[0]["content"], "Yes, Rust.");
+    assert_eq!(sources[0]["proposal"]["content"], "Recommendation: Rust.");
+}
+
+#[test]
+fn a_prompt_with_no_earlier_agent_reply_in_its_source_carries_a_null_proposal() {
+    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let prompt = message_received(Actor::Human(human()), "Rust, please.");
+    let decision = node_added_with_sources(Actor::Agent, "decision", "Rust", vec![prompt.id()]);
+    let resolves = edge_added("resolves", &decision, &question);
+
+    let map = cut_decisions(vec![question, prompt, decision, resolves]);
+
+    let claims = groups_of(&map)[0]["claims"].as_array().unwrap();
+    let sources = claims[0]["sources"].as_array().unwrap();
+    assert!(sources[0]["proposal"].is_null(), "{sources:?}");
+}
+
+#[test]
+fn a_reply_from_another_source_is_not_taken_as_the_proposal() {
+    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let t0 = Timestamp::now();
+    let other_reply = created_at(message_received_at(source_at("other", "/other"), Actor::Agent, "Go."), t0);
+    let t1 = t0.minus_minutes(-10).unwrap();
+    let prompt = created_at(message_received(Actor::Human(human()), "Rust, please."), t1);
+    let decision = node_added_with_sources(Actor::Agent, "decision", "Rust", vec![prompt.id()]);
+    let resolves = edge_added("resolves", &decision, &question);
+
+    let map = cut_decisions(vec![question, other_reply, prompt, decision, resolves]);
+
+    let claims = groups_of(&map)[0]["claims"].as_array().unwrap();
+    let sources = claims[0]["sources"].as_array().unwrap();
+    assert!(sources[0]["proposal"].is_null(), "{sources:?}");
+}
+
+#[test]
+fn a_file_cited_source_carries_its_path_lines_and_excerpt() {
+    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let cite = file_cited("src/main.rs", Some((10, 20)), "fn main() {}");
+    let decision = node_added_with_sources(Actor::Agent, "decision", "Rust", vec![cite.id()]);
+    let resolves = edge_added("resolves", &decision, &question);
+
+    let map = cut_decisions(vec![question, cite, decision, resolves]);
+
+    let claims = groups_of(&map)[0]["claims"].as_array().unwrap();
+    let sources = claims[0]["sources"].as_array().unwrap();
+    assert_eq!(sources[0]["kind"], "file");
+    assert_eq!(sources[0]["path"], "src/main.rs");
+    assert_eq!(sources[0]["lines"][0], 10);
+    assert_eq!(sources[0]["lines"][1], 20);
+    assert_eq!(sources[0]["excerpt"], "fn main() {}");
+}
+
+#[test]
+fn a_source_id_the_log_does_not_hold_reads_as_missing() {
+    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let missing_id = EventId::new();
+    let decision = node_added_with_sources(Actor::Agent, "decision", "Rust", vec![missing_id]);
+    let resolves = edge_added("resolves", &decision, &question);
+
+    let map = cut_decisions(vec![question, decision, resolves]);
+
+    let claims = groups_of(&map)[0]["claims"].as_array().unwrap();
+    let sources = claims[0]["sources"].as_array().unwrap();
+    assert_eq!(sources[0]["kind"], "missing");
+}
+
+#[test]
+fn content_over_4000_characters_is_cut_and_marked_truncated() {
+    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let long = "a".repeat(4001);
+    let prompt = message_received(Actor::Human(human()), &long);
+    let decision = node_added_with_sources(Actor::Agent, "decision", "Rust", vec![prompt.id()]);
+    let resolves = edge_added("resolves", &decision, &question);
+
+    let map = cut_decisions(vec![question, prompt, decision, resolves]);
+
+    let claims = groups_of(&map)[0]["claims"].as_array().unwrap();
+    let sources = claims[0]["sources"].as_array().unwrap();
+    assert_eq!(sources[0]["content"].as_str().unwrap().len(), 4000);
+    assert_eq!(sources[0]["truncated"], true);
 }

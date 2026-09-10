@@ -1,6 +1,6 @@
 import Mark from "./Mark";
-import { plural } from "./format";
-import type { Claim as ClaimT, Option, Standing } from "./types";
+import { formatDate, plural, summarize } from "./format";
+import type { Claim as ClaimT, Option, Source as SourceT, Standing } from "./types";
 
 const standingText: Partial<Record<Standing, string>> = {
   seen: "Seen by you.",
@@ -26,6 +26,123 @@ function Dispute({ dispute }: { dispute: string | null }) {
     <div className="mt-1 border-l-2 border-[var(--object)] pl-4 font-serif">
       <p className="text-[var(--ink-2)]">Why you marked it wrong.</p>
       <p>{dispute}</p>
+    </div>
+  );
+}
+
+/** The chevron a source's or the alternatives fold shares, rotating
+ * open with its `<details>`. */
+function Chevron() {
+  return (
+    <span aria-hidden="true" className="mr-2 inline-block transition-transform group-open:rotate-90">
+      ▸
+    </span>
+  );
+}
+
+/** The line a truncated source's exchange ends with, so a reader who
+ * needs the rest knows where to take it. */
+function TruncatedNote({ id }: { id: string }) {
+  return (
+    <p className="mt-1 text-[var(--ink-2)]">
+      Cut here; the whole event is <code>percept events show {id}</code>.
+    </p>
+  );
+}
+
+/** A `message` source: a human prompt folds open to the exchange grid
+ * - the proposal it answered, if any, over the prompt itself; an agent
+ * reply folds open to the reply text alone. */
+function MessageSource({ source }: { source: Extract<SourceT, { kind: "message" }> }) {
+  if (source.actor === "agent") {
+    return (
+      <details className="group source">
+        <summary className="flex min-h-[44px] cursor-pointer list-none items-center text-[var(--ink-2)]">
+          <Chevron />
+          From the model&rsquo;s reply at {formatDate(source.at)}. Show it.
+        </summary>
+        <div className="mt-2 whitespace-pre-wrap border-l-2 border-[var(--rule)] pl-4 font-serif">
+          <p>{source.content}</p>
+          {source.truncated && <TruncatedNote id={source.id} />}
+        </div>
+      </details>
+    );
+  }
+  return (
+    <details className="group source">
+      <summary className="flex min-h-[44px] cursor-pointer list-none items-center text-[var(--ink-2)]">
+        <Chevron />
+        You said &ldquo;{summarize(source.content)}&rdquo; at {formatDate(source.at)}. Show the exchange.
+      </summary>
+      <div className="mt-2 grid grid-cols-[3.5rem_1fr] gap-x-2 gap-y-3 border-l-2 border-[var(--rule)] pl-4 font-serif">
+        {source.proposal && (
+          <>
+            <span className="font-sans text-sm leading-tight text-[var(--ink-3)]">
+              model
+              <br />
+              {formatDate(source.proposal.at)}
+            </span>
+            <p className="whitespace-pre-wrap">{source.proposal.content}</p>
+          </>
+        )}
+        <span className="font-sans text-sm leading-tight text-[var(--ink-3)]">
+          you
+          <br />
+          {formatDate(source.at)}
+        </span>
+        <p className="whitespace-pre-wrap">{source.content}</p>
+      </div>
+      {source.truncated && <TruncatedNote id={source.id} />}
+    </details>
+  );
+}
+
+/** A `file` source: folds open to its excerpt, in a `<pre>` that
+ * scrolls on its own rather than widening the row. */
+function FileSource({ source }: { source: Extract<SourceT, { kind: "file" }> }) {
+  const label = source.lines ? `${source.path}:${source.lines[0]}-${source.lines[1]}` : source.path;
+  return (
+    <details className="group source">
+      <summary className="flex min-h-[44px] cursor-pointer list-none items-center text-[var(--ink-2)]">
+        <Chevron />
+        Cites {label}.
+      </summary>
+      <div className="mt-2 overflow-x-auto border-l-2 border-[var(--rule)] pl-4">
+        <pre className="whitespace-pre font-mono text-sm">{source.excerpt}</pre>
+      </div>
+      {source.truncated && <TruncatedNote id={source.id} />}
+    </details>
+  );
+}
+
+/** One row's sources, in order: a message and a file fold open, an
+ * unrecognised event names its type, and a source id the log no longer
+ * holds says so - none of the last two open, since there is nothing
+ * more to show. */
+function Sources({ sources }: { sources: SourceT[] }) {
+  if (sources.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1">
+      {sources.map((source) => {
+        switch (source.kind) {
+          case "message":
+            return <MessageSource key={source.id} source={source} />;
+          case "file":
+            return <FileSource key={source.id} source={source} />;
+          case "event":
+            return (
+              <p key={source.id} className="text-[var(--ink-2)]">
+                From {source.type} {source.id.slice(0, 8)}.
+              </p>
+            );
+          case "missing":
+            return (
+              <p key={source.id} className="text-[var(--ink-2)]">
+                Cites an event the log no longer has.
+              </p>
+            );
+        }
+      })}
     </div>
   );
 }
@@ -154,6 +271,7 @@ export default function Claim({
       ))}
       <StandingText standing={claim.standing} />
       <Dispute dispute={claim.dispute} />
+      <Sources sources={claim.sources} />
       {claim.options.length > 0 && (
         <details className="group">
           <summary className="flex min-h-[44px] cursor-pointer list-none items-center text-[var(--ink-2)]">

@@ -120,6 +120,11 @@ export default function App() {
     setSheet({ kind: "finish" });
   }
 
+  function toggleSource(id: string) {
+    const row = document.querySelector(`li[data-id="${CSS.escape(id)}"] details.source`);
+    if (row instanceof HTMLDetailsElement) row.open = !row.open;
+  }
+
   function markSeen() {
     if (!current || !map) return;
     const claimed = claimedRows(map);
@@ -146,6 +151,7 @@ export default function App() {
       if (!focused) return;
       if (event.key === "w") openWhy(focused);
       if (event.key === "y") confirmNode(focused);
+      if (event.key === "s") toggleSource(focused);
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -225,6 +231,10 @@ export default function App() {
             <span>
               <kbd className="mr-1 rounded border border-[var(--rule)] px-1.5 font-bold text-[var(--ink)]">y</kbd>
               confirm
+            </span>
+            <span>
+              <kbd className="mr-1 rounded border border-[var(--rule)] px-1.5 font-bold text-[var(--ink)]">s</kbd>
+              show the exchange
             </span>
             <span>
               <kbd className="mr-1 rounded border border-[var(--rule)] px-1.5 font-bold text-[var(--ink)]">f</kbd>

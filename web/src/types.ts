@@ -1,6 +1,39 @@
 /** A node's standing, as `Map::standing` reports it. */
 export type Standing = "claimed" | "seen" | "confirmed" | "disputed";
 
+/** The proposal a human prompt's "yes" answered: the latest agent
+ * reply in the same source before it, or `null` when there is none. */
+export interface Proposal {
+  id: string;
+  at: string;
+  content: string;
+}
+
+/** One event a node's `sources` names, as `GET /api/review` resolves
+ * it - what the source line folds open to. */
+export type Source =
+  | {
+      kind: "message";
+      actor: "human" | "agent";
+      id: string;
+      at: string;
+      client: string;
+      content: string;
+      truncated?: boolean;
+      proposal: Proposal | null;
+    }
+  | {
+      kind: "file";
+      id: string;
+      at: string;
+      path: string;
+      lines: [number, number] | null;
+      excerpt: string;
+      truncated?: boolean;
+    }
+  | { kind: "event"; id: string; at: string; type: string }
+  | { kind: "missing"; id: string };
+
 /** A node this one supersedes, or one it reopens - just enough to link
  * back to it: its short id and name. */
 export interface NodeRef {
@@ -17,6 +50,7 @@ export interface Option {
   why: string | null;
   standing: Standing;
   dispute: string | null;
+  sources: Source[];
 }
 
 /** One claim in the queue: a headline node the map's fold marks

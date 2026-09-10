@@ -16,3 +16,10 @@ export function formatDate(iso: string): string {
 export function plural(n: number, one: string, many: string): string {
   return n === 1 ? one : `${n} ${many}`;
 }
+
+/** `content` cut to 57 characters plus "…" once it runs past 60 - what
+ * a source's summary quotes, the sketch's inline cut ported to a
+ * helper. */
+export function summarize(content: string): string {
+  return content.length > 60 ? `${content.slice(0, 57)}…` : content;
+}
