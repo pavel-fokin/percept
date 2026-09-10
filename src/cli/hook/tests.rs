@@ -19,7 +19,7 @@ struct Fixture {
     root: PathBuf,
     sessions: PathBuf,
     log: FakeLog,
-    me: HumanId,
+    me: Option<HumanId>,
 }
 
 impl Fixture {

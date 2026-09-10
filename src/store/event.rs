@@ -541,10 +541,9 @@ impl From<&crate::core::Event> for Event {
 }
 
 /// `event` off the wire - the counterpart to `Event::from(&core::Event)`
-/// above, kept as a plain function rather than `TryFrom` since it needs
-/// `me`, this log's own `HumanId`, to resolve a legacy `"user"` actor
-/// string, or an actor object with no `id` of its own.
-pub fn from_wire(event: Event, me: HumanId) -> Result<crate::core::Event, Error> {
+/// above. A legacy `"user"` actor string, like a `human` object with no
+/// `id`, reads as a human with none: whose it was is the log's to say.
+pub fn from_wire(event: Event) -> Result<crate::core::Event, Error> {
     let payload = decode_payload(&event.kind, event.payload)?;
 
     let id = EventId::from_uuid(parse_uuid(&event.id)?);
@@ -556,7 +555,7 @@ pub fn from_wire(event: Event, me: HumanId) -> Result<crate::core::Event, Error>
         .created_at
         .parse::<Timestamp>()
         .map_err(|_| Error::BadTimestamp(event.created_at.clone()))?;
-    let actor = parse_actor_value(&event.actor, me)?;
+    let actor = parse_actor_value(&event.actor)?;
 
     Ok(crate::core::Event::restore(
         id,
@@ -582,7 +581,7 @@ pub fn decode(
     kind: &str,
     causation_id: Option<EventId>,
     payload: Value,
-    me: HumanId,
+    me: Option<HumanId>,
 ) -> Result<crate::core::Event, Error> {
     let event = crate::core::Event::new(
         parse_actor(actor, me)?,
@@ -743,7 +742,7 @@ fn parse_event_ids(sources: Vec<String>) -> Result<Vec<EventId>, Error> {
 /// or its legacy alias `"model"`; `"system"`. The one parser behind
 /// every word a caller may type - a CLI `--actor` flag, a
 /// `search_events` filter, and a legacy wire string alike.
-pub fn parse_actor(s: &str, me: HumanId) -> Result<Actor, Error> {
+pub fn parse_actor(s: &str, me: Option<HumanId>) -> Result<Actor, Error> {
     match s {
         "human" | "user" => Ok(Actor::Human(me)),
         "agent" | "model" => Ok(Actor::Agent),
@@ -758,7 +757,10 @@ pub fn parse_actor(s: &str, me: HumanId) -> Result<Actor, Error> {
 /// in the same shape.
 pub fn actor_value(actor: Actor) -> Value {
     match actor {
-        Actor::Human(id) => serde_json::json!({"kind": "human", "id": id.as_uuid().to_string()}),
+        Actor::Human(Some(id)) => {
+            serde_json::json!({"kind": "human", "id": id.as_uuid().to_string()})
+        }
+        Actor::Human(None) => serde_json::json!({"kind": "human"}),
         Actor::Agent => serde_json::json!({"kind": "agent"}),
         Actor::System => serde_json::json!({"kind": "system"}),
     }
@@ -767,9 +769,11 @@ pub fn actor_value(actor: Actor) -> Value {
 /// `value` as an `Actor`: the object form `actor_value` writes, or a
 /// log line written before actors carried one - a bare legacy string,
 /// read the same way `parse_actor` reads a CLI word.
-fn parse_actor_value(value: &Value, me: HumanId) -> Result<Actor, Error> {
+fn parse_actor_value(value: &Value) -> Result<Actor, Error> {
     match value {
-        Value::String(s) => parse_actor(s, me),
+        // A line from before the object form: a human with no id, the
+        // way every line of an unregistered home reads.
+        Value::String(s) => parse_actor(s, None),
         Value::Object(fields) => {
             let kind = fields
                 .get("kind")
@@ -777,11 +781,11 @@ fn parse_actor_value(value: &Value, me: HumanId) -> Result<Actor, Error> {
                 .ok_or_else(|| Error::UnknownActor(value.to_string()))?;
             match kind {
                 "human" => {
-                    let id = fields
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .ok_or_else(|| Error::UnknownActor(value.to_string()))?;
-                    Ok(Actor::Human(HumanId::from_uuid(parse_uuid(id)?)))
+                    let id = match fields.get("id").and_then(Value::as_str) {
+                        Some(id) => Some(HumanId::from_uuid(parse_uuid(id)?)),
+                        None => None,
+                    };
+                    Ok(Actor::Human(id))
                 }
                 "agent" => Ok(Actor::Agent),
                 "system" => Ok(Actor::System),

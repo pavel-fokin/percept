@@ -111,7 +111,7 @@ pub trait AppService {
 
     /// This `$PERCEPT_HOME`'s `HumanId`, from `Jsonl::me` - who `submit`
     /// attributes a prompt to.
-    fn me(&self) -> HumanId;
+    fn me(&self) -> Option<HumanId>;
 
     /// `submit` with the prompt attributed to `actor`: `System` when
     /// percept itself asks, as `reflect` does, so the log never says
@@ -313,7 +313,7 @@ pub struct App {
     source: Source,
     /// This `$PERCEPT_HOME`'s `HumanId`, from `Jsonl::me` - who
     /// `submit` attributes a prompt to.
-    me: HumanId,
+    me: Option<HumanId>,
     chat: Arc<dyn crate::harness::Model>,
     /// The reasoning level for the next turn: the model's configured
     /// default until `/effort` picks another, and reset to the new
@@ -358,7 +358,7 @@ impl App {
         schemas: Arc<Schemas>,
         harness: Harness,
         source: Source,
-        me: HumanId,
+        me: Option<HumanId>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let scope = source.scope();
         let events: Vec<Event> = log
@@ -534,7 +534,7 @@ impl App {
 }
 
 impl AppService for App {
-    fn me(&self) -> HumanId {
+    fn me(&self) -> Option<HumanId> {
         self.me
     }
 

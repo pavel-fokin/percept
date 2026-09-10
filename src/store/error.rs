@@ -9,8 +9,8 @@ pub enum Error {
     UnknownEventType(String),
     UnknownActor(String),
     /// The `me` file beside the log didn't hold one parseable UUID and
-    /// a newline - never silently re-minted, since that would change
-    /// whose events a log's past `"user"` lines resolve to.
+    /// a newline - never ignored, since that would change whose events
+    /// this process writes.
     BadMeFile(std::path::PathBuf),
     BadUuid(String),
     BadTimestamp(String),

@@ -71,9 +71,10 @@ Both are serde-free.
 - `Message` is a value object (no identity) - the shape `Model` needs to
   talk to an LLM. Derived from the log at the boundary, never stored.
 - `Actor` (`Human`, `Agent`, `System`) is the one vocabulary for who a
-  message or event is attributed to; a human carries an id minted once
-  per home, kept in the `me` file beside the log, so a claim confirmed
-  or disputed says by whom.
+  message or event is attributed to; a human carries an id once a
+  server has registered them, kept in the `me` file beside the log, so
+  a claim confirmed or disputed says by whom. Until then they have
+  none, and the log they wrote is who they are.
 - `Model` is domain-owned, not infrastructure: `percept` needs "a reply
   given messages," never the mechanism behind it.
 - `Map` is a cognitive map: nodes and edges the model builds from the

@@ -28,11 +28,12 @@ pub struct Jsonl {
     /// which is what deleting or replacing the path mid-run would
     /// otherwise produce.
     file: Mutex<fs::File>,
-    /// This `$PERCEPT_HOME`'s `HumanId`, read from `me` beside the log,
-    /// or minted into it on the first open. Every event and node this
-    /// process writes as the human, and every legacy `"user"` actor a
-    /// line predating the object form is read back as, resolves to it.
-    me: HumanId,
+    /// This `$PERCEPT_HOME`'s `HumanId`, read from `me` beside the log
+    /// when a login has put one there; `None` until then. Every event
+    /// this process writes as the human, and every legacy `"user"`
+    /// actor a line predating the object form is read back as, carries
+    /// it.
+    me: Option<HumanId>,
 }
 
 impl Jsonl {
@@ -70,9 +71,9 @@ impl Jsonl {
     }
 
     /// This `$PERCEPT_HOME`'s `HumanId` - the person at the keyboard,
-    /// minted once into `me` beside the log and read back here ever
-    /// after.
-    pub fn me(&self) -> HumanId {
+    /// read from `me` beside the log; `None` while no login has written
+    /// one.
+    pub fn me(&self) -> Option<HumanId> {
         self.me
     }
 
@@ -130,7 +131,7 @@ impl EventLog for Jsonl {
 
         let mut events = Vec::new();
         for (line, raw) in lines(complete_text(&bytes)?) {
-            events.push(parse_line(raw, self.me).map_err(|source| at_line(line, source))?);
+            events.push(parse_line(raw).map_err(|source| at_line(line, source))?);
         }
         Ok(events)
     }
@@ -148,7 +149,7 @@ impl EventLog for Jsonl {
             if parse_event_id(&found).map_err(|e| at_line(line, e))? != id {
                 continue;
             }
-            return Ok(Some(parse_line(raw, self.me).map_err(|e| at_line(line, e))?));
+            return Ok(Some(parse_line(raw).map_err(|e| at_line(line, e))?));
         }
         Ok(None)
     }
@@ -169,7 +170,7 @@ impl EventLog for Jsonl {
             let bytes = read_all(file)?;
             let mut events = Vec::new();
             for (line, raw) in lines(complete_text(&bytes)?) {
-                events.push(parse_line(raw, self.me).map_err(|source| at_line(line, source))?);
+                events.push(parse_line(raw).map_err(|source| at_line(line, source))?);
             }
             let event = compute(events).map_err(Error::Compute)?;
             let mut text = crate::store::encode(&event);
@@ -198,7 +199,7 @@ impl EventLog for Jsonl {
             let bytes = read_all(file)?;
             let mut events = Vec::new();
             for (line, raw) in lines(complete_text(&bytes)?) {
-                events.push(parse_line(raw, self.me).map_err(|source| at_line(line, source))?);
+                events.push(parse_line(raw).map_err(|source| at_line(line, source))?);
             }
             let batch = compute(events).map_err(Error::Compute)?;
             let mut text = String::new();
@@ -235,9 +236,9 @@ struct WireId {
     id: String,
 }
 
-fn parse_line(raw: &str, me: HumanId) -> Result<crate::core::Event, Error> {
+fn parse_line(raw: &str) -> Result<crate::core::Event, Error> {
     let wire: Event = serde_json::from_str(raw).map_err(Error::BadLine)?;
-    crate::store::from_wire(wire, me)
+    crate::store::from_wire(wire)
 }
 
 /// Everything up to the last newline. Bytes, not `read_to_string`: a
@@ -265,21 +266,16 @@ fn at_line(line: usize, source: Error) -> Error {
     }
 }
 
-/// Reads the `HumanId` from `path`, minting a fresh UUIDv7 into it when
-/// the file is missing - one open, one id. A file that exists but
-/// doesn't hold a single parseable UUID is an error naming `path`,
-/// never silently re-minted: overwriting it would strand every event
-/// and node this human already wrote under the old one.
-fn open_me(path: &Path) -> Result<HumanId, Error> {
+/// Reads the `HumanId` from `path` - `None` when there is no such
+/// file, which is every home no login has touched. Nothing mints one:
+/// an id is the server's to give. A file that exists but doesn't hold
+/// a single parseable UUID is an error naming `path`.
+fn open_me(path: &Path) -> Result<Option<HumanId>, Error> {
     match fs::read_to_string(path) {
         Ok(text) => Uuid::parse_str(text.trim())
-            .map(Id::from_uuid)
+            .map(|uuid| Some(Id::from_uuid(uuid)))
             .map_err(|_| Error::BadMeFile(path.to_path_buf())),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            let me = HumanId::new();
-            fs::write(path, format!("{}\n", me.as_uuid())).map_err(Error::Io)?;
-            Ok(me)
-        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(err) => Err(Error::Io(err)),
     }
 }

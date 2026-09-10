@@ -307,3 +307,32 @@ fn search_reads_the_file_and_applies_the_query() {
     assert_eq!(found.len(), 1);
     assert!(found[0].actor() == Actor::Agent);
 }
+
+#[test]
+fn opening_a_log_mints_no_me_file_and_reports_no_human_id() {
+    let temp = TempLog::new();
+
+    let log = temp.open();
+
+    assert_eq!(log.me(), None);
+    assert!(!temp.dir.join("me").exists());
+}
+
+#[test]
+fn me_is_read_from_the_file_beside_the_log() {
+    let temp = TempLog::new();
+    let id = Uuid::now_v7();
+    std::fs::write(temp.dir.join("me"), format!("{id}\n")).unwrap();
+
+    let log = temp.open();
+
+    assert_eq!(log.me().map(|me| me.as_uuid()), Some(id));
+}
+
+#[test]
+fn a_me_file_that_is_not_one_uuid_is_an_error() {
+    let temp = TempLog::new();
+    std::fs::write(temp.dir.join("me"), "not a uuid\n").unwrap();
+
+    assert!(matches!(Jsonl::open(&temp.path), Err(Error::BadMeFile(_))));
+}

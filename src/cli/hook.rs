@@ -133,7 +133,7 @@ pub fn run(
     log: &dyn EventLog,
     sessions_dir: &Path,
     checkout: &Path,
-    me: crate::core::HumanId,
+    me: Option<crate::core::HumanId>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let dir = sessions_dir.join(state_dir_name(&source.path));
     let name = state_file_name(&source.name, &input.session_id, &input.turn_id);
@@ -515,7 +515,7 @@ fn submit_prompt(
     source: &Source,
     log: &dyn EventLog,
     state: &mut TurnState,
-    me: crate::core::HumanId,
+    me: Option<crate::core::HumanId>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     state.clear()?;
 

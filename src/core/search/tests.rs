@@ -137,7 +137,7 @@ fn filters_are_anded_together() {
 fn an_actor_filter_matches_the_kind_not_which_human() {
     let event = Event::restore(
         EventId::new(),
-        Actor::Human(crate::core::HumanId::new()),
+        Actor::Human(human()),
         source("a"),
         None,
         Timestamp::now(),
@@ -146,7 +146,7 @@ fn an_actor_filter_matches_the_kind_not_which_human() {
         },
     );
     let query = EventQuery {
-        actors: vec![Actor::Human(crate::core::HumanId::new())],
+        actors: vec![Actor::Human(human())],
         ..Default::default()
     };
 

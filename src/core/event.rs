@@ -12,9 +12,10 @@ pub type EventId = Id<Event>;
 /// for their own ids.
 pub enum Human {}
 
-/// Identifies the person at the keyboard. Minted once per
-/// `$PERCEPT_HOME`, kept in the `me` file beside the log, so a claim
-/// confirmed or disputed says by whom.
+/// Identifies the person at the keyboard, once a server has registered
+/// them: the account id a login puts in the `me` file beside the log.
+/// Until then a human has none, and the log they wrote is their
+/// identity.
 pub type HumanId = Id<Human>;
 
 /// Token counts for one round trip to the model. `cached_tokens` is
@@ -39,11 +40,11 @@ pub struct Source {
 }
 
 /// Who an Event is attributed to. Extend by adding a variant. A human
-/// carries the id minted for this `$PERCEPT_HOME`, so a log shared by
-/// more than one person still says which one wrote a given event.
+/// carries their id once they have one, so a log shared by more than
+/// one person still says which one wrote a given event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Actor {
-    Human(HumanId),
+    Human(Option<HumanId>),
     Agent,
     /// percept itself acting - so far, feeding a tool's output back as
     /// `tool.resulted`.
@@ -357,7 +358,7 @@ impl Event {
     pub fn claim_confirmed(
         map: String,
         node: NodeId,
-        human: HumanId,
+        human: Option<HumanId>,
         source: Source,
         causation_id: Option<EventId>,
     ) -> Self {
@@ -375,7 +376,7 @@ impl Event {
         map: String,
         node: NodeId,
         why: String,
-        human: HumanId,
+        human: Option<HumanId>,
         source: Source,
         causation_id: Option<EventId>,
     ) -> Self {

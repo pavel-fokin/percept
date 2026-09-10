@@ -447,7 +447,7 @@ pub fn publish(
     log: &dyn EventLog,
     root: &Path,
     checkout: &Path,
-    me: crate::core::HumanId,
+    me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let causation_id = args
         .causation
@@ -575,7 +575,7 @@ fn known_event_id(
 pub fn search(
     args: SearchArgs,
     log: &dyn EventSearch,
-    me: crate::core::HumanId,
+    me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let query = parse_query(&args, me)?;
     let events = log.search(&query)?;
@@ -691,7 +691,7 @@ fn write(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
-    me: crate::core::HumanId,
+    me: Option<crate::core::HumanId>,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
     let MapArgs {
@@ -712,7 +712,7 @@ pub fn maps_add_node(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
-    me: crate::core::HumanId,
+    me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let payload = write(args.target, log, schemas, source, me, |sources| {
         Mutation::AddNode {
@@ -736,7 +736,7 @@ pub fn maps_add_edge(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
-    me: crate::core::HumanId,
+    me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let scope = source.scope();
     let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
@@ -759,7 +759,7 @@ pub fn maps_remove_node(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
-    me: crate::core::HumanId,
+    me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let scope = source.scope();
     let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
@@ -780,7 +780,7 @@ pub fn maps_remove_edge(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
-    me: crate::core::HumanId,
+    me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let scope = source.scope();
     let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
@@ -833,7 +833,7 @@ pub fn maps_confirm(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
-    me: crate::core::HumanId,
+    me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     judge(args, log, schemas, source, |map, node, source| {
         Event::claim_confirmed(map, node, me, source, None)
@@ -847,7 +847,7 @@ pub fn maps_dispute(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
-    me: crate::core::HumanId,
+    me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let why = args.why;
     judge(args.target, log, schemas, source, move |map, node, source| {
@@ -1010,7 +1010,7 @@ pub fn maps_record(
     schemas: &Schemas,
     source: &crate::core::Source,
     checkout: &Path,
-    me: crate::core::HumanId,
+    me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut document = String::new();
     io::stdin().read_to_string(&mut document)?;
@@ -1035,7 +1035,7 @@ fn record_document(
     schemas: &Schemas,
     source: &crate::core::Source,
     checkout: &Path,
-    me: crate::core::HumanId,
+    me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let nodes = parse_document(document)?;
     let total = nodes.len();
@@ -1188,7 +1188,7 @@ fn stop_if_pipe_closed(e: io::Error) -> Result<(), Box<dyn std::error::Error>> {
 /// the value it is compared against. A filter naming something the log
 /// has no word for is an error here rather than a query that quietly
 /// matches nothing.
-fn parse_query(args: &SearchArgs, me: crate::core::HumanId) -> Result<EventQuery, String> {
+fn parse_query(args: &SearchArgs, me: Option<crate::core::HumanId>) -> Result<EventQuery, String> {
     let kinds = args
         .kind
         .iter()

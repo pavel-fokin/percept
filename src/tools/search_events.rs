@@ -15,11 +15,11 @@ pub struct SearchEvents {
     log: Arc<dyn EventSearch>,
     /// This `$PERCEPT_HOME`'s `HumanId`, from `Jsonl::me` - what an
     /// `actors: ["human"]` (or the legacy `"user"`) filter resolves to.
-    me: HumanId,
+    me: Option<HumanId>,
 }
 
 impl SearchEvents {
-    pub fn new(log: Arc<dyn EventSearch>, me: HumanId) -> Self {
+    pub fn new(log: Arc<dyn EventSearch>, me: Option<HumanId>) -> Self {
         Self { log, me }
     }
 }

@@ -56,8 +56,8 @@ pub fn scope() -> Scope {
 /// A `HumanId` for a test that needs one but doesn't care which - every
 /// call mints a fresh one, so two calls are never mistaken for the
 /// same person.
-pub fn human() -> HumanId {
-    HumanId::new()
+pub fn human() -> Option<HumanId> {
+    Some(HumanId::new())
 }
 
 pub fn node_ref(kind: &str, name: &str) -> NodeRef {
