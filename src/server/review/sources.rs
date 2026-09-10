@@ -93,9 +93,7 @@ impl<'a> EventIndex<'a> {
                     Actor::Agent => Value::Null,
                     _ => self.proposal_of(event).unwrap_or(Value::Null),
                 };
-                if truncated {
-                    entry["truncated"] = json!(true);
-                }
+                entry["truncated"] = json!(truncated);
                 entry
             }
             Payload::FileCited { path, lines, excerpt } => {
@@ -108,9 +106,7 @@ impl<'a> EventIndex<'a> {
                     None => Value::Null,
                 };
                 entry["excerpt"] = json!(excerpt);
-                if truncated {
-                    entry["truncated"] = json!(true);
-                }
+                entry["truncated"] = json!(truncated);
                 entry
             }
             _ => {

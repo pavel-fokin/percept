@@ -108,7 +108,8 @@ export function WhySheet({
 
 /** "Mark N claims seen?": the finish sheet Finish opens, naming `count`
  * - the map's claimed headline rows shown when it opened - and
- * `map`'s name. */
+ * `map`'s name. With no claimed rows left, every row in the cut is
+ * already judged, and the sheet says so instead of naming a count. */
 export function FinishSheet({
   map,
   count,
@@ -124,11 +125,17 @@ export function FinishSheet({
   return (
     <Scrim onClose={onCancel}>
       <h2 id="finish-title" className="text-base font-bold">
-        Mark {plural(count, "one claim", "claims")} seen?
+        {count === 0 ? "Finish this review?" : `Mark ${plural(count, "one claim", "claims")} seen?`}
       </h2>
       <p className="mt-2 text-[var(--ink-2)]">
-        Every claim to {map} you did not mark becomes seen, in one event. Seen is not undone. An
-        alternative folded under a decision stays unjudged.
+        {count === 0 ? (
+          "Everything here is judged. Finishing closes this sitting."
+        ) : (
+          <>
+            Every claim to {map} you did not mark becomes seen, in one event. Seen is not undone. An
+            alternative folded under a decision stays unjudged.
+          </>
+        )}
       </p>
       <div className="mt-3.5 flex items-center justify-end gap-2">
         <button

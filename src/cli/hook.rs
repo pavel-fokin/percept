@@ -239,10 +239,10 @@ recording
 - Close the session with one line naming what was recorded: Recorded to decisions: q1, d1, o1.";
 
 /// What each folded map gained since `since`: a counts line for every
-/// map, in fold order, then up to `LIMIT` lines per map that gained
-/// anything - a node's `added_at` is compared directly, not
-/// `Map::since`, which would also surface an older node a fresh edge
-/// only touched.
+/// map, in fold order, then up to `mapstore::judge::LIMIT` lines per
+/// map that gained anything - a node's `added_at` is compared
+/// directly, not `Map::since`, which would also surface an older node
+/// a fresh edge only touched.
 fn gained_block(maps: &[Map], since: Timestamp) -> String {
     let per_map: Vec<Vec<&Node>> = maps
         .iter()

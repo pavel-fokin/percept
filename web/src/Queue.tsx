@@ -37,13 +37,13 @@ export default function Queue({
         const isSelfGroup = group.claims.some((claim) => claim.id === group.id);
         return (
           <section key={group.id || group.claims[0]?.id} className="mt-8">
-            {!isSelfGroup && (
+            {group.id && !isSelfGroup && (
               <header>
                 <h2 className="font-serif text-[1.1875rem] font-medium leading-snug">
                   <span className="mr-2 font-sans text-sm font-normal text-[var(--ink-3)]">{group.id}</span>
                   {group.title}
                 </h2>
-                <p className="mt-1 text-[var(--ink-2)]">Raised on {formatDate(group.raised_at)}.</p>
+                <p className="mt-1 text-[var(--ink-2)]">Raised on {formatDate(group.raised_at as string)}.</p>
               </header>
             )}
             <ol className="mt-3 list-none border-t border-[var(--rule)] p-0">

@@ -5,7 +5,7 @@ use serde_json::Value;
 
 use super::*;
 use crate::core::testing::{
-    edge_added, human, node_added_by, node_id, schemas, source, source_at, FakeLog,
+    edge_added, human, node_added_by, node_id, schemas, source, source_at, FakeLog, ROOT,
 };
 use crate::core::{Actor, Event, EventId, NodeId, Payload};
 use crate::shared::Timestamp;
@@ -227,6 +227,51 @@ fn next_is_null_when_nothing_was_judged() {
 }
 
 #[test]
+fn a_decision_that_supersedes_the_one_resolving_a_question_is_grouped_under_that_question() {
+    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let old_decision = node_added_by(Actor::Agent, "decision", "Rust");
+    let resolves = edge_added("resolves", &old_decision, &question);
+    let correction = node_added_by(Actor::Agent, "decision", "Go");
+    let supersedes = edge_added("supersedes", &correction, &old_decision);
+
+    let map = cut_decisions(vec![question, old_decision, resolves, correction, supersedes]);
+
+    let groups = groups_of(&map);
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0]["title"], "Which language?");
+    let claims = groups[0]["claims"].as_array().unwrap();
+    assert_eq!(claims.len(), 1);
+    assert_eq!(claims[0]["name"], "Go");
+}
+
+#[test]
+fn an_orphan_group_carries_a_null_raised_at() {
+    let decision = node_added_by(Actor::Agent, "decision", "Rust");
+
+    let map = cut_decisions(vec![decision]);
+
+    let groups = groups_of(&map);
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0]["id"], "");
+    assert!(groups[0]["raised_at"].is_null(), "{:?}", groups[0]);
+}
+
+#[test]
+fn an_option_whose_name_equals_the_decisions_is_not_listed_under_it() {
+    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let decision = node_added_by(Actor::Agent, "decision", "Rust");
+    let resolves = edge_added("resolves", &decision, &question);
+    let restating_option = node_added_by(Actor::Agent, "option", "Rust");
+    let answers = edge_added("answers", &restating_option, &question);
+
+    let map = cut_decisions(vec![question, decision, resolves, restating_option, answers]);
+
+    let claims = groups_of(&map)[0]["claims"].as_array().unwrap();
+    let options = claims[0]["options"].as_array().unwrap();
+    assert!(options.is_empty(), "{options:?}");
+}
+
+#[test]
 fn an_option_that_answers_the_question_is_listed_under_the_decisions_row() {
     let question = node_added_by(Actor::Agent, "question", "Which language?");
     let decision = node_added_by(Actor::Agent, "decision", "Rust");
@@ -326,6 +371,57 @@ fn a_source_id_the_log_does_not_hold_reads_as_missing() {
     let claims = groups_of(&map)[0]["claims"].as_array().unwrap();
     let sources = claims[0]["sources"].as_array().unwrap();
     assert_eq!(sources[0]["kind"], "missing");
+}
+
+#[test]
+fn a_finish_naming_an_unknown_id_still_appends_a_review_finished_naming_the_ones_that_resolved() {
+    let decision = node_added_by(Actor::Agent, "decision", "Rust");
+    let log = FakeLog::seeded(vec![decision.clone()]);
+    let schemas = schemas();
+    let src = source("test");
+
+    let outcome = finish(&log, &schemas, &src, human(), "decisions", &["d1".to_string(), "d99".to_string()]);
+
+    assert!(matches!(outcome, ApiOutcome::Ok(_)));
+    let events = log.load().unwrap();
+    let finished = events
+        .iter()
+        .find_map(|event| match event.payload() {
+            Payload::ReviewFinished { nodes, .. } => Some(nodes.clone()),
+            _ => None,
+        })
+        .expect("a review.finished event");
+    assert_eq!(finished, vec![node_id(&decision)]);
+}
+
+#[test]
+fn a_judgment_between_two_clients_last_sessions_is_in_next() {
+    let decision = node_added_by(Actor::Agent, "decision", "Rust");
+    let t0 = Timestamp::now();
+    let earlier_session = created_at(Event::session_started(source_at("claude-code", ROOT)), t0);
+    let t1 = t0.minus_minutes(-10).unwrap();
+    let disputed = created_at(claim_disputed(node_id(&decision), "nah"), t1);
+    let t2 = t1.minus_minutes(-10).unwrap();
+    let later_session = created_at(Event::session_started(source_at("codex", ROOT)), t2);
+
+    let body = cut_body(vec![decision, earlier_session, disputed, later_session]);
+
+    let next = body["next"].as_str().expect("next carries the judged block");
+    assert!(next.contains("nah"), "{next}");
+}
+
+#[test]
+fn a_judgment_with_no_session_at_all_is_in_next() {
+    let decision = node_added_by(Actor::Agent, "decision", "Rust");
+    let t0 = Timestamp::now();
+    let seeded_decision = created_at(decision.clone(), t0);
+    let t1 = t0.minus_minutes(-10).unwrap();
+    let disputed = created_at(claim_disputed(node_id(&decision), "nah"), t1);
+
+    let body = cut_body(vec![seeded_decision, disputed]);
+
+    let next = body["next"].as_str().expect("next carries the judged block");
+    assert!(next.contains("nah"), "{next}");
 }
 
 #[test]

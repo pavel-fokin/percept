@@ -3,6 +3,9 @@
 //! fresh on every call from the log `cut` is handed - nothing here is
 //! cached, so a write between two requests is seen on the next one.
 
+use std::collections::HashMap;
+use std::path::PathBuf;
+
 use serde_json::{json, Value};
 
 use crate::core::{
@@ -15,14 +18,9 @@ use crate::shared::Timestamp;
 mod sources;
 use sources::EventIndex;
 
-/// The edge kind names the built-in schemas fix a settlement to: a
-/// `by` node resolves its `of` node over `RESOLVES`, an option answers
-/// its question over `ANSWERS`, and a correction points at what it
-/// replaces over `SUPERSEDES`. `core::Map` enforces these by string
-/// too; `review` reads the same names rather than re-deriving them,
-/// since a `Settlement` names the two node kinds, not the edge.
-const RESOLVES: &str = "resolves";
-const ANSWERS: &str = "answers";
+/// The edge kind a correction points at what it replaces over -
+/// `core::Map` enforces this by string too; `review` reads the same
+/// name rather than re-deriving it.
 const SUPERSEDES: &str = "supersedes";
 
 /// The response `GET /api/review` serves: `{"maps": [...], "next":
@@ -50,17 +48,30 @@ pub fn cut(
     Ok(json!({ "maps": map_values, "next": next }))
 }
 
-/// The `created_at` of the latest `session.started` event in `scope`,
-/// from any source - unlike `cli::hook::last_session`, which filters to
-/// one client, the review page is opened from a browser, not a coding
-/// client, so every client's last session here counts.
+/// The `since` every client's next `session.started` block will use, so
+/// a judgment the foot names here is one the model is guaranteed to
+/// see next: for each client - grouped by source name and path - the
+/// latest `session.started` in `scope`, then the earliest of those
+/// maxes across clients, since that is the oldest `since` any client's
+/// next start will compute. `None` when `scope` holds no events at all;
+/// when it holds events but no `session.started`, the earliest event's
+/// `created_at` stands in, so a judgment made before any hook ran still
+/// shows.
 fn last_session(events: &[Event], scope: &Scope) -> Option<Timestamp> {
-    events
-        .iter()
-        .filter(|event| scope.admits(event))
-        .filter(|event| matches!(event.payload(), Payload::SessionStarted))
-        .map(Event::created_at)
-        .max()
+    let admitted: Vec<&Event> = events.iter().filter(|event| scope.admits(event)).collect();
+    let mut latest_by_client: HashMap<(String, PathBuf), Timestamp> = HashMap::new();
+    for event in admitted.iter().filter(|event| matches!(event.payload(), Payload::SessionStarted)) {
+        let key = (event.source().name.clone(), event.source().path.clone());
+        let at = event.created_at();
+        latest_by_client
+            .entry(key)
+            .and_modify(|current| *current = (*current).max(at))
+            .or_insert(at);
+    }
+    if latest_by_client.is_empty() {
+        return admitted.iter().map(|event| event.created_at()).min();
+    }
+    latest_by_client.into_values().min()
 }
 
 /// What a `/api/dispute`, `/api/confirm`, or `/api/finish` write
@@ -122,9 +133,12 @@ pub fn confirm(
 }
 
 /// `POST /api/finish`: appends one `review.finished` naming every id in
-/// `nodes`, resolved against `map` - a short id or `kind:name`, as
-/// `maps confirm` accepts - skipping one the human wrote themselves,
-/// since the page may send a group's heading along with its claims.
+/// `nodes` that still resolves against `map` - a short id or
+/// `kind:name`, as `maps confirm` accepts - skipping one the human
+/// wrote themselves, the same as one that no longer resolves: a node
+/// removed since the page loaded must not block finishing until a
+/// reload, and the page may send a group's heading along with its
+/// claims.
 pub fn finish(
     log: &dyn EventLog,
     schemas: &Schemas,
@@ -139,9 +153,8 @@ pub fn finish(
     };
     let mut ids = Vec::new();
     for node in nodes {
-        let id = match folded.resolve_str(node) {
-            Ok(id) => id,
-            Err(err) => return outcome_of(err.into()),
+        let Ok(id) = folded.resolve_str(node) else {
+            continue;
         };
         let resolved = folded.node(id).expect("resolve_str returns a live node's id");
         if !matches!(resolved.actor, Actor::Human(_)) {
@@ -217,31 +230,37 @@ struct Group<'a> {
     rows: Vec<&'a Node>,
 }
 
-/// `claims` grouped by `settlement`: a `by` claim under the `of` node
-/// its `resolves` edge names, an `of` claim nothing in the cut resolves
-/// as its own group, and a `by` claim that resolves nothing in a last
-/// group with no heading. A group whose `of` node reopens a decision
-/// sorts first; otherwise by the `of` node's `added_at`, ascending.
+/// `claims` grouped by `settlement`: for every `of` node in the map,
+/// the decision that `Map::settled_by` says settles it now, when that
+/// decision is a `by` claim in the cut - so a decision recorded as a
+/// correction, with a `supersedes` edge and no `resolves` edge of its
+/// own, still lands under the question its predecessor answered. An
+/// `of` claim nothing in the cut settles is its own group, and a `by`
+/// claim that settles no `of` node in the map goes to a last group with
+/// no heading. A group whose `of` node reopens a decision sorts first;
+/// otherwise by the `of` node's `added_at`, ascending.
 fn grouped<'a>(map: &'a Map, settlement: &Settlement, claims: &[&'a Node]) -> Vec<Group<'a>> {
-    let mut resolved: Vec<(NodeId, Vec<&'a Node>)> = Vec::new();
-    let mut orphaned: Vec<&'a Node> = Vec::new();
-    for &node in claims.iter().filter(|node| node.kind == settlement.by) {
-        match resolves_target(map, node.id) {
-            Some(question) => match resolved.iter_mut().find(|(id, _)| *id == question) {
-                Some((_, rows)) => rows.push(node),
-                None => resolved.push((question, vec![node])),
-            },
-            None => orphaned.push(node),
+    let mut resolved: Vec<(&'a Node, Vec<&'a Node>)> = Vec::new();
+    let mut settled_ids: Vec<NodeId> = Vec::new();
+    for of_node in map.nodes().iter().filter(|node| node.kind == settlement.of) {
+        let rows: Vec<&'a Node> = map
+            .settled_by(of_node.id)
+            .into_iter()
+            .filter_map(|decision| claims.iter().copied().find(|claim| claim.id == decision.id))
+            .collect();
+        if !rows.is_empty() {
+            settled_ids.extend(rows.iter().map(|node| node.id));
+            resolved.push((of_node, rows));
         }
     }
 
-    let resolved_ids: Vec<NodeId> = resolved.iter().map(|(id, _)| *id).collect();
+    let grouped_of_ids: Vec<NodeId> = resolved.iter().map(|(of_node, _)| of_node.id).collect();
     let mut groups: Vec<Group<'a>> = resolved
         .into_iter()
-        .filter_map(|(id, rows)| map.node(id).map(|of_node| Group { of_node: Some(of_node), rows }))
+        .map(|(of_node, rows)| Group { of_node: Some(of_node), rows })
         .collect();
     for &node in claims.iter().filter(|node| node.kind == settlement.of) {
-        if !resolved_ids.contains(&node.id) {
+        if !grouped_of_ids.contains(&node.id) {
             groups.push(Group {
                 of_node: Some(node),
                 rows: vec![node],
@@ -259,6 +278,11 @@ fn grouped<'a>(map: &'a Map, settlement: &Settlement, claims: &[&'a Node]) -> Ve
             .then(a_node.added_at.cmp(&b_node.added_at))
     });
 
+    let orphaned: Vec<&'a Node> = claims
+        .iter()
+        .copied()
+        .filter(|node| node.kind == settlement.by && !settled_ids.contains(&node.id))
+        .collect();
     if !orphaned.is_empty() {
         groups.push(Group {
             of_node: None,
@@ -266,14 +290,6 @@ fn grouped<'a>(map: &'a Map, settlement: &Settlement, claims: &[&'a Node]) -> Ve
         });
     }
     groups
-}
-
-/// The node `from`'s `resolves` edge points at, if it has one.
-fn resolves_target(map: &Map, from: NodeId) -> Option<NodeId> {
-    map.edges()
-        .iter()
-        .find(|edge| edge.kind == RESOLVES && edge.from == from)
-        .map(|edge| edge.to)
 }
 
 /// The node `from`'s `supersedes` edge points at, if it has one.
@@ -284,30 +300,15 @@ fn supersedes_target(map: &Map, from: NodeId) -> Option<NodeId> {
         .map(|edge| edge.to)
 }
 
-/// Every model-written node with an `answers` edge to `question`, any
-/// standing, in `added_at` order - a group's row lists these as its
-/// weighed-and-lost alternatives.
-fn answers(map: &Map, question: NodeId) -> Vec<&Node> {
-    let mut nodes: Vec<&Node> = map
-        .edges()
-        .iter()
-        .filter(|edge| edge.kind == ANSWERS && edge.to == question)
-        .filter_map(|edge| map.node(edge.from))
-        .filter(|node| !matches!(node.actor, Actor::Human(_)))
-        .collect();
-    nodes.sort_by_key(|node| node.added_at);
-    nodes
-}
-
 /// One group as JSON: its heading, and its rows by `added_at` ascending.
 fn group_json(map: &Map, group: &Group, index: &EventIndex) -> Value {
     let (id, title, raised_at) = match group.of_node {
         Some(node) => (
             map.short_id(node.id).unwrap_or_default(),
             node.name.clone(),
-            node.added_at.to_string(),
+            json!(node.added_at.to_string()),
         ),
-        None => (String::new(), String::new(), String::new()),
+        None => (String::new(), String::new(), Value::Null),
     };
     let mut rows = group.rows.clone();
     rows.sort_by_key(|node| node.added_at);
@@ -334,7 +335,7 @@ fn row_json(map: &Map, node: &Node, question: Option<NodeId>, index: &EventIndex
         .collect();
     let options: Vec<Value> = question
         .map(|question| {
-            answers(map, question)
+            map.weighed_for(question)
                 .into_iter()
                 .map(|option| option_json(map, option, index))
                 .collect()

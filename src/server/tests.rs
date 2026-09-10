@@ -73,6 +73,14 @@ fn root_returns_the_embedded_page() {
 }
 
 #[test]
+fn root_with_a_query_string_still_returns_the_embedded_page() {
+    let addr = spawn();
+    let response = get(addr, "/?x=1");
+    assert!(response.starts_with("HTTP/1.0 200"), "{response}");
+    assert!(response.contains("<title>percept review</title>"), "{response}");
+}
+
+#[test]
 fn api_review_returns_json_with_a_maps_array() {
     let addr = spawn();
     let response = get(addr, "/api/review");

@@ -25,13 +25,13 @@ npm run build`, then `cargo build`.</p>
 
 fn main() {
     let source = Path::new("web/dist/index.html");
-    println!("cargo:rerun-if-changed=web/dist/index.html");
     println!("cargo:rerun-if-changed=web/dist");
 
     let out_dir = env::var("OUT_DIR").expect("OUT_DIR set by cargo");
     let dest = Path::new(&out_dir).join("index.html");
 
     if source.exists() {
+        println!("cargo:rerun-if-changed=web/dist/index.html");
         fs::copy(source, &dest).expect("copy web/dist/index.html to OUT_DIR");
         println!("cargo:rustc-env=PERCEPT_REVIEW_PAGE=built");
     } else {

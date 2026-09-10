@@ -19,7 +19,7 @@ export type Source =
       at: string;
       client: string;
       content: string;
-      truncated?: boolean;
+      truncated: boolean;
       proposal: Proposal | null;
     }
   | {
@@ -29,7 +29,7 @@ export type Source =
       path: string;
       lines: [number, number] | null;
       excerpt: string;
-      truncated?: boolean;
+      truncated: boolean;
     }
   | { kind: "event"; id: string; at: string; type: string }
   | { kind: "missing"; id: string };
@@ -66,7 +66,7 @@ export interface Claim extends Option {
 export interface Group {
   id: string;
   title: string;
-  raised_at: string;
+  raised_at: string | null;
   claims: Claim[];
 }
 

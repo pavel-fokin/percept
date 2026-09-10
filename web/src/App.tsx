@@ -116,7 +116,7 @@ export default function App() {
   }
 
   function openFinish() {
-    if (!map || claimedRows(map).length === 0) return;
+    if (!map || rowIds.length === 0) return;
     setSheet({ kind: "finish" });
   }
 
@@ -127,9 +127,8 @@ export default function App() {
 
   function markSeen() {
     if (!current || !map) return;
-    const claimed = claimedRows(map);
-    const count = claimed.length;
-    const nodes = [...claimed.map((claim) => claim.id), ...map.groups.map((group) => group.id).filter(Boolean)];
+    const count = claimedRows(map).length;
+    const nodes = [...rowIds, ...map.groups.map((group) => group.id).filter(Boolean)];
     finish(current, nodes)
       .then(() => {
         setSheet(null);
@@ -142,16 +141,38 @@ export default function App() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (sheet) return;
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
       const target = event.target as HTMLElement;
       if (target.matches("textarea, input, select")) return;
-      if (event.key === "j") moveFocus(1);
-      if (event.key === "k") moveFocus(-1);
-      if (event.key === "?") setKeysShown((shown) => !shown);
-      if (event.key === "f") openFinish();
+      if (event.key === "j") {
+        event.preventDefault();
+        moveFocus(1);
+      }
+      if (event.key === "k") {
+        event.preventDefault();
+        moveFocus(-1);
+      }
+      if (event.key === "?") {
+        event.preventDefault();
+        setKeysShown((shown) => !shown);
+      }
+      if (event.key === "f") {
+        event.preventDefault();
+        openFinish();
+      }
       if (!focused) return;
-      if (event.key === "w") openWhy(focused);
-      if (event.key === "y") confirmNode(focused);
-      if (event.key === "s") toggleSource(focused);
+      if (event.key === "w") {
+        event.preventDefault();
+        openWhy(focused);
+      }
+      if (event.key === "y") {
+        event.preventDefault();
+        confirmNode(focused);
+      }
+      if (event.key === "s") {
+        event.preventDefault();
+        toggleSource(focused);
+      }
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
@@ -251,11 +272,11 @@ export default function App() {
         <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-2.5">
           <button
             type="button"
-            disabled={!map || claimedRows(map).length === 0}
+            disabled={rowIds.length === 0}
             onClick={openFinish}
             className="min-h-11 flex-1 rounded-md bg-[var(--ink)] px-4 py-2 font-bold text-[var(--ground)] disabled:bg-[var(--ground-2)] disabled:text-[var(--ink-3)]"
           >
-            {map && claimedRows(map).length === 0 ? "Review finished" : "Finish review"}
+            Finish review
           </button>
           <button
             type="button"

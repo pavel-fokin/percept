@@ -1,7 +1,8 @@
 //! `percept review` - serves the embedded review page over HTTP on
 //! `127.0.0.1`, on a port the OS picks, and opens it in the browser.
 //! A presentation-layer peer of `cli` and `tui`: it has no chat logic
-//! of its own, and later serves the JSON the page reads and writes
+//! of its own. It serves the JSON the page reads (`GET /api/review`)
+//! and writes (`POST /api/dispute`, `/api/confirm`, `/api/finish`)
 //! over the same log and maps the CLI uses.
 //!
 //! The page is built into the binary at compile time - `build.rs`
@@ -72,7 +73,8 @@ fn bind() -> Result<Server, Box<dyn Error>> {
 /// everything else 404s.
 fn serve(server: Server, log: Arc<dyn EventLog>, schemas: Arc<Schemas>, source: Source, me: Option<HumanId>) {
     for mut request in server.incoming_requests() {
-        let response = match (request.method(), request.url()) {
+        let path = request.url().split('?').next().unwrap_or("").to_string();
+        let response = match (request.method(), path.as_str()) {
             (Method::Get, "/" | "/index.html") => {
                 let header = Header::from_bytes(
                     &b"Content-Type"[..],
