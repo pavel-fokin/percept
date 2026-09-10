@@ -26,8 +26,8 @@ use std::path::{Path, PathBuf};
 use clap::{Args, Parser, Subcommand};
 
 use crate::core::{
-    cited_label, Actor, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeId,
-    NodeRef, Payload, Schemas,
+    cited_label, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeId, NodeRef,
+    Payload, Schemas,
 };
 use crate::mapstore;
 use crate::shared::Timestamp;
@@ -88,6 +88,9 @@ pub enum Command {
     /// Write a coding client's project config so its hooks call
     /// `percept hook <client>`.
     Init(init::InitArgs),
+    /// Open the review page: an HTTP server on `127.0.0.1` serving the
+    /// embedded page, until the process is killed.
+    Review,
 }
 
 #[derive(Subcommand)]
@@ -785,35 +788,6 @@ pub fn maps_remove_edge(
     .map(drop)
 }
 
-/// Resolves `s` against `map`, refusing a node the map does not hold or
-/// one the human wrote themselves - a landmark, not a model's claim, so
-/// it carries no standing to judge.
-fn resolve_judged_node(map: &Map, s: &str) -> Result<NodeId, Box<dyn std::error::Error>> {
-    let id = map.resolve_str(s)?;
-    let node = map.node(id).expect("resolve_str returns a live node's id");
-    if matches!(node.actor, Actor::Human(_)) {
-        return Err(format!("{s} is the user's own; standing is for a model's claim").into());
-    }
-    Ok(id)
-}
-
-/// The one write path under `maps confirm` and `maps dispute`: folds
-/// the map, resolves the judged node, appends the event `event_of`
-/// builds for it, and prints the event's id.
-fn judge(
-    target: StandingArgs,
-    log: &dyn EventLog,
-    schemas: &Schemas,
-    source: &crate::core::Source,
-    event_of: impl FnOnce(String, NodeId, crate::core::Source) -> Event,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let map = mapstore::fold_map(log, schemas, &target.map, &source.scope())?;
-    let node = resolve_judged_node(&map, &target.node)?;
-    let event = event_of(target.map, node, source.clone());
-    log.append(&event)?;
-    print_lines(std::iter::once(event.id().as_uuid().to_string()))
-}
-
 /// Marks `args.node`'s claim confirmed - always the human's own
 /// judgment, never the model's. Prints the committed event's id.
 pub fn maps_confirm(
@@ -823,9 +797,8 @@ pub fn maps_confirm(
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    judge(args, log, schemas, source, |map, node, source| {
-        Event::claim_confirmed(map, node, me, source, None)
-    })
+    let event = mapstore::confirm(log, schemas, source, me, &args.map, &args.node)?;
+    print_lines(std::iter::once(event.id().as_uuid().to_string()))
 }
 
 /// Marks `args.target.node`'s claim disputed, with `args.why` - always
@@ -837,10 +810,16 @@ pub fn maps_dispute(
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let why = args.why;
-    judge(args.target, log, schemas, source, move |map, node, source| {
-        Event::claim_disputed(map, node, why, me, source, None)
-    })
+    let event = mapstore::dispute(
+        log,
+        schemas,
+        source,
+        me,
+        &args.target.map,
+        &args.target.node,
+        args.why,
+    )?;
+    print_lines(std::iter::once(event.id().as_uuid().to_string()))
 }
 
 /// One `cites` line under a node: the file it rested on, and the range

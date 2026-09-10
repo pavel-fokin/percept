@@ -1,5 +1,7 @@
 use super::*;
-use crate::core::testing::{decisions, files, human, node_added_at, scope, source, tasks, ROOT};
+use crate::core::testing::{
+    created_at, decisions, files, human, node_added_at, scope, source, tasks, ROOT,
+};
 use crate::core::Actor;
 
 fn committed(payload: Payload) -> Event {
@@ -189,18 +191,6 @@ fn a_resolves_edge_between_other_kinds_settles_nothing() {
 
     assert!(map.settled_by(o).is_empty());
     assert!(!map.settles(d));
-}
-
-/// `event`, re-stamped as created at `at`.
-fn created_at(event: Event, at: Timestamp) -> Event {
-    Event::restore(
-        event.id(),
-        event.actor(),
-        event.source().clone(),
-        event.causation_id(),
-        at,
-        event.payload().clone(),
-    )
 }
 
 #[test]
@@ -1281,6 +1271,40 @@ fn a_judgment_naming_a_node_the_map_does_not_hold_is_not_judged_since() {
     let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
     assert_eq!(map.judged_since(at).count(), 0);
+}
+
+#[test]
+fn last_finished_is_the_latest_finish_s_time() {
+    let node = NodeId::new();
+    let earlier = Timestamp::now();
+    let later = earlier.minus_minutes(-10).unwrap();
+    let events = [
+        node_added_by(Actor::Agent, "decisions", node, "decision", "Rust"),
+        created_at(review_finished("decisions", vec![node]), later),
+        created_at(review_finished("decisions", vec![node]), earlier),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.last_finished(), Some(later));
+}
+
+#[test]
+fn judged_at_is_the_latest_judgment_s_time_and_none_for_an_unjudged_node() {
+    let (judged, unjudged) = (NodeId::new(), NodeId::new());
+    let earlier = Timestamp::now();
+    let later = earlier.minus_minutes(-10).unwrap();
+    let events = [
+        node_added_by(Actor::Agent, "decisions", judged, "decision", "Rust"),
+        node_added_by(Actor::Agent, "decisions", unjudged, "decision", "Go"),
+        created_at(claim_disputed("decisions", judged, "never proposed"), earlier),
+        created_at(claim_confirmed("decisions", judged), later),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.judged_at(judged), Some(later));
+    assert_eq!(map.judged_at(unjudged), None);
 }
 
 #[test]

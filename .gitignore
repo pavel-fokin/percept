@@ -4,6 +4,7 @@
 !/docs/architecture.md
 !/docs/clients.md
 !/docs/review-sketch.html
+!/docs/review-sketch-mvp.html
 !/docs/mvp.md
 /target
 /percept.jsonl
@@ -15,6 +16,10 @@
 /.percept/tasks.md
 /.percept/ideas.md
 **/__pycache__/
+/web/dist/*
+!/web/dist/.gitkeep
+/web/node_modules/
+/web/tsconfig.tsbuildinfo
 
 # Experiment run output — regenerate with the run scripts
 experiment/*/runs/

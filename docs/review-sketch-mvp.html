@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>percept review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,500;0,7..72,600;1,7..72,400&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap">
+<style>
+  :root {
+    --ground: #F4F6F8;
+    --ground-2: #EAEDF0;
+    --ink: #22262A;
+    --ink-2: #5B6167;
+    --ink-3: #8A9096;
+    --rule: #D3D8DC;
+    --focus: #345B9A;
+    --agree: #2F7D52;
+    --object: #B23A3A;
+    --sheet: #FFFFFF;
+    --serif: "Literata", "Iowan Old Style", Georgia, serif;
+    --sans: "Atkinson Hyperlegible", "Helvetica Neue", Arial, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #17191C; --ground-2: #1F2226; --ink: #E4E6E8; --ink-2: #A5ABB1; --ink-3: #737980;
+      --rule: #30353A; --focus: #8FB1E0; --agree: #7CC594; --object: #E28A8A; --sheet: #1F2226;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #17191C; --ground-2: #1F2226; --ink: #E4E6E8; --ink-2: #A5ABB1; --ink-3: #737980;
+    --rule: #30353A; --focus: #8FB1E0; --agree: #7CC594; --object: #E28A8A; --sheet: #1F2226;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font: 15px/1.45 var(--sans);
+    padding-bottom: 6rem;
+  }
+  [hidden] { display: none !important; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  button:focus-visible, summary:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  h1, h2, h3, p { margin: 0; }
+  .record { font-family: var(--serif); font-size: 1.0625rem; line-height: 1.55; }
+  .wrap { max-width: 44rem; margin: 0 auto; padding: 0 1rem; }
+
+  /* Top bar: the name, the map, the count. */
+  .top { position: sticky; top: 0; z-index: 5; background: var(--ground); border-bottom: 1px solid var(--rule); }
+  .top .wrap { display: flex; align-items: baseline; gap: 1rem; padding-top: .75rem; padding-bottom: .625rem; }
+  .top h1 { font-size: 1rem; font-weight: 700; }
+  .top h1 span { font-weight: 400; color: var(--ink-2); }
+  .maps { margin-left: auto; display: flex; gap: 1rem; }
+  .maps button { padding: .125rem 0; border-bottom: 2px solid transparent; color: var(--ink-2); }
+  .maps button[aria-current="page"] { color: var(--ink); border-color: var(--ink); }
+  .maps button b { font-weight: 400; color: var(--ink-3); margin-left: .25rem; }
+
+  .since { padding: 1.25rem 0 .25rem; }
+  .since p + p { color: var(--ink-2); margin-top: .25rem; }
+
+  /* A group: the question, then its claims. */
+  .group { margin-top: 2rem; }
+  .group > header .id { color: var(--ink-3); }
+  .group > header h2 { font-family: var(--serif); font-size: 1.1875rem; font-weight: 500; line-height: 1.4; }
+  .group > header h2 .id { font-family: var(--sans); font-size: .875rem; font-weight: 400; margin-right: .5rem; }
+  .group > header p { color: var(--ink-2); margin-top: .25rem; }
+  .claim .reopens { color: var(--focus); }
+  .claims { list-style: none; margin: .75rem 0 0; padding: 0; border-top: 1px solid var(--rule); }
+
+  /* A claim row. On a phone the mark leads the first line; from 40rem it moves into a margin column. */
+  .claim { border-bottom: 1px solid var(--rule); padding: 1rem 0 1.125rem; display: grid; grid-template-columns: 1fr; row-gap: .5rem; }
+  .claim[data-focused] { box-shadow: inset 3px 0 0 var(--focus); padding-left: .75rem; margin-left: -.75rem; }
+  .head { display: flex; align-items: center; gap: .625rem; color: var(--ink-2); }
+  .head .id { font-weight: 700; color: var(--ink); }
+  .mark { width: 22px; height: 22px; flex: none; }
+  .mark .on-seen, .mark .on-confirmed, .mark .on-disputed, .mark .on-claimed { display: none; }
+  [data-state="claimed"] .mark .on-claimed { display: inline; }
+  [data-state="seen"] .mark .on-seen { display: inline; }
+  [data-state="confirmed"] .mark .on-confirmed { display: inline; }
+  [data-state="disputed"] .mark .on-disputed { display: inline; }
+  [data-state="confirmed"] .head { color: var(--agree); }
+  [data-state="confirmed"] .head .id { color: var(--agree); }
+  [data-state="disputed"] .head { color: var(--object); }
+  [data-state="disputed"] .head .id { color: var(--object); }
+  .mark .fillable { transform-origin: center; transform: scale(.2); transition: transform .22s ease-out; }
+  [data-state="confirmed"] .mark .fillable, [data-state="disputed"] .mark .fillable { transform: scale(1); }
+  .claim .why { color: var(--ink-2); }
+  .claim .why i { font-style: italic; }
+  .claim .was { color: var(--ink-2); }
+  .standing { color: var(--ink-3); }
+  [data-state="confirmed"] .standing { color: var(--agree); }
+  [data-state="disputed"] .standing { color: var(--object); }
+
+  details summary { cursor: pointer; color: var(--ink-2); list-style: none; min-height: 2.75rem; display: flex; align-items: center; }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before { content: ""; display: inline-block; width: .4rem; height: .4rem; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: rotate(-45deg); margin: 0 .5rem .15rem .1rem; transition: transform .15s; }
+  details[open] summary::before { transform: rotate(45deg); }
+  details summary:hover { color: var(--ink); }
+  .exchange { margin: .75rem 0 .25rem; padding-left: 1rem; border-left: 2px solid var(--rule); display: grid; grid-template-columns: 3.5rem 1fr; row-gap: .75rem; column-gap: .5rem; }
+  .exchange .who { color: var(--ink-3); font-family: var(--sans); font-size: .875rem; line-height: 1.3; }
+  .lost { margin: .5rem 0 0; padding: 0; list-style: none; }
+  .lost li { display: grid; grid-template-columns: auto 1fr; gap: .625rem; padding: .625rem 0 .25rem; }
+  .lost .head { align-items: flex-start; flex-direction: column; gap: .25rem; }
+  .dispute { margin-top: .25rem; padding-left: 1rem; border-left: 2px solid var(--object); }
+  .dispute p:first-child { color: var(--ink-2); }
+
+  .acts { display: flex; gap: .5rem; align-items: center; margin-top: .25rem; }
+  .btn { padding: .5rem .875rem; border: 1.5px solid var(--rule); border-radius: .375rem; font-weight: 700; min-height: 2.5rem; }
+  .btn.wrong { color: var(--ink); }
+  .btn.wrong:hover, .btn.wrong:focus-visible, .btn.wrong:active { border-color: var(--object); color: var(--object); }
+  .btn.quiet { border-color: transparent; color: var(--ink-3); font-weight: 400; }
+  .btn.quiet:hover { color: var(--agree); }
+  .acts .small { color: var(--ink-3); margin-left: auto; }
+  .legend { display: flex; align-items: center; gap: .5rem; color: var(--ink-2); margin-top: .5rem; }
+  .legend .mark { width: 18px; height: 18px; color: var(--ink-3); }
+  .sheet .save.seen { background: var(--ink); color: var(--ground); border-color: var(--ink); }
+
+  /* The foot: what the next session reads, in the hook's own lines. */
+  .next { margin-top: 3rem; }
+  .next h2 { font-size: 1rem; font-weight: 700; }
+  .next p { color: var(--ink-2); margin-top: .25rem; }
+  .next pre { margin: .75rem 0 0; padding: .875rem 1rem; background: var(--ground-2); border-radius: .375rem; white-space: pre-wrap; overflow-wrap: anywhere; font: .875rem/1.5 ui-monospace, "SF Mono", Menlo, monospace; color: var(--ink); }
+
+  /* Bottom bar: Finish in thumb reach. */
+  .bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; background: var(--ground); border-top: 1px solid var(--rule); padding-bottom: env(safe-area-inset-bottom); }
+  .bar .wrap { display: flex; align-items: center; gap: .75rem; padding-top: .625rem; padding-bottom: .625rem; }
+  .finish { flex: 1; min-height: 2.75rem; border-radius: .375rem; background: var(--ink); color: var(--ground); font-weight: 700; padding: .5rem 1rem; }
+  .finish:disabled { background: var(--ground-2); color: var(--ink-3); cursor: default; }
+  .keys-btn { width: 2.75rem; min-height: 2.75rem; border: 1.5px solid var(--rule); border-radius: .375rem; color: var(--ink-2); }
+  .keys { position: fixed; left: 0; right: 0; bottom: 3.9rem; z-index: 6; background: var(--sheet); border-top: 1px solid var(--rule); }
+  .keys .wrap { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: .375rem 1rem; padding-top: .75rem; padding-bottom: .75rem; color: var(--ink-2); }
+  kbd { font: inherit; font-weight: 700; color: var(--ink); border: 1px solid var(--rule); border-radius: .25rem; padding: 0 .35rem; margin-right: .25rem; }
+
+  /* The why box: a sheet from the bottom on a phone, a dialog in the middle from 40rem. */
+  .scrim { position: fixed; inset: 0; z-index: 10; background: rgba(0,0,0,.35); display: flex; align-items: flex-end; justify-content: center; }
+  .sheet { width: 100%; max-width: 44rem; background: var(--sheet); border-radius: .75rem .75rem 0 0; padding: 1.25rem 1rem calc(1rem + env(safe-area-inset-bottom)); }
+  .sheet h2 { font-size: 1rem; font-weight: 700; }
+  .sheet h2 span { color: var(--object); }
+  .sheet .about { margin-top: .5rem; }
+  .sheet label { display: block; color: var(--ink-2); margin-top: .875rem; }
+  .sheet textarea { display: block; width: 100%; margin-top: .375rem; padding: .625rem .75rem; border: 1.5px solid var(--rule); border-radius: .375rem; background: var(--ground); color: var(--ink); font: 1.0625rem/1.5 var(--serif); resize: vertical; min-height: 5.5rem; }
+  .sheet .acts { margin-top: .875rem; justify-content: flex-end; }
+  .sheet .save { background: var(--object); color: #fff; border-color: var(--object); }
+
+  .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 4.75rem; z-index: 7; background: var(--ink); color: var(--ground); padding: .5rem .875rem; border-radius: .375rem; }
+
+  @media (min-width: 40rem) {
+    body { font-size: 16px; }
+    .record { font-size: 1.125rem; }
+    .claim { grid-template-columns: 3rem 1fr; column-gap: .75rem; }
+    .claim > * { grid-column: 2; }
+    .claim .head { grid-column: 1; grid-row: 1 / span 6; flex-direction: column; align-items: flex-start; gap: .25rem; }
+    .claim .head .kind { display: none; }
+    .claim > .record[data-kind]::before { content: attr(data-kind) ", "; font-style: italic; color: var(--ink-2); }
+    .claim[data-focused] { padding-left: 0; margin-left: 0; box-shadow: none; }
+    .claim[data-focused] .head .id { text-decoration: underline; text-decoration-color: var(--focus); text-underline-offset: 4px; }
+    .scrim { align-items: center; }
+    .sheet { max-width: 34rem; border-radius: .75rem; padding: 1.5rem; }
+    .acts .small { display: inline; }
+  }
+  @media (max-width: 39.99rem) { .acts .small { display: none; } }
+  @media (pointer: coarse) { .keys-btn, .keys, .acts .small { display: none !important; } }
+  @media (min-width: 40rem) {
+    .group > header { display: grid; grid-template-columns: 3rem 1fr; column-gap: .75rem; }
+    .group > header > .id { padding-top: .2rem; }
+    .group > header h2 .id { display: none; }
+  }
+  @media (max-width: 39.99rem) { .group > header > .id { display: none; } }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <h1>percept <span>review</span></h1>
+    <nav class="maps" id="maps" aria-label="maps"></nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="since">
+    <p class="record" id="since"></p>
+    <p id="hint"></p>
+    <p class="legend" id="legend" hidden></p>
+  </div>
+  <div id="queue"></div>
+
+  <section class="next">
+    <h2>What the next session starts with</h2>
+    <p>These lines are printed to the model when it next opens this project, in any client.</p>
+    <pre id="preview"></pre>
+  </section>
+</main>
+
+<footer class="keys" id="keys" hidden>
+  <div class="wrap">
+    <span><kbd>j</kbd><kbd>k</kbd> next, previous</span>
+    <span><kbd>w</kbd> wrong</span>
+    <span><kbd>y</kbd> confirm</span>
+    <span><kbd>s</kbd> show the exchange</span>
+    <span><kbd>f</kbd> finish, after a check</span>
+    <span><kbd>?</kbd> hide this</span>
+  </div>
+</footer>
+<div class="bar">
+  <div class="wrap">
+    <button class="finish" id="finish"></button>
+    <button class="keys-btn" id="keys-btn" aria-label="keyboard shortcuts">?</button>
+  </div>
+</div>
+
+<div class="scrim" id="scrim" hidden>
+  <form class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+    <h2 id="sheet-title"><span id="sheet-id"></span> is wrong</h2>
+    <p class="record about" id="sheet-about"></p>
+    <label for="why">Why it is wrong. Saved when you press Save, and read by the model at its next session here.</label>
+    <textarea id="why" rows="3" required></textarea>
+    <div class="acts">
+      <button type="button" class="btn quiet" id="sheet-cancel">Close, keep the text</button>
+      <button type="submit" class="btn save">Save</button>
+    </div>
+  </form>
+</div>
+
+<div class="scrim" id="finish-scrim" hidden>
+  <form class="sheet" id="finish-sheet" role="dialog" aria-modal="true" aria-labelledby="finish-title">
+    <h2 id="finish-title"></h2>
+    <p class="about" id="finish-about"></p>
+    <div class="acts">
+      <button type="button" class="btn quiet" id="finish-cancel">Cancel</button>
+      <button type="submit" class="btn save seen" id="finish-save">Mark seen</button>
+    </div>
+  </form>
+</div>
+
+<div class="toast" id="toast" hidden role="status" aria-live="polite"></div>
+
+<script>
+  // The since-cut per map, as the server would hand it to the page: headline nodes with standing claimed,
+  // grouped by the map's settlement question, a reopening question first. Options fold under their decision.
+  const maps = {
+    decisions: {
+      since: 'since you last reviewed, on 9 September at 18:40',
+      groups: [
+        { id: 'q106', title: 'Is the extend-only check still right once init writes the built-in schemas into a project?',
+          claims: [
+            { id: 'q106', kind: 'question', name: 'Is the extend-only check still right once init writes the built-in schemas into a project?', state: 'claimed',
+              reopens: 'Raised today at 12:31. It reopens d66, a project schema extends a built-in, never shrinks it, which stands until you settle this.',
+              source: { said: 'Instead I want to make all map schemas explicit. So repo local are stored in .percept and user level in ~/.percept.', at: '12:20', proposalAt: '12:19',
+                proposal: 'Item 11 is supposed to make the five counts mechanical. Which of them the log can give: claims in the queue, yes; claims corrected, yes; decisions reopened, partly.' } } ] },
+        { id: 'q102', title: 'Where does the review page’s frontend live?', meta: 'Raised today at 12:58.',
+          claims: [
+            { id: 'd107', kind: 'decision', name: 'web/ at the repo root holds the frontend with its own build; the built web/dist is embedded in the binary and served by percept review',
+              why: 'the page is not static: it writes wrong and finish back, so it has a server, and a frontend with a build step is kept apart from the Rust crate rather than as assets under src', state: 'claimed',
+              source: { said: 'If the page is not static and requires a server, I’d have percept/web for frontend and embed percept/web/dist', at: '12:58', proposalAt: '12:55',
+                proposal: 'Recommendation: src/review/, a presentation package beside cli and tui, with no frontend toolchain. The Rust side embeds two assets with include_str, the way mapstore embeds its schema TOML.' },
+              lost: [ { id: 'o107', name: 'src/review/page: hand-written CSS and JS embedded beside a Rust-rendered page, no toolchain', why: 'no Node for a Rust contributor and one renderer for human and model, but it caps the page at what hand-written assets can carry; the user chose a real frontend', state: 'claimed' } ] } ] },
+        { id: 'q103', title: 'Where does the review page’s server live?', meta: 'Raised today at 13:01.',
+          claims: [
+            { id: 'd108', kind: 'decision', name: 'src/server, a presentation package beside cli and tui: it serves the embedded web/dist and the JSON the page reads and writes, over the same log and maps the CLI uses',
+              why: 'the server is a surface over core and mapstore, as the TUI and CLI are; its own package keeps HTTP out of cli and the page’s build out of src', state: 'claimed',
+              source: { said: 'And percept/src/server for server code.', at: '13:01', proposalAt: '12:58', proposal: 'What follows from web/dist in the binary is a split of work: the Rust side serves the cut as JSON and takes the writes, the page lays it out.' } } ] },
+        { id: 'q104', title: 'Is the built review page committed?', meta: 'Raised today at 13:14.',
+          claims: [
+            { id: 'd109', kind: 'decision', name: 'no: web/dist holds a .gitkeep and its build output is ignored; build.rs copies web/dist into OUT_DIR when present and writes a stub page there when not, so cargo build never needs Node',
+              why: 'the user keeps build output out of git; the stub keeps a fresh checkout compiling, and release builds run the web build first', state: 'claimed',
+              source: { said: 'web/dist commited but without build just .gitkeep. Is it good?', at: '13:14', proposalAt: '13:02', proposal: 'Committed, recommended: cargo build alone produces the binary from a checkout, which the curl install and a Rust contributor without Node both need.' },
+              lost: [ { id: 'o108', name: 'commit web/dist so cargo build alone yields the page', why: 'built files in every diff; the user keeps build output out of git', state: 'claimed' } ] } ] },
+        { id: 'q105', title: 'What stack builds the review page under web/?', meta: 'Raised today at 13:14.',
+          claims: [
+            { id: 'd110', kind: 'decision', name: 'Vite, React, TypeScript, and Tailwind from the start; shadcn components only when the page needs one',
+              why: 'the user plans React with Tailwind and shadcn later; shadcn assumes a Vite React project, so Preact or plain TypeScript now is a migration later, and the size difference is nothing on a local page', state: 'claimed',
+              source: { said: 'I’m planning to use react later with tailwindcss and shadcn components. If it will be easy to migrate proceed with only typescript or preact', at: '13:14', proposalAt: '13:02', proposal: 'Vite, TypeScript, no framework or Preact, recommended. The page is a queue of about ten rows, a why box, and keystrokes.' },
+              lost: [ { id: 'o109', name: 'Preact or plain TypeScript now, React later', why: 'Preact to React is easy for own code but shadcn’s tooling assumes React, and plain TypeScript to React rewrites the rendering', state: 'claimed' } ] } ] },
+      ] },
+    tasks: {
+      since: 'since you last reviewed, on 9 September at 18:40',
+      groups: [
+        { id: '', title: 'Open tasks', meta: 'Tasks with no outcome yet.',
+          claims: [
+            { id: 't23', kind: 'task', name: 'add a server row to the AGENTS.md architecture table', why: 'src/server is a new presentation package; the table is where a reader learns the layers', state: 'claimed',
+              source: { said: 'And percept/src/server for server code.', at: '13:01', proposalAt: '12:58', proposal: 'The architecture table in AGENTS.md gets a row for server.' } } ] },
+      ] },
+  };
+
+  const $ = s => document.querySelector(s);
+  let map = 'decisions', focused = null, pending = null;
+  const claimsOf = m => maps[m].groups.flatMap(g => g.claims);
+  const allNodes = () => Object.values(maps).flatMap(m => m.groups.flatMap(g => g.claims.flatMap(c => [c, ...(c.lost || [])])));
+  const find = id => allNodes().find(n => n.id === id);
+  // Only headline claims are in the cut Finish marks seen; a folded option is judged only when opened.
+  const left = m => claimsOf(m).filter(n => n.state === 'claimed');
+  const drafts = {};
+  const plural = (n, one, many) => n === 1 ? one : `${n} ${many}`;
+
+  const mark = `<svg class="mark" viewBox="0 0 22 22" aria-hidden="true">
+      <circle class="on-claimed" cx="11" cy="11" r="8.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3.2 2.4"/>
+      <circle class="on-seen" cx="11" cy="11" r="8.5" fill="none" stroke="currentColor" stroke-width="1.6"/>
+      <g class="on-confirmed"><circle class="fillable" cx="11" cy="11" r="9" fill="currentColor"/><path d="M6.5 11.5l3 3L15.5 8" fill="none" stroke="var(--ground)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></g>
+      <g class="on-disputed"><circle class="fillable" cx="11" cy="11" r="9" fill="currentColor"/><path d="M7 11h8" fill="none" stroke="var(--ground)" stroke-width="2.2" stroke-linecap="round"/></g>
+    </svg>`;
+  const standingText = { seen: 'Seen by you.', confirmed: 'Confirmed by you.', disputed: 'Marked wrong by you.' };
+  const acts = state => `<button class="btn wrong" data-act="dispute" title="w">${state === 'confirmed' ? 'Wrong instead' : 'Wrong'}</button>` +
+    (state === 'confirmed' ? '' : `<button class="btn quiet" data-act="confirm" title="y">${state === 'disputed' ? 'Confirm instead' : 'Confirm'}</button>`);
+
+  function lostRow(o) {
+    return `<li data-state="${o.state}" data-id="${o.id}">
+      <div class="head">${mark}<span class="id">${o.id}</span></div>
+      <div>
+        <p class="record"><i>weighed and lost,</i> ${o.name}</p>
+        <p class="record why"><i>because</i> ${o.why}</p>
+        ${o.state !== 'claimed' ? `<p class="standing">${standingText[o.state]}</p>` : ''}
+        ${o.dispute ? `<div class="dispute record"><p>Why you marked it wrong.</p><p>${o.dispute}</p></div>` : ''}
+        <div class="acts">${acts(o.state)}</div>
+      </div></li>`;
+  }
+  function claimRow(c) {
+    return `<li class="claim" data-id="${c.id}" data-state="${c.state}">
+      <div class="head">${mark}<span class="id">${c.id}</span><span class="kind">${c.kind}</span></div>
+      <p class="record" data-kind="${c.kind}">${c.name}</p>
+      ${c.why ? `<p class="record why"><i>because</i> ${c.why}</p>` : ''}
+      ${c.reopens ? `<p class="reopens">${c.reopens}</p>` : ''}
+      ${c.state !== 'claimed' ? `<p class="standing">${standingText[c.state]}</p>` : ''}
+      ${c.dispute ? `<div class="dispute record"><p>Why you marked it wrong. The model reads it at its next session here.</p><p>${c.dispute}</p></div>` : ''}
+      ${c.source ? `<details class="source"><summary>You said “${c.source.said.length > 60 ? c.source.said.slice(0, 57) + '…' : c.source.said}” at ${c.source.at}. Show the exchange.</summary>
+        <div class="exchange record">
+          <span class="who">model<br>${c.source.proposalAt}</span><p>${c.source.proposal}</p>
+          <span class="who">you<br>${c.source.at}</span><p>${c.source.said}</p>
+        </div></details>` : ''}
+      ${c.lost ? `<details class="options"><summary>${plural(c.lost.length, 'One alternative', 'alternatives')} weighed and lost</summary><ul class="lost">${c.lost.map(lostRow).join('')}</ul></details>` : ''}
+      <div class="acts">${acts(c.state)}<span class="small">w, y</span></div>
+    </li>`;
+  }
+
+  function renderNav() {
+    $('#maps').innerHTML = Object.keys(maps).map(k => `<button data-map="${k}" aria-current="${k === map ? 'page' : 'false'}">${k}<b>${left(k).length}</b></button>`).join('');
+    const n = left(map).length, f = $('#finish');
+    f.textContent = n === 0 ? 'Review finished' : 'Finish review';
+    f.disabled = !n;
+  }
+  function renderQueue() {
+    const m = maps[map], n = left(map).length;
+    $('#since').textContent = `${plural(n, 'One claim', 'claims')} to ${map} ${m.since}.`;
+    $('#hint').textContent = n ? 'Mark the wrong ones. Finishing marks the rest seen.' : 'Nothing left to read here.';
+    $('#legend').hidden = !n;
+    $('#legend').innerHTML = `<span data-state="claimed" style="display:flex">${mark}</span><span>A dashed ring is a claim you have not seen yet.</span>`;
+    // A question with no decision yet is itself the claim: one row, no heading over it.
+    $('#queue').innerHTML = m.groups.map(g => `
+      <section class="group">
+        ${g.claims.some(c => c.id === g.id) ? '' : `<header>
+          <span class="id">${g.id}</span>
+          <div><h2><span class="id">${g.id}</span>${g.title}</h2><p>${g.meta}</p></div>
+        </header>`}
+        <ol class="claims">${g.claims.map(claimRow).join('')}</ol>
+      </section>`).join('');
+  }
+  // The foot repeats the hook's judged block line for line, so what the page promises is what the hook prints.
+  function renderPreview() {
+    const judged = allNodes().filter(n => n.state === 'disputed' || n.state === 'confirmed');
+    if (!judged.length) { $('#preview').textContent = 'Nothing judged yet. Seen is not listed: it changes nothing the model does.'; return; }
+    judged.sort((a, b) => (a.state === 'confirmed') - (b.state === 'confirmed'));
+    const kindOf = n => n.kind || 'option';
+    const lines = judged.map(n => `- ${n.id} ${kindOf(n)} "${n.name}" · ${n.state}${n.dispute ? `: "${n.dispute}"` : ''}`);
+    $('#preview').textContent = [`judged since your last session (${judged.length})`, ...lines].join('\n');
+  }
+  function render() { renderNav(); renderQueue(); renderPreview(); if (focused) focusClaim(focused, false); }
+
+  let toastTimer;
+  function toast(text) { const t = $('#toast'); t.textContent = text; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 4000); }
+
+  function openSheet(id) {
+    const n = find(id); pending = id;
+    $('#sheet-id').textContent = id;
+    $('#sheet-about').textContent = n.name;
+    $('#why').value = drafts[id] || '';
+    $('#scrim').hidden = false;
+    $('#why').focus();
+  }
+  // Closing keeps what was typed; only Save records it.
+  function closeSheet() { if (pending) drafts[pending] = $('#why').value; $('#scrim').hidden = true; pending = null; }
+  function openFinish() {
+    const n = left(map).length; if (!n) return;
+    $('#finish-title').textContent = `Mark ${plural(n, 'one claim', 'claims')} seen?`;
+    $('#finish-about').textContent = `Every claim to ${map} you did not mark becomes seen, in one event. Seen is not undone. An alternative folded under a decision stays unjudged.`;
+    $('#finish-scrim').hidden = false; $('#finish-save').focus();
+  }
+  function closeFinish() { $('#finish-scrim').hidden = true; }
+
+  function focusClaim(id, scroll = true) {
+    document.querySelectorAll('.claim[data-focused]').forEach(r => r.removeAttribute('data-focused'));
+    const row = document.querySelector(`.claim[data-id="${id}"]`);
+    if (!row) return;
+    row.setAttribute('data-focused', ''); focused = id;
+    if (scroll) row.scrollIntoView({ block: 'nearest' });
+  }
+
+  document.addEventListener('click', e => {
+    const mb = e.target.closest('[data-map]'); if (mb) { map = mb.dataset.map; focused = null; render(); return; }
+    const b = e.target.closest('button[data-act]'); if (!b) return;
+    const id = b.closest('[data-id]').dataset.id;
+    if (b.dataset.act === 'confirm') { const n = find(id); n.state = 'confirmed'; delete n.dispute; render(); toast(`Confirmed ${id}.`); }
+    if (b.dataset.act === 'dispute') openSheet(id);
+  });
+  $('#sheet').addEventListener('submit', e => {
+    e.preventDefault();
+    const why = $('#why').value.trim(); if (!why) { $('#why').focus(); return; }
+    const n = find(pending); n.state = 'disputed'; n.dispute = why; delete drafts[pending];
+    pending = null; $('#scrim').hidden = true; render(); toast(`Marked ${n.id} wrong.`);
+  });
+  $('#sheet-cancel').addEventListener('click', closeSheet);
+  $('#scrim').addEventListener('click', e => { if (e.target === e.currentTarget) closeSheet(); });
+  // Finishing is the batch: one event for the cut, and what was not marked is seen. It asks once, since seen is not undone.
+  $('#finish').addEventListener('click', openFinish);
+  $('#finish-cancel').addEventListener('click', closeFinish);
+  $('#finish-scrim').addEventListener('click', e => { if (e.target === e.currentTarget) closeFinish(); });
+  $('#finish-sheet').addEventListener('submit', e => {
+    e.preventDefault();
+    const ids = left(map).map(n => n.id);
+    ids.forEach(id => { find(id).state = 'seen'; });
+    closeFinish(); render(); toast(`Review finished. ${ids.join(', ')} seen.`);
+  });
+  $('#keys-btn').addEventListener('click', () => { $('#keys').hidden = !$('#keys').hidden; });
+
+  document.addEventListener('keydown', e => {
+    if (!$('#scrim').hidden) { if (e.key === 'Escape') closeSheet(); return; }
+    if (!$('#finish-scrim').hidden) { if (e.key === 'Escape') closeFinish(); return; }
+    if (e.target.matches('textarea, input, select')) return;
+    const rows = Array.from(document.querySelectorAll('.claim'));
+    const i = rows.findIndex(r => r.dataset.id === focused);
+    if (e.key === 'j') focusClaim((rows[Math.min(i + 1, rows.length - 1)] || rows[0]).dataset.id);
+    if (e.key === 'k') focusClaim((rows[Math.max(i - 1, 0)] || rows[0]).dataset.id);
+    if (e.key === '?') $('#keys').hidden = !$('#keys').hidden;
+    if (e.key === 'f') openFinish();
+    const row = rows[i]; if (!row) return;
+    if (e.key === 'w') openSheet(row.dataset.id);
+    if (e.key === 'y') row.querySelector('.acts [data-act="confirm"]').click();
+    if (e.key === 's') { const d = row.querySelector('details.source'); if (d) d.open = !d.open; }
+  });
+
+  render();
+</script>
+</body>
+</html>

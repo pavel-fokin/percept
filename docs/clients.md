@@ -260,7 +260,11 @@ surface, and it must be readable in one sitting or it does not exist.
 
 ## The review page
 
-`docs/review-sketch.html` is the sketch. It settles the following.
+`docs/review-sketch-mvp.html` is the sketch the MVP builds: the
+Changes view for decisions and tasks, mobile first, with Wrong, a
+quiet Confirm, and Finish behind one check. `docs/review-sketch.html`
+is the earlier, fuller sketch; the Map view, comments, undo, and the
+asks mark below wait for it. Together they settle the following.
 
 **Two views per map, one for each budget the maps are judged by.**
 Changes is the since-cut as a queue, grouped by the map's headline

@@ -26,9 +26,8 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::core::{
-    cited_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source, Standing,
-};
+use crate::core::{cited_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source};
+use crate::mapstore::{block_header, capped_lines, judged_since_block, latest_session_per_client, line_id};
 use crate::shared::Timestamp;
 use crate::store::TurnState;
 use crate::workspace;
@@ -239,43 +238,11 @@ recording
 - A node marked disputed carries the human's why: never propose it again; a correction the user agrees is a new decision with a supersedes line.
 - Close the session with one line naming what was recorded: Recorded to decisions: q1, d1, o1.";
 
-/// The short id `node` has on `map`, or a `kind:name` fallback for the
-/// unexpected case a headline node carries none.
-fn line_id(map: &Map, node: &Node) -> String {
-    map.short_id(node.id)
-        .unwrap_or_else(|| format!("{}:{}", node.kind, node.name))
-}
-
-/// How many lines of a gained, changed, or open list a block shows
-/// before folding the rest into a trailing count.
-const LIMIT: usize = 5;
-
-/// Up to `LIMIT` of `lines`, with a trailing `+N more` when there were
-/// more - the one truncation rule every block below shares.
-fn capped_lines(mut lines: Vec<String>) -> Vec<String> {
-    let total = lines.len();
-    lines.truncate(LIMIT);
-    if total > LIMIT {
-        lines.push(format!("+{} more", total - LIMIT));
-    }
-    lines
-}
-
-/// The header of a capped block: `label (total)`, or `label (total,
-/// showing LIMIT)` when `capped_lines` folds the rest into a count.
-fn block_header(label: &str, total: usize) -> String {
-    if total > LIMIT {
-        format!("{label} ({total}, showing {LIMIT})")
-    } else {
-        format!("{label} ({total})")
-    }
-}
-
 /// What each folded map gained since `since`: a counts line for every
-/// map, in fold order, then up to `LIMIT` lines per map that gained
-/// anything - a node's `added_at` is compared directly, not
-/// `Map::since`, which would also surface an older node a fresh edge
-/// only touched.
+/// map, in fold order, then up to `mapstore::judge::LIMIT` lines per
+/// map that gained anything - a node's `added_at` is compared
+/// directly, not `Map::since`, which would also surface an older node
+/// a fresh edge only touched.
 fn gained_block(maps: &[Map], since: Timestamp) -> String {
     let per_map: Vec<Vec<&Node>> = maps
         .iter()
@@ -302,44 +269,6 @@ fn gained_block(maps: &[Map], since: Timestamp) -> String {
         ));
     }
     lines.join("\n")
-}
-
-/// What the human judged since `since`: every node, of any kind, whose
-/// latest `claim.confirmed`/`claim.disputed` landed at or after `since`,
-/// across every folded map in fold order. Disputed nodes first, then
-/// confirmed, each group by when the judgment landed, then by short id
-/// so equal times print in one order. `None` when nothing was judged
-/// since, so `start_session` omits the block rather than printing an
-/// empty one.
-fn judged_since_block(maps: &[Map], since: Timestamp) -> Option<String> {
-    let mut judged: Vec<(&Map, &Node, Standing, Timestamp)> = maps
-        .iter()
-        .flat_map(|map| {
-            map.judged_since(since)
-                .map(move |(node, standing, at)| (map, node, standing, at))
-        })
-        .collect();
-    if judged.is_empty() {
-        return None;
-    }
-    judged.sort_by_cached_key(|(_, node, standing, at)| {
-        (*standing == Standing::Confirmed, *at, node.kind.clone(), node.seq)
-    });
-
-    let lines = judged
-        .iter()
-        .map(|(map, node, standing, _)| {
-            let mut line = format!("{} {node} \u{b7} {standing}", line_id(map, node));
-            if let Some(why) = map.dispute(node.id) {
-                line.push_str(&format!(": {why:?}"));
-            }
-            line
-        })
-        .collect();
-
-    let mut block = vec![block_header("judged since your last session", judged.len())];
-    block.extend(capped_lines(lines));
-    Some(block.join("\n"))
 }
 
 /// What every current headline node cites that no longer matches the
@@ -524,15 +453,9 @@ fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
 /// and project path) recorded, if any - `None` on a project's first
 /// session with this client.
 fn last_session(events: &[Event], source: &Source) -> Option<Timestamp> {
-    events
-        .iter()
-        .filter(|event| {
-            matches!(event.payload(), Payload::SessionStarted)
-                && event.source().name == source.name
-                && event.source().path == source.path
-        })
-        .map(Event::created_at)
-        .max()
+    latest_session_per_client(events, &source.scope())
+        .get(&(source.name.clone(), source.path.clone()))
+        .copied()
 }
 
 /// `source.path`'s last component, the name a reader knows the project

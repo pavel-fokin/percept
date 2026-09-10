@@ -989,3 +989,27 @@ fn a_line_with_no_log_cursor_decodes_with_log_none() {
     let decoded: Event = serde_json::from_str(&json).unwrap();
     assert!(decoded.log.is_none());
 }
+
+#[test]
+fn every_kind_names_round_trip_through_the_store_parser() {
+    let kinds = [
+        EventKind::MessageReceived,
+        EventKind::ThoughtRecorded,
+        EventKind::ToolCalled,
+        EventKind::ToolResulted,
+        EventKind::NodeAdded,
+        EventKind::NodeRemoved,
+        EventKind::EdgeAdded,
+        EventKind::EdgeRemoved,
+        EventKind::ModelCalled,
+        EventKind::SessionStarted,
+        EventKind::FileCited,
+        EventKind::ClaimConfirmed,
+        EventKind::ClaimDisputed,
+        EventKind::ReviewFinished,
+    ];
+
+    for kind in kinds {
+        assert!(parse_kind(kind.name()).unwrap() == kind);
+    }
+}

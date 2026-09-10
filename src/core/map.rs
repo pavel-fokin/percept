@@ -571,6 +571,9 @@ pub struct Map {
     // Nodes at least one `review.finished` has named - `Standing::Seen`
     // for one with no judgment yet.
     reviewed: HashSet<NodeId>,
+    // The latest `review.finished`'s `at`, across every one folded in -
+    // what `last_finished` reports.
+    last_finished: Option<Timestamp>,
 }
 
 impl Map {
@@ -608,6 +611,7 @@ impl Map {
             edge_keys,
             judgments: HashMap::new(),
             reviewed: HashSet::new(),
+            last_finished: None,
         }
     }
 
@@ -888,6 +892,18 @@ impl Map {
         })
     }
 
+    /// When the latest `review.finished` folded into this map landed,
+    /// or `None` if it holds none.
+    pub fn last_finished(&self) -> Option<Timestamp> {
+        self.last_finished
+    }
+
+    /// When `id` was last judged - the latest `claim.confirmed` or
+    /// `claim.disputed` naming it - or `None` if it never was.
+    pub fn judged_at(&self, id: NodeId) -> Option<Timestamp> {
+        self.judgments.get(&id).map(|j| j.at)
+    }
+
     pub fn find(&self, kind: &str, name: &str) -> Option<&Node> {
         let id = self.by_name.get(&(kind.to_string(), name.to_string()))?;
         self.node(*id)
@@ -1014,6 +1030,7 @@ impl Map {
         let mut cut = Self::from_parts(self.schema.clone(), nodes, edges);
         cut.judgments = self.judgments.clone();
         cut.reviewed = self.reviewed.clone();
+        cut.last_finished = self.last_finished;
         cut
     }
 
@@ -1069,6 +1086,7 @@ impl Map {
         let mut cut = Self::from_parts(self.schema.clone(), nodes, edges);
         cut.judgments = self.judgments.clone();
         cut.reviewed = self.reviewed.clone();
+        cut.last_finished = self.last_finished;
         cut
     }
 
@@ -1280,6 +1298,10 @@ impl Map {
                         self.reviewed.insert(*node);
                     }
                 }
+                self.last_finished = Some(match self.last_finished {
+                    Some(last) => last.max(at),
+                    None => at,
+                });
             }
             _ => {}
         }

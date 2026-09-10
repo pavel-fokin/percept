@@ -15,6 +15,7 @@ mod lab;
 mod mapstore;
 #[cfg(feature = "lab")]
 mod providers;
+mod server;
 mod shared;
 mod store;
 #[cfg(test)]
@@ -281,6 +282,19 @@ async fn main() {
             lab::headless_turn(false, args.prompt, args.yes, cli_source, &checkout).await
         }
         Some(Command::Init(args)) => cli::init::run(args, &checkout),
+        Some(Command::Review) => {
+            let opened = open_log(&checkout).and_then(|log| {
+                let schemas = mapstore::load_schemas(&checkout)?;
+                let me = log.me();
+                Ok((log, schemas, me))
+            });
+            match opened {
+                Ok((log, schemas, me)) => {
+                    server::run(std::sync::Arc::new(log), schemas, cli_source.clone(), me).await
+                }
+                Err(err) => Err(err),
+            }
+        }
         #[cfg(feature = "lab")]
         Some(Command::Reflect) => {
             lab::headless_turn(
