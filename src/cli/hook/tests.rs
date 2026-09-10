@@ -785,6 +785,21 @@ fn a_first_session_with_history_shows_open_items_but_no_gained_section() {
 }
 
 #[test]
+fn every_session_start_ends_with_the_recording_rules() {
+    let fixture = Fixture::new();
+
+    let first = fixture.session_start("codex");
+    let returning = fixture.session_start("codex");
+
+    for context in [first, returning] {
+        let rules = context.rsplit("\n\n").next().unwrap();
+        assert!(rules.starts_with("recording\n"), "{context:?}");
+        assert!(rules.contains("percept maps record decisions --actor model --source <prompt id>"));
+        assert!(rules.contains("Recorded to decisions:"));
+    }
+}
+
+#[test]
 fn a_returning_session_reports_counts_and_excludes_older_gains() {
     let fixture = Fixture::new();
     fixture.session_start("codex");

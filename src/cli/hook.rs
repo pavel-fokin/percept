@@ -202,6 +202,7 @@ fn start_session(
     let (open_blocks, pointer) = open_blocks_and_pointer(&maps);
     sections.extend(open_blocks);
     sections.extend(pointer);
+    sections.push(RULES.to_string());
 
     Ok(json!({
         "hookSpecificOutput": {
@@ -210,6 +211,27 @@ fn start_session(
         }
     }))
 }
+
+/// The recording rules, printed after the fragment on every session
+/// start. A stranger's project has no AGENTS.md or skill naming them,
+/// so this block is the one place the model meets them, and the
+/// recipe is complete enough to run as printed.
+const RULES: &str = "\
+recording
+- Before proposing a design, look: percept maps show decisions --around <id>, or --format md for the whole map.
+- When the user says yes to a proposal, record it at once, citing the prompt id the hook printed:
+    percept maps record decisions --actor model --source <prompt id> <<'EOF'
+    question \"what was asked\"
+    decision \"what was chosen\"
+      why \"the grounds\"
+      resolves question
+    option \"an alternative that lost\"
+      why \"why it lost\"
+      answers question
+    EOF
+- A claim that rests on a file cites the text it read: an indented line, cites src/path.rs:10-20, under the node.
+- A decision that changes an earlier one adds a supersedes <id> line under it; never remove a node.
+- Close the session with one line naming what was recorded: Recorded to decisions: q1, d1, o1.";
 
 /// The short id `node` has on `map`, or a `kind:name` fallback for the
 /// unexpected case a headline node carries none.
