@@ -1,9 +1,8 @@
 # percept
 
-An experience log for AI coding sessions, and the cognitive maps a
-model builds from it.
+percept keeps project decisions alive across AI coding sessions.
 
-percept records what happens across your tools - prompts, replies,
+It records what happens across your tools - prompts, replies,
 tool calls, files read - as an append-only log of events. A model
 searches that log and writes what it concludes into maps: a decisions
 map, a tasks map, an ideas map, or one you define. Every change to a

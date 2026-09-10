@@ -4,6 +4,7 @@
 !/docs/architecture.md
 !/docs/clients.md
 !/docs/review-sketch.html
+!/docs/mvp.md
 /target
 /percept.jsonl
 /.percept/percept.jsonl
