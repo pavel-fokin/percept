@@ -779,10 +779,26 @@ fn resolve_judged_node(map: &Map, s: &str) -> Result<NodeId, Box<dyn std::error:
     let id = map.resolve_str(s)?;
     let node = map.node(id).expect("resolve_str returns a live node's id");
     if matches!(node.actor, Actor::User) {
-        let short = map.short_id(id).unwrap_or_default();
-        return Err(format!("{short} is the user's own; standing is for a model's claim").into());
+        return Err(format!("{s} is the user's own; standing is for a model's claim").into());
     }
     Ok(id)
+}
+
+/// The one write path under `maps confirm` and `maps dispute`: folds
+/// the map, resolves the judged node, appends the event `event_of`
+/// builds for it, and prints the event's id.
+fn judge(
+    target: StandingArgs,
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &crate::core::Source,
+    event_of: impl FnOnce(String, NodeId, crate::core::Source) -> Event,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let map = mapstore::fold_map(log, schemas, &target.map, &source.scope())?;
+    let node = resolve_judged_node(&map, &target.node)?;
+    let event = event_of(target.map, node, source.clone());
+    log.append(&event)?;
+    print_lines(std::iter::once(event.id().as_uuid().to_string()))
 }
 
 /// Marks `args.node`'s claim confirmed - always the human's own
@@ -793,12 +809,9 @@ pub fn maps_confirm(
     schemas: &Schemas,
     source: &crate::core::Source,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let scope = source.scope();
-    let map = mapstore::fold_map(log, schemas, &args.map, &scope)?;
-    let node = resolve_judged_node(&map, &args.node)?;
-    let event = Event::claim_confirmed(args.map, node, source.clone(), None);
-    log.append(&event)?;
-    print_lines(std::iter::once(event.id().as_uuid().to_string()))
+    judge(args, log, schemas, source, |map, node, source| {
+        Event::claim_confirmed(map, node, source, None)
+    })
 }
 
 /// Marks `args.target.node`'s claim disputed, with `args.why` - always
@@ -809,12 +822,10 @@ pub fn maps_dispute(
     schemas: &Schemas,
     source: &crate::core::Source,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let scope = source.scope();
-    let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
-    let node = resolve_judged_node(&map, &args.target.node)?;
-    let event = Event::claim_disputed(args.target.map, node, args.why, source.clone(), None);
-    log.append(&event)?;
-    print_lines(std::iter::once(event.id().as_uuid().to_string()))
+    let why = args.why;
+    judge(args.target, log, schemas, source, move |map, node, source| {
+        Event::claim_disputed(map, node, why, source, None)
+    })
 }
 
 /// One `cites` line under a node: the file it rested on, and the range

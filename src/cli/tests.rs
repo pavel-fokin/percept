@@ -861,7 +861,7 @@ fn maps_confirm_refuses_the_user_s_own_node() {
 
     assert_eq!(
         err.to_string(),
-        "d1 is the user's own; standing is for a model's claim"
+        "decision:Rust is the user's own; standing is for a model's claim"
     );
     assert_eq!(log.load().unwrap().len(), 1);
 }

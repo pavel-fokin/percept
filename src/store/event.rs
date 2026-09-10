@@ -7,7 +7,7 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::core::{Actor, EventId, EventKind, NodeId, Payload, Usage};
-use crate::shared::Timestamp;
+use crate::shared::{Id, Timestamp};
 use crate::store::Error;
 
 /// `source` on the wire - the writer's name and its project root. No
@@ -400,14 +400,8 @@ fn shorten(payload: Value) -> Value {
 }
 
 /// `sources` on the wire - each `EventId` as its UUID string.
-pub fn ids(sources: &[EventId]) -> Vec<String> {
-    sources.iter().map(|id| id.as_uuid().to_string()).collect()
-}
-
-/// `Payload::ReviewFinished.nodes` on the wire - each `NodeId` as its
-/// UUID string.
-fn ids_of_nodes(nodes: &[NodeId]) -> Vec<String> {
-    nodes.iter().map(|id| id.as_uuid().to_string()).collect()
+pub fn ids<T>(ids: &[Id<T>]) -> Vec<String> {
+    ids.iter().map(|id| id.as_uuid().to_string()).collect()
 }
 
 impl From<&crate::core::Event> for Event {
@@ -520,7 +514,7 @@ impl From<&crate::core::Event> for Event {
             }
             Payload::ReviewFinished { map, nodes } => serde_json::to_value(ReviewFinishedBody {
                 map: map.clone(),
-                nodes: ids_of_nodes(nodes),
+                nodes: ids(nodes),
             })
             .expect("ReviewFinishedBody always serializes"),
         };
