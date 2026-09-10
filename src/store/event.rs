@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::core::{Actor, EventId, EventKind, HumanId, NodeId, Payload, Usage};
+use crate::core::{Actor, EventId, EventKind, HumanId, LogCursor, NodeId, Payload, Usage};
 use crate::shared::{Id, Timestamp};
 use crate::store::Error;
 
@@ -17,6 +17,16 @@ use crate::store::Error;
 pub struct Source {
     pub name: String,
     pub path: PathBuf,
+}
+
+/// `core::LogCursor` on the wire - `{"id":"<uuid>","seq":N}`. Absent on
+/// a line written before cursors existed, and on any line `encode`
+/// writes, since `encode` has no cursor to fill; only `encode_at` sets
+/// it.
+#[derive(Serialize, Deserialize)]
+pub struct Cursor {
+    pub id: String,
+    pub seq: u64,
 }
 
 /// A `core::Event` as it travels over the wire. Flat JSON:
@@ -38,6 +48,11 @@ pub struct Event {
     pub causation_id: Option<String>,
     pub created_at: String,
     pub payload: Value,
+    /// This line's position in the log that wrote it - `None` on a
+    /// line written before cursors existed, or on any line built
+    /// through `encode` rather than `encode_at`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log: Option<Cursor>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -236,6 +251,17 @@ pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
 /// One event as the JSONL line `percept.jsonl` stores.
 pub fn encode(event: &crate::core::Event) -> String {
     serde_json::to_string(&Event::from(event)).expect("store::Event always serializes")
+}
+
+/// As `encode`, but with `cursor` filled in - the log's own knowledge
+/// of where this line lands, which `Event::from` cannot know.
+pub fn encode_at(event: &crate::core::Event, cursor: LogCursor) -> String {
+    let mut wire = Event::from(event);
+    wire.log = Some(Cursor {
+        id: cursor.log.as_uuid().to_string(),
+        seq: cursor.seq,
+    });
+    serde_json::to_string(&wire).expect("store::Event always serializes")
 }
 
 pub use crate::core::PREVIEW_CHARS;
@@ -536,6 +562,7 @@ impl From<&crate::core::Event> for Event {
             causation_id: event.causation_id().map(|id| id.as_uuid().to_string()),
             created_at: event.created_at().to_string(),
             payload,
+            log: None,
         }
     }
 }

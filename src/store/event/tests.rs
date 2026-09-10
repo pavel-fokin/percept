@@ -958,3 +958,34 @@ fn a_legacy_user_string_reads_as_a_human_without_an_id() {
     let restored = crate::store::from_wire(serde_json::from_str::<Event>(json).unwrap()).unwrap();
     assert_eq!(restored.actor(), Actor::Human(None));
 }
+
+#[test]
+fn a_line_with_a_log_cursor_round_trips_through_store_event() {
+    let original = message(Actor::Agent, "hi".to_string());
+    let cursor = crate::core::LogCursor {
+        log: crate::core::LogId::new(),
+        seq: 7,
+    };
+
+    let json = serde_json::to_string(&Event::from(&original)).unwrap();
+    let mut wire: Event = serde_json::from_str(&json).unwrap();
+    wire.log = Some(Cursor {
+        id: cursor.log.as_uuid().to_string(),
+        seq: cursor.seq,
+    });
+
+    let json = serde_json::to_string(&wire).unwrap();
+    let decoded: Event = serde_json::from_str(&json).unwrap();
+    let on_wire = decoded.log.unwrap();
+    assert_eq!(on_wire.id, cursor.log.as_uuid().to_string());
+    assert_eq!(on_wire.seq, cursor.seq);
+}
+
+#[test]
+fn a_line_with_no_log_cursor_decodes_with_log_none() {
+    let original = message(Actor::Agent, "hi".to_string());
+    let json = serde_json::to_string(&Event::from(&original)).unwrap();
+
+    let decoded: Event = serde_json::from_str(&json).unwrap();
+    assert!(decoded.log.is_none());
+}

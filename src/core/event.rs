@@ -18,6 +18,22 @@ pub enum Human {}
 /// identity.
 pub type HumanId = Id<Human>;
 
+/// Marker for `LogId`, the way `Human` pins `HumanId`.
+pub enum Log {}
+
+/// Identifies one event log: minted once into the `log-id` file beside
+/// it. Before a server registers a human, the log they wrote is their
+/// identity.
+pub type LogId = Id<Log>;
+
+/// A position in one log: the event with `seq` in the log `log`. `seq`
+/// starts at 1 and equals the line number until logs are merged.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LogCursor {
+    pub log: LogId,
+    pub seq: u64,
+}
+
 /// Token counts for one round trip to the model. `cached_tokens` is
 /// `None` when the provider does not report it. Carried by
 /// `Payload::ModelCalled`, so it is the core's, not the harness's.
