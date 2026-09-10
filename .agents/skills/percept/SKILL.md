@@ -135,14 +135,16 @@ name = "glossary"
 purpose = "what a term means in this project, so a word is not redefined"
 headlines = ["term"]
 
-[[nodes]]
+[[node]]
 name = "term"
 gloss = "a word and the meaning this project gives it, in its `meaning` property"
 requires = ["meaning"]
 
-[[edges]]
+[[edge]]
 name = "relates"
 gloss = "from a term to one it is defined against"
+from = "term"
+to = "term"
 ```
 
 `decisions` and `tasks` are built in as the same TOML; a project file

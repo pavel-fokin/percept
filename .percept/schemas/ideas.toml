@@ -12,7 +12,7 @@ name = "ideas"
 purpose = "a candidate worth doing, not yet committed to a task, so a session revisits the backlog instead of re-deriving it"
 headlines = ["idea"]
 
-[[nodes]]
+[[node]]
 name = "idea"
 gloss = "something that might be worth building, saying why in its `why` property"
 requires = ["why"]

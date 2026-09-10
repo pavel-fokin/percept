@@ -293,7 +293,10 @@ fn two_impls_of_one_generic_trait_keep_their_methods_apart() {
 #[test]
 fn every_kind_of_the_schema_carries_a_gloss() {
     let s = schema();
-    for kind in s.node_kinds.iter().chain(&s.edge_kinds) {
+    for kind in &s.node_kinds {
+        assert!(!kind.gloss.is_empty(), "kind {:?} has no gloss", kind.name);
+    }
+    for kind in &s.edge_kinds {
         assert!(!kind.gloss.is_empty(), "kind {:?} has no gloss", kind.name);
     }
 }

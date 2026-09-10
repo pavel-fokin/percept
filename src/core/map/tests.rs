@@ -16,7 +16,7 @@ fn default_prefix_is_the_name_s_first_letter_lowercased() {
 
 #[test]
 fn kind_new_defaults_its_prefix() {
-    assert_eq!(Kind::new("evidence", "g").prefix, "e");
+    assert_eq!(NodeKind::new("evidence", "g").prefix, "e");
 }
 
 #[test]
@@ -661,6 +661,55 @@ fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
 }
 
 #[test]
+fn apply_refuses_an_edge_whose_from_node_is_the_wrong_kind() {
+    let mut map = Map::empty(decisions());
+    map.apply(add_node("question", "Which language?"), Actor::Human(human()))
+        .unwrap();
+    map.apply(add_option("Go"), Actor::Human(human())).unwrap();
+
+    let err = map
+        .apply(
+            add_edge(
+                "resolves",
+                node_ref("option", "Go"),
+                node_ref("question", "Which language?"),
+            ),
+            Actor::Human(human()),
+        )
+        .err()
+        .unwrap();
+
+    assert_eq!(
+        err,
+        MapError::WrongEdgeEnd {
+            edge_kind: "resolves".to_string(),
+            end: EdgeEnd::From,
+            allowed: vec!["decision".to_string()],
+            found: "option".to_string(),
+        }
+    );
+    assert!(map.edges().is_empty());
+}
+
+#[test]
+fn a_fold_still_accepts_an_edge_between_the_wrong_kinds_from_history() {
+    // `check_edge_ends` runs only from `apply`; `replay`, which `fold`
+    // uses, never calls it, so an edge recorded before its kind
+    // declared ends - or written by a race `apply` did not see - still
+    // folds rather than breaking every read of the map.
+    let (question, option) = (NodeId::new(), NodeId::new());
+    let events = [
+        node_added("decisions", question, "question", "Which language?"),
+        node_added("decisions", option, "option", "Go"),
+        edge_added("decisions", "resolves", option, question),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.edges().len(), 1);
+}
+
+#[test]
 fn apply_removes_a_node_by_name_and_its_edges_with_it() {
     let mut map = Map::empty(decisions());
     map.apply(add_node("question", "Which language?"), Actor::Human(human()))
@@ -746,7 +795,15 @@ fn a_schema_is_found_by_name() {
 #[test]
 fn every_kind_of_every_schema_carries_a_gloss() {
     for schema in [decisions(), tasks()] {
-        for kind in schema.node_kinds.iter().chain(&schema.edge_kinds) {
+        for kind in &schema.node_kinds {
+            assert!(
+                !kind.gloss.is_empty(),
+                "{}: kind {:?} has no gloss",
+                schema.name,
+                kind.name
+            );
+        }
+        for kind in &schema.edge_kinds {
             assert!(
                 !kind.gloss.is_empty(),
                 "{}: kind {:?} has no gloss",
@@ -791,8 +848,12 @@ fn keeping_a_kind_the_schema_lacks_is_an_error() {
     assert!(matches!(err, MapError::UnknownNodeKind { .. }));
 }
 
-/// A chain: question <- decision <- evidence, so depth walks one
-/// step at a time and against the edge direction.
+/// A chain: question <- decision, question <- option <- evidence, plus
+/// an unlinked option, so depth walks one step at a time, against the
+/// edge direction, and a genuinely unlinked node stays out at any
+/// depth. `resolves`, `answers`, and `supports` are the only edge
+/// kinds that can build it, since `Map::apply` now refuses an edge
+/// whose ends are not of the kinds its edge kind declares.
 fn chain() -> Map {
     let mut map = Map::empty(decisions());
     map.apply(add_node("question", "Which language?"), Actor::Human(human()))
@@ -802,6 +863,7 @@ fn chain() -> Map {
     map.apply(add_node("evidence", "Built both"), Actor::Human(human()))
         .unwrap();
     map.apply(add_option("Go"), Actor::Human(human())).unwrap();
+    map.apply(add_option("Java"), Actor::Human(human())).unwrap();
     map.apply(
         add_edge(
             "resolves",
@@ -813,9 +875,18 @@ fn chain() -> Map {
     .unwrap();
     map.apply(
         add_edge(
+            "answers",
+            node_ref("option", "Go"),
+            node_ref("question", "Which language?"),
+        ),
+        Actor::Human(human()),
+    )
+    .unwrap();
+    map.apply(
+        add_edge(
             "supports",
             node_ref("evidence", "Built both"),
-            node_ref("decision", "Rust over Go"),
+            node_ref("option", "Go"),
         ),
         Actor::Human(human()),
     )
@@ -839,14 +910,14 @@ fn around_follows_edges_both_ways_one_step_per_depth() {
         .around(&node_ref("question", "Which language?"), 1)
         .unwrap();
     let names: Vec<&str> = one.nodes().iter().map(|n| n.name.as_str()).collect();
-    assert_eq!(names, ["Which language?", "Rust over Go"]);
-    assert_eq!(one.edges().len(), 1);
+    assert_eq!(names, ["Which language?", "Rust over Go", "Go"]);
+    assert_eq!(one.edges().len(), 2);
 
     let two = map
         .around(&node_ref("question", "Which language?"), 2)
         .unwrap();
-    assert_eq!(two.nodes().len(), 3, "the unlinked option stays out");
-    assert_eq!(two.edges().len(), 2);
+    assert_eq!(two.nodes().len(), 4, "the unlinked option stays out");
+    assert_eq!(two.edges().len(), 3);
 }
 
 #[test]
@@ -861,10 +932,14 @@ fn select_counts_the_whole_and_the_edges_crossing_the_cut() {
 
     let fragment = whole.select(&selection).unwrap();
 
-    assert_eq!(fragment.map().nodes().len(), 2);
+    assert_eq!(fragment.map().nodes().len(), 3);
     assert_eq!(fragment.total_nodes(), nodes);
     assert_eq!(fragment.total_edges(), edges);
-    assert_eq!(fragment.boundary_edges(), 1, "the decision's edge onward");
+    assert_eq!(
+        fragment.boundary_edges(),
+        1,
+        "the option's edge onward to evidence"
+    );
 }
 
 #[test]
@@ -921,7 +996,7 @@ fn select_walks_around_before_it_keeps_kinds() {
     assert_eq!(
         names,
         ["Built both"],
-        "reached through the decision, then kept alone"
+        "reached through the option, then kept alone"
     );
     assert_eq!(fragment.boundary_edges(), 1);
 }

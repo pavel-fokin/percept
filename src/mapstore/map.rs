@@ -265,13 +265,26 @@ struct KindLine<'a> {
 }
 
 impl<'a> KindLine<'a> {
-    fn of(kinds: &'a [crate::core::Kind]) -> Vec<Self> {
+    fn of_nodes(kinds: &'a [crate::core::NodeKind]) -> Vec<Self> {
         kinds
             .iter()
             .map(|kind| Self {
                 name: &kind.name,
                 gloss: &kind.gloss,
                 requires: &kind.requires,
+            })
+            .collect()
+    }
+
+    /// An edge kind carries no `requires`, so every line here reports
+    /// none.
+    fn of_edges(kinds: &'a [crate::core::EdgeKind]) -> Vec<Self> {
+        kinds
+            .iter()
+            .map(|kind| Self {
+                name: &kind.name,
+                gloss: &kind.gloss,
+                requires: &[],
             })
             .collect()
     }
@@ -293,8 +306,8 @@ pub fn encode_schema(schema: &crate::core::Schema) -> String {
     serde_json::to_string(&SchemaLine {
         schema: &schema.name,
         purpose: &schema.purpose,
-        node_kinds: KindLine::of(&schema.node_kinds),
-        edge_kinds: KindLine::of(&schema.edge_kinds),
+        node_kinds: KindLine::of_nodes(&schema.node_kinds),
+        edge_kinds: KindLine::of_edges(&schema.edge_kinds),
     })
     .expect("SchemaLine always serializes")
 }

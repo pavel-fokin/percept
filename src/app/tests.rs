@@ -979,7 +979,9 @@ fn assert_decisions_header(message: &str) {
     ));
     assert!(message.contains(
         ". Node kinds: `question`, `option` (requires `why`), `evidence`, `decision`. Edge \
-         kinds: `answers`, `supports`, `contradicts`, `resolves`, `supersedes`, `reopens`.\n"
+         kinds: `answers` (option -> question), `supports` (evidence -> option), `contradicts` \
+         (evidence -> option), `resolves` (decision -> question), `supersedes` (decision -> \
+         decision), `reopens` (question -> decision).\n"
     ));
 }
 

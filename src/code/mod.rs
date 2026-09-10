@@ -15,7 +15,7 @@ use std::path::Path;
 
 use ignore::WalkBuilder;
 
-use crate::core::{Actor, Kind, Map, MapError, Mutation, NodeRef, Schema};
+use crate::core::{Actor, EdgeKind, Map, MapError, Mutation, NodeKind, NodeRef, Schema};
 use crate::shared::to_slash;
 
 /// The code map's schema: a codebase's files, the symbols they define,
@@ -27,26 +27,36 @@ pub fn schema() -> Schema {
         name: "code".to_string(),
         purpose: "which file defines which symbol and imports which file or package".to_string(),
         node_kinds: vec![
-            Kind::new("file", "a source file, named by its repo-relative path"),
+            NodeKind::new("file", "a source file, named by its repo-relative path"),
             // Its default prefix, `f`, collides with `file`'s; `fn`
             // both avoids that and reads as the keyword it names.
-            Kind {
+            NodeKind {
                 prefix: "fn".to_string(),
-                ..Kind::new(
+                ..NodeKind::new(
                     "function",
                     "a function or method, named `path::Type::method` or `path::func`",
                 )
             },
-            Kind::new("type", "a struct, enum, trait, or alias, named `path::Name`"),
-            Kind::new(
+            NodeKind::new("type", "a struct, enum, trait, or alias, named `path::Name`"),
+            NodeKind::new(
                 "package",
                 "an external crate a file imports, like `serde_json` - never one of this \
                  project's own modules",
             ),
         ],
         edge_kinds: vec![
-            Kind::new("contains", "from a file to a symbol it defines"),
-            Kind::new("imports", "from a file to a file or package it uses"),
+            EdgeKind::new(
+                "contains",
+                "from a file to a symbol it defines",
+                &["file"],
+                &["function", "type"],
+            ),
+            EdgeKind::new(
+                "imports",
+                "from a file to a file or package it uses",
+                &["file"],
+                &["file", "package"],
+            ),
         ],
         headline_kinds: vec!["file".to_string()],
         settlement: None,

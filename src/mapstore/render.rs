@@ -4,7 +4,7 @@
 
 use std::fmt::Write as _;
 
-use crate::core::{Actor, EventId, Kind, Map, Node, Schema, Standing};
+use crate::core::{Actor, EventId, Map, Node, Schema, Standing};
 use crate::store::ids;
 
 /// What every rendered map opens with, so a reader who lands on the
@@ -80,17 +80,29 @@ pub fn catalogue(maps: &[Map]) -> String {
             map.nodes().len(),
             map.edges().len()
         );
-        push_kind_glosses(&mut out, "Node kinds", &schema.node_kinds);
-        push_kind_glosses(&mut out, "Edge kinds", &schema.edge_kinds);
+        push_kind_glosses(
+            &mut out,
+            "Node kinds",
+            schema.node_kinds.iter().map(|k| (k.label(), k.gloss.as_str())),
+        );
+        push_kind_glosses(
+            &mut out,
+            "Edge kinds",
+            schema.edge_kinds.iter().map(|k| (k.label(), k.gloss.as_str())),
+        );
         push_example(&mut out, map);
     }
     out
 }
 
-fn push_kind_glosses(out: &mut String, heading: &str, kinds: &[Kind]) {
+fn push_kind_glosses<'a>(
+    out: &mut String,
+    heading: &str,
+    kinds: impl Iterator<Item = (String, &'a str)>,
+) {
     let _ = write!(out, "\n{heading}:\n");
-    for kind in kinds {
-        let _ = writeln!(out, "- {} - {}", kind.label(), kind.gloss);
+    for (label, gloss) in kinds {
+        let _ = writeln!(out, "- {label} - {gloss}");
     }
 }
 

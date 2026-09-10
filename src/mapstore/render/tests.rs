@@ -473,6 +473,21 @@ fn node_added(node: crate::core::NodeId, kind: &str, name: &str, why: Option<&st
     )
 }
 
+fn edge_added(kind: &str, from: crate::core::NodeId, to: crate::core::NodeId) -> crate::core::Event {
+    crate::core::Event::new(
+        Actor::Human(human()),
+        crate::core::testing::source("test"),
+        None,
+        crate::core::Payload::EdgeAdded {
+            map: "decisions".to_string(),
+            kind: kind.to_string(),
+            from,
+            to,
+            sources: Vec::new(),
+        },
+    )
+}
+
 fn claim_disputed(node: crate::core::NodeId, why: &str) -> crate::core::Event {
     crate::core::Event::new(
         Actor::Human(human()),
@@ -636,30 +651,35 @@ fn an_option_with_no_answers_edge_stays_out_of_the_render() {
 
 #[test]
 fn a_resolves_edge_between_the_wrong_kinds_settles_nothing() {
-    let mut map = Map::empty(decisions());
-    let source = EventId::new();
-    add(
-        &mut map,
-        "option",
-        "gemma4",
-        Some("slower on this hardware"),
-        &[source],
-        Actor::Human(human()),
-    );
-    add(
-        &mut map,
-        "decision",
-        "gemma4 by default",
-        None,
-        &[source],
-        Actor::Human(human()),
-    );
-    link(
-        &mut map,
-        "resolves",
-        ("decision", "gemma4 by default"),
-        ("option", "gemma4"),
-    );
+    // Built from raw events, not `link` (`Map::apply`): a `resolves`
+    // edge to an `option` end would now be refused on write. `replay`
+    // never checks ends, so this shape still folds from history
+    // written before the rule, and the render must still cope with it.
+    let (option, decision) = (crate::core::NodeId::new(), crate::core::NodeId::new());
+    let human_node = |node, kind: &str, name: &str, why: Option<&str>| {
+        let properties = why
+            .map(|why| BTreeMap::from([("why".to_string(), why.to_string())]))
+            .unwrap_or_default();
+        crate::core::Event::new(
+            Actor::Human(human()),
+            crate::core::testing::source("test"),
+            None,
+            crate::core::Payload::NodeAdded {
+                map: "decisions".to_string(),
+                node,
+                kind: kind.to_string(),
+                name: name.to_string(),
+                properties,
+                sources: Vec::new(),
+                seq: 0,
+            },
+        )
+    };
+    let map = folded(&[
+        human_node(option, "option", "gemma4", Some("slower on this hardware")),
+        human_node(decision, "decision", "gemma4 by default", None),
+        edge_added("resolves", decision, option),
+    ]);
 
     assert!(markdown(&map).contains("## d1 \"gemma4 by default\"\n\n- decision d1 \"gemma4 by default\"\n"));
 }
@@ -831,7 +851,9 @@ fn the_catalogue_gives_each_map_a_section_with_its_kinds_glossed() {
     assert!(text.contains(&decisions().purpose));
     assert!(text.contains("1 nodes, 0 edges.\n"));
     assert!(text.contains("\nNode kinds:\n- `question` - a matter the project had to settle\n"));
-    assert!(text.contains("\nEdge kinds:\n- `answers` - from an option to the question"));
+    assert!(text.contains(
+        "\nEdge kinds:\n- `answers` (option -> question) - from an option to the question"
+    ));
     assert!(text.contains("\nExample node and edge:\n\n    {\"node\":"));
     assert!(text.contains("\"name\":\"Where does the log live?\""));
 }

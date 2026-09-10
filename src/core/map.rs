@@ -52,8 +52,8 @@ pub struct Schema {
     /// deciding whether to open it needs to hear it - what the prompt
     /// carries in place of the map.
     pub purpose: String,
-    pub node_kinds: Vec<Kind>,
-    pub edge_kinds: Vec<Kind>,
+    pub node_kinds: Vec<NodeKind>,
+    pub edge_kinds: Vec<EdgeKind>,
     /// The node kinds worth a reader's attention without opening the
     /// whole map - what `MapShape::Headlines` sends.
     pub headline_kinds: Vec<String>,
@@ -63,28 +63,26 @@ pub struct Schema {
     pub settlement: Option<Settlement>,
 }
 
-/// A node or edge kind and one line saying what it is, so a reader who
-/// meets the kind name in a map's output learns its meaning without a
+/// A node kind and one line saying what it is, so a reader who meets
+/// the kind name in a map's output learns its meaning without a
 /// separate doc. The gloss lives here, beside the name, and nowhere
 /// else.
 #[derive(Debug, PartialEq, Eq)]
-pub struct Kind {
+pub struct NodeKind {
     pub name: String,
     pub gloss: String,
     /// The properties a new node of this kind must carry - `why` on an
     /// option or a task. Checked on a write, never on a fold, so what
     /// was recorded before the rule still folds.
     pub requires: Vec<String>,
-    /// A node kind's short id prefix - `d` for `decision`, so a node
-    /// reads as `d41` rather than its full id. Meaningless on an edge
-    /// kind, which is never referenced by a short id; left at its
-    /// default there and never shown.
+    /// This node kind's short id prefix - `d` for `decision`, so a
+    /// node reads as `d41` rather than its full id.
     pub prefix: String,
 }
 
 /// A kind's prefix when its schema names none: the name's own first
 /// character, lowercased - `d` for `decision`, `t` for `task`. Used
-/// both by `Kind::new` and by the TOML loader, so the one rule for
+/// both by `NodeKind::new` and by the TOML loader, so the one rule for
 /// "no prefix given" lives once.
 pub fn default_prefix(name: &str) -> String {
     name.chars()
@@ -93,7 +91,7 @@ pub fn default_prefix(name: &str) -> String {
         .unwrap_or_default()
 }
 
-impl Kind {
+impl NodeKind {
     pub(crate) fn new(name: &str, gloss: &str) -> Self {
         Self {
             prefix: default_prefix(name),
@@ -123,6 +121,41 @@ impl Kind {
             let requires: Vec<String> = self.requires.iter().map(|p| format!("`{p}`")).collect();
             format!("`{}` (requires {})", self.name, requires.join(", "))
         }
+    }
+}
+
+/// An edge kind and one line saying what it is, plus the node kinds it
+/// may join: `from` on the tail, `to` on the head, each naming one or
+/// more node kinds by name. `Map::apply` refuses an `AddEdge` whose
+/// ends are not of these kinds.
+#[derive(Debug, PartialEq, Eq)]
+pub struct EdgeKind {
+    pub name: String,
+    pub gloss: String,
+    pub from: Vec<String>,
+    pub to: Vec<String>,
+}
+
+impl EdgeKind {
+    pub(crate) fn new(name: &str, gloss: &str, from: &[&str], to: &[&str]) -> Self {
+        Self {
+            name: name.to_string(),
+            gloss: gloss.to_string(),
+            from: from.iter().map(|s| s.to_string()).collect(),
+            to: to.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    /// This kind's name, backticked, with its ends - `` `contains`
+    /// (file -> function | type) `` - so a reader meets the direction
+    /// alongside the gloss.
+    pub fn label(&self) -> String {
+        format!(
+            "`{}` ({} -> {})",
+            self.name,
+            self.from.join(" | "),
+            self.to.join(" | ")
+        )
     }
 }
 
@@ -217,12 +250,12 @@ impl Schemas {
 
 impl Schema {
     /// The node kind `name` names, when the schema has it.
-    pub fn node_kind(&self, name: &str) -> Option<&Kind> {
+    pub fn node_kind(&self, name: &str) -> Option<&NodeKind> {
         self.node_kinds.iter().find(|kind| kind.name == name)
     }
 
     /// The edge kind `name` names, when the schema has it.
-    pub fn edge_kind(&self, name: &str) -> Option<&Kind> {
+    pub fn edge_kind(&self, name: &str) -> Option<&EdgeKind> {
         self.edge_kinds.iter().find(|kind| kind.name == name)
     }
 
@@ -241,7 +274,7 @@ impl Schema {
     pub fn node_kinds_csv(&self) -> String {
         self.node_kinds
             .iter()
-            .map(Kind::label)
+            .map(NodeKind::label)
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -250,7 +283,7 @@ impl Schema {
     pub fn edge_kinds_csv(&self) -> String {
         self.edge_kinds
             .iter()
-            .map(Kind::label)
+            .map(EdgeKind::label)
             .collect::<Vec<_>>()
             .join(", ")
     }
@@ -386,6 +419,22 @@ pub enum Mutation {
     },
 }
 
+/// Which end of an edge broke a `WrongEdgeEnd` rule.
+#[derive(Debug, PartialEq, Eq)]
+pub enum EdgeEnd {
+    From,
+    To,
+}
+
+impl fmt::Display for EdgeEnd {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::From => "from",
+            Self::To => "to",
+        })
+    }
+}
+
 /// Why a mutation, or a stored event, doesn't fit its map. Each names
 /// the rule and the value that broke it. `apply` checks a mutation
 /// before it becomes an event, so a stored event that breaks a rule
@@ -447,6 +496,15 @@ pub enum MapError {
         from: String,
         to: String,
     },
+    /// A new edge whose `from` or `to` end is not of a kind its edge
+    /// kind allows. A write-only rule: `replay` never checks ends, so
+    /// an edge recorded before its kind declared ends still folds.
+    WrongEdgeEnd {
+        edge_kind: String,
+        end: EdgeEnd,
+        allowed: Vec<String>,
+        found: String,
+    },
     /// Wraps any of the above with the event that broke the rule.
     Rejected {
         event: EventId,
@@ -493,6 +551,16 @@ impl fmt::Display for MapError {
                 write!(f, "{from} {kind} {to} is already in the map")
             }
             Self::NoSuchEdge { kind, from, to } => write!(f, "no edge {from} {kind} {to}"),
+            Self::WrongEdgeEnd {
+                edge_kind,
+                end,
+                allowed,
+                found,
+            } => write!(
+                f,
+                "a {edge_kind:?} edge's {end} end must be {}; found {found}",
+                allowed.join(" or ")
+            ),
             Self::Rejected { event, error } => {
                 write!(f, "event {} does not fit its map: {error}", event.as_uuid())
             }
@@ -1142,13 +1210,18 @@ impl Map {
                 from,
                 to,
                 sources,
-            } => Payload::EdgeAdded {
-                map,
-                kind,
-                from: self.resolve(from)?,
-                to: self.resolve(to)?,
-                sources,
-            },
+            } => {
+                let from_id = self.resolve(from)?;
+                let to_id = self.resolve(to)?;
+                self.check_edge_ends(&kind, from_id, to_id)?;
+                Payload::EdgeAdded {
+                    map,
+                    kind,
+                    from: from_id,
+                    to: to_id,
+                    sources,
+                }
+            }
             Mutation::RemoveEdge {
                 kind,
                 from,
@@ -1408,6 +1481,37 @@ impl Map {
         } else {
             Err(MapError::NoSuchNodeId(id))
         }
+    }
+
+    /// Refuses an `AddEdge` whose `from` or `to` node is not of a kind
+    /// `kind` allows at that end. A kind `apply` has not yet checked
+    /// against the schema is let through here; `check_edge_kind` in
+    /// `replay` is what refuses it. A write-only rule, never run by
+    /// `replay`, so an edge recorded before its kind declared ends
+    /// still folds.
+    fn check_edge_ends(&self, kind: &str, from: NodeId, to: NodeId) -> Result<(), MapError> {
+        let Some(edge_kind) = self.schema.edge_kind(kind) else {
+            return Ok(());
+        };
+        let from_node = self.node(from).ok_or(MapError::NoSuchNodeId(from))?;
+        if !edge_kind.from.iter().any(|k| k == &from_node.kind) {
+            return Err(MapError::WrongEdgeEnd {
+                edge_kind: kind.to_string(),
+                end: EdgeEnd::From,
+                allowed: edge_kind.from.clone(),
+                found: from_node.kind.clone(),
+            });
+        }
+        let to_node = self.node(to).ok_or(MapError::NoSuchNodeId(to))?;
+        if !edge_kind.to.iter().any(|k| k == &to_node.kind) {
+            return Err(MapError::WrongEdgeEnd {
+                edge_kind: kind.to_string(),
+                end: EdgeEnd::To,
+                allowed: edge_kind.to.clone(),
+                found: to_node.kind.clone(),
+            });
+        }
+        Ok(())
     }
 }
 

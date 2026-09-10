@@ -824,7 +824,7 @@ name = "ideas"
 purpose = "loose thoughts worth keeping"
 headlines = ["idea"]
 
-[[nodes]]
+[[node]]
 name = "idea"
 gloss = "a loose thought"
 "#;
