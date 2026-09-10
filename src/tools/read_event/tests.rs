@@ -38,7 +38,7 @@ fn no_range_returns_the_whole_event_as_show_prints_it() {
     let out = tool
         .run(&format!(r#"{{"id":"{}"}}"#, event.id().as_uuid()))
         .unwrap();
-    assert_eq!(out.content, encode(&event));
+    assert_eq!(out.content, crate::store::encode(&event));
 }
 
 #[test]

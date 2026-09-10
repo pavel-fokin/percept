@@ -4,27 +4,7 @@ use serde::Deserialize;
 
 use crate::core::EventLog;
 use crate::harness::{Tool, ToolOutput, ToolSpec};
-use crate::store::{encode, excerpt, parse_event_id};
-
-/// One event by its wire id, as `encode` prints it, or with `content`
-/// sliced to `start..end` when either bound is given - the one path
-/// both the tool and `events show` take, so an unknown id or a range
-/// reads the same from a shell and from the model.
-pub fn read(
-    log: &dyn EventLog,
-    id: &str,
-    start: Option<usize>,
-    end: Option<usize>,
-) -> Result<String, Box<dyn std::error::Error>> {
-    let event = log
-        .get(parse_event_id(id)?)?
-        .ok_or_else(|| format!("no event with id {id}"))?;
-    if start.is_none() && end.is_none() {
-        Ok(encode(&event))
-    } else {
-        Ok(excerpt(&event, start, end)?)
-    }
-}
+use crate::store::read_event;
 
 /// The `read_event` tool: fetches one event by id and prints it as
 /// `events show` does. With `start` and/or `end`, it returns
@@ -85,7 +65,7 @@ impl Tool for ReadEvent {
 
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
-        Ok(ToolOutput::text(read(
+        Ok(ToolOutput::text(read_event(
             self.log.as_ref(),
             &args.id,
             args.start,

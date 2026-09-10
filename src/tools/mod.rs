@@ -34,7 +34,7 @@ pub use grep_files::GrepFiles;
 pub use list_files::ListFiles;
 pub use policy::AskBeforeWrites;
 pub use read_code::ReadCode;
-pub use read_event::{read, ReadEvent};
+pub use read_event::ReadEvent;
 pub use read_file::ReadFile;
 pub use read_map::ReadMap;
 pub use revise_map::ReviseMap;

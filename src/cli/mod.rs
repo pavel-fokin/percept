@@ -1239,7 +1239,7 @@ fn parse_query(args: &SearchArgs, me: Option<crate::core::HumanId>) -> Result<Ev
 /// sliced to it instead of the whole event.
 pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
     let (start, end) = args.range.unwrap_or_default();
-    println!("{}", tools::read(log, &args.id, start, end)?);
+    println!("{}", store::read_event(log, &args.id, start, end)?);
     Ok(())
 }
 
