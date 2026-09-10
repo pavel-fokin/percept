@@ -1238,6 +1238,52 @@ fn a_judgment_naming_a_node_the_map_no_longer_holds_is_ignored() {
 }
 
 #[test]
+fn a_judgment_carries_its_events_time() {
+    let node = NodeId::new();
+    let at = Timestamp::now();
+    let events = [
+        node_added_by(Actor::Agent, "decisions", node, "decision", "Rust"),
+        created_at(claim_confirmed("decisions", node), at),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    let judged: Vec<_> = map.judged_since(at).collect();
+    assert_eq!(judged.len(), 1);
+    assert_eq!(judged[0].2, at);
+}
+
+#[test]
+fn a_later_judgment_replaces_the_earlier_ones_time() {
+    let node = NodeId::new();
+    let earlier = Timestamp::now();
+    let later = earlier.minus_minutes(-10).unwrap();
+    let events = [
+        node_added_by(Actor::Agent, "decisions", node, "decision", "Rust"),
+        created_at(claim_disputed("decisions", node, "never proposed"), earlier),
+        created_at(claim_confirmed("decisions", node), later),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    let judged: Vec<_> = map.judged_since(earlier).collect();
+    assert_eq!(judged.len(), 1);
+    assert_eq!(judged[0].1, Standing::Confirmed);
+    assert_eq!(judged[0].2, later);
+}
+
+#[test]
+fn a_judgment_naming_a_node_the_map_does_not_hold_is_not_judged_since() {
+    let stray = NodeId::new();
+    let at = Timestamp::now();
+    let events = [created_at(claim_disputed("decisions", stray, "gone already"), at)];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.judged_since(at).count(), 0);
+}
+
+#[test]
 fn standing_survives_a_cut_to_a_neighbourhood() {
     let (question, decision) = (NodeId::new(), NodeId::new());
     let events = [
