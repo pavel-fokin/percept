@@ -188,6 +188,12 @@ The module split that tested the shape is done: the harness ports are
 out of `core`, and it holds no model, no tool, and no tree. A library
 target beside the binary is the next step that costs nothing.
 
+Until then the split is a Cargo feature. `app`, `harness`, `tools`,
+`code`, `tui`, and `providers` build only under `--features lab`, off
+by default, so the binary a developer installs is `core`, `store`,
+`mapstore`, and the CLI, and a core change that breaks the lab fails
+in the same build.
+
 ## Validation
 
 The two directions test different claims.

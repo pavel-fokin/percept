@@ -10,8 +10,8 @@ map is itself an event in the same log, citing the experience it was
 drawn from. A map can be rebuilt from its history, and every claim in
 it can be checked against what was actually seen.
 
-It serves Claude Code and Codex through hooks, ships its own coding
-agent as a TUI, and exposes the log and maps on the command line.
+It serves Claude Code and Codex through hooks and exposes the log and
+maps on the command line.
 
 - [AGENTS.md](AGENTS.md) - the design, the domain, and the architecture.
 - [.percept/index.md](.percept/index.md) - the directory of this repo's maps.
@@ -24,9 +24,9 @@ agent as a TUI, and exposes the log and maps on the command line.
 - [The log](#the-log)
 - [Maps](#maps)
 - [Coding clients](#coding-clients)
-- [The coding agent](#the-coding-agent)
 - [Configuration](#configuration)
 - [Development](#development)
+- [The lab](#the-lab)
 
 ## Install
 
@@ -182,14 +182,53 @@ hooks at `percept hook <client-name>`. The binary reads the hook input
 shape Claude Code and Codex share. A client that sends another shape
 needs a translation in `src/cli/hook.rs`, not a hook of its own.
 
-## The coding agent
+## Configuration
 
-`percept` with no arguments opens a TUI: a chat over the log with
-tools, and in a git checkout a coding agent over the working tree.
+| Variable | Values | Default |
+|---|---|---|
+| `PERCEPT_HOME` | state directory: the log, hook state, the binary | `~/.percept` |
 
-When a tool call needs approval the turn pauses on its row: `y` runs
-it once, `a` runs it and allows that tool for the session, `n`
-declines. `Esc` quits.
+A binary run from `target/` ignores `~/.percept` and keeps its state
+under the checkout's own `.percept/`, so working on percept does not
+mix test events into the shared log. `PERCEPT_HOME` overrides both.
+
+## Development
+
+```sh
+cargo build --offline
+cargo test --offline --all-features
+cargo clippy --offline --all-features --all-targets -- -D warnings
+```
+
+The default build is the binary above. `--all-features` adds the lab,
+so a change to the core that breaks it fails here and not later.
+
+Worktrees are the same project as far as the log is concerned. To keep
+an experiment's events apart, run it with its own `PERCEPT_HOME`. A
+checkout with no events for a map folds an empty one; that is not
+evidence that no decision was made.
+
+The workflow for changes - plan, build, review, reflect - is in
+[AGENTS.md](AGENTS.md).
+
+## The lab
+
+percept's own coding agent is a lab for one claim, the log as an
+environment the model searches instead of a transcript it reads. It is
+not part of what a developer installs: it builds only under the `lab`
+feature, and `scripts/install.sh` leaves it out.
+
+```sh
+cargo run --features lab                  # the TUI
+cargo run --features lab -- ask "what did the last session leave open?"
+cargo run --features lab -- ask --yes "rename Foo to Bar"    # run calls the policy would ask about
+cargo run --features lab -- reflect       # one turn revising the decisions map
+```
+
+The TUI is a chat over the log with tools, and in a git checkout a
+coding agent over the working tree. When a tool call needs approval
+the turn pauses on its row: `y` runs it once, `a` runs it and allows
+that tool for the session, `n` declines. `Esc` quits.
 
 | Command | Does |
 |---|---|
@@ -198,19 +237,8 @@ declines. `Esc` quits.
 | `/context` | show what the model was sent |
 | `/effort` | set the model's reasoning effort for the session |
 
-The same turn runs headless:
-
-```sh
-percept ask "what did the last session leave open?"
-percept ask --yes "rename Foo to Bar"    # run calls the policy would ask about
-percept reflect                          # one turn revising the decisions map
-```
-
-## Configuration
-
 | Variable | Values | Default |
 |---|---|---|
-| `PERCEPT_HOME` | state directory: the log, hook state, the binary | `~/.percept` |
 | `PERCEPT_PROVIDER` | `ollama`, `openai`, `fireworks` | `ollama` |
 | `OPENAI_API_KEY`, `FIREWORKS_API_KEY` | the provider's key | |
 | `PERCEPT_TOOLS` | `code`, `maps` | `code` in a git checkout, `maps` elsewhere and headless |
@@ -224,26 +252,6 @@ write and snapshots the tree before each prompt. `PERCEPT_MAPS` says
 how much of each map the prompt carries; in every shape the model can
 cut a map around one node with `read_map`.
 
-A binary run from `target/` ignores `~/.percept` and keeps its state
-under the checkout's own `.percept/`, so working on percept does not
-mix test events into the shared log. `PERCEPT_HOME` overrides both.
-
-## Development
-
-```sh
-cargo build --offline
-cargo test --offline
-cargo clippy --offline --all-targets -- -D warnings
-```
-
 The TUI needs a real terminal. `scripts/drive.py` forks a pty, sends
 timed keystrokes, and prints the frames; `--plain` strips the escapes
 so the text can be grepped.
-
-Worktrees are the same project as far as the log is concerned. To keep
-an experiment's events apart, run it with its own `PERCEPT_HOME`. A
-checkout with no events for a map folds an empty one; that is not
-evidence that no decision was made.
-
-The workflow for changes - plan, build, review, reflect - is in
-[AGENTS.md](AGENTS.md).

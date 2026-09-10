@@ -52,11 +52,9 @@ by every project; each event names the project it came from. It never \
 ranks, summarises, or answers: its job is to make looking cheap and \
 leave relevance to the caller.
 
-Run with no arguments to open the TUI. Every subcommand reaches the log \
-without it: `events publish` appends one event, `events search` and \
-`events show` query it, `maps list` and `maps show` print a cognitive \
-map folded from it, `ask` runs one full turn and prints the reply, \
-`reflect` runs one turn asking the model to revise its maps, `hook \
+`events publish` appends one event, `events search` and `events show` \
+query it, `maps list` and `maps show` print a cognitive map folded \
+from it, `maps record`, `confirm`, and `dispute` change one, `hook \
 <client>` records one coding client's turn from the hook JSON it reads \
 on stdin, and `init <client>` writes that client's project config to \
 call it.")]
@@ -67,7 +65,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Work with the event log directly, bypassing the TUI.
+    /// Work with the event log directly.
     Events {
         #[command(subcommand)]
         command: EventsCommand,
