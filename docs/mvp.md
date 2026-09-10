@@ -148,10 +148,15 @@ session starts from the answer.
 | 12 | The hook records prompts and replies; tool capture only behind `init --capture` | Built 2026-09-10 | Trust; the fold stays small |
 | 13 | Release binaries and a curl install | To build | A stranger installs |
 | 14 | `init` writes the local, uncommitted config | To build | A teammate without percept is unharmed |
+| 15 | Actors are `human`, `agent`, `system`; a human carries an id minted per home | To build | Who confirmed; the wire an object before a stranger has a log |
+| 16 | Every event carries its log's id and seq; a `LogCursor` names a position | To build | Merging logs later, without a migration |
 
-Build 5 to 12 in that order and run the tally on this repo and one
-other for two weeks. Then 13 and 14, which a stranger needs and the
-hypothesis does not.
+Built so far: 5, 7, 8, 12. The order from here is 15, 16, 10, 11,
+then two weeks of the tally on this repo and one other, then 13 and
+14, which a stranger needs and the hypothesis does not. 9 is deferred:
+the CLI verbs carry correctability and continuity without the page,
+and only seen waits for it. 15 and 16 change the wire, so they land
+before 13 while the only log is the author's.
 
 ## The tally
 
