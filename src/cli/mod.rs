@@ -24,13 +24,16 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};
+#[cfg(feature = "lab")]
 use tokio_stream::StreamExt;
 
+#[cfg(feature = "lab")]
 use crate::app::{run_tool, AppService, ToolStep};
 use crate::core::{
     cited_label, Actor, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeId,
     NodeRef, Payload, Schemas,
 };
+#[cfg(feature = "lab")]
 use crate::harness::Chunk;
 use crate::mapstore;
 use crate::shared::Timestamp;
@@ -75,8 +78,10 @@ pub enum Command {
         command: MapsCommand,
     },
     /// Run one turn headlessly and print the reply.
+    #[cfg(feature = "lab")]
     Ask(AskArgs),
     /// Run one turn asking the model to revise its maps from the log.
+    #[cfg(feature = "lab")]
     Reflect,
     /// Record one coding client's turn from the hook JSON it sends on
     /// stdin. Never fails the client's turn: an error prints to
@@ -361,6 +366,7 @@ pub struct ShowArgs {
     range: Option<(Option<usize>, Option<usize>)>,
 }
 
+#[cfg(feature = "lab")]
 #[derive(Args)]
 pub struct AskArgs {
     /// The prompt to send.
@@ -1253,6 +1259,7 @@ pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error
 /// is the user's standing answer to every call the policy puts to
 /// them - what `y` is in the TUI; without it, headless, such a call is
 /// declined.
+#[cfg(feature = "lab")]
 pub async fn run_turn(
     mut app: Box<dyn AppService>,
     actor: Actor,
@@ -1314,6 +1321,7 @@ pub async fn run_turn(
 /// Writes the reply to stdout, saying nothing when the turn produced no
 /// text. A reader that stops early is the caller's choice, not a
 /// failure - the same courtesy `search` extends.
+#[cfg(feature = "lab")]
 fn print_reply(reply: &str) -> Result<(), Box<dyn std::error::Error>> {
     if reply.is_empty() {
         return Ok(());

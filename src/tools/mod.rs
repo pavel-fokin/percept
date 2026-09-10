@@ -10,43 +10,75 @@
 //! the user, and `GitSnapshot`, the `Snapshot` that saves the tree
 //! before each prompt.
 
+#[cfg(feature = "lab")]
 mod bash;
+#[cfg(feature = "lab")]
 mod edit_file;
+#[cfg(feature = "lab")]
 mod find_files;
+#[cfg(feature = "lab")]
 mod git_snapshot;
+#[cfg(feature = "lab")]
 mod grep_files;
+#[cfg(feature = "lab")]
 mod list_files;
+#[cfg(feature = "lab")]
 mod policy;
+#[cfg(feature = "lab")]
 mod read_code;
+#[cfg(feature = "lab")]
 mod read_event;
+#[cfg(feature = "lab")]
 mod read_file;
+#[cfg(feature = "lab")]
 mod read_map;
+#[cfg(feature = "lab")]
 mod revise_map;
+#[cfg(feature = "lab")]
 mod search_events;
 mod workspace;
+#[cfg(feature = "lab")]
 mod write_file;
 
+#[cfg(feature = "lab")]
 pub use bash::Bash;
+#[cfg(feature = "lab")]
 pub use edit_file::EditFile;
+#[cfg(feature = "lab")]
 pub use find_files::FindFiles;
+#[cfg(feature = "lab")]
 pub use git_snapshot::GitSnapshot;
+#[cfg(feature = "lab")]
 pub use grep_files::GrepFiles;
+#[cfg(feature = "lab")]
 pub use list_files::ListFiles;
+#[cfg(feature = "lab")]
 pub use policy::AskBeforeWrites;
+#[cfg(feature = "lab")]
 pub use read_code::ReadCode;
+#[cfg(feature = "lab")]
 pub use read_event::ReadEvent;
+#[cfg(feature = "lab")]
 pub use read_file::ReadFile;
+#[cfg(feature = "lab")]
 pub use read_map::ReadMap;
+#[cfg(feature = "lab")]
 pub use revise_map::ReviseMap;
+#[cfg(feature = "lab")]
 pub use search_events::SearchEvents;
 pub use workspace::Workspace;
+#[cfg(feature = "lab")]
 pub use write_file::WriteFile;
 
 use std::path::Path;
 
+#[cfg(feature = "lab")]
 use crate::core::{Map, MapError, NodeRef, Selection};
+#[cfg(feature = "lab")]
 use crate::harness::ToolOutput;
+#[cfg(feature = "lab")]
 use crate::mapstore::{encode_fragment, encode_lines, encode_schema, NodeRefArgs};
+#[cfg(feature = "lab")]
 use crate::shared::Timestamp;
 
 /// How much of a file's start is checked for a NUL byte before it is
@@ -84,6 +116,7 @@ pub(crate) fn read_text_lossy(path: &Path) -> Result<String, Box<dyn std::error:
 /// fragment's counts, and its lines. `stamped` is `false` for
 /// `read_code`'s tree walk, whose nodes carry no actor or time to show;
 /// `true` for a map folded from the log.
+#[cfg(feature = "lab")]
 pub(crate) fn read_selection(
     map: Map,
     around: Option<NodeRefArgs>,
@@ -127,6 +160,7 @@ pub(crate) fn read_selection(
 /// `lines` joined, at most `cap` of them, with `trailer` on its own
 /// last line when any were cut - told how many, so a tool can say what
 /// to do about it.
+#[cfg(feature = "lab")]
 fn join_capped(
     mut lines: Vec<String>,
     cap: usize,

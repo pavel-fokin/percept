@@ -220,6 +220,7 @@ pub fn node_id(event: &Event) -> NodeId {
 
 /// An edge on the decisions map, written by the user, between two nodes
 /// `node_added` minted.
+#[cfg(feature = "lab")]
 pub fn edge_added(kind: &str, from: &Event, to: &Event) -> Event {
     Event::new(
         Actor::Human(human()),

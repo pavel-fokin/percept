@@ -4,15 +4,20 @@
 //! `Snapshot` of the log and turned into the payload that records it.
 
 use std::collections::{BTreeMap, HashSet};
+#[cfg(feature = "lab")]
 use std::sync::Arc;
 
-use serde::{Deserialize, Serialize};
+#[cfg(any(test, feature = "lab"))]
+use serde::Deserialize;
+use serde::Serialize;
 use uuid::Uuid;
 
 use crate::core::{
-    Actor, Edge, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation, Node, NodeId,
-    Payload, Schemas, Scope,
+    Actor, Edge, EventId, EventLog, Fragment, Map, MapError, Mutation, Node, NodeId, Payload,
+    Schemas, Scope,
 };
+#[cfg(feature = "lab")]
+use crate::core::MapReader;
 use crate::shared::Timestamp;
 use crate::store::{ids, parse_event_id};
 
@@ -29,12 +34,14 @@ pub fn fold_map(
 
 /// The `MapReader` over every map `Schemas` knows, each folded from the
 /// log.
+#[cfg(feature = "lab")]
 pub struct LogMaps {
     log: Arc<dyn EventLog>,
     schemas: Arc<Schemas>,
     scope: Scope,
 }
 
+#[cfg(feature = "lab")]
 impl LogMaps {
     pub fn new(log: Arc<dyn EventLog>, schemas: Arc<Schemas>, scope: Scope) -> Self {
         Self {
@@ -45,6 +52,7 @@ impl LogMaps {
     }
 }
 
+#[cfg(feature = "lab")]
 impl MapReader for LogMaps {
     fn read(&self, name: &str) -> Result<Map, Box<dyn std::error::Error>> {
         fold_map(self.log.as_ref(), &self.schemas, name, &self.scope)
@@ -60,6 +68,7 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    #[cfg(feature = "lab")]
     pub fn load(
         log: &dyn EventLog,
         schemas: &Schemas,
@@ -256,6 +265,7 @@ pub fn encode_map(map: &Map) -> String {
     .expect("MapLine always serializes")
 }
 
+#[cfg(feature = "lab")]
 #[derive(Serialize)]
 struct KindLine<'a> {
     name: &'a str,
@@ -264,6 +274,7 @@ struct KindLine<'a> {
     requires: &'a [String],
 }
 
+#[cfg(feature = "lab")]
 impl<'a> KindLine<'a> {
     fn of(kinds: &'a [crate::core::Kind]) -> Vec<Self> {
         kinds
@@ -277,6 +288,7 @@ impl<'a> KindLine<'a> {
     }
 }
 
+#[cfg(feature = "lab")]
 #[derive(Serialize)]
 struct SchemaLine<'a> {
     schema: &'a str,
@@ -289,6 +301,7 @@ struct SchemaLine<'a> {
 /// its `Schema` - what `read_map` returns before the fragment, so the
 /// model meets `package` or `option` with its meaning attached and does
 /// not guess a selector from a name alone.
+#[cfg(feature = "lab")]
 pub fn encode_schema(schema: &crate::core::Schema) -> String {
     serde_json::to_string(&SchemaLine {
         schema: &schema.name,
@@ -343,6 +356,7 @@ pub fn encode_lines(map: &Map, stamped: bool) -> impl Iterator<Item = String> + 
 /// `NodeRef`, or a bare short id string, `d41`, the way this map's own
 /// render shows a node. Untagged: which JSON shape the caller sent
 /// decides the match. Its own type since the domain stays serde-free.
+#[cfg(any(test, feature = "lab"))]
 #[derive(Deserialize)]
 #[serde(untagged)]
 pub enum NodeRefArgs {
@@ -350,6 +364,7 @@ pub enum NodeRefArgs {
     ShortId(String),
 }
 
+#[cfg(any(test, feature = "lab"))]
 impl NodeRefArgs {
     /// Resolves this reference against `map` to the node id it names.
     /// `{kind, name}` and a short id both go through `Map::resolve_str`,

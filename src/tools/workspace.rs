@@ -1,10 +1,12 @@
 //! The working tree a file tool reads from, and the one place a path
 //! the model gave becomes a real path on disk.
 
+#[cfg(feature = "lab")]
 use std::collections::HashSet;
 use std::error::Error;
 use std::io;
 use std::path::{Path, PathBuf};
+#[cfg(feature = "lab")]
 use std::sync::Mutex;
 
 use crate::shared::to_slash;
@@ -15,6 +17,7 @@ use crate::shared::to_slash;
 /// stays an edit from memory, never allowed.
 pub struct Workspace {
     root: PathBuf,
+    #[cfg(feature = "lab")]
     read: Mutex<HashSet<PathBuf>>,
 }
 
@@ -24,10 +27,12 @@ impl Workspace {
     pub fn new(root: &Path) -> io::Result<Self> {
         Ok(Self {
             root: root.canonicalize()?,
+            #[cfg(feature = "lab")]
             read: Mutex::new(HashSet::new()),
         })
     }
 
+    #[cfg(feature = "lab")]
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -80,6 +85,7 @@ impl Workspace {
     /// them: gitignore honoured, dot-directories entered - `.percept`
     /// and `.agents` hold what a reader here most wants - and `.git`
     /// itself left alone. An entry that cannot be read is skipped.
+    #[cfg(feature = "lab")]
     pub fn walk(&self, from: &Path) -> impl Iterator<Item = ignore::DirEntry> {
         ignore::WalkBuilder::new(from)
             .require_git(false)
@@ -97,11 +103,13 @@ impl Workspace {
     }
 
     /// Records that `read_file` has returned `path`'s contents.
+    #[cfg(feature = "lab")]
     pub fn mark_read(&self, path: &Path) {
         self.read.lock().unwrap().insert(path.to_path_buf());
     }
 
     /// Whether `path` has been read this session.
+    #[cfg(feature = "lab")]
     pub fn was_read(&self, path: &Path) -> bool {
         self.read.lock().unwrap().contains(path)
     }

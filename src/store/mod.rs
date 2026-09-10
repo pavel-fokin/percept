@@ -46,6 +46,7 @@ fn relative_minutes(s: &str) -> Option<i64> {
 /// A tool's optional time bound. Absent or empty is no bound: a model
 /// that fills every field the schema offers sends "" for a bound it
 /// does not want, and refusing it cost a call per turn.
+#[cfg(feature = "lab")]
 pub fn optional_time(
     s: Option<&str>,
 ) -> Result<Option<crate::shared::Timestamp>, Box<dyn std::error::Error>> {

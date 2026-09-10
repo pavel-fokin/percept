@@ -5,6 +5,7 @@
 mod event;
 mod event_log;
 mod map;
+#[cfg(feature = "lab")]
 mod map_reader;
 mod search;
 
@@ -20,7 +21,10 @@ pub use event_log::EventLog;
 pub use map::{REOPENS, SUPERSEDES};
 pub use map::{
     default_prefix, map_of, Edge, Fragment, Kind, Map, MapError, Mutation, Node, NodeId, NodeRef,
-    Schema, Schemas, Scope, Selection, Settlement, Standing, DECISION,
+    Schema, Schemas, Scope, Selection, Settlement, Standing,
 };
+#[cfg(feature = "lab")]
+pub use map::DECISION;
+#[cfg(feature = "lab")]
 pub use map_reader::MapReader;
 pub use search::{EventQuery, EventSearch};

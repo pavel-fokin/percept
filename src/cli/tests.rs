@@ -1,11 +1,16 @@
 use super::*;
+#[cfg(feature = "lab")]
 use crate::app::{App, Harness, MapShape};
+#[cfg(feature = "lab")]
+use crate::core::testing::content;
 use crate::core::testing::{
-    content, human, node_added, node_added_by, node_id, schemas, source, FakeLog, Fixture, ROOT,
+    human, node_added, node_added_by, node_id, schemas, source, FakeLog, Fixture, ROOT,
 };
 use crate::core::{Actor, Payload};
+#[cfg(feature = "lab")]
 use crate::harness::testing::{FakeCatalog, FakeTool, Scripted};
 use std::path::{Path, PathBuf};
+#[cfg(feature = "lab")]
 use std::sync::Arc;
 
 fn args(actor: &str, payload: &str) -> PublishArgs {
@@ -496,6 +501,7 @@ fn an_unknown_node_ref_is_rejected() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[cfg(feature = "lab")]
 async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
     let model = Scripted::new(
         vec![
@@ -544,6 +550,7 @@ async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+#[cfg(feature = "lab")]
 async fn a_stream_error_ends_the_turn_but_still_commits_partial_text() {
     let log = Arc::new(FakeLog::default());
     // A reply that breaks mid-stream, after saying something.

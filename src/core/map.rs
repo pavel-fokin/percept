@@ -94,6 +94,7 @@ pub fn default_prefix(name: &str) -> String {
 }
 
 impl Kind {
+    #[cfg(any(test, feature = "lab"))]
     pub(crate) fn new(name: &str, gloss: &str) -> Self {
         Self {
             prefix: default_prefix(name),
@@ -154,6 +155,7 @@ pub const BLOCKS: &str = "blocks";
 
 /// The one node kind `revise_map` never removes: a decision is corrected
 /// by a successor with a `supersedes` edge, so it is public.
+#[cfg(feature = "lab")]
 pub const DECISION: &str = "decision";
 /// An alternative that lost. The store refuses one that does not say
 /// why, so it is public too.
@@ -830,6 +832,7 @@ impl Map {
     /// When the map last gained a node or an edge; `None` while it is
     /// empty. A removal leaves no trace here - what was removed lives
     /// only in the events.
+    #[cfg(feature = "lab")]
     pub fn last_changed(&self) -> Option<Timestamp> {
         let nodes = self.nodes.iter().map(|node| node.added_at);
         let edges = self.edges.iter().map(|edge| edge.added_at);

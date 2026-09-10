@@ -2,11 +2,16 @@ use std::fs;
 
 use tempfile::tempdir;
 
-use super::{code_tools, discover_root, resolve_toolset, Toolset, CODE_SOURCE_NAME};
+use super::discover_root;
+#[cfg(feature = "lab")]
+use super::{code_tools, resolve_toolset, Toolset, CODE_SOURCE_NAME};
+#[cfg(feature = "lab")]
 use crate::harness::Tool;
+#[cfg(feature = "lab")]
 use crate::tools::ReadCode;
 
 #[test]
+#[cfg(feature = "lab")]
 fn tui_in_a_git_checkout_defaults_to_code_tools() {
     assert!(matches!(
         resolve_toolset(CODE_SOURCE_NAME, None, true),
@@ -15,6 +20,7 @@ fn tui_in_a_git_checkout_defaults_to_code_tools() {
 }
 
 #[test]
+#[cfg(feature = "lab")]
 fn tui_without_a_git_checkout_defaults_to_maps_tools() {
     assert!(matches!(
         resolve_toolset(CODE_SOURCE_NAME, None, false),
@@ -23,6 +29,7 @@ fn tui_without_a_git_checkout_defaults_to_maps_tools() {
 }
 
 #[test]
+#[cfg(feature = "lab")]
 fn headless_source_defaults_to_maps_tools() {
     assert!(matches!(
         resolve_toolset("percept-cli", None, true),
@@ -31,6 +38,7 @@ fn headless_source_defaults_to_maps_tools() {
 }
 
 #[test]
+#[cfg(feature = "lab")]
 fn explicit_toolset_overrides_client_default() {
     assert!(matches!(
         resolve_toolset(CODE_SOURCE_NAME, Some("maps"), true),
@@ -43,11 +51,13 @@ fn explicit_toolset_overrides_client_default() {
 }
 
 #[test]
+#[cfg(feature = "lab")]
 fn unknown_toolset_is_rejected() {
     assert!(resolve_toolset(CODE_SOURCE_NAME, Some("unknown"), true).is_err());
 }
 
 #[test]
+#[cfg(feature = "lab")]
 fn code_tools_offers_read_code() {
     let tree = tempdir().unwrap();
 
@@ -57,6 +67,7 @@ fn code_tools_offers_read_code() {
 }
 
 #[test]
+#[cfg(feature = "lab")]
 fn read_code_walks_the_working_tree_it_is_given() {
     let tree = tempdir().unwrap();
     fs::write(

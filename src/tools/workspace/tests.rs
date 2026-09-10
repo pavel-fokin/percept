@@ -58,6 +58,7 @@ fn a_dangling_symlink_pointing_outside_is_refused_not_treated_as_a_new_file() {
 }
 
 #[test]
+#[cfg(feature = "lab")]
 fn walk_enters_dot_directories_but_not_git_itself() {
     let (dir, workspace) = workspace();
     fs::create_dir_all(dir.path().join(".percept")).unwrap();
