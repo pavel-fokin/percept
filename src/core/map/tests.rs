@@ -1507,6 +1507,40 @@ fn a_model_written_node_starts_claimed() {
 }
 
 #[test]
+fn a_change_joins_its_sources_to_the_nodes() {
+    let node = NodeId::new();
+    let cited = EventId::new();
+    let events = [
+        node_added_by(Actor::Agent, "decisions", node, "decision", "Rust"),
+        committed(Payload::NodeChanged {
+            map: "decisions".to_string(),
+            node,
+            name: None,
+            properties: BTreeMap::new(),
+            sources: vec![cited],
+        }),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.node(node).unwrap().sources, vec![cited]);
+}
+
+#[test]
+fn a_change_after_a_confirmation_puts_the_node_back_to_claimed() {
+    let node = NodeId::new();
+    let events = [
+        node_added_by(Actor::Agent, "decisions", node, "decision", "Rust"),
+        claim_confirmed("decisions", node),
+        node_changed("decisions", node, Some("Rust, stable"), BTreeMap::new()),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.standing(node), Some(Standing::Claimed));
+}
+
+#[test]
 fn a_review_finished_marks_a_node_seen() {
     let node = NodeId::new();
     let events = [

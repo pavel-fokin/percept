@@ -1397,7 +1397,13 @@ impl Map {
                     seq,
                 });
             }
-            Payload::NodeChanged { node, name, properties, .. } => {
+            Payload::NodeChanged {
+                node,
+                name,
+                properties,
+                sources,
+                ..
+            } => {
                 let index = *self.by_id.get(node).ok_or(MapError::NoSuchNodeId(*node))?;
                 let kind = self.nodes[index].kind.clone();
                 if let Some(new_name) = name {
@@ -1420,6 +1426,15 @@ impl Map {
                 for (key, value) in properties {
                     self.nodes[index].properties.insert(key.clone(), value.clone());
                 }
+                for source in sources {
+                    if !self.nodes[index].sources.contains(source) {
+                        self.nodes[index].sources.push(*source);
+                    }
+                }
+                // The human judged the text they saw; changed text is a
+                // new claim, so it goes back to the review queue.
+                self.judgments.remove(node);
+                self.reviewed.remove(node);
                 self.nodes[index].changed_at = at;
             }
             Payload::NodeRemoved { node, .. } => {

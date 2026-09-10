@@ -58,7 +58,7 @@ Small: events, maps, and the rules between them.
 | Part | Holds |
 |---|---|
 | Event | An append-only entry: id, actor, source, causation, time, payload. Never changes. |
-| Map, Schema | Nodes and edges folded from `node.added`, `edge.added` and their removals. A schema names the kinds it allows and one line of purpose. |
+| Map, Schema | Nodes and edges folded from `node.added`, `node.changed`, `edge.added` and the removals. A schema names the kinds it allows and one line of purpose. |
 | Rules | Who may remove what; an option needs a why; a decision is superseded, never removed. One place, `Map::apply`. |
 | Selection, Fragment | A cut of a map around a node, since an instant, of some kinds, with counts of what the cut left out. |
 | Ports | Append, load, search the log; read and render a map. |

@@ -236,7 +236,7 @@ recording
 - A decision that changes an earlier one adds a supersedes <id> line under it; never remove a node.
 - A decision that no longer seems to fit is not yours to rewrite: raise a question with a reopens <id> line under it, and let the user settle it.
 - A node marked disputed carries the human's why: never propose it again; a correction the user agrees is a new decision with a supersedes line.
-- Close a task by changing it, not by adding a node: t4 on its own line, then state \"done\" and outcome \"<commit>: what happened\" indented under it (state \"dropped\" and why for one dropped, state \"open\" to reopen one).
+- Close a task by changing it, not by adding a node: t4 on its own line, then state \"done\" and outcome \"<commit>: what happened\" indented under it (state \"dropped\" and why for one dropped, state \"open\" to reopen one). A task the user wrote takes only state and outcome from you; its name and why are theirs.
 - Close the session with one line naming what was recorded: Recorded to decisions: q1, d1, o1.";
 
 /// What each folded map gained since `since`: a counts line for every
@@ -247,7 +247,7 @@ recording
 fn gained_block(maps: &[Map], since: Timestamp) -> String {
     let per_map: Vec<Vec<&Node>> = maps
         .iter()
-        .map(|map| map.headlines().filter(|node| node.added_at >= since).collect())
+        .map(|map| map.headlines().filter(|node| node.changed_at >= since).collect())
         .collect();
 
     let counts = maps

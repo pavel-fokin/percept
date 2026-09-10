@@ -130,11 +130,13 @@ pub enum Payload {
         seq: u32,
     },
     /// A node changed in place: a rename, a property merge, or both -
-    /// how a task is closed, dropped, reopened, or reworded, and how a
-    /// decision's node itself may be corrected without a new one.
-    /// `name` is `Some` only on a rename; `properties` are merged into
-    /// the node's own, last write wins, a key present here replacing
-    /// that key alone.
+    /// how a task is closed, dropped, reopened, or reworded. A decision
+    /// is never corrected this way: it gets a successor with a
+    /// `supersedes` edge. `name` is `Some` only on a rename;
+    /// `properties` are merged into the node's own, last write wins, a
+    /// key present here replacing that key alone; `sources` join the
+    /// node's. The fold clears whatever the human had judged on the
+    /// node, since the text they judged has changed.
     NodeChanged {
         map: String,
         node: NodeId,

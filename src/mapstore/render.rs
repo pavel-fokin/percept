@@ -243,16 +243,27 @@ fn push_tasks(out: &mut String, map: &Map) {
         }
     }
 
-    let states = map
+    // One section per declared state after the first, then any value
+    // the fold met that the schema no longer lists, so no task is
+    // rendered nowhere.
+    let declared = map
         .schema()
         .node_kind("task")
         .map(|kind| kind.states.as_slice())
         .unwrap_or_default();
-    for state in states.iter().skip(1) {
+    let mut states: Vec<&str> = declared.iter().skip(1).map(String::as_str).collect();
+    for task in &tasks {
+        if let Some(state) = map.state(task) {
+            if !states.contains(&state) && declared.first().map(String::as_str) != Some(state) {
+                states.push(state);
+            }
+        }
+    }
+    for state in states {
         let in_state: Vec<&Node> = tasks
             .iter()
             .copied()
-            .filter(|task| map.state(task) == Some(state.as_str()))
+            .filter(|task| map.state(task) == Some(state))
             .collect();
         if in_state.is_empty() {
             continue;

@@ -106,7 +106,9 @@ The tasks map holds work left to do. A `task` says in its `why`
 property what it costs to leave undone; the store refuses one without
 it. Its `state` property is `open`, `done`, or `dropped` - `open`
 until something changes it. A task `blocks` the one that must wait for
-it. Rewording a task changes its name in place, never a new node.
+it. Rewording a task changes its name in place, never a new node. The
+model may reword only a task it wrote; on a task the user wrote it may
+change `state` and `outcome` and nothing else.
 
 ```sh
 percept maps add-node tasks --actor agent --kind task --name "cancel a turn without quitting" \

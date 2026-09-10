@@ -94,7 +94,7 @@ percept maps list --format md
 percept maps show decisions --format md
 percept maps show decisions --around 'question:Where does the event log live?'
 percept maps show decisions --since 1d
-percept maps show tasks --kind task --kind outcome
+percept maps show tasks --since 1d
 ```
 
 The Markdown render of the decisions map lists each question with the

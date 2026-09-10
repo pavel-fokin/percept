@@ -855,18 +855,6 @@ struct DocNode {
     line: usize,
 }
 
-/// Whether `word` takes a short id's shape - a kind's prefix, then at
-/// least one digit and nothing else - the same split
-/// `Map::resolve_str` makes; the prefix is checked against a schema
-/// only there, so this is a syntactic guess: it decides whether a bare
-/// margin line starts a change block, not whether the id resolves.
-fn looks_like_short_id(word: &str) -> bool {
-    match word.find(|c: char| c.is_ascii_digit()) {
-        Some(at) if at > 0 => word[at..].chars().all(|c| c.is_ascii_digit()),
-        _ => false,
-    }
-}
-
 /// Splits `s` at its first run of whitespace, trimming what leads the
 /// rest - `word`, then whatever follows it on the line.
 fn split_first_word(s: &str) -> Option<(&str, &str)> {
@@ -954,18 +942,12 @@ fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>
                 Some((word, rest)) => (word.to_string(), rest),
                 None => (raw.trim().to_string(), ""),
             };
-            let (kind, name, is_change) = if looks_like_short_id(&word) {
-                if !rest.is_empty() {
-                    return Err(format!(
-                        "line {line}: {word:?} names a short id; a change to it takes no \
-                         name, only indented lines under it"
-                    )
-                    .into());
-                }
+            let (kind, name, is_change) = if rest.is_empty() {
                 (word, String::new(), true)
             } else {
-                let name = parse_quoted(rest)
-                    .ok_or_else(|| format!("line {line}: expected `<kind> \"<name>\"`"))?;
+                let name = parse_quoted(rest).ok_or_else(|| {
+                    format!("line {line}: expected `<kind> \"<name>\"`, or a short id alone")
+                })?;
                 (word, name, false)
             };
             nodes.push(DocNode {

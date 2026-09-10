@@ -59,11 +59,15 @@ fn a_valid_batch_returns_the_payloads_and_content() {
 fn a_change_node_op_applies() {
     let added = node_added_by(Actor::Agent, "option", "Rust");
     let id = node_id(&added);
+    let source = added.id();
     let revise = tool(vec![added]);
 
-    let args = r#"{"map":"decisions","changes":[{"op":"change_node","node":{"kind":"option","name":"Rust"},"properties":{"summary":"fast"},"sources":[]}]}"#;
+    let args = format!(
+        r#"{{"map":"decisions","changes":[{{"op":"change_node","node":{{"kind":"option","name":"Rust"}},"properties":{{"summary":"fast"}},"sources":["{}"]}}]}}"#,
+        source.as_uuid()
+    );
 
-    let output = revise.run(args).unwrap();
+    let output = revise.run(&args).unwrap();
 
     assert_eq!(output.commits.len(), 1);
     match &output.commits[0] {
@@ -281,4 +285,31 @@ fn removing_a_decision_is_refused_whoever_wrote_it() {
 
     assert!(err.contains("never removed"), "{err}");
     assert!(err.contains("supersedes"), "{err}");
+}
+
+#[test]
+fn a_change_node_op_citing_no_sources_is_refused() {
+    let revise = tool(vec![node_added_by(Actor::Agent, "option", "Rust")]);
+
+    let args = r#"{"map":"decisions","changes":[{"op":"change_node","node":{"kind":"option","name":"Rust"},"properties":{"summary":"fast"},"sources":[]}]}"#;
+
+    let err = revise.run(args).err().expect("refused");
+
+    assert!(err.to_string().contains("cites no sources"), "{err}");
+}
+
+#[test]
+fn a_change_node_op_renaming_a_decision_is_refused() {
+    let added = node_added_by(Actor::Agent, "decision", "use axum");
+    let source = added.id();
+    let revise = tool(vec![added]);
+
+    let args = format!(
+        r#"{{"map":"decisions","changes":[{{"op":"change_node","node":{{"kind":"decision","name":"use axum"}},"name":"use actix","sources":["{}"]}}]}}"#,
+        source.as_uuid()
+    );
+
+    let err = revise.run(&args).err().expect("refused");
+
+    assert!(err.to_string().contains("supersedes"), "{err}");
 }
