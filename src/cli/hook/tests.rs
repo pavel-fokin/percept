@@ -870,6 +870,7 @@ fn every_session_start_ends_with_the_recording_rules() {
         let rules = context.rsplit("\n\n").next().unwrap();
         assert!(rules.starts_with("recording\n"), "{context:?}");
         assert!(rules.contains("percept maps record decisions --actor agent --source <prompt id>"));
+        assert!(rules.contains("A node marked disputed carries the human's why: never propose it again"));
         assert!(rules.contains("Recorded to decisions:"));
     }
 }

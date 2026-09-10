@@ -143,7 +143,7 @@ session starts from the answer.
 | 7 | A `reopens` edge in the decisions schema, from a question to the decision it challenges | Built 2026-09-10 | An agent disputes without rewriting; the review raises it |
 | 8 | `claim.confirmed`, `claim.disputed`, `review.finished`; standing in the fold; `maps confirm` and `maps dispute` | Built 2026-09-10 | Correctability |
 | 9 | `percept review`: the page, wrong-only, finish as the batch | To build | Visibility, correctability |
-| 10 | The start block carries standing and the human's words | To build | Continuity |
+| 10 | The start block carries standing and the human's words | Built 2026-09-10 | Continuity |
 | 11 | A tally per session | To build | Falsifiability |
 | 12 | The hook records prompts and replies; tool capture only behind `init --capture` | Built 2026-09-10 | Trust; the fold stays small |
 | 13 | Release binaries and a curl install | To build | A stranger installs |
@@ -151,7 +151,7 @@ session starts from the answer.
 | 15 | Actors are `human`, `agent`, `system`; a human carries an id once a server registers them | Built 2026-09-10 | Who confirmed; the wire an object before a stranger has a log |
 | 16 | Every event carries its log's id and seq; a `LogCursor` names a position | Built 2026-09-10 | Merging logs later, without a migration |
 
-Built so far: 5, 7, 8, 12, 15, 16. The order from here is 10, 11,
+Built so far: 5, 7, 8, 10, 12, 15, 16. The order from here is 11,
 then two weeks of the tally on this repo and one other, then 13 and
 14, which a stranger needs and the hypothesis does not. 9 is deferred:
 the CLI verbs carry correctability and continuity without the page,
