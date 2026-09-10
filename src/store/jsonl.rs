@@ -6,13 +6,17 @@ use std::sync::Mutex;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use crate::core::{EventId, EventLog, EventQuery, EventSearch, HumanId};
+use crate::core::{EventId, EventLog, EventQuery, EventSearch, HumanId, LogCursor, LogId};
 use crate::shared::Id;
-use crate::store::{parse_event_id, Error, Event};
+use crate::store::{parse_event_id, Cursor, Error, Event};
 
 /// The file beside the log holding this `$PERCEPT_HOME`'s `HumanId` -
 /// one UUID and a trailing newline, editable by hand.
 const ME_FILE: &str = "me";
+
+/// The file beside the log holding this log's `LogId` - one UUID and a
+/// trailing newline, minted on first open.
+const LOG_ID_FILE: &str = "log-id";
 
 /// A JSONL event log: one compact `store::Event` per line, appended to
 /// as the app runs and replayed to rebuild the transcript on start.
@@ -34,6 +38,10 @@ pub struct Jsonl {
     /// actor a line predating the object form is read back as, carries
     /// it.
     me: Option<HumanId>,
+    /// This log's own id, read from `log-id` beside it - minted on
+    /// first open. Every event this process appends carries it, so a
+    /// merge of two logs can still tell which one wrote a given line.
+    log_id: LogId,
 }
 
 impl Jsonl {
@@ -57,16 +65,18 @@ impl Jsonl {
             .append(true)
             .open(path)
             .map_err(Error::Io)?;
-        {
+        let log_id = {
             let _lock = Lock::exclusive(&file)?;
             truncate_torn_tail(&file)?;
-        }
+            open_or_mint_log_id(&path.with_file_name(LOG_ID_FILE))?
+        };
 
         let me = open_me(&path.with_file_name(ME_FILE))?;
 
         Ok(Self {
             file: Mutex::new(file),
             me,
+            log_id,
         })
     }
 
@@ -75,6 +85,14 @@ impl Jsonl {
     /// one.
     pub fn me(&self) -> Option<HumanId> {
         self.me
+    }
+
+    /// Where the line with `seq` lands: in this log.
+    fn at(&self, seq: u64) -> LogCursor {
+        LogCursor {
+            log: self.log_id,
+            seq,
+        }
     }
 
     /// Runs `f` holding both locks: the mutex that orders this
@@ -97,17 +115,19 @@ impl Jsonl {
 }
 
 impl EventLog for Jsonl {
-    /// Appends one event as a compact JSON line.
+    /// Appends one event as a compact JSON line, carrying this log's id
+    /// and the next seq in it.
     fn append(&self, event: &crate::core::Event) -> Result<(), Box<dyn std::error::Error>> {
-        let mut line = crate::store::encode(event);
-        line.push('\n');
-
         self.with_exclusive(|file| {
             // One mechanism for every torn tail, whoever left it: a
             // dead writer, a write that failed here last time, or an
             // append by something that never took the lock. The common
             // case reads a single byte.
             truncate_torn_tail(file)?;
+            let last = read_last_line(file)?;
+            let seq = next_seq(last.as_deref(), || count_lines(file))?;
+            let mut line = crate::store::encode_at(event, self.at(seq));
+            line.push('\n');
             let mut file = file;
             file.write_all(line.as_bytes()).map_err(Error::Io)
         })?;
@@ -169,11 +189,14 @@ impl EventLog for Jsonl {
             truncate_torn_tail(file)?;
             let bytes = read_all(file)?;
             let mut events = Vec::new();
+            let mut last_line = None;
             for (line, raw) in lines(complete_text(&bytes)?) {
                 events.push(parse_line(raw).map_err(|source| at_line(line, source))?);
+                last_line = Some(raw);
             }
+            let seq = next_seq(last_line, || Ok(events.len() as u64))?;
             let event = compute(events).map_err(Error::Compute)?;
-            let mut text = crate::store::encode(&event);
+            let mut text = crate::store::encode_at(&event, self.at(seq));
             text.push('\n');
             let mut file = file;
             file.write_all(text.as_bytes()).map_err(Error::Io)?;
@@ -198,13 +221,16 @@ impl EventLog for Jsonl {
             truncate_torn_tail(file)?;
             let bytes = read_all(file)?;
             let mut events = Vec::new();
+            let mut last_line = None;
             for (line, raw) in lines(complete_text(&bytes)?) {
                 events.push(parse_line(raw).map_err(|source| at_line(line, source))?);
+                last_line = Some(raw);
             }
+            let start = next_seq(last_line, || Ok(events.len() as u64))?;
             let batch = compute(events).map_err(Error::Compute)?;
             let mut text = String::new();
-            for event in &batch {
-                text.push_str(&crate::store::encode(event));
+            for (seq, event) in (start..).zip(&batch) {
+                text.push_str(&crate::store::encode_at(event, self.at(seq)));
                 text.push('\n');
             }
             let mut file = file;
@@ -234,6 +260,93 @@ impl EventSearch for Jsonl {
 #[derive(Deserialize)]
 struct WireId {
     id: String,
+}
+
+/// Just enough of a line to read its cursor, if it has one. `None` on
+/// a legacy line, written before cursors existed.
+#[derive(Deserialize)]
+struct WireCursor {
+    #[serde(default)]
+    log: Option<Cursor>,
+}
+
+/// Next seq for the line about to be appended: the last complete
+/// line's own `seq` plus one. A tail with none - a legacy line, or one
+/// that isn't JSON, which `load` rejects but `append` has never had
+/// reason to - reads as its position among the log's non-empty lines,
+/// so `count` is asked for that number. `append_computed` already holds that
+/// count; `append` pays one full read for it, once per log, on the
+/// first append after the upgrade that added cursors.
+fn next_seq(last: Option<&str>, count: impl FnOnce() -> Result<u64, Error>) -> Result<u64, Error> {
+    let Some(raw) = last else {
+        return Ok(1);
+    };
+    let cursor = serde_json::from_str::<WireCursor>(raw)
+        .ok()
+        .and_then(|wire| wire.log);
+    match cursor {
+        Some(cursor) => Ok(cursor.seq + 1),
+        None => Ok(count()? + 1),
+    }
+}
+
+fn count_lines(file: &File) -> Result<u64, Error> {
+    let bytes = read_all(file)?;
+    Ok(lines(complete_text(&bytes)?).count() as u64)
+}
+
+/// The text of the log's last complete line, found by scanning
+/// backward in growing windows - the same technique `last_line_end`
+/// uses to find where that line ends. `None` for an empty log. Assumes
+/// the tail has already been repaired, so a non-empty file ends in a
+/// newline.
+fn read_last_line(mut file: &File) -> Result<Option<String>, Error> {
+    let len = file.seek(SeekFrom::End(0)).map_err(Error::Io)?;
+    if len == 0 {
+        return Ok(None);
+    }
+    let mut window = 64 * 1024;
+    loop {
+        let start = len.saturating_sub(window);
+        file.seek(SeekFrom::Start(start)).map_err(Error::Io)?;
+        let mut bytes = vec![0u8; (len - start) as usize];
+        file.read_exact(&mut bytes).map_err(Error::Io)?;
+
+        // The file ends in a newline, at the last byte of `bytes`.
+        // What's wanted is the newline before that one - the start of
+        // the last line.
+        let end = bytes.len() - 1;
+        if let Some(prev) = bytes[..end].iter().rposition(|byte| *byte == b'\n') {
+            return decode_line(&bytes[prev + 1..end]).map(Some);
+        }
+        if start == 0 {
+            return decode_line(&bytes[..end]).map(Some);
+        }
+        window *= 2;
+    }
+}
+
+fn decode_line(bytes: &[u8]) -> Result<String, Error> {
+    std::str::from_utf8(bytes)
+        .map(str::to_string)
+        .map_err(|e| Error::Io(io::Error::new(io::ErrorKind::InvalidData, e)))
+}
+
+/// Reads this log's `LogId` from `path`, minting one and writing it if
+/// the file doesn't exist yet - the log's own identity, unlike `me`,
+/// which only a server may give.
+fn open_or_mint_log_id(path: &Path) -> Result<LogId, Error> {
+    match fs::read_to_string(path) {
+        Ok(text) => Uuid::parse_str(text.trim())
+            .map(LogId::from_uuid)
+            .map_err(|_| Error::BadLogIdFile(path.to_path_buf())),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            let id = LogId::new();
+            fs::write(path, format!("{}\n", id.as_uuid())).map_err(Error::Io)?;
+            Ok(id)
+        }
+        Err(err) => Err(Error::Io(err)),
+    }
 }
 
 fn parse_line(raw: &str) -> Result<crate::core::Event, Error> {

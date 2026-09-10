@@ -65,7 +65,9 @@ clients](#coding-clients) section says what the hooks capture.
 One file, `~/.percept/percept.jsonl`, holds every project. Each event
 names its source - the writer and the project root it ran in - and a
 read picks the current project by default, or every one with
-`--all-projects`.
+`--all-projects`. Each line also carries the log's own id, kept in
+`log-id` beside the file, and its number in that log, so two logs can
+be merged later.
 
 ```sh
 percept events search --since 1d --type message.received

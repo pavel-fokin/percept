@@ -12,6 +12,9 @@ pub enum Error {
     /// a newline - never ignored, since that would change whose events
     /// this process writes.
     BadMeFile(std::path::PathBuf),
+    /// The `log-id` file beside the log didn't hold one parseable UUID
+    /// and a newline.
+    BadLogIdFile(std::path::PathBuf),
     BadUuid(String),
     BadTimestamp(String),
     BadPayload(serde_json::Error),
@@ -59,6 +62,9 @@ impl fmt::Display for Error {
             ),
             Self::UnknownActor(a) => write!(f, "unknown actor: {a}"),
             Self::BadMeFile(path) => write!(f, "{} does not hold a single uuid", path.display()),
+            Self::BadLogIdFile(path) => {
+                write!(f, "{} does not hold a single uuid", path.display())
+            }
             Self::BadUuid(s) => write!(f, "malformed uuid: {s}"),
             Self::BadTimestamp(s) => write!(f, "malformed timestamp: {s}"),
             Self::BadPayload(e) => write!(f, "malformed payload: {e}"),
