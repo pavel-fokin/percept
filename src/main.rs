@@ -15,6 +15,7 @@ mod lab;
 mod mapstore;
 #[cfg(feature = "lab")]
 mod providers;
+mod server;
 mod shared;
 mod store;
 #[cfg(test)]
@@ -281,6 +282,7 @@ async fn main() {
             lab::headless_turn(false, args.prompt, args.yes, cli_source, &checkout).await
         }
         Some(Command::Init(args)) => cli::init::run(args, &checkout),
+        Some(Command::Review) => server::run(),
         #[cfg(feature = "lab")]
         Some(Command::Reflect) => {
             lab::headless_turn(
