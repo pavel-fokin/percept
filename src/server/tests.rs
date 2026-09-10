@@ -2,13 +2,18 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 
 use super::*;
+use crate::core::testing::{schemas, source, FakeLog};
 
-/// Binds a server on a spare port, serves it on a background thread,
-/// and returns its address for a test to connect to.
+/// Binds a server on a spare port, serves it on a background thread
+/// over an empty in-memory log and the built-in schemas, and returns
+/// its address for a test to connect to.
 fn spawn() -> std::net::SocketAddr {
     let server = bind().expect("bind a server on a spare port");
     let addr = server.server_addr().to_ip().expect("server bound to an IP address");
-    std::thread::spawn(move || serve(server));
+    let log: Arc<dyn EventLog> = Arc::new(FakeLog::default());
+    let schemas = Arc::new(schemas());
+    let src = source("test");
+    std::thread::spawn(move || serve(server, log, schemas, src));
     addr
 }
 
@@ -33,6 +38,17 @@ fn root_returns_the_embedded_page() {
     let response = get(addr, "/");
     assert!(response.starts_with("HTTP/1.0 200"), "{response}");
     assert!(response.contains("<title>percept review</title>"), "{response}");
+}
+
+#[test]
+fn api_review_returns_json_with_a_maps_array() {
+    let addr = spawn();
+    let response = get(addr, "/api/review");
+    assert!(response.starts_with("HTTP/1.0 200"), "{response}");
+    assert!(response.contains("application/json"), "{response}");
+    let body = response.split("\r\n\r\n").nth(1).expect("a body past the headers");
+    let json: serde_json::Value = serde_json::from_str(body).expect("valid JSON");
+    assert!(json["maps"].is_array(), "{json}");
 }
 
 #[test]

@@ -11,9 +11,13 @@
 //! serves something explaining how to build it.
 
 use std::error::Error;
+use std::sync::Arc;
 
 use tiny_http::{Header, Method, Response, Server};
 
+use crate::core::{EventLog, Schemas, Source};
+
+mod review;
 #[cfg(test)]
 mod tests;
 
@@ -31,7 +35,9 @@ fn is_stub() -> bool {
 
 /// `percept review` - binds a server on `127.0.0.1`, prints its URL,
 /// opens it in the browser, and serves until the process is killed.
-pub fn run() -> Result<(), Box<dyn Error>> {
+/// `log` and `schemas` are read fresh on every `GET /api/review`;
+/// `source` says which project's events that cut reads.
+pub fn run(log: Arc<dyn EventLog>, schemas: Arc<Schemas>, source: Source) -> Result<(), Box<dyn Error>> {
     let server = bind()?;
     let url = format!("http://{}", server.server_addr());
     println!("percept review at {url}");
@@ -39,7 +45,7 @@ pub fn run() -> Result<(), Box<dyn Error>> {
         eprintln!("the review page is not built; see the page for how");
     }
     open_browser(&url);
-    serve(server);
+    serve(server, log, schemas, source);
     Ok(())
 }
 
@@ -50,9 +56,10 @@ fn bind() -> Result<Server, Box<dyn Error>> {
 }
 
 /// Serves requests on `server` until the process is killed: `GET /`
-/// and `GET /index.html` return the embedded page, everything else
+/// and `GET /index.html` return the embedded page, `GET /api/review`
+/// the queue `review::cut` folds fresh from `log`, everything else
 /// 404s.
-fn serve(server: Server) {
+fn serve(server: Server, log: Arc<dyn EventLog>, schemas: Arc<Schemas>, source: Source) {
     for request in server.incoming_requests() {
         let response = match (request.method(), request.url()) {
             (Method::Get, "/" | "/index.html") => {
@@ -63,9 +70,32 @@ fn serve(server: Server) {
                 .expect("static header name and value are valid ASCII");
                 Response::from_string(PAGE).with_header(header).boxed()
             }
+            (Method::Get, "/api/review") => review_response(log.as_ref(), &schemas, &source),
             _ => Response::empty(404).boxed(),
         };
         let _ = request.respond(response);
+    }
+}
+
+/// `GET /api/review`'s response: `review::cut`'s JSON, or its error as
+/// a 500 - the log or a schema failing to fold is the one way this can
+/// go wrong, and a reader gets the message rather than a dropped
+/// connection.
+fn review_response(
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &Source,
+) -> tiny_http::ResponseBox {
+    match review::cut(log, schemas, source) {
+        Ok(body) => {
+            let header = Header::from_bytes(
+                &b"Content-Type"[..],
+                &b"application/json; charset=utf-8"[..],
+            )
+            .expect("static header name and value are valid ASCII");
+            Response::from_string(body.to_string()).with_header(header).boxed()
+        }
+        Err(err) => Response::from_string(err.to_string()).with_status_code(500).boxed(),
     }
 }
 

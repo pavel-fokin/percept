@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use clap::Parser;
 
@@ -282,7 +283,10 @@ async fn main() {
             lab::headless_turn(false, args.prompt, args.yes, cli_source, &checkout).await
         }
         Some(Command::Init(args)) => cli::init::run(args, &checkout),
-        Some(Command::Review) => server::run(),
+        Some(Command::Review) => open_log(&checkout).and_then(|log| {
+            let schemas = mapstore::load_schemas(&checkout)?;
+            server::run(Arc::new(log), Arc::new(schemas), cli_source.clone())
+        }),
         #[cfg(feature = "lab")]
         Some(Command::Reflect) => {
             lab::headless_turn(

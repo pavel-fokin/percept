@@ -1,1 +1,44 @@
 @import "tailwindcss";
+
+/* System-only font stacks - no Google Fonts, no CDN - replacing
+   Tailwind's own defaults so `font-serif`/`font-sans` read as these
+   everywhere. */
+@theme {
+  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* The sketch's colour tokens, light by default and dark under
+   `prefers-color-scheme`. */
+:root {
+  --ground: #f4f6f8;
+  --ground-2: #eaedf0;
+  --ink: #22262a;
+  --ink-2: #5b6167;
+  --ink-3: #8a9096;
+  --rule: #d3d8dc;
+  --focus: #345b9a;
+  --agree: #2f7d52;
+  --object: #b23a3a;
+  --sheet: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ground: #17191c;
+    --ground-2: #1f2226;
+    --ink: #e4e6e8;
+    --ink-2: #a5abb1;
+    --ink-3: #737980;
+    --rule: #30353a;
+    --focus: #8fb1e0;
+    --agree: #7cc594;
+    --object: #e28a8a;
+    --sheet: #1f2226;
+  }
+}
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+}
