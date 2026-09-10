@@ -7,37 +7,49 @@ use super::*;
 use crate::core::testing::{human, node_added, node_added_by, node_id, schemas, source, FakeLog};
 use crate::core::{Actor, Payload};
 
-/// Binds a server on a spare port, serves it on a background thread
-/// over an empty in-memory log and the built-in schemas, and returns
-/// its address for a test to connect to.
-fn spawn() -> std::net::SocketAddr {
-    spawn_over(Vec::new()).1
+/// Binds a server on a spare port, serves it on a spawned task over an
+/// empty in-memory log and the built-in schemas, and returns its
+/// address for a test to connect to.
+async fn spawn() -> std::net::SocketAddr {
+    spawn_over(Vec::new()).await.1
 }
 
 /// `spawn`, seeded with `events` and handing the test back the same
 /// `FakeLog` the server writes to, so it can read a write's effect back
-/// with `.load()`. The thread owns the `Arc<FakeLog>` it moves in and
-/// serves through a reference to it, the way `main` serves through a
-/// reference to its own log.
-fn spawn_over(events: Vec<crate::core::Event>) -> (std::sync::Arc<FakeLog>, std::net::SocketAddr) {
-    let server = bind().expect("bind a server on a spare port");
-    let addr = server.server_addr().to_ip().expect("server bound to an IP address");
+/// with `.load()`. The server runs on a spawned task the same way
+/// `main` runs it, and outlives the test - the process exits when the
+/// test binary does.
+async fn spawn_over(events: Vec<crate::core::Event>) -> (std::sync::Arc<FakeLog>, std::net::SocketAddr) {
+    let (listener, addr) = bind().await.expect("bind a server on a spare port");
     let log = std::sync::Arc::new(FakeLog::seeded(events));
     let handed_back = log.clone();
-    let schemas = schemas();
-    let src = source("test");
-    std::thread::spawn(move || serve(server, &*log, &schemas, src, human()));
+    let state = std::sync::Arc::new(AppState {
+        log: log.clone() as std::sync::Arc<dyn crate::core::EventLog>,
+        schemas: schemas(),
+        source: source("test"),
+        me: human(),
+    });
+    tokio::spawn(serve(listener, state));
     (handed_back, addr)
 }
 
-/// Sends a raw HTTP/1.0 request to `addr` and returns the full response
-/// text - what `get` and `post` both parse.
-fn send(addr: std::net::SocketAddr, request: String) -> String {
-    let mut stream = TcpStream::connect(addr).expect("connect to the running server");
-    stream.write_all(request.as_bytes()).expect("write the request");
-    let mut response = String::new();
-    stream.read_to_string(&mut response).expect("read the response");
-    response
+/// Sends a raw HTTP/1.1 request to `addr` and returns the full response
+/// text - what `get` and `post` both parse. Every request carries
+/// `Connection: close`, so the server closes the socket once it has
+/// answered and `read_to_string` sees EOF; shutting down the write half
+/// ourselves first would race the server's own read of the request.
+/// Runs the blocking socket I/O on a blocking thread, since the server
+/// itself runs on the same runtime.
+async fn send(addr: std::net::SocketAddr, request: String) -> String {
+    tokio::task::spawn_blocking(move || {
+        let mut stream = TcpStream::connect(addr).expect("connect to the running server");
+        stream.write_all(request.as_bytes()).expect("write the request");
+        let mut response = String::new();
+        stream.read_to_string(&mut response).expect("read the response");
+        response
+    })
+    .await
+    .expect("the blocking request never panics")
 }
 
 /// `response`'s status line and its body past the headers.
@@ -47,66 +59,67 @@ fn split(response: &str) -> (&str, &str) {
     (status, body)
 }
 
-/// Sends a raw HTTP/1.0 POST of `body` for `path` to `addr` and returns
+/// Sends a raw HTTP/1.1 POST of `body` for `path` to `addr` and returns
 /// the status line and the response text past the headers.
-fn post(addr: std::net::SocketAddr, path: &str, body: &serde_json::Value) -> (String, String) {
+async fn post(addr: std::net::SocketAddr, path: &str, body: &serde_json::Value) -> (String, String) {
     let text = body.to_string();
     let request = format!(
-        "POST {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\n\r\n{text}",
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{text}",
         text.len()
     );
-    let response = send(addr, request);
+    let response = send(addr, request).await;
     let (status, body) = split(&response);
     (status.to_string(), body.to_string())
 }
 
-/// Sends a raw HTTP/1.0 GET for `path` to `addr` and returns the
+/// Sends a raw HTTP/1.1 GET for `path` to `addr` and returns the
 /// response text.
-fn get(addr: std::net::SocketAddr, path: &str) -> String {
-    send(addr, format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n"))
+async fn get(addr: std::net::SocketAddr, path: &str) -> String {
+    send(addr, format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")).await
 }
 
-#[test]
-fn root_returns_the_embedded_page() {
-    let addr = spawn();
-    let response = get(addr, "/");
-    assert!(response.starts_with("HTTP/1.0 200"), "{response}");
+#[tokio::test]
+async fn root_returns_the_embedded_page() {
+    let addr = spawn().await;
+    let response = get(addr, "/").await;
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     assert!(response.contains("<title>percept review</title>"), "{response}");
 }
 
-#[test]
-fn root_with_a_query_string_still_returns_the_embedded_page() {
-    let addr = spawn();
-    let response = get(addr, "/?x=1");
-    assert!(response.starts_with("HTTP/1.0 200"), "{response}");
+#[tokio::test]
+async fn root_with_a_query_string_still_returns_the_embedded_page() {
+    let addr = spawn().await;
+    let response = get(addr, "/?x=1").await;
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     assert!(response.contains("<title>percept review</title>"), "{response}");
 }
 
-#[test]
-fn api_review_returns_json_with_a_maps_array() {
-    let addr = spawn();
-    let response = get(addr, "/api/review");
-    assert!(response.starts_with("HTTP/1.0 200"), "{response}");
+#[tokio::test]
+async fn api_review_returns_json_with_a_maps_array() {
+    let addr = spawn().await;
+    let response = get(addr, "/api/review").await;
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
     assert!(response.contains("application/json"), "{response}");
     let (_, body) = split(&response);
     let json: serde_json::Value = serde_json::from_str(body).expect("valid JSON");
     assert!(json["maps"].is_array(), "{json}");
 }
 
-#[test]
-fn unknown_path_returns_404() {
-    let addr = spawn();
-    let response = get(addr, "/nope");
-    assert!(response.starts_with("HTTP/1.0 404"), "{response}");
+#[tokio::test]
+async fn unknown_path_returns_404() {
+    let addr = spawn().await;
+    let response = get(addr, "/nope").await;
+    assert!(response.starts_with("HTTP/1.1 404"), "{response}");
 }
 
-#[test]
-fn dispute_posted_with_a_why_appends_a_claim_disputed_naming_the_node_and_the_why() {
+#[tokio::test]
+async fn dispute_posted_with_a_why_appends_a_claim_disputed_naming_the_node_and_the_why() {
     let node = node_added_by(Actor::Agent, "decision", "ship it");
-    let (log, addr) = spawn_over(vec![node.clone()]);
+    let (log, addr) = spawn_over(vec![node.clone()]).await;
 
-    let (status, body) = post(addr, "/api/dispute", &json!({ "map": "decisions", "node": "d1", "why": "not yet" }));
-    assert!(status.starts_with("HTTP/1.0 200"), "{status} {body}");
+    let (status, body) =
+        post(addr, "/api/dispute", &json!({ "map": "decisions", "node": "d1", "why": "not yet" })).await;
+    assert!(status.starts_with("HTTP/1.1 200"), "{status} {body}");
 
     let events = log.load().unwrap();
     let disputed = events
@@ -119,24 +132,25 @@ fn dispute_posted_with_a_why_appends_a_claim_disputed_naming_the_node_and_the_wh
     assert_eq!(disputed, (node_id(&node), "not yet".to_string()));
 }
 
-#[test]
-fn dispute_with_a_blank_why_is_refused_with_400_and_appends_nothing() {
+#[tokio::test]
+async fn dispute_with_a_blank_why_is_refused_with_400_and_appends_nothing() {
     let node = node_added_by(Actor::Agent, "decision", "ship it");
-    let (log, addr) = spawn_over(vec![node]);
+    let (log, addr) = spawn_over(vec![node]).await;
 
-    let (status, body) = post(addr, "/api/dispute", &json!({ "map": "decisions", "node": "d1", "why": "   " }));
-    assert!(status.starts_with("HTTP/1.0 400"), "{status} {body}");
+    let (status, body) =
+        post(addr, "/api/dispute", &json!({ "map": "decisions", "node": "d1", "why": "   " })).await;
+    assert!(status.starts_with("HTTP/1.1 400"), "{status} {body}");
 
     assert_eq!(log.load().unwrap().len(), 1, "nothing beyond the seeded node.added");
 }
 
-#[test]
-fn confirm_appends_a_claim_confirmed() {
+#[tokio::test]
+async fn confirm_appends_a_claim_confirmed() {
     let node = node_added_by(Actor::Agent, "decision", "ship it");
-    let (log, addr) = spawn_over(vec![node.clone()]);
+    let (log, addr) = spawn_over(vec![node.clone()]).await;
 
-    let (status, body) = post(addr, "/api/confirm", &json!({ "map": "decisions", "node": "d1" }));
-    assert!(status.starts_with("HTTP/1.0 200"), "{status} {body}");
+    let (status, body) = post(addr, "/api/confirm", &json!({ "map": "decisions", "node": "d1" })).await;
+    assert!(status.starts_with("HTTP/1.1 200"), "{status} {body}");
 
     let events = log.load().unwrap();
     let confirmed = events.iter().any(|event| {
@@ -145,14 +159,15 @@ fn confirm_appends_a_claim_confirmed() {
     assert!(confirmed, "expected a claim.confirmed for the disputed node");
 }
 
-#[test]
-fn finish_appends_one_review_finished_naming_the_resolved_nodes_and_skipping_a_user_written_one() {
+#[tokio::test]
+async fn finish_appends_one_review_finished_naming_the_resolved_nodes_and_skipping_a_user_written_one() {
     let decision = node_added_by(Actor::Agent, "decision", "ship it");
     let question = node_added("question", "should we ship it");
-    let (log, addr) = spawn_over(vec![decision.clone(), question.clone()]);
+    let (log, addr) = spawn_over(vec![decision.clone(), question.clone()]).await;
 
-    let (status, body) = post(addr, "/api/finish", &json!({ "map": "decisions", "nodes": ["d1", "q1"] }));
-    assert!(status.starts_with("HTTP/1.0 200"), "{status} {body}");
+    let (status, body) =
+        post(addr, "/api/finish", &json!({ "map": "decisions", "nodes": ["d1", "q1"] })).await;
+    assert!(status.starts_with("HTTP/1.1 200"), "{status} {body}");
 
     let events = log.load().unwrap();
     let finished = events
@@ -165,9 +180,9 @@ fn finish_appends_one_review_finished_naming_the_resolved_nodes_and_skipping_a_u
     assert_eq!(finished, vec![node_id(&decision)], "the human-written question is skipped");
 }
 
-#[test]
-fn an_unknown_node_id_is_404() {
-    let addr = spawn();
-    let (status, body) = post(addr, "/api/confirm", &json!({ "map": "decisions", "node": "d99" }));
-    assert!(status.starts_with("HTTP/1.0 404"), "{status} {body}");
+#[tokio::test]
+async fn an_unknown_node_id_is_404() {
+    let addr = spawn().await;
+    let (status, body) = post(addr, "/api/confirm", &json!({ "map": "decisions", "node": "d99" })).await;
+    assert!(status.starts_with("HTTP/1.1 404"), "{status} {body}");
 }

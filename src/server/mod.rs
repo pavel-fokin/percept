@@ -3,7 +3,7 @@
 //! A presentation-layer peer of `cli` and `tui`: it has no chat logic
 //! of its own. It serves the JSON the page reads (`GET /api/review`)
 //! and writes (`POST /api/dispute`, `/api/confirm`, `/api/finish`)
-//! over the same log and maps the CLI uses.
+//! over the same log and maps the CLI uses. Built on `axum`.
 //!
 //! The page is built into the binary at compile time - `build.rs`
 //! copies `web/dist/index.html` into `OUT_DIR`, or writes a stub there
@@ -12,11 +12,17 @@
 //! serves something explaining how to build it.
 
 use std::error::Error;
+use std::net::SocketAddr;
+use std::sync::Arc;
 
-use serde::de::DeserializeOwned;
+use axum::extract::State;
+use axum::http::StatusCode;
+use axum::response::{Html, IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
-use tiny_http::{Header, Method, Request, Response, ResponseBox, Server};
+use tokio::net::TcpListener;
 
 use crate::core::{EventId, EventLog, HumanId, Schemas, Source};
 use crate::server::review::Refused;
@@ -30,98 +36,80 @@ mod tests;
 /// to build it otherwise.
 const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 
+/// What every handler needs to fold or write the log: read fresh on
+/// every `GET /api/review` call, never cached.
+struct AppState {
+    log: Arc<dyn EventLog>,
+    schemas: Schemas,
+    source: Source,
+    me: Option<HumanId>,
+}
+
 /// `percept review` - binds a server on `127.0.0.1`, prints its URL,
 /// opens it in the browser, and serves until the process is killed.
 /// `log` and `schemas` are read fresh on every `GET /api/review`;
 /// `source` says which project's events that cut reads; `me` is the
 /// human every write the page makes is attributed to.
-pub fn run(
-    log: &dyn EventLog,
-    schemas: &Schemas,
+pub async fn run(
+    log: Arc<dyn EventLog>,
+    schemas: Schemas,
     source: Source,
     me: Option<HumanId>,
 ) -> Result<(), Box<dyn Error>> {
-    let server = bind()?;
-    let url = format!("http://{}", server.server_addr());
+    let (listener, addr) = bind().await?;
+    let url = format!("http://{addr}");
     println!("percept review at {url}");
     open_browser(&url);
-    serve(server, log, schemas, source, me);
+    let state = Arc::new(AppState { log, schemas, source, me });
+    serve(listener, state).await;
     Ok(())
 }
 
 /// Binds the server on an OS-picked port, without printing or opening
 /// a browser - what a test binds against.
-fn bind() -> Result<Server, Box<dyn Error>> {
-    Server::http("127.0.0.1:0").map_err(|err| err.to_string().into())
+async fn bind() -> Result<(TcpListener, SocketAddr), Box<dyn Error>> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    Ok((listener, addr))
 }
 
-/// A response with `Content-Type: content_type` and `status`, whatever
-/// the caller's `body`.
-fn respond(body: impl Into<Vec<u8>>, content_type: &str, status: u16) -> ResponseBox {
-    let header = Header::from_bytes(&b"Content-Type"[..], content_type.as_bytes())
-        .expect("content-type header value is valid ASCII");
-    Response::from_data(body.into())
-        .with_status_code(status)
-        .with_header(header)
-        .boxed()
-}
-
-/// Reads `request`'s body in full, parses it as `B`, and hands it to
-/// `act` - the one write path `/api/dispute`, `/api/confirm`, and
-/// `/api/finish` share: a body that fails to parse, or an `act` that
-/// refuses it, both answer with the reason as plain text.
-fn write<B: DeserializeOwned>(
-    request: &mut Request,
-    act: impl FnOnce(B) -> Result<EventId, Refused>,
-) -> ResponseBox {
-    let body = match read_body::<B>(request) {
-        Ok(body) => body,
-        Err(reason) => return respond(reason, "text/plain; charset=utf-8", 400),
-    };
-    match act(body) {
-        Ok(id) => respond(
-            json!({ "event": id.as_uuid().to_string() }).to_string(),
-            "application/json; charset=utf-8",
-            200,
-        ),
-        Err(Refused::Bad(reason)) => respond(reason, "text/plain; charset=utf-8", 400),
-        Err(Refused::NotFound(reason)) => respond(reason, "text/plain; charset=utf-8", 404),
-    }
-}
-
-/// Serves requests on `server` until the process is killed: `GET /`
+/// Serves requests on `listener` until the process is killed: `GET /`
 /// and `GET /index.html` return the embedded page, `GET /api/review`
-/// the queue `review::cut` folds fresh from `log`, `POST /api/dispute`,
+/// the queue `review::cut` folds fresh from the log, `POST /api/dispute`,
 /// `POST /api/confirm`, and `POST /api/finish` each take one JSON body
 /// and answer the appended event's id or a plain-text reason,
 /// everything else 404s.
-fn serve(server: Server, log: &dyn EventLog, schemas: &Schemas, source: Source, me: Option<HumanId>) {
-    for mut request in server.incoming_requests() {
-        let path = request.url().split('?').next().unwrap_or("").to_string();
-        let response = match (request.method(), path.as_str()) {
-            (Method::Get, "/" | "/index.html") => {
-                respond(PAGE, "text/html; charset=utf-8", 200)
-            }
-            (Method::Get, "/api/review") => match review::cut(log, schemas, &source) {
-                Ok(body) => respond(
-                    serde_json::to_string(&body).expect("ReviewResponse always serializes"),
-                    "application/json; charset=utf-8",
-                    200,
-                ),
-                Err(err) => respond(err.to_string(), "text/plain; charset=utf-8", 500),
-            },
-            (Method::Post, "/api/dispute") => write(&mut request, |body: DisputeBody| {
-                review::dispute(log, schemas, &source, me, &body.map, &body.node, body.why)
-            }),
-            (Method::Post, "/api/confirm") => write(&mut request, |body: NodeBody| {
-                review::confirm(log, schemas, &source, me, &body.map, &body.node)
-            }),
-            (Method::Post, "/api/finish") => write(&mut request, |body: FinishBody| {
-                review::finish(log, schemas, &source, me, &body.map, &body.nodes)
-            }),
-            _ => Response::empty(404).boxed(),
-        };
-        let _ = request.respond(response);
+async fn serve(listener: TcpListener, state: Arc<AppState>) {
+    let app = router(state);
+    axum::serve(listener, app).await.expect("the review server never returns an error");
+}
+
+/// The route table every handler is registered on, shared by `serve`
+/// and the tests that spawn it over a bound listener.
+fn router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/", get(index))
+        .route("/index.html", get(index))
+        .route("/api/review", get(api_review))
+        .route("/api/dispute", post(api_dispute))
+        .route("/api/confirm", post(api_confirm))
+        .route("/api/finish", post(api_finish))
+        .with_state(state)
+}
+
+async fn index() -> Html<&'static str> {
+    Html(PAGE)
+}
+
+async fn api_review(State(state): State<Arc<AppState>>) -> Response {
+    let result = tokio::task::spawn_blocking(move || {
+        review::cut(&*state.log, &state.schemas, &state.source).map_err(|err| err.to_string())
+    })
+    .await
+    .expect("api_review's blocking fold never panics");
+    match result {
+        Ok(body) => Json(body).into_response(),
+        Err(reason) => (StatusCode::INTERNAL_SERVER_ERROR, reason).into_response(),
     }
 }
 
@@ -147,16 +135,38 @@ struct FinishBody {
     nodes: Vec<String>,
 }
 
-/// Reads `request`'s body in full and parses it as `T` - a body that
-/// isn't valid JSON, or doesn't match the shape a route expects, reads
-/// as a refused write the same as any other.
-fn read_body<T: DeserializeOwned>(request: &mut Request) -> Result<T, String> {
-    let mut text = String::new();
-    request
-        .as_reader()
-        .read_to_string(&mut text)
-        .map_err(|err| err.to_string())?;
-    serde_json::from_str(&text).map_err(|err| err.to_string())
+async fn api_dispute(State(state): State<Arc<AppState>>, Json(body): Json<DisputeBody>) -> Response {
+    write_response(tokio::task::spawn_blocking(move || {
+        review::dispute(&*state.log, &state.schemas, &state.source, state.me, &body.map, &body.node, body.why)
+    }))
+    .await
+}
+
+async fn api_confirm(State(state): State<Arc<AppState>>, Json(body): Json<NodeBody>) -> Response {
+    write_response(tokio::task::spawn_blocking(move || {
+        review::confirm(&*state.log, &state.schemas, &state.source, state.me, &body.map, &body.node)
+    }))
+    .await
+}
+
+async fn api_finish(State(state): State<Arc<AppState>>, Json(body): Json<FinishBody>) -> Response {
+    write_response(tokio::task::spawn_blocking(move || {
+        review::finish(&*state.log, &state.schemas, &state.source, state.me, &body.map, &body.nodes)
+    }))
+    .await
+}
+
+/// Awaits a `spawn_blocking`'d write and turns its result into the
+/// response every write route shares: the appended event's id as JSON,
+/// or the refusal's reason as plain text with its status.
+async fn write_response(
+    task: tokio::task::JoinHandle<Result<EventId, Refused>>,
+) -> Response {
+    match task.await.expect("a write handler's blocking task never panics") {
+        Ok(id) => Json(json!({ "event": id.as_uuid().to_string() })).into_response(),
+        Err(Refused::Bad(reason)) => (StatusCode::BAD_REQUEST, reason).into_response(),
+        Err(Refused::NotFound(reason)) => (StatusCode::NOT_FOUND, reason).into_response(),
+    }
 }
 
 /// Opens `url` in the user's default browser: `open` on macOS,
