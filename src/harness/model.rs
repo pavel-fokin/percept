@@ -212,7 +212,10 @@ pub fn message_of(event: &Event) -> Option<Message> {
         | Payload::EdgeRemoved { .. }
         | Payload::ModelCalled(..)
         | Payload::SessionStarted
-        | Payload::FileCited { .. } => None,
+        | Payload::FileCited { .. }
+        | Payload::ClaimConfirmed { .. }
+        | Payload::ClaimDisputed { .. }
+        | Payload::ReviewFinished { .. } => None,
     }
 }
 

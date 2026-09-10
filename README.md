@@ -51,7 +51,7 @@ Record a Claude Code session and read what it left behind:
 ```sh
 cd your-project
 percept init claude-code       # writes .claude/settings.json hooks
-claude                         # work as usual; every turn is recorded
+claude                         # work as usual; prompts and replies are recorded
 
 percept events search --since 1h
 percept maps show decisions --format md
@@ -122,6 +122,19 @@ its properties, edges, and `cites` lines indented under it. A `cites`
 line publishes the named text as a `file.cited` event, so a later
 session can see whether the file still says what the claim rested on.
 
+A model's node carries a standing - `claimed`, `seen`, `confirmed`, or
+`disputed` - the fold derives from the human's own judgment, never from
+an edge:
+
+```sh
+percept maps confirm decisions d41
+percept maps dispute decisions d41 --why "never proposed"
+```
+
+`confirm` marks a node's claim right; `dispute` marks it wrong, with
+why. Both refuse a node the map does not hold and the human's own node,
+since a user-written node carries no standing to judge.
+
 A map's schema is a TOML file at `.percept/schemas/<name>.toml` naming
 its node and edge kinds and one line of purpose. `decisions` and
 `tasks` ship built in; this repo adds `ideas`. The rules for a map -
@@ -150,10 +163,14 @@ the checkout and trust the repository; in Codex, `/hooks` reviews the
 capture hooks. Restart a running session to load the configuration.
 
 The hooks call `percept hook <client>` on session start, each prompt,
-each completed tool call, and each reply. Session start prints a
-bounded fragment of every map into the client's context: what changed
-since the last session, what is open, and whether any cited file has
-changed. The other three append events under the client's name. A
+and each reply. `percept init <client> --capture` adds each completed
+tool call and its result, which fills the log with every file the
+agent read; this repo's own configs carry it, a project that only
+wants its decisions does not. Session start prints a bounded fragment
+of every map into the client's context: what changed since the last
+session, what is open, and whether any cited file has changed, then
+the recording rules. The other hooks append events under the client's
+name. A
 capture error goes to stderr and the hook exits non-zero, which is how
 the client shows it; the turn continues.
 

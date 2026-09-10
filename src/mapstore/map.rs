@@ -221,6 +221,14 @@ struct NodeLine<'a> {
     name: &'a str,
     properties: &'a BTreeMap<String, String>,
     sources: Vec<String>,
+    /// The human's judgment on this node's claim - `claimed`, `seen`,
+    /// `confirmed`, or `disputed` - omitted for the human's own node,
+    /// which carries no standing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    standing: Option<String>,
+    /// The latest dispute's why, only while `standing` is `disputed`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dispute: Option<&'a str>,
     #[serde(flatten)]
     stamp: Option<Stamp>,
 }
@@ -362,6 +370,8 @@ pub fn encode_node(map: &Map, node: &Node, stamped: bool) -> String {
         name: &node.name,
         properties: &node.properties,
         sources: ids(&node.sources),
+        standing: map.standing(node.id).map(|standing| standing.to_string()),
+        dispute: map.dispute(node.id),
         stamp: Stamp::of(node.actor, node.added_at, stamped),
     })
     .expect("NodeLine always serializes")

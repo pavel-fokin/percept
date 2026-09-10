@@ -337,6 +337,69 @@ fn an_edge_line_names_its_ends_as_kind_and_name() {
     assert_eq!(line["sources"], serde_json::json!([]));
 }
 
+#[test]
+fn a_node_line_omits_standing_and_dispute_for_a_claim_nobody_has_judged() {
+    let events = [Event::new(
+        Actor::Model,
+        source("test"),
+        None,
+        Payload::NodeAdded {
+            map: "decisions".to_string(),
+            node: NodeId::new(),
+            kind: "decision".to_string(),
+            name: "Rust".to_string(),
+            properties: BTreeMap::new(),
+            sources: Vec::new(),
+            seq: 0,
+        },
+    )];
+    let map = Map::fold(crate::core::testing::decisions(), &scope(), &events).unwrap();
+    let node = map.find("decision", "Rust").unwrap();
+
+    let line: serde_json::Value = serde_json::from_str(&encode_node(&map, node, true)).unwrap();
+
+    assert_eq!(line["standing"], "claimed");
+    assert!(line.get("dispute").is_none());
+}
+
+#[test]
+fn a_node_line_carries_a_disputed_standing_and_its_why() {
+    let node_id = NodeId::new();
+    let events = [
+        Event::new(
+            Actor::Model,
+            source("test"),
+            None,
+            Payload::NodeAdded {
+                map: "decisions".to_string(),
+                node: node_id,
+                kind: "decision".to_string(),
+                name: "Rust".to_string(),
+                properties: BTreeMap::new(),
+                sources: Vec::new(),
+                seq: 0,
+            },
+        ),
+        Event::new(
+            Actor::User,
+            source("test"),
+            None,
+            Payload::ClaimDisputed {
+                map: "decisions".to_string(),
+                node: node_id,
+                why: "never proposed".to_string(),
+            },
+        ),
+    ];
+    let map = Map::fold(crate::core::testing::decisions(), &scope(), &events).unwrap();
+    let node = map.find("decision", "Rust").unwrap();
+
+    let line: serde_json::Value = serde_json::from_str(&encode_node(&map, node, true)).unwrap();
+
+    assert_eq!(line["standing"], "disputed");
+    assert_eq!(line["dispute"], "never proposed");
+}
+
 fn map_with_a_decision() -> Map {
     let mut map = Map::empty(crate::core::testing::decisions());
     map.apply(

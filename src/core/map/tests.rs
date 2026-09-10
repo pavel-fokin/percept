@@ -160,6 +160,24 @@ fn weighed_for_lists_answering_options_but_not_ones_that_restate_the_decision() 
 }
 
 #[test]
+fn a_reopening_question_is_listed_under_the_decision_and_names_it() {
+    let (q, d, doubt) = (NodeId::new(), NodeId::new(), NodeId::new());
+    let events = [
+        node_added("decisions", q, "question", "Which parser?"),
+        node_added("decisions", d, "decision", "its own parser"),
+        edge_added("decisions", RESOLVES, d, q),
+        node_added("decisions", doubt, "question", "Does its own parser still fit?"),
+        edge_added("decisions", REOPENS, doubt, d),
+    ];
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.reopened_by(d).iter().map(|n| n.id).collect::<Vec<_>>(), vec![doubt]);
+    assert_eq!(map.reopens(doubt).iter().map(|n| n.id).collect::<Vec<_>>(), vec![d]);
+    assert!(map.reopened_by(q).is_empty());
+    assert_eq!(map.settled_by(q).iter().map(|n| n.id).collect::<Vec<_>>(), vec![d]);
+}
+
+#[test]
 fn a_resolves_edge_between_other_kinds_settles_nothing() {
     let (o, d) = (NodeId::new(), NodeId::new());
     let events = [
@@ -1087,4 +1105,150 @@ fn a_node_added_event_with_no_seq_falls_back_to_its_position() {
     let b = map.find("decision", "B").unwrap().id;
     assert_eq!(map.short_id(a), Some("d1".to_string()));
     assert_eq!(map.short_id(b), Some("d2".to_string()));
+}
+
+fn node_added_by(actor: Actor, map: &str, node: NodeId, kind: &str, name: &str) -> Event {
+    Event::new(
+        actor,
+        source("test"),
+        None,
+        Payload::NodeAdded {
+            map: map.to_string(),
+            node,
+            kind: kind.to_string(),
+            name: name.to_string(),
+            properties: BTreeMap::new(),
+            sources: Vec::new(),
+            seq: 0,
+        },
+    )
+}
+
+fn claim_confirmed(map: &str, node: NodeId) -> Event {
+    committed(Payload::ClaimConfirmed {
+        map: map.to_string(),
+        node,
+    })
+}
+
+fn claim_disputed(map: &str, node: NodeId, why: &str) -> Event {
+    committed(Payload::ClaimDisputed {
+        map: map.to_string(),
+        node,
+        why: why.to_string(),
+    })
+}
+
+fn review_finished(map: &str, nodes: Vec<NodeId>) -> Event {
+    committed(Payload::ReviewFinished {
+        map: map.to_string(),
+        nodes,
+    })
+}
+
+#[test]
+fn a_model_written_node_starts_claimed() {
+    let node = NodeId::new();
+    let events = [node_added_by(Actor::Model, "decisions", node, "decision", "Rust")];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.standing(node), Some(Standing::Claimed));
+    assert_eq!(map.dispute(node), None);
+}
+
+#[test]
+fn a_review_finished_marks_a_node_seen() {
+    let node = NodeId::new();
+    let events = [
+        node_added_by(Actor::Model, "decisions", node, "decision", "Rust"),
+        review_finished("decisions", vec![node]),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.standing(node), Some(Standing::Seen));
+}
+
+#[test]
+fn a_claim_confirmed_marks_a_node_confirmed() {
+    let node = NodeId::new();
+    let events = [
+        node_added_by(Actor::Model, "decisions", node, "decision", "Rust"),
+        claim_confirmed("decisions", node),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.standing(node), Some(Standing::Confirmed));
+    assert_eq!(map.dispute(node), None);
+}
+
+#[test]
+fn a_claim_disputed_marks_a_node_disputed_and_keeps_its_why() {
+    let node = NodeId::new();
+    let events = [
+        node_added_by(Actor::Model, "decisions", node, "decision", "Rust"),
+        claim_disputed("decisions", node, "never proposed"),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.standing(node), Some(Standing::Disputed));
+    assert_eq!(map.dispute(node), Some("never proposed"));
+}
+
+#[test]
+fn the_latest_judgment_in_log_order_wins() {
+    let node = NodeId::new();
+    let events = [
+        node_added_by(Actor::Model, "decisions", node, "decision", "Rust"),
+        claim_disputed("decisions", node, "never proposed"),
+        claim_confirmed("decisions", node),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.standing(node), Some(Standing::Confirmed));
+    assert_eq!(map.dispute(node), None);
+}
+
+#[test]
+fn a_user_written_node_has_no_standing() {
+    let node = NodeId::new();
+    let events = [
+        node_added_by(Actor::User, "decisions", node, "decision", "Rust"),
+        claim_confirmed("decisions", node),
+    ];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.standing(node), None);
+}
+
+#[test]
+fn a_judgment_naming_a_node_the_map_no_longer_holds_is_ignored() {
+    let stray = NodeId::new();
+    let events = [claim_disputed("decisions", stray, "gone already")];
+
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert!(map.nodes().is_empty());
+}
+
+#[test]
+fn standing_survives_a_cut_to_a_neighbourhood() {
+    let (question, decision) = (NodeId::new(), NodeId::new());
+    let events = [
+        node_added_by(Actor::Model, "decisions", question, "question", "Which?"),
+        node_added_by(Actor::Model, "decisions", decision, "decision", "Rust"),
+        edge_added("decisions", RESOLVES, decision, question),
+        claim_disputed("decisions", decision, "never proposed"),
+    ];
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    let cut = map.around(&node_ref("decision", "Rust"), 1).unwrap();
+
+    assert_eq!(cut.standing(decision), Some(Standing::Disputed));
+    assert_eq!(cut.dispute(decision), Some("never proposed"));
 }

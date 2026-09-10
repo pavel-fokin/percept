@@ -146,6 +146,27 @@ pub enum Payload {
         lines: Option<(u32, u32)>,
         excerpt: String,
     },
+    /// The human confirming a node's claim - always `Actor::User`. Named
+    /// events, never edges, so a map's fold derives standing from the log
+    /// rather than from a mutable graph fact.
+    ClaimConfirmed {
+        map: String,
+        node: NodeId,
+    },
+    /// The human disputing a node's claim, with why - always
+    /// `Actor::User`.
+    ClaimDisputed {
+        map: String,
+        node: NodeId,
+        why: String,
+    },
+    /// The node ids a human's review showed - always `Actor::User`. Marks
+    /// each `Standing::Seen` until a later `claim.confirmed` or
+    /// `claim.disputed` names it.
+    ReviewFinished {
+        map: String,
+        nodes: Vec<NodeId>,
+    },
 }
 
 /// `path`, with `:from-to` appended for a ranged citation - the
@@ -178,7 +199,10 @@ impl Payload {
             | Self::EdgeAdded { .. }
             | Self::EdgeRemoved { .. }
             | Self::ModelCalled(..)
-            | Self::SessionStarted => None,
+            | Self::SessionStarted
+            | Self::ClaimConfirmed { .. }
+            | Self::ClaimDisputed { .. }
+            | Self::ReviewFinished { .. } => None,
         }
     }
 }
@@ -200,6 +224,9 @@ pub enum EventKind {
     ModelCalled,
     SessionStarted,
     FileCited,
+    ClaimConfirmed,
+    ClaimDisputed,
+    ReviewFinished,
 }
 
 /// One recorded fact in the conversation log. Append-only: a committed
@@ -312,6 +339,39 @@ impl Event {
         Self::new(Actor::System, source, None, Payload::SessionStarted)
     }
 
+    /// A `claim.confirmed` event - always the human's own judgment on a
+    /// node's claim, never the model's.
+    pub fn claim_confirmed(
+        map: String,
+        node: NodeId,
+        source: Source,
+        causation_id: Option<EventId>,
+    ) -> Self {
+        Self::new(
+            Actor::User,
+            source,
+            causation_id,
+            Payload::ClaimConfirmed { map, node },
+        )
+    }
+
+    /// A `claim.disputed` event - always the human's own judgment, with
+    /// why.
+    pub fn claim_disputed(
+        map: String,
+        node: NodeId,
+        why: String,
+        source: Source,
+        causation_id: Option<EventId>,
+    ) -> Self {
+        Self::new(
+            Actor::User,
+            source,
+            causation_id,
+            Payload::ClaimDisputed { map, node, why },
+        )
+    }
+
     /// Rebuilds an Event from stored fields - the persistence boundary,
     /// where `id` and `created_at` come from storage rather than being
     /// minted fresh.
@@ -370,6 +430,9 @@ impl Event {
             Payload::ModelCalled(..) => EventKind::ModelCalled,
             Payload::SessionStarted => EventKind::SessionStarted,
             Payload::FileCited { .. } => EventKind::FileCited,
+            Payload::ClaimConfirmed { .. } => EventKind::ClaimConfirmed,
+            Payload::ClaimDisputed { .. } => EventKind::ClaimDisputed,
+            Payload::ReviewFinished { .. } => EventKind::ReviewFinished,
         }
     }
 }

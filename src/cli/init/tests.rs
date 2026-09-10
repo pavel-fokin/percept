@@ -7,11 +7,18 @@ fn as_map(existing: Value) -> JsonMap<String, Value> {
 }
 
 fn claude_code(existing: Value, command: &str) -> Value {
-    merge(as_map(existing), command, &CLAUDE_ALLOW).unwrap()
+    merge(as_map(existing), command, &EVENTS, &CLAUDE_ALLOW).unwrap()
 }
 
 fn codex(existing: Value, command: &str) -> Value {
-    merge(as_map(existing), command, &[]).unwrap()
+    merge(as_map(existing), command, &EVENTS, &[]).unwrap()
+}
+
+fn init(client: &str, capture: bool) -> InitArgs {
+    InitArgs {
+        client: client.to_string(),
+        capture,
+    }
 }
 
 #[test]
@@ -144,9 +151,7 @@ fn unknown_client_is_refused() {
     let temp = tempfile::tempdir().unwrap();
 
     let err = run(
-        InitArgs {
-            client: "cursor".to_string(),
-        },
+        init("cursor", true),
         temp.path(),
     )
     .unwrap_err();
@@ -162,9 +167,7 @@ fn a_non_object_file_is_an_error() {
     std::fs::write(temp.path().join(".claude/settings.json"), "[1, 2]").unwrap();
 
     let err = run(
-        InitArgs {
-            client: "claude-code".to_string(),
-        },
+        init("claude-code", true),
         temp.path(),
     )
     .unwrap_err();
@@ -181,9 +184,7 @@ fn an_empty_file_is_treated_as_no_config() {
     std::fs::write(temp.path().join(".claude/settings.json"), "  \n").unwrap();
 
     run(
-        InitArgs {
-            client: "claude-code".to_string(),
-        },
+        init("claude-code", true),
         temp.path(),
     )
     .unwrap();
@@ -201,9 +202,7 @@ fn writes_events_and_entry_fields_in_declared_order() {
     let temp = tempfile::tempdir().unwrap();
 
     run(
-        InitArgs {
-            client: "codex".to_string(),
-        },
+        init("codex", true),
         temp.path(),
     )
     .unwrap();
@@ -221,13 +220,36 @@ fn writes_events_and_entry_fields_in_declared_order() {
 }
 
 #[test]
+fn without_capture_init_writes_no_tool_use_hook() {
+    let temp = tempfile::tempdir().unwrap();
+
+    run(init("codex", false), temp.path()).unwrap();
+
+    let text = std::fs::read_to_string(temp.path().join(".codex/hooks.json")).unwrap();
+    let value: Value = serde_json::from_str(&text).unwrap();
+    let hooks = value["hooks"].as_object().unwrap();
+    let written: Vec<&str> = hooks.keys().map(String::as_str).collect();
+    assert_eq!(written, ["SessionStart", "UserPromptSubmit", "Stop"]);
+}
+
+#[test]
+fn a_later_init_without_capture_keeps_the_tool_use_hook() {
+    let temp = tempfile::tempdir().unwrap();
+
+    run(init("codex", true), temp.path()).unwrap();
+    let with = std::fs::read_to_string(temp.path().join(".codex/hooks.json")).unwrap();
+    run(init("codex", false), temp.path()).unwrap();
+    let after = std::fs::read_to_string(temp.path().join(".codex/hooks.json")).unwrap();
+
+    assert_eq!(with, after);
+}
+
+#[test]
 fn writes_claude_code_settings_to_disk() {
     let temp = tempfile::tempdir().unwrap();
 
     run(
-        InitArgs {
-            client: "claude-code".to_string(),
-        },
+        init("claude-code", true),
         temp.path(),
     )
     .unwrap();
@@ -246,18 +268,14 @@ fn running_init_twice_leaves_the_file_unchanged() {
     let temp = tempfile::tempdir().unwrap();
 
     run(
-        InitArgs {
-            client: "codex".to_string(),
-        },
+        init("codex", true),
         temp.path(),
     )
     .unwrap();
     let first = std::fs::read_to_string(temp.path().join(".codex/hooks.json")).unwrap();
 
     run(
-        InitArgs {
-            client: "codex".to_string(),
-        },
+        init("codex", true),
         temp.path(),
     )
     .unwrap();

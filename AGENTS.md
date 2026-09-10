@@ -93,9 +93,16 @@ Both are serde-free.
   may attach edges to it but never remove it. A decision is corrected by
   adding the new one with a `supersedes` edge to the old, never by
   removal, so the old landmark stays one hop away and leaves the
-  headlines. Stability of the representation is a value beside accuracy
+  headlines. A model that finds a decision no longer fits does not
+  supersede it: it raises a question with a `reopens` edge to the
+  decision, which stands until the user settles the question.
+  Stability of the representation is a value beside accuracy
   and compactness: a map may grow, but what a reader has seen does not
-  move.
+  move. A model-written node carries a standing the fold derives from
+  the human's `claim.confirmed`, `claim.disputed`, and
+  `review.finished` events - `claimed`, `seen`, `confirmed`, or
+  `disputed` - never from an edge. A user-written node has none: it is
+  the human's own landmark, not a claim to judge.
 - `Scope` says which project's events a fold reads: the current one by
   default, every one with `--all-projects`. A map is read live, never
   rendered to a file a session commits: one log holds every branch, so

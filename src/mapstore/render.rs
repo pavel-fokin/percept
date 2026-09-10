@@ -4,7 +4,7 @@
 
 use std::fmt::Write as _;
 
-use crate::core::{Actor, EventId, Kind, Map, Node, Schema};
+use crate::core::{Actor, EventId, Kind, Map, Node, Schema, Standing};
 use crate::store::ids;
 
 /// What every rendered map opens with, so a reader who lands on the
@@ -223,7 +223,7 @@ fn push_tasks(out: &mut String, map: &Map) {
     }
     for task in open {
         let _ = write!(out, "\n## {}\n\n", marked_name(map, task));
-        push_props(out, task, "");
+        push_props(out, map, task, "");
         for blocker in map.blocked_by(task.id) {
             let _ = writeln!(out, "waits on {}", marked_name(map, blocker));
         }
@@ -234,7 +234,7 @@ fn push_tasks(out: &mut String, map: &Map) {
             let _ = writeln!(out, "- {}", marked_name(map, task));
             for outcome in map.settled_by(task.id) {
                 let _ = writeln!(out, "  outcome {}", marked_name(map, outcome));
-                push_props(out, outcome, "  ");
+                push_props(out, map, outcome, "  ");
             }
         }
     }
@@ -257,10 +257,15 @@ fn push_contents(out: &mut String, map: &Map, headlines: &[&Node]) {
 }
 
 /// A node's properties, each on its own line under `indent` - a long
-/// `why` reads on a line of its own, never wrapped onto the name.
-fn push_props(out: &mut String, node: &Node, indent: &str) {
+/// `why` reads on a line of its own, never wrapped onto the name - then
+/// one `disputed` line with the latest dispute's why, when the node has
+/// one.
+fn push_props(out: &mut String, map: &Map, node: &Node, indent: &str) {
     for (key, value) in &node.properties {
         let _ = writeln!(out, "{indent}{key}: {value:?}");
+    }
+    if let Some(why) = map.dispute(node.id) {
+        let _ = writeln!(out, "{indent}disputed: {why:?}");
     }
 }
 
@@ -268,7 +273,7 @@ fn push_props(out: &mut String, node: &Node, indent: &str) {
 /// decision - or `- open` when none settles it - then one `- weighed`
 /// bullet per alternative that lost, each with its own `why`.
 fn push_question_body(out: &mut String, map: &Map, question: &Node) {
-    push_props(out, question, "");
+    push_props(out, map, question, "");
     let decisions = map.settled_by(question.id);
     if decisions.is_empty() {
         out.push_str("- open\n");
@@ -278,17 +283,18 @@ fn push_question_body(out: &mut String, map: &Map, question: &Node) {
     }
     for option in map.weighed_for(question.id) {
         let _ = writeln!(out, "- weighed {}", marked_name(map, option));
-        push_props(out, option, "  ");
+        push_props(out, map, option, "  ");
     }
 }
 
 /// A `- decision` bullet, its properties one per line, the prompt it
 /// cites when that is not `raised_by` - the prompt already shown for the
-/// headline this sits under - and one `was` line per decision it
-/// superseded, nearest first.
+/// headline this sits under - one `was` line per decision it
+/// superseded, nearest first, and one `reopened by` line per question
+/// that puts it in doubt.
 fn push_decision(out: &mut String, map: &Map, decision: &Node, raised_by: Option<EventId>) {
     let _ = writeln!(out, "- decision {}", marked_name(map, decision));
-    push_props(out, decision, "  ");
+    push_props(out, map, decision, "  ");
     if let Some(source) = decision
         .sources
         .first()
@@ -299,12 +305,16 @@ fn push_decision(out: &mut String, map: &Map, decision: &Node, raised_by: Option
     for was in map.predecessors(decision.id) {
         let _ = writeln!(out, "  was {}", marked_name(map, was));
     }
+    for question in map.reopened_by(decision.id) {
+        let _ = writeln!(out, "  reopened by {}", marked_name(map, question));
+    }
 }
 
 /// A node's short id and quoted name, marked `(model)` when the model
-/// wrote it - `Actor::User` and `Actor::System` are unmarked. The short
-/// id is the same `d41` `--around`, `--from`/`--to`, and a bare short
-/// id in `revise_map`'s arguments all resolve.
+/// wrote it - `Actor::User` and `Actor::System` are unmarked - and, when
+/// its standing is not `Claimed`, ` \u{b7} <standing>` after that. The
+/// short id is the same `d41` `--around`, `--from`/`--to`, and a bare
+/// short id in `revise_map`'s arguments all resolve.
 fn marked_name(map: &Map, node: &Node) -> String {
     let mut label = match map.short_id(node.id) {
         Some(id) => format!("{id} {:?}", node.name),
@@ -312,6 +322,9 @@ fn marked_name(map: &Map, node: &Node) -> String {
     };
     if matches!(node.actor, Actor::Model) {
         label.push_str(" (model)");
+    }
+    if let Some(standing) = map.standing(node.id).filter(|s| *s != Standing::Claimed) {
+        let _ = write!(label, " \u{b7} {standing}");
     }
     label
 }

@@ -785,6 +785,37 @@ fn a_first_session_with_history_shows_open_items_but_no_gained_section() {
 }
 
 #[test]
+fn an_open_question_that_reopens_a_decision_says_which() {
+    let fixture = Fixture::new();
+    let at = Timestamp::now();
+    let question = fixture.seed_node("decisions", "question", "which parser?", at);
+    let decision = fixture.seed_node("decisions", "decision", "its own", at);
+    fixture.seed_edge("decisions", "resolves", &decision, &question);
+    let doubt = fixture.seed_node("decisions", "question", "does its own still fit?", at);
+    fixture.seed_edge("decisions", "reopens", &doubt, &decision);
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("q2 \"does its own still fit?\" reopens d1"), "{context:?}");
+    assert!(context.contains("open question (1)"), "{context:?}");
+}
+
+#[test]
+fn every_session_start_ends_with_the_recording_rules() {
+    let fixture = Fixture::new();
+
+    let first = fixture.session_start("codex");
+    let returning = fixture.session_start("codex");
+
+    for context in [first, returning] {
+        let rules = context.rsplit("\n\n").next().unwrap();
+        assert!(rules.starts_with("recording\n"), "{context:?}");
+        assert!(rules.contains("percept maps record decisions --actor model --source <prompt id>"));
+        assert!(rules.contains("Recorded to decisions:"));
+    }
+}
+
+#[test]
 fn a_returning_session_reports_counts_and_excludes_older_gains() {
     let fixture = Fixture::new();
     fixture.session_start("codex");

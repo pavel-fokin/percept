@@ -16,10 +16,10 @@ pub use event::{
 };
 pub use event_log::EventLog;
 #[cfg(test)]
-pub use map::SUPERSEDES;
+pub use map::{REOPENS, SUPERSEDES};
 pub use map::{
     default_prefix, map_of, Edge, Fragment, Kind, Map, MapError, Mutation, Node, NodeId, NodeRef,
-    Schema, Schemas, Scope, Selection, Settlement, DECISION,
+    Schema, Schemas, Scope, Selection, Settlement, Standing, DECISION,
 };
 pub use map_reader::MapReader;
 pub use search::{EventQuery, EventSearch};
