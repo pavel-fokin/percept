@@ -1507,6 +1507,23 @@ fn a_model_written_node_starts_claimed() {
 }
 
 #[test]
+fn a_decision_is_not_renamed_in_place_by_anyone() {
+    let mut map = Map::empty(decisions());
+    map.apply(add_node("decision", "use axum"), Actor::Human(human()))
+        .unwrap();
+
+    let err = map
+        .apply(
+            change_node("decision", "use axum", Some("use actix"), BTreeMap::new()),
+            Actor::Human(human()),
+        )
+        .err()
+        .unwrap();
+
+    assert!(matches!(err, MapError::DecisionRenamed { .. }), "{err}");
+}
+
+#[test]
 fn a_change_joins_its_sources_to_the_nodes() {
     let node = NodeId::new();
     let cited = EventId::new();

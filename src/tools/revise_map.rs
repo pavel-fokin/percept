@@ -302,16 +302,7 @@ fn apply(
             properties,
             sources,
         } => {
-            // The model is held to the design's rule that a cognitive
-            // commit cites experience; the shell is not, so the check is
-            // here and not in `Map::apply`. An edge joins two cited
-            // nodes and inherits their provenance.
-            if sources.is_empty() {
-                return Err(format!(
-                    "{kind} {name:?} cites no sources; a node needs at least one event id, as search_events returns them"
-                )
-                .into());
-            }
+            cited(&sources, format_args!("{kind} {name:?}"))?;
             let line = format!("added {kind} {name:?}");
             let mutation = Mutation::AddNode {
                 kind,
@@ -328,18 +319,7 @@ fn apply(
             sources,
         } => {
             let node = node_ref(snapshot.map(), node)?;
-            if sources.is_empty() {
-                return Err(format!(
-                    "{node} cites no sources; a change needs at least one event id, as search_events returns them"
-                )
-                .into());
-            }
-            if node.kind == DECISION && name.is_some() {
-                return Err(format!(
-                    "{node} is a decision and is not reworded in place; add the corrected decision with a supersedes edge to this one"
-                )
-                .into());
-            }
+            cited(&sources, format_args!("{node}"))?;
             let line = match &name {
                 Some(new_name) => format!("changed {node} to {new_name:?}"),
                 None => format!("changed {node}"),
@@ -474,6 +454,20 @@ fn user_wrote_edge(map: &Map, kind: &str, from: &NodeRef, to: &NodeRef) -> bool 
     map.edges().iter().any(|edge| {
         edge.kind == kind && edge.from == from.id && edge.to == to.id && matches!(edge.actor, Actor::Human(_))
     })
+}
+
+/// The model is held to the design's rule that a cognitive commit
+/// cites experience; the shell is not, so the check is here and not in
+/// `Map::apply`. An edge joins two cited nodes and inherits their
+/// provenance, so only a node's add and change go through this.
+fn cited(sources: &[String], what: std::fmt::Arguments<'_>) -> Result<(), Box<dyn std::error::Error>> {
+    if sources.is_empty() {
+        return Err(format!(
+            "{what} cites no sources; at least one event id is needed, as search_events returns them"
+        )
+        .into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]

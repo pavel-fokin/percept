@@ -26,8 +26,8 @@ use std::path::{Path, PathBuf};
 use clap::{Args, Parser, Subcommand};
 
 use crate::core::{
-    cited_label, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeId, NodeRef,
-    Payload, Schemas,
+    cited_label, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, Node, NodeId,
+    NodeRef, Payload, Schemas,
 };
 use crate::mapstore;
 use crate::shared::Timestamp;
@@ -422,12 +422,18 @@ fn parse_prop(s: &str) -> Result<(String, String), String> {
 /// and that one is the same one a plain `kind:name` reference always
 /// lived with.
 fn resolve_ref(map: &Map, s: &str) -> Result<NodeRef, Box<dyn std::error::Error>> {
-    let id = map.resolve_str(s)?;
-    let node = map.node(id).expect("resolve_str returns a live node's id");
+    let node = resolve_node(map, s)?;
     Ok(NodeRef {
         kind: node.kind.clone(),
         name: node.name.clone(),
     })
+}
+
+/// The node `s` names - see `resolve_ref` - for a caller that needs
+/// more of it than its ref.
+fn resolve_node<'a>(map: &'a Map, s: &str) -> Result<&'a Node, Box<dyn std::error::Error>> {
+    let id = map.resolve_str(s)?;
+    Ok(map.node(id).expect("resolve_str returns a live node's id"))
 }
 
 /// Appends one event built from `args` to `log`. `store` owns the
@@ -1082,34 +1088,24 @@ fn record_document(
                 batch.push(event);
             }
 
-            let from_ref = if node.is_change {
-                let target_id = snapshot
-                    .map()
-                    .resolve_str(&node.kind)
-                    .map_err(|err| context(err.into()))?;
-                let target = snapshot
-                    .map()
-                    .node(target_id)
-                    .expect("resolve_str returns a live node's id")
-                    .clone();
+            // Either arm yields the mutation and the kind and name the
+            // node has once it lands, so one tail applies both.
+            let (mutation, kind, name) = if node.is_change {
+                let target = resolve_node(snapshot.map(), &node.kind).map_err(context)?;
+                let (kind, old_name) = (target.kind.clone(), target.name.clone());
                 let mut properties = node.properties;
                 let rename = properties.remove("name");
+                let name = rename.clone().unwrap_or_else(|| old_name.clone());
                 let mutation = Mutation::ChangeNode {
                     node: NodeRef {
-                        kind: target.kind.clone(),
-                        name: target.name.clone(),
+                        kind: kind.clone(),
+                        name: old_name,
                     },
-                    name: rename.clone(),
+                    name: rename,
                     properties,
                     sources,
                 };
-                let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
-                batch.push(Event::new(actor, batch_source.clone(), None, payload));
-                last_of_kind.insert(target.kind.clone(), target_id);
-                NodeRef {
-                    kind: target.kind,
-                    name: rename.unwrap_or(target.name),
-                }
+                (mutation, kind, name)
             } else {
                 let mutation = Mutation::AddNode {
                     kind: node.kind.clone(),
@@ -1117,18 +1113,16 @@ fn record_document(
                     properties: node.properties,
                     sources,
                 };
-                let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
-                let node_id = match payload {
-                    Payload::NodeAdded { node, .. } => node,
-                    _ => unreachable!("AddNode always yields NodeAdded"),
-                };
-                batch.push(Event::new(actor, batch_source.clone(), None, payload));
-                last_of_kind.insert(node.kind.clone(), node_id);
-                NodeRef {
-                    kind: node.kind,
-                    name: node.name,
-                }
+                (mutation, node.kind, node.name)
             };
+            let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
+            let node_id = match &payload {
+                Payload::NodeAdded { node, .. } | Payload::NodeChanged { node, .. } => *node,
+                _ => unreachable!("AddNode and ChangeNode yield a node payload"),
+            };
+            batch.push(Event::new(actor, batch_source.clone(), None, payload));
+            last_of_kind.insert(kind.clone(), node_id);
+            let from_ref = NodeRef { kind, name };
 
             for edge in node.edges {
                 let to_id = if snapshot.map().schema().node_kind(&edge.target).is_some() {

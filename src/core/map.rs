@@ -515,6 +515,12 @@ pub enum MapError {
     HumansNode {
         node: String,
     },
+    /// A `ChangeNode` renaming a decision. A decision is corrected by a
+    /// successor with a `supersedes` edge, never reworded in place, so
+    /// the landmark a reader knows stays where it was. Write-only.
+    DecisionRenamed {
+        node: String,
+    },
     NoSuchNode {
         node: NodeRef,
         /// Nodes of the same kind whose name overlaps `node.name`, as
@@ -590,6 +596,11 @@ impl fmt::Display for MapError {
             Self::HumansNode { node } => write!(
                 f,
                 "{node} was written by the user; the model may change only its state and outcome"
+            ),
+            Self::DecisionRenamed { node } => write!(
+                f,
+                "{node} is a decision and is not reworded in place; add the corrected decision \
+                 with a supersedes edge to this one"
             ),
             Self::NoSuchNode { node, suggestions } => {
                 write!(f, "no {node} in the map")?;
@@ -884,15 +895,11 @@ impl Map {
     /// picks one up.
     pub fn open(&self) -> impl Iterator<Item = &Node> {
         let of = self.schema.settlement.as_ref().map(|s| s.of.as_str());
-        self.headlines().filter(move |node| match self.state(node) {
-            Some(state) => {
-                let kind = self
-                    .schema
-                    .node_kind(&node.kind)
-                    .expect("state returned a value only for a known kind");
-                state == kind.states[0]
+        self.headlines().filter(move |node| match self.schema.node_kind(&node.kind) {
+            Some(kind) if !kind.states.is_empty() => {
+                self.state(node) == Some(kind.states[0].as_str())
             }
-            None => Some(node.kind.as_str()) == of && self.settled_by(node.id).is_empty(),
+            _ => Some(node.kind.as_str()) == of && self.settled_by(node.id).is_empty(),
         })
     }
 
@@ -1168,9 +1175,7 @@ impl Map {
         let nodes = self
             .nodes
             .iter()
-            .filter(|node| {
-                node.added_at >= at || node.changed_at >= at || touched.contains(&node.id)
-            })
+            .filter(|node| node.changed_at >= at || touched.contains(&node.id))
             .cloned()
             .collect();
         let edges = fresh.into_iter().cloned().collect();
@@ -1263,7 +1268,7 @@ impl Map {
                             gloss: node_kind.gloss.clone(),
                         });
                     }
-                    check_state(&kind, node_kind, &properties)?;
+                    check_state(node_kind, &properties)?;
                 }
                 Payload::NodeAdded {
                     map,
@@ -1284,7 +1289,12 @@ impl Map {
                 let node_id = self.resolve(node)?;
                 let existing = self.node(node_id).expect("resolve returns a live node's id");
                 if let Some(node_kind) = self.schema.node_kind(&existing.kind) {
-                    check_state(&existing.kind, node_kind, &properties)?;
+                    check_state(node_kind, &properties)?;
+                }
+                if existing.kind == DECISION && name.is_some() {
+                    return Err(MapError::DecisionRenamed {
+                        node: self.label(node_id),
+                    });
                 }
                 if matches!(actor, Actor::Agent | Actor::System)
                     && matches!(existing.actor, Actor::Human(_))
@@ -1366,15 +1376,7 @@ impl Map {
                 ..
             } => {
                 self.check_node_kind(kind)?;
-                if name.trim().is_empty() {
-                    return Err(MapError::BlankName);
-                }
-                if self.find(kind, name).is_some() {
-                    return Err(MapError::DuplicateNode {
-                        kind: kind.clone(),
-                        name: name.clone(),
-                    });
-                }
+                self.check_name(kind, name, None)?;
                 // `0` is an event from before short ids existed - the
                 // same count `apply` would have minted for it, taken
                 // here from its position among nodes of its kind, since
@@ -1407,17 +1409,7 @@ impl Map {
                 let index = *self.by_id.get(node).ok_or(MapError::NoSuchNodeId(*node))?;
                 let kind = self.nodes[index].kind.clone();
                 if let Some(new_name) = name {
-                    if new_name.trim().is_empty() {
-                        return Err(MapError::BlankName);
-                    }
-                    if let Some(&existing) = self.by_name.get(&(kind.clone(), new_name.clone())) {
-                        if existing != *node {
-                            return Err(MapError::DuplicateNode {
-                                kind: kind.clone(),
-                                name: new_name.clone(),
-                            });
-                        }
-                    }
+                    self.check_name(&kind, new_name, Some(*node))?;
                     let old_name = self.nodes[index].name.clone();
                     self.by_name.remove(&(kind.clone(), old_name));
                     self.by_name.insert((kind.clone(), new_name.clone()), *node);
@@ -1644,22 +1636,38 @@ impl Map {
         let Some(edge_kind) = self.schema.edge_kind(kind) else {
             return Ok(());
         };
-        let from_node = self.node(from).ok_or(MapError::NoSuchNodeId(from))?;
-        if !edge_kind.from.iter().any(|k| k == &from_node.kind) {
-            return Err(MapError::WrongEdgeEnd {
-                edge_kind: kind.to_string(),
-                end: EdgeEnd::From,
-                allowed: edge_kind.from.clone(),
-                found: from_node.kind.clone(),
-            });
+        let ends = [
+            (EdgeEnd::From, &edge_kind.from, from),
+            (EdgeEnd::To, &edge_kind.to, to),
+        ];
+        for (end, allowed, id) in ends {
+            let node = self.node(id).ok_or(MapError::NoSuchNodeId(id))?;
+            if !allowed.contains(&node.kind) {
+                return Err(MapError::WrongEdgeEnd {
+                    edge_kind: kind.to_string(),
+                    end,
+                    allowed: allowed.clone(),
+                    found: node.kind.clone(),
+                });
+            }
         }
-        let to_node = self.node(to).ok_or(MapError::NoSuchNodeId(to))?;
-        if !edge_kind.to.iter().any(|k| k == &to_node.kind) {
-            return Err(MapError::WrongEdgeEnd {
-                edge_kind: kind.to_string(),
-                end: EdgeEnd::To,
-                allowed: edge_kind.to.clone(),
-                found: to_node.kind.clone(),
+        Ok(())
+    }
+
+    /// Refuses a blank `name`, or one another node of `kind` holds -
+    /// `except` being the node itself when a rename keeps its name.
+    /// The one rule `NodeAdded` and a `NodeChanged` rename share.
+    fn check_name(&self, kind: &str, name: &str, except: Option<NodeId>) -> Result<(), MapError> {
+        if name.trim().is_empty() {
+            return Err(MapError::BlankName);
+        }
+        if self
+            .find(kind, name)
+            .is_some_and(|holder| Some(holder.id) != except)
+        {
+            return Err(MapError::DuplicateNode {
+                kind: kind.to_string(),
+                name: name.to_string(),
             });
         }
         Ok(())
@@ -1740,19 +1748,15 @@ pub fn map_of(payload: &Payload) -> Option<&str> {
     }
 }
 
-/// Refuses a `state` property in `properties` whose value `kind`
-/// (named `kind_name` for the error) does not list - including a kind
-/// with no `states` at all, whose list is then empty. Shared by
-/// `Mutation::AddNode` and `Mutation::ChangeNode` in `Map::apply`.
-fn check_state(
-    kind_name: &str,
-    kind: &NodeKind,
-    properties: &BTreeMap<String, String>,
-) -> Result<(), MapError> {
+/// Refuses a `state` property in `properties` whose value `kind` does
+/// not list - including a kind with no `states` at all, whose list is
+/// then empty. Shared by `Mutation::AddNode` and `Mutation::ChangeNode`
+/// in `Map::apply`.
+fn check_state(kind: &NodeKind, properties: &BTreeMap<String, String>) -> Result<(), MapError> {
     if let Some(value) = properties.get("state") {
         if !kind.states.iter().any(|state| state == value) {
             return Err(MapError::UnknownState {
-                kind: kind_name.to_string(),
+                kind: kind.name.clone(),
                 value: value.clone(),
                 states: kind.states.clone(),
             });

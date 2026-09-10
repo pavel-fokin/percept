@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::core::testing::{decisions, files, human, node_ref, tasks};
+use crate::core::testing::{decisions, edge_added, files, human, node_added_citing, node_ref, tasks};
 use crate::core::{Actor, EventId, Mutation, REOPENS, SUPERSEDES};
 
 /// Adds a node with one `why` property when `why` is given.
@@ -493,21 +493,6 @@ fn node_added(node: crate::core::NodeId, kind: &str, name: &str, why: Option<&st
     )
 }
 
-fn edge_added(kind: &str, from: crate::core::NodeId, to: crate::core::NodeId) -> crate::core::Event {
-    crate::core::Event::new(
-        Actor::Human(human()),
-        crate::core::testing::source("test"),
-        None,
-        crate::core::Payload::EdgeAdded {
-            map: "decisions".to_string(),
-            kind: kind.to_string(),
-            from,
-            to,
-            sources: Vec::new(),
-        },
-    )
-}
-
 fn claim_disputed(node: crate::core::NodeId, why: &str) -> crate::core::Event {
     crate::core::Event::new(
         Actor::Human(human()),
@@ -675,31 +660,10 @@ fn a_resolves_edge_between_the_wrong_kinds_settles_nothing() {
     // edge to an `option` end would now be refused on write. `replay`
     // never checks ends, so this shape still folds from history
     // written before the rule, and the render must still cope with it.
-    let (option, decision) = (crate::core::NodeId::new(), crate::core::NodeId::new());
-    let human_node = |node, kind: &str, name: &str, why: Option<&str>| {
-        let properties = why
-            .map(|why| BTreeMap::from([("why".to_string(), why.to_string())]))
-            .unwrap_or_default();
-        crate::core::Event::new(
-            Actor::Human(human()),
-            crate::core::testing::source("test"),
-            None,
-            crate::core::Payload::NodeAdded {
-                map: "decisions".to_string(),
-                node,
-                kind: kind.to_string(),
-                name: name.to_string(),
-                properties,
-                sources: Vec::new(),
-                seq: 0,
-            },
-        )
-    };
-    let map = folded(&[
-        human_node(option, "option", "gemma4", Some("slower on this hardware")),
-        human_node(decision, "decision", "gemma4 by default", None),
-        edge_added("resolves", decision, option),
-    ]);
+    let option = node_added_citing(Actor::Human(human()), "option", "gemma4", vec![]);
+    let decision = node_added_citing(Actor::Human(human()), "decision", "gemma4 by default", vec![]);
+    let edge = edge_added("resolves", &decision, &option);
+    let map = folded(&[option, decision, edge]);
 
     assert!(markdown(&map).contains("## d1 \"gemma4 by default\"\n\n- decision d1 \"gemma4 by default\"\n"));
 }

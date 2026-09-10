@@ -331,25 +331,27 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
 fn check_names_and_glosses<'a>(
     stem: &str,
     group: &str,
-    kinds: impl Iterator<Item = (&'a str, &'a str)> + Clone,
+    kinds: impl Iterator<Item = (&'a str, &'a str)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    for (name, gloss) in kinds.clone() {
+    let mut names: Vec<&str> = Vec::new();
+    for (name, gloss) in kinds {
         if name.trim().is_empty() {
             return Err(format!("{stem}.toml: a {group} kind's name must not be blank").into());
         }
         if gloss.trim().is_empty() {
             return Err(format!("{stem}.toml: {group} kind {name:?} has a blank gloss").into());
         }
+        names.push(name);
     }
-    if let Some(name) = repeated(kinds.map(|(name, _)| name)) {
+    if let Some(name) = repeated(names.into_iter()) {
         return Err(format!("{stem}.toml: {group} declares {name:?} twice").into());
     }
     Ok(())
 }
 
-/// Refuses `end` (`from` or `to`) of edge kind `name` when it is empty,
-/// names a blank kind, or names a node kind `node_kinds` does not
-/// declare.
+/// Refuses `end` (`from` or `to`) of edge kind `name` when it is empty
+/// or names a node kind `node_kinds` does not declare - a blank name
+/// falls in the latter, since no declared kind is blank.
 fn check_edge_end(
     stem: &str,
     edge: &str,
@@ -361,12 +363,6 @@ fn check_edge_end(
         return Err(format!("{stem}.toml: edge kind {edge:?}'s {end} names no node kind").into());
     }
     for kind in kinds {
-        if kind.trim().is_empty() {
-            return Err(format!(
-                "{stem}.toml: edge kind {edge:?}'s {end} names a blank node kind"
-            )
-            .into());
-        }
         if !node_kinds.iter().any(|node| node.name == *kind) {
             return Err(format!(
                 "{stem}.toml: edge kind {edge:?}'s {end} names {kind:?}, which is not a \

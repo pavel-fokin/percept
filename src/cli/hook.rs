@@ -417,15 +417,12 @@ fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
     let mut pointer = None;
 
     for map in maps {
-        let Some(kind) = open_kind(map) else {
+        let open: Vec<&Node> = map.open().collect();
+        let Some(first) = open.first() else {
             continue;
         };
-        let open: Vec<&Node> = map.open().collect();
-        if open.is_empty() {
-            continue;
-        }
 
-        let mut lines = vec![block_header(&format!("open {kind}"), open.len())];
+        let mut lines = vec![block_header(&format!("open {}", first.kind), open.len())];
         lines.extend(capped_lines(
             open.iter()
                 .map(|node| {
@@ -449,25 +446,6 @@ fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
     }
 
     (blocks, pointer)
-}
-
-/// The kind name an `open {kind}` block reports for `map`: the
-/// `Settlement`'s `of` kind when it has one, else the headline kind
-/// that declares states - `question` on `decisions`, `task` on
-/// `tasks`. `None` for a map with neither, so it prints no block.
-fn open_kind(map: &Map) -> Option<&str> {
-    if let Some(settlement) = map.schema().settlement.as_ref() {
-        return Some(settlement.of.as_str());
-    }
-    map.schema()
-        .headline_kinds
-        .iter()
-        .find(|name| {
-            map.schema()
-                .node_kind(name)
-                .is_some_and(|kind| !kind.states.is_empty())
-        })
-        .map(String::as_str)
 }
 
 /// The latest `session.started` event this exact source (client name

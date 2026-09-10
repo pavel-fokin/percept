@@ -245,16 +245,16 @@ fn push_tasks(out: &mut String, map: &Map) {
 
     // One section per declared state after the first, then any value
     // the fold met that the schema no longer lists, so no task is
-    // rendered nowhere.
+    // rendered nowhere. Open is whatever `Map::open` said above.
     let declared = map
         .schema()
         .node_kind("task")
         .map(|kind| kind.states.as_slice())
         .unwrap_or_default();
     let mut states: Vec<&str> = declared.iter().skip(1).map(String::as_str).collect();
-    for task in &tasks {
+    for task in tasks.iter().filter(|task| !open.iter().any(|o| o.id == task.id)) {
         if let Some(state) = map.state(task) {
-            if !states.contains(&state) && declared.first().map(String::as_str) != Some(state) {
+            if !states.contains(&state) {
                 states.push(state);
             }
         }
