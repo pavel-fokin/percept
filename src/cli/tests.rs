@@ -1,7 +1,9 @@
 use super::*;
 use crate::app::{App, Harness, MapShape};
-use crate::core::testing::{content, node_added, schemas, source, FakeLog, Fixture, ROOT};
-use crate::core::Payload;
+use crate::core::testing::{
+    content, node_added, node_added_by, node_id, schemas, source, FakeLog, Fixture, ROOT,
+};
+use crate::core::{Actor, Payload};
 use crate::harness::testing::{FakeCatalog, FakeTool, Scripted};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -752,6 +754,124 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_user() {
         panic!("expected maps add-node")
     };
     assert!(args.target.actor == Actor::User);
+}
+
+#[test]
+fn maps_confirm_commits_a_claim_confirmed_event_citing_the_node() {
+    let added = node_added_by(Actor::Model, "decision", "Rust");
+    let node = node_id(&added);
+    let log = FakeLog::seeded(vec![added]);
+
+    maps_confirm(
+        StandingArgs {
+            map: "decisions".to_string(),
+            node: "decision:Rust".to_string(),
+        },
+        &log,
+        &schemas(),
+        &source("cli"),
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    match events[1].payload() {
+        Payload::ClaimConfirmed {
+            map,
+            node: confirmed,
+        } => {
+            assert_eq!(map, "decisions");
+            assert!(*confirmed == node);
+        }
+        _ => panic!("expected ClaimConfirmed"),
+    }
+    assert!(events[1].actor() == Actor::User);
+}
+
+#[test]
+fn maps_dispute_commits_a_claim_disputed_event_with_its_why() {
+    let added = node_added_by(Actor::Model, "decision", "Rust");
+    let node = node_id(&added);
+    let log = FakeLog::seeded(vec![added]);
+
+    maps_dispute(
+        DisputeArgs {
+            target: StandingArgs {
+                map: "decisions".to_string(),
+                node: "decision:Rust".to_string(),
+            },
+            why: "never proposed".to_string(),
+        },
+        &log,
+        &schemas(),
+        &source("cli"),
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    match events[1].payload() {
+        Payload::ClaimDisputed {
+            map,
+            node: disputed,
+            why,
+        } => {
+            assert_eq!(map, "decisions");
+            assert!(*disputed == node);
+            assert_eq!(why, "never proposed");
+        }
+        _ => panic!("expected ClaimDisputed"),
+    }
+}
+
+#[test]
+fn maps_confirm_refuses_a_node_the_map_does_not_hold() {
+    let log = FakeLog::default();
+
+    let err = maps_confirm(
+        StandingArgs {
+            map: "decisions".to_string(),
+            node: "decision:Rust".to_string(),
+        },
+        &log,
+        &schemas(),
+        &source("cli"),
+    )
+    .err()
+    .unwrap();
+
+    assert!(err.to_string().contains("no decision"), "{err}");
+    assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
+fn maps_confirm_refuses_the_user_s_own_node() {
+    let added = node_added("decision", "Rust");
+    let log = FakeLog::seeded(vec![added]);
+
+    let err = maps_confirm(
+        StandingArgs {
+            map: "decisions".to_string(),
+            node: "decision:Rust".to_string(),
+        },
+        &log,
+        &schemas(),
+        &source("cli"),
+    )
+    .err()
+    .unwrap();
+
+    assert_eq!(
+        err.to_string(),
+        "d1 is the user's own; standing is for a model's claim"
+    );
+    assert_eq!(log.load().unwrap().len(), 1);
+}
+
+#[test]
+fn maps_dispute_without_why_fails_to_parse() {
+    assert!(Cli::try_parse_from([
+        "percept", "maps", "dispute", "decisions", "d1", "--why", ""
+    ])
+    .is_err());
 }
 
 fn record_args(map: &str) -> RecordArgs {

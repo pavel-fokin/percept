@@ -446,6 +446,74 @@ fn a_decision_resolving_no_question_gets_its_own_h2() {
     );
 }
 
+/// Folds `events` into the decisions map - what a standing test needs,
+/// since `claim.confirmed`/`claim.disputed` are not `Mutation`s and so
+/// never go through `add`/`link`'s `Map::apply`.
+fn folded(events: &[crate::core::Event]) -> Map {
+    Map::fold(decisions(), &crate::core::testing::scope(), events).unwrap()
+}
+
+fn node_added(node: crate::core::NodeId, kind: &str, name: &str, why: Option<&str>) -> crate::core::Event {
+    let properties = why
+        .map(|why| BTreeMap::from([("why".to_string(), why.to_string())]))
+        .unwrap_or_default();
+    crate::core::Event::new(
+        Actor::Model,
+        crate::core::testing::source("test"),
+        None,
+        crate::core::Payload::NodeAdded {
+            map: "decisions".to_string(),
+            node,
+            kind: kind.to_string(),
+            name: name.to_string(),
+            properties,
+            sources: Vec::new(),
+            seq: 0,
+        },
+    )
+}
+
+fn claim_disputed(node: crate::core::NodeId, why: &str) -> crate::core::Event {
+    crate::core::Event::new(
+        Actor::User,
+        crate::core::testing::source("test"),
+        None,
+        crate::core::Payload::ClaimDisputed {
+            map: "decisions".to_string(),
+            node,
+            why: why.to_string(),
+        },
+    )
+}
+
+#[test]
+fn a_disputed_decision_is_marked_with_its_why() {
+    let node = crate::core::NodeId::new();
+    let map = folded(&[
+        node_added(node, "decision", "gemma4 by default", Some("the local model")),
+        claim_disputed(node, "never proposed"),
+    ]);
+
+    let text = markdown(&map);
+
+    assert!(
+        text.contains("## d1 \"gemma4 by default\" (model) \u{b7} disputed\n"),
+        "{text}"
+    );
+    assert!(text.contains("disputed: \"never proposed\"\n"), "{text}");
+}
+
+#[test]
+fn a_claimed_decision_carries_no_standing_mark() {
+    let node = crate::core::NodeId::new();
+    let map = folded(&[node_added(node, "decision", "gemma4 by default", None)]);
+
+    let text = markdown(&map);
+
+    assert!(text.contains("## d1 \"gemma4 by default\" (model)\n"), "{text}");
+    assert!(!text.contains("\u{b7} claimed"), "{text}");
+}
+
 #[test]
 fn a_question_lists_the_options_weighed_against_its_decision() {
     let mut map = Map::empty(decisions());

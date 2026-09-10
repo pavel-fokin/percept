@@ -502,6 +502,38 @@ impl fmt::Display for MapError {
 
 impl std::error::Error for MapError {}
 
+/// How the human has judged a model's claim, derived - never stored
+/// directly - from the `claim.confirmed`, `claim.disputed`, and
+/// `review.finished` events that name a node, latest by log order.
+/// `Claimed` is a model's claim nobody has judged yet; a user-written
+/// node has no standing at all (see `Map::standing`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Standing {
+    Claimed,
+    Seen,
+    Confirmed,
+    Disputed,
+}
+
+impl fmt::Display for Standing {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Claimed => "claimed",
+            Self::Seen => "seen",
+            Self::Confirmed => "confirmed",
+            Self::Disputed => "disputed",
+        })
+    }
+}
+
+/// The latest `claim.confirmed`/`claim.disputed` naming a node, so
+/// `Map::dispute` can hand back the why without walking the log again.
+#[derive(Clone)]
+enum Judgment {
+    Confirmed,
+    Disputed(String),
+}
+
 /// A map folded from the log. Holds every node and edge still present;
 /// what was removed lives only in the events.
 pub struct Map {
@@ -525,6 +557,12 @@ pub struct Map {
     // point at the wrong node.
     next_seq_by_kind: HashMap<String, u32>,
     edge_keys: HashSet<(String, NodeId, NodeId)>,
+    // The latest `claim.confirmed`/`claim.disputed` naming each node, in
+    // log order - what `standing` and `dispute` read.
+    judgments: HashMap<NodeId, Judgment>,
+    // Nodes at least one `review.finished` has named - `Standing::Seen`
+    // for one with no judgment yet.
+    reviewed: HashSet<NodeId>,
 }
 
 impl Map {
@@ -560,6 +598,8 @@ impl Map {
             by_seq,
             next_seq_by_kind,
             edge_keys,
+            judgments: HashMap::new(),
+            reviewed: HashSet::new(),
         }
     }
 
@@ -792,6 +832,38 @@ impl Map {
         self.by_id.get(&id).map(|&i| &self.nodes[i])
     }
 
+    /// `id`'s standing - `None` when the map holds no such node, or when
+    /// it is the human's own landmark (`Actor::User`): a user-written
+    /// node is never a claim to judge. Otherwise `Disputed` or
+    /// `Confirmed` from the latest `claim.disputed`/`claim.confirmed`
+    /// naming it, else `Seen` when a `review.finished` has, else
+    /// `Claimed`.
+    pub fn standing(&self, id: NodeId) -> Option<Standing> {
+        let node = self.node(id)?;
+        if matches!(node.actor, Actor::User) {
+            return None;
+        }
+        Some(match self.judgments.get(&id) {
+            Some(Judgment::Confirmed) => Standing::Confirmed,
+            Some(Judgment::Disputed(_)) => Standing::Disputed,
+            None if self.reviewed.contains(&id) => Standing::Seen,
+            None => Standing::Claimed,
+        })
+    }
+
+    /// The why of the latest `claim.disputed` naming `id`, only while its
+    /// standing is `Disputed` - `None` once a later `claim.confirmed`
+    /// supersedes it.
+    pub fn dispute(&self, id: NodeId) -> Option<&str> {
+        if self.standing(id) != Some(Standing::Disputed) {
+            return None;
+        }
+        match self.judgments.get(&id) {
+            Some(Judgment::Disputed(why)) => Some(why.as_str()),
+            _ => None,
+        }
+    }
+
     pub fn find(&self, kind: &str, name: &str) -> Option<&Node> {
         let id = self.by_name.get(&(kind.to_string(), name.to_string()))?;
         self.node(*id)
@@ -915,7 +987,10 @@ impl Map {
             .cloned()
             .collect();
         let edges = fresh.into_iter().cloned().collect();
-        Self::from_parts(self.schema.clone(), nodes, edges)
+        let mut cut = Self::from_parts(self.schema.clone(), nodes, edges);
+        cut.judgments = self.judgments.clone();
+        cut.reviewed = self.reviewed.clone();
+        cut
     }
 
     /// The map cut to `selection`, in its fixed order, counting what
@@ -967,7 +1042,10 @@ impl Map {
             .filter(|edge| kept.contains(&edge.from) && kept.contains(&edge.to))
             .cloned()
             .collect();
-        Self::from_parts(self.schema.clone(), nodes, edges)
+        let mut cut = Self::from_parts(self.schema.clone(), nodes, edges);
+        cut.judgments = self.judgments.clone();
+        cut.reviewed = self.reviewed.clone();
+        cut
     }
 
     /// Checks `mutation` against the schema and the map's current
@@ -1147,6 +1225,27 @@ impl Map {
                 self.edges
                     .retain(|e| !(e.kind == *kind && e.from == *from && e.to == *to));
             }
+            // A node the fold no longer holds is ignored, not an error:
+            // the log is append-only, and a node named here may since
+            // have been removed.
+            Payload::ClaimConfirmed { node, .. } => {
+                if self.node(*node).is_some() {
+                    self.judgments.insert(*node, Judgment::Confirmed);
+                }
+            }
+            Payload::ClaimDisputed { node, why, .. } => {
+                if self.node(*node).is_some() {
+                    self.judgments
+                        .insert(*node, Judgment::Disputed(why.clone()));
+                }
+            }
+            Payload::ReviewFinished { nodes, .. } => {
+                for node in nodes {
+                    if self.node(*node).is_some() {
+                        self.reviewed.insert(*node);
+                    }
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -1320,7 +1419,10 @@ pub fn map_of(payload: &Payload) -> Option<&str> {
         Payload::NodeAdded { map, .. }
         | Payload::NodeRemoved { map, .. }
         | Payload::EdgeAdded { map, .. }
-        | Payload::EdgeRemoved { map, .. } => Some(map),
+        | Payload::EdgeRemoved { map, .. }
+        | Payload::ClaimConfirmed { map, .. }
+        | Payload::ClaimDisputed { map, .. }
+        | Payload::ReviewFinished { map, .. } => Some(map),
         _ => None,
     }
 }

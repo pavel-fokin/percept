@@ -606,6 +606,8 @@ async fn main() {
                 MapsCommand::Record(args) => {
                     cli::maps_record(args, &log, &schemas, &cli_source, &checkout)
                 }
+                MapsCommand::Confirm(args) => cli::maps_confirm(args, &log, &schemas, &cli_source),
+                MapsCommand::Dispute(args) => cli::maps_dispute(args, &log, &schemas, &cli_source),
             }
         }),
         Some(Command::Ask(args)) => {

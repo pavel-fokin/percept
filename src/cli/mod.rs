@@ -104,6 +104,12 @@ pub enum MapsCommand {
     /// Add several nodes and edges from a document on stdin. Prints one
     /// line per node, then one per edge, then one per `cites` line.
     Record(RecordArgs),
+    /// Mark a node's claim confirmed - always the human's own judgment.
+    /// Prints the committed event's id.
+    Confirm(StandingArgs),
+    /// Mark a node's claim disputed, with why - always the human's own
+    /// judgment. Prints the committed event's id.
+    Dispute(DisputeArgs),
 }
 
 /// How `maps show` and `maps list` print a map.
@@ -234,6 +240,27 @@ pub struct RecordArgs {
     /// from.
     #[arg(long)]
     causation: Option<String>,
+}
+
+/// What `maps confirm` and the shared half of `maps dispute` name: the
+/// map, and the node whose claim is being judged.
+#[derive(Args)]
+pub struct StandingArgs {
+    /// The map's name, as `maps list` prints it.
+    map: String,
+    /// `kind:name` of the node, or the short id its map shows it as,
+    /// `d41`.
+    #[arg(value_parser = non_blank)]
+    node: String,
+}
+
+#[derive(Args)]
+pub struct DisputeArgs {
+    #[command(flatten)]
+    target: StandingArgs,
+    /// Why the claim is disputed.
+    #[arg(long, value_parser = non_blank)]
+    why: String,
 }
 
 #[derive(Subcommand)]
@@ -743,6 +770,51 @@ pub fn maps_remove_edge(
         }
     })
     .map(drop)
+}
+
+/// Resolves `s` against `map`, refusing a node the map does not hold or
+/// one the human wrote themselves - a landmark, not a model's claim, so
+/// it carries no standing to judge.
+fn resolve_judged_node(map: &Map, s: &str) -> Result<NodeId, Box<dyn std::error::Error>> {
+    let id = map.resolve_str(s)?;
+    let node = map.node(id).expect("resolve_str returns a live node's id");
+    if matches!(node.actor, Actor::User) {
+        let short = map.short_id(id).unwrap_or_default();
+        return Err(format!("{short} is the user's own; standing is for a model's claim").into());
+    }
+    Ok(id)
+}
+
+/// Marks `args.node`'s claim confirmed - always the human's own
+/// judgment, never the model's. Prints the committed event's id.
+pub fn maps_confirm(
+    args: StandingArgs,
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &crate::core::Source,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let scope = source.scope();
+    let map = mapstore::fold_map(log, schemas, &args.map, &scope)?;
+    let node = resolve_judged_node(&map, &args.node)?;
+    let event = Event::claim_confirmed(args.map, node, source.clone(), None);
+    log.append(&event)?;
+    print_lines(std::iter::once(event.id().as_uuid().to_string()))
+}
+
+/// Marks `args.target.node`'s claim disputed, with `args.why` - always
+/// the human's own judgment. Prints the committed event's id.
+pub fn maps_dispute(
+    args: DisputeArgs,
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &crate::core::Source,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let scope = source.scope();
+    let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
+    let node = resolve_judged_node(&map, &args.target.node)?;
+    let event = Event::claim_disputed(args.target.map, node, args.why, source.clone(), None);
+    log.append(&event)?;
+    print_lines(std::iter::once(event.id().as_uuid().to_string()))
 }
 
 /// One `cites` line under a node: the file it rested on, and the range

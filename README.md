@@ -122,6 +122,19 @@ its properties, edges, and `cites` lines indented under it. A `cites`
 line publishes the named text as a `file.cited` event, so a later
 session can see whether the file still says what the claim rested on.
 
+A model's node carries a standing - `claimed`, `seen`, `confirmed`, or
+`disputed` - the fold derives from the human's own judgment, never from
+an edge:
+
+```sh
+percept maps confirm decisions d41
+percept maps dispute decisions d41 --why "never proposed"
+```
+
+`confirm` marks a node's claim right; `dispute` marks it wrong, with
+why. Both refuse a node the map does not hold and the human's own node,
+since a user-written node carries no standing to judge.
+
 A map's schema is a TOML file at `.percept/schemas/<name>.toml` naming
 its node and edge kinds and one line of purpose. `decisions` and
 `tasks` ship built in; this repo adds `ideas`. The rules for a map -

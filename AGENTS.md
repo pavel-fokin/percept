@@ -98,7 +98,11 @@ Both are serde-free.
   decision, which stands until the user settles the question.
   Stability of the representation is a value beside accuracy
   and compactness: a map may grow, but what a reader has seen does not
-  move.
+  move. A model-written node carries a standing the fold derives from
+  the human's `claim.confirmed`, `claim.disputed`, and
+  `review.finished` events - `claimed`, `seen`, `confirmed`, or
+  `disputed` - never from an edge. A user-written node has none: it is
+  the human's own landmark, not a claim to judge.
 - `Scope` says which project's events a fold reads: the current one by
   default, every one with `--all-projects`. A map is read live, never
   rendered to a file a session commits: one log holds every branch, so

@@ -110,6 +110,25 @@ struct FileCitedBody {
     excerpt: String,
 }
 
+#[derive(Serialize, Deserialize)]
+struct ClaimConfirmedBody {
+    map: String,
+    node: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ClaimDisputedBody {
+    map: String,
+    node: String,
+    why: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct ReviewFinishedBody {
+    map: String,
+    nodes: Vec<String>,
+}
+
 /// `Payload::FileCited.lines` as `"from-to"` - the wire spelling of a
 /// 1-based inclusive range.
 fn format_lines(lines: (u32, u32)) -> String {
@@ -143,10 +162,13 @@ const EDGE_REMOVED: &str = "edge.removed";
 const MODEL_CALLED: &str = "model.called";
 const SESSION_STARTED: &str = "session.started";
 const FILE_CITED: &str = "file.cited";
+const CLAIM_CONFIRMED: &str = "claim.confirmed";
+const CLAIM_DISPUTED: &str = "claim.disputed";
+const REVIEW_FINISHED: &str = "review.finished";
 
 /// Every `type` the log records, for the error that lists them when a
 /// caller names one that isn't here.
-pub const KINDS: [&str; 11] = [
+pub const KINDS: [&str; 14] = [
     MESSAGE_RECEIVED,
     THOUGHT_RECORDED,
     TOOL_CALLED,
@@ -158,6 +180,9 @@ pub const KINDS: [&str; 11] = [
     MODEL_CALLED,
     SESSION_STARTED,
     FILE_CITED,
+    CLAIM_CONFIRMED,
+    CLAIM_DISPUTED,
+    REVIEW_FINISHED,
 ];
 
 /// The wire `type` a kind serializes as.
@@ -174,6 +199,9 @@ fn kind(kind: EventKind) -> &'static str {
         EventKind::ModelCalled => MODEL_CALLED,
         EventKind::SessionStarted => SESSION_STARTED,
         EventKind::FileCited => FILE_CITED,
+        EventKind::ClaimConfirmed => CLAIM_CONFIRMED,
+        EventKind::ClaimDisputed => CLAIM_DISPUTED,
+        EventKind::ReviewFinished => REVIEW_FINISHED,
     }
 }
 
@@ -192,6 +220,9 @@ pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
         MODEL_CALLED => Ok(EventKind::ModelCalled),
         SESSION_STARTED => Ok(EventKind::SessionStarted),
         FILE_CITED => Ok(EventKind::FileCited),
+        CLAIM_CONFIRMED => Ok(EventKind::ClaimConfirmed),
+        CLAIM_DISPUTED => Ok(EventKind::ClaimDisputed),
+        REVIEW_FINISHED => Ok(EventKind::ReviewFinished),
         other => Err(Error::UnknownEventType(other.to_string())),
     }
 }
@@ -373,6 +404,12 @@ pub fn ids(sources: &[EventId]) -> Vec<String> {
     sources.iter().map(|id| id.as_uuid().to_string()).collect()
 }
 
+/// `Payload::ReviewFinished.nodes` on the wire - each `NodeId` as its
+/// UUID string.
+fn ids_of_nodes(nodes: &[NodeId]) -> Vec<String> {
+    nodes.iter().map(|id| id.as_uuid().to_string()).collect()
+}
+
 impl From<&crate::core::Event> for Event {
     fn from(event: &crate::core::Event) -> Self {
         let payload = match event.payload() {
@@ -468,6 +505,24 @@ impl From<&crate::core::Event> for Event {
                 excerpt: excerpt.clone(),
             })
             .expect("FileCitedBody always serializes"),
+            Payload::ClaimConfirmed { map, node } => serde_json::to_value(ClaimConfirmedBody {
+                map: map.clone(),
+                node: node.as_uuid().to_string(),
+            })
+            .expect("ClaimConfirmedBody always serializes"),
+            Payload::ClaimDisputed { map, node, why } => {
+                serde_json::to_value(ClaimDisputedBody {
+                    map: map.clone(),
+                    node: node.as_uuid().to_string(),
+                    why: why.clone(),
+                })
+                .expect("ClaimDisputedBody always serializes")
+            }
+            Payload::ReviewFinished { map, nodes } => serde_json::to_value(ReviewFinishedBody {
+                map: map.clone(),
+                nodes: ids_of_nodes(nodes),
+            })
+            .expect("ReviewFinishedBody always serializes"),
         };
 
         Self {
@@ -639,7 +694,39 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 excerpt: body.excerpt,
             })
         }
+        EventKind::ClaimConfirmed => {
+            let body: ClaimConfirmedBody =
+                serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::ClaimConfirmed {
+                map: body.map,
+                node: parse_node_id(&body.node)?,
+            })
+        }
+        EventKind::ClaimDisputed => {
+            let body: ClaimDisputedBody =
+                serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::ClaimDisputed {
+                map: body.map,
+                node: parse_node_id(&body.node)?,
+                why: body.why,
+            })
+        }
+        EventKind::ReviewFinished => {
+            let body: ReviewFinishedBody =
+                serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::ReviewFinished {
+                map: body.map,
+                nodes: parse_node_ids(&body.nodes)?,
+            })
+        }
     }
+}
+
+/// `Payload::ReviewFinished.nodes` off the wire - each UUID string
+/// parsed to a `NodeId`, so one malformed entry fails the whole payload
+/// rather than being dropped silently, matching `parse_event_ids`.
+fn parse_node_ids(nodes: &[String]) -> Result<Vec<NodeId>, Error> {
+    nodes.iter().map(|s| parse_node_id(s)).collect()
 }
 
 /// `sources` off the wire - each UUID string parsed to an `EventId`, so
