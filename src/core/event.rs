@@ -144,24 +144,9 @@ pub enum Payload {
         properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
     },
-    /// A node removed from a cognitive map, with why.
-    NodeRemoved {
-        map: String,
-        node: NodeId,
-        reason: String,
-        sources: Vec<EventId>,
-    },
     /// An edge added to a cognitive map. Carries no id of its own -
     /// `kind`, `from`, and `to` identify one.
     EdgeAdded {
-        map: String,
-        kind: String,
-        from: NodeId,
-        to: NodeId,
-        sources: Vec<EventId>,
-    },
-    /// An edge removed from a cognitive map.
-    EdgeRemoved {
         map: String,
         kind: String,
         from: NodeId,
@@ -240,9 +225,7 @@ impl Payload {
             Self::ToolCalled { .. }
             | Self::NodeAdded { .. }
             | Self::NodeChanged { .. }
-            | Self::NodeRemoved { .. }
             | Self::EdgeAdded { .. }
-            | Self::EdgeRemoved { .. }
             | Self::ModelCalled(..)
             | Self::SessionStarted
             | Self::ClaimConfirmed { .. }
@@ -264,9 +247,7 @@ pub enum EventKind {
     ToolResulted,
     NodeAdded,
     NodeChanged,
-    NodeRemoved,
     EdgeAdded,
-    EdgeRemoved,
     ModelCalled,
     SessionStarted,
     FileCited,
@@ -286,9 +267,7 @@ impl EventKind {
             Self::ToolResulted => "tool.resulted",
             Self::NodeAdded => "node.added",
             Self::NodeChanged => "node.changed",
-            Self::NodeRemoved => "node.removed",
             Self::EdgeAdded => "edge.added",
-            Self::EdgeRemoved => "edge.removed",
             Self::ModelCalled => "model.called",
             Self::SessionStarted => "session.started",
             Self::FileCited => "file.cited",
@@ -516,9 +495,7 @@ impl Event {
             Payload::ToolResulted { .. } => EventKind::ToolResulted,
             Payload::NodeAdded { .. } => EventKind::NodeAdded,
             Payload::NodeChanged { .. } => EventKind::NodeChanged,
-            Payload::NodeRemoved { .. } => EventKind::NodeRemoved,
             Payload::EdgeAdded { .. } => EventKind::EdgeAdded,
-            Payload::EdgeRemoved { .. } => EventKind::EdgeRemoved,
             Payload::ModelCalled(..) => EventKind::ModelCalled,
             Payload::SessionStarted => EventKind::SessionStarted,
             Payload::FileCited { .. } => EventKind::FileCited,

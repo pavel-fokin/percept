@@ -27,6 +27,5 @@ pub use map::{
     default_prefix, map_of, Edge, EdgeKind, Fragment, Map, MapError, Mutation, Node, NodeId,
     NodeKind, NodeRef, Schema, Schemas, Scope, Selection, Settlement, Standing,
 };
-pub use map::DECISION;
 pub use map_reader::MapReader;
 pub use search::{EventQuery, EventSearch};

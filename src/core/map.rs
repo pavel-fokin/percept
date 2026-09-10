@@ -200,7 +200,7 @@ pub const ANSWERS: &str = "answers";
 /// The edge kind from a task to the task it must land before.
 pub const BLOCKS: &str = "blocks";
 
-/// The one node kind `revise_map` never removes: a decision is corrected
+/// The one node kind never renamed in place: a decision is corrected
 /// by a successor with a `supersedes` edge, so it is public.
 pub const DECISION: &str = "decision";
 /// An alternative that lost. The store refuses one that does not say
@@ -424,18 +424,7 @@ pub enum Mutation {
         properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
     },
-    RemoveNode {
-        node: NodeRef,
-        reason: String,
-        sources: Vec<EventId>,
-    },
     AddEdge {
-        kind: String,
-        from: NodeRef,
-        to: NodeRef,
-        sources: Vec<EventId>,
-    },
-    RemoveEdge {
         kind: String,
         from: NodeRef,
         to: NodeRef,
@@ -537,11 +526,6 @@ pub enum MapError {
         from: String,
         to: String,
     },
-    NoSuchEdge {
-        kind: String,
-        from: String,
-        to: String,
-    },
     /// A new edge whose `from` or `to` end is not of a kind its edge
     /// kind allows. A write-only rule: `replay` never checks ends, so
     /// an edge recorded before its kind declared ends still folds.
@@ -614,7 +598,6 @@ impl fmt::Display for MapError {
             Self::DuplicateEdge { kind, from, to } => {
                 write!(f, "{from} {kind} {to} is already in the map")
             }
-            Self::NoSuchEdge { kind, from, to } => write!(f, "no edge {from} {kind} {to}"),
             Self::WrongEdgeEnd {
                 edge_kind,
                 end,
@@ -674,8 +657,8 @@ enum JudgmentKind {
     Disputed(String),
 }
 
-/// A map folded from the log. Holds every node and edge still present;
-/// what was removed lives only in the events.
+/// A map folded from the log. Holds every node and edge ever added:
+/// nothing is removed, only changed in place.
 pub struct Map {
     schema: Arc<Schema>,
     nodes: Vec<Node>,
@@ -691,10 +674,8 @@ pub struct Map {
     // `by_name` is.
     by_seq: HashMap<(String, u32), NodeId>,
     // The next short id number `next_seq` mints per kind. Tracked apart
-    // from `nodes`, and never rolled back on a `NodeRemoved`: a short
-    // id is cited in chat, PR comments, and committed text, so a
-    // removal freeing its number for reuse would make an old citation
-    // point at the wrong node.
+    // from `nodes`, since a short id is cited in chat, PR comments, and
+    // committed text and must never point at a different node later.
     next_seq_by_kind: HashMap<String, u32>,
     edge_keys: HashSet<(String, NodeId, NodeId)>,
     // The latest `claim.confirmed`/`claim.disputed` naming each node, in
@@ -984,8 +965,7 @@ impl Map {
     }
 
     /// When the map last gained or changed a node, or gained an edge;
-    /// `None` while it is empty. A removal leaves no trace here - what
-    /// was removed lives only in the events.
+    /// `None` while it is empty.
     pub fn last_changed(&self) -> Option<Timestamp> {
         let nodes = self.nodes.iter().map(|node| node.changed_at);
         let edges = self.edges.iter().map(|edge| edge.added_at);
@@ -1064,9 +1044,7 @@ impl Map {
     /// The next short id number for a fresh `kind` node. `apply` mints
     /// with this; `replay` falls back to it only for a `NodeAdded`
     /// whose event carried no `seq` of its own. Tracked in
-    /// `next_seq_by_kind`, never by counting live nodes: a `NodeRemoved`
-    /// must not free a number for reuse, or an old citation of it would
-    /// point at whatever node minted it next.
+    /// `next_seq_by_kind`, never by counting live nodes.
     fn next_seq(&self, kind: &str) -> u32 {
         self.next_seq_by_kind.get(kind).copied().unwrap_or(1)
     }
@@ -1315,16 +1293,6 @@ impl Map {
                     sources,
                 }
             }
-            Mutation::RemoveNode {
-                node,
-                reason,
-                sources,
-            } => Payload::NodeRemoved {
-                map,
-                node: self.resolve(node)?,
-                reason,
-                sources,
-            },
             Mutation::AddEdge {
                 kind,
                 from,
@@ -1342,28 +1310,15 @@ impl Map {
                     sources,
                 }
             }
-            Mutation::RemoveEdge {
-                kind,
-                from,
-                to,
-                sources,
-            } => Payload::EdgeRemoved {
-                map,
-                kind,
-                from: self.resolve(from)?,
-                to: self.resolve(to)?,
-                sources,
-            },
         };
         self.replay(&payload, actor, Timestamp::now())?;
         Ok(payload)
     }
 
     /// Applies one recorded change - every rule a map enforces lives
-    /// here, so a fold and `apply` agree. Removing a node drops the
-    /// edges that touch it: an edge to nothing is not a fact. `actor`
-    /// and `at` stamp a node or edge this call adds - who and when,
-    /// from the event that carried it.
+    /// here, so a fold and `apply` agree. `actor` and `at` stamp a node
+    /// or edge this call adds - who and when, from the event that
+    /// carried it.
     fn replay(&mut self, payload: &Payload, actor: Actor, at: Timestamp) -> Result<(), MapError> {
         match payload {
             Payload::NodeAdded {
@@ -1429,23 +1384,6 @@ impl Map {
                 self.reviewed.remove(node);
                 self.nodes[index].changed_at = at;
             }
-            Payload::NodeRemoved { node, .. } => {
-                let removed = self.node(*node).ok_or(MapError::NoSuchNodeId(*node))?;
-                let key = (removed.kind.clone(), removed.name.clone());
-                let seq_key = (removed.kind.clone(), removed.seq);
-                self.by_name.remove(&key);
-                self.by_seq.remove(&seq_key);
-                self.nodes.retain(|n| n.id != *node);
-                self.by_id = self
-                    .nodes
-                    .iter()
-                    .enumerate()
-                    .map(|(i, n)| (n.id, i))
-                    .collect();
-                self.edges.retain(|e| e.from != *node && e.to != *node);
-                self.edge_keys
-                    .retain(|(_, from, to)| from != node && to != node);
-            }
             Payload::EdgeAdded {
                 kind,
                 from,
@@ -1472,20 +1410,9 @@ impl Map {
                     added_at: at,
                 });
             }
-            Payload::EdgeRemoved { kind, from, to, .. } => {
-                if !self.edge_keys.remove(&(kind.clone(), *from, *to)) {
-                    return Err(MapError::NoSuchEdge {
-                        kind: kind.clone(),
-                        from: self.label(*from),
-                        to: self.label(*to),
-                    });
-                }
-                self.edges
-                    .retain(|e| !(e.kind == *kind && e.from == *from && e.to == *to));
-            }
-            // A node the fold no longer holds is ignored, not an error:
-            // the log is append-only, and a node named here may since
-            // have been removed.
+            // A node the fold does not hold is ignored, not an error:
+            // its `node.added` may fall outside this fold's scope even
+            // when this event does not.
             Payload::ClaimConfirmed { node, .. } => {
                 if self.node(*node).is_some() {
                     self.judgments.insert(
@@ -1738,9 +1665,7 @@ pub fn map_of(payload: &Payload) -> Option<&str> {
     match payload {
         Payload::NodeAdded { map, .. }
         | Payload::NodeChanged { map, .. }
-        | Payload::NodeRemoved { map, .. }
         | Payload::EdgeAdded { map, .. }
-        | Payload::EdgeRemoved { map, .. }
         | Payload::ClaimConfirmed { map, .. }
         | Payload::ClaimDisputed { map, .. }
         | Payload::ReviewFinished { map, .. } => Some(map),

@@ -620,17 +620,6 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
         &cli_source,
         human(),
     );
-    let remove_node = maps_remove_node(
-        RemoveNodeArgs {
-            target: target(),
-            node: "file:src/main.rs".to_string(),
-            reason: "gone".to_string(),
-        },
-        &log,
-        &schemas(),
-        &cli_source,
-        human(),
-    );
     let edge_args = || EdgeArgs {
         target: target(),
         kind: "imports".to_string(),
@@ -638,9 +627,8 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
         to: "file:src/app/mod.rs".to_string(),
     };
     let add_edge = maps_add_edge(edge_args(), &log, &schemas(), &cli_source, human());
-    let remove_edge = maps_remove_edge(edge_args(), &log, &schemas(), &cli_source, human());
 
-    for result in [add_node, remove_node, add_edge, remove_edge] {
+    for result in [add_node, add_edge] {
         let err = result.err().unwrap();
         assert!(err.to_string().starts_with("no map named \"code\""), "{err}");
     }

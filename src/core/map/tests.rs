@@ -303,15 +303,6 @@ fn node_changed(
     })
 }
 
-fn node_removed(map: &str, node: NodeId) -> Event {
-    committed(Payload::NodeRemoved {
-        map: map.to_string(),
-        node,
-        reason: "gone".to_string(),
-        sources: Vec::new(),
-    })
-}
-
 /// The decision from the ADR: a question, an option, a decision,
 /// and the edge that resolves the question.
 fn rust_over_go() -> ([NodeId; 3], Vec<Event>) {
@@ -458,34 +449,6 @@ fn a_fold_scoped_to_a_project_skips_a_node_added_under_another_path() {
 }
 
 #[test]
-fn removing_a_node_drops_its_edges() {
-    let (ids, mut events) = rust_over_go();
-    events.push(node_removed("decisions", ids[0]));
-
-    let map = Map::fold(decisions(), &scope(), &events).unwrap();
-
-    assert_eq!(map.nodes().len(), 2);
-    assert!(map.edges().is_empty());
-}
-
-#[test]
-fn removing_an_edge_leaves_its_nodes() {
-    let (ids, mut events) = rust_over_go();
-    events.push(committed(Payload::EdgeRemoved {
-        map: "decisions".to_string(),
-        kind: "resolves".to_string(),
-        from: ids[2],
-        to: ids[0],
-        sources: Vec::new(),
-    }));
-
-    let map = Map::fold(decisions(), &scope(), &events).unwrap();
-
-    assert_eq!(map.nodes().len(), 3);
-    assert!(map.edges().is_empty());
-}
-
-#[test]
 fn an_unknown_kind_fails_the_fold() {
     let stray = node_added("decisions", NodeId::new(), "goal", "Ship");
     let stray_id = stray.id();
@@ -584,27 +547,6 @@ fn an_edge_needs_both_ends_and_is_stated_once() {
 }
 
 #[test]
-fn removing_an_edge_that_is_not_there_fails_the_fold() {
-    let (ids, mut events) = rust_over_go();
-    let stray = committed(Payload::EdgeRemoved {
-        map: "decisions".to_string(),
-        kind: "supports".to_string(),
-        from: ids[1],
-        to: ids[0],
-        sources: Vec::new(),
-    });
-    let stray_id = stray.id();
-    events.push(stray);
-
-    let err = Map::fold(decisions(), &scope(), &events).err().unwrap();
-
-    assert!(matches!(
-        rejected_with(err, stray_id),
-        MapError::NoSuchEdge { .. }
-    ));
-}
-
-#[test]
 fn apply_records_what_a_fold_rebuilds() {
     let mut built = Map::empty(decisions());
     let events: Vec<Event> = vec![
@@ -688,19 +630,6 @@ fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
         )
         .err()
         .unwrap();
-    let no_edge = map
-        .apply(
-            Mutation::RemoveEdge {
-                kind: "supports".to_string(),
-                from: node_ref("option", "Rust"),
-                to: node_ref("option", "Rust"),
-                sources: Vec::new(),
-            },
-            Actor::Human(human()),
-        )
-        .err()
-        .unwrap();
-
     assert!(matches!(unknown, MapError::UnknownNodeKind { .. }));
     assert_eq!(blank, MapError::BlankName);
     assert!(matches!(duplicate, MapError::DuplicateNode { .. }));
@@ -710,7 +639,6 @@ fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
             if node == &node_ref("evidence", "Nope") && suggestions.is_empty()
     ));
     assert_eq!(missing.to_string(), "no evidence \"Nope\" in the map");
-    assert!(matches!(no_edge, MapError::NoSuchEdge { .. }));
     assert_eq!(map.nodes().len(), 1);
     assert!(map.edges().is_empty());
 }
@@ -990,39 +918,6 @@ fn a_fold_still_accepts_an_edge_between_the_wrong_kinds_from_history() {
     let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
     assert_eq!(map.edges().len(), 1);
-}
-
-#[test]
-fn apply_removes_a_node_by_name_and_its_edges_with_it() {
-    let mut map = Map::empty(decisions());
-    map.apply(add_node("question", "Which language?"), Actor::Human(human()))
-        .unwrap();
-    map.apply(add_node("decision", "Rust over Go"), Actor::Human(human()))
-        .unwrap();
-    map.apply(
-        add_edge(
-            "resolves",
-            node_ref("decision", "Rust over Go"),
-            node_ref("question", "Which language?"),
-        ),
-        Actor::Human(human()),
-    )
-    .unwrap();
-
-    let payload = map
-        .apply(
-            Mutation::RemoveNode {
-                node: node_ref("question", "Which language?"),
-                reason: "answered".to_string(),
-                sources: Vec::new(),
-            },
-            Actor::Human(human()),
-        )
-        .unwrap();
-
-    assert!(matches!(payload, Payload::NodeRemoved { .. }));
-    assert_eq!(map.nodes().len(), 1);
-    assert!(map.edges().is_empty());
 }
 
 #[test]
@@ -1389,31 +1284,6 @@ fn a_short_id_is_its_kind_s_prefix_and_its_mint_order() {
     assert_eq!(map.short_id(question), Some("q1".to_string()));
     assert_eq!(map.short_id(rust), Some("d1".to_string()));
     assert_eq!(map.short_id(go), Some("d2".to_string()));
-}
-
-/// `next_seq_by_kind` tracks a high-water mark per kind, never rolled
-/// back on `NodeRemoved` - a short id is cited in chat, PR comments,
-/// and committed text, so a removed node's number must never come back
-/// under a different node.
-#[test]
-fn a_removed_node_s_number_is_never_reused() {
-    let mut map = Map::empty(decisions());
-    map.apply(add_node("decision", "Go"), Actor::Human(human())).unwrap();
-    map.apply(
-        Mutation::RemoveNode {
-            node: node_ref("decision", "Go"),
-            reason: "reconsidered".to_string(),
-            sources: Vec::new(),
-        },
-        Actor::Human(human()),
-    )
-    .unwrap();
-    map.apply(add_node("decision", "Rust"), Actor::Human(human()))
-        .unwrap();
-
-    let rust = map.find("decision", "Rust").unwrap().id;
-
-    assert_eq!(map.short_id(rust), Some("d2".to_string()));
 }
 
 #[test]
