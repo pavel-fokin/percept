@@ -133,6 +133,7 @@ pub fn run(
     log: &dyn EventLog,
     sessions_dir: &Path,
     checkout: &Path,
+    me: Option<crate::core::HumanId>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let dir = sessions_dir.join(state_dir_name(&source.path));
     let name = state_file_name(&source.name, &input.session_id, &input.turn_id);
@@ -143,7 +144,7 @@ pub fn run(
             let schemas = crate::mapstore::load_schemas(checkout)?;
             start_session(source, log, &schemas, checkout)
         }
-        HookEvent::UserPromptSubmit { prompt } => submit_prompt(prompt, source, log, &mut state),
+        HookEvent::UserPromptSubmit { prompt } => submit_prompt(prompt, source, log, &mut state, me),
         HookEvent::PostToolUse {
             tool_name,
             tool_input,
@@ -220,7 +221,7 @@ const RULES: &str = "\
 recording
 - Before proposing a design, look: percept maps show decisions --around <id>, or --format md for the whole map.
 - When the user says yes to a proposal, record it at once, citing the prompt id the hook printed:
-    percept maps record decisions --actor model --source <prompt id> <<'EOF'
+    percept maps record decisions --actor agent --source <prompt id> <<'EOF'
     question \"what was asked\"
     decision \"what was chosen\"
       why \"the grounds\"
@@ -507,17 +508,18 @@ fn project_name(source: &Source) -> String {
 /// `UserPromptSubmit`: clears the turn's previous cause before doing
 /// anything else, so a prompt that then fails to commit never leaves a
 /// later event citing the wrong one. Records the prompt as
-/// `message.received` from `user`, stores its id as the turn's cause,
+/// `message.received` from `human`, stores its id as the turn's cause,
 /// and returns the client's expected `additionalContext`.
 fn submit_prompt(
     prompt: String,
     source: &Source,
     log: &dyn EventLog,
     state: &mut TurnState,
+    me: Option<crate::core::HumanId>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     state.clear()?;
 
-    let committed = Event::message_received(Actor::User, prompt, source.clone(), None);
+    let committed = Event::message_received(Actor::Human(me), prompt, source.clone(), None);
     let id = committed.id();
     log.append(&committed)?;
     state.set(id)?;
@@ -556,7 +558,7 @@ fn record_tool_use(
 
 /// `Stop`: the turn's reply, `last_assistant_message` when given, else
 /// read from the Claude transcript at `transcript_path`. A non-empty
-/// reply is recorded as `message.received` from `model`, caused by the
+/// reply is recorded as `message.received` from `agent`, caused by the
 /// turn's prompt.
 fn record_stop(
     last_assistant_message: Option<String>,
@@ -576,7 +578,7 @@ fn record_stop(
 
     if let Some(reply) = reply {
         if !reply.trim().is_empty() {
-            let committed = Event::message_received(Actor::Model, reply, source.clone(), cause);
+            let committed = Event::message_received(Actor::Agent, reply, source.clone(), cause);
             log.append(&committed)?;
         }
     }

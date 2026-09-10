@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::testing::{edge_added, node_added, node_added_by, schemas, scope, source, FakeLog};
+use crate::core::testing::{edge_added, human, node_added, node_added_by, schemas, scope, source, FakeLog};
 use crate::core::{Actor, Event, EventId};
 
 fn tool(events: Vec<Event>) -> ReviseMap {
@@ -18,7 +18,7 @@ fn spec_names_the_tool_and_carries_valid_schema_json() {
 #[test]
 fn a_valid_batch_returns_the_payloads_and_content() {
     let cited =
-        Event::message_received(Actor::User, "Go or Rust?".to_string(), source("tui"), None);
+        Event::message_received(Actor::Human(human()), "Go or Rust?".to_string(), source("tui"), None);
     let cited_id = cited.id();
     let revise = tool(vec![cited]);
 
@@ -55,7 +55,7 @@ fn a_valid_batch_returns_the_payloads_and_content() {
 
 #[test]
 fn a_failing_change_names_its_index_and_commits_nothing() {
-    let cited = Event::message_received(Actor::User, "Rust".to_string(), source("tui"), None);
+    let cited = Event::message_received(Actor::Human(human()), "Rust".to_string(), source("tui"), None);
     let id = cited.id().as_uuid().to_string();
     let revise = tool(vec![cited]);
 
@@ -99,7 +99,7 @@ fn a_node_with_no_sources_is_refused_and_the_error_names_the_rule() {
 
 #[test]
 fn an_option_with_no_why_is_refused() {
-    let cited = Event::message_received(Actor::User, "Rust".to_string(), source("tui"), None);
+    let cited = Event::message_received(Actor::Human(human()), "Rust".to_string(), source("tui"), None);
     let cited_id = cited.id();
     let revise = tool(vec![cited]);
 
@@ -161,7 +161,7 @@ fn a_sources_id_the_log_lacks_is_an_error() {
 
 #[test]
 fn a_change_can_reference_a_node_an_earlier_change_just_added() {
-    let cited = Event::message_received(Actor::User, "Rust".to_string(), source("tui"), None);
+    let cited = Event::message_received(Actor::Human(human()), "Rust".to_string(), source("tui"), None);
     let id = cited.id().as_uuid().to_string();
     let revise = tool(vec![cited]);
 
@@ -215,7 +215,7 @@ fn removing_a_user_written_edge_is_refused() {
 
 #[test]
 fn removing_a_model_node_that_a_user_edge_touches_is_refused() {
-    let model_node = node_added_by(Actor::Model, "option", "Rust");
+    let model_node = node_added_by(Actor::Agent, "option", "Rust");
     let question = node_added("question", "Which language?");
     let user_edge = edge_added("answers", &model_node, &question);
     let revise = tool(vec![model_node, question, user_edge]);
@@ -231,7 +231,7 @@ fn removing_a_model_node_that_a_user_edge_touches_is_refused() {
 
 #[test]
 fn removing_a_model_written_node_is_allowed() {
-    let revise = tool(vec![node_added_by(Actor::Model, "option", "Go")]);
+    let revise = tool(vec![node_added_by(Actor::Agent, "option", "Go")]);
 
     let output = revise
         .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"option","name":"Go"},"reason":"wrong"}]}"#)
@@ -242,7 +242,7 @@ fn removing_a_model_written_node_is_allowed() {
 
 #[test]
 fn removing_a_decision_is_refused_whoever_wrote_it() {
-    let revise = tool(vec![node_added_by(Actor::Model, "decision", "Go")]);
+    let revise = tool(vec![node_added_by(Actor::Agent, "decision", "Go")]);
 
     let err = revise
         .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"decision","name":"Go"},"reason":"wrong"}]}"#)

@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use super::*;
+use crate::core::testing::human;
 use crate::core::Actor;
 
 #[test]
@@ -120,7 +121,7 @@ fn a_malformed_line_is_an_error() {
 fn a_tool_result_cites_the_call_before_it() {
     let messages = vec![
         Message::Text {
-            role: Actor::User,
+            role: Actor::Human(human()),
             content: "search".to_string(),
         },
         Message::ToolCall {
@@ -151,7 +152,7 @@ fn a_call_left_unanswered_replays_as_text() {
             arguments: r#"{"size":5}"#.to_string(),
         },
         Message::Text {
-            role: Actor::User,
+            role: Actor::Human(human()),
             content: "and now?".to_string(),
         },
     ];

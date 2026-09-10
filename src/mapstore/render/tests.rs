@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::core::testing::{decisions, files, node_ref, tasks};
+use crate::core::testing::{decisions, files, human, node_ref, tasks};
 use crate::core::{Actor, EventId, Mutation, REOPENS, SUPERSEDES};
 
 /// Adds a node with one `why` property when `why` is given.
@@ -36,7 +36,7 @@ fn link(map: &mut Map, kind: &str, from: (&str, &str), to: (&str, &str)) {
             to: node_ref(to.0, to.1),
             sources: Vec::new(),
         },
-        Actor::User,
+        Actor::Human(human()),
     )
     .unwrap();
 }
@@ -80,7 +80,7 @@ fn questions_render_flat_at_h2_in_first_seen_order() {
         "Where does the event log live?",
         None,
         &[first],
-        Actor::User,
+        Actor::Human(human()),
     );
     add(
         &mut map,
@@ -88,7 +88,7 @@ fn questions_render_flat_at_h2_in_first_seen_order() {
         "one log under ~/.percept",
         Some("PERCEPT_HOME also holds the binary"),
         &[first],
-        Actor::User,
+        Actor::Human(human()),
     );
     link(
         &mut map,
@@ -102,7 +102,7 @@ fn questions_render_flat_at_h2_in_first_seen_order() {
         "How is a decision corrected?",
         None,
         &[second],
-        Actor::User,
+        Actor::Human(human()),
     );
     add(
         &mut map,
@@ -110,7 +110,7 @@ fn questions_render_flat_at_h2_in_first_seen_order() {
         "add the new decision with a supersedes edge",
         Some("the old landmark stays one hop away"),
         &[second],
-        Actor::User,
+        Actor::Human(human()),
     );
     link(
         &mut map,
@@ -145,7 +145,7 @@ fn the_contents_list_names_every_question_with_its_raising_date() {
     let mut map = Map::empty(decisions());
     let prompt = EventId::new();
     for name in ["Which model?", "Where is the key?", "What is the URL?"] {
-        add(&mut map, "question", name, None, &[prompt], Actor::User);
+        add(&mut map, "question", name, None, &[prompt], Actor::Human(human()));
     }
 
     let text = markdown(&map);
@@ -170,7 +170,7 @@ fn a_questions_own_properties_render_under_its_heading() {
         "How should X integrate?",
         Some("not decided; three models sketched"),
         &[source],
-        Actor::User,
+        Actor::Human(human()),
     );
 
     assert_eq!(
@@ -196,7 +196,7 @@ fn a_question_without_a_decision_is_open() {
         "Which key accepts a suggestion?",
         None,
         &[],
-        Actor::User,
+        Actor::Human(human()),
     );
 
     assert_eq!(
@@ -218,15 +218,15 @@ fn a_question_without_a_decision_is_open() {
 fn a_reopening_question_shows_under_the_decision_it_doubts() {
     let mut map = Map::empty(decisions());
     let source = EventId::new();
-    add(&mut map, "question", "Which model is default?", None, &[source], Actor::User);
-    add(&mut map, "decision", "gpt3 by default", None, &[source], Actor::User);
+    add(&mut map, "question", "Which model is default?", None, &[source], Actor::Human(human()));
+    add(&mut map, "decision", "gpt3 by default", None, &[source], Actor::Human(human()));
     link(
         &mut map,
         "resolves",
         ("decision", "gpt3 by default"),
         ("question", "Which model is default?"),
     );
-    add(&mut map, "question", "Does gpt3 still fit?", None, &[source], Actor::User);
+    add(&mut map, "question", "Does gpt3 still fit?", None, &[source], Actor::Human(human()));
     link(
         &mut map,
         REOPENS,
@@ -265,7 +265,7 @@ fn a_superseding_decision_shows_its_predecessor_as_was() {
         "Which model is default?",
         None,
         &[source],
-        Actor::User,
+        Actor::Human(human()),
     );
     add(
         &mut map,
@@ -273,7 +273,7 @@ fn a_superseding_decision_shows_its_predecessor_as_was() {
         "gpt3 by default",
         None,
         &[source],
-        Actor::User,
+        Actor::Human(human()),
     );
     link(
         &mut map,
@@ -287,7 +287,7 @@ fn a_superseding_decision_shows_its_predecessor_as_was() {
         "gemma4 by default",
         None,
         &[source],
-        Actor::User,
+        Actor::Human(human()),
     );
     link(
         &mut map,
@@ -320,10 +320,10 @@ fn a_supersession_chain_lists_every_predecessor_nearest_first() {
         "Which model?",
         None,
         &[source],
-        Actor::User,
+        Actor::Human(human()),
     );
     for name in ["A", "B", "C"] {
-        add(&mut map, "decision", name, None, &[source], Actor::User);
+        add(&mut map, "decision", name, None, &[source], Actor::Human(human()));
     }
     link(
         &mut map,
@@ -359,7 +359,7 @@ fn a_decision_citing_a_different_prompt_than_its_question_names_the_source() {
         "Which model?",
         None,
         &[raised],
-        Actor::User,
+        Actor::Human(human()),
     );
     add(
         &mut map,
@@ -367,7 +367,7 @@ fn a_decision_citing_a_different_prompt_than_its_question_names_the_source() {
         "gemma4",
         None,
         &[settled],
-        Actor::User,
+        Actor::Human(human()),
     );
     link(
         &mut map,
@@ -401,19 +401,19 @@ fn a_model_written_question_is_marked() {
         "Which key accepts a suggestion?",
         None,
         &[source],
-        Actor::Model,
+        Actor::Agent,
     );
 
     assert_eq!(
         markdown(&map),
         format!(
             "{}{}\n\
-             ## q1 \"Which key accepts a suggestion?\" (model)\n\
+             ## q1 \"Which key accepts a suggestion?\" (agent)\n\
              \n\
              - open\n",
             head(),
             contents(&[("q1", "Which key accepts a suggestion?", source)])
-                .replace(" \u{b7} ", " (model) \u{b7} "),
+                .replace(" \u{b7} ", " (agent) \u{b7} "),
         )
     );
 }
@@ -428,20 +428,20 @@ fn a_decision_resolving_no_question_gets_its_own_h2() {
         "gemma4 by default",
         Some("the local model"),
         &[source],
-        Actor::Model,
+        Actor::Agent,
     );
 
     assert_eq!(
         markdown(&map),
         format!(
             "{}{}\n\
-             ## d1 \"gemma4 by default\" (model)\n\
+             ## d1 \"gemma4 by default\" (agent)\n\
              \n\
-             - decision d1 \"gemma4 by default\" (model)\n\
+             - decision d1 \"gemma4 by default\" (agent)\n\
              \x20 why: \"the local model\"\n",
             head(),
             contents(&[("d1", "gemma4 by default", source)])
-                .replace(" \u{b7} ", " (model) \u{b7} "),
+                .replace(" \u{b7} ", " (agent) \u{b7} "),
         )
     );
 }
@@ -458,7 +458,7 @@ fn node_added(node: crate::core::NodeId, kind: &str, name: &str, why: Option<&st
         .map(|why| BTreeMap::from([("why".to_string(), why.to_string())]))
         .unwrap_or_default();
     crate::core::Event::new(
-        Actor::Model,
+        Actor::Agent,
         crate::core::testing::source("test"),
         None,
         crate::core::Payload::NodeAdded {
@@ -475,7 +475,7 @@ fn node_added(node: crate::core::NodeId, kind: &str, name: &str, why: Option<&st
 
 fn claim_disputed(node: crate::core::NodeId, why: &str) -> crate::core::Event {
     crate::core::Event::new(
-        Actor::User,
+        Actor::Human(human()),
         crate::core::testing::source("test"),
         None,
         crate::core::Payload::ClaimDisputed {
@@ -497,7 +497,7 @@ fn a_disputed_decision_is_marked_with_its_why() {
     let text = markdown(&map);
 
     assert!(
-        text.contains("## d1 \"gemma4 by default\" (model) \u{b7} disputed\n"),
+        text.contains("## d1 \"gemma4 by default\" (agent) \u{b7} disputed\n"),
         "{text}"
     );
     assert!(text.contains("disputed: \"never proposed\"\n"), "{text}");
@@ -510,7 +510,7 @@ fn a_claimed_decision_carries_no_standing_mark() {
 
     let text = markdown(&map);
 
-    assert!(text.contains("## d1 \"gemma4 by default\" (model)\n"), "{text}");
+    assert!(text.contains("## d1 \"gemma4 by default\" (agent)\n"), "{text}");
     assert!(!text.contains("\u{b7} claimed"), "{text}");
 }
 
@@ -524,7 +524,7 @@ fn a_question_lists_the_options_weighed_against_its_decision() {
         "How is the provider built?",
         None,
         &[source],
-        Actor::User,
+        Actor::Human(human()),
     );
     add(
         &mut map,
@@ -532,7 +532,7 @@ fn a_question_lists_the_options_weighed_against_its_decision() {
         "its own wire parser",
         Some("a different SSE shape"),
         &[source],
-        Actor::User,
+        Actor::Human(human()),
     );
     link(
         &mut map,
@@ -546,7 +546,7 @@ fn a_question_lists_the_options_weighed_against_its_decision() {
         "reuse the OpenAi struct",
         Some("the wire shapes differ"),
         &[source],
-        Actor::User,
+        Actor::Human(human()),
     );
     link(
         &mut map,
@@ -573,7 +573,7 @@ fn an_option_that_repeats_the_winning_decision_is_not_listed_as_weighed() {
         "Which parser?",
         None,
         &[source],
-        Actor::User,
+        Actor::Human(human()),
     );
     add(
         &mut map,
@@ -581,7 +581,7 @@ fn an_option_that_repeats_the_winning_decision_is_not_listed_as_weighed() {
         "its own parser",
         None,
         &[source],
-        Actor::User,
+        Actor::Human(human()),
     );
     link(
         &mut map,
@@ -595,7 +595,7 @@ fn an_option_that_repeats_the_winning_decision_is_not_listed_as_weighed() {
         "its own parser",
         Some("older data"),
         &[source],
-        Actor::User,
+        Actor::Human(human()),
     );
     link(
         &mut map,
@@ -617,7 +617,7 @@ fn an_option_with_no_answers_edge_stays_out_of_the_render() {
         "Which model?",
         None,
         &[source],
-        Actor::User,
+        Actor::Human(human()),
     );
     add(
         &mut map,
@@ -625,7 +625,7 @@ fn an_option_with_no_answers_edge_stays_out_of_the_render() {
         "a loose option",
         Some("no edge"),
         &[source],
-        Actor::User,
+        Actor::Human(human()),
     );
 
     let text = markdown(&map);
@@ -644,7 +644,7 @@ fn a_resolves_edge_between_the_wrong_kinds_settles_nothing() {
         "gemma4",
         Some("slower on this hardware"),
         &[source],
-        Actor::User,
+        Actor::Human(human()),
     );
     add(
         &mut map,
@@ -652,7 +652,7 @@ fn a_resolves_edge_between_the_wrong_kinds_settles_nothing() {
         "gemma4 by default",
         None,
         &[source],
-        Actor::User,
+        Actor::Human(human()),
     );
     link(
         &mut map,
@@ -673,7 +673,7 @@ fn a_map_with_no_question_or_decision_says_so() {
         "Rust",
         Some("only alternative weighed"),
         &[EventId::new()],
-        Actor::User,
+        Actor::Human(human()),
     );
 
     assert_eq!(
@@ -695,7 +695,7 @@ fn open_tasks_render_flat_with_why_and_blockers_then_done() {
         "send AGENTS.md to a coding turn",
         Some("the model never saw the rules"),
         &[first],
-        Actor::Model,
+        Actor::Agent,
     );
     add(
         &mut map,
@@ -703,7 +703,7 @@ fn open_tasks_render_flat_with_why_and_blockers_then_done() {
         "cancel a turn without quitting",
         Some("Esc drops the session"),
         &[first],
-        Actor::User,
+        Actor::Human(human()),
     );
     add(
         &mut map,
@@ -711,7 +711,7 @@ fn open_tasks_render_flat_with_why_and_blockers_then_done() {
         "cancellable reply streams",
         Some("nothing can stop a stream today"),
         &[second],
-        Actor::User,
+        Actor::Human(human()),
     );
     link(
         &mut map,
@@ -725,7 +725,7 @@ fn open_tasks_render_flat_with_why_and_blockers_then_done() {
         "done in 1f1a9a9",
         None,
         &[second],
-        Actor::User,
+        Actor::Human(human()),
     );
     link(
         &mut map,
@@ -746,7 +746,7 @@ fn open_tasks_render_flat_with_why_and_blockers_then_done() {
          why: \"nothing can stop a stream today\"\n\
          \n\
          ## done\n\
-         - t1 \"send AGENTS.md to a coding turn\" (model)\n\
+         - t1 \"send AGENTS.md to a coding turn\" (agent)\n\
          \x20 outcome o1 \"done in 1f1a9a9\"\n",
         tasks_head(),
         contents(&[
@@ -821,7 +821,7 @@ fn the_catalogue_gives_each_map_a_section_with_its_kinds_glossed() {
         "Where does the log live?",
         None,
         &[],
-        Actor::User,
+        Actor::Human(human()),
     );
 
     let text = catalogue(std::slice::from_ref(&map));

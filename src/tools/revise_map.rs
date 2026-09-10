@@ -355,7 +355,7 @@ fn apply(
             (mutation, line)
         }
     };
-    let payload = snapshot.apply(mutation, Actor::Model)?;
+    let payload = snapshot.apply(mutation, Actor::Agent)?;
     let line = match &payload {
         Payload::NodeAdded { node, .. } => format!("{line} as {}", node.as_uuid()),
         _ => line,
@@ -382,7 +382,7 @@ fn node_ref(map: &Map, args: NodeRefArgs) -> Result<NodeRef, Box<dyn std::error:
 /// reports that.
 fn user_guards_node(map: &Map, node: &NodeRef) -> Option<String> {
     let found = map.find(&node.kind, &node.name)?;
-    if found.actor == Actor::User {
+    if matches!(found.actor, Actor::Human(_)) {
         return Some(format!(
             "{node} was written by the user and the model may not remove it; \
              add the corrected node and a supersedes edge from it to this one instead"
@@ -390,7 +390,7 @@ fn user_guards_node(map: &Map, node: &NodeRef) -> Option<String> {
     }
     map.edges()
         .iter()
-        .find(|edge| edge.actor == Actor::User && (edge.from == found.id || edge.to == found.id))
+        .find(|edge| matches!(edge.actor, Actor::Human(_)) && (edge.from == found.id || edge.to == found.id))
         .map(|edge| {
             format!(
                 "{node} cannot be removed by the model: the user wrote the edge {}, \
@@ -410,7 +410,7 @@ fn user_wrote_edge(map: &Map, kind: &str, from: &NodeRef, to: &NodeRef) -> bool 
         return false;
     };
     map.edges().iter().any(|edge| {
-        edge.kind == kind && edge.from == from.id && edge.to == to.id && edge.actor == Actor::User
+        edge.kind == kind && edge.from == from.id && edge.to == to.id && matches!(edge.actor, Actor::Human(_))
     })
 }
 

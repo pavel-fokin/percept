@@ -23,7 +23,7 @@ mod tools;
 mod tui;
 
 use crate::core::Actor;
-use app::{App, Harness, MapShape};
+use app::{App, AppService, Harness, MapShape};
 use cli::{Cli, Command, EventsCommand, MapsCommand};
 use mapstore::LogMaps;
 use providers::{Catalog, ProviderConfig, FIREWORKS_MODEL, OPENAI_MODEL};
@@ -257,8 +257,9 @@ fn hook_run(args: cli::hook::HookArgs) -> Result<serde_json::Value, Box<dyn std:
         path: root,
     };
     let log = open_log(&checkout)?;
+    let me = log.me();
     let sessions = data_dir(&checkout)?.join(HOOK_SESSIONS_DIR);
-    cli::hook::run(input, &source, &log, &sessions, &checkout)
+    cli::hook::run(input, &source, &log, &sessions, &checkout, me)
 }
 
 /// The checkout `cwd` is in: the first ancestor of it
@@ -473,7 +474,9 @@ fn build_app(
     source: crate::core::Source,
     checkout: &Path,
 ) -> Result<App, Box<dyn std::error::Error>> {
-    let log = Arc::new(open_log(checkout)?);
+    let opened = open_log(checkout)?;
+    let me = opened.me();
+    let log = Arc::new(opened);
     let schemas = Arc::new(mapstore::load_schemas(checkout)?);
     let catalog: Arc<dyn crate::harness::ModelCatalog> = Arc::new(build_catalog());
     let model = build_model(&*catalog)?;
@@ -481,7 +484,7 @@ fn build_app(
     let scope = source.scope();
     let maps = LogMaps::new(log.clone(), schemas.clone(), scope.clone());
     let mut tools: Vec<Arc<dyn crate::harness::Tool>> = vec![
-        Arc::new(SearchEvents::new(log.clone())),
+        Arc::new(SearchEvents::new(log.clone(), me)),
         Arc::new(ReadEvent::new(log.clone())),
         Arc::new(ReviseMap::new(log.clone(), schemas.clone(), scope)),
         Arc::new(ReadMap::new(Arc::new(maps))),
@@ -494,6 +497,7 @@ fn build_app(
             schemas,
             Harness::new(tools, map_shape),
             source,
+            me,
         ),
         Toolset::Code => {
             tools.extend(code_tools(checkout)?);
@@ -505,21 +509,27 @@ fn build_app(
                 instructions,
                 ..Harness::new(tools, map_shape)
             };
-            App::new(model, catalog, log, schemas, harness, source)
+            App::new(model, catalog, log, schemas, harness, source, me)
         }
     }
 }
 
-/// One turn without the TUI: `ask` with the user's prompt, `reflect`
-/// with percept's own. `yes` is `ask --yes`.
+/// One turn without the TUI: `ask` with the user's prompt, attributed
+/// to `app.me()`, or `reflect` with percept's own, as `Actor::System`.
+/// `yes` is `ask --yes`.
 async fn headless_turn(
-    actor: Actor,
+    system: bool,
     prompt: String,
     yes: bool,
     source: crate::core::Source,
     checkout: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let app = build_app(source, checkout)?;
+    let actor = if system {
+        Actor::System
+    } else {
+        Actor::Human(app.me())
+    };
     cli::run_turn(Box::new(app), actor, prompt, yes).await
 }
 
@@ -581,42 +591,50 @@ async fn main() {
     let result = match cli.command {
         // `hook_main` above exits before this match is ever reached.
         Some(Command::Hook(_)) => unreachable!(),
-        Some(Command::Events { command }) => open_log(&checkout).and_then(|log| match command {
-            EventsCommand::Publish(args) => cli::publish(args, &log, &root, &checkout),
-            EventsCommand::Search(args) => cli::search(args, &log),
-            EventsCommand::Show(args) => cli::show(args, &log),
+        Some(Command::Events { command }) => open_log(&checkout).and_then(|log| {
+            let me = log.me();
+            match command {
+                EventsCommand::Publish(args) => cli::publish(args, &log, &root, &checkout, me),
+                EventsCommand::Search(args) => cli::search(args, &log, me),
+                EventsCommand::Show(args) => cli::show(args, &log),
+            }
         }),
         Some(Command::Maps { command }) => open_log(&checkout).and_then(|log| {
             let schemas = mapstore::load_schemas(&checkout)?;
+            let me = log.me();
             match command {
                 MapsCommand::List(args) => cli::maps_list(args, &log, &schemas, &root),
                 MapsCommand::Show(args) => cli::maps_show(args, &log, &schemas, &root),
                 MapsCommand::AddNode(args) => {
-                    cli::maps_add_node(args, &log, &schemas, &cli_source)
+                    cli::maps_add_node(args, &log, &schemas, &cli_source, me)
                 }
                 MapsCommand::AddEdge(args) => {
-                    cli::maps_add_edge(args, &log, &schemas, &cli_source)
+                    cli::maps_add_edge(args, &log, &schemas, &cli_source, me)
                 }
                 MapsCommand::RemoveNode(args) => {
-                    cli::maps_remove_node(args, &log, &schemas, &cli_source)
+                    cli::maps_remove_node(args, &log, &schemas, &cli_source, me)
                 }
                 MapsCommand::RemoveEdge(args) => {
-                    cli::maps_remove_edge(args, &log, &schemas, &cli_source)
+                    cli::maps_remove_edge(args, &log, &schemas, &cli_source, me)
                 }
                 MapsCommand::Record(args) => {
-                    cli::maps_record(args, &log, &schemas, &cli_source, &checkout)
+                    cli::maps_record(args, &log, &schemas, &cli_source, &checkout, me)
                 }
-                MapsCommand::Confirm(args) => cli::maps_confirm(args, &log, &schemas, &cli_source),
-                MapsCommand::Dispute(args) => cli::maps_dispute(args, &log, &schemas, &cli_source),
+                MapsCommand::Confirm(args) => {
+                    cli::maps_confirm(args, &log, &schemas, &cli_source, me)
+                }
+                MapsCommand::Dispute(args) => {
+                    cli::maps_dispute(args, &log, &schemas, &cli_source, me)
+                }
             }
         }),
         Some(Command::Ask(args)) => {
-            headless_turn(Actor::User, args.prompt, args.yes, cli_source, &checkout).await
+            headless_turn(false, args.prompt, args.yes, cli_source, &checkout).await
         }
         Some(Command::Init(args)) => cli::init::run(args, &checkout),
         Some(Command::Reflect) => {
             headless_turn(
-                Actor::System,
+                true,
                 REFLECT_PROMPT.to_string(),
                 false,
                 cli_source,

@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use context::{Context, Section, View, Window};
 
-use crate::core::{Actor, Event, EventId, EventKind, MapError, Schemas, Source};
+use crate::core::{Actor, Event, EventId, EventKind, HumanId, MapError, Schemas, Source};
 
 mod context;
 
@@ -106,8 +106,12 @@ pub trait AppService {
         &mut self,
         text: String,
     ) -> Result<crate::harness::ReplyStream, Box<dyn std::error::Error>> {
-        self.submit_as(Actor::User, text)
+        self.submit_as(Actor::Human(self.me()), text)
     }
+
+    /// This `$PERCEPT_HOME`'s `HumanId`, from `Jsonl::me` - who `submit`
+    /// attributes a prompt to.
+    fn me(&self) -> Option<HumanId>;
 
     /// `submit` with the prompt attributed to `actor`: `System` when
     /// percept itself asks, as `reflect` does, so the log never says
@@ -307,6 +311,9 @@ pub struct App {
     /// The writer this app records as - stamped on every event it
     /// commits, so the log can tell its events from other writers'.
     source: Source,
+    /// This `$PERCEPT_HOME`'s `HumanId`, from `Jsonl::me` - who
+    /// `submit` attributes a prompt to.
+    me: Option<HumanId>,
     chat: Arc<dyn crate::harness::Model>,
     /// The reasoning level for the next turn: the model's configured
     /// default until `/effort` picks another, and reset to the new
@@ -351,6 +358,7 @@ impl App {
         schemas: Arc<Schemas>,
         harness: Harness,
         source: Source,
+        me: Option<HumanId>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let scope = source.scope();
         let events: Vec<Event> = log
@@ -365,6 +373,7 @@ impl App {
         Ok(Self {
             events,
             source,
+            me,
             chat,
             reasoning_effort,
             catalog,
@@ -451,7 +460,7 @@ impl App {
         let commits: Vec<Event> = output
             .commits
             .into_iter()
-            .map(|payload| Event::new(Actor::Model, self.source.clone(), Some(called_id), payload))
+            .map(|payload| Event::new(Actor::Agent, self.source.clone(), Some(called_id), payload))
             .collect();
         // A tool checked its commits against the log file, and this
         // transcript can be behind it - another writer since startup.
@@ -505,12 +514,12 @@ impl App {
         // retry from. The thought commits before the reply, before the
         // usage that paid for both.
         if !thought.is_empty() {
-            let event = Event::thought_recorded(Actor::Model, thought, self.source.clone(), cause);
+            let event = Event::thought_recorded(Actor::Agent, thought, self.source.clone(), cause);
             self.commit(event)?;
             self.with_pending(|turn| turn.thought.clear());
         }
         if !reply.is_empty() {
-            let event = Event::message_received(Actor::Model, reply, self.source.clone(), cause);
+            let event = Event::message_received(Actor::Agent, reply, self.source.clone(), cause);
             self.commit(event)?;
             self.with_pending(|turn| turn.reply.clear());
         }
@@ -525,6 +534,10 @@ impl App {
 }
 
 impl AppService for App {
+    fn me(&self) -> Option<HumanId> {
+        self.me
+    }
+
     fn submit_as(
         &mut self,
         actor: Actor,

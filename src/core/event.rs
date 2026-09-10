@@ -7,6 +7,17 @@ use crate::shared::{Id, Timestamp};
 /// Identifies an Event.
 pub type EventId = Id<Event>;
 
+/// Marker for `HumanId` - no `Human` entity is stored in the domain;
+/// this only pins the id's phantom type, the way `Event` and `Node` do
+/// for their own ids.
+pub enum Human {}
+
+/// Identifies the person at the keyboard, once a server has registered
+/// them: the account id a login puts in the `me` file beside the log.
+/// Until then a human has none, and the log they wrote is their
+/// identity.
+pub type HumanId = Id<Human>;
+
 /// Token counts for one round trip to the model. `cached_tokens` is
 /// `None` when the provider does not report it. Carried by
 /// `Payload::ModelCalled`, so it is the core's, not the harness's.
@@ -28,11 +39,13 @@ pub struct Source {
     pub path: PathBuf,
 }
 
-/// Who an Event is attributed to. Extend by adding a variant.
+/// Who an Event is attributed to. Extend by adding a variant. A human
+/// carries their id once they have one, so a log shared by more than
+/// one person still says which one wrote a given event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Actor {
-    User,
-    Model,
+    Human(Option<HumanId>),
+    Agent,
     /// percept itself acting - so far, feeding a tool's output back as
     /// `tool.resulted`.
     System,
@@ -42,8 +55,8 @@ impl Actor {
     /// The word the log, its search, and a prompt use for this actor.
     pub fn name(self) -> &'static str {
         match self {
-            Self::User => "user",
-            Self::Model => "model",
+            Self::Human(_) => "human",
+            Self::Agent => "agent",
             Self::System => "system",
         }
     }
@@ -146,7 +159,7 @@ pub enum Payload {
         lines: Option<(u32, u32)>,
         excerpt: String,
     },
-    /// The human confirming a node's claim - always `Actor::User`. Named
+    /// The human confirming a node's claim - always `Actor::Human`. Named
     /// events, never edges, so a map's fold derives standing from the log
     /// rather than from a mutable graph fact.
     ClaimConfirmed {
@@ -154,13 +167,13 @@ pub enum Payload {
         node: NodeId,
     },
     /// The human disputing a node's claim, with why - always
-    /// `Actor::User`.
+    /// `Actor::Human`.
     ClaimDisputed {
         map: String,
         node: NodeId,
         why: String,
     },
-    /// The node ids a human's review showed - always `Actor::User`. Marks
+    /// The node ids a human's review showed - always `Actor::Human`. Marks
     /// each `Standing::Seen` until a later `claim.confirmed` or
     /// `claim.disputed` names it.
     ReviewFinished {
@@ -303,7 +316,7 @@ impl Event {
         causation_id: Option<EventId>,
     ) -> Self {
         Self::new(
-            Actor::Model,
+            Actor::Agent,
             source,
             causation_id,
             Payload::ToolCalled { tool, arguments },
@@ -340,15 +353,17 @@ impl Event {
     }
 
     /// A `claim.confirmed` event - always the human's own judgment on a
-    /// node's claim, never the model's.
+    /// node's claim, never the model's. `human` is the one who judged
+    /// it, from `Jsonl::me`.
     pub fn claim_confirmed(
         map: String,
         node: NodeId,
+        human: Option<HumanId>,
         source: Source,
         causation_id: Option<EventId>,
     ) -> Self {
         Self::new(
-            Actor::User,
+            Actor::Human(human),
             source,
             causation_id,
             Payload::ClaimConfirmed { map, node },
@@ -356,16 +371,17 @@ impl Event {
     }
 
     /// A `claim.disputed` event - always the human's own judgment, with
-    /// why.
+    /// why. `human` is the one who judged it, from `Jsonl::me`.
     pub fn claim_disputed(
         map: String,
         node: NodeId,
         why: String,
+        human: Option<HumanId>,
         source: Source,
         causation_id: Option<EventId>,
     ) -> Self {
         Self::new(
-            Actor::User,
+            Actor::Human(human),
             source,
             causation_id,
             Payload::ClaimDisputed { map, node, why },

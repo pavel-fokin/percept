@@ -12,7 +12,7 @@ mod search;
 pub mod testing;
 
 pub use event::{
-    cited_label, Actor, Event, EventId, EventKind, Payload, Source, Usage, PREVIEW_CHARS,
+    cited_label, Actor, Event, EventId, EventKind, HumanId, Payload, Source, Usage, PREVIEW_CHARS,
 };
 pub use event_log::EventLog;
 #[cfg(test)]

@@ -47,9 +47,9 @@ node, search the log instead of inventing one.
 ## Check a claim
 
 Every node and edge names the events it was drawn from and who wrote it:
-`user`, `model`, or `system`. The render marks model-written nodes with
-`(model)`. Read the cited events before correcting a decision, resolving
-a contradiction, or resting a consequential inference on a model node:
+`human`, `agent`, or `system`. The render marks agent-written nodes with
+`(agent)`. Read the cited events before correcting a decision, resolving
+a contradiction, or resting a consequential inference on an agent node:
 
 ```sh
 percept events show EVENT_ID
@@ -67,7 +67,7 @@ The recipe is in the [plan skill](../plan/SKILL.md): a `question`, the
 `decision` with a `resolves` edge, and an `option` with an `answers`
 edge for each alternative that lost, saying why in its `why` property.
 Every node cites the prompt that settled it and is written as
-`--actor model`. Write several nodes at once with `percept maps
+`--actor agent`. Write several nodes at once with `percept maps
 record`, one with `add-node`, or mid-turn with `revise_map`.
 Capture an unlogged prompt with `events publish` under its real actor
 and source before citing it; never invent an id or cite an agent's
@@ -83,9 +83,9 @@ single node, publish what was seen first and list the printed id in
 `--source` beside the prompt:
 
 ```sh
-id=$(percept events publish --actor model --source claude-code --type file.cited \
+id=$(percept events publish --actor agent --source claude-code --type file.cited \
   --payload '{"path":"src/mapstore/schema.rs","lines":"40-58"}')
-percept maps add-node decisions --actor model --kind decision --name "..." \
+percept maps add-node decisions --actor agent --kind decision --name "..." \
   --prop why="..." --source $prompt --source $id
 ```
 
@@ -110,11 +110,11 @@ property. A task `blocks` the one that must wait for it. Rewording a
 task is a new task with a `supersedes` edge, never a removal.
 
 ```sh
-percept maps add-node tasks --actor model --kind task --name "cancel a turn without quitting" \
+percept maps add-node tasks --actor agent --kind task --name "cancel a turn without quitting" \
   --prop why="Esc drops the whole session on a fifty-call turn" --source $id
-percept maps add-node tasks --actor model --kind outcome --name "done in 1f1a9a9" \
+percept maps add-node tasks --actor agent --kind outcome --name "done in 1f1a9a9" \
   --prop ref=1f1a9a9 --source $id
-percept maps add-edge tasks --actor model --kind resolves \
+percept maps add-edge tasks --actor agent --kind resolves \
   --from 'outcome:done in 1f1a9a9' --to 'task:cancel a turn without quitting' --source $id
 ```
 

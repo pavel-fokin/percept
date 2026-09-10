@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::testing::{source, usage};
+use crate::core::testing::{human, source, usage};
 
 fn text(message: &Message) -> &str {
     match message {
@@ -11,14 +11,14 @@ fn text(message: &Message) -> &str {
 #[test]
 fn a_thought_recorded_event_is_filtered_out_while_a_neighbouring_message_survives() {
     let events = [
-        Event::message_received(Actor::User, "hi".to_string(), source("tui"), None),
+        Event::message_received(Actor::Human(human()), "hi".to_string(), source("tui"), None),
         Event::thought_recorded(
-            Actor::Model,
+            Actor::Agent,
             "let me think".to_string(),
             source("tui"),
             None,
         ),
-        Event::message_received(Actor::Model, "done".to_string(), source("tui"), None),
+        Event::message_received(Actor::Agent, "done".to_string(), source("tui"), None),
     ];
 
     let messages: Vec<Message> = events.iter().filter_map(message_of).collect();
@@ -32,9 +32,9 @@ fn a_thought_recorded_event_is_filtered_out_while_a_neighbouring_message_survive
 fn a_model_called_event_is_filtered_out_while_a_neighbouring_message_survives() {
     let usage = usage();
     let events = [
-        Event::message_received(Actor::User, "hi".to_string(), source("tui"), None),
+        Event::message_received(Actor::Human(human()), "hi".to_string(), source("tui"), None),
         Event::model_called(usage, source("tui"), None),
-        Event::message_received(Actor::Model, "done".to_string(), source("tui"), None),
+        Event::message_received(Actor::Agent, "done".to_string(), source("tui"), None),
     ];
 
     let messages: Vec<Message> = events.iter().filter_map(message_of).collect();
@@ -51,7 +51,7 @@ fn a_map_change_is_filtered_out_while_a_neighbouring_message_survives() {
 
     let node = NodeId::new();
     let events = [
-        Event::message_received(Actor::User, "hi".to_string(), source("tui"), None),
+        Event::message_received(Actor::Human(human()), "hi".to_string(), source("tui"), None),
         Event::new(
             Actor::System,
             source("tui"),
@@ -78,7 +78,7 @@ fn a_map_change_is_filtered_out_while_a_neighbouring_message_survives() {
                 sources: Vec::new(),
             },
         ),
-        Event::message_received(Actor::Model, "done".to_string(), source("tui"), None),
+        Event::message_received(Actor::Agent, "done".to_string(), source("tui"), None),
     ];
 
     let messages: Vec<Message> = events.iter().filter_map(message_of).collect();
@@ -91,9 +91,9 @@ fn a_map_change_is_filtered_out_while_a_neighbouring_message_survives() {
 #[test]
 fn a_tool_call_and_its_result_replay_as_tool_messages() {
     let events = [
-        Event::message_received(Actor::User, "search".to_string(), source("tui"), None),
+        Event::message_received(Actor::Human(human()), "search".to_string(), source("tui"), None),
         Event::new(
-            Actor::Model,
+            Actor::Agent,
             source("tui"),
             None,
             Payload::ToolCalled {

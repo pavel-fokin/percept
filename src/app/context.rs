@@ -37,7 +37,7 @@ fn is_percepts_prompt(event: &Event) -> bool {
 }
 
 fn is_users_prompt(event: &Event) -> bool {
-    event.actor() == Actor::User && event.kind() == EventKind::MessageReceived
+    matches!(event.actor(), Actor::Human(_)) && event.kind() == EventKind::MessageReceived
 }
 
 /// Four characters a token: the one estimate the window, the index,

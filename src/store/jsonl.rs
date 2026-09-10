@@ -4,9 +4,15 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use serde::Deserialize;
+use uuid::Uuid;
 
-use crate::core::{EventId, EventLog, EventQuery, EventSearch};
+use crate::core::{EventId, EventLog, EventQuery, EventSearch, HumanId};
+use crate::shared::Id;
 use crate::store::{parse_event_id, Error, Event};
+
+/// The file beside the log holding this `$PERCEPT_HOME`'s `HumanId` -
+/// one UUID and a trailing newline, editable by hand.
+const ME_FILE: &str = "me";
 
 /// A JSONL event log: one compact `store::Event` per line, appended to
 /// as the app runs and replayed to rebuild the transcript on start.
@@ -22,6 +28,12 @@ pub struct Jsonl {
     /// which is what deleting or replacing the path mid-run would
     /// otherwise produce.
     file: Mutex<fs::File>,
+    /// This `$PERCEPT_HOME`'s `HumanId`, read from `me` beside the log
+    /// when a login has put one there; `None` until then. Every event
+    /// this process writes as the human, and every legacy `"user"`
+    /// actor a line predating the object form is read back as, carries
+    /// it.
+    me: Option<HumanId>,
 }
 
 impl Jsonl {
@@ -50,9 +62,19 @@ impl Jsonl {
             truncate_torn_tail(&file)?;
         }
 
+        let me = open_me(&path.with_file_name(ME_FILE))?;
+
         Ok(Self {
             file: Mutex::new(file),
+            me,
         })
+    }
+
+    /// This `$PERCEPT_HOME`'s `HumanId` - the person at the keyboard,
+    /// read from `me` beside the log; `None` while no login has written
+    /// one.
+    pub fn me(&self) -> Option<HumanId> {
+        self.me
     }
 
     /// Runs `f` holding both locks: the mutex that orders this
@@ -216,7 +238,7 @@ struct WireId {
 
 fn parse_line(raw: &str) -> Result<crate::core::Event, Error> {
     let wire: Event = serde_json::from_str(raw).map_err(Error::BadLine)?;
-    crate::core::Event::try_from(wire)
+    crate::store::from_wire(wire)
 }
 
 /// Everything up to the last newline. Bytes, not `read_to_string`: a
@@ -241,6 +263,20 @@ fn at_line(line: usize, source: Error) -> Error {
     Error::AtLine {
         line,
         source: Box::new(source),
+    }
+}
+
+/// Reads the `HumanId` from `path` - `None` when there is no such
+/// file, which is every home no login has touched. Nothing mints one:
+/// an id is the server's to give. A file that exists but doesn't hold
+/// a single parseable UUID is an error naming `path`.
+fn open_me(path: &Path) -> Result<Option<HumanId>, Error> {
+    match fs::read_to_string(path) {
+        Ok(text) => Uuid::parse_str(text.trim())
+            .map(|uuid| Some(Id::from_uuid(uuid)))
+            .map_err(|_| Error::BadMeFile(path.to_path_buf())),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(err) => Err(Error::Io(err)),
     }
 }
 

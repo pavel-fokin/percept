@@ -73,7 +73,7 @@ percept events search --contains worktree --size 5
 percept events search --source codex
 percept events show <id>
 percept events show <id> --range 400:
-percept events publish --actor user --source percept-cli \
+percept events publish --actor human --source percept-cli \
   --type message.received --payload '{"content":"..."}'
 ```
 
@@ -104,11 +104,11 @@ Writes go through the same binary. Every one cites the events it was
 drawn from and says who is writing, `user` or `model`:
 
 ```sh
-percept maps add-node decisions --actor model --kind decision --name "..." \
+percept maps add-node decisions --actor agent --kind decision --name "..." \
   --prop why="..." --source <event-id>
-percept maps add-edge decisions --actor model --kind resolves --from d42 --to q7
+percept maps add-edge decisions --actor agent --kind resolves --from d42 --to q7
 
-percept maps record decisions --actor model --source <event-id> <<'EOF'
+percept maps record decisions --actor agent --source <event-id> <<'EOF'
 question "Where does the log live?"
 decision "one log under ~/.percept"
   why "one variable also covers the binary"

@@ -85,7 +85,7 @@ hook prints `percept event <id>` into the context after each prompt;
 use that id. Without it, the latest prompt from this project is
 
 ```
-~/.percept/bin/percept events search --source claude-code --actor user \
+~/.percept/bin/percept events search --source claude-code --actor human \
   | jq -r --arg root "$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")" \
       'select(.source.path == $root) | .id' | tail -1
 ```
@@ -98,11 +98,11 @@ checkout's path, worktree or not, which is why the filter asks for the
 common git dir's parent and not `--show-toplevel`.
 
 One decision, as one document on stdin, with `$id` the prompt. Every
-write carries `--actor model`: the agent is recording, not the user,
+write carries `--actor agent`: the agent is recording, not the user,
 and the map shows the difference.
 
 ```
-~/.percept/bin/percept maps record decisions --actor model --source $id <<'EOF'
+~/.percept/bin/percept maps record decisions --actor agent --source $id <<'EOF'
 question "Where does the log live?"
 option "percept.jsonl in the working directory"
   why "one log per checkout makes cross-project search a join"
@@ -142,7 +142,7 @@ A decision that changes an earlier one is never a removal. Add the new
 decision, then point it at the old one:
 
 ```
-$P add-edge decisions --actor model --kind supersedes \
+$P add-edge decisions --actor agent --kind supersedes \
   --from 'decision:<new>' --to 'decision:<old>' --source $id
 ```
 

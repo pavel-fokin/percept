@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::core::{
-    Actor, Event, EventId, EventLog, Kind, NodeId, NodeRef, Payload, Schema, Schemas, Scope,
-    Settlement, Source, Usage,
+    Actor, Event, EventId, EventLog, HumanId, Kind, NodeId, NodeRef, Payload, Schema, Schemas,
+    Scope, Settlement, Source, Usage,
 };
 
 /// The project root `source` stamps, for a test that compares paths.
@@ -51,6 +51,13 @@ pub fn source(name: &str) -> Source {
 /// The scope `source`'s events fall inside.
 pub fn scope() -> Scope {
     Scope::Project(PathBuf::from(ROOT))
+}
+
+/// A `HumanId` for a test that needs one but doesn't care which - every
+/// call mints a fresh one, so two calls are never mistaken for the
+/// same person.
+pub fn human() -> Option<HumanId> {
+    Some(HumanId::new())
 }
 
 pub fn node_ref(kind: &str, name: &str) -> NodeRef {
@@ -168,7 +175,7 @@ pub fn usage() -> Usage {
 /// A node on the decisions map, written by the user and cited from one
 /// event, for tests that need a map with something in it.
 pub fn node_added(kind: &str, name: &str) -> Event {
-    node_added_by(Actor::User, kind, name)
+    node_added_by(Actor::Human(human()), kind, name)
 }
 
 /// `node_added`, committed as `actor` - for a test about who wrote a
@@ -181,7 +188,7 @@ pub fn node_added_by(actor: Actor, kind: &str, name: &str) -> Event {
 /// checks a map scoped to one project skips another's.
 pub fn node_added_at(path: &str, kind: &str, name: &str) -> Event {
     Event::new(
-        Actor::User,
+        Actor::Human(human()),
         source_at("test", path),
         None,
         node_added_payload(kind, name),
@@ -215,7 +222,7 @@ pub fn node_id(event: &Event) -> NodeId {
 /// `node_added` minted.
 pub fn edge_added(kind: &str, from: &Event, to: &Event) -> Event {
     Event::new(
-        Actor::User,
+        Actor::Human(human()),
         source("test"),
         None,
         Payload::EdgeAdded {

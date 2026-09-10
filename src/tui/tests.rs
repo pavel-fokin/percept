@@ -77,6 +77,7 @@ fn chat() -> Chat<'static> {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source("test"),
+        crate::core::testing::human(),
     )
     .unwrap();
     Chat::new(Box::new(app))

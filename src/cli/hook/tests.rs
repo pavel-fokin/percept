@@ -5,8 +5,8 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::*;
-use crate::core::testing::{content, FakeLog};
-use crate::core::Payload;
+use crate::core::testing::{content, human, FakeLog};
+use crate::core::{HumanId, Payload};
 
 /// A checkout `run` can discover a root in - a `.percept` marker is
 /// enough, so a test needs no `git init` - plus the sessions directory
@@ -19,6 +19,7 @@ struct Fixture {
     root: PathBuf,
     sessions: PathBuf,
     log: FakeLog,
+    me: Option<HumanId>,
 }
 
 impl Fixture {
@@ -35,6 +36,7 @@ impl Fixture {
             sessions: temp.path().join("storage/hook-sessions"),
             root,
             log: FakeLog::default(),
+            me: human(),
             _temp: temp,
         }
     }
@@ -74,7 +76,7 @@ impl Fixture {
             name: client.to_string(),
             path: root,
         };
-        run(input, &source, &self.log, &self.sessions, &checkout)
+        run(input, &source, &self.log, &self.sessions, &checkout, self.me)
     }
 
     /// The number of turn state files kept anywhere under
@@ -206,7 +208,7 @@ impl Fixture {
         };
         let event = Event::restore(
             EventId::new(),
-            Actor::User,
+            Actor::Human(human()),
             Source {
                 name: "codex".to_string(),
                 path: self.root.clone(),
@@ -238,7 +240,7 @@ impl Fixture {
     ) -> Event {
         let event = Event::restore(
             EventId::new(),
-            Actor::Model,
+            Actor::Agent,
             Source {
                 name: "codex".to_string(),
                 path: self.root.clone(),
@@ -268,7 +270,7 @@ impl Fixture {
     ) -> Event {
         let event = Event::restore(
             EventId::new(),
-            Actor::User,
+            Actor::Human(human()),
             Source {
                 name: "codex".to_string(),
                 path: self.root.clone(),
@@ -361,7 +363,7 @@ fn prompt_context_names_the_committed_event() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].id().as_uuid().to_string(), id);
     assert_eq!(content(&events[0]), "hello");
-    assert!(events[0].actor() == Actor::User);
+    assert!(matches!(events[0].actor(), Actor::Human(_)));
 }
 
 #[test]
@@ -475,7 +477,7 @@ fn stop_uses_last_assistant_message_and_the_prompts_cause() {
     let reply = fixture
         .events()
         .into_iter()
-        .find(|event| event.actor() == Actor::Model)
+        .find(|event| event.actor() == Actor::Agent)
         .unwrap();
     assert_eq!(reply.causation_id().unwrap().as_uuid().to_string(), prompt);
     assert_eq!(content(&reply), "reply");
@@ -536,7 +538,7 @@ fn checkouts_sessions_and_turns_keep_separate_causes() {
     let replies: Vec<_> = fixture
         .events()
         .into_iter()
-        .filter(|event| event.actor() == Actor::Model)
+        .filter(|event| event.actor() == Actor::Agent)
         .collect();
     assert_eq!(replies.len(), cases.len());
     for reply in &replies {
@@ -570,7 +572,7 @@ fn subdirectory_uses_the_checkout_root_and_its_existing_prompt() {
     let reply = fixture
         .events()
         .into_iter()
-        .find(|event| event.actor() == Actor::Model)
+        .find(|event| event.actor() == Actor::Agent)
         .unwrap();
     assert_eq!(reply.source().path, fixture.root);
     assert_eq!(reply.causation_id().unwrap().as_uuid().to_string(), prompt);
@@ -607,7 +609,7 @@ fn failed_prompt_removes_the_previous_cause() {
     let reply = fixture
         .events()
         .into_iter()
-        .find(|event| event.actor() == Actor::Model)
+        .find(|event| event.actor() == Actor::Agent)
         .unwrap();
     assert!(reply.causation_id().is_none());
 }
@@ -644,7 +646,7 @@ fn invalid_prompt_does_not_touch_the_previous_cause() {
     let reply = fixture
         .events()
         .into_iter()
-        .find(|event| event.actor() == Actor::Model)
+        .find(|event| event.actor() == Actor::Agent)
         .unwrap();
     assert_eq!(reply.causation_id().unwrap().as_uuid().to_string(), prompt);
 }
@@ -665,7 +667,7 @@ fn unknown_turn_does_not_inherit_another_turns_prompt() {
     let reply = fixture
         .events()
         .into_iter()
-        .find(|event| event.actor() == Actor::Model)
+        .find(|event| event.actor() == Actor::Agent)
         .unwrap();
     assert!(reply.causation_id().is_none());
 }
@@ -810,7 +812,7 @@ fn every_session_start_ends_with_the_recording_rules() {
     for context in [first, returning] {
         let rules = context.rsplit("\n\n").next().unwrap();
         assert!(rules.starts_with("recording\n"), "{context:?}");
-        assert!(rules.contains("percept maps record decisions --actor model --source <prompt id>"));
+        assert!(rules.contains("percept maps record decisions --actor agent --source <prompt id>"));
         assert!(rules.contains("Recorded to decisions:"));
     }
 }
