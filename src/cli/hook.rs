@@ -27,7 +27,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::core::{
-    cited_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source,
+    cited_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source, Standing,
 };
 use crate::shared::Timestamp;
 use crate::store::TurnState;
@@ -196,6 +196,9 @@ fn start_session(
     let mut sections = vec![header];
     if let Some(at) = since {
         sections.push(gained_block(&maps, at));
+        if let Some(block) = judged_since_block(&maps, at) {
+            sections.push(block);
+        }
     }
     if let Some(block) = changed_since_recorded_block(&maps, &events, checkout) {
         sections.push(block);
@@ -233,6 +236,7 @@ recording
 - A claim that rests on a file cites the text it read: an indented line, cites src/path.rs:10-20, under the node.
 - A decision that changes an earlier one adds a supersedes <id> line under it; never remove a node.
 - A decision that no longer seems to fit is not yours to rewrite: raise a question with a reopens <id> line under it, and let the user settle it.
+- A node marked disputed carries the human's why: never propose it again; a correction the user agrees is a new decision with a supersedes line.
 - Close the session with one line naming what was recorded: Recorded to decisions: q1, d1, o1.";
 
 /// The short id `node` has on `map`, or a `kind:name` fallback for the
@@ -255,6 +259,16 @@ fn capped_lines(mut lines: Vec<String>) -> Vec<String> {
         lines.push(format!("+{} more", total - LIMIT));
     }
     lines
+}
+
+/// The header of a capped block: `label (total)`, or `label (total,
+/// showing LIMIT)` when `capped_lines` folds the rest into a count.
+fn block_header(label: &str, total: usize) -> String {
+    if total > LIMIT {
+        format!("{label} ({total}, showing {LIMIT})")
+    } else {
+        format!("{label} ({total})")
+    }
 }
 
 /// What each folded map gained since `since`: a counts line for every
@@ -288,6 +302,44 @@ fn gained_block(maps: &[Map], since: Timestamp) -> String {
         ));
     }
     lines.join("\n")
+}
+
+/// What the human judged since `since`: every node, of any kind, whose
+/// latest `claim.confirmed`/`claim.disputed` landed at or after `since`,
+/// across every folded map in fold order. Disputed nodes first, then
+/// confirmed, each group by when the judgment landed, then by short id
+/// so equal times print in one order. `None` when nothing was judged
+/// since, so `start_session` omits the block rather than printing an
+/// empty one.
+fn judged_since_block(maps: &[Map], since: Timestamp) -> Option<String> {
+    let mut judged: Vec<(&Map, &Node, Standing, Timestamp)> = maps
+        .iter()
+        .flat_map(|map| {
+            map.judged_since(since)
+                .map(move |(node, standing, at)| (map, node, standing, at))
+        })
+        .collect();
+    if judged.is_empty() {
+        return None;
+    }
+    judged.sort_by_cached_key(|(_, node, standing, at)| {
+        (*standing == Standing::Confirmed, *at, node.kind.clone(), node.seq)
+    });
+
+    let lines = judged
+        .iter()
+        .map(|(map, node, standing, _)| {
+            let mut line = format!("{} {node} \u{b7} {standing}", line_id(map, node));
+            if let Some(why) = map.dispute(node.id) {
+                line.push_str(&format!(": {why:?}"));
+            }
+            line
+        })
+        .collect();
+
+    let mut block = vec![block_header("judged since your last session", judged.len())];
+    block.extend(capped_lines(lines));
+    Some(block.join("\n"))
 }
 
 /// What every current headline node cites that no longer matches the
@@ -332,13 +384,7 @@ fn changed_since_recorded_block(maps: &[Map], events: &[Event], checkout: &Path)
         return None;
     }
 
-    let total = lines.len();
-    let header = if total > LIMIT {
-        format!("changed since recorded ({total}, showing {LIMIT})")
-    } else {
-        "changed since recorded".to_string()
-    };
-    let mut block = vec![header];
+    let mut block = vec![block_header("changed since recorded", lines.len())];
     block.extend(capped_lines(lines));
     Some(block.join("\n"))
 }
@@ -448,13 +494,7 @@ fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
             continue;
         }
 
-        let total = open.len();
-        let header = if total > LIMIT {
-            format!("open {} ({total}, showing {LIMIT})", settlement.of)
-        } else {
-            format!("open {} ({total})", settlement.of)
-        };
-        let mut lines = vec![header];
+        let mut lines = vec![block_header(&format!("open {}", settlement.of), open.len())];
         lines.extend(capped_lines(
             open.iter()
                 .map(|node| {

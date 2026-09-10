@@ -5,7 +5,7 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::*;
-use crate::core::testing::{content, human, FakeLog};
+use crate::core::testing::{content, human, node_id, FakeLog};
 use crate::core::{HumanId, Payload};
 
 /// A checkout `run` can discover a root in - a `.percept` marker is
@@ -198,30 +198,56 @@ impl Fixture {
     /// Appends an `edge.added` event resolving `from` against `to`, at
     /// the same moment as `from` was recorded.
     fn seed_edge(&self, map: &str, kind: &str, from: &Event, to: &Event) {
-        let from_id = match from.payload() {
-            Payload::NodeAdded { node, .. } => *node,
-            _ => panic!("expected a node.added event"),
-        };
-        let to_id = match to.payload() {
-            Payload::NodeAdded { node, .. } => *node,
-            _ => panic!("expected a node.added event"),
-        };
         let event = Event::restore(
             EventId::new(),
             Actor::Human(human()),
-            Source {
-                name: "codex".to_string(),
-                path: self.root.clone(),
-            },
+            self.source(),
             None,
             from.created_at(),
             Payload::EdgeAdded {
                 map: map.to_string(),
                 kind: kind.to_string(),
-                from: from_id,
-                to: to_id,
+                from: node_id(from),
+                to: node_id(to),
                 sources: Vec::new(),
             },
+        );
+        self.log.append(&event).unwrap();
+    }
+
+    /// Appends a `claim.confirmed` event for `node`, at `at`.
+    fn seed_confirmed(&self, map: &str, node: &Event, at: Timestamp) {
+        self.seed_judgment(
+            Payload::ClaimConfirmed {
+                map: map.to_string(),
+                node: node_id(node),
+            },
+            at,
+        );
+    }
+
+    /// Appends a `claim.disputed` event for `node`, with `why`, at `at`.
+    fn seed_disputed(&self, map: &str, node: &Event, why: &str, at: Timestamp) {
+        self.seed_judgment(
+            Payload::ClaimDisputed {
+                map: map.to_string(),
+                node: node_id(node),
+                why: why.to_string(),
+            },
+            at,
+        );
+    }
+
+    /// Appends the human's judgment `payload` at `at` - the moment a
+    /// "judged since" test needs to control.
+    fn seed_judgment(&self, payload: Payload, at: Timestamp) {
+        let event = Event::restore(
+            EventId::new(),
+            Actor::Human(self.me),
+            self.source(),
+            None,
+            at,
+            payload,
         );
         self.log.append(&event).unwrap();
     }
@@ -241,10 +267,7 @@ impl Fixture {
         let event = Event::restore(
             EventId::new(),
             Actor::Agent,
-            Source {
-                name: "codex".to_string(),
-                path: self.root.clone(),
-            },
+            self.source(),
             causation,
             at,
             Payload::FileCited {
@@ -268,13 +291,28 @@ impl Fixture {
         at: Timestamp,
         sources: Vec<EventId>,
     ) -> Event {
+        self.seed_node_by(Actor::Human(human()), map, kind, name, at, sources)
+    }
+
+    /// `seed_node`, but written by the model - a judgment test needs
+    /// one, since a user-written node carries no standing to judge.
+    fn seed_agent_node(&self, map: &str, kind: &str, name: &str, at: Timestamp) -> Event {
+        self.seed_node_by(Actor::Agent, map, kind, name, at, Vec::new())
+    }
+
+    fn seed_node_by(
+        &self,
+        actor: Actor,
+        map: &str,
+        kind: &str,
+        name: &str,
+        at: Timestamp,
+        sources: Vec<EventId>,
+    ) -> Event {
         let event = Event::restore(
             EventId::new(),
-            Actor::Human(human()),
-            Source {
-                name: "codex".to_string(),
-                path: self.root.clone(),
-            },
+            actor,
+            self.source(),
             None,
             at,
             Payload::NodeAdded {
@@ -289,6 +327,25 @@ impl Fixture {
         );
         self.log.append(&event).unwrap();
         event
+    }
+
+    /// The source every seeded event carries: this fixture's project,
+    /// written by codex.
+    fn source(&self) -> Source {
+        Source {
+            name: "codex".to_string(),
+            path: self.root.clone(),
+        }
+    }
+
+    /// When the previous session started - what a returning session's
+    /// "since" is, after one `session_start` has run.
+    fn since(&self) -> Timestamp {
+        self.events()
+            .into_iter()
+            .find(|event| matches!(event.payload(), Payload::SessionStarted))
+            .unwrap()
+            .created_at()
     }
 
     /// Writes `<root>/<path>`, creating any missing parent directories -
@@ -813,6 +870,7 @@ fn every_session_start_ends_with_the_recording_rules() {
         let rules = context.rsplit("\n\n").next().unwrap();
         assert!(rules.starts_with("recording\n"), "{context:?}");
         assert!(rules.contains("percept maps record decisions --actor agent --source <prompt id>"));
+        assert!(rules.contains("A node marked disputed carries the human's why: never propose it again"));
         assert!(rules.contains("Recorded to decisions:"));
     }
 }
@@ -821,12 +879,7 @@ fn every_session_start_ends_with_the_recording_rules() {
 fn a_returning_session_reports_counts_and_excludes_older_gains() {
     let fixture = Fixture::new();
     fixture.session_start("codex");
-    let since = fixture
-        .events()
-        .into_iter()
-        .find(|event| matches!(event.payload(), Payload::SessionStarted))
-        .unwrap()
-        .created_at();
+    let since = fixture.since();
 
     fixture.seed_node("decisions", "question", "an older one", since.minus_minutes(60).unwrap());
     fixture.seed_node(
@@ -848,18 +901,148 @@ fn a_returning_session_reports_counts_and_excludes_older_gains() {
 }
 
 #[test]
+fn a_node_disputed_after_the_previous_session_shows_its_why() {
+    let fixture = Fixture::new();
+    fixture.session_start("codex");
+    let since = fixture.since();
+
+    let option = fixture.seed_agent_node(
+        "decisions",
+        "option",
+        "a terminal render of the since-cut, the page later",
+        since.minus_minutes(120).unwrap(),
+    );
+    fixture.seed_disputed(
+        "decisions",
+        &option,
+        "never proposed",
+        since.minus_minutes(-30).unwrap(),
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("judged since your last session (1)"), "{context:?}");
+    assert!(
+        context.contains(
+            "option \"a terminal render of the since-cut, the page later\" \u{b7} disputed: \"never proposed\""
+        ),
+        "{context:?}"
+    );
+}
+
+#[test]
+fn a_node_confirmed_shows_confirmed_with_no_why() {
+    let fixture = Fixture::new();
+    fixture.session_start("codex");
+    let since = fixture.since();
+
+    let decision = fixture.seed_agent_node(
+        "decisions",
+        "decision",
+        "percept review serves a local web page",
+        since.minus_minutes(120).unwrap(),
+    );
+    fixture.seed_confirmed("decisions", &decision, since.minus_minutes(-30).unwrap());
+
+    let context = fixture.session_start("codex");
+
+    assert!(
+        context.contains("decision \"percept review serves a local web page\" \u{b7} confirmed"),
+        "{context:?}"
+    );
+    assert!(!context.contains("confirmed: "), "{context:?}");
+}
+
+#[test]
+fn a_judgment_from_before_the_previous_session_is_not_shown() {
+    let fixture = Fixture::new();
+    fixture.session_start("codex");
+    let since = fixture.since();
+
+    let decision = fixture.seed_agent_node(
+        "decisions",
+        "decision",
+        "an old decision",
+        since.minus_minutes(120).unwrap(),
+    );
+    fixture.seed_confirmed("decisions", &decision, since.minus_minutes(90).unwrap());
+
+    let context = fixture.session_start("codex");
+
+    assert!(!context.contains("judged since your last session"), "{context:?}");
+}
+
+#[test]
+fn disputed_lines_come_before_confirmed_ones() {
+    let fixture = Fixture::new();
+    fixture.session_start("codex");
+    let since = fixture.since();
+
+    let confirmed = fixture.seed_agent_node(
+        "decisions",
+        "decision",
+        "confirmed one",
+        since.minus_minutes(120).unwrap(),
+    );
+    fixture.seed_confirmed("decisions", &confirmed, since.minus_minutes(-10).unwrap());
+    let disputed = fixture.seed_agent_node(
+        "decisions",
+        "option",
+        "disputed one",
+        since.minus_minutes(120).unwrap(),
+    );
+    fixture.seed_disputed(
+        "decisions",
+        &disputed,
+        "why not",
+        since.minus_minutes(-20).unwrap(),
+    );
+
+    let context = fixture.session_start("codex");
+
+    let judged = context.split("judged since your last session").nth(1).unwrap();
+    let disputed_at = judged.find("disputed one").unwrap();
+    let confirmed_at = judged.find("confirmed one").unwrap();
+    assert!(disputed_at < confirmed_at, "{context:?}");
+}
+
+#[test]
+fn no_judgment_means_no_judged_since_block() {
+    let fixture = Fixture::new();
+    fixture.session_start("codex");
+    let since = fixture.since();
+    fixture.seed_node(
+        "decisions",
+        "question",
+        "unjudged",
+        since.minus_minutes(-10).unwrap(),
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(!context.contains("judged since your last session"), "{context:?}");
+}
+
+#[test]
+fn a_first_session_prints_no_judged_block_even_with_judgments() {
+    let fixture = Fixture::new();
+    let decision = fixture.seed_agent_node("decisions", "decision", "a decision", Timestamp::now());
+    fixture.seed_confirmed("decisions", &decision, Timestamp::now());
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("first session here"), "{context:?}");
+    assert!(!context.contains("judged since your last session"), "{context:?}");
+}
+
+#[test]
 fn resolving_an_old_question_does_not_report_it_as_gained() {
     // `Map::since` would also surface `question` here, since a fresh
     // `resolves` edge touches it; the gained block compares `added_at`
     // directly instead, so only the decision itself counts as new.
     let fixture = Fixture::new();
     fixture.session_start("codex");
-    let since = fixture
-        .events()
-        .into_iter()
-        .find(|event| matches!(event.payload(), Payload::SessionStarted))
-        .unwrap()
-        .created_at();
+    let since = fixture.since();
 
     let question = fixture.seed_node(
         "decisions",

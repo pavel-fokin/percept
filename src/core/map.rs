@@ -527,9 +527,17 @@ impl fmt::Display for Standing {
 }
 
 /// The latest `claim.confirmed`/`claim.disputed` naming a node, so
-/// `Map::dispute` can hand back the why without walking the log again.
+/// `Map::dispute` can hand back the why without walking the log again,
+/// and `at` its event's `created_at`, so `Map::judged_since` can tell a
+/// fresh judgment from an old one.
 #[derive(Clone)]
-enum Judgment {
+struct Judgment {
+    at: Timestamp,
+    kind: JudgmentKind,
+}
+
+#[derive(Clone)]
+enum JudgmentKind {
     Confirmed,
     Disputed(String),
 }
@@ -843,9 +851,9 @@ impl Map {
         if matches!(node.actor, Actor::Human(_)) {
             return None;
         }
-        Some(match self.judgments.get(&id) {
-            Some(Judgment::Confirmed) => Standing::Confirmed,
-            Some(Judgment::Disputed(_)) => Standing::Disputed,
+        Some(match self.judgments.get(&id).map(|j| &j.kind) {
+            Some(JudgmentKind::Confirmed) => Standing::Confirmed,
+            Some(JudgmentKind::Disputed(_)) => Standing::Disputed,
             None if self.reviewed.contains(&id) => Standing::Seen,
             None => Standing::Claimed,
         })
@@ -858,10 +866,26 @@ impl Map {
         if self.standing(id) != Some(Standing::Disputed) {
             return None;
         }
-        match self.judgments.get(&id) {
-            Some(Judgment::Disputed(why)) => Some(why.as_str()),
+        match self.judgments.get(&id).map(|j| &j.kind) {
+            Some(JudgmentKind::Disputed(why)) => Some(why.as_str()),
             _ => None,
         }
+    }
+
+    /// Every node whose latest judgment - `claim.confirmed` or
+    /// `claim.disputed` - landed at or after `at`, each with the
+    /// standing it now carries and when that judgment landed. A node
+    /// only ever `review.finished` has named is not a judgment, so it
+    /// is never in this list.
+    pub fn judged_since(&self, at: Timestamp) -> impl Iterator<Item = (&Node, Standing, Timestamp)> {
+        self.judgments.iter().filter_map(move |(id, judgment)| {
+            if judgment.at < at {
+                return None;
+            }
+            let node = self.node(*id)?;
+            let standing = self.standing(*id)?;
+            Some((node, standing, judgment.at))
+        })
     }
 
     pub fn find(&self, kind: &str, name: &str) -> Option<&Node> {
@@ -1230,13 +1254,24 @@ impl Map {
             // have been removed.
             Payload::ClaimConfirmed { node, .. } => {
                 if self.node(*node).is_some() {
-                    self.judgments.insert(*node, Judgment::Confirmed);
+                    self.judgments.insert(
+                        *node,
+                        Judgment {
+                            at,
+                            kind: JudgmentKind::Confirmed,
+                        },
+                    );
                 }
             }
             Payload::ClaimDisputed { node, why, .. } => {
                 if self.node(*node).is_some() {
-                    self.judgments
-                        .insert(*node, Judgment::Disputed(why.clone()));
+                    self.judgments.insert(
+                        *node,
+                        Judgment {
+                            at,
+                            kind: JudgmentKind::Disputed(why.clone()),
+                        },
+                    );
                 }
             }
             Payload::ReviewFinished { nodes, .. } => {
