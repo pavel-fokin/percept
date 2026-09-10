@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::harness::{Tool, ToolOutput, ToolSpec};
-use crate::tools::Workspace;
+use crate::workspace::Workspace;
 
 /// The `list_files` tool: one directory's immediate entries, sorted by
 /// name, directories marked with a trailing `/`. Not recursive; use

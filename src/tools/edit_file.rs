@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::harness::{Tool, ToolOutput, ToolSpec};
-use crate::tools::{is_binary, Workspace};
+use crate::workspace::{is_binary, Workspace};
 
 /// The `edit_file` tool: replaces `old_string` with `new_string` in a
 /// file already read this session. Refuses an edit of a file the model

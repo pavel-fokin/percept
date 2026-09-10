@@ -310,7 +310,6 @@ impl Event {
     }
 
     /// A `thought.recorded` event.
-    #[cfg(feature = "lab")]
     pub fn thought_recorded(
         actor: Actor,
         content: String,
@@ -353,7 +352,6 @@ impl Event {
 
     /// A `model.called` event - always percept recording what one round
     /// trip to the model cost, never the model's own words.
-    #[cfg(feature = "lab")]
     pub fn model_called(usage: Usage, source: Source, causation_id: Option<EventId>) -> Self {
         Self::new(
             Actor::System,

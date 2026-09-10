@@ -24,21 +24,20 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 
 use clap::{Args, Parser, Subcommand};
-#[cfg(feature = "lab")]
-use tokio_stream::StreamExt;
 
-#[cfg(feature = "lab")]
-use crate::app::{run_tool, AppService, ToolStep};
 use crate::core::{
     cited_label, Actor, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, NodeId,
     NodeRef, Payload, Schemas,
 };
-#[cfg(feature = "lab")]
-use crate::harness::Chunk;
 use crate::mapstore;
 use crate::shared::Timestamp;
 use crate::store;
-use crate::tools;
+use crate::workspace;
+
+#[cfg(feature = "lab")]
+mod turn;
+#[cfg(feature = "lab")]
+pub use turn::{run_turn, AskArgs};
 
 #[derive(Parser)]
 #[command(name = "percept")]
@@ -365,18 +364,6 @@ pub struct ShowArgs {
     range: Option<(Option<usize>, Option<usize>)>,
 }
 
-#[cfg(feature = "lab")]
-#[derive(Args)]
-pub struct AskArgs {
-    /// The prompt to send.
-    #[arg(value_parser = non_blank)]
-    pub prompt: String,
-    /// Run every tool call the policy would ask about. Headless, there
-    /// is no one to ask, so without this such a call is declined.
-    #[arg(long)]
-    pub yes: bool,
-}
-
 /// Parses `--range START:END`; either side may be blank.
 fn parse_range(s: &str) -> Result<(Option<usize>, Option<usize>), String> {
     let (start, end) = s
@@ -508,7 +495,7 @@ struct RawFileCited {
 fn file_cited_payload(raw: &str, checkout: &Path) -> Result<Payload, Box<dyn std::error::Error>> {
     let raw: RawFileCited = serde_json::from_str(raw).map_err(store::Error::BadPayload)?;
     let lines = raw.lines.as_deref().map(store::parse_lines).transpose()?;
-    let workspace = tools::Workspace::new(checkout)?;
+    let workspace = workspace::Workspace::new(checkout)?;
     build_file_cited(&workspace, &raw.path, lines, raw.excerpt)
 }
 
@@ -520,7 +507,7 @@ fn file_cited_payload(raw: &str, checkout: &Path) -> Result<Payload, Box<dyn std
 /// resolved and repo-relative; an `excerpt` the caller did give is
 /// otherwise stored as given.
 fn build_file_cited(
-    workspace: &tools::Workspace,
+    workspace: &workspace::Workspace,
     path: &str,
     lines: Option<(u32, u32)>,
     excerpt: Option<String>,
@@ -531,7 +518,7 @@ fn build_file_cited(
     let excerpt = match excerpt {
         Some(excerpt) => excerpt,
         None => {
-            let text = tools::read_text_lossy(&resolved)?;
+            let text = workspace::read_text_lossy(&resolved)?;
             match lines {
                 Some((from, to)) => {
                     let file_lines = text.lines().count();
@@ -567,11 +554,7 @@ fn known_event_id(
     id: &str,
     log: &dyn EventLog,
 ) -> Result<crate::core::EventId, Box<dyn std::error::Error>> {
-    let parsed = store::parse_event_id(id)?;
-    if log.get(parsed)?.is_none() {
-        return Err(format!("no event with id {id}").into());
-    }
-    Ok(parsed)
+    Ok(store::find_event(log, id)?.id())
 }
 
 /// Searches `log` for events matching `args`, printing one JSON object
@@ -1059,7 +1042,7 @@ fn record_document(
     // document with none should still record against a `checkout` that
     // does not exist, the way it always could.
     let workspace = if nodes.iter().any(|node| !node.cites.is_empty()) {
-        Some(tools::Workspace::new(checkout)?)
+        Some(workspace::Workspace::new(checkout)?)
     } else {
         None
     };
@@ -1181,7 +1164,7 @@ fn record_document(
 /// A reader that stops early - `head`, or a `jq` that has seen enough -
 /// closes the pipe. That is the caller's choice, not a failure to
 /// report.
-fn stop_if_pipe_closed(e: io::Error) -> Result<(), Box<dyn std::error::Error>> {
+pub(super) fn stop_if_pipe_closed(e: io::Error) -> Result<(), Box<dyn std::error::Error>> {
     if e.kind() == io::ErrorKind::BrokenPipe {
         Ok(())
     } else {
@@ -1246,87 +1229,6 @@ pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error
     let (start, end) = args.range.unwrap_or_default();
     println!("{}", store::read_event(log, &args.id, start, end)?);
     Ok(())
-}
-
-/// Runs one turn on `app` - submitting `prompt` as `actor`, then
-/// draining the reply stream chunk by chunk - and prints the reply to
-/// stdout. No channel, no spawned task: unlike the TUI, nothing else
-/// needs the thread while headless, so a tool runs inline and the turn
-/// is one plain `await` loop. Each tool call and its result print to
-/// stderr as they happen, so stdout stays pipeable. That trace is for
-/// watching a run live; the log is what a run is read back from. `yes`
-/// is the user's standing answer to every call the policy puts to
-/// them - what `y` is in the TUI; without it, headless, such a call is
-/// declined.
-#[cfg(feature = "lab")]
-pub async fn run_turn(
-    mut app: Box<dyn AppService>,
-    actor: Actor,
-    prompt: String,
-    yes: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut stream = app.submit_as(actor, prompt)?;
-    // What stdout gets. `App` clears its own reply buffer at each tool
-    // call and again when the cap ends a turn, so a turn that spoke
-    // before calling a tool would otherwise print only its last leg.
-    let mut reply = String::new();
-
-    loop {
-        match stream.next().await {
-            // Each arm echoes for itself: `App` decides what a call
-            // means, and a call it refused never happened.
-            Some(Ok(Chunk::ToolCall { tool, arguments })) => {
-                stream = match app.begin_tool(&tool, arguments.clone())? {
-                    ToolStep::Ask(_, arguments) if !yes => {
-                        eprintln!("⚒ {tool}({arguments}) - declined: needs approval, run in the TUI or pass --yes");
-                        app.decline_tool()?
-                    }
-                    ToolStep::Run(run, arguments) | ToolStep::Ask(run, arguments) => {
-                        eprintln!("⚒ {tool}({arguments})");
-                        let output = run_tool(&*run, &arguments);
-                        eprintln!("⚒ {}", output.content);
-                        app.finish_tool(output)?
-                    }
-                    ToolStep::Continue(stream) => {
-                        eprintln!("⚒ {tool}({arguments}) - no such tool");
-                        stream
-                    }
-                    ToolStep::Stop => break,
-                };
-            }
-            Some(Ok(chunk)) => {
-                if let Chunk::Reply(text) = &chunk {
-                    reply.push_str(text);
-                }
-                app.append_chunk(chunk);
-            }
-            // A failed reply is shown, never logged - the stream's own
-            // words are this run's error. Whatever text arrived before
-            // it still commits, and still prints: the words reached the
-            // log, so stdout is not the surface that should lose them.
-            Some(Err(err)) => {
-                app.end_stream()?;
-                print_reply(&reply)?;
-                return Err(err.to_string().into());
-            }
-            None => break,
-        }
-    }
-
-    app.end_stream()?;
-    print_reply(&reply)
-}
-
-/// Writes the reply to stdout, saying nothing when the turn produced no
-/// text. A reader that stops early is the caller's choice, not a
-/// failure - the same courtesy `search` extends.
-#[cfg(feature = "lab")]
-fn print_reply(reply: &str) -> Result<(), Box<dyn std::error::Error>> {
-    if reply.is_empty() {
-        return Ok(());
-    }
-    let mut out = io::stdout().lock();
-    writeln!(out, "{reply}").or_else(stop_if_pipe_closed)
 }
 
 /// Parses a `--since`/`--until` value: an ISO-8601 timestamp, or a

@@ -369,6 +369,17 @@ fn window(chars: &[char], keep: Range<usize>, size: usize) -> String {
     out
 }
 
+/// Parses `id` and reads the event it names from `log`, so a caller
+/// naming an id the log doesn't carry fails the same way whether it
+/// wants the event or only its id.
+pub fn find_event(
+    log: &dyn crate::core::EventLog,
+    id: &str,
+) -> Result<crate::core::Event, Box<dyn std::error::Error>> {
+    log.get(parse_event_id(id)?)?
+        .ok_or_else(|| format!("no event with id {id}").into())
+}
+
 /// One event by its wire id, as `encode` prints it, or with `content`
 /// sliced to `start..end` when either bound is given - the one path
 /// both the `read_event` tool and `events show` take, so an unknown id
@@ -379,9 +390,7 @@ pub fn read_event(
     start: Option<usize>,
     end: Option<usize>,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let event = log
-        .get(parse_event_id(id)?)?
-        .ok_or_else(|| format!("no event with id {id}"))?;
+    let event = find_event(log, id)?;
     if start.is_none() && end.is_none() {
         Ok(encode(&event))
     } else {

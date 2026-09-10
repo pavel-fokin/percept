@@ -4,7 +4,8 @@ use globset::GlobBuilder;
 use serde::Deserialize;
 
 use crate::harness::{Tool, ToolOutput, ToolSpec};
-use crate::tools::{join_capped, Workspace};
+use crate::tools::{join_capped, walk};
+use crate::workspace::Workspace;
 
 /// Cap on matches returned, so a broad pattern can't flood the
 /// model's window with the whole tree.
@@ -63,9 +64,7 @@ impl Tool for FindFiles {
             .build()?
             .compile_matcher();
 
-        let mut matches: Vec<String> = self
-            .workspace
-            .walk(self.workspace.root())
+        let mut matches: Vec<String> = walk(self.workspace.root())
             .map(|entry| self.workspace.relative(entry.path()))
             .filter(|relative| glob.is_match(relative))
             .collect();

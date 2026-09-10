@@ -2,10 +2,14 @@
 //! maps folded from it, with the rules between them. Serde-free; knows
 //! nothing of a model, a tool, or a working tree.
 
+// Reachability here is judged with the lab present: the lab build is
+// the one that sees every consumer, and `--all-features` clippy is
+// what catches code dead in both.
+#![cfg_attr(not(feature = "lab"), allow(dead_code, unused_imports))]
+
 mod event;
 mod event_log;
 mod map;
-#[cfg(feature = "lab")]
 mod map_reader;
 mod search;
 
@@ -23,8 +27,6 @@ pub use map::{
     default_prefix, map_of, Edge, Fragment, Kind, Map, MapError, Mutation, Node, NodeId, NodeRef,
     Schema, Schemas, Scope, Selection, Settlement, Standing,
 };
-#[cfg(feature = "lab")]
 pub use map::DECISION;
-#[cfg(feature = "lab")]
 pub use map_reader::MapReader;
 pub use search::{EventQuery, EventSearch};

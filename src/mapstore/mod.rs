@@ -6,12 +6,18 @@
 //! and `catalogue` render it to text for `maps show`/`maps list
 //! --format md`. The tools that call these live in `src/tools`.
 
+// Reachability here is judged with the lab present: the lab build is
+// the one that sees every consumer, and `--all-features` clippy is
+// what catches code dead in both.
+#![cfg_attr(not(feature = "lab"), allow(dead_code, unused_imports))]
+
 mod map;
 mod render;
 mod schemas;
 
-pub use map::{commit, commit_batch, encode_fragment, encode_lines, encode_map, fold_map};
-#[cfg(feature = "lab")]
-pub use map::{encode_schema, LogMaps, NodeRefArgs, Snapshot};
+pub use map::{
+    commit, commit_batch, encode_fragment, encode_lines, encode_map, encode_schema, fold_map,
+    LogMaps, NodeRefArgs, Snapshot,
+};
 pub use render::{catalogue, markdown};
 pub use schemas::load as load_schemas;

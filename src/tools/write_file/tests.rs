@@ -2,7 +2,7 @@ use super::*;
 use std::fs;
 
 fn tool() -> (tempfile::TempDir, WriteFile) {
-    let (dir, workspace) = crate::tools::workspace::temp_workspace();
+    let (dir, workspace) = crate::workspace::temp_workspace();
     (dir, WriteFile::new(workspace))
 }
 

@@ -171,14 +171,14 @@ it, never sideways or up:
 | Infrastructure | `store` | The JSONL event log - the serde boundary - implements `core::EventLog` and `core::EventSearch`. `event` encodes an event to a log line and back, and reads one out for display. |
 | Infrastructure | `mapstore` | Loads the schemas - the built-in TOML plus `.percept/schemas/*.toml` - and folds a log-backed cognitive map (`LogMaps`, the `core::MapReader`), revises it, and gives it an external form: `encode_*` to JSON lines, `markdown`/`catalogue` to the text `maps show`/`maps list --format md` print - read live, never written to a file. |
 | Infrastructure | `code` | Walks the working tree with `ignore`, parses each file with `tree-sitter`, and builds a `Map` of the tree's files, the symbols they define, and what imports what: a `file` keyed by repo-relative path, a `function` or `type` keyed by `path::Name`, a `package` per external crate. Not a map percept keeps - it has no author and no history, is never folded from the log, never in the catalogue, never carried in the prompt. It reaches the model only as the `read_code` tool. |
-| Infrastructure | `tools` | Every tool the model calls. `search_events`, `read_event`, `revise_map`, `read_map` run over the log and its maps through `store` and `mapstore`. `read_code` walks the checkout through `code` with the same `around`, `depth`, and `kinds` as `read_map`. `read_file`, `write_file`, `edit_file`, `list_files`, `find_files`, `grep_files` run over a working tree, native over `Workspace` - the one place a path the model gave becomes a real path, refusing any outside the checkout - and `bash`, one `sh -c` at the root with a timeout. The file tools and `read_code` come in under `PERCEPT_TOOLS=code`. `AskBeforeWrites` is the `Policy`; `GitSnapshot` the `Snapshot`, a commit under `refs/percept/snapshots/<prompt>` built through a scratch index. |
+| Infrastructure | `tools` | Every tool the model calls. `search_events`, `read_event`, `revise_map`, `read_map` run over the log and its maps through `store` and `mapstore`. `read_code` walks the checkout through `code` with the same `around`, `depth`, and `kinds` as `read_map`. `read_file`, `write_file`, `edit_file`, `list_files`, `find_files`, `grep_files` run over a working tree, native over the `workspace` module's `Workspace` - the one place a path the model gave becomes a real path, refusing any outside the checkout, shared with the CLI's citations - and `bash`, one `sh -c` at the root with a timeout. The file tools and `read_code` come in under `PERCEPT_TOOLS=code`. `AskBeforeWrites` is the `Policy`; `GitSnapshot` the `Snapshot`, a commit under `refs/percept/snapshots/<prompt>` built through a scratch index. |
+| Infrastructure | `workspace` | `Workspace`, `is_binary`, `read_text_lossy` - the one place a path the model gave becomes a real path, and the text reader both a file tool and the CLI's `file.cited` citations read through. Builds without `lab`. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
 
-`app`, `harness`, `tui`, `providers`, `code`, and the tools the model
-calls build only under the `lab` Cargo feature, off by default;
-`Workspace` and the text reader in `tools` stay, for the CLI's
-citations. Test and lint both builds: with `--all-features` and
-without.
+`app`, `harness`, `tui`, `providers`, `code`, and `tools` build only
+under the `lab` Cargo feature, off by default; `workspace` stays, for
+the CLI's citations. Test and lint both builds: with `--all-features`
+and without.
 
 Wire concrete types together only at the entrypoint - `main` in Rust.
 

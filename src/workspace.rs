@@ -1,12 +1,15 @@
 //! The working tree a file tool reads from, and the one place a path
 //! the model gave becomes a real path on disk.
 
-#[cfg(feature = "lab")]
+// Reachability here is judged with the lab present: the lab build is
+// the one that sees every consumer, and `--all-features` clippy is
+// what catches code dead in both.
+#![cfg_attr(not(feature = "lab"), allow(dead_code, unused_imports))]
+
 use std::collections::HashSet;
 use std::error::Error;
 use std::io;
 use std::path::{Path, PathBuf};
-#[cfg(feature = "lab")]
 use std::sync::Mutex;
 
 use crate::shared::to_slash;
@@ -17,7 +20,6 @@ use crate::shared::to_slash;
 /// stays an edit from memory, never allowed.
 pub struct Workspace {
     root: PathBuf,
-    #[cfg(feature = "lab")]
     read: Mutex<HashSet<PathBuf>>,
 }
 
@@ -27,12 +29,10 @@ impl Workspace {
     pub fn new(root: &Path) -> io::Result<Self> {
         Ok(Self {
             root: root.canonicalize()?,
-            #[cfg(feature = "lab")]
             read: Mutex::new(HashSet::new()),
         })
     }
 
-    #[cfg(feature = "lab")]
     pub fn root(&self) -> &Path {
         &self.root
     }
@@ -81,21 +81,6 @@ impl Workspace {
         Ok(resolved)
     }
 
-    /// The files under `from`, as `find_files` and `grep_files` walk
-    /// them: gitignore honoured, dot-directories entered - `.percept`
-    /// and `.agents` hold what a reader here most wants - and `.git`
-    /// itself left alone. An entry that cannot be read is skipped.
-    #[cfg(feature = "lab")]
-    pub fn walk(&self, from: &Path) -> impl Iterator<Item = ignore::DirEntry> {
-        ignore::WalkBuilder::new(from)
-            .require_git(false)
-            .hidden(false)
-            .filter_entry(|entry| entry.file_name() != ".git")
-            .build()
-            .flatten()
-            .filter(|entry| entry.file_type().is_some_and(|t| t.is_file()))
-    }
-
     /// The path as the model should see it: relative to the root,
     /// `/`-separated.
     pub fn relative(&self, path: &Path) -> String {
@@ -103,13 +88,11 @@ impl Workspace {
     }
 
     /// Records that `read_file` has returned `path`'s contents.
-    #[cfg(feature = "lab")]
     pub fn mark_read(&self, path: &Path) {
         self.read.lock().unwrap().insert(path.to_path_buf());
     }
 
     /// Whether `path` has been read this session.
-    #[cfg(feature = "lab")]
     pub fn was_read(&self, path: &Path) -> bool {
         self.read.lock().unwrap().contains(path)
     }
@@ -130,6 +113,35 @@ fn normalize(path: &Path) -> PathBuf {
         }
     }
     out
+}
+
+/// How much of a file's start is checked for a NUL byte before it is
+/// treated as text.
+const BINARY_SNIFF_BYTES: usize = 8192;
+
+/// Whether `bytes` are a binary file: a NUL in the first 8 KiB. What
+/// `read_file`, `edit_file`, `grep_files`, and `read_text_lossy` all
+/// refuse or skip.
+pub(crate) fn is_binary(bytes: &[u8]) -> bool {
+    bytes[..bytes.len().min(BINARY_SNIFF_BYTES)].contains(&0)
+}
+
+/// Reads `path` as text, refusing a binary file - a NUL in the first
+/// 8 KiB - the same rule `read_file` reads by. Valid UTF-8 is kept as
+/// is; anything else is decoded lossily, so one invalid byte in an
+/// otherwise-text file doesn't fail the read. Shared by `cli::publish`'s
+/// `file.cited` payload and `cli::hook`'s `changed since recorded`
+/// check, so the two sides of "does this citation still read" agree on
+/// what counts as text.
+pub(crate) fn read_text_lossy(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let bytes = std::fs::read(path)?;
+    if is_binary(&bytes) {
+        return Err(format!("{} is binary", path.display()).into());
+    }
+    Ok(match String::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(err) => String::from_utf8_lossy(err.as_bytes()).into_owned(),
+    })
 }
 
 /// A workspace over a fresh temp dir, for every tool's tests. The dir

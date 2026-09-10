@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::harness::{Tool, ToolOutput, ToolSpec};
-use crate::tools::{is_binary, Workspace};
+use crate::workspace::{is_binary, Workspace};
 
 /// Default number of lines a call returns when the model gives no
 /// `limit` - large enough for most files, small enough that a huge one

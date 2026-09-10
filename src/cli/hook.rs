@@ -31,7 +31,7 @@ use crate::core::{
 };
 use crate::shared::Timestamp;
 use crate::store::TurnState;
-use crate::tools;
+use crate::workspace;
 
 /// `percept hook <client>` - `client` names the writer whose turn this
 /// is, and becomes every event's source.
@@ -459,7 +459,7 @@ fn citation_status(
     }
     let text = cache
         .entry(path.to_path_buf())
-        .or_insert_with(|| tools::read_text_lossy(&checkout.join(path)).ok().map(|t| normalize(&t)));
+        .or_insert_with(|| workspace::read_text_lossy(&checkout.join(path)).ok().map(|t| normalize(&t)));
     match text {
         Some(text) if text.contains(&excerpt) => None,
         _ => Some(if text.is_some() { "changed" } else { "gone" }),

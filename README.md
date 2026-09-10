@@ -204,8 +204,9 @@ cargo clippy --offline --all-features --all-targets -- -D warnings
 
 The default build is the binary above. `--all-features` adds the lab,
 so a change to the core that breaks it fails here and not later. Run
-both: what the lab gates is dead code in the default build, and only
-that build sees it.
+both: below the lab, `core`, `store`, `mapstore`, and `workspace` are
+judged with the lab present, and the default clippy is what catches a
+lab symbol reaching `cli` or `main` ungated.
 
 Worktrees are the same project as far as the log is concerned. To keep
 an experiment's events apart, run it with its own `PERCEPT_HOME`. A
