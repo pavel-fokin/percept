@@ -138,14 +138,14 @@ session starts from the answer.
 | 2 | Short ids on every node, `maps record` on stdin | Built 2026-09-09 | Recording |
 | 3 | The start block prints a since-cut; the render leaves the tree | Built 2026-09-09 | Visibility, continuity |
 | 4 | A node cites file text; the start block reports what changed | Built 2026-09-09 | Evidence |
-| 5 | The start block carries the three recording rules | To build | Recording in a stranger's project |
+| 5 | The start block carries the recording rules | Built 2026-09-10 | Recording in a stranger's project |
 | 6 | A push hook at the yes moment | To build | Recording as a habit; the queue |
-| 7 | A `reopens` edge in the decisions schema, from a question to the decision it challenges | To build | An agent disputes without rewriting; the review raises it |
-| 8 | `confirms`, `disputes`, `review.finished`; standing in the fold | To build | Correctability |
+| 7 | A `reopens` edge in the decisions schema, from a question to the decision it challenges | Built 2026-09-10 | An agent disputes without rewriting; the review raises it |
+| 8 | `claim.confirmed`, `claim.disputed`, `review.finished`; standing in the fold; `maps confirm` and `maps dispute` | Built 2026-09-10 | Correctability |
 | 9 | `percept review`: the page, wrong-only, finish as the batch | To build | Visibility, correctability |
 | 10 | The start block carries standing and the human's words | To build | Continuity |
 | 11 | A tally per session | To build | Falsifiability |
-| 12 | The hook records prompts and replies; tool capture only behind an `init` flag | To build | Trust; the fold stays small |
+| 12 | The hook records prompts and replies; tool capture only behind `init --capture` | Built 2026-09-10 | Trust; the fold stays small |
 | 13 | Release binaries and a curl install | To build | A stranger installs |
 | 14 | `init` writes the local, uncommitted config | To build | A teammate without percept is unharmed |
 
