@@ -255,6 +255,11 @@ pub fn decisions() -> Schema {
             Kind::new("contradicts", "from evidence to an option it undercuts"),
             Kind::new("resolves", "from a decision to the question it settles"),
             Kind::new("supersedes", "from a decision to an earlier one it replaces"),
+            Kind::new(
+                "reopens",
+                "from a question to a decision it puts in doubt; the decision stands until a \
+                 new one supersedes it",
+            ),
         ],
         headline_kinds: vec!["question".to_string(), "decision".to_string()],
         settlement: Some(Settlement {

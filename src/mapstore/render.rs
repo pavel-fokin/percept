@@ -284,8 +284,9 @@ fn push_question_body(out: &mut String, map: &Map, question: &Node) {
 
 /// A `- decision` bullet, its properties one per line, the prompt it
 /// cites when that is not `raised_by` - the prompt already shown for the
-/// headline this sits under - and one `was` line per decision it
-/// superseded, nearest first.
+/// headline this sits under - one `was` line per decision it
+/// superseded, nearest first, and one `reopened by` line per question
+/// that puts it in doubt.
 fn push_decision(out: &mut String, map: &Map, decision: &Node, raised_by: Option<EventId>) {
     let _ = writeln!(out, "- decision {}", marked_name(map, decision));
     push_props(out, decision, "  ");
@@ -298,6 +299,9 @@ fn push_decision(out: &mut String, map: &Map, decision: &Node, raised_by: Option
     }
     for was in map.predecessors(decision.id) {
         let _ = writeln!(out, "  was {}", marked_name(map, was));
+    }
+    for question in map.reopened_by(decision.id) {
+        let _ = writeln!(out, "  reopened by {}", marked_name(map, question));
     }
 }
 

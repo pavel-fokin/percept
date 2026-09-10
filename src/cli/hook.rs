@@ -231,6 +231,7 @@ recording
     EOF
 - A claim that rests on a file cites the text it read: an indented line, cites src/path.rs:10-20, under the node.
 - A decision that changes an earlier one adds a supersedes <id> line under it; never remove a node.
+- A decision that no longer seems to fit is not yours to rewrite: raise a question with a reopens <id> line under it, and let the user settle it.
 - Close the session with one line naming what was recorded: Recorded to decisions: q1, d1, o1.";
 
 /// The short id `node` has on `map`, or a `kind:name` fallback for the
@@ -455,7 +456,13 @@ fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
         let mut lines = vec![header];
         lines.extend(capped_lines(
             open.iter()
-                .map(|node| format!("{} {:?}", line_id(map, node), node.name))
+                .map(|node| {
+                    let mut line = format!("{} {:?}", line_id(map, node), node.name);
+                    for decision in map.reopens(node.id) {
+                        line.push_str(&format!(" reopens {}", line_id(map, decision)));
+                    }
+                    line
+                })
                 .collect(),
         ));
         blocks.push(lines.join("\n"));

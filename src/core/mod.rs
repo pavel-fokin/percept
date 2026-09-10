@@ -16,7 +16,7 @@ pub use event::{
 };
 pub use event_log::EventLog;
 #[cfg(test)]
-pub use map::SUPERSEDES;
+pub use map::{REOPENS, SUPERSEDES};
 pub use map::{
     default_prefix, map_of, Edge, Fragment, Kind, Map, MapError, Mutation, Node, NodeId, NodeRef,
     Schema, Schemas, Scope, Selection, Settlement, DECISION,

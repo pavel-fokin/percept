@@ -45,3 +45,7 @@ gloss = "from a decision to the question it settles"
 [[edges]]
 name = "supersedes"
 gloss = "from a decision to an earlier one it replaces"
+
+[[edges]]
+name = "reopens"
+gloss = "from a question to a decision it puts in doubt; the decision stands until a new one supersedes it"

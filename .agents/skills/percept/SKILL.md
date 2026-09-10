@@ -159,7 +159,10 @@ constraint moves, or the user says the map misread them. One more event,
 or a shorter wording, is not a trigger. "Nothing to revise" is a valid
 result.
 
-A correction is an addition. A new decision supersedes the old one:
+A correction is an addition. A decision you doubt is raised, not
+replaced: a `question` with a `reopens <id>` line under it puts the
+decision in the user's review, and the decision stands until they
+settle it. A new decision the user agreed supersedes the old one:
 
 ```sh
 percept maps add-edge decisions --kind supersedes \

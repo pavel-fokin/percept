@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 use crate::core::testing::{decisions, files, node_ref, tasks};
-use crate::core::{Actor, EventId, Mutation, SUPERSEDES};
+use crate::core::{Actor, EventId, Mutation, REOPENS, SUPERSEDES};
 
 /// Adds a node with one `why` property when `why` is given.
 fn add(
@@ -210,6 +210,47 @@ fn a_question_without_a_decision_is_open() {
              \n\
              - open\n",
             head()
+        )
+    );
+}
+
+#[test]
+fn a_reopening_question_shows_under_the_decision_it_doubts() {
+    let mut map = Map::empty(decisions());
+    let source = EventId::new();
+    add(&mut map, "question", "Which model is default?", None, &[source], Actor::User);
+    add(&mut map, "decision", "gpt3 by default", None, &[source], Actor::User);
+    link(
+        &mut map,
+        "resolves",
+        ("decision", "gpt3 by default"),
+        ("question", "Which model is default?"),
+    );
+    add(&mut map, "question", "Does gpt3 still fit?", None, &[source], Actor::User);
+    link(
+        &mut map,
+        REOPENS,
+        ("question", "Does gpt3 still fit?"),
+        ("decision", "gpt3 by default"),
+    );
+
+    assert_eq!(
+        markdown(&map),
+        format!(
+            "{}{}\n\
+             ## q1 \"Which model is default?\"\n\
+             \n\
+             - decision d1 \"gpt3 by default\"\n\
+             \x20 reopened by q2 \"Does gpt3 still fit?\"\n\
+             \n\
+             ## q2 \"Does gpt3 still fit?\"\n\
+             \n\
+             - open\n",
+            head(),
+            contents(&[
+                ("q1", "Which model is default?", source),
+                ("q2", "Does gpt3 still fit?", source),
+            ]),
         )
     );
 }

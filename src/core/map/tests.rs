@@ -160,6 +160,24 @@ fn weighed_for_lists_answering_options_but_not_ones_that_restate_the_decision() 
 }
 
 #[test]
+fn a_reopening_question_is_listed_under_the_decision_and_names_it() {
+    let (q, d, doubt) = (NodeId::new(), NodeId::new(), NodeId::new());
+    let events = [
+        node_added("decisions", q, "question", "Which parser?"),
+        node_added("decisions", d, "decision", "its own parser"),
+        edge_added("decisions", RESOLVES, d, q),
+        node_added("decisions", doubt, "question", "Does its own parser still fit?"),
+        edge_added("decisions", REOPENS, doubt, d),
+    ];
+    let map = Map::fold(decisions(), &scope(), &events).unwrap();
+
+    assert_eq!(map.reopened_by(d).iter().map(|n| n.id).collect::<Vec<_>>(), vec![doubt]);
+    assert_eq!(map.reopens(doubt).iter().map(|n| n.id).collect::<Vec<_>>(), vec![d]);
+    assert!(map.reopened_by(q).is_empty());
+    assert_eq!(map.settled_by(q).iter().map(|n| n.id).collect::<Vec<_>>(), vec![d]);
+}
+
+#[test]
 fn a_resolves_edge_between_other_kinds_settles_nothing() {
     let (o, d) = (NodeId::new(), NodeId::new());
     let events = [

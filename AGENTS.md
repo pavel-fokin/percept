@@ -93,7 +93,10 @@ Both are serde-free.
   may attach edges to it but never remove it. A decision is corrected by
   adding the new one with a `supersedes` edge to the old, never by
   removal, so the old landmark stays one hop away and leaves the
-  headlines. Stability of the representation is a value beside accuracy
+  headlines. A model that finds a decision no longer fits does not
+  supersede it: it raises a question with a `reopens` edge to the
+  decision, which stands until the user settles the question.
+  Stability of the representation is a value beside accuracy
   and compactness: a map may grow, but what a reader has seen does not
   move.
 - `Scope` says which project's events a fold reads: the current one by

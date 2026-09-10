@@ -138,6 +138,11 @@ pub struct Settlement {
 /// headlines - a removal would take a reader's landmark with it.
 pub const SUPERSEDES: &str = "supersedes";
 
+/// The edge kind from a question to a decision it puts in doubt. The
+/// decision stands until a successor supersedes it; the question is how
+/// a model raises the doubt without rewriting what the human agreed.
+pub const REOPENS: &str = "reopens";
+
 /// The edge kind from a decision to the question it settles.
 pub const RESOLVES: &str = "resolves";
 
@@ -749,6 +754,24 @@ impl Map {
             .filter(|edge| edge.kind == ANSWERS && edge.to == question)
             .filter_map(|edge| self.node(edge.from))
             .filter(|node| node.kind == OPTION && !restated.contains(node.name.as_str()))
+            .collect()
+    }
+
+    /// The questions with a `reopens` edge to `decision`, in map order.
+    pub fn reopened_by(&self, decision: NodeId) -> Vec<&Node> {
+        self.edges
+            .iter()
+            .filter(|edge| edge.kind == REOPENS && edge.to == decision)
+            .filter_map(|edge| self.node(edge.from))
+            .collect()
+    }
+
+    /// The decisions `question` reopens, in map order.
+    pub fn reopens(&self, question: NodeId) -> Vec<&Node> {
+        self.edges
+            .iter()
+            .filter(|edge| edge.kind == REOPENS && edge.from == question)
+            .filter_map(|edge| self.node(edge.to))
             .collect()
     }
 
