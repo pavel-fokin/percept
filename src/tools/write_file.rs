@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 
 use crate::harness::{Tool, ToolOutput, ToolSpec};
-use crate::tools::Workspace;
+use crate::workspace::Workspace;
 
 /// The `write_file` tool: writes a file's whole content, creating any
 /// missing parent directories and overwriting whatever was there. Marks

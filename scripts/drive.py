@@ -4,7 +4,7 @@
 The app needs a real terminal, so piping stdin doesn't work. This forks
 a pty, sends timed keystrokes, and captures the frames.
 
-    cargo build
+    cargo build --features lab
     python3 scripts/drive.py --cwd /tmp/scratch 1.0='hi there<enter>' 6.0='<esc>'
 
 Each argument is DELAY=KEYS, where DELAY is seconds since launch. Keys

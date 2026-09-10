@@ -4,7 +4,8 @@ use regex::Regex;
 use serde::Deserialize;
 
 use crate::harness::{Tool, ToolOutput, ToolSpec};
-use crate::tools::{is_binary, join_capped, Workspace};
+use crate::tools::{join_capped, walk};
+use crate::workspace::{is_binary, Workspace};
 
 /// Cap on matches returned, so a broad pattern can't flood the model's
 /// window. The walk stops at the cap: past it the rest of the tree is
@@ -82,7 +83,7 @@ impl Tool for GrepFiles {
         let resolved = self.workspace.resolve(&args.path)?;
 
         let mut matches = Vec::new();
-        for entry in self.workspace.walk(&resolved) {
+        for entry in walk(&resolved) {
             if matches.len() > MAX_MATCHES {
                 break;
             }

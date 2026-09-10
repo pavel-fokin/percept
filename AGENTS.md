@@ -166,13 +166,19 @@ it, never sideways or up:
 | Domain | `harness` | `Message`, `Model`, `Tool`, `Snapshot`, `Policy` - what a loop needs to drive a model over `core`. `Policy` says whether a tool call runs at once or asks the user; `Snapshot` saves the working tree under a prompt and puts it back. Depends on `core` and on `futures-core`, for the stream type its reply port returns. |
 | Application | `app` | `App` - orchestrates `core` and `harness` for one use case, no vocabulary beyond theirs. Runs the tool loop: commits `tool.called`, asks the `Policy`, hands the caller a `ToolStep` - run, ask the user, or carry on. A `Harness` groups what `App` is given: the tools, the policy, the cap, the snapshot, the instructions, and a `Context` - the list of sections the request carries, stable first for the provider's cache, with history sized to a share of the model's window and the events just past it indexed one line each. `MapShape` says how much of each map the prompt carries; `PERCEPT_MAPS` sets it at the entrypoint. `docs/harness.md` is the design. The `code` toolset - the TUI's default, `PERCEPT_TOOLS=code` elsewhere - adds the file tools, the policy that asks before a write, a cap of fifty calls, a snapshot per prompt, and the checkout's `AGENTS.md` as system text every round; `undo` restores the last one. |
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. A `ToolStep::Ask` pauses the turn on a row: `y` runs once, `a` runs and allows that tool for the session, `n` declines; `/undo` puts the tree back. |
-| Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps`, `ask`, `reflect` - the log and its maps without the TUI. `hook <client>` records a coding client's turn from the hook JSON on stdin; `init <client>` writes the client's config to call it. Headless, a call the policy would ask about is declined unless `ask --yes`. |
+| Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps` - the log and its maps without the TUI; `ask` and `reflect` under `lab`. `hook <client>` records a coding client's turn from the hook JSON on stdin; `init <client>` writes the client's config to call it. Headless, a call the policy would ask about is declined unless `ask --yes`. |
 | Infrastructure | `providers` | `Ollama`, `OpenAi`, and `Fireworks` - implement `harness::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` and `FIREWORKS_API_KEY` carry the keys. |
 | Infrastructure | `store` | The JSONL event log - the serde boundary - implements `core::EventLog` and `core::EventSearch`. `event` encodes an event to a log line and back, and reads one out for display. |
 | Infrastructure | `mapstore` | Loads the schemas - the built-in TOML plus `.percept/schemas/*.toml` - and folds a log-backed cognitive map (`LogMaps`, the `core::MapReader`), revises it, and gives it an external form: `encode_*` to JSON lines, `markdown`/`catalogue` to the text `maps show`/`maps list --format md` print - read live, never written to a file. |
 | Infrastructure | `code` | Walks the working tree with `ignore`, parses each file with `tree-sitter`, and builds a `Map` of the tree's files, the symbols they define, and what imports what: a `file` keyed by repo-relative path, a `function` or `type` keyed by `path::Name`, a `package` per external crate. Not a map percept keeps - it has no author and no history, is never folded from the log, never in the catalogue, never carried in the prompt. It reaches the model only as the `read_code` tool. |
-| Infrastructure | `tools` | Every tool the model calls. `search_events`, `read_event`, `revise_map`, `read_map` run over the log and its maps through `store` and `mapstore`. `read_code` walks the checkout through `code` with the same `around`, `depth`, and `kinds` as `read_map`. `read_file`, `write_file`, `edit_file`, `list_files`, `find_files`, `grep_files` run over a working tree, native over `Workspace` - the one place a path the model gave becomes a real path, refusing any outside the checkout - and `bash`, one `sh -c` at the root with a timeout. The file tools and `read_code` come in under `PERCEPT_TOOLS=code`. `AskBeforeWrites` is the `Policy`; `GitSnapshot` the `Snapshot`, a commit under `refs/percept/snapshots/<prompt>` built through a scratch index. |
+| Infrastructure | `tools` | Every tool the model calls. `search_events`, `read_event`, `revise_map`, `read_map` run over the log and its maps through `store` and `mapstore`. `read_code` walks the checkout through `code` with the same `around`, `depth`, and `kinds` as `read_map`. `read_file`, `write_file`, `edit_file`, `list_files`, `find_files`, `grep_files` run over a working tree, native over the `workspace` module's `Workspace` - the one place a path the model gave becomes a real path, refusing any outside the checkout, shared with the CLI's citations - and `bash`, one `sh -c` at the root with a timeout. The file tools and `read_code` come in under `PERCEPT_TOOLS=code`. `AskBeforeWrites` is the `Policy`; `GitSnapshot` the `Snapshot`, a commit under `refs/percept/snapshots/<prompt>` built through a scratch index. |
+| Infrastructure | `workspace` | `Workspace`, `is_binary`, `read_text_lossy` - the one place a path the model gave becomes a real path, and the text reader both a file tool and the CLI's `file.cited` citations read through. Builds without `lab`. |
 | Foundation | `shared` | `Id<T>`, `Timestamp` - value types with no domain meaning. Below the domain; depends only on `uuid`, `jiff`. |
+
+`app`, `harness`, `tui`, `providers`, `code`, and `tools` build only
+under the `lab` Cargo feature, off by default; `workspace` stays, for
+the CLI's citations. Test and lint both builds: with `--all-features`
+and without.
 
 Wire concrete types together only at the entrypoint - `main` in Rust.
 
@@ -241,7 +247,8 @@ skips it.
   outcome there, so the next session starts from the list and not
   from a re-read.
 
-The TUI only runs on a real terminal. `scripts/drive.py` forks a pty,
+The TUI builds under `--features lab` and only runs on a real
+terminal. `scripts/drive.py` forks a pty,
 sends timed keystrokes, and prints the frames; `--plain` strips the
 escapes so the rendered text can be grepped.
 

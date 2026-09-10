@@ -58,22 +58,6 @@ fn a_dangling_symlink_pointing_outside_is_refused_not_treated_as_a_new_file() {
 }
 
 #[test]
-fn walk_enters_dot_directories_but_not_git_itself() {
-    let (dir, workspace) = workspace();
-    fs::create_dir_all(dir.path().join(".percept")).unwrap();
-    fs::write(dir.path().join(".percept/index.md"), "").unwrap();
-    fs::create_dir_all(dir.path().join(".git/objects")).unwrap();
-    fs::write(dir.path().join(".git/HEAD"), "").unwrap();
-
-    let seen: Vec<String> = workspace
-        .walk(workspace.root())
-        .map(|entry| workspace.relative(entry.path()))
-        .collect();
-
-    assert_eq!(seen, vec![".percept/index.md"]);
-}
-
-#[test]
 fn a_path_that_does_not_exist_yet_under_an_existing_directory_resolves() {
     let (dir, workspace) = workspace();
 

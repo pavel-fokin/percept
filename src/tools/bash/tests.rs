@@ -1,7 +1,7 @@
 use super::*;
 
 fn tool() -> (tempfile::TempDir, Bash) {
-    let (dir, workspace) = crate::tools::workspace::temp_workspace();
+    let (dir, workspace) = crate::workspace::temp_workspace();
     (dir, Bash::new(workspace))
 }
 

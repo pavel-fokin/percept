@@ -28,7 +28,7 @@ answer='7|seven'
 # How many events to pile on top. The model reads the newest 20.
 burial=${BURIAL:-30}
 
-cargo build --release --manifest-path "$root/Cargo.toml" -q
+cargo build --release --features lab --manifest-path "$root/Cargo.toml" -q
 percept="$root/target/release/percept"
 
 provider=${PERCEPT_PROVIDER:-ollama}

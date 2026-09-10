@@ -5,6 +5,11 @@
 //! the four tools the model calls over the log and its maps live in
 //! `src/tools`.
 
+// Reachability here is judged with the lab present: the lab build is
+// the one that sees every consumer, and `--all-features` clippy is
+// what catches code dead in both.
+#![cfg_attr(not(feature = "lab"), allow(dead_code, unused_imports))]
+
 mod error;
 mod event;
 mod jsonl;
@@ -12,8 +17,8 @@ mod turn_state;
 
 pub use error::Error;
 pub use event::{
-    actor_value, decode, encode, encode_at, excerpt, from_wire, ids, parse_actor, parse_event_id,
-    parse_kind, parse_lines, summarize, Cursor, Event, PREVIEW_CHARS,
+    actor_value, decode, encode, encode_at, find_event, from_wire, ids, parse_actor,
+    parse_event_id, parse_kind, parse_lines, read_event, summarize, Cursor, Event, PREVIEW_CHARS,
 };
 pub use jsonl::Jsonl;
 pub use turn_state::TurnState;
