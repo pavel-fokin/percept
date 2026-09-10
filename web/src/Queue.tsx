@@ -1,13 +1,16 @@
+import { memo } from "react";
 import Claim from "./Claim";
 import { formatDate, plural } from "./format";
 import Mark from "./Mark";
+import { claimedRows } from "./claims";
 import type { MapQueue } from "./types";
 
 /** One map's queue: the since line, the hint, the legend, and one
  * `.group` per settlement question - or one plain group when the map
  * has no settlement. `focused` is the id of the row a keyboard user has
- * moved to, if any. */
-export default function Queue({
+ * moved to, if any. Memoised: `App` re-renders on every keystroke in
+ * the why sheet, and this list does not change with it. */
+function Queue({
   map,
   focused,
   onDispute,
@@ -18,7 +21,7 @@ export default function Queue({
   onDispute: (id: string) => void;
   onConfirm: (id: string) => void;
 }) {
-  const claimed = map.groups.flatMap((group) => group.claims).filter((claim) => claim.standing === "claimed");
+  const claimed = claimedRows(map);
 
   return (
     <div>
@@ -33,33 +36,32 @@ export default function Queue({
           <span>A dashed ring is a claim you have not seen yet.</span>
         </p>
       </div>
-      {map.groups.map((group) => {
-        const isSelfGroup = group.claims.some((claim) => claim.id === group.id);
-        return (
-          <section key={group.id || group.claims[0]?.id} className="mt-8">
-            {group.id && !isSelfGroup && (
-              <header>
-                <h2 className="font-serif text-[1.1875rem] font-medium leading-snug">
-                  <span className="mr-2 font-sans text-sm font-normal text-[var(--ink-3)]">{group.id}</span>
-                  {group.title}
-                </h2>
-                <p className="mt-1 text-[var(--ink-2)]">Raised on {formatDate(group.raised_at as string)}.</p>
-              </header>
-            )}
-            <ol className="mt-3 list-none border-t border-[var(--rule)] p-0">
-              {group.claims.map((claim) => (
-                <Claim
-                  key={claim.id}
-                  claim={claim}
-                  focused={claim.id === focused}
-                  onDispute={onDispute}
-                  onConfirm={onConfirm}
-                />
-              ))}
-            </ol>
-          </section>
-        );
-      })}
+      {map.groups.map((group) => (
+        <section key={group.heading?.id ?? group.claims[0]?.id} className="mt-8">
+          {group.heading && (
+            <header>
+              <h2 className="font-serif text-[1.1875rem] font-medium leading-snug">
+                <span className="mr-2 font-sans text-sm font-normal text-[var(--ink-3)]">{group.heading.id}</span>
+                {group.heading.title}
+              </h2>
+              <p className="mt-1 text-[var(--ink-2)]">Raised on {formatDate(group.heading.raised_at)}.</p>
+            </header>
+          )}
+          <ol className="mt-3 list-none border-t border-[var(--rule)] p-0">
+            {group.claims.map((claim) => (
+              <Claim
+                key={claim.id}
+                claim={claim}
+                focused={claim.id === focused}
+                onDispute={onDispute}
+                onConfirm={onConfirm}
+              />
+            ))}
+          </ol>
+        </section>
+      ))}
     </div>
   );
 }
+
+export default memo(Queue);

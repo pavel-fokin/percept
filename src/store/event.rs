@@ -206,26 +206,6 @@ pub const KINDS: [&str; 14] = [
     REVIEW_FINISHED,
 ];
 
-/// The wire `type` a kind serializes as.
-fn kind(kind: EventKind) -> &'static str {
-    match kind {
-        EventKind::MessageReceived => MESSAGE_RECEIVED,
-        EventKind::ThoughtRecorded => THOUGHT_RECORDED,
-        EventKind::ToolCalled => TOOL_CALLED,
-        EventKind::ToolResulted => TOOL_RESULTED,
-        EventKind::NodeAdded => NODE_ADDED,
-        EventKind::NodeRemoved => NODE_REMOVED,
-        EventKind::EdgeAdded => EDGE_ADDED,
-        EventKind::EdgeRemoved => EDGE_REMOVED,
-        EventKind::ModelCalled => MODEL_CALLED,
-        EventKind::SessionStarted => SESSION_STARTED,
-        EventKind::FileCited => FILE_CITED,
-        EventKind::ClaimConfirmed => CLAIM_CONFIRMED,
-        EventKind::ClaimDisputed => CLAIM_DISPUTED,
-        EventKind::ReviewFinished => REVIEW_FINISHED,
-    }
-}
-
 /// An `EventKind` from its wire spelling - so a caller filtering by
 /// type parses once rather than comparing every event as text.
 pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
@@ -414,7 +394,7 @@ pub fn excerpt(
     let content = event
         .payload()
         .content()
-        .ok_or_else(|| Error::NoRangeableContent(kind(event.kind()).to_string()))?;
+        .ok_or_else(|| Error::NoRangeableContent(event.kind().name().to_string()))?;
     let mut wire = Event::from(event);
 
     let chars: Vec<char> = content.chars().collect();
@@ -587,7 +567,7 @@ impl From<&crate::core::Event> for Event {
                 name: event.source().name.clone(),
                 path: event.source().path.clone(),
             },
-            kind: kind(event.kind()).to_string(),
+            kind: event.kind().name().to_string(),
             causation_id: event.causation_id().map(|id| id.as_uuid().to_string()),
             created_at: event.created_at().to_string(),
             payload,

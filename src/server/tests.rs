@@ -16,52 +16,54 @@ fn spawn() -> std::net::SocketAddr {
 
 /// `spawn`, seeded with `events` and handing the test back the same
 /// `FakeLog` the server writes to, so it can read a write's effect back
-/// with `.load()`.
-fn spawn_over(events: Vec<crate::core::Event>) -> (Arc<FakeLog>, std::net::SocketAddr) {
+/// with `.load()`. The thread owns the `Arc<FakeLog>` it moves in and
+/// serves through a reference to it, the way `main` serves through a
+/// reference to its own log.
+fn spawn_over(events: Vec<crate::core::Event>) -> (std::sync::Arc<FakeLog>, std::net::SocketAddr) {
     let server = bind().expect("bind a server on a spare port");
     let addr = server.server_addr().to_ip().expect("server bound to an IP address");
-    let log = Arc::new(FakeLog::seeded(events));
-    let schemas = Arc::new(schemas());
+    let log = std::sync::Arc::new(FakeLog::seeded(events));
+    let handed_back = log.clone();
+    let schemas = schemas();
     let src = source("test");
-    let served: Arc<dyn EventLog> = log.clone();
-    std::thread::spawn(move || serve(server, served, schemas, src, human()));
-    (log, addr)
+    std::thread::spawn(move || serve(server, &*log, &schemas, src, human()));
+    (handed_back, addr)
+}
+
+/// Sends a raw HTTP/1.0 request to `addr` and returns the full response
+/// text - what `get` and `post` both parse.
+fn send(addr: std::net::SocketAddr, request: String) -> String {
+    let mut stream = TcpStream::connect(addr).expect("connect to the running server");
+    stream.write_all(request.as_bytes()).expect("write the request");
+    let mut response = String::new();
+    stream.read_to_string(&mut response).expect("read the response");
+    response
+}
+
+/// `response`'s status line and its body past the headers.
+fn split(response: &str) -> (&str, &str) {
+    let status = response.lines().next().unwrap_or_default();
+    let body = response.split("\r\n\r\n").nth(1).unwrap_or_default();
+    (status, body)
 }
 
 /// Sends a raw HTTP/1.0 POST of `body` for `path` to `addr` and returns
 /// the status line and the response text past the headers.
 fn post(addr: std::net::SocketAddr, path: &str, body: &serde_json::Value) -> (String, String) {
     let text = body.to_string();
-    let mut stream = TcpStream::connect(addr).expect("connect to the running server");
     let request = format!(
         "POST {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nContent-Length: {}\r\n\r\n{text}",
         text.len()
     );
-    stream
-        .write_all(request.as_bytes())
-        .expect("write the request");
-    let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
-        .expect("read the response");
-    let status = response.lines().next().unwrap_or_default().to_string();
-    let body = response.split("\r\n\r\n").nth(1).unwrap_or_default().to_string();
-    (status, body)
+    let response = send(addr, request);
+    let (status, body) = split(&response);
+    (status.to_string(), body.to_string())
 }
 
 /// Sends a raw HTTP/1.0 GET for `path` to `addr` and returns the
 /// response text.
 fn get(addr: std::net::SocketAddr, path: &str) -> String {
-    let mut stream = TcpStream::connect(addr).expect("connect to the running server");
-    let request = format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n");
-    stream
-        .write_all(request.as_bytes())
-        .expect("write the request");
-    let mut response = String::new();
-    stream
-        .read_to_string(&mut response)
-        .expect("read the response");
-    response
+    send(addr, format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n"))
 }
 
 #[test]
@@ -86,7 +88,7 @@ fn api_review_returns_json_with_a_maps_array() {
     let response = get(addr, "/api/review");
     assert!(response.starts_with("HTTP/1.0 200"), "{response}");
     assert!(response.contains("application/json"), "{response}");
-    let body = response.split("\r\n\r\n").nth(1).expect("a body past the headers");
+    let (_, body) = split(&response);
     let json: serde_json::Value = serde_json::from_str(body).expect("valid JSON");
     assert!(json["maps"].is_array(), "{json}");
 }

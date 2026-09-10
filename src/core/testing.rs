@@ -11,6 +11,7 @@ use crate::core::{
     Actor, Event, EventId, EventLog, HumanId, Kind, NodeId, NodeRef, Payload, Schema, Schemas,
     Scope, Settlement, Source, Usage,
 };
+use crate::shared::Timestamp;
 
 /// The project root `source` stamps, for a test that compares paths.
 pub const ROOT: &str = "/test";
@@ -196,17 +197,46 @@ pub fn node_added_at(path: &str, kind: &str, name: &str) -> Event {
 }
 
 fn node_added_payload(kind: &str, name: &str) -> Payload {
+    node_added_payload_citing(kind, name, vec![EventId::new()])
+}
+
+fn node_added_payload_citing(kind: &str, name: &str, sources: Vec<EventId>) -> Payload {
     Payload::NodeAdded {
         map: "decisions".to_string(),
         node: NodeId::new(),
         kind: kind.to_string(),
         name: name.to_string(),
         properties: BTreeMap::new(),
-        sources: vec![EventId::new()],
+        sources,
         // Left at the sentinel: nothing here has more than one node of
         // a kind, so a positional fallback and a minted one agree.
         seq: 0,
     }
+}
+
+/// A `node.added` event on the decisions map, citing `sources` - for a
+/// test that points a row at events of its own choosing, rather than
+/// the fresh id `node_added_by` mints for one no event answers to.
+pub fn node_added_citing(actor: Actor, kind: &str, name: &str, sources: Vec<EventId>) -> Event {
+    Event::new(
+        actor,
+        source("test"),
+        None,
+        node_added_payload_citing(kind, name, sources),
+    )
+}
+
+/// `event`, re-stamped as created at `at` - for a test that controls
+/// the order a fold sees events in.
+pub fn created_at(event: Event, at: Timestamp) -> Event {
+    Event::restore(
+        event.id(),
+        event.actor(),
+        event.source().clone(),
+        event.causation_id(),
+        at,
+        event.payload().clone(),
+    )
 }
 
 /// The node id a `node.added` event minted, so a test can point an

@@ -258,6 +258,29 @@ pub enum EventKind {
     ReviewFinished,
 }
 
+impl EventKind {
+    /// The wire spelling this kind serializes as, the twin of
+    /// `Actor::name`.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::MessageReceived => "message.received",
+            Self::ThoughtRecorded => "thought.recorded",
+            Self::ToolCalled => "tool.called",
+            Self::ToolResulted => "tool.resulted",
+            Self::NodeAdded => "node.added",
+            Self::NodeRemoved => "node.removed",
+            Self::EdgeAdded => "edge.added",
+            Self::EdgeRemoved => "edge.removed",
+            Self::ModelCalled => "model.called",
+            Self::SessionStarted => "session.started",
+            Self::FileCited => "file.cited",
+            Self::ClaimConfirmed => "claim.confirmed",
+            Self::ClaimDisputed => "claim.disputed",
+            Self::ReviewFinished => "review.finished",
+        }
+    }
+}
+
 /// One recorded fact in the conversation log. Append-only: a committed
 /// Event never changes. `actor` and the `payload` variant together say
 /// what happened; `source` says which writer produced it; `causation_id`

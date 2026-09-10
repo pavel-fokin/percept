@@ -2,8 +2,7 @@
 //! build` writes - into `OUT_DIR`, so `src/server` can embed it with
 //! `include_str!` without Node ever running as part of `cargo build`.
 //! A checkout without a built page still compiles: a stub page lands
-//! at the same path instead, and `PERCEPT_REVIEW_PAGE` says which one
-//! the binary carries.
+//! at the same path instead, saying so itself.
 
 use std::env;
 use std::fs;
@@ -31,11 +30,8 @@ fn main() {
     let dest = Path::new(&out_dir).join("index.html");
 
     if source.exists() {
-        println!("cargo:rerun-if-changed=web/dist/index.html");
         fs::copy(source, &dest).expect("copy web/dist/index.html to OUT_DIR");
-        println!("cargo:rustc-env=PERCEPT_REVIEW_PAGE=built");
     } else {
         fs::write(&dest, STUB).expect("write stub review page to OUT_DIR");
-        println!("cargo:rustc-env=PERCEPT_REVIEW_PAGE=stub");
     }
 }

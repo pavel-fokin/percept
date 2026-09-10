@@ -1,13 +1,16 @@
 //! What a row's `sources` resolve to: the events a node's `sources`
-//! name, as `GET /api/review` sends them - a message with the proposal
-//! a human's "yes" answered, a file's path and excerpt, anything else
-//! by its type, or `missing` when the log no longer holds it.
+//! names, as `GET /api/review` sends them - a message with the
+//! proposal a human's "yes" answered, a file's path and excerpt,
+//! anything else by its type, or `missing` when the log no longer
+//! holds it.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
-use serde_json::{json, Value};
+use serde::Serialize;
 
-use crate::core::{Actor, Event, EventId, Payload};
+use crate::core::{cited_label, Actor, Event, EventId, Payload};
 
 /// A source entry's `content` or `excerpt` is sent whole up to this
 /// many characters; beyond it the entry is cut at a character boundary
@@ -16,110 +19,171 @@ use crate::core::{Actor, Event, EventId, Payload};
 /// blowing up a request that lists many rows.
 const MAX_SOURCE_CHARS: usize = 4000;
 
+/// The proposal a human prompt's "yes" answered: the latest agent
+/// reply in the same source before it.
+#[derive(Serialize, Clone)]
+pub struct Proposal {
+    id: String,
+    at: String,
+    content: String,
+}
+
+/// One event a node's `sources` names, as `GET /api/review` resolves
+/// it - what the source line folds open to.
+#[derive(Serialize, Clone)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum SourceEntry {
+    Message {
+        id: String,
+        at: String,
+        actor: String,
+        client: String,
+        content: String,
+        truncated: bool,
+        proposal: Option<Proposal>,
+    },
+    File {
+        id: String,
+        at: String,
+        path: String,
+        lines: Option<(u32, u32)>,
+        label: String,
+        excerpt: String,
+        truncated: bool,
+    },
+    Event {
+        id: String,
+        at: String,
+        #[serde(rename = "type")]
+        kind: String,
+    },
+    Missing {
+        id: String,
+    },
+}
+
 /// `text` cut to `MAX_SOURCE_CHARS`, and whether it was.
 fn truncate(text: &str) -> (String, bool) {
-    if text.chars().count() <= MAX_SOURCE_CHARS {
-        (text.to_string(), false)
-    } else {
-        (text.chars().take(MAX_SOURCE_CHARS).collect(), true)
+    match text.char_indices().nth(MAX_SOURCE_CHARS) {
+        Some((at, _)) => (text[..at].to_string(), true),
+        None => (text.to_string(), false),
     }
 }
 
-/// Every event loaded for one request, indexed by id - built once so
-/// resolving a node's `sources` never calls `log.get` per source; the
-/// log is large and a request lists many rows.
+/// Every event loaded for one request, indexed by id, and every agent
+/// `message.received` indexed by its source, both built in one pass so
+/// resolving a node's `sources` never scans the whole log per source -
+/// the log is large and a request lists many rows. `entry` memoises
+/// what it builds, since two nodes can cite the same event.
 pub struct EventIndex<'a> {
-    events: &'a [Event],
     by_id: HashMap<EventId, &'a Event>,
+    agent_replies: HashMap<(String, PathBuf), Vec<&'a Event>>,
+    cache: RefCell<HashMap<EventId, SourceEntry>>,
 }
 
 impl<'a> EventIndex<'a> {
     pub fn new(events: &'a [Event]) -> Self {
+        let mut by_id = HashMap::new();
+        let mut agent_replies: HashMap<(String, PathBuf), Vec<&Event>> = HashMap::new();
+        for event in events {
+            by_id.insert(event.id(), event);
+            if matches!(event.actor(), Actor::Agent)
+                && matches!(event.payload(), Payload::MessageReceived { .. })
+            {
+                let key = (event.source().name.clone(), event.source().path.clone());
+                agent_replies.entry(key).or_default().push(event);
+            }
+        }
         Self {
-            events,
-            by_id: events.iter().map(|event| (event.id(), event)).collect(),
+            by_id,
+            agent_replies,
+            cache: RefCell::new(HashMap::new()),
         }
     }
 
-    /// The latest `message.received` from `Actor::Agent`, in the same
-    /// source as `message` (same name and path) and `created_at`
+    /// The latest agent reply in the same source as `message` and
     /// before it - the proposal a human's "yes" answered, or `None`
     /// when there is none.
-    fn proposal_of(&self, message: &Event) -> Option<Value> {
-        self.events
-            .iter()
-            .filter(|event| matches!(event.actor(), Actor::Agent))
-            .filter(|event| matches!(event.payload(), Payload::MessageReceived { .. }))
-            .filter(|event| event.source() == message.source())
-            .filter(|event| event.created_at() < message.created_at())
-            .max_by_key(|event| event.created_at())
-            .map(|event| {
-                let content = match event.payload() {
-                    Payload::MessageReceived { content } => content,
-                    _ => unreachable!("filtered to message.received above"),
-                };
-                let (content, _) = truncate(content);
-                json!({
-                    "id": event.id().as_uuid().to_string(),
-                    "at": event.created_at().to_string(),
-                    "content": content,
-                })
-            })
+    fn proposal_of(&self, message: &Event) -> Option<Proposal> {
+        let key = (message.source().name.clone(), message.source().path.clone());
+        let replies = self.agent_replies.get(&key)?;
+        let at = replies.partition_point(|event| event.created_at() < message.created_at());
+        let event = *replies[..at].last()?;
+        let Payload::MessageReceived { content } = event.payload() else {
+            return None;
+        };
+        let (content, _) = truncate(content);
+        Some(Proposal {
+            id: event.id().as_uuid().to_string(),
+            at: event.created_at().to_string(),
+            content,
+        })
     }
 
     /// One entry of a node's `sources`: the event `id` names, read as
     /// what a source line documents - a message, a file, anything
     /// else, or `missing` when the log no longer holds it.
-    fn entry(&self, id: EventId) -> Value {
+    fn build(&self, id: EventId) -> SourceEntry {
         let Some(event) = self.by_id.get(&id) else {
-            return json!({ "kind": "missing", "id": id.as_uuid().to_string() });
+            return SourceEntry::Missing { id: id.as_uuid().to_string() };
         };
-        let base = json!({
-            "id": event.id().as_uuid().to_string(),
-            "at": event.created_at().to_string(),
-        });
+        let entry_id = event.id().as_uuid().to_string();
+        let at = event.created_at().to_string();
         match event.payload() {
             Payload::MessageReceived { content } => {
                 let (content, truncated) = truncate(content);
-                let mut entry = base;
-                entry["kind"] = json!("message");
-                entry["actor"] = json!(match event.actor() {
-                    Actor::Agent => "agent",
-                    _ => "human",
-                });
-                entry["client"] = json!(event.source().name);
-                entry["content"] = json!(content);
-                entry["proposal"] = match event.actor() {
-                    Actor::Agent => Value::Null,
-                    _ => self.proposal_of(event).unwrap_or(Value::Null),
+                let actor = match event.actor() {
+                    // A system-authored message reads as the human's
+                    // own: percept itself never speaks as a proposal or
+                    // reply.
+                    Actor::System => "human".to_string(),
+                    other => other.name().to_string(),
                 };
-                entry["truncated"] = json!(truncated);
-                entry
+                let proposal = match event.actor() {
+                    Actor::Agent => None,
+                    _ => self.proposal_of(event),
+                };
+                SourceEntry::Message {
+                    id: entry_id,
+                    at,
+                    actor,
+                    client: event.source().name.clone(),
+                    content,
+                    truncated,
+                    proposal,
+                }
             }
             Payload::FileCited { path, lines, excerpt } => {
                 let (excerpt, truncated) = truncate(excerpt);
-                let mut entry = base;
-                entry["kind"] = json!("file");
-                entry["path"] = json!(path.to_string_lossy());
-                entry["lines"] = match lines {
-                    Some((from, to)) => json!([from, to]),
-                    None => Value::Null,
-                };
-                entry["excerpt"] = json!(excerpt);
-                entry["truncated"] = json!(truncated);
-                entry
+                SourceEntry::File {
+                    id: entry_id,
+                    at,
+                    path: path.to_string_lossy().into_owned(),
+                    lines: *lines,
+                    label: cited_label(path, *lines),
+                    excerpt,
+                    truncated,
+                }
             }
-            _ => {
-                let mut entry = base;
-                entry["kind"] = json!("event");
-                entry["type"] = json!(crate::store::Event::from(*event).kind);
-                entry
-            }
+            _ => SourceEntry::Event {
+                id: entry_id,
+                at,
+                kind: event.kind().name().to_string(),
+            },
         }
     }
 
-    /// A node's `sources` as JSON, one entry per id in order.
-    pub fn sources_json(&self, sources: &[EventId]) -> Vec<Value> {
+    fn entry(&self, id: EventId) -> SourceEntry {
+        if let Some(cached) = self.cache.borrow().get(&id) {
+            return cached.clone();
+        }
+        let built = self.build(id);
+        self.cache.borrow_mut().insert(id, built.clone());
+        built
+    }
+
+    /// A node's `sources`, one entry per id in order.
+    pub fn sources_json(&self, sources: &[EventId]) -> Vec<SourceEntry> {
         sources.iter().map(|id| self.entry(*id)).collect()
     }
 }

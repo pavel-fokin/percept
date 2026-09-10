@@ -7,8 +7,7 @@ export default function Toast({ text }: { text: string | null }) {
     <div
       role="status"
       aria-live="polite"
-      style={{ bottom: "4.75rem" }}
-      className="fixed left-1/2 z-[7] -translate-x-1/2 rounded-md bg-[var(--ink)] px-3.5 py-2 text-[var(--ground)]"
+      className="fixed bottom-[4.75rem] left-1/2 z-[7] -translate-x-1/2 rounded-md bg-[var(--ink)] px-3.5 py-2 text-[var(--ground)]"
     >
       {text}
     </div>

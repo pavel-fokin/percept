@@ -28,6 +28,7 @@ export type Source =
       at: string;
       path: string;
       lines: [number, number] | null;
+      label: string;
       excerpt: string;
       truncated: boolean;
     }
@@ -42,8 +43,9 @@ export interface NodeRef {
 }
 
 /** An alternative weighed and lost, folded under the row that answers
- * the same question. */
-export interface Option {
+ * the same question - or the shape a claim itself carries in common
+ * with one. */
+export interface OptionRow {
   id: string;
   kind: string;
   name: string;
@@ -55,19 +57,25 @@ export interface Option {
 
 /** One claim in the queue: a headline node the map's fold marks
  * `claimed`, or judged since the map was last finished. */
-export interface Claim extends Option {
+export interface Row extends OptionRow {
   added_at: string;
   was: NodeRef | null;
   reopens: NodeRef[];
-  options: Option[];
+  options: OptionRow[];
+}
+
+/** The question or task a group's rows answer - absent for the orphan
+ * group, and for a group whose only row is its own question. */
+export interface Heading {
+  id: string;
+  title: string;
+  raised_at: string;
 }
 
 /** Claims that share a settlement question, or a task with none. */
 export interface Group {
-  id: string;
-  title: string;
-  raised_at: string | null;
-  claims: Claim[];
+  heading: Heading | null;
+  claims: Row[];
 }
 
 /** One map's queue: its claims, grouped by the question or task each

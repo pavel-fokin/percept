@@ -27,7 +27,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::core::{cited_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source};
-use crate::mapstore::{block_header, capped_lines, judged_since_block, line_id};
+use crate::mapstore::{block_header, capped_lines, judged_since_block, latest_session_per_client, line_id};
 use crate::shared::Timestamp;
 use crate::store::TurnState;
 use crate::workspace;
@@ -453,15 +453,9 @@ fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
 /// and project path) recorded, if any - `None` on a project's first
 /// session with this client.
 fn last_session(events: &[Event], source: &Source) -> Option<Timestamp> {
-    events
-        .iter()
-        .filter(|event| {
-            matches!(event.payload(), Payload::SessionStarted)
-                && event.source().name == source.name
-                && event.source().path == source.path
-        })
-        .map(Event::created_at)
-        .max()
+    latest_session_per_client(events, &source.scope())
+        .get(&(source.name.clone(), source.path.clone()))
+        .copied()
 }
 
 /// `source.path`'s last component, the name a reader knows the project

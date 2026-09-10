@@ -1,38 +1,25 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { confirm, dispute, fetchReview, finish } from "./api";
-import { plural } from "./format";
+import { messageOf, plural } from "./format";
 import Queue from "./Queue";
+import { allClaims, claimedRows } from "./claims";
 import { FinishSheet, WhySheet } from "./Sheet";
 import Toast from "./Toast";
-import type { Claim, MapQueue, ReviewResponse } from "./types";
+import type { ReviewResponse } from "./types";
 
 type Load =
   | { state: "loading" }
   | { state: "failed"; message: string }
   | { state: "ready"; response: ReviewResponse };
 
-type Sheet = { kind: "why"; id: string } | { kind: "finish" } | null;
+type Sheet = { kind: "why"; id: string; name: string } | { kind: "finish" } | null;
 
-/** `id`'s claim or folded option, searched across every map - what the
- * why sheet shows a name beside, and what `w` resolves a focused row
- * to. */
-function findClaim(response: ReviewResponse, id: string): Claim | { id: string; name: string } | undefined {
-  for (const map of response.maps) {
-    for (const group of map.groups) {
-      for (const claim of group.claims) {
-        if (claim.id === id) return claim;
-        const option = claim.options.find((option) => option.id === id);
-        if (option) return option;
-      }
-    }
-  }
-  return undefined;
-}
-
-/** The current map's headline claims still claimed - what Finish marks
- * seen, and what its sheet counts. */
-function claimedRows(map: MapQueue): Claim[] {
-  return map.groups.flatMap((group) => group.claims).filter((claim) => claim.standing === "claimed");
+/** One keyboard shortcut's key cap - what the seven identical `<kbd>`
+ * elements in the shortcuts footer shared inline. */
+function Key({ children }: { children: React.ReactNode }) {
+  return (
+    <kbd className="mr-1 rounded border border-[var(--rule)] px-1.5 font-bold text-[var(--ink)]">{children}</kbd>
+  );
 }
 
 export default function App() {
@@ -50,9 +37,7 @@ export default function App() {
         setLoad({ state: "ready", response });
         setCurrent((current) => current ?? response.maps[0]?.name ?? null);
       })
-      .catch((error: unknown) => {
-        setLoad({ state: "failed", message: error instanceof Error ? error.message : String(error) });
-      });
+      .catch((error: unknown) => setLoad({ state: "failed", message: messageOf(error) }));
   }
 
   useEffect(refetch, []);
@@ -64,7 +49,7 @@ export default function App() {
   }, [toast]);
 
   const map = load.state === "ready" ? load.response.maps.find((map) => map.name === current) : undefined;
-  const rowIds = map ? map.groups.flatMap((group) => group.claims.map((claim) => claim.id)) : [];
+  const rowIds = map ? allClaims(map).map((claim) => claim.id) : [];
 
   function moveFocus(delta: 1 | -1) {
     if (rowIds.length === 0) return;
@@ -73,21 +58,16 @@ export default function App() {
     setFocused(rowIds[next]);
   }
 
-  function openWhy(id: string) {
-    setSheet({ kind: "why", id });
-  }
+  const onDispute = useCallback(
+    (id: string) => {
+      const name = map ? allClaims(map).find((claim) => claim.id === id)?.name : undefined;
+      setSheet({ kind: "why", id, name: name ?? "" });
+    },
+    [map],
+  );
 
-  // Every keystroke already lands in `drafts` through the textarea's
-  // `onChange`, so closing needs only to dismiss the sheet - what was
-  // typed is kept until a later Save clears it.
-  function closeWhy() {
-    setSheet(null);
-  }
-
-  function saveWhy() {
-    if (sheet?.kind !== "why" || load.state !== "ready" || !current) return;
-    const { id } = sheet;
-    const why = drafts[id] ?? "";
+  function saveWhy(id: string, why: string) {
+    if (!current) return;
     dispute(current, id, why)
       .then(() => {
         setDrafts((drafts) => {
@@ -96,24 +76,23 @@ export default function App() {
         });
         setSheet(null);
         refetch();
-        toastNow(`Marked ${id} wrong.`);
+        setToast(`Marked ${id} wrong.`);
       })
-      .catch((error: unknown) => toastNow(error instanceof Error ? error.message : String(error)));
+      .catch((error: unknown) => setToast(messageOf(error)));
   }
 
-  function confirmNode(id: string) {
-    if (!current) return;
-    confirm(current, id)
-      .then(() => {
-        refetch();
-        toastNow(`Confirmed ${id}.`);
-      })
-      .catch((error: unknown) => toastNow(error instanceof Error ? error.message : String(error)));
-  }
-
-  function toastNow(text: string) {
-    setToast(text);
-  }
+  const onConfirm = useCallback(
+    (id: string) => {
+      if (!current) return;
+      confirm(current, id)
+        .then(() => {
+          refetch();
+          setToast(`Confirmed ${id}.`);
+        })
+        .catch((error: unknown) => setToast(messageOf(error)));
+    },
+    [current],
+  );
 
   function openFinish() {
     if (!map || rowIds.length === 0) return;
@@ -128,14 +107,13 @@ export default function App() {
   function markSeen() {
     if (!current || !map) return;
     const count = claimedRows(map).length;
-    const nodes = [...rowIds, ...map.groups.map((group) => group.id).filter(Boolean)];
-    finish(current, nodes)
+    finish(current, rowIds)
       .then(() => {
         setSheet(null);
         refetch();
-        toastNow(`Review finished. ${plural(count, "One claim", "claims")} seen.`);
+        setToast(`Review finished. ${plural(count, "One claim", "claims")} seen.`);
       })
-      .catch((error: unknown) => toastNow(error instanceof Error ? error.message : String(error)));
+      .catch((error: unknown) => setToast(messageOf(error)));
   }
 
   useEffect(() => {
@@ -163,11 +141,11 @@ export default function App() {
       if (!focused) return;
       if (event.key === "w") {
         event.preventDefault();
-        openWhy(focused);
+        onDispute(focused);
       }
       if (event.key === "y") {
         event.preventDefault();
-        confirmNode(focused);
+        onConfirm(focused);
       }
       if (event.key === "s") {
         event.preventDefault();
@@ -176,9 +154,7 @@ export default function App() {
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  });
-
-  const whyClaim = sheet?.kind === "why" ? findClaim(load.state === "ready" ? load.response : { maps: [], next: null }, sheet.id) : undefined;
+  }, [sheet, focused, rowIds, map, onDispute, onConfirm]);
 
   return (
     <div className="min-h-screen pb-24 font-sans text-[15px] leading-normal">
@@ -222,7 +198,7 @@ export default function App() {
           <p className="py-8">The queue could not be read: {load.message}. Reload to try again.</p>
         )}
         {load.state === "ready" && map && (
-          <Queue map={map} focused={focused} onDispute={openWhy} onConfirm={confirmNode} />
+          <Queue map={map} focused={focused} onDispute={onDispute} onConfirm={onConfirm} />
         )}
         <section className="mt-12">
           <h2 className="text-base font-bold">What the next session starts with</h2>
@@ -241,28 +217,28 @@ export default function App() {
         <footer className="keys-only fixed inset-x-0 bottom-[3.9rem] z-[6] border-t border-[var(--rule)] bg-[var(--sheet)]">
           <div className="mx-auto grid max-w-2xl grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-x-4 gap-y-1.5 px-4 py-3 text-[var(--ink-2)]">
             <span>
-              <kbd className="mr-1 rounded border border-[var(--rule)] px-1.5 font-bold text-[var(--ink)]">j</kbd>
-              <kbd className="mr-1 rounded border border-[var(--rule)] px-1.5 font-bold text-[var(--ink)]">k</kbd>
+              <Key>j</Key>
+              <Key>k</Key>
               next, previous
             </span>
             <span>
-              <kbd className="mr-1 rounded border border-[var(--rule)] px-1.5 font-bold text-[var(--ink)]">w</kbd>
+              <Key>w</Key>
               wrong
             </span>
             <span>
-              <kbd className="mr-1 rounded border border-[var(--rule)] px-1.5 font-bold text-[var(--ink)]">y</kbd>
+              <Key>y</Key>
               confirm
             </span>
             <span>
-              <kbd className="mr-1 rounded border border-[var(--rule)] px-1.5 font-bold text-[var(--ink)]">s</kbd>
+              <Key>s</Key>
               show the exchange
             </span>
             <span>
-              <kbd className="mr-1 rounded border border-[var(--rule)] px-1.5 font-bold text-[var(--ink)]">f</kbd>
+              <Key>f</Key>
               finish, after a check
             </span>
             <span>
-              <kbd className="mr-1 rounded border border-[var(--rule)] px-1.5 font-bold text-[var(--ink)]">?</kbd>
+              <Key>?</Key>
               hide this
             </span>
           </div>
@@ -292,11 +268,13 @@ export default function App() {
       {sheet?.kind === "why" && (
         <WhySheet
           id={sheet.id}
-          name={whyClaim?.name ?? ""}
-          value={drafts[sheet.id] ?? ""}
-          onChange={(value) => setDrafts((drafts) => ({ ...drafts, [sheet.id]: value }))}
-          onCancel={closeWhy}
-          onSave={saveWhy}
+          name={sheet.name}
+          initial={drafts[sheet.id] ?? ""}
+          onCancel={(value) => {
+            setDrafts((drafts) => ({ ...drafts, [sheet.id]: value }));
+            setSheet(null);
+          }}
+          onSave={(value) => saveWhy(sheet.id, value)}
         />
       )}
       {sheet?.kind === "finish" && map && (

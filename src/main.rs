@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use clap::Parser;
 
@@ -286,7 +285,7 @@ async fn main() {
         Some(Command::Review) => open_log(&checkout).and_then(|log| {
             let schemas = mapstore::load_schemas(&checkout)?;
             let me = log.me();
-            server::run(Arc::new(log), Arc::new(schemas), cli_source.clone(), me)
+            server::run(&log, &schemas, cli_source.clone(), me)
         }),
         #[cfg(feature = "lab")]
         Some(Command::Reflect) => {

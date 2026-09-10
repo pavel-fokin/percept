@@ -1,23 +1,18 @@
+import { QUIET } from "./Sheet";
 import Mark from "./Mark";
 import { formatDate, plural, summarize } from "./format";
-import type { Claim as ClaimT, Option, Source as SourceT, Standing } from "./types";
+import type { OptionRow as OptionRowT, Row as RowT, Source as SourceT, Standing } from "./types";
 
-const standingText: Partial<Record<Standing, string>> = {
-  seen: "Seen by you.",
-  confirmed: "Confirmed by you.",
-  disputed: "Marked wrong by you.",
+const standingText: Partial<Record<Standing, { text: string; color: string }>> = {
+  seen: { text: "Seen by you.", color: "text-[var(--ink-3)]" },
+  confirmed: { text: "Confirmed by you.", color: "text-[var(--agree)]" },
+  disputed: { text: "Marked wrong by you.", color: "text-[var(--object)]" },
 };
 
 function StandingText({ standing }: { standing: Standing }) {
-  const text = standingText[standing];
-  if (!text) return null;
-  const color =
-    standing === "confirmed"
-      ? "text-[var(--agree)]"
-      : standing === "disputed"
-        ? "text-[var(--object)]"
-        : "text-[var(--ink-3)]";
-  return <p className={color}>{text}</p>;
+  const entry = standingText[standing];
+  if (!entry) return null;
+  return <p className={entry.color}>{entry.text}</p>;
 }
 
 function Dispute({ dispute }: { dispute: string | null }) {
@@ -27,16 +22,6 @@ function Dispute({ dispute }: { dispute: string | null }) {
       <p className="text-[var(--ink-2)]">Why you marked it wrong.</p>
       <p>{dispute}</p>
     </div>
-  );
-}
-
-/** The chevron a source's or the alternatives fold shares, rotating
- * open with its `<details>`. */
-function Chevron() {
-  return (
-    <span aria-hidden="true" className="mr-2 inline-block transition-transform group-open:rotate-90">
-      ▸
-    </span>
   );
 }
 
@@ -50,30 +35,55 @@ function TruncatedNote({ id }: { id: string }) {
   );
 }
 
+/** A fold shared by a row's sources and its alternatives: a 44px
+ * chevron summary that rotates open with its `<details>`. `source`
+ * marks the three source folds, so `App`'s `s` shortcut can find one
+ * with `details.source`. */
+function Fold({
+  summary,
+  children,
+  source,
+}: {
+  summary: React.ReactNode;
+  children: React.ReactNode;
+  source?: boolean;
+}) {
+  return (
+    <details className={source ? "group source" : "group"}>
+      <summary className="flex min-h-[44px] cursor-pointer list-none items-center text-[var(--ink-2)]">
+        <span aria-hidden="true" className="mr-2 inline-block transition-transform group-open:rotate-90">
+          ▸
+        </span>
+        {summary}
+      </summary>
+      {children}
+    </details>
+  );
+}
+
 /** A `message` source: a human prompt folds open to the exchange grid
  * - the proposal it answered, if any, over the prompt itself; an agent
  * reply folds open to the reply text alone. */
 function MessageSource({ source }: { source: Extract<SourceT, { kind: "message" }> }) {
   if (source.actor === "agent") {
     return (
-      <details className="group source">
-        <summary className="flex min-h-[44px] cursor-pointer list-none items-center text-[var(--ink-2)]">
-          <Chevron />
-          From the model&rsquo;s reply at {formatDate(source.at)}. Show it.
-        </summary>
+      <Fold source summary={<>From the model&rsquo;s reply at {formatDate(source.at)}. Show it.</>}>
         <div className="mt-2 whitespace-pre-wrap border-l-2 border-[var(--rule)] pl-4 font-serif">
           <p>{source.content}</p>
           {source.truncated && <TruncatedNote id={source.id} />}
         </div>
-      </details>
+      </Fold>
     );
   }
   return (
-    <details className="group source">
-      <summary className="flex min-h-[44px] cursor-pointer list-none items-center text-[var(--ink-2)]">
-        <Chevron />
-        You said &ldquo;{summarize(source.content)}&rdquo; at {formatDate(source.at)}. Show the exchange.
-      </summary>
+    <Fold
+      source
+      summary={
+        <>
+          You said &ldquo;{summarize(source.content)}&rdquo; at {formatDate(source.at)}. Show the exchange.
+        </>
+      }
+    >
       <div className="mt-2 grid grid-cols-[3.5rem_1fr] gap-x-2 gap-y-3 border-l-2 border-[var(--rule)] pl-4 font-serif">
         {source.proposal && (
           <>
@@ -93,25 +103,20 @@ function MessageSource({ source }: { source: Extract<SourceT, { kind: "message" 
         <p className="whitespace-pre-wrap">{source.content}</p>
       </div>
       {source.truncated && <TruncatedNote id={source.id} />}
-    </details>
+    </Fold>
   );
 }
 
 /** A `file` source: folds open to its excerpt, in a `<pre>` that
  * scrolls on its own rather than widening the row. */
 function FileSource({ source }: { source: Extract<SourceT, { kind: "file" }> }) {
-  const label = source.lines ? `${source.path}:${source.lines[0]}-${source.lines[1]}` : source.path;
   return (
-    <details className="group source">
-      <summary className="flex min-h-[44px] cursor-pointer list-none items-center text-[var(--ink-2)]">
-        <Chevron />
-        Cites {label}.
-      </summary>
+    <Fold source summary={<>Cites {source.label}.</>}>
       <div className="mt-2 overflow-x-auto border-l-2 border-[var(--rule)] pl-4">
         <pre className="whitespace-pre font-mono text-sm">{source.excerpt}</pre>
       </div>
       {source.truncated && <TruncatedNote id={source.id} />}
-    </details>
+    </Fold>
   );
 }
 
@@ -169,11 +174,7 @@ function Acts({
         {standing === "confirmed" ? "Wrong instead" : "Wrong"}
       </button>
       {standing !== "confirmed" && (
-        <button
-          type="button"
-          onClick={onConfirm}
-          className="min-h-10 rounded-md border-[1.5px] border-transparent px-3.5 py-2 font-normal text-[var(--ink-3)] hover:text-[var(--agree)]"
-        >
+        <button type="button" onClick={onConfirm} className={`${QUIET} hover:text-[var(--agree)]`}>
           {standing === "disputed" ? "Confirm instead" : "Confirm"}
         </button>
       )}
@@ -186,7 +187,7 @@ function OptionRow({
   onDispute,
   onConfirm,
 }: {
-  option: Option;
+  option: OptionRowT;
   onDispute: (id: string) => void;
   onConfirm: (id: string) => void;
 }) {
@@ -228,7 +229,7 @@ export default function Claim({
   onDispute,
   onConfirm,
 }: {
-  claim: ClaimT;
+  claim: RowT;
   focused: boolean;
   onDispute: (id: string) => void;
   onConfirm: (id: string) => void;
@@ -273,19 +274,13 @@ export default function Claim({
       <Dispute dispute={claim.dispute} />
       <Sources sources={claim.sources} />
       {claim.options.length > 0 && (
-        <details className="group">
-          <summary className="flex min-h-[44px] cursor-pointer list-none items-center text-[var(--ink-2)]">
-            <span aria-hidden="true" className="mr-2 inline-block transition-transform group-open:rotate-90">
-              ▸
-            </span>
-            {plural(claim.options.length, "One alternative", "alternatives")} weighed and lost
-          </summary>
+        <Fold summary={`${plural(claim.options.length, "One alternative", "alternatives")} weighed and lost`}>
           <ul className="ml-4 mt-2 list-none border-l-2 border-[var(--rule)] pl-4">
             {claim.options.map((option) => (
               <OptionRow key={option.id} option={option} onDispute={onDispute} onConfirm={onConfirm} />
             ))}
           </ul>
-        </details>
+        </Fold>
       )}
       <Acts
         standing={claim.standing}

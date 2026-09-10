@@ -797,9 +797,7 @@ pub fn maps_confirm(
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let event = mapstore::judge(log, schemas, source, &args.map, &args.node, |map, node, source| {
-        Event::claim_confirmed(map, node, me, source, None)
-    })?;
+    let event = mapstore::confirm(log, schemas, source, me, &args.map, &args.node)?;
     print_lines(std::iter::once(event.id().as_uuid().to_string()))
 }
 
@@ -812,14 +810,14 @@ pub fn maps_dispute(
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let why = args.why;
-    let event = mapstore::judge(
+    let event = mapstore::dispute(
         log,
         schemas,
         source,
+        me,
         &args.target.map,
         &args.target.node,
-        move |map, node, source| Event::claim_disputed(map, node, why, me, source, None),
+        args.why,
     )?;
     print_lines(std::iter::once(event.id().as_uuid().to_string()))
 }

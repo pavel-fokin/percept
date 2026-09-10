@@ -1,35 +1,14 @@
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde_json::Value;
 
 use super::*;
 use crate::core::testing::{
-    edge_added, human, node_added_by, node_id, schemas, source, source_at, FakeLog, ROOT,
+    created_at, edge_added, human, node_added_by, node_added_citing, node_id, schemas, source,
+    source_at, FakeLog, ROOT,
 };
 use crate::core::{Actor, Event, EventId, NodeId, Payload};
 use crate::shared::Timestamp;
-
-/// A `node.added` event on the decisions map, citing `sources` - the
-/// one way a test points a row at events of its own choosing, since
-/// `core::testing::node_added_by` mints a source id no event answers
-/// to.
-fn node_added_with_sources(actor: Actor, kind: &str, name: &str, sources: Vec<EventId>) -> Event {
-    Event::new(
-        actor,
-        source("test"),
-        None,
-        Payload::NodeAdded {
-            map: "decisions".to_string(),
-            node: NodeId::new(),
-            kind: kind.to_string(),
-            name: name.to_string(),
-            properties: BTreeMap::new(),
-            sources,
-            seq: 0,
-        },
-    )
-}
 
 fn message_received(actor: Actor, content: &str) -> Event {
     Event::new(actor, source("test"), None, Payload::MessageReceived { content: content.to_string() })
@@ -77,25 +56,15 @@ fn claim_disputed(node: NodeId, why: &str) -> Event {
     )
 }
 
-/// `event`, restamped to `at` - the one way a test controls the order
-/// `Map::judged_since` and this cut's grouping see, mirroring
-/// `core::map::tests::created_at`.
-fn created_at(event: Event, at: Timestamp) -> Event {
-    Event::restore(
-        event.id(),
-        event.actor(),
-        event.source().clone(),
-        event.causation_id(),
-        at,
-        event.payload().clone(),
-    )
-}
-
-fn cut_decisions(events: Vec<Event>) -> Value {
+fn cut_body(events: Vec<Event>) -> Value {
     let log = FakeLog::seeded(events);
     let schemas = schemas();
     let src = source("test");
-    let body = cut(&log, &schemas, &src).unwrap();
+    serde_json::to_value(cut(&log, &schemas, &src).unwrap()).unwrap()
+}
+
+fn cut_decisions(events: Vec<Event>) -> Value {
+    let body = cut_body(events);
     body["maps"]
         .as_array()
         .unwrap()
@@ -109,6 +78,17 @@ fn groups_of(map: &Value) -> &Vec<Value> {
     map["groups"].as_array().unwrap()
 }
 
+/// `group`'s claims - the one path most tests need past `groups_of`.
+fn claims_of(map: &Value, group: usize) -> &Vec<Value> {
+    groups_of(map)[group]["claims"].as_array().unwrap()
+}
+
+/// The first group's first claim's sources - what a test about one
+/// source reaches for.
+fn first_sources(map: &Value) -> &Vec<Value> {
+    claims_of(map, 0)[0]["sources"].as_array().unwrap()
+}
+
 #[test]
 fn a_claimed_decision_appears_under_the_question_it_resolves() {
     let question = node_added_by(Actor::Agent, "question", "Which language?");
@@ -119,8 +99,8 @@ fn a_claimed_decision_appears_under_the_question_it_resolves() {
 
     let groups = groups_of(&map);
     assert_eq!(groups.len(), 1);
-    assert_eq!(groups[0]["title"], "Which language?");
-    let claims = groups[0]["claims"].as_array().unwrap();
+    assert_eq!(groups[0]["heading"]["title"], "Which language?");
+    let claims = claims_of(&map, 0);
     assert_eq!(claims.len(), 1);
     assert_eq!(claims[0]["name"], "Rust");
     assert_eq!(claims[0]["standing"], "claimed");
@@ -159,7 +139,7 @@ fn a_decision_disputed_after_the_last_finish_stays_in_the_cut_with_its_why() {
 
     let groups = groups_of(&map);
     assert_eq!(groups.len(), 1);
-    let claims = groups[0]["claims"].as_array().unwrap();
+    let claims = claims_of(&map, 0);
     assert_eq!(claims.len(), 1);
     assert_eq!(claims[0]["name"], "Rust");
     assert_eq!(claims[0]["standing"], "disputed");
@@ -175,30 +155,22 @@ fn a_question_that_reopens_a_decision_sorts_before_an_older_question() {
 
     let map = cut_decisions(vec![older_question, decision, newer_question, reopens]);
 
-    let groups = groups_of(&map);
-    assert_eq!(groups[0]["title"], "Newer, reopening?");
+    let claims = claims_of(&map, 0);
+    assert_eq!(claims[0]["name"], "Newer, reopening?");
 }
 
 #[test]
-fn an_open_question_with_no_decision_is_its_own_group_with_itself_as_the_only_row() {
+fn an_open_question_with_no_decision_is_its_own_group_with_a_null_heading() {
     let question = node_added_by(Actor::Agent, "question", "Which language?");
 
     let map = cut_decisions(vec![question]);
 
     let groups = groups_of(&map);
     assert_eq!(groups.len(), 1);
-    assert_eq!(groups[0]["title"], "Which language?");
-    let claims = groups[0]["claims"].as_array().unwrap();
+    assert!(groups[0]["heading"].is_null(), "{:?}", groups[0]);
+    let claims = claims_of(&map, 0);
     assert_eq!(claims.len(), 1);
-    assert_eq!(claims[0]["id"], groups[0]["id"]);
     assert_eq!(claims[0]["name"], "Which language?");
-}
-
-fn cut_body(events: Vec<Event>) -> Value {
-    let log = FakeLog::seeded(events);
-    let schemas = schemas();
-    let src = source("test");
-    cut(&log, &schemas, &src).unwrap()
 }
 
 #[test]
@@ -238,22 +210,21 @@ fn a_decision_that_supersedes_the_one_resolving_a_question_is_grouped_under_that
 
     let groups = groups_of(&map);
     assert_eq!(groups.len(), 1);
-    assert_eq!(groups[0]["title"], "Which language?");
-    let claims = groups[0]["claims"].as_array().unwrap();
+    assert_eq!(groups[0]["heading"]["title"], "Which language?");
+    let claims = claims_of(&map, 0);
     assert_eq!(claims.len(), 1);
     assert_eq!(claims[0]["name"], "Go");
 }
 
 #[test]
-fn an_orphan_group_carries_a_null_raised_at() {
+fn an_orphan_group_carries_a_null_heading() {
     let decision = node_added_by(Actor::Agent, "decision", "Rust");
 
     let map = cut_decisions(vec![decision]);
 
     let groups = groups_of(&map);
     assert_eq!(groups.len(), 1);
-    assert_eq!(groups[0]["id"], "");
-    assert!(groups[0]["raised_at"].is_null(), "{:?}", groups[0]);
+    assert!(groups[0]["heading"].is_null(), "{:?}", groups[0]);
 }
 
 #[test]
@@ -266,7 +237,7 @@ fn an_option_whose_name_equals_the_decisions_is_not_listed_under_it() {
 
     let map = cut_decisions(vec![question, decision, resolves, restating_option, answers]);
 
-    let claims = groups_of(&map)[0]["claims"].as_array().unwrap();
+    let claims = claims_of(&map, 0);
     let options = claims[0]["options"].as_array().unwrap();
     assert!(options.is_empty(), "{options:?}");
 }
@@ -281,8 +252,7 @@ fn an_option_that_answers_the_question_is_listed_under_the_decisions_row() {
 
     let map = cut_decisions(vec![question, decision, resolves, option, answers]);
 
-    let groups = groups_of(&map);
-    let claims = groups[0]["claims"].as_array().unwrap();
+    let claims = claims_of(&map, 0);
     let options = claims[0]["options"].as_array().unwrap();
     assert_eq!(options.len(), 1);
     assert_eq!(options[0]["name"], "Go");
@@ -297,13 +267,12 @@ fn a_decision_citing_a_human_prompt_carries_the_prompts_content_and_the_agent_re
     let proposal = created_at(message_received(Actor::Agent, "Recommendation: Rust."), t0);
     let t1 = t0.minus_minutes(-10).unwrap();
     let prompt = created_at(message_received(Actor::Human(human()), "Yes, Rust."), t1);
-    let decision = node_added_with_sources(Actor::Agent, "decision", "Rust", vec![prompt.id()]);
+    let decision = node_added_citing(Actor::Agent, "decision", "Rust", vec![prompt.id()]);
     let resolves = edge_added("resolves", &decision, &question);
 
     let map = cut_decisions(vec![question, proposal, prompt, decision, resolves]);
 
-    let claims = groups_of(&map)[0]["claims"].as_array().unwrap();
-    let sources = claims[0]["sources"].as_array().unwrap();
+    let sources = first_sources(&map);
     assert_eq!(sources.len(), 1);
     assert_eq!(sources[0]["kind"], "message");
     assert_eq!(sources[0]["content"], "Yes, Rust.");
@@ -314,13 +283,12 @@ fn a_decision_citing_a_human_prompt_carries_the_prompts_content_and_the_agent_re
 fn a_prompt_with_no_earlier_agent_reply_in_its_source_carries_a_null_proposal() {
     let question = node_added_by(Actor::Agent, "question", "Which language?");
     let prompt = message_received(Actor::Human(human()), "Rust, please.");
-    let decision = node_added_with_sources(Actor::Agent, "decision", "Rust", vec![prompt.id()]);
+    let decision = node_added_citing(Actor::Agent, "decision", "Rust", vec![prompt.id()]);
     let resolves = edge_added("resolves", &decision, &question);
 
     let map = cut_decisions(vec![question, prompt, decision, resolves]);
 
-    let claims = groups_of(&map)[0]["claims"].as_array().unwrap();
-    let sources = claims[0]["sources"].as_array().unwrap();
+    let sources = first_sources(&map);
     assert!(sources[0]["proposal"].is_null(), "{sources:?}");
 }
 
@@ -331,13 +299,12 @@ fn a_reply_from_another_source_is_not_taken_as_the_proposal() {
     let other_reply = created_at(message_received_at(source_at("other", "/other"), Actor::Agent, "Go."), t0);
     let t1 = t0.minus_minutes(-10).unwrap();
     let prompt = created_at(message_received(Actor::Human(human()), "Rust, please."), t1);
-    let decision = node_added_with_sources(Actor::Agent, "decision", "Rust", vec![prompt.id()]);
+    let decision = node_added_citing(Actor::Agent, "decision", "Rust", vec![prompt.id()]);
     let resolves = edge_added("resolves", &decision, &question);
 
     let map = cut_decisions(vec![question, other_reply, prompt, decision, resolves]);
 
-    let claims = groups_of(&map)[0]["claims"].as_array().unwrap();
-    let sources = claims[0]["sources"].as_array().unwrap();
+    let sources = first_sources(&map);
     assert!(sources[0]["proposal"].is_null(), "{sources:?}");
 }
 
@@ -345,17 +312,17 @@ fn a_reply_from_another_source_is_not_taken_as_the_proposal() {
 fn a_file_cited_source_carries_its_path_lines_and_excerpt() {
     let question = node_added_by(Actor::Agent, "question", "Which language?");
     let cite = file_cited("src/main.rs", Some((10, 20)), "fn main() {}");
-    let decision = node_added_with_sources(Actor::Agent, "decision", "Rust", vec![cite.id()]);
+    let decision = node_added_citing(Actor::Agent, "decision", "Rust", vec![cite.id()]);
     let resolves = edge_added("resolves", &decision, &question);
 
     let map = cut_decisions(vec![question, cite, decision, resolves]);
 
-    let claims = groups_of(&map)[0]["claims"].as_array().unwrap();
-    let sources = claims[0]["sources"].as_array().unwrap();
+    let sources = first_sources(&map);
     assert_eq!(sources[0]["kind"], "file");
     assert_eq!(sources[0]["path"], "src/main.rs");
     assert_eq!(sources[0]["lines"][0], 10);
     assert_eq!(sources[0]["lines"][1], 20);
+    assert_eq!(sources[0]["label"], "src/main.rs:10-20");
     assert_eq!(sources[0]["excerpt"], "fn main() {}");
 }
 
@@ -363,13 +330,12 @@ fn a_file_cited_source_carries_its_path_lines_and_excerpt() {
 fn a_source_id_the_log_does_not_hold_reads_as_missing() {
     let question = node_added_by(Actor::Agent, "question", "Which language?");
     let missing_id = EventId::new();
-    let decision = node_added_with_sources(Actor::Agent, "decision", "Rust", vec![missing_id]);
+    let decision = node_added_citing(Actor::Agent, "decision", "Rust", vec![missing_id]);
     let resolves = edge_added("resolves", &decision, &question);
 
     let map = cut_decisions(vec![question, decision, resolves]);
 
-    let claims = groups_of(&map)[0]["claims"].as_array().unwrap();
-    let sources = claims[0]["sources"].as_array().unwrap();
+    let sources = first_sources(&map);
     assert_eq!(sources[0]["kind"], "missing");
 }
 
@@ -382,7 +348,7 @@ fn a_finish_naming_an_unknown_id_still_appends_a_review_finished_naming_the_ones
 
     let outcome = finish(&log, &schemas, &src, human(), "decisions", &["d1".to_string(), "d99".to_string()]);
 
-    assert!(matches!(outcome, ApiOutcome::Ok(_)));
+    assert!(outcome.is_ok());
     let events = log.load().unwrap();
     let finished = events
         .iter()
@@ -392,6 +358,29 @@ fn a_finish_naming_an_unknown_id_still_appends_a_review_finished_naming_the_ones
         })
         .expect("a review.finished event");
     assert_eq!(finished, vec![node_id(&decision)]);
+}
+
+#[test]
+fn finish_given_only_a_rows_id_also_names_its_groups_heading() {
+    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let decision = node_added_by(Actor::Agent, "decision", "Rust");
+    let resolves = edge_added("resolves", &decision, &question);
+    let log = FakeLog::seeded(vec![question.clone(), decision.clone(), resolves]);
+    let schemas = schemas();
+    let src = source("test");
+
+    finish(&log, &schemas, &src, human(), "decisions", &["d1".to_string()]).expect("finish succeeds");
+
+    let events = log.load().unwrap();
+    let finished = events
+        .iter()
+        .find_map(|event| match event.payload() {
+            Payload::ReviewFinished { nodes, .. } => Some(nodes.clone()),
+            _ => None,
+        })
+        .expect("a review.finished event");
+    assert!(finished.contains(&node_id(&question)), "{finished:?}");
+    assert!(finished.contains(&node_id(&decision)), "{finished:?}");
 }
 
 #[test]
@@ -429,13 +418,12 @@ fn content_over_4000_characters_is_cut_and_marked_truncated() {
     let question = node_added_by(Actor::Agent, "question", "Which language?");
     let long = "a".repeat(4001);
     let prompt = message_received(Actor::Human(human()), &long);
-    let decision = node_added_with_sources(Actor::Agent, "decision", "Rust", vec![prompt.id()]);
+    let decision = node_added_citing(Actor::Agent, "decision", "Rust", vec![prompt.id()]);
     let resolves = edge_added("resolves", &decision, &question);
 
     let map = cut_decisions(vec![question, prompt, decision, resolves]);
 
-    let claims = groups_of(&map)[0]["claims"].as_array().unwrap();
-    let sources = claims[0]["sources"].as_array().unwrap();
+    let sources = first_sources(&map);
     assert_eq!(sources[0]["content"].as_str().unwrap().len(), 4000);
     assert_eq!(sources[0]["truncated"], true);
 }
