@@ -4,9 +4,15 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use serde::Deserialize;
+use uuid::Uuid;
 
-use crate::core::{EventId, EventLog, EventQuery, EventSearch};
+use crate::core::{EventId, EventLog, EventQuery, EventSearch, HumanId};
+use crate::shared::Id;
 use crate::store::{parse_event_id, Error, Event};
+
+/// The file beside the log holding this `$PERCEPT_HOME`'s `HumanId` -
+/// one UUID and a trailing newline, editable by hand.
+const ME_FILE: &str = "me";
 
 /// A JSONL event log: one compact `store::Event` per line, appended to
 /// as the app runs and replayed to rebuild the transcript on start.
@@ -22,6 +28,11 @@ pub struct Jsonl {
     /// which is what deleting or replacing the path mid-run would
     /// otherwise produce.
     file: Mutex<fs::File>,
+    /// This `$PERCEPT_HOME`'s `HumanId`, read from `me` beside the log,
+    /// or minted into it on the first open. Every event and node this
+    /// process writes as the human, and every legacy `"user"` actor a
+    /// line predating the object form is read back as, resolves to it.
+    me: HumanId,
 }
 
 impl Jsonl {
@@ -50,9 +61,19 @@ impl Jsonl {
             truncate_torn_tail(&file)?;
         }
 
+        let me = open_me(&path.with_file_name(ME_FILE))?;
+
         Ok(Self {
             file: Mutex::new(file),
+            me,
         })
+    }
+
+    /// This `$PERCEPT_HOME`'s `HumanId` - the person at the keyboard,
+    /// minted once into `me` beside the log and read back here ever
+    /// after.
+    pub fn me(&self) -> HumanId {
+        self.me
     }
 
     /// Runs `f` holding both locks: the mutex that orders this
@@ -109,7 +130,7 @@ impl EventLog for Jsonl {
 
         let mut events = Vec::new();
         for (line, raw) in lines(complete_text(&bytes)?) {
-            events.push(parse_line(raw).map_err(|source| at_line(line, source))?);
+            events.push(parse_line(raw, self.me).map_err(|source| at_line(line, source))?);
         }
         Ok(events)
     }
@@ -127,7 +148,7 @@ impl EventLog for Jsonl {
             if parse_event_id(&found).map_err(|e| at_line(line, e))? != id {
                 continue;
             }
-            return Ok(Some(parse_line(raw).map_err(|e| at_line(line, e))?));
+            return Ok(Some(parse_line(raw, self.me).map_err(|e| at_line(line, e))?));
         }
         Ok(None)
     }
@@ -148,7 +169,7 @@ impl EventLog for Jsonl {
             let bytes = read_all(file)?;
             let mut events = Vec::new();
             for (line, raw) in lines(complete_text(&bytes)?) {
-                events.push(parse_line(raw).map_err(|source| at_line(line, source))?);
+                events.push(parse_line(raw, self.me).map_err(|source| at_line(line, source))?);
             }
             let event = compute(events).map_err(Error::Compute)?;
             let mut text = crate::store::encode(&event);
@@ -177,7 +198,7 @@ impl EventLog for Jsonl {
             let bytes = read_all(file)?;
             let mut events = Vec::new();
             for (line, raw) in lines(complete_text(&bytes)?) {
-                events.push(parse_line(raw).map_err(|source| at_line(line, source))?);
+                events.push(parse_line(raw, self.me).map_err(|source| at_line(line, source))?);
             }
             let batch = compute(events).map_err(Error::Compute)?;
             let mut text = String::new();
@@ -214,9 +235,9 @@ struct WireId {
     id: String,
 }
 
-fn parse_line(raw: &str) -> Result<crate::core::Event, Error> {
+fn parse_line(raw: &str, me: HumanId) -> Result<crate::core::Event, Error> {
     let wire: Event = serde_json::from_str(raw).map_err(Error::BadLine)?;
-    crate::core::Event::try_from(wire)
+    crate::store::from_wire(wire, me)
 }
 
 /// Everything up to the last newline. Bytes, not `read_to_string`: a
@@ -241,6 +262,25 @@ fn at_line(line: usize, source: Error) -> Error {
     Error::AtLine {
         line,
         source: Box::new(source),
+    }
+}
+
+/// Reads the `HumanId` from `path`, minting a fresh UUIDv7 into it when
+/// the file is missing - one open, one id. A file that exists but
+/// doesn't hold a single parseable UUID is an error naming `path`,
+/// never silently re-minted: overwriting it would strand every event
+/// and node this human already wrote under the old one.
+fn open_me(path: &Path) -> Result<HumanId, Error> {
+    match fs::read_to_string(path) {
+        Ok(text) => Uuid::parse_str(text.trim())
+            .map(Id::from_uuid)
+            .map_err(|_| Error::BadMeFile(path.to_path_buf())),
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {
+            let me = HumanId::new();
+            fs::write(path, format!("{}\n", me.as_uuid())).map_err(Error::Io)?;
+            Ok(me)
+        }
+        Err(err) => Err(Error::Io(err)),
     }
 }
 

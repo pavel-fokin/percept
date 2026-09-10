@@ -37,7 +37,7 @@ impl EventQuery {
     pub fn matches(&self, event: &Event) -> bool {
         self.since.is_none_or(|since| event.created_at() >= since)
             && self.until.is_none_or(|until| event.created_at() < until)
-            && (self.actors.is_empty() || self.actors.contains(&event.actor()))
+            && (self.actors.is_empty() || self.actors.iter().any(|actor| actor.name() == event.actor().name()))
             && (self.sources.is_empty() || self.sources.iter().any(|s| s == &event.source().name))
             && (self.kinds.is_empty() || self.kinds.contains(&event.kind()))
             && (self.text.is_empty() || self.text.iter().any(|term| carries(event.payload(), term)))

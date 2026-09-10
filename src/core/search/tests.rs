@@ -1,14 +1,14 @@
 use super::*;
 use std::collections::BTreeMap;
 
-use crate::core::testing::source;
+use crate::core::testing::{human, source};
 use crate::core::{EventId, NodeId, Payload};
 
 /// A message from `name`, timestamped `offset_minutes` back.
 fn event_at(name: &str, offset_minutes: i64) -> Event {
     Event::restore(
         EventId::new(),
-        Actor::User,
+        Actor::Human(human()),
         source(name),
         None,
         Timestamp::now().minus_minutes(offset_minutes).unwrap(),
@@ -27,7 +27,7 @@ fn sources(events: &[Event]) -> Vec<String> {
 fn message(content: &str) -> Event {
     Event::restore(
         EventId::new(),
-        Actor::User,
+        Actor::Human(human()),
         source("tui"),
         None,
         Timestamp::now(),
@@ -114,7 +114,7 @@ fn filters_are_anded_together() {
     let mut wanted = event_at("a", 2);
     wanted = Event::restore(
         wanted.id(),
-        Actor::Model,
+        Actor::Agent,
         source("a"),
         None,
         wanted.created_at(),
@@ -125,12 +125,32 @@ fn filters_are_anded_together() {
 
     let query = EventQuery {
         sources: vec!["a".to_string()],
-        actors: vec![Actor::Model],
+        actors: vec![Actor::Agent],
         ..Default::default()
     };
 
     assert!(query.matches(&wanted));
     assert!(!query.matches(&event_at("a", 1)));
+}
+
+#[test]
+fn an_actor_filter_matches_the_kind_not_which_human() {
+    let event = Event::restore(
+        EventId::new(),
+        Actor::Human(crate::core::HumanId::new()),
+        source("a"),
+        None,
+        Timestamp::now(),
+        Payload::MessageReceived {
+            content: "hi".to_string(),
+        },
+    );
+    let query = EventQuery {
+        actors: vec![Actor::Human(crate::core::HumanId::new())],
+        ..Default::default()
+    };
+
+    assert!(query.matches(&event));
 }
 
 #[test]
@@ -207,7 +227,7 @@ fn an_empty_term_matches_empty_content_without_panicking() {
 fn a_tool_call_matching_on_its_tool_name_has_no_hit() {
     let call = Event::restore(
         EventId::new(),
-        Actor::Model,
+        Actor::Agent,
         source("tui"),
         None,
         Timestamp::now(),
@@ -287,7 +307,7 @@ fn a_text_term_matches_every_payload_kind() {
     for payload in payloads {
         let event = Event::restore(
             EventId::new(),
-            Actor::User,
+            Actor::Human(human()),
             source("tui"),
             None,
             Timestamp::now(),
@@ -301,7 +321,7 @@ fn a_text_term_matches_every_payload_kind() {
 fn a_tool_call_matches_by_tool_name_or_by_arguments() {
     let call = Event::restore(
         EventId::new(),
-        Actor::Model,
+        Actor::Agent,
         source("tui"),
         None,
         Timestamp::now(),

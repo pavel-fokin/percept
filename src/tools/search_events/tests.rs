@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::testing::source;
+use crate::core::testing::{human, source};
 use crate::core::{Actor, Event, EventId, Payload};
 use crate::shared::Timestamp;
 use std::sync::Mutex;
@@ -32,7 +32,7 @@ impl EventSearch for FakeSearch {
 fn message(name: &str, content: &str) -> Event {
     Event::restore(
         EventId::new(),
-        Actor::User,
+        Actor::Human(human()),
         source(name),
         None,
         Timestamp::now(),
@@ -43,10 +43,13 @@ fn message(name: &str, content: &str) -> Event {
 }
 
 fn tool() -> SearchEvents {
-    SearchEvents::new(Arc::new(FakeSearch {
-        events: vec![message("tui", "hello"), message("claude-code", "world")],
-        ..Default::default()
-    }))
+    SearchEvents::new(
+        Arc::new(FakeSearch {
+            events: vec![message("tui", "hello"), message("claude-code", "world")],
+            ..Default::default()
+        }),
+        human(),
+    )
 }
 
 #[test]
@@ -73,13 +76,14 @@ fn run_translates_string_filters_into_domain_enums() {
         events: vec![message("tui", "hi")],
         ..Default::default()
     });
-    let tool = SearchEvents::new(search.clone());
+    let me = human();
+    let tool = SearchEvents::new(search.clone(), me);
 
-    tool.run(r#"{"actors":["user"],"contains":["deploy"],"size":3}"#)
+    tool.run(r#"{"actors":["human"],"contains":["deploy"],"size":3}"#)
         .unwrap();
 
     let seen = search.seen.lock().unwrap();
-    assert!(seen.actors == vec![Actor::User]);
+    assert!(seen.actors == vec![Actor::Human(me)]);
     assert_eq!(seen.text, vec!["deploy".to_string()]);
     assert_eq!(seen.size, Some(3));
 }
@@ -90,7 +94,7 @@ fn an_empty_object_searches_with_only_the_default_size() {
         events: vec![message("tui", "a"), message("tui", "b")],
         ..Default::default()
     });
-    let out = SearchEvents::new(search.clone()).run("{}").unwrap();
+    let out = SearchEvents::new(search.clone(), human()).run("{}").unwrap();
 
     assert_eq!(out.content.lines().count(), 2);
     assert_eq!(search.seen.lock().unwrap().size, Some(DEFAULT_SIZE));

@@ -45,6 +45,7 @@ fn chat_with_catalog(catalog: FakeCatalog) -> Chat<'static> {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source("test"),
+        crate::core::testing::human(),
     )
     .unwrap();
     Chat::new(Box::new(app))
@@ -65,6 +66,7 @@ fn chat_with_efforts() -> Chat<'static> {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source("test"),
+        crate::core::testing::human(),
     )
     .unwrap();
     Chat::new(Box::new(app))
@@ -429,6 +431,7 @@ fn chat_asking() -> Chat<'static> {
             ..Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt)
         },
         source("test"),
+        crate::core::testing::human(),
     )
     .unwrap();
     Chat::new(Box::new(app))
@@ -465,6 +468,7 @@ fn a_tool_call_past_the_budget_ends_the_turn_instead_of_hanging() {
             ..Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt)
         },
         source("test"),
+        crate::core::testing::human(),
     )
     .unwrap();
     let mut chat = Chat::new(Box::new(app));

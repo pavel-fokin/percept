@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::testing::{content, node_added, schemas, scope, source, usage, FakeLog};
+use crate::core::testing::{content, human, node_added, schemas, scope, source, usage, FakeLog};
 use crate::core::{Actor, Payload};
 use crate::harness::testing::{FakeCatalog, FakeSnapshot, FakeTool, FixedPolicy, Scripted};
 use crate::harness::{Chunk, Verdict};
@@ -45,6 +45,7 @@ fn streamed_reply_commits_one_event_caused_by_the_prompt() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -62,8 +63,8 @@ fn streamed_reply_commits_one_event_caused_by_the_prompt() {
 
     let events = app.events();
     assert_eq!(events.len(), 2);
-    assert!(events[0].actor() == Actor::User);
-    assert!(events[1].actor() == Actor::Model);
+    assert!(matches!(events[0].actor(), Actor::Human(_)));
+    assert!(events[1].actor() == Actor::Agent);
     assert_eq!(content(&events[1]), "hello");
     assert!(events[1].causation_id() == Some(events[0].id()));
     assert_eq!(events[0].source().name, SOURCE);
@@ -79,6 +80,7 @@ fn a_thought_and_a_reply_commit_as_two_model_events_thought_first() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -94,9 +96,9 @@ fn a_thought_and_a_reply_commit_as_two_model_events_thought_first() {
 
     let events = app.events();
     assert_eq!(events.len(), 3);
-    assert!(events[1].actor() == Actor::Model);
+    assert!(events[1].actor() == Actor::Agent);
     assert_eq!(thought(&events[1]), "hmm");
-    assert!(events[2].actor() == Actor::Model);
+    assert!(events[2].actor() == Actor::Agent);
     assert_eq!(content(&events[2]), "hello");
     assert!(events[1].causation_id() == Some(events[0].id()));
     assert!(events[2].causation_id() == Some(events[0].id()));
@@ -111,6 +113,7 @@ fn a_plain_turn_commits_thought_reply_then_model_called_in_that_order() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -147,6 +150,7 @@ fn a_submit_while_a_turn_streams_is_refused_and_records_nothing() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -170,6 +174,7 @@ fn a_turn_with_a_thought_and_no_reply_still_ends() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -190,6 +195,7 @@ fn empty_reply_commits_nothing() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
     let _ = app.submit("hi".to_string()).unwrap();
@@ -200,8 +206,8 @@ fn empty_reply_commits_nothing() {
 #[test]
 fn preseeded_log_becomes_the_opening_transcript() {
     let seeded = vec![
-        Event::message_received(Actor::User, "hi".to_string(), source(SOURCE), None),
-        Event::message_received(Actor::Model, "hello".to_string(), source(SOURCE), None),
+        Event::message_received(Actor::Human(human()), "hi".to_string(), source(SOURCE), None),
+        Event::message_received(Actor::Agent, "hello".to_string(), source(SOURCE), None),
     ];
     let log = Arc::new(FakeLog::seeded(seeded));
     let mut app = App::new(
@@ -211,6 +217,7 @@ fn preseeded_log_becomes_the_opening_transcript() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
     assert_eq!(app.events().len(), 2);
@@ -222,9 +229,9 @@ fn preseeded_log_becomes_the_opening_transcript() {
 #[test]
 fn another_source_s_conversation_in_the_same_project_stays_out_of_the_transcript() {
     let seeded = vec![
-        Event::message_received(Actor::User, "hi".to_string(), source(SOURCE), None),
+        Event::message_received(Actor::Human(human()), "hi".to_string(), source(SOURCE), None),
         Event::message_received(
-            Actor::User,
+            Actor::Human(human()),
             "codex was here".to_string(),
             source("codex"),
             None,
@@ -238,6 +245,7 @@ fn another_source_s_conversation_in_the_same_project_stays_out_of_the_transcript
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -248,7 +256,7 @@ fn another_source_s_conversation_in_the_same_project_stays_out_of_the_transcript
 #[test]
 fn another_source_s_map_mutation_in_the_same_project_still_folds() {
     let seeded = vec![Event::new(
-        Actor::Model,
+        Actor::Agent,
         source("codex"),
         None,
         Payload::NodeAdded {
@@ -269,6 +277,7 @@ fn another_source_s_map_mutation_in_the_same_project_still_folds() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -284,7 +293,7 @@ fn another_source_s_map_mutation_in_the_same_project_still_folds() {
 #[test]
 fn a_reopened_log_s_last_model_called_seeds_last_usage() {
     let seeded = vec![
-        Event::message_received(Actor::User, "hi".to_string(), source(SOURCE), None),
+        Event::message_received(Actor::Human(human()), "hi".to_string(), source(SOURCE), None),
         Event::model_called(usage(), source(SOURCE), None),
     ];
     let log = Arc::new(FakeLog::seeded(seeded));
@@ -295,6 +304,7 @@ fn a_reopened_log_s_last_model_called_seeds_last_usage() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -304,7 +314,7 @@ fn a_reopened_log_s_last_model_called_seeds_last_usage() {
 #[test]
 fn a_log_with_no_model_called_leaves_last_usage_unset() {
     let seeded = vec![Event::message_received(
-        Actor::User,
+        Actor::Human(human()),
         "hi".to_string(),
         source(SOURCE),
         None,
@@ -317,6 +327,7 @@ fn a_log_with_no_model_called_leaves_last_usage_unset() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -334,6 +345,7 @@ fn append_failure_surfaces_as_err_and_leaves_transcript_unchanged() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -351,6 +363,7 @@ fn a_failed_reply_append_leaves_the_reply_pending() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -373,6 +386,7 @@ fn a_failed_thought_append_leaves_the_reply_unattempted() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -413,6 +427,7 @@ fn app_with_policy(policy: Verdict) -> App {
             ..Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt)
         },
         source(SOURCE),
+        human(),
     )
     .unwrap()
 }
@@ -503,6 +518,7 @@ fn app_with_snapshot() -> (Arc<FakeSnapshot>, App) {
             ..Harness::new(Vec::new(), MapShape::Prompt)
         },
         source(SOURCE),
+        human(),
     )
     .unwrap();
     (snapshot, app)
@@ -549,6 +565,7 @@ fn an_app_without_a_snapshot_takes_none_and_cannot_undo() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
     let _ = app.submit("hi".to_string()).unwrap();
@@ -570,6 +587,7 @@ fn instructions_go_to_the_model_as_system_text_before_the_maps_every_round() {
             ..Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt)
         },
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -592,6 +610,7 @@ fn an_app_without_instructions_sends_none() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -616,6 +635,7 @@ fn a_harness_tool_cap_replaces_the_default() {
             ..Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt)
         },
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -636,6 +656,7 @@ fn a_tool_call_commits_called_then_resulted_then_the_reply() {
         Arc::new(schemas()),
         Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -647,7 +668,7 @@ fn a_tool_call_commits_called_then_resulted_then_the_reply() {
 
     let events = app.events();
     assert_eq!(events.len(), 4);
-    assert!(events[1].actor() == Actor::Model);
+    assert!(events[1].actor() == Actor::Agent);
     assert!(matches!(
         events[1].payload(),
         Payload::ToolCalled { tool, .. } if tool == "search_events"
@@ -672,6 +693,7 @@ fn a_tool_round_commits_model_called_before_tool_called() {
         Arc::new(schemas()),
         Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -697,6 +719,7 @@ fn an_unknown_tool_name_becomes_the_result_content() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -752,6 +775,7 @@ fn a_tool_s_commits_land_between_the_call_and_the_result_caused_by_it() {
             MapShape::Prompt,
         ),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -762,10 +786,10 @@ fn a_tool_s_commits_land_between_the_call_and_the_result_caused_by_it() {
     assert_eq!(events.len(), 5);
     let called_id = events[1].id();
     assert!(matches!(events[1].payload(), Payload::ToolCalled { .. }));
-    assert!(events[2].actor() == Actor::Model);
+    assert!(events[2].actor() == Actor::Agent);
     assert_eq!(content(&events[2]), "one");
     assert!(events[2].causation_id() == Some(called_id));
-    assert!(events[3].actor() == Actor::Model);
+    assert!(events[3].actor() == Actor::Agent);
     assert_eq!(content(&events[3]), "two");
     assert!(events[3].causation_id() == Some(called_id));
     assert!(matches!(
@@ -785,6 +809,7 @@ fn the_tool_call_limit_stops_tools_being_sent_and_then_exhausts() {
         Arc::new(schemas()),
         Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -813,6 +838,7 @@ fn the_request_after_the_last_tool_call_says_the_budget_is_spent() {
         Arc::new(schemas()),
         Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -837,6 +863,7 @@ fn a_model_that_cannot_use_tools_is_sent_none() {
         Arc::new(schemas()),
         Harness::new(vec![Arc::new(FakeTool)], MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -865,6 +892,7 @@ fn seeded_app_with_shape(
         Arc::new(schemas()),
         Harness::new(tools, map_shape),
         source(SOURCE),
+        human(),
     )
     .unwrap();
     (model, app)
@@ -875,7 +903,7 @@ fn seeded_app_with_shape(
 /// overflow the eighth that history may take.
 fn filler(n: usize) -> Vec<Event> {
     (0..n)
-        .map(|i| Event::message_received(Actor::User, format!("{i:<40}"), source(SOURCE), None))
+        .map(|i| Event::message_received(Actor::Human(human()), format!("{i:<40}"), source(SOURCE), None))
         .collect()
 }
 
@@ -919,7 +947,7 @@ fn a_long_tool_loop_never_evicts_the_prompt_it_is_answering() {
 #[test]
 fn a_map_is_sent_with_its_kinds_ahead_of_the_transcript_and_outside_the_window() {
     let mut events = vec![Event::new(
-        Actor::User,
+        Actor::Human(human()),
         source(SOURCE),
         None,
         crate::core::Payload::NodeAdded {
@@ -1042,7 +1070,7 @@ fn an_empty_map_header_says_it_holds_nothing_yet() {
 #[test]
 fn a_map_that_does_not_fold_fails_at_open() {
     let events = vec![Event::new(
-        Actor::User,
+        Actor::Human(human()),
         source(SOURCE),
         None,
         crate::core::Payload::NodeAdded {
@@ -1062,6 +1090,7 @@ fn a_map_that_does_not_fold_fails_at_open() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .err()
     .unwrap();
@@ -1161,6 +1190,7 @@ fn set_model_swaps_the_live_model() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
     assert_eq!(app.model_name(), "silent");
@@ -1189,6 +1219,7 @@ fn set_model_clears_last_usage_so_the_new_model_reads_as_unasked() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
     let _ = app.submit("hi".to_string()).unwrap();
@@ -1220,6 +1251,7 @@ fn set_model_errs_and_leaves_the_model_in_place_while_a_turn_streams() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -1238,6 +1270,7 @@ fn app_on(model: Arc<dyn crate::harness::Model>, catalog: FakeCatalog) -> App {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap()
 }
@@ -1344,6 +1377,7 @@ async fn available_models_returns_the_catalog_s_listing() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
 
@@ -1361,6 +1395,7 @@ fn last_usage_is_the_most_recent_round_trip_not_a_sum() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source(SOURCE),
+        human(),
     )
     .unwrap();
     assert!(app.last_usage().is_none());

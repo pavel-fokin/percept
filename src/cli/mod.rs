@@ -173,14 +173,21 @@ pub struct MapArgs {
     /// Repeatable. An event this fact was drawn from.
     #[arg(long)]
     source: Vec<String>,
-    /// Who is writing: `user` for a human at the terminal, `model` for an
-    /// agent recording on their behalf. The map shows the difference.
-    #[arg(long, default_value = "user", value_parser = parse_actor_arg)]
-    actor: Actor,
+    /// Who is writing: `human` for a person at the terminal, `agent`
+    /// for a model recording on their behalf. The map shows the
+    /// difference.
+    #[arg(long, default_value = "human", value_parser = parse_actor_word)]
+    actor: String,
 }
 
-fn parse_actor_arg(s: &str) -> Result<Actor, String> {
-    store::parse_actor(s).map_err(|err| err.to_string())
+/// Checks `s` names an actor `store::parse_actor` knows, without
+/// resolving it yet - the human's id isn't known until the log is
+/// open, well after clap has parsed the command line.
+fn parse_actor_word(s: &str) -> Result<String, String> {
+    match s {
+        "human" | "agent" | "system" | "user" | "model" => Ok(s.to_string()),
+        other => Err(format!("{other:?} names no actor; use human, agent or system")),
+    }
 }
 
 #[derive(Args)]
@@ -232,10 +239,10 @@ pub struct RecordArgs {
     /// node's and every edge's sources, alongside a node's own `cites`.
     #[arg(long)]
     source: Vec<String>,
-    /// Who is writing: `user` for a human at the terminal, `model` for an
-    /// agent recording on their behalf.
-    #[arg(long, default_value = "user", value_parser = parse_actor_arg)]
-    actor: Actor,
+    /// Who is writing: `human` for a person at the terminal, `agent`
+    /// for a model recording on their behalf.
+    #[arg(long, default_value = "human", value_parser = parse_actor_word)]
+    actor: String,
     /// The id of the event a `cites` line's `file.cited` event follows
     /// from.
     #[arg(long)]
@@ -275,7 +282,8 @@ pub enum EventsCommand {
 
 #[derive(Args)]
 pub struct PublishArgs {
-    #[arg(long)]
+    /// Who is writing: `human`, `agent`, or `system`.
+    #[arg(long, value_parser = parse_actor_word)]
     actor: String,
     #[arg(long, value_parser = non_blank)]
     source: String,
@@ -319,7 +327,7 @@ pub struct SearchArgs {
     #[arg(long)]
     source: Vec<String>,
     /// Repeatable. An event matching any of these actors passes.
-    #[arg(long)]
+    #[arg(long, value_parser = parse_actor_word)]
     actor: Vec<String>,
     /// Repeatable. An event matching any of these types passes.
     #[arg(long = "type")]
@@ -439,6 +447,7 @@ pub fn publish(
     log: &dyn EventLog,
     root: &Path,
     checkout: &Path,
+    me: crate::core::HumanId,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let causation_id = args
         .causation
@@ -452,10 +461,15 @@ pub fn publish(
 
     let event = if args.kind == "file.cited" {
         let payload = file_cited_payload(&args.payload, checkout)?;
-        Event::new(store::parse_actor(&args.actor)?, source, causation_id, payload)
+        Event::new(
+            store::parse_actor(&args.actor, me)?,
+            source,
+            causation_id,
+            payload,
+        )
     } else {
         let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
-        let event = store::decode(&args.actor, source, &args.kind, causation_id, payload)?;
+        let event = store::decode(&args.actor, source, &args.kind, causation_id, payload, me)?;
         // A raw map event would skip `Map::apply`, and one that breaks
         // a rule fails every fold from then on, with no undo in an
         // append-only log.
@@ -558,8 +572,12 @@ fn known_event_id(
 /// Searches `log` for events matching `args`, printing one JSON object
 /// per line in log order. `store` owns the wire shape; the CLI only
 /// builds the query and formats the result.
-pub fn search(args: SearchArgs, log: &dyn EventSearch) -> Result<(), Box<dyn std::error::Error>> {
-    let query = parse_query(&args)?;
+pub fn search(
+    args: SearchArgs,
+    log: &dyn EventSearch,
+    me: crate::core::HumanId,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let query = parse_query(&args, me)?;
     let events = log.search(&query)?;
 
     print_lines(events.iter().map(|event| {
@@ -664,14 +682,16 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
 }
 
 /// One map change from the shell: `target`'s cited events resolved and
-/// `mutation` checked, applied, and committed as actor `user` with no
-/// cause, all under `mapstore::commit`'s one lock. Returns the
-/// payload, for `add-node` to print the minted id.
+/// `mutation` checked, applied, and committed as `target.actor`
+/// (`human` by default) with no cause, all under `mapstore::commit`'s
+/// one lock. `me` resolves `human`/`user` to this log's own `HumanId`.
+/// Returns the payload, for `add-node` to print the minted id.
 fn write(
     target: MapArgs,
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
+    me: crate::core::HumanId,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
     let MapArgs {
@@ -679,6 +699,7 @@ fn write(
         source: cited,
         actor,
     } = target;
+    let actor = store::parse_actor(&actor, me)?;
     let scope = source.scope();
     let event = mapstore::commit(log, schemas, &map, &scope, source, &cited, actor, mutation)?;
     Ok(event.payload().clone())
@@ -691,8 +712,9 @@ pub fn maps_add_node(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
+    me: crate::core::HumanId,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let payload = write(args.target, log, schemas, source, |sources| {
+    let payload = write(args.target, log, schemas, source, me, |sources| {
         Mutation::AddNode {
             kind: args.kind,
             name: args.name,
@@ -714,12 +736,13 @@ pub fn maps_add_edge(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
+    me: crate::core::HumanId,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let scope = source.scope();
     let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
     let from = resolve_ref(&map, &args.from)?;
     let to = resolve_ref(&map, &args.to)?;
-    write(args.target, log, schemas, source, |sources| {
+    write(args.target, log, schemas, source, me, |sources| {
         Mutation::AddEdge {
             kind: args.kind,
             from,
@@ -736,11 +759,12 @@ pub fn maps_remove_node(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
+    me: crate::core::HumanId,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let scope = source.scope();
     let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
     let node = resolve_ref(&map, &args.node)?;
-    write(args.target, log, schemas, source, |sources| {
+    write(args.target, log, schemas, source, me, |sources| {
         Mutation::RemoveNode {
             node,
             reason: args.reason,
@@ -756,12 +780,13 @@ pub fn maps_remove_edge(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
+    me: crate::core::HumanId,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let scope = source.scope();
     let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
     let from = resolve_ref(&map, &args.from)?;
     let to = resolve_ref(&map, &args.to)?;
-    write(args.target, log, schemas, source, |sources| {
+    write(args.target, log, schemas, source, me, |sources| {
         Mutation::RemoveEdge {
             kind: args.kind,
             from,
@@ -778,7 +803,7 @@ pub fn maps_remove_edge(
 fn resolve_judged_node(map: &Map, s: &str) -> Result<NodeId, Box<dyn std::error::Error>> {
     let id = map.resolve_str(s)?;
     let node = map.node(id).expect("resolve_str returns a live node's id");
-    if matches!(node.actor, Actor::User) {
+    if matches!(node.actor, Actor::Human(_)) {
         return Err(format!("{s} is the user's own; standing is for a model's claim").into());
     }
     Ok(id)
@@ -808,9 +833,10 @@ pub fn maps_confirm(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
+    me: crate::core::HumanId,
 ) -> Result<(), Box<dyn std::error::Error>> {
     judge(args, log, schemas, source, |map, node, source| {
-        Event::claim_confirmed(map, node, source, None)
+        Event::claim_confirmed(map, node, me, source, None)
     })
 }
 
@@ -821,10 +847,11 @@ pub fn maps_dispute(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
+    me: crate::core::HumanId,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let why = args.why;
     judge(args.target, log, schemas, source, move |map, node, source| {
-        Event::claim_disputed(map, node, why, source, None)
+        Event::claim_disputed(map, node, why, me, source, None)
     })
 }
 
@@ -983,10 +1010,11 @@ pub fn maps_record(
     schemas: &Schemas,
     source: &crate::core::Source,
     checkout: &Path,
+    me: crate::core::HumanId,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut document = String::new();
     io::stdin().read_to_string(&mut document)?;
-    record_document(&document, args, log, schemas, source, checkout)
+    record_document(&document, args, log, schemas, source, checkout, me)
 }
 
 /// `maps_record`'s work, given the document text rather than reading it
@@ -1007,6 +1035,7 @@ fn record_document(
     schemas: &Schemas,
     source: &crate::core::Source,
     checkout: &Path,
+    me: crate::core::HumanId,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let nodes = parse_document(document)?;
     let total = nodes.len();
@@ -1032,6 +1061,7 @@ fn record_document(
 
     let scope = source.scope();
     let RecordArgs { map, actor, .. } = args;
+    let actor = store::parse_actor(&actor, me)?;
     let batch_source = source.clone();
 
     let events = mapstore::commit_batch(log, schemas, &map, &scope, move |snapshot| {
@@ -1158,7 +1188,7 @@ fn stop_if_pipe_closed(e: io::Error) -> Result<(), Box<dyn std::error::Error>> {
 /// the value it is compared against. A filter naming something the log
 /// has no word for is an error here rather than a query that quietly
 /// matches nothing.
-fn parse_query(args: &SearchArgs) -> Result<EventQuery, String> {
+fn parse_query(args: &SearchArgs, me: crate::core::HumanId) -> Result<EventQuery, String> {
     let kinds = args
         .kind
         .iter()
@@ -1168,7 +1198,7 @@ fn parse_query(args: &SearchArgs) -> Result<EventQuery, String> {
     let actors = args
         .actor
         .iter()
-        .map(|actor| store::parse_actor(actor).map_err(|e| e.to_string()))
+        .map(|actor| store::parse_actor(actor, me).map_err(|e| e.to_string()))
         .collect::<Result<Vec<_>, _>>()?;
 
     let since = args

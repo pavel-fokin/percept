@@ -70,8 +70,10 @@ Both are serde-free.
   project; the path is how a fold picks one project out of it.
 - `Message` is a value object (no identity) - the shape `Model` needs to
   talk to an LLM. Derived from the log at the boundary, never stored.
-- `Actor` (`User`, `Model`, `System`) is the one vocabulary for who a
-  message or event is attributed to.
+- `Actor` (`Human`, `Agent`, `System`) is the one vocabulary for who a
+  message or event is attributed to; a human carries an id minted once
+  per home, kept in the `me` file beside the log, so a claim confirmed
+  or disputed says by whom.
 - `Model` is domain-owned, not infrastructure: `percept` needs "a reply
   given messages," never the mechanism behind it.
 - `Map` is a cognitive map: nodes and edges the model builds from the

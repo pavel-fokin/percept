@@ -201,7 +201,7 @@ fn transcript(chat: &Chat, area: Rect) -> (Text<'static>, u16, Vec<Option<EventI
             &mut lines,
             &mut ids,
             None,
-            actor_lines(chat, Actor::Model, reply, width),
+            actor_lines(chat, Actor::Agent, reply, width),
         );
     }
 
@@ -340,8 +340,8 @@ pub(super) fn clip(text: &str) -> String {
 
 fn actor_lines(chat: &Chat, actor: Actor, content: &str, width: usize) -> Vec<Line<'static>> {
     let (marker, style) = match actor {
-        Actor::User => (">", chat.user_style),
-        Actor::Model => ("⏺", chat.assistant_style),
+        Actor::Human(_) => (">", chat.user_style),
+        Actor::Agent => ("⏺", chat.assistant_style),
         Actor::System => ("⏺", chat.hint_style),
     };
     turn_lines(marker, style, Style::default(), content, width)

@@ -8,6 +8,10 @@ use std::fmt;
 pub enum Error {
     UnknownEventType(String),
     UnknownActor(String),
+    /// The `me` file beside the log didn't hold one parseable UUID and
+    /// a newline - never silently re-minted, since that would change
+    /// whose events a log's past `"user"` lines resolve to.
+    BadMeFile(std::path::PathBuf),
     BadUuid(String),
     BadTimestamp(String),
     BadPayload(serde_json::Error),
@@ -54,6 +58,7 @@ impl fmt::Display for Error {
                 super::event::KINDS.join(", ")
             ),
             Self::UnknownActor(a) => write!(f, "unknown actor: {a}"),
+            Self::BadMeFile(path) => write!(f, "{} does not hold a single uuid", path.display()),
             Self::BadUuid(s) => write!(f, "malformed uuid: {s}"),
             Self::BadTimestamp(s) => write!(f, "malformed timestamp: {s}"),
             Self::BadPayload(e) => write!(f, "malformed payload: {e}"),

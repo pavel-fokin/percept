@@ -1,10 +1,10 @@
 use super::*;
-use crate::core::testing::{source, FakeLog};
+use crate::core::testing::{human, source, FakeLog};
 use crate::core::{Actor, Event, EventId, Payload};
 use crate::shared::Timestamp;
 
 fn message(content: &str) -> Event {
-    Event::message_received(Actor::User, content.to_string(), source("tui"), None)
+    Event::message_received(Actor::Human(human()), content.to_string(), source("tui"), None)
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn a_start_past_the_end_is_an_error() {
 fn a_range_on_a_tool_called_event_is_an_error() {
     let call = Event::restore(
         EventId::new(),
-        Actor::Model,
+        Actor::Agent,
         source("tui"),
         None,
         Timestamp::now(),

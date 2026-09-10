@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::core::{EventQuery, EventSearch};
+use crate::core::{EventQuery, EventSearch, HumanId};
 use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::store::{optional_time, parse_actor, parse_kind, summarize, PREVIEW_CHARS};
 
@@ -13,11 +13,14 @@ use crate::store::{optional_time, parse_actor, parse_kind, summarize, PREVIEW_CH
 /// AGENTS.md.
 pub struct SearchEvents {
     log: Arc<dyn EventSearch>,
+    /// This `$PERCEPT_HOME`'s `HumanId`, from `Jsonl::me` - what an
+    /// `actors: ["human"]` (or the legacy `"user"`) filter resolves to.
+    me: HumanId,
 }
 
 impl SearchEvents {
-    pub fn new(log: Arc<dyn EventSearch>) -> Self {
-        Self { log }
+    pub fn new(log: Arc<dyn EventSearch>, me: HumanId) -> Self {
+        Self { log, me }
     }
 }
 
@@ -41,7 +44,7 @@ const PARAMETERS: &str = r#"{
   "properties": {
     "since": {"type": "string", "description": "lower bound, inclusive: ISO-8601, or 1d/2h/30m back from now"},
     "until": {"type": "string", "description": "upper bound, exclusive: ISO-8601, or 1d/2h/30m back from now"},
-    "actors": {"type": "array", "items": {"type": "string", "enum": ["user", "model", "system"]}},
+    "actors": {"type": "array", "items": {"type": "string", "enum": ["human", "agent", "system"]}},
     "sources": {"type": "array", "items": {"type": "string"}, "description": "the writer that produced the event, e.g. percept-code or claude-code"},
     "kinds": {"type": "array", "items": {"type": "string", "enum": ["message.received", "thought.recorded", "tool.called", "tool.resulted", "node.added", "node.removed", "edge.added", "edge.removed", "model.called", "session.started", "file.cited"]}},
     "contains": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "a substring, case-insensitive, that one of the event's payload strings must carry; any of the values matches"},
@@ -85,7 +88,7 @@ impl Tool for SearchEvents {
         let actors = args
             .actors
             .iter()
-            .map(|a| parse_actor(a))
+            .map(|a| parse_actor(a, self.me))
             .collect::<Result<_, _>>()?;
         let kinds = args
             .kinds

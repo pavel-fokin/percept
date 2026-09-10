@@ -192,7 +192,9 @@ struct MapLine<'a> {
 /// walk that built them, not by who wrote the code or when.
 #[derive(Serialize)]
 struct Stamp {
-    actor: &'static str,
+    /// The same object shape an event's `actor` carries on the wire -
+    /// see `store::actor_value`.
+    actor: serde_json::Value,
     added_at: String,
 }
 
@@ -203,7 +205,7 @@ impl Stamp {
     /// needs.
     fn of(actor: Actor, added_at: Timestamp, stamped: bool) -> Option<Self> {
         stamped.then(|| Self {
-            actor: actor.name(),
+            actor: crate::store::actor_value(actor),
             added_at: added_at.to_string(),
         })
     }

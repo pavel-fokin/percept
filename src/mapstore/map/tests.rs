@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::core::testing::{schemas, scope, source, source_at, FakeLog};
+use crate::core::testing::{human, schemas, scope, source, source_at, FakeLog};
 use crate::core::{Actor, Event, NodeId, NodeRef};
 use crate::shared::Timestamp;
 
@@ -26,7 +26,7 @@ fn an_option_without_a_why_is_refused_as_a_new_write() {
         &scope(),
         &source("cli"),
         &[],
-        Actor::User,
+        Actor::Human(human()),
         add_node("option", "SQLite"),
     )
     .err()
@@ -48,7 +48,7 @@ fn a_task_without_a_why_is_refused_as_a_new_write() {
         &scope(),
         &source("cli"),
         &[],
-        Actor::User,
+        Actor::Human(human()),
         add_node("task", "cancel a turn without quitting"),
     )
     .err()
@@ -76,7 +76,7 @@ fn an_option_with_a_why_is_recorded() {
         &scope(),
         &source("cli"),
         &[],
-        Actor::User,
+        Actor::Human(human()),
         mutation,
     )
     .unwrap();
@@ -95,7 +95,7 @@ fn commit_appends_the_event_that_records_the_mutation() {
         &scope(),
         &source("cli"),
         &[],
-        Actor::User,
+        Actor::Human(human()),
         add_node("decision", "Rust"),
     )
     .unwrap();
@@ -117,7 +117,7 @@ fn commit_loads_the_log_so_a_second_call_sees_the_first() {
         &scope(),
         &source("cli"),
         &[],
-        Actor::User,
+        Actor::Human(human()),
         add_node("decision", "Rust"),
     )
     .unwrap();
@@ -129,7 +129,7 @@ fn commit_loads_the_log_so_a_second_call_sees_the_first() {
         &scope(),
         &source("cli"),
         &[],
-        Actor::User,
+        Actor::Human(human()),
         add_node("decision", "Rust"),
     )
     .err()
@@ -151,7 +151,7 @@ fn commit_allows_the_same_name_under_a_different_project_s_path() {
         &here,
         &source_at("cli", "/here"),
         &[],
-        Actor::User,
+        Actor::Human(human()),
         add_node("decision", "Rust"),
     )
     .unwrap();
@@ -162,7 +162,7 @@ fn commit_allows_the_same_name_under_a_different_project_s_path() {
         &there,
         &source_at("cli", "/there"),
         &[],
-        Actor::User,
+        Actor::Human(human()),
         add_node("decision", "Rust"),
     )
     .unwrap();
@@ -182,7 +182,7 @@ fn committing_to_a_map_no_schema_declares_is_an_error() {
         &scope(),
         &source("cli"),
         &[],
-        Actor::User,
+        Actor::Human(human()),
         add_node("file", "src/main.rs"),
     )
     .err()
@@ -205,7 +205,7 @@ fn an_unknown_map_is_an_error() {
 
 #[test]
 fn a_source_is_checked_against_the_loaded_log() {
-    let cited = Event::message_received(Actor::User, "hi".to_string(), source("t"), None);
+    let cited = Event::message_received(Actor::Human(human()), "hi".to_string(), source("t"), None);
     let known = cited.id().as_uuid().to_string();
     let log = FakeLog::seeded(vec![cited]);
     let unknown = Uuid::now_v7().to_string();
@@ -217,7 +217,7 @@ fn a_source_is_checked_against_the_loaded_log() {
         &scope(),
         &source("cli"),
         &[known],
-        Actor::User,
+        Actor::Human(human()),
         add_node("decision", "Rust"),
     )
     .unwrap();
@@ -228,7 +228,7 @@ fn a_source_is_checked_against_the_loaded_log() {
         &scope(),
         &source("cli"),
         std::slice::from_ref(&unknown),
-        Actor::User,
+        Actor::Human(human()),
         add_node("decision", "Go"),
     )
     .err()
@@ -240,7 +240,7 @@ fn a_source_is_checked_against_the_loaded_log() {
         &scope(),
         &source("cli"),
         &["user".to_string()],
-        Actor::User,
+        Actor::Human(human()),
         add_node("decision", "Go"),
     )
     .err()
@@ -254,13 +254,14 @@ fn a_source_is_checked_against_the_loaded_log() {
 #[test]
 fn a_node_line_carries_its_id_sources_actor_and_time() {
     let map = Map::empty(crate::core::testing::decisions());
+    let me = crate::core::testing::human();
     let node = Node {
         id: NodeId::new(),
         kind: "evidence".to_string(),
         name: "Built both".to_string(),
         properties: BTreeMap::from([("summary".to_string(), "side by side".to_string())]),
         sources: vec![EventId::new()],
-        actor: Actor::User,
+        actor: Actor::Human(me),
         added_at: Timestamp::now(),
         seq: 1,
     };
@@ -272,7 +273,8 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
     assert_eq!(line["name"], "Built both");
     assert_eq!(line["properties"]["summary"], "side by side");
     assert_eq!(line["sources"][0], node.sources[0].as_uuid().to_string());
-    assert_eq!(line["actor"], "user");
+    assert_eq!(line["actor"]["kind"], "human");
+    assert_eq!(line["actor"]["id"], me.as_uuid().to_string());
     assert_eq!(line["added_at"], node.added_at.to_string());
 }
 
@@ -286,7 +288,7 @@ fn a_node_line_carries_its_short_id() {
             properties: BTreeMap::new(),
             sources: Vec::new(),
         },
-        Actor::User,
+        Actor::Human(human()),
     )
     .unwrap();
 
@@ -307,7 +309,7 @@ fn an_edge_line_names_its_ends_as_kind_and_name() {
                 properties: BTreeMap::new(),
                 sources: Vec::new(),
             },
-            Actor::User,
+            Actor::Human(human()),
         )
         .unwrap();
     }
@@ -324,7 +326,7 @@ fn an_edge_line_names_its_ends_as_kind_and_name() {
             },
             sources: Vec::new(),
         },
-        Actor::User,
+        Actor::Human(human()),
     )
     .unwrap();
 
@@ -340,7 +342,7 @@ fn an_edge_line_names_its_ends_as_kind_and_name() {
 #[test]
 fn a_node_line_omits_standing_and_dispute_for_a_claim_nobody_has_judged() {
     let events = [Event::new(
-        Actor::Model,
+        Actor::Agent,
         source("test"),
         None,
         Payload::NodeAdded {
@@ -367,7 +369,7 @@ fn a_node_line_carries_a_disputed_standing_and_its_why() {
     let node_id = NodeId::new();
     let events = [
         Event::new(
-            Actor::Model,
+            Actor::Agent,
             source("test"),
             None,
             Payload::NodeAdded {
@@ -381,7 +383,7 @@ fn a_node_line_carries_a_disputed_standing_and_its_why() {
             },
         ),
         Event::new(
-            Actor::User,
+            Actor::Human(human()),
             source("test"),
             None,
             Payload::ClaimDisputed {
@@ -409,7 +411,7 @@ fn map_with_a_decision() -> Map {
             properties: BTreeMap::new(),
             sources: Vec::new(),
         },
-        Actor::User,
+        Actor::Human(human()),
     )
     .unwrap();
     map

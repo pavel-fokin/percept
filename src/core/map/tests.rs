@@ -1,9 +1,9 @@
 use super::*;
-use crate::core::testing::{decisions, files, node_added_at, scope, source, tasks, ROOT};
+use crate::core::testing::{decisions, files, human, node_added_at, scope, source, tasks, ROOT};
 use crate::core::Actor;
 
 fn committed(payload: Payload) -> Event {
-    Event::new(Actor::User, source("test"), None, payload)
+    Event::new(Actor::Human(human()), source("test"), None, payload)
 }
 
 #[test]
@@ -349,7 +349,7 @@ fn rejected_with(err: MapError, expected: EventId) -> MapError {
 #[test]
 fn fold_stamps_a_node_with_its_events_actor_and_time() {
     let event = Event::new(
-        Actor::Model,
+        Actor::Agent,
         source("test"),
         None,
         Payload::NodeAdded {
@@ -367,7 +367,7 @@ fn fold_stamps_a_node_with_its_events_actor_and_time() {
     let map = Map::fold(decisions(), &scope(), &[event]).unwrap();
 
     let node = map.find("option", "Rust").unwrap();
-    assert_eq!(node.actor, Actor::Model);
+    assert_eq!(node.actor, Actor::Agent);
     assert_eq!(node.added_at, created_at);
 }
 
@@ -572,7 +572,7 @@ fn apply_records_what_a_fold_rebuilds() {
         ),
     ]
     .into_iter()
-    .map(|m| committed(built.apply(m, Actor::User).unwrap()))
+    .map(|m| committed(built.apply(m, Actor::Human(human())).unwrap()))
     .collect();
 
     let folded = Map::fold(decisions(), &scope(), &events).unwrap();
@@ -586,11 +586,12 @@ fn apply_records_what_a_fold_rebuilds() {
 #[test]
 fn apply_stamps_the_node_with_the_actor_given() {
     let mut map = Map::empty(decisions());
-    map.apply(add_option("Rust"), Actor::User).unwrap();
+    let me = crate::core::testing::human();
+    map.apply(add_option("Rust"), Actor::Human(me)).unwrap();
 
     let node = map.find("option", "Rust").unwrap();
 
-    assert_eq!(node.actor, Actor::User);
+    assert_eq!(node.actor, Actor::Human(me));
 }
 
 #[test]
@@ -598,7 +599,7 @@ fn apply_refuses_an_option_without_a_why() {
     let mut map = Map::empty(decisions());
 
     let err = map
-        .apply(add_node("option", "Rust"), Actor::User)
+        .apply(add_node("option", "Rust"), Actor::Human(human()))
         .err()
         .unwrap();
 
@@ -617,18 +618,18 @@ fn apply_refuses_an_option_without_a_why() {
 #[test]
 fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
     let mut map = Map::empty(decisions());
-    map.apply(add_option("Rust"), Actor::User).unwrap();
+    map.apply(add_option("Rust"), Actor::Human(human())).unwrap();
 
     let unknown = map
-        .apply(add_node("goal", "Ship"), Actor::User)
+        .apply(add_node("goal", "Ship"), Actor::Human(human()))
         .err()
         .unwrap();
     let blank = map
-        .apply(add_option("  "), Actor::User)
+        .apply(add_option("  "), Actor::Human(human()))
         .err()
         .unwrap();
     let duplicate = map
-        .apply(add_option("Rust"), Actor::User)
+        .apply(add_option("Rust"), Actor::Human(human()))
         .err()
         .unwrap();
     let missing = map
@@ -638,7 +639,7 @@ fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
                 node_ref("evidence", "Nope"),
                 node_ref("option", "Rust"),
             ),
-            Actor::User,
+            Actor::Human(human()),
         )
         .err()
         .unwrap();
@@ -650,7 +651,7 @@ fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
                 to: node_ref("option", "Rust"),
                 sources: Vec::new(),
             },
-            Actor::User,
+            Actor::Human(human()),
         )
         .err()
         .unwrap();
@@ -672,9 +673,9 @@ fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
 #[test]
 fn apply_removes_a_node_by_name_and_its_edges_with_it() {
     let mut map = Map::empty(decisions());
-    map.apply(add_node("question", "Which language?"), Actor::User)
+    map.apply(add_node("question", "Which language?"), Actor::Human(human()))
         .unwrap();
-    map.apply(add_node("decision", "Rust over Go"), Actor::User)
+    map.apply(add_node("decision", "Rust over Go"), Actor::Human(human()))
         .unwrap();
     map.apply(
         add_edge(
@@ -682,7 +683,7 @@ fn apply_removes_a_node_by_name_and_its_edges_with_it() {
             node_ref("decision", "Rust over Go"),
             node_ref("question", "Which language?"),
         ),
-        Actor::User,
+        Actor::Human(human()),
     )
     .unwrap();
 
@@ -693,7 +694,7 @@ fn apply_removes_a_node_by_name_and_its_edges_with_it() {
                 reason: "answered".to_string(),
                 sources: Vec::new(),
             },
-            Actor::User,
+            Actor::Human(human()),
         )
         .unwrap();
 
@@ -705,7 +706,7 @@ fn apply_removes_a_node_by_name_and_its_edges_with_it() {
 #[test]
 fn a_map_reads_as_one_line_per_node_then_per_edge() {
     let mut map = Map::empty(decisions());
-    map.apply(add_node("question", "Which language?"), Actor::User)
+    map.apply(add_node("question", "Which language?"), Actor::Human(human()))
         .unwrap();
     map.apply(
         Mutation::AddNode {
@@ -717,10 +718,10 @@ fn a_map_reads_as_one_line_per_node_then_per_edge() {
             ]),
             sources: Vec::new(),
         },
-        Actor::User,
+        Actor::Human(human()),
     )
     .unwrap();
-    map.apply(add_node("decision", "Rust over Go"), Actor::User)
+    map.apply(add_node("decision", "Rust over Go"), Actor::Human(human()))
         .unwrap();
     map.apply(
         add_edge(
@@ -728,7 +729,7 @@ fn a_map_reads_as_one_line_per_node_then_per_edge() {
             node_ref("decision", "Rust over Go"),
             node_ref("question", "Which language?"),
         ),
-        Actor::User,
+        Actor::Human(human()),
     )
     .unwrap();
 
@@ -804,20 +805,20 @@ fn keeping_a_kind_the_schema_lacks_is_an_error() {
 /// step at a time and against the edge direction.
 fn chain() -> Map {
     let mut map = Map::empty(decisions());
-    map.apply(add_node("question", "Which language?"), Actor::User)
+    map.apply(add_node("question", "Which language?"), Actor::Human(human()))
         .unwrap();
-    map.apply(add_node("decision", "Rust over Go"), Actor::User)
+    map.apply(add_node("decision", "Rust over Go"), Actor::Human(human()))
         .unwrap();
-    map.apply(add_node("evidence", "Built both"), Actor::User)
+    map.apply(add_node("evidence", "Built both"), Actor::Human(human()))
         .unwrap();
-    map.apply(add_option("Go"), Actor::User).unwrap();
+    map.apply(add_option("Go"), Actor::Human(human())).unwrap();
     map.apply(
         add_edge(
             "resolves",
             node_ref("decision", "Rust over Go"),
             node_ref("question", "Which language?"),
         ),
-        Actor::User,
+        Actor::Human(human()),
     )
     .unwrap();
     map.apply(
@@ -826,7 +827,7 @@ fn chain() -> Map {
             node_ref("evidence", "Built both"),
             node_ref("decision", "Rust over Go"),
         ),
-        Actor::User,
+        Actor::Human(human()),
     )
     .unwrap();
     map
@@ -971,7 +972,7 @@ fn a_missing_node_stays_silent_on_a_single_shared_word() {
 #[test]
 fn a_missing_node_counts_a_repeated_word_once() {
     let mut map = Map::empty(decisions());
-    map.apply(add_node("decision", "safe safe pick"), Actor::User)
+    map.apply(add_node("decision", "safe safe pick"), Actor::Human(human()))
         .unwrap();
     let err = map
         .around(&node_ref("decision", "safe choice"), 1)
@@ -1027,11 +1028,11 @@ fn a_missing_prose_node_does_not_cross_kinds_on_one_shared_word() {
 #[test]
 fn a_short_id_is_its_kind_s_prefix_and_its_mint_order() {
     let mut map = Map::empty(decisions());
-    map.apply(add_node("question", "Which language?"), Actor::User)
+    map.apply(add_node("question", "Which language?"), Actor::Human(human()))
         .unwrap();
-    map.apply(add_node("decision", "Rust"), Actor::User)
+    map.apply(add_node("decision", "Rust"), Actor::Human(human()))
         .unwrap();
-    map.apply(add_node("decision", "Go"), Actor::User).unwrap();
+    map.apply(add_node("decision", "Go"), Actor::Human(human())).unwrap();
 
     let question = map.find("question", "Which language?").unwrap().id;
     let rust = map.find("decision", "Rust").unwrap().id;
@@ -1049,17 +1050,17 @@ fn a_short_id_is_its_kind_s_prefix_and_its_mint_order() {
 #[test]
 fn a_removed_node_s_number_is_never_reused() {
     let mut map = Map::empty(decisions());
-    map.apply(add_node("decision", "Go"), Actor::User).unwrap();
+    map.apply(add_node("decision", "Go"), Actor::Human(human())).unwrap();
     map.apply(
         Mutation::RemoveNode {
             node: node_ref("decision", "Go"),
             reason: "reconsidered".to_string(),
             sources: Vec::new(),
         },
-        Actor::User,
+        Actor::Human(human()),
     )
     .unwrap();
-    map.apply(add_node("decision", "Rust"), Actor::User)
+    map.apply(add_node("decision", "Rust"), Actor::Human(human()))
         .unwrap();
 
     let rust = map.find("decision", "Rust").unwrap().id;
@@ -1070,7 +1071,7 @@ fn a_removed_node_s_number_is_never_reused() {
 #[test]
 fn resolve_str_takes_a_short_id_or_a_kind_and_name() {
     let mut map = Map::empty(decisions());
-    map.apply(add_node("decision", "Rust over Go"), Actor::User)
+    map.apply(add_node("decision", "Rust over Go"), Actor::Human(human()))
         .unwrap();
     let id = map.find("decision", "Rust over Go").unwrap().id;
 
@@ -1149,7 +1150,7 @@ fn review_finished(map: &str, nodes: Vec<NodeId>) -> Event {
 #[test]
 fn a_model_written_node_starts_claimed() {
     let node = NodeId::new();
-    let events = [node_added_by(Actor::Model, "decisions", node, "decision", "Rust")];
+    let events = [node_added_by(Actor::Agent, "decisions", node, "decision", "Rust")];
 
     let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
@@ -1161,7 +1162,7 @@ fn a_model_written_node_starts_claimed() {
 fn a_review_finished_marks_a_node_seen() {
     let node = NodeId::new();
     let events = [
-        node_added_by(Actor::Model, "decisions", node, "decision", "Rust"),
+        node_added_by(Actor::Agent, "decisions", node, "decision", "Rust"),
         review_finished("decisions", vec![node]),
     ];
 
@@ -1174,7 +1175,7 @@ fn a_review_finished_marks_a_node_seen() {
 fn a_claim_confirmed_marks_a_node_confirmed() {
     let node = NodeId::new();
     let events = [
-        node_added_by(Actor::Model, "decisions", node, "decision", "Rust"),
+        node_added_by(Actor::Agent, "decisions", node, "decision", "Rust"),
         claim_confirmed("decisions", node),
     ];
 
@@ -1188,7 +1189,7 @@ fn a_claim_confirmed_marks_a_node_confirmed() {
 fn a_claim_disputed_marks_a_node_disputed_and_keeps_its_why() {
     let node = NodeId::new();
     let events = [
-        node_added_by(Actor::Model, "decisions", node, "decision", "Rust"),
+        node_added_by(Actor::Agent, "decisions", node, "decision", "Rust"),
         claim_disputed("decisions", node, "never proposed"),
     ];
 
@@ -1202,7 +1203,7 @@ fn a_claim_disputed_marks_a_node_disputed_and_keeps_its_why() {
 fn the_latest_judgment_in_log_order_wins() {
     let node = NodeId::new();
     let events = [
-        node_added_by(Actor::Model, "decisions", node, "decision", "Rust"),
+        node_added_by(Actor::Agent, "decisions", node, "decision", "Rust"),
         claim_disputed("decisions", node, "never proposed"),
         claim_confirmed("decisions", node),
     ];
@@ -1217,7 +1218,7 @@ fn the_latest_judgment_in_log_order_wins() {
 fn a_user_written_node_has_no_standing() {
     let node = NodeId::new();
     let events = [
-        node_added_by(Actor::User, "decisions", node, "decision", "Rust"),
+        node_added_by(Actor::Human(human()), "decisions", node, "decision", "Rust"),
         claim_confirmed("decisions", node),
     ];
 
@@ -1240,8 +1241,8 @@ fn a_judgment_naming_a_node_the_map_no_longer_holds_is_ignored() {
 fn standing_survives_a_cut_to_a_neighbourhood() {
     let (question, decision) = (NodeId::new(), NodeId::new());
     let events = [
-        node_added_by(Actor::Model, "decisions", question, "question", "Which?"),
-        node_added_by(Actor::Model, "decisions", decision, "decision", "Rust"),
+        node_added_by(Actor::Agent, "decisions", question, "question", "Which?"),
+        node_added_by(Actor::Agent, "decisions", decision, "decision", "Rust"),
         edge_added("decisions", RESOLVES, decision, question),
         claim_disputed("decisions", decision, "never proposed"),
     ];

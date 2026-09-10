@@ -42,8 +42,8 @@ fn client() -> reqwest::Client {
 /// the wire's word, not the domain's.
 fn role(actor: Actor) -> &'static str {
     match actor {
-        Actor::User => "user",
-        Actor::Model => "assistant",
+        Actor::Human(_) => "user",
+        Actor::Agent => "assistant",
         Actor::System => "system",
     }
 }
@@ -217,8 +217,8 @@ mod tests {
 
     #[test]
     fn roles_map_to_the_wires_vocabulary() {
-        assert_eq!(role(Actor::User), "user");
-        assert_eq!(role(Actor::Model), "assistant");
+        assert_eq!(role(Actor::Human(crate::core::testing::human())), "user");
+        assert_eq!(role(Actor::Agent), "assistant");
         assert_eq!(role(Actor::System), "system");
     }
 }

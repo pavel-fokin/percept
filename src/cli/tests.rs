@@ -1,7 +1,7 @@
 use super::*;
 use crate::app::{App, Harness, MapShape};
 use crate::core::testing::{
-    content, node_added, node_added_by, node_id, schemas, source, FakeLog, Fixture, ROOT,
+    content, human, node_added, node_added_by, node_id, schemas, source, FakeLog, Fixture, ROOT,
 };
 use crate::core::{Actor, Payload};
 use crate::harness::testing::{FakeCatalog, FakeTool, Scripted};
@@ -42,13 +42,14 @@ fn a_publish_citing_a_cause_records_it() {
         &log,
         Path::new(ROOT),
         no_checkout(),
+        human(),
     )
     .unwrap();
     let cause = log.load().unwrap()[0].id();
 
     let mut reply = args("model", r#"{"content":"hello"}"#);
     reply.causation = Some(cause.as_uuid().to_string());
-    publish(reply, &log, Path::new(ROOT), no_checkout()).unwrap();
+    publish(reply, &log, Path::new(ROOT), no_checkout(), human()).unwrap();
 
     assert!(log.load().unwrap()[1].causation_id() == Some(cause));
 }
@@ -58,7 +59,7 @@ fn a_publish_citing_a_cause_the_log_lacks_is_rejected() {
     let log = FakeLog::default();
     let mut orphan = args("model", r#"{"content":"hello"}"#);
     orphan.causation = Some(crate::core::EventId::new().as_uuid().to_string());
-    assert!(publish(orphan, &log, Path::new(ROOT), no_checkout()).is_err());
+    assert!(publish(orphan, &log, Path::new(ROOT), no_checkout(), human()).is_err());
     assert!(log.load().unwrap().is_empty());
 }
 
@@ -70,6 +71,7 @@ fn a_valid_publish_appends_one_event_carrying_its_source() {
         &log,
         Path::new(ROOT),
         no_checkout(),
+        human(),
     )
     .unwrap();
 
@@ -77,14 +79,14 @@ fn a_valid_publish_appends_one_event_carrying_its_source() {
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].source().name, "claude-code");
     assert_eq!(events[0].source().path, Path::new(ROOT));
-    assert!(events[0].actor() == crate::core::Actor::User);
+    assert!(matches!(events[0].actor(), crate::core::Actor::Human(_)));
 }
 
 #[test]
 fn a_payload_field_the_type_does_not_record_is_rejected() {
     let log = FakeLog::default();
     let extra = r#"{"content":"hi","meta":{"thread":42}}"#;
-    assert!(publish(args("user", extra), &log, Path::new(ROOT), no_checkout()).is_err());
+    assert!(publish(args("user", extra), &log, Path::new(ROOT), no_checkout(), human()).is_err());
     assert!(log.load().unwrap().is_empty());
 }
 
@@ -95,14 +97,16 @@ fn a_rejected_event_appends_nothing() {
         args("robot", r#"{"content":"hi"}"#),
         &log,
         Path::new(ROOT),
-        no_checkout()
+        no_checkout(),
+        human(),
     )
     .is_err());
     assert!(publish(
         args("user", "not json"),
         &log,
         Path::new(ROOT),
-        no_checkout()
+        no_checkout(),
+        human(),
     )
     .is_err());
     assert!(log.load().unwrap().is_empty());
@@ -119,6 +123,7 @@ fn a_file_cited_publish_reads_the_range_from_the_checkout() {
         &log,
         Path::new(ROOT),
         fixture.path(),
+        human(),
     )
     .unwrap();
 
@@ -148,6 +153,7 @@ fn a_file_cited_publish_with_no_lines_reads_the_whole_file() {
         &log,
         Path::new(ROOT),
         fixture.path(),
+        human(),
     )
     .unwrap();
 
@@ -172,6 +178,7 @@ fn a_file_cited_publish_stores_an_absolute_path_relative() {
         &log,
         Path::new(ROOT),
         fixture.path(),
+        human(),
     )
     .unwrap();
 
@@ -193,6 +200,7 @@ fn a_file_cited_publish_with_an_excerpt_stores_it_as_given() {
         &log,
         Path::new(ROOT),
         fixture.path(),
+        human(),
     )
     .unwrap();
 
@@ -213,7 +221,8 @@ fn a_file_cited_publish_refuses_a_path_outside_the_checkout() {
         file_cited_args(payload),
         &log,
         Path::new(ROOT),
-        fixture.path()
+        fixture.path(),
+        human(),
     )
     .is_err());
     assert!(log.load().unwrap().is_empty());
@@ -231,6 +240,7 @@ fn a_file_cited_publish_refuses_a_binary_file() {
         &log,
         Path::new(ROOT),
         fixture.path(),
+        human(),
     )
     .unwrap_err();
     assert!(err.to_string().contains("binary"), "{err}");
@@ -249,6 +259,7 @@ fn a_file_cited_publish_refuses_an_unknown_field() {
         &log,
         Path::new(ROOT),
         fixture.path(),
+        human(),
     )
     .unwrap_err();
     assert!(err.to_string().contains("line"), "{err}");
@@ -265,6 +276,7 @@ fn a_file_cited_publish_refuses_a_blank_excerpt() {
         &log,
         Path::new(ROOT),
         fixture.path(),
+        human(),
     )
     .unwrap_err();
     assert!(err.to_string().contains("blank"), "{err}");
@@ -281,7 +293,8 @@ fn a_file_cited_publish_refuses_a_reversed_range() {
         file_cited_args(payload),
         &log,
         Path::new(ROOT),
-        fixture.path()
+        fixture.path(),
+        human(),
     )
     .is_err());
     assert!(log.load().unwrap().is_empty());
@@ -297,7 +310,8 @@ fn a_file_cited_publish_refuses_a_zero_line() {
         file_cited_args(payload),
         &log,
         Path::new(ROOT),
-        fixture.path()
+        fixture.path(),
+        human(),
     )
     .is_err());
     assert!(log.load().unwrap().is_empty());
@@ -314,6 +328,7 @@ fn a_file_cited_publish_refuses_a_range_past_the_end() {
         &log,
         Path::new(ROOT),
         fixture.path(),
+        human(),
     )
     .unwrap_err();
     assert!(err.to_string().contains("past"), "{err}");
@@ -347,7 +362,7 @@ fn an_unknown_type_filter_is_rejected_rather_than_matching_nothing() {
         kind: vec!["message.recieved".to_string()],
         ..Default::default()
     };
-    assert!(parse_query(&args).is_err());
+    assert!(parse_query(&args, crate::core::testing::human()).is_err());
 }
 
 #[test]
@@ -362,10 +377,11 @@ fn every_flag_reaches_the_query_it_builds() {
         ..Default::default()
     };
 
-    let query = parse_query(&args).unwrap();
+    let me = crate::core::testing::human();
+    let query = parse_query(&args, me).unwrap();
 
     assert_eq!(query.sources, vec!["tui", "cli"]);
-    assert!(query.actors == vec![crate::core::Actor::User]);
+    assert!(query.actors == vec![crate::core::Actor::Human(me)]);
     assert!(query.kinds == vec![crate::core::EventKind::ToolCalled]);
     assert_eq!(query.text, vec!["deploy".to_string()]);
     assert_eq!(query.size, Some(3));
@@ -379,7 +395,7 @@ fn a_window_that_ends_before_it_starts_is_rejected() {
         until: Some("2h".to_string()),
         ..Default::default()
     };
-    assert!(parse_query(&args).is_err());
+    assert!(parse_query(&args, crate::core::testing::human()).is_err());
 }
 
 #[test]
@@ -388,7 +404,7 @@ fn an_unknown_actor_filter_is_rejected_rather_than_matching_nothing() {
         actor: vec!["User".to_string()],
         ..Default::default()
     };
-    assert!(parse_query(&args).is_err());
+    assert!(parse_query(&args, crate::core::testing::human()).is_err());
 }
 
 #[test]
@@ -453,7 +469,7 @@ fn map_with_a_decision() -> Map {
             properties: Default::default(),
             sources: Vec::new(),
         },
-        Actor::User,
+        Actor::Human(human()),
     )
     .unwrap();
     map
@@ -500,12 +516,13 @@ async fn ask_runs_one_tool_round_and_commits_the_final_reply() {
         Arc::new(schemas()),
         Harness::new(tools, MapShape::Prompt),
         source("cli"),
+        human(),
     )
     .unwrap();
 
     run_turn(
         Box::new(app),
-        Actor::User,
+        Actor::Human(human()),
         "what happened".to_string(),
         false,
     )
@@ -544,10 +561,11 @@ async fn a_stream_error_ends_the_turn_but_still_commits_partial_text() {
         Arc::new(schemas()),
         Harness::new(Vec::new(), MapShape::Prompt),
         source("cli"),
+        human(),
     )
     .unwrap();
 
-    let result = run_turn(Box::new(app), Actor::User, "hi".to_string(), false).await;
+    let result = run_turn(Box::new(app), Actor::Human(human()), "hi".to_string(), false).await;
 
     assert!(result.is_err());
     let events = log.load().unwrap();
@@ -667,7 +685,7 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
     let target = || MapArgs {
         map: "code".to_string(),
         source: Vec::new(),
-        actor: Actor::User,
+        actor: "human".to_string(),
     };
 
     let cli_source = source("cli");
@@ -681,6 +699,7 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
         &log,
         &schemas(),
         &cli_source,
+        human(),
     );
     let remove_node = maps_remove_node(
         RemoveNodeArgs {
@@ -691,6 +710,7 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
         &log,
         &schemas(),
         &cli_source,
+        human(),
     );
     let edge_args = || EdgeArgs {
         target: target(),
@@ -698,8 +718,8 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
         from: "file:src/main.rs".to_string(),
         to: "file:src/app/mod.rs".to_string(),
     };
-    let add_edge = maps_add_edge(edge_args(), &log, &schemas(), &cli_source);
-    let remove_edge = maps_remove_edge(edge_args(), &log, &schemas(), &cli_source);
+    let add_edge = maps_add_edge(edge_args(), &log, &schemas(), &cli_source, human());
+    let remove_edge = maps_remove_edge(edge_args(), &log, &schemas(), &cli_source, human());
 
     for result in [add_node, remove_node, add_edge, remove_edge] {
         let err = result.err().unwrap();
@@ -709,7 +729,7 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
 }
 
 #[test]
-fn a_map_write_commits_as_the_actor_given_and_defaults_to_user() {
+fn a_map_write_commits_as_the_actor_given_and_defaults_to_human() {
     let log = FakeLog::default();
     let cli = Cli::try_parse_from([
         "percept",
@@ -730,12 +750,12 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_user() {
     else {
         panic!("expected maps add-node")
     };
-    assert!(args.target.actor == Actor::Model);
+    assert_eq!(args.target.actor, "model");
 
-    maps_add_node(args, &log, &schemas(), &source("cli")).unwrap();
+    maps_add_node(args, &log, &schemas(), &source("cli"), human()).unwrap();
 
     let events = log.load().unwrap();
-    assert!(events[0].actor() == Actor::Model);
+    assert!(events[0].actor() == Actor::Agent);
     let default = Cli::try_parse_from([
         "percept",
         "maps",
@@ -753,12 +773,12 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_user() {
     else {
         panic!("expected maps add-node")
     };
-    assert!(args.target.actor == Actor::User);
+    assert_eq!(args.target.actor, "human");
 }
 
 #[test]
 fn maps_confirm_commits_a_claim_confirmed_event_citing_the_node() {
-    let added = node_added_by(Actor::Model, "decision", "Rust");
+    let added = node_added_by(Actor::Agent, "decision", "Rust");
     let node = node_id(&added);
     let log = FakeLog::seeded(vec![added]);
 
@@ -770,6 +790,7 @@ fn maps_confirm_commits_a_claim_confirmed_event_citing_the_node() {
         &log,
         &schemas(),
         &source("cli"),
+        human(),
     )
     .unwrap();
 
@@ -784,12 +805,12 @@ fn maps_confirm_commits_a_claim_confirmed_event_citing_the_node() {
         }
         _ => panic!("expected ClaimConfirmed"),
     }
-    assert!(events[1].actor() == Actor::User);
+    assert!(matches!(events[1].actor(), Actor::Human(_)));
 }
 
 #[test]
 fn maps_dispute_commits_a_claim_disputed_event_with_its_why() {
-    let added = node_added_by(Actor::Model, "decision", "Rust");
+    let added = node_added_by(Actor::Agent, "decision", "Rust");
     let node = node_id(&added);
     let log = FakeLog::seeded(vec![added]);
 
@@ -804,6 +825,7 @@ fn maps_dispute_commits_a_claim_disputed_event_with_its_why() {
         &log,
         &schemas(),
         &source("cli"),
+        human(),
     )
     .unwrap();
 
@@ -834,6 +856,7 @@ fn maps_confirm_refuses_a_node_the_map_does_not_hold() {
         &log,
         &schemas(),
         &source("cli"),
+        human(),
     )
     .err()
     .unwrap();
@@ -855,6 +878,7 @@ fn maps_confirm_refuses_the_user_s_own_node() {
         &log,
         &schemas(),
         &source("cli"),
+        human(),
     )
     .err()
     .unwrap();
@@ -878,7 +902,7 @@ fn record_args(map: &str) -> RecordArgs {
     RecordArgs {
         map: map.to_string(),
         source: Vec::new(),
-        actor: Actor::User,
+        actor: "human".to_string(),
         causation: None,
     }
 }
@@ -895,6 +919,7 @@ fn a_document_writes_its_nodes_and_edges_in_order() {
         &schemas(),
         &source("cli"),
         no_checkout(),
+        human(),
     )
     .unwrap();
 
@@ -929,6 +954,7 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
         &schemas(),
         &source("cli"),
         fixture.path(),
+        human(),
     )
     .unwrap();
 
@@ -956,6 +982,7 @@ fn a_ref_to_an_existing_short_id_resolves() {
         &schemas(),
         &source("cli"),
         no_checkout(),
+        human(),
     )
     .unwrap();
 
@@ -977,6 +1004,7 @@ fn an_unknown_node_kind_fails_before_anything_is_written() {
         &schemas(),
         &source("cli"),
         no_checkout(),
+        human(),
     )
     .unwrap_err();
     assert!(err.to_string().contains("riddle"), "{err}");
@@ -995,6 +1023,7 @@ fn a_missing_required_property_fails_before_anything_is_written() {
         &schemas(),
         &source("cli"),
         no_checkout(),
+        human(),
     )
     .unwrap_err();
     assert!(err.to_string().contains("why"), "{err}");
@@ -1013,6 +1042,7 @@ fn a_bad_ref_names_its_line_number() {
         &schemas(),
         &source("cli"),
         no_checkout(),
+        human(),
     )
     .unwrap_err();
     assert!(err.to_string().starts_with("line 4:"), "{err}");
@@ -1031,6 +1061,7 @@ fn a_duplicate_name_in_a_later_node_writes_nothing() {
         &schemas(),
         &source("cli"),
         no_checkout(),
+        human(),
     )
     .unwrap_err();
     assert!(err.to_string().contains("already in the map"), "{err}");
@@ -1050,6 +1081,7 @@ fn a_source_id_the_log_lacks_writes_nothing() {
         &schemas(),
         &source("cli"),
         no_checkout(),
+        human(),
     )
     .unwrap_err();
     assert!(err.to_string().contains("no event with id"), "{err}");

@@ -833,14 +833,14 @@ impl Map {
     }
 
     /// `id`'s standing - `None` when the map holds no such node, or when
-    /// it is the human's own landmark (`Actor::User`): a user-written
+    /// it is the human's own landmark (`Actor::Human`): a user-written
     /// node is never a claim to judge. Otherwise `Disputed` or
     /// `Confirmed` from the latest `claim.disputed`/`claim.confirmed`
     /// naming it, else `Seen` when a `review.finished` has, else
     /// `Claimed`.
     pub fn standing(&self, id: NodeId) -> Option<Standing> {
         let node = self.node(id)?;
-        if matches!(node.actor, Actor::User) {
+        if matches!(node.actor, Actor::Human(_)) {
             return None;
         }
         Some(match self.judgments.get(&id) {
