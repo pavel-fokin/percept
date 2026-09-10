@@ -42,3 +42,11 @@ body {
   background: var(--ground);
   color: var(--ink);
 }
+
+/* Keyboard shortcuts are a desktop affordance: a phone or tablet with a
+   coarse pointer never sees the keys button or its bar. */
+@media (pointer: coarse) {
+  .keys-only {
+    display: none !important;
+  }
+}

@@ -149,6 +149,38 @@ fn an_open_question_with_no_decision_is_its_own_group_with_itself_as_the_only_ro
     assert_eq!(claims[0]["name"], "Which language?");
 }
 
+fn cut_body(events: Vec<Event>) -> Value {
+    let log = FakeLog::seeded(events);
+    let schemas = schemas();
+    let src = source("test");
+    cut(&log, &schemas, &src).unwrap()
+}
+
+#[test]
+fn next_carries_a_disputed_nodes_line_with_its_why_once_a_session_started_precedes_the_dispute() {
+    let decision = node_added_by(Actor::Agent, "decision", "Rust");
+    let t0 = Timestamp::now();
+    let started = created_at(Event::session_started(source("test")), t0);
+    let t1 = t0.minus_minutes(-10).unwrap();
+    let disputed = created_at(claim_disputed(node_id(&decision), "nah"), t1);
+
+    let body = cut_body(vec![decision, started, disputed]);
+
+    let next = body["next"].as_str().expect("next carries the judged block");
+    assert!(next.contains("d1"), "{next}");
+    assert!(next.contains("nah"), "{next}");
+}
+
+#[test]
+fn next_is_null_when_nothing_was_judged() {
+    let decision = node_added_by(Actor::Agent, "decision", "Rust");
+    let started = Event::session_started(source("test"));
+
+    let body = cut_body(vec![decision, started]);
+
+    assert!(body["next"].is_null(), "{body}");
+}
+
 #[test]
 fn an_option_that_answers_the_question_is_listed_under_the_decisions_row() {
     let question = node_added_by(Actor::Agent, "question", "Which language?");

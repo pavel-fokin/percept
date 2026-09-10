@@ -11,10 +11,14 @@
 // what catches code dead in both.
 #![cfg_attr(not(feature = "lab"), allow(dead_code, unused_imports))]
 
+mod judge;
 mod map;
 mod render;
 mod schemas;
 
+pub(crate) use judge::{
+    block_header, capped_lines, is_unknown_node, judge, judged_since_block, line_id,
+};
 pub use map::{
     commit, commit_batch, encode_fragment, encode_lines, encode_map, encode_schema, fold_map,
     LogMaps, NodeRefArgs, Snapshot,

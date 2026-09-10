@@ -404,6 +404,24 @@ impl Event {
         )
     }
 
+    /// A `review.finished` event - always the human's own, naming the
+    /// node ids their review showed. `human` is the one who reviewed,
+    /// from `Jsonl::me`.
+    pub fn review_finished(
+        map: String,
+        nodes: Vec<NodeId>,
+        human: Option<HumanId>,
+        source: Source,
+        causation_id: Option<EventId>,
+    ) -> Self {
+        Self::new(
+            Actor::Human(human),
+            source,
+            causation_id,
+            Payload::ReviewFinished { map, nodes },
+        )
+    }
+
     /// Rebuilds an Event from stored fields - the persistence boundary,
     /// where `id` and `created_at` come from storage rather than being
     /// minted fresh.

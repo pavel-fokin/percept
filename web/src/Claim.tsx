@@ -30,7 +30,49 @@ function Dispute({ dispute }: { dispute: string | null }) {
   );
 }
 
-function OptionRow({ option }: { option: Option }) {
+/** Wrong and Confirm, on a row or on a folded option - the sketch's
+ * `acts()`, ported label for label: "Wrong instead" once confirmed,
+ * "Confirm instead" once disputed, Confirm hidden once confirmed. */
+function Acts({
+  standing,
+  onDispute,
+  onConfirm,
+}: {
+  standing: Standing;
+  onDispute: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="mt-1 flex items-center gap-2">
+      <button
+        type="button"
+        onClick={onDispute}
+        className="min-h-10 rounded-md border-[1.5px] border-[var(--rule)] px-3.5 py-2 font-bold text-[var(--ink)] hover:border-[var(--object)] hover:text-[var(--object)] focus-visible:border-[var(--object)] focus-visible:text-[var(--object)] active:border-[var(--object)] active:text-[var(--object)]"
+      >
+        {standing === "confirmed" ? "Wrong instead" : "Wrong"}
+      </button>
+      {standing !== "confirmed" && (
+        <button
+          type="button"
+          onClick={onConfirm}
+          className="min-h-10 rounded-md border-[1.5px] border-transparent px-3.5 py-2 font-normal text-[var(--ink-3)] hover:text-[var(--agree)]"
+        >
+          {standing === "disputed" ? "Confirm instead" : "Confirm"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function OptionRow({
+  option,
+  onDispute,
+  onConfirm,
+}: {
+  option: Option;
+  onDispute: (id: string) => void;
+  onConfirm: (id: string) => void;
+}) {
   return (
     <li className="grid grid-cols-[auto_1fr] items-start gap-2.5 py-2.5">
       <div className="flex flex-col items-start gap-1 text-[var(--ink-2)]">
@@ -48,20 +90,50 @@ function OptionRow({ option }: { option: Option }) {
         )}
         <StandingText standing={option.standing} />
         <Dispute dispute={option.dispute} />
+        <Acts
+          standing={option.standing}
+          onDispute={() => onDispute(option.id)}
+          onConfirm={() => onConfirm(option.id)}
+        />
       </div>
     </li>
   );
 }
 
 /** One row of the queue: a claim's mark, headline, why, what it
- * replaced or reopens, its standing, and the alternatives weighed
- * against it, if any - the sketch's `.claim`, read-only. */
-export default function Claim({ claim }: { claim: ClaimT }) {
+ * replaced or reopens, its standing, the alternatives weighed against
+ * it, and the Wrong/Confirm acts on it and on each alternative - the
+ * sketch's `.claim`. `focused` renders the keyboard-navigation
+ * highlight: an inset bar on a phone, an underlined id from 40rem. */
+export default function Claim({
+  claim,
+  focused,
+  onDispute,
+  onConfirm,
+}: {
+  claim: ClaimT;
+  focused: boolean;
+  onDispute: (id: string) => void;
+  onConfirm: (id: string) => void;
+}) {
   return (
-    <li className="grid grid-cols-1 gap-2 border-b border-[var(--rule)] py-4">
+    <li
+      data-id={claim.id}
+      className={
+        "grid grid-cols-1 gap-2 border-b border-[var(--rule)] py-4" +
+        (focused ? " -ml-3 border-l-4 border-l-[var(--focus)] pl-2.5 sm:ml-0 sm:border-l-0 sm:pl-0" : "")
+      }
+    >
       <div className="flex items-center gap-2.5 text-[var(--ink-2)]">
         <Mark standing={claim.standing} />
-        <span className="font-bold text-[var(--ink)]">{claim.id}</span>
+        <span
+          className={
+            "font-bold text-[var(--ink)]" +
+            (focused ? " sm:underline sm:decoration-[var(--focus)] sm:underline-offset-4" : "")
+          }
+        >
+          {claim.id}
+        </span>
         <span>{claim.kind}</span>
       </div>
       <p className="font-serif text-[1.0625rem] leading-relaxed">{claim.name}</p>
@@ -92,11 +164,16 @@ export default function Claim({ claim }: { claim: ClaimT }) {
           </summary>
           <ul className="ml-4 mt-2 list-none border-l-2 border-[var(--rule)] pl-4">
             {claim.options.map((option) => (
-              <OptionRow key={option.id} option={option} />
+              <OptionRow key={option.id} option={option} onDispute={onDispute} onConfirm={onConfirm} />
             ))}
           </ul>
         </details>
       )}
+      <Acts
+        standing={claim.standing}
+        onDispute={() => onDispute(claim.id)}
+        onConfirm={() => onConfirm(claim.id)}
+      />
     </li>
   );
 }

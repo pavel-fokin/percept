@@ -6,9 +6,10 @@
 use serde_json::{json, Value};
 
 use crate::core::{
-    Actor, Event, EventLog, Map, Node, NodeId, Payload, Schemas, Scope, Settlement, Source,
-    Standing,
+    Actor, Event, EventId, EventLog, HumanId, Map, Node, NodeId, Payload, Schemas, Scope,
+    Settlement, Source, Standing,
 };
+use crate::mapstore;
 use crate::shared::Timestamp;
 
 /// The edge kind names the built-in schemas fix a settlement to: a
@@ -21,9 +22,13 @@ const RESOLVES: &str = "resolves";
 const ANSWERS: &str = "answers";
 const SUPERSEDES: &str = "supersedes";
 
-/// The response `GET /api/review` serves: `{"maps": [...]}`, one entry
-/// per schema with at least one headline kind, each folded from
-/// `log.load()` fresh - the log is never cached between calls.
+/// The response `GET /api/review` serves: `{"maps": [...], "next":
+/// ...}`, one map entry per schema with at least one headline kind,
+/// each folded from `log.load()` fresh - the log is never cached
+/// between calls. `next` is the same lines `judged_since_block` builds
+/// for the session-start hook, cut to what was judged since the
+/// project's latest `session.started` event from any source - the page
+/// has no client of its own to filter by - or `null` when nothing was.
 pub fn cut(
     log: &dyn EventLog,
     schemas: &Schemas,
@@ -37,7 +42,113 @@ pub fn cut(
         .filter(|map| !map.schema().headline_kinds.is_empty())
         .map(|map| map_json(map, &scope, &events))
         .collect();
-    Ok(json!({ "maps": map_values }))
+    let next = last_session(&events, &scope).and_then(|at| mapstore::judged_since_block(&maps, at));
+    Ok(json!({ "maps": map_values, "next": next }))
+}
+
+/// The `created_at` of the latest `session.started` event in `scope`,
+/// from any source - unlike `cli::hook::last_session`, which filters to
+/// one client, the review page is opened from a browser, not a coding
+/// client, so every client's last session here counts.
+fn last_session(events: &[Event], scope: &Scope) -> Option<Timestamp> {
+    events
+        .iter()
+        .filter(|event| scope.admits(event))
+        .filter(|event| matches!(event.payload(), Payload::SessionStarted))
+        .map(Event::created_at)
+        .max()
+}
+
+/// What a `/api/dispute`, `/api/confirm`, or `/api/finish` write
+/// yields: the appended event's id, or an error with the HTTP status
+/// it earns - 404 for a node id no map holds, 400 for anything else a
+/// write path refuses.
+pub enum ApiOutcome {
+    Ok(EventId),
+    Bad(String),
+    NotFound(String),
+}
+
+fn outcome_of(err: Box<dyn std::error::Error>) -> ApiOutcome {
+    if mapstore::is_unknown_node(err.as_ref()) {
+        ApiOutcome::NotFound(err.to_string())
+    } else {
+        ApiOutcome::Bad(err.to_string())
+    }
+}
+
+/// `POST /api/dispute`: appends a `claim.disputed` naming `node` on
+/// `map`, with `why` - refused with `Bad` when `why` is blank.
+pub fn dispute(
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &Source,
+    me: Option<HumanId>,
+    map: &str,
+    node: &str,
+    why: String,
+) -> ApiOutcome {
+    if why.trim().is_empty() {
+        return ApiOutcome::Bad("why must not be blank".to_string());
+    }
+    match mapstore::judge(log, schemas, source, map, node, |map, node, source| {
+        Event::claim_disputed(map, node, why, me, source, None)
+    }) {
+        Ok(event) => ApiOutcome::Ok(event.id()),
+        Err(err) => outcome_of(err),
+    }
+}
+
+/// `POST /api/confirm`: appends a `claim.confirmed` naming `node` on
+/// `map`.
+pub fn confirm(
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &Source,
+    me: Option<HumanId>,
+    map: &str,
+    node: &str,
+) -> ApiOutcome {
+    match mapstore::judge(log, schemas, source, map, node, |map, node, source| {
+        Event::claim_confirmed(map, node, me, source, None)
+    }) {
+        Ok(event) => ApiOutcome::Ok(event.id()),
+        Err(err) => outcome_of(err),
+    }
+}
+
+/// `POST /api/finish`: appends one `review.finished` naming every id in
+/// `nodes`, resolved against `map` - a short id or `kind:name`, as
+/// `maps confirm` accepts - skipping one the human wrote themselves,
+/// since the page may send a group's heading along with its claims.
+pub fn finish(
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &Source,
+    me: Option<HumanId>,
+    map: &str,
+    nodes: &[String],
+) -> ApiOutcome {
+    let folded = match mapstore::fold_map(log, schemas, map, &source.scope()) {
+        Ok(folded) => folded,
+        Err(err) => return outcome_of(err),
+    };
+    let mut ids = Vec::new();
+    for node in nodes {
+        let id = match folded.resolve_str(node) {
+            Ok(id) => id,
+            Err(err) => return outcome_of(err.into()),
+        };
+        let resolved = folded.node(id).expect("resolve_str returns a live node's id");
+        if !matches!(resolved.actor, Actor::Human(_)) {
+            ids.push(id);
+        }
+    }
+    let event = Event::review_finished(map.to_string(), ids, me, source.clone(), None);
+    match log.append(&event) {
+        Ok(()) => ApiOutcome::Ok(event.id()),
+        Err(err) => outcome_of(err),
+    }
 }
 
 /// One map's queue: its `since`, and its claims grouped by question.

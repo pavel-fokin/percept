@@ -13,9 +13,12 @@
 use std::error::Error;
 use std::sync::Arc;
 
+use serde::Deserialize;
+use serde_json::json;
 use tiny_http::{Header, Method, Response, Server};
 
-use crate::core::{EventLog, Schemas, Source};
+use crate::core::{EventLog, HumanId, Schemas, Source};
+use crate::server::review::ApiOutcome;
 
 mod review;
 #[cfg(test)]
@@ -36,8 +39,14 @@ fn is_stub() -> bool {
 /// `percept review` - binds a server on `127.0.0.1`, prints its URL,
 /// opens it in the browser, and serves until the process is killed.
 /// `log` and `schemas` are read fresh on every `GET /api/review`;
-/// `source` says which project's events that cut reads.
-pub fn run(log: Arc<dyn EventLog>, schemas: Arc<Schemas>, source: Source) -> Result<(), Box<dyn Error>> {
+/// `source` says which project's events that cut reads; `me` is the
+/// human every write the page makes is attributed to.
+pub fn run(
+    log: Arc<dyn EventLog>,
+    schemas: Arc<Schemas>,
+    source: Source,
+    me: Option<HumanId>,
+) -> Result<(), Box<dyn Error>> {
     let server = bind()?;
     let url = format!("http://{}", server.server_addr());
     println!("percept review at {url}");
@@ -45,7 +54,7 @@ pub fn run(log: Arc<dyn EventLog>, schemas: Arc<Schemas>, source: Source) -> Res
         eprintln!("the review page is not built; see the page for how");
     }
     open_browser(&url);
-    serve(server, log, schemas, source);
+    serve(server, log, schemas, source, me);
     Ok(())
 }
 
@@ -57,10 +66,12 @@ fn bind() -> Result<Server, Box<dyn Error>> {
 
 /// Serves requests on `server` until the process is killed: `GET /`
 /// and `GET /index.html` return the embedded page, `GET /api/review`
-/// the queue `review::cut` folds fresh from `log`, everything else
-/// 404s.
-fn serve(server: Server, log: Arc<dyn EventLog>, schemas: Arc<Schemas>, source: Source) {
-    for request in server.incoming_requests() {
+/// the queue `review::cut` folds fresh from `log`, `POST /api/dispute`,
+/// `POST /api/confirm`, and `POST /api/finish` each take one JSON body
+/// and answer the appended event's id or a plain-text reason,
+/// everything else 404s.
+fn serve(server: Server, log: Arc<dyn EventLog>, schemas: Arc<Schemas>, source: Source, me: Option<HumanId>) {
+    for mut request in server.incoming_requests() {
         let response = match (request.method(), request.url()) {
             (Method::Get, "/" | "/index.html") => {
                 let header = Header::from_bytes(
@@ -71,6 +82,15 @@ fn serve(server: Server, log: Arc<dyn EventLog>, schemas: Arc<Schemas>, source: 
                 Response::from_string(PAGE).with_header(header).boxed()
             }
             (Method::Get, "/api/review") => review_response(log.as_ref(), &schemas, &source),
+            (Method::Post, "/api/dispute") => {
+                dispute_response(&mut request, log.as_ref(), &schemas, &source, me)
+            }
+            (Method::Post, "/api/confirm") => {
+                confirm_response(&mut request, log.as_ref(), &schemas, &source, me)
+            }
+            (Method::Post, "/api/finish") => {
+                finish_response(&mut request, log.as_ref(), &schemas, &source, me)
+            }
             _ => Response::empty(404).boxed(),
         };
         let _ = request.respond(response);
@@ -96,6 +116,118 @@ fn review_response(
             Response::from_string(body.to_string()).with_header(header).boxed()
         }
         Err(err) => Response::from_string(err.to_string()).with_status_code(500).boxed(),
+    }
+}
+
+/// `{"map": ..., "node": ...}`, the body `/api/confirm` takes and
+/// `/api/dispute` extends with `why`.
+#[derive(Deserialize)]
+struct NodeBody {
+    map: String,
+    node: String,
+}
+
+/// The body `/api/dispute` takes.
+#[derive(Deserialize)]
+struct DisputeBody {
+    map: String,
+    node: String,
+    why: String,
+}
+
+/// The body `/api/finish` takes.
+#[derive(Deserialize)]
+struct FinishBody {
+    map: String,
+    nodes: Vec<String>,
+}
+
+/// Reads `request`'s body in full and parses it as `T` - a body that
+/// isn't valid JSON, or doesn't match the shape a route expects, reads
+/// as `Bad` the same as any other refused write.
+fn read_body<T: serde::de::DeserializeOwned>(request: &mut tiny_http::Request) -> Result<T, String> {
+    let mut text = String::new();
+    request
+        .as_reader()
+        .read_to_string(&mut text)
+        .map_err(|err| err.to_string())?;
+    serde_json::from_str(&text).map_err(|err| err.to_string())
+}
+
+/// `ApiOutcome` as tiny_http's response: the event's id as `{"event":
+/// ...}` on 200, or the reason as plain text on 400 or 404.
+fn outcome_response(outcome: ApiOutcome) -> tiny_http::ResponseBox {
+    match outcome {
+        ApiOutcome::Ok(id) => {
+            let header = Header::from_bytes(
+                &b"Content-Type"[..],
+                &b"application/json; charset=utf-8"[..],
+            )
+            .expect("static header name and value are valid ASCII");
+            Response::from_string(json!({ "event": id.as_uuid().to_string() }).to_string())
+                .with_header(header)
+                .boxed()
+        }
+        ApiOutcome::Bad(reason) => text_response(reason, 400),
+        ApiOutcome::NotFound(reason) => text_response(reason, 404),
+    }
+}
+
+/// A plain-text response with `status` - what a rejected body, and
+/// `ApiOutcome`'s error cases, both answer with.
+fn text_response(text: String, status: u16) -> tiny_http::ResponseBox {
+    let header = Header::from_bytes(&b"Content-Type"[..], &b"text/plain; charset=utf-8"[..])
+        .expect("static header name and value are valid ASCII");
+    Response::from_string(text)
+        .with_status_code(status)
+        .with_header(header)
+        .boxed()
+}
+
+/// `POST /api/dispute`'s response: `review::dispute`'s outcome, or 400
+/// naming a body that failed to parse.
+fn dispute_response(
+    request: &mut tiny_http::Request,
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &Source,
+    me: Option<HumanId>,
+) -> tiny_http::ResponseBox {
+    match read_body::<DisputeBody>(request) {
+        Ok(body) => outcome_response(review::dispute(
+            log, schemas, source, me, &body.map, &body.node, body.why,
+        )),
+        Err(reason) => text_response(reason, 400),
+    }
+}
+
+/// `POST /api/confirm`'s response: `review::confirm`'s outcome, or 400
+/// naming a body that failed to parse.
+fn confirm_response(
+    request: &mut tiny_http::Request,
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &Source,
+    me: Option<HumanId>,
+) -> tiny_http::ResponseBox {
+    match read_body::<NodeBody>(request) {
+        Ok(body) => outcome_response(review::confirm(log, schemas, source, me, &body.map, &body.node)),
+        Err(reason) => text_response(reason, 400),
+    }
+}
+
+/// `POST /api/finish`'s response: `review::finish`'s outcome, or 400
+/// naming a body that failed to parse.
+fn finish_response(
+    request: &mut tiny_http::Request,
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &Source,
+    me: Option<HumanId>,
+) -> tiny_http::ResponseBox {
+    match read_body::<FinishBody>(request) {
+        Ok(body) => outcome_response(review::finish(log, schemas, source, me, &body.map, &body.nodes)),
+        Err(reason) => text_response(reason, 400),
     }
 }
 

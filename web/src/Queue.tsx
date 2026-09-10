@@ -5,8 +5,19 @@ import type { MapQueue } from "./types";
 
 /** One map's queue: the since line, the hint, the legend, and one
  * `.group` per settlement question - or one plain group when the map
- * has no settlement. */
-export default function Queue({ map }: { map: MapQueue }) {
+ * has no settlement. `focused` is the id of the row a keyboard user has
+ * moved to, if any. */
+export default function Queue({
+  map,
+  focused,
+  onDispute,
+  onConfirm,
+}: {
+  map: MapQueue;
+  focused: string | null;
+  onDispute: (id: string) => void;
+  onConfirm: (id: string) => void;
+}) {
   const claimed = map.groups.flatMap((group) => group.claims).filter((claim) => claim.standing === "claimed");
 
   return (
@@ -37,7 +48,13 @@ export default function Queue({ map }: { map: MapQueue }) {
             )}
             <ol className="mt-3 list-none border-t border-[var(--rule)] p-0">
               {group.claims.map((claim) => (
-                <Claim key={claim.id} claim={claim} />
+                <Claim
+                  key={claim.id}
+                  claim={claim}
+                  focused={claim.id === focused}
+                  onDispute={onDispute}
+                  onConfirm={onConfirm}
+                />
               ))}
             </ol>
           </section>

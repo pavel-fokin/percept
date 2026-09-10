@@ -45,7 +45,11 @@ export interface MapQueue {
   groups: Group[];
 }
 
-/** `GET /api/review`'s response. */
+/** `GET /api/review`'s response. `next` is the lines the next session's
+ * start block will print - the same text `judged_since_block` builds
+ * for the hook - or `null` when nothing was judged since the project's
+ * last session. */
 export interface ReviewResponse {
   maps: MapQueue[];
+  next: string | null;
 }
