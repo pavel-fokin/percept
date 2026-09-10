@@ -58,6 +58,11 @@ struct NodeFile {
     /// A node kind's short id prefix, `d` for `decision` - optional,
     /// since `default_prefix` covers the common case.
     prefix: Option<String>,
+    /// The values a `state` property on a node of this kind may hold,
+    /// first listed the open one - `state = ["open", "done",
+    /// "dropped"]`. Empty when the kind carries no state.
+    #[serde(default, rename = "state")]
+    states: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -152,10 +157,17 @@ fn check_extends(
     stem: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for kind in &built_in.node_kinds {
-        if project.node_kind(&kind.name).is_none() {
+        let Some(project_kind) = project.node_kind(&kind.name) else {
             return Err(format!(
                 "{stem}.toml: drops node kind {:?}, which the built-in {:?} declares",
                 kind.name, built_in.name
+            )
+            .into());
+        };
+        if project_kind.states != kind.states {
+            return Err(format!(
+                "{stem}.toml: changes node kind {:?}'s states from {:?} to {:?}",
+                kind.name, kind.states, project_kind.states
             )
             .into());
         }
@@ -220,6 +232,29 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
             )
             .into());
         }
+        if !node.states.is_empty() {
+            if node.states.len() < 2 {
+                return Err(format!(
+                    "{stem}.toml: node kind {:?} declares fewer than two states",
+                    node.name
+                )
+                .into());
+            }
+            if node.states.iter().any(|state| state.trim().is_empty()) {
+                return Err(format!(
+                    "{stem}.toml: node kind {:?} declares a blank state",
+                    node.name
+                )
+                .into());
+            }
+            if let Some(state) = repeated(node.states.iter().map(String::as_str)) {
+                return Err(format!(
+                    "{stem}.toml: node kind {:?} declares the state {state:?} twice",
+                    node.name
+                )
+                .into());
+            }
+        }
     }
 
     let node_kinds: Vec<NodeKind> = file
@@ -232,6 +267,7 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
                 name: node.name,
                 gloss: node.gloss,
                 requires: node.requires,
+                states: node.states,
             }
         })
         .collect();

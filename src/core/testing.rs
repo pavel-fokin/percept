@@ -346,37 +346,17 @@ pub fn tasks() -> Schema {
                 "task",
                 "one piece of work left to do, saying why it matters in its `why` property",
             )
-            .requiring("why"),
-            NodeKind::new(
-                "outcome",
-                "what became of a task: done with its commit, or dropped with the reason",
-            ),
+            .requiring("why")
+            .with_states(&["open", "done", "dropped"]),
         ],
-        edge_kinds: vec![
-            EdgeKind::new(
-                "resolves",
-                "from an outcome to the task it settles",
-                &["outcome"],
-                &["task"],
-            ),
-            EdgeKind::new(
-                "blocks",
-                "from a task to the one that must wait for it",
-                &["task"],
-                &["task"],
-            ),
-            EdgeKind::new(
-                "supersedes",
-                "from a reworded task to the wording it replaces",
-                &["task"],
-                &["task"],
-            ),
-        ],
+        edge_kinds: vec![EdgeKind::new(
+            "blocks",
+            "from a task to the one that must wait for it",
+            &["task"],
+            &["task"],
+        )],
         headline_kinds: vec!["task".to_string()],
-        settlement: Some(Settlement {
-            by: "outcome".to_string(),
-            of: "task".to_string(),
-        }),
+        settlement: None,
     }
 }
 

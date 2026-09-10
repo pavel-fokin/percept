@@ -260,6 +260,19 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
         Payload::NodeAdded {
             map, kind, name, ..
         } => tool_lines(chat, &format!("{map}: added {kind} {name:?}"), width),
+        Payload::NodeChanged {
+            map, node, name, ..
+        } => tool_lines(
+            chat,
+            &format!(
+                "{map}: changed node {}{}",
+                node.as_uuid(),
+                name.as_deref()
+                    .map(|name| format!(" -> {name:?}"))
+                    .unwrap_or_default()
+            ),
+            width,
+        ),
         Payload::NodeRemoved {
             map, node, reason, ..
         } => tool_lines(

@@ -107,8 +107,11 @@ pub enum MapsCommand {
     RemoveNode(RemoveNodeArgs),
     /// Remove an edge from a map.
     RemoveEdge(EdgeArgs),
-    /// Add several nodes and edges from a document on stdin. Prints one
-    /// line per node, then one per edge, then one per `cites` line.
+    /// Add several nodes and edges from a document on stdin, or change
+    /// one already in the map - a margin line naming a short id, `t4`,
+    /// starts a change block: `state "done"` under it sets a property,
+    /// `name "..."` renames it. Prints one line per node or change,
+    /// then one per edge, then one per `cites` line.
     Record(RecordArgs),
     /// Mark a node's claim confirmed - always the human's own judgment.
     /// Prints the committed event's id.
@@ -838,14 +841,30 @@ struct DocEdge {
     line: usize,
 }
 
-/// One node a document names, with what is declared under it.
+/// One node a document names, with what is declared under it - a fresh
+/// node (`kind` its node kind, `name` its name) or, when `is_change` is
+/// set, a change to one already in the map (`kind` its short id,
+/// `name` unused).
 struct DocNode {
     kind: String,
     name: String,
+    is_change: bool,
     properties: BTreeMap<String, String>,
     edges: Vec<DocEdge>,
     cites: Vec<DocCite>,
     line: usize,
+}
+
+/// Whether `word` takes a short id's shape - a kind's prefix, then at
+/// least one digit and nothing else - the same split
+/// `Map::resolve_str` makes; the prefix is checked against a schema
+/// only there, so this is a syntactic guess: it decides whether a bare
+/// margin line starts a change block, not whether the id resolves.
+fn looks_like_short_id(word: &str) -> bool {
+    match word.find(|c: char| c.is_ascii_digit()) {
+        Some(at) if at > 0 => word[at..].chars().all(|c| c.is_ascii_digit()),
+        _ => false,
+    }
 }
 
 /// Splits `s` at its first run of whitespace, trimming what leads the
@@ -916,10 +935,13 @@ fn split_cite_range(s: &str) -> Result<(String, Option<(u32, u32)>), Box<dyn std
 }
 
 /// Parses `maps record`'s document grammar: a node line at column 0,
-/// `<kind> "<name>"`, owns every indented line under it - a `<key>
-/// "<value>"` property, an `<edge kind> <ref>`, or a `cites
-/// <path>[:<from>-<to>]` - until the next node line or the document's
-/// end. A blank line is ignored; anything else names its line number.
+/// either `<kind> "<name>"`, which adds a node, or a bare short id,
+/// `t4`, which starts a change to the node it names - each owns every
+/// indented line under it - a `<key> "<value>"` property (`name
+/// "<value>"` is a rename, only meaningful under a change), an `<edge
+/// kind> <ref>`, or a `cites <path>[:<from>-<to>]` - until the next
+/// node line or the document's end. A blank line is ignored; anything
+/// else names its line number.
 fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>> {
     let mut nodes: Vec<DocNode> = Vec::new();
     for (i, raw) in text.lines().enumerate() {
@@ -928,13 +950,28 @@ fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>
             continue;
         }
         if !raw.starts_with(char::is_whitespace) {
-            let (kind, rest) = split_first_word(raw)
-                .ok_or_else(|| format!("line {line}: expected `<kind> \"<name>\"`"))?;
-            let name = parse_quoted(rest)
-                .ok_or_else(|| format!("line {line}: expected `<kind> \"<name>\"`"))?;
+            let (word, rest) = match split_first_word(raw) {
+                Some((word, rest)) => (word.to_string(), rest),
+                None => (raw.trim().to_string(), ""),
+            };
+            let (kind, name, is_change) = if looks_like_short_id(&word) {
+                if !rest.is_empty() {
+                    return Err(format!(
+                        "line {line}: {word:?} names a short id; a change to it takes no \
+                         name, only indented lines under it"
+                    )
+                    .into());
+                }
+                (word, String::new(), true)
+            } else {
+                let name = parse_quoted(rest)
+                    .ok_or_else(|| format!("line {line}: expected `<kind> \"<name>\"`"))?;
+                (word, name, false)
+            };
             nodes.push(DocNode {
-                kind: kind.to_string(),
+                kind,
                 name,
+                is_change,
                 properties: BTreeMap::new(),
                 edges: Vec::new(),
                 cites: Vec::new(),
@@ -1036,13 +1073,17 @@ fn record_document(
         let mut last_of_kind: HashMap<String, NodeId> = HashMap::new();
 
         for (i, node) in nodes.into_iter().enumerate() {
-            let label = format!(
-                "line {}: node {} of {total} ({} {:?})",
-                node.line,
-                i + 1,
-                node.kind,
-                node.name
-            );
+            let label = if node.is_change {
+                format!("line {}: change {} of {total} ({})", node.line, i + 1, node.kind)
+            } else {
+                format!(
+                    "line {}: node {} of {total} ({} {:?})",
+                    node.line,
+                    i + 1,
+                    node.kind,
+                    node.name
+                )
+            };
             let context = |err: Box<dyn std::error::Error>| -> Box<dyn std::error::Error> {
                 format!("{label}: {err}").into()
             };
@@ -1059,24 +1100,54 @@ fn record_document(
                 batch.push(event);
             }
 
-            let mutation = Mutation::AddNode {
-                kind: node.kind.clone(),
-                name: node.name.clone(),
-                properties: node.properties,
-                sources,
+            let from_ref = if node.is_change {
+                let target_id = snapshot
+                    .map()
+                    .resolve_str(&node.kind)
+                    .map_err(|err| context(err.into()))?;
+                let target = snapshot
+                    .map()
+                    .node(target_id)
+                    .expect("resolve_str returns a live node's id")
+                    .clone();
+                let mut properties = node.properties;
+                let rename = properties.remove("name");
+                let mutation = Mutation::ChangeNode {
+                    node: NodeRef {
+                        kind: target.kind.clone(),
+                        name: target.name.clone(),
+                    },
+                    name: rename.clone(),
+                    properties,
+                    sources,
+                };
+                let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
+                batch.push(Event::new(actor, batch_source.clone(), None, payload));
+                last_of_kind.insert(target.kind.clone(), target_id);
+                NodeRef {
+                    kind: target.kind,
+                    name: rename.unwrap_or(target.name),
+                }
+            } else {
+                let mutation = Mutation::AddNode {
+                    kind: node.kind.clone(),
+                    name: node.name.clone(),
+                    properties: node.properties,
+                    sources,
+                };
+                let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
+                let node_id = match payload {
+                    Payload::NodeAdded { node, .. } => node,
+                    _ => unreachable!("AddNode always yields NodeAdded"),
+                };
+                batch.push(Event::new(actor, batch_source.clone(), None, payload));
+                last_of_kind.insert(node.kind.clone(), node_id);
+                NodeRef {
+                    kind: node.kind,
+                    name: node.name,
+                }
             };
-            let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
-            let node_id = match payload {
-                Payload::NodeAdded { node, .. } => node,
-                _ => unreachable!("AddNode always yields NodeAdded"),
-            };
-            batch.push(Event::new(actor, batch_source.clone(), None, payload));
-            last_of_kind.insert(node.kind.clone(), node_id);
 
-            let from_ref = NodeRef {
-                kind: node.kind.clone(),
-                name: node.name.clone(),
-            };
             for edge in node.edges {
                 let to_id = if snapshot.map().schema().node_kind(&edge.target).is_some() {
                     last_of_kind.get(&edge.target).copied().ok_or_else(|| {
@@ -1127,6 +1198,13 @@ fn record_document(
             Payload::NodeAdded { node, kind, name, .. } => {
                 let short_id = map.short_id(*node).unwrap_or_default();
                 node_lines.push(format!("{short_id} {kind} {}", quote(name)));
+            }
+            Payload::NodeChanged { node, name, .. } => {
+                let short_id = map.short_id(*node).unwrap_or_default();
+                match name {
+                    Some(name) => node_lines.push(format!("{short_id} changed to {}", quote(name))),
+                    None => node_lines.push(format!("{short_id} changed")),
+                }
             }
             Payload::EdgeAdded { kind, from, to, .. } => {
                 let from_short = map.short_id(*from).unwrap_or_default();

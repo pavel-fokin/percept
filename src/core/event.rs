@@ -129,6 +129,19 @@ pub enum Payload {
         sources: Vec<EventId>,
         seq: u32,
     },
+    /// A node changed in place: a rename, a property merge, or both -
+    /// how a task is closed, dropped, reopened, or reworded, and how a
+    /// decision's node itself may be corrected without a new one.
+    /// `name` is `Some` only on a rename; `properties` are merged into
+    /// the node's own, last write wins, a key present here replacing
+    /// that key alone.
+    NodeChanged {
+        map: String,
+        node: NodeId,
+        name: Option<String>,
+        properties: BTreeMap<String, String>,
+        sources: Vec<EventId>,
+    },
     /// A node removed from a cognitive map, with why.
     NodeRemoved {
         map: String,
@@ -224,6 +237,7 @@ impl Payload {
             Self::FileCited { excerpt, .. } => Some(excerpt),
             Self::ToolCalled { .. }
             | Self::NodeAdded { .. }
+            | Self::NodeChanged { .. }
             | Self::NodeRemoved { .. }
             | Self::EdgeAdded { .. }
             | Self::EdgeRemoved { .. }
@@ -247,6 +261,7 @@ pub enum EventKind {
     ToolCalled,
     ToolResulted,
     NodeAdded,
+    NodeChanged,
     NodeRemoved,
     EdgeAdded,
     EdgeRemoved,
@@ -268,6 +283,7 @@ impl EventKind {
             Self::ToolCalled => "tool.called",
             Self::ToolResulted => "tool.resulted",
             Self::NodeAdded => "node.added",
+            Self::NodeChanged => "node.changed",
             Self::NodeRemoved => "node.removed",
             Self::EdgeAdded => "edge.added",
             Self::EdgeRemoved => "edge.removed",
@@ -497,6 +513,7 @@ impl Event {
             Payload::ToolCalled { .. } => EventKind::ToolCalled,
             Payload::ToolResulted { .. } => EventKind::ToolResulted,
             Payload::NodeAdded { .. } => EventKind::NodeAdded,
+            Payload::NodeChanged { .. } => EventKind::NodeChanged,
             Payload::NodeRemoved { .. } => EventKind::NodeRemoved,
             Payload::EdgeAdded { .. } => EventKind::EdgeAdded,
             Payload::EdgeRemoved { .. } => EventKind::EdgeRemoved,

@@ -94,6 +94,18 @@ fn is_zero(seq: &u32) -> bool {
     *seq == 0
 }
 
+/// `Payload::NodeChanged` on the wire. `name` is present only on a
+/// rename.
+#[derive(Serialize, Deserialize)]
+struct NodeChangedBody {
+    map: String,
+    node: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    properties: BTreeMap<String, String>,
+    sources: Vec<String>,
+}
+
 #[derive(Serialize, Deserialize)]
 struct NodeRemovedBody {
     map: String,
@@ -177,6 +189,7 @@ const THOUGHT_RECORDED: &str = "thought.recorded";
 const TOOL_CALLED: &str = "tool.called";
 const TOOL_RESULTED: &str = "tool.resulted";
 const NODE_ADDED: &str = "node.added";
+const NODE_CHANGED: &str = "node.changed";
 const NODE_REMOVED: &str = "node.removed";
 const EDGE_ADDED: &str = "edge.added";
 const EDGE_REMOVED: &str = "edge.removed";
@@ -189,12 +202,13 @@ const REVIEW_FINISHED: &str = "review.finished";
 
 /// Every `type` the log records, for the error that lists them when a
 /// caller names one that isn't here.
-pub const KINDS: [&str; 14] = [
+pub const KINDS: [&str; 15] = [
     MESSAGE_RECEIVED,
     THOUGHT_RECORDED,
     TOOL_CALLED,
     TOOL_RESULTED,
     NODE_ADDED,
+    NODE_CHANGED,
     NODE_REMOVED,
     EDGE_ADDED,
     EDGE_REMOVED,
@@ -215,6 +229,7 @@ pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
         TOOL_CALLED => Ok(EventKind::ToolCalled),
         TOOL_RESULTED => Ok(EventKind::ToolResulted),
         NODE_ADDED => Ok(EventKind::NodeAdded),
+        NODE_CHANGED => Ok(EventKind::NodeChanged),
         NODE_REMOVED => Ok(EventKind::NodeRemoved),
         EDGE_ADDED => Ok(EventKind::EdgeAdded),
         EDGE_REMOVED => Ok(EventKind::EdgeRemoved),
@@ -489,6 +504,20 @@ impl From<&crate::core::Event> for Event {
                 seq: *seq,
             })
             .expect("NodeAddedBody always serializes"),
+            Payload::NodeChanged {
+                map,
+                node,
+                name,
+                properties,
+                sources,
+            } => serde_json::to_value(NodeChangedBody {
+                map: map.clone(),
+                node: node.as_uuid().to_string(),
+                name: name.clone(),
+                properties: properties.clone(),
+                sources: ids(sources),
+            })
+            .expect("NodeChangedBody always serializes"),
             Payload::NodeRemoved {
                 map,
                 node,
@@ -676,6 +705,17 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 properties: body.properties,
                 sources: parse_event_ids(body.sources)?,
                 seq: body.seq,
+            })
+        }
+        EventKind::NodeChanged => {
+            let body: NodeChangedBody =
+                serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::NodeChanged {
+                map: body.map,
+                node: parse_node_id(&body.node)?,
+                name: body.name,
+                properties: body.properties,
+                sources: parse_event_ids(body.sources)?,
             })
         }
         EventKind::NodeRemoved => {

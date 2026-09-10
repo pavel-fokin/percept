@@ -479,6 +479,65 @@ fn a_node_added_line_with_no_seq_decodes_to_the_sentinel() {
 }
 
 #[test]
+fn node_changed_round_trips_through_json() {
+    let node = NodeId::new();
+    let mut properties = BTreeMap::new();
+    properties.insert("state".to_string(), "done".to_string());
+    let original = crate::core::Event::restore(
+        EventId::new(),
+        Actor::Agent,
+        source("cli"),
+        None,
+        Timestamp::now(),
+        Payload::NodeChanged {
+            map: "tasks".to_string(),
+            node,
+            name: Some("cancel a turn cleanly".to_string()),
+            properties: properties.clone(),
+            sources: Vec::new(),
+        },
+    );
+
+    let json = serde_json::to_string(&Event::from(&original)).unwrap();
+    let wire: Event = serde_json::from_str(&json).unwrap();
+    assert_eq!(wire.kind, "node.changed");
+    assert_eq!(wire.payload["name"], "cancel a turn cleanly");
+    let restored = crate::store::from_wire(wire).unwrap();
+
+    match restored.payload() {
+        Payload::NodeChanged {
+            map,
+            node: restored_node,
+            name,
+            properties: restored_properties,
+            sources,
+        } => {
+            assert_eq!(map, "tasks");
+            assert!(*restored_node == node);
+            assert_eq!(name.as_deref(), Some("cancel a turn cleanly"));
+            assert_eq!(*restored_properties, properties);
+            assert!(sources.is_empty());
+        }
+        _ => panic!("expected NodeChanged"),
+    }
+}
+
+#[test]
+fn a_node_changed_line_with_no_name_decodes_to_none() {
+    let node = NodeId::new();
+    let json = serde_json::json!({
+        "map": "tasks",
+        "node": node.as_uuid().to_string(),
+        "properties": {"state": "done"},
+        "sources": [],
+    });
+
+    let event = decode("agent", source("cli"), "node.changed", None, json, human()).unwrap();
+
+    assert!(matches!(event.payload(), Payload::NodeChanged { name: None, .. }));
+}
+
+#[test]
 fn node_removed_round_trips_through_json() {
     let node = NodeId::new();
     let original = crate::core::Event::restore(

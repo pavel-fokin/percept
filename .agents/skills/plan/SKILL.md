@@ -63,9 +63,9 @@ Verify: <how to confirm the outcome>
    it back to `software-developer` with the specifics.
 6. **Commit.** Re-run the build and tests yourself first. One commit per
    issue - conventional message, subject line only. An issue that was
-   an open task gets an `outcome` on the tasks map naming the commit,
-   with a `resolves` edge to it (see the percept skill). Work the
-   session found but left undone goes in as a new task, with its why.
+   an open task is changed to `state "done"` with an `outcome` naming
+   the commit (see the percept skill). Work the session found but left
+   undone goes in as a new task, with its why.
 
 ## Recording decisions
 

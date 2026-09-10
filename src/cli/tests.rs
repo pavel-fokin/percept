@@ -1006,3 +1006,74 @@ fn a_source_id_the_log_lacks_writes_nothing() {
     assert!(err.to_string().contains("no event with id"), "{err}");
     assert!(log.load().unwrap().is_empty());
 }
+
+#[test]
+fn a_short_id_document_changes_the_node_and_records_node_changed() {
+    let log = FakeLog::default();
+    record_document(
+        "task \"cancel a turn\"\n  why \"Esc drops the session\"\n",
+        record_args("tasks"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+    )
+    .unwrap();
+
+    record_document(
+        "t1\n  state \"done\"\n  outcome \"1f1a9a9: done\"\n",
+        record_args("tasks"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    assert!(matches!(
+        events.last().unwrap().payload(),
+        Payload::NodeChanged { .. }
+    ));
+
+    let scope = crate::core::testing::scope();
+    let map = Map::fold(crate::core::testing::tasks(), &scope, &events).unwrap();
+    let task = map.find("task", "cancel a turn").unwrap();
+    assert_eq!(task.properties.get("state").unwrap(), "done");
+    assert_eq!(task.properties.get("outcome").unwrap(), "1f1a9a9: done");
+}
+
+#[test]
+fn a_short_id_line_with_a_quoted_name_is_an_error() {
+    let log = FakeLog::default();
+    let err = record_document(
+        "t4 \"name\"\n",
+        record_args("tasks"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().starts_with("line 1:"), "{err}");
+}
+
+#[test]
+fn a_change_to_an_unknown_short_id_is_an_error() {
+    let log = FakeLog::default();
+    let err = record_document(
+        "t9\n  state \"done\"\n",
+        record_args("tasks"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("t9"), "{err}");
+    assert!(log.load().unwrap().is_empty());
+}

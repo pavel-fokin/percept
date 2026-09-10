@@ -236,6 +236,7 @@ recording
 - A decision that changes an earlier one adds a supersedes <id> line under it; never remove a node.
 - A decision that no longer seems to fit is not yours to rewrite: raise a question with a reopens <id> line under it, and let the user settle it.
 - A node marked disputed carries the human's why: never propose it again; a correction the user agrees is a new decision with a supersedes line.
+- Close a task by changing it, not by adding a node: t4 on its own line, then state \"done\" and outcome \"<commit>: what happened\" indented under it (state \"dropped\" and why for one dropped, state \"open\" to reopen one).
 - Close the session with one line naming what was recorded: Recorded to decisions: q1, d1, o1.";
 
 /// What each folded map gained since `since`: a counts line for every
@@ -406,16 +407,17 @@ fn normalize(text: &str) -> String {
     lines[start..end].join("\n")
 }
 
-/// One `open {of} (...)` block per settled map that has open items - a
-/// map without a `Settlement` (an `ideas` map, say) is skipped entirely,
-/// never by name, since `Map::open` is empty there - plus the fragment
-/// pointer at the first open item found, walking maps in fold order.
+/// One `open {kind} (...)` block per map that has open items - a map
+/// with neither a `Settlement` nor a headline kind that declares
+/// states (an `ideas` map, say) is skipped entirely, never by name,
+/// since `Map::open` is empty there - plus the fragment pointer at the
+/// first open item found, walking maps in fold order.
 fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
     let mut blocks = Vec::new();
     let mut pointer = None;
 
     for map in maps {
-        let Some(settlement) = map.schema().settlement.as_ref() else {
+        let Some(kind) = open_kind(map) else {
             continue;
         };
         let open: Vec<&Node> = map.open().collect();
@@ -423,7 +425,7 @@ fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
             continue;
         }
 
-        let mut lines = vec![block_header(&format!("open {}", settlement.of), open.len())];
+        let mut lines = vec![block_header(&format!("open {kind}"), open.len())];
         lines.extend(capped_lines(
             open.iter()
                 .map(|node| {
@@ -447,6 +449,25 @@ fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
     }
 
     (blocks, pointer)
+}
+
+/// The kind name an `open {kind}` block reports for `map`: the
+/// `Settlement`'s `of` kind when it has one, else the headline kind
+/// that declares states - `question` on `decisions`, `task` on
+/// `tasks`. `None` for a map with neither, so it prints no block.
+fn open_kind(map: &Map) -> Option<&str> {
+    if let Some(settlement) = map.schema().settlement.as_ref() {
+        return Some(settlement.of.as_str());
+    }
+    map.schema()
+        .headline_kinds
+        .iter()
+        .find(|name| {
+            map.schema()
+                .node_kind(name)
+                .is_some_and(|kind| !kind.states.is_empty())
+        })
+        .map(String::as_str)
 }
 
 /// The latest `session.started` event this exact source (client name

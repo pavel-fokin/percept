@@ -22,8 +22,9 @@ const DECISIONS_GUIDE: &str = "A `## contents` list, then every question at `##`
 /// What the tasks map adds to the preamble.
 const TASKS_GUIDE: &str = "A `## contents` list, then every open task at `##` in the order it \
     was raised, each with why it matters and what it waits on. Done and dropped tasks follow \
-    under `done`, each with its outcome. A task's own history: `percept maps show tasks \
-    --around 'task:<name>'`. What changed lately: `percept maps show tasks --since 1d`.";
+    under one `##` section per state, each with its outcome. A task's own history: `percept \
+    maps show tasks --around 'task:<name>'`. What changed lately: `percept maps show tasks \
+    --since 1d`.";
 
 /// `map` as Markdown: a heading and the preamble, then the map's body.
 /// The decisions map renders as a `## contents` list and then one `##`
@@ -213,16 +214,15 @@ fn push_decisions(out: &mut String, map: &Map) {
 }
 
 /// The tasks map's body: a `## contents` list, then one `##` per open
-/// task - one no outcome resolves - in the order it was raised, each
-/// with why it matters and the tasks it waits on; then, under `done`,
-/// every settled task with its outcome. A task never moves in the open
-/// list; settling it is the one move, and the agreed one.
+/// task - one whose state is still the kind's first listed value - in
+/// the order it was raised, each with why it matters and the tasks it
+/// waits on; then one `##` section per later state that has tasks -
+/// `## done`, `## dropped` - each task a bullet with its properties. A
+/// task never moves in the open list; changing its state is the one
+/// move, and the agreed one.
 fn push_tasks(out: &mut String, map: &Map) {
-    let (done, open): (Vec<&Node>, Vec<&Node>) = map
-        .headlines()
-        .partition(|task| !map.settled_by(task.id).is_empty());
-
-    if open.is_empty() && done.is_empty() {
+    let tasks: Vec<&Node> = map.headlines().collect();
+    if tasks.is_empty() {
         let _ = writeln!(
             out,
             "\n(no task yet; {} nodes of other kinds.)",
@@ -230,24 +230,37 @@ fn push_tasks(out: &mut String, map: &Map) {
         );
         return;
     }
+
+    let open: Vec<&Node> = map.open().collect();
     if !open.is_empty() {
         push_contents(out, map, &open);
     }
-    for task in open {
+    for task in &open {
         let _ = write!(out, "\n## {}\n\n", marked_name(map, task));
         push_props(out, map, task, "");
         for blocker in map.blocked_by(task.id) {
             let _ = writeln!(out, "waits on {}", marked_name(map, blocker));
         }
     }
-    if !done.is_empty() {
-        out.push_str("\n## done\n");
-        for task in done {
+
+    let states = map
+        .schema()
+        .node_kind("task")
+        .map(|kind| kind.states.as_slice())
+        .unwrap_or_default();
+    for state in states.iter().skip(1) {
+        let in_state: Vec<&Node> = tasks
+            .iter()
+            .copied()
+            .filter(|task| map.state(task) == Some(state.as_str()))
+            .collect();
+        if in_state.is_empty() {
+            continue;
+        }
+        let _ = writeln!(out, "\n## {state}");
+        for task in in_state {
             let _ = writeln!(out, "- {}", marked_name(map, task));
-            for outcome in map.settled_by(task.id) {
-                let _ = writeln!(out, "  outcome {}", marked_name(map, outcome));
-                push_props(out, map, outcome, "  ");
-            }
+            push_props(out, map, task, "  ");
         }
     }
 }

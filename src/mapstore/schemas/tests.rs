@@ -362,6 +362,79 @@ fn a_blank_requires_entry_is_refused() {
 }
 
 #[test]
+fn a_state_list_loads_onto_the_node_kind() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[node]]\nname = \"term\"\ngloss = \"g\"\nstate = [\"open\", \"done\"]\n",
+    );
+
+    let schemas = load(fixture.path()).unwrap();
+
+    let glossary = schemas.find("glossary").unwrap();
+    assert_eq!(glossary.node_kind("term").unwrap().states, ["open", "done"]);
+}
+
+#[test]
+fn a_state_list_of_one_entry_is_refused() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[node]]\nname = \"term\"\ngloss = \"g\"\nstate = [\"open\"]\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert!(err.contains("fewer than two states"), "{err}");
+}
+
+#[test]
+fn a_blank_state_entry_is_refused() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[node]]\nname = \"term\"\ngloss = \"g\"\nstate = [\"open\", \"\"]\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert!(err.contains("blank state"), "{err}");
+}
+
+#[test]
+fn a_repeated_state_entry_is_refused() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[node]]\nname = \"term\"\ngloss = \"g\"\nstate = [\"open\", \"open\"]\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert!(err.contains("twice"), "{err}");
+}
+
+#[test]
+fn a_built_in_replacement_that_changes_a_kind_s_states_is_refused() {
+    let fixture = Fixture::new();
+    let changed = TASKS_TOML.replacen(
+        "state = [\"open\", \"done\", \"dropped\"]",
+        "state = [\"open\", \"done\"]",
+        1,
+    );
+    fixture.write(".percept/schemas/tasks.toml", &changed);
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert!(err.starts_with("tasks.toml:"), "{err}");
+    assert!(err.contains("states"), "{err}");
+}
+
+#[test]
 fn an_edge_end_naming_an_undeclared_kind_is_refused() {
     let fixture = Fixture::new();
     fixture.write(

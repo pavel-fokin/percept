@@ -74,6 +74,29 @@ const PARAMETERS: &str = r#"{
           {
             "type": "object",
             "properties": {
+              "op": {"const": "change_node"},
+              "node": {
+                "description": "the node to change: {kind, name}, or the short id its map shows it as, e.g. d41",
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
+                    "required": ["kind", "name"],
+                    "additionalProperties": false
+                  },
+                  {"type": "string"}
+                ]
+              },
+              "name": {"type": "string", "description": "a rename, if any"},
+              "properties": {"type": "object", "additionalProperties": {"type": "string"}, "description": "merged into the node's own; a key given here replaces that key alone"},
+              "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"}
+            },
+            "required": ["op", "node"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
               "op": {"const": "remove_node"},
               "node": {
                 "description": "the node to remove: {kind, name}, or the short id its map shows it as, e.g. d41",
@@ -183,6 +206,14 @@ enum ChangeArgs {
         #[serde(default)]
         sources: Vec<String>,
     },
+    ChangeNode {
+        node: NodeRefArgs,
+        name: Option<String>,
+        #[serde(default)]
+        properties: BTreeMap<String, String>,
+        #[serde(default)]
+        sources: Vec<String>,
+    },
     RemoveNode {
         node: NodeRefArgs,
         reason: String,
@@ -284,6 +315,25 @@ fn apply(
             let line = format!("added {kind} {name:?}");
             let mutation = Mutation::AddNode {
                 kind,
+                name,
+                properties,
+                sources: snapshot.resolve(&sources)?,
+            };
+            (mutation, line)
+        }
+        ChangeArgs::ChangeNode {
+            node,
+            name,
+            properties,
+            sources,
+        } => {
+            let node = node_ref(snapshot.map(), node)?;
+            let line = match &name {
+                Some(new_name) => format!("changed {node} to {new_name:?}"),
+                None => format!("changed {node}"),
+            };
+            let mutation = Mutation::ChangeNode {
+                node,
                 name,
                 properties,
                 sources: snapshot.resolve(&sources)?,

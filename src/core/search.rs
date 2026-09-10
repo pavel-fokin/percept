@@ -108,6 +108,9 @@ fn carries(payload: &Payload, term: &str) -> bool {
             properties,
             ..
         } => has(map) || has(kind) || has(name) || properties.values().any(|v| has(v)),
+        Payload::NodeChanged { map, name, properties, .. } => {
+            has(map) || name.as_deref().is_some_and(has) || properties.values().any(|v| has(v))
+        }
         Payload::NodeRemoved { map, reason, .. } => has(map) || has(reason),
         Payload::EdgeAdded { map, kind, .. } | Payload::EdgeRemoved { map, kind, .. } => {
             has(map) || has(kind)

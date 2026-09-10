@@ -90,25 +90,22 @@ fn a_question_is_settled_by_the_current_end_of_each_resolvers_chain() {
 }
 
 #[test]
-fn an_outcome_settles_a_task_the_way_a_decision_settles_a_question() {
-    let (t, o, blocker) = (NodeId::new(), NodeId::new(), NodeId::new());
+fn a_task_s_open_list_names_the_ones_it_blocks_on() {
+    let (t, blocker) = (NodeId::new(), NodeId::new());
     let events = [
         node_added("tasks", t, "task", "cancel a turn"),
         node_added("tasks", blocker, "task", "cancellable streams"),
-        node_added("tasks", o, "outcome", "done in 1a2b3c"),
-        edge_added("tasks", RESOLVES, o, t),
         edge_added("tasks", "blocks", blocker, t),
     ];
     let map = Map::fold(tasks(), &scope(), &events).unwrap();
 
     assert_eq!(
-        map.settled_by(t).iter().map(|n| n.id).collect::<Vec<_>>(),
-        vec![o]
-    );
-    assert!(map.settles(o));
-    assert_eq!(
         map.blocked_by(t).iter().map(|n| n.id).collect::<Vec<_>>(),
         vec![blocker]
+    );
+    assert_eq!(
+        map.open().map(|n| n.id).collect::<Vec<_>>(),
+        vec![t, blocker]
     );
 }
 
@@ -242,6 +239,30 @@ fn since_leaves_out_an_edge_older_than_the_instant_between_kept_nodes() {
     assert!(cut.edges().is_empty());
 }
 
+#[test]
+fn since_includes_a_node_changed_after_at() {
+    let t = NodeId::new();
+    let at = Timestamp::now();
+    let earlier = at.minus_minutes(1).unwrap();
+    let events = [
+        created_at(node_added("tasks", t, "task", "cancel a turn"), earlier),
+        created_at(
+            node_changed(
+                "tasks",
+                t,
+                None,
+                BTreeMap::from([("state".to_string(), "done".to_string())]),
+            ),
+            at,
+        ),
+    ];
+    let map = Map::fold(tasks(), &scope(), &events).unwrap();
+
+    let cut = map.since(at);
+
+    assert_eq!(cut.nodes().len(), 1);
+}
+
 fn node_added(map: &str, node: NodeId, kind: &str, name: &str) -> Event {
     // `seq` at its sentinel: these fixtures build a few nodes at most,
     // so `Map::replay`'s positional fallback mints the same numbers a
@@ -263,6 +284,21 @@ fn edge_added(map: &str, kind: &str, from: NodeId, to: NodeId) -> Event {
         kind: kind.to_string(),
         from,
         to,
+        sources: Vec::new(),
+    })
+}
+
+fn node_changed(
+    map: &str,
+    node: NodeId,
+    name: Option<&str>,
+    properties: BTreeMap<String, String>,
+) -> Event {
+    committed(Payload::NodeChanged {
+        map: map.to_string(),
+        node,
+        name: name.map(str::to_string),
+        properties,
         sources: Vec::new(),
     })
 }
@@ -322,6 +358,25 @@ fn add_edge(kind: &str, from: NodeRef, to: NodeRef) -> Mutation {
         kind: kind.to_string(),
         from,
         to,
+        sources: Vec::new(),
+    }
+}
+
+/// A `task` node with the `why` its kind requires.
+fn add_task(name: &str) -> Mutation {
+    Mutation::AddNode {
+        kind: "task".to_string(),
+        name: name.to_string(),
+        properties: BTreeMap::from([("why".to_string(), "because".to_string())]),
+        sources: Vec::new(),
+    }
+}
+
+fn change_node(kind: &str, name: &str, rename: Option<&str>, properties: BTreeMap<String, String>) -> Mutation {
+    Mutation::ChangeNode {
+        node: node_ref(kind, name),
+        name: rename.map(str::to_string),
+        properties,
         sources: Vec::new(),
     }
 }
@@ -658,6 +713,234 @@ fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
     assert!(matches!(no_edge, MapError::NoSuchEdge { .. }));
     assert_eq!(map.nodes().len(), 1);
     assert!(map.edges().is_empty());
+}
+
+#[test]
+fn change_merges_one_property_and_keeps_the_rest() {
+    let mut map = Map::empty(tasks());
+    map.apply(add_task("cancel a turn"), Actor::Human(human()))
+        .unwrap();
+
+    map.apply(
+        change_node(
+            "task",
+            "cancel a turn",
+            None,
+            BTreeMap::from([("state".to_string(), "done".to_string())]),
+        ),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    let node = map.find("task", "cancel a turn").unwrap();
+    assert_eq!(node.properties.get("why").unwrap(), "because");
+    assert_eq!(node.properties.get("state").unwrap(), "done");
+}
+
+#[test]
+fn a_rename_updates_lookup_by_the_new_name_and_frees_the_old() {
+    let mut map = Map::empty(tasks());
+    map.apply(add_task("cancel a turn"), Actor::Human(human()))
+        .unwrap();
+
+    map.apply(
+        change_node("task", "cancel a turn", Some("cancel a turn cleanly"), BTreeMap::new()),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    assert!(map.find("task", "cancel a turn").is_none());
+    assert!(map.find("task", "cancel a turn cleanly").is_some());
+}
+
+#[test]
+fn a_rename_to_a_taken_name_is_refused() {
+    let mut map = Map::empty(tasks());
+    map.apply(add_task("a"), Actor::Human(human())).unwrap();
+    map.apply(add_task("b"), Actor::Human(human())).unwrap();
+
+    let err = map
+        .apply(
+            change_node("task", "a", Some("b"), BTreeMap::new()),
+            Actor::Human(human()),
+        )
+        .err()
+        .unwrap();
+
+    assert_eq!(
+        err,
+        MapError::DuplicateNode {
+            kind: "task".to_string(),
+            name: "b".to_string(),
+        }
+    );
+}
+
+#[test]
+fn a_state_off_the_list_is_refused_on_add_and_on_change() {
+    let mut map = Map::empty(tasks());
+    let states = vec!["open".to_string(), "done".to_string(), "dropped".to_string()];
+
+    let on_add = map
+        .apply(
+            Mutation::AddNode {
+                kind: "task".to_string(),
+                name: "a".to_string(),
+                properties: BTreeMap::from([
+                    ("why".to_string(), "because".to_string()),
+                    ("state".to_string(), "urgent".to_string()),
+                ]),
+                sources: Vec::new(),
+            },
+            Actor::Human(human()),
+        )
+        .err()
+        .unwrap();
+    assert_eq!(
+        on_add,
+        MapError::UnknownState {
+            kind: "task".to_string(),
+            value: "urgent".to_string(),
+            states: states.clone(),
+        }
+    );
+
+    map.apply(add_task("a"), Actor::Human(human())).unwrap();
+    let on_change = map
+        .apply(
+            change_node(
+                "task",
+                "a",
+                None,
+                BTreeMap::from([("state".to_string(), "urgent".to_string())]),
+            ),
+            Actor::Human(human()),
+        )
+        .err()
+        .unwrap();
+    assert_eq!(
+        on_change,
+        MapError::UnknownState {
+            kind: "task".to_string(),
+            value: "urgent".to_string(),
+            states,
+        }
+    );
+}
+
+#[test]
+fn a_state_on_a_kind_with_no_states_is_refused() {
+    let mut map = Map::empty(decisions());
+
+    let err = map
+        .apply(
+            Mutation::AddNode {
+                kind: "option".to_string(),
+                name: "Rust".to_string(),
+                properties: BTreeMap::from([
+                    ("why".to_string(), "because".to_string()),
+                    ("state".to_string(), "open".to_string()),
+                ]),
+                sources: Vec::new(),
+            },
+            Actor::Human(human()),
+        )
+        .err()
+        .unwrap();
+
+    assert_eq!(
+        err,
+        MapError::UnknownState {
+            kind: "option".to_string(),
+            value: "open".to_string(),
+            states: Vec::new(),
+        }
+    );
+}
+
+#[test]
+fn an_agent_changing_a_humans_node_may_set_state_and_outcome_and_is_refused_a_name_or_why() {
+    let mut map = Map::empty(tasks());
+    map.apply(add_task("cancel a turn"), Actor::Human(human()))
+        .unwrap();
+
+    map.apply(
+        change_node(
+            "task",
+            "cancel a turn",
+            None,
+            BTreeMap::from([
+                ("state".to_string(), "done".to_string()),
+                ("outcome".to_string(), "3f2a9c1: done".to_string()),
+            ]),
+        ),
+        Actor::Agent,
+    )
+    .unwrap();
+
+    let renamed = map
+        .apply(
+            change_node("task", "cancel a turn", Some("renamed"), BTreeMap::new()),
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
+    assert!(matches!(renamed, MapError::HumansNode { .. }));
+
+    let other_property = map
+        .apply(
+            change_node(
+                "task",
+                "cancel a turn",
+                None,
+                BTreeMap::from([("why".to_string(), "different".to_string())]),
+            ),
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
+    assert!(matches!(other_property, MapError::HumansNode { .. }));
+}
+
+#[test]
+fn a_human_may_change_anything_on_a_humans_node() {
+    let mut map = Map::empty(tasks());
+    map.apply(add_task("cancel a turn"), Actor::Human(human()))
+        .unwrap();
+
+    map.apply(
+        change_node(
+            "task",
+            "cancel a turn",
+            Some("cancel a turn cleanly"),
+            BTreeMap::from([("why".to_string(), "different".to_string())]),
+        ),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    let node = map.find("task", "cancel a turn cleanly").unwrap();
+    assert_eq!(node.properties.get("why").unwrap(), "different");
+}
+
+#[test]
+fn open_on_the_tasks_fixture_lists_first_state_tasks_only() {
+    let mut map = Map::empty(tasks());
+    map.apply(add_task("a"), Actor::Human(human())).unwrap();
+    map.apply(add_task("b"), Actor::Human(human())).unwrap();
+    map.apply(
+        change_node(
+            "task",
+            "b",
+            None,
+            BTreeMap::from([("state".to_string(), "done".to_string())]),
+        ),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    let names: Vec<&str> = map.open().map(|node| node.name.as_str()).collect();
+    assert_eq!(names, ["a"]);
 }
 
 #[test]

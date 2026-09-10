@@ -263,6 +263,7 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
         sources: vec![EventId::new()],
         actor: Actor::Human(me),
         added_at: Timestamp::now(),
+        changed_at: Timestamp::now(),
         seq: 1,
     };
 

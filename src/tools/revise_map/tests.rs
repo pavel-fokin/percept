@@ -1,5 +1,7 @@
 use super::*;
-use crate::core::testing::{edge_added, human, node_added, node_added_by, schemas, scope, source, FakeLog};
+use crate::core::testing::{
+    edge_added, human, node_added, node_added_by, node_id, schemas, scope, source, FakeLog,
+};
 use crate::core::{Actor, Event, EventId};
 
 fn tool(events: Vec<Event>) -> ReviseMap {
@@ -51,6 +53,33 @@ fn a_valid_batch_returns_the_payloads_and_content() {
         output.content,
         format!("added option \"Rust\" as {}", node_id.as_uuid())
     );
+}
+
+#[test]
+fn a_change_node_op_applies() {
+    let added = node_added_by(Actor::Agent, "option", "Rust");
+    let id = node_id(&added);
+    let revise = tool(vec![added]);
+
+    let args = r#"{"map":"decisions","changes":[{"op":"change_node","node":{"kind":"option","name":"Rust"},"properties":{"summary":"fast"},"sources":[]}]}"#;
+
+    let output = revise.run(args).unwrap();
+
+    assert_eq!(output.commits.len(), 1);
+    match &output.commits[0] {
+        Payload::NodeChanged {
+            node,
+            name,
+            properties,
+            ..
+        } => {
+            assert_eq!(*node, id);
+            assert!(name.is_none());
+            assert_eq!(properties["summary"], "fast");
+        }
+        _ => panic!("expected a NodeChanged payload"),
+    }
+    assert_eq!(output.content, "changed option \"Rust\"");
 }
 
 #[test]

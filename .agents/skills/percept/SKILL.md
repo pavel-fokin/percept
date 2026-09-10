@@ -102,24 +102,35 @@ reads the newest. If the meaning moved, record the new decision with a
 
 ## Record a task
 
-The tasks map holds work left to do. A `task` names one outcome and
-says in its `why` property what it costs to leave undone; the store
-refuses one without it. An `outcome` with a `resolves` edge settles it,
-done or dropped, with the commit or the reason in its `ref` or `why`
-property. A task `blocks` the one that must wait for it. Rewording a
-task is a new task with a `supersedes` edge, never a removal.
+The tasks map holds work left to do. A `task` says in its `why`
+property what it costs to leave undone; the store refuses one without
+it. Its `state` property is `open`, `done`, or `dropped` - `open`
+until something changes it. A task `blocks` the one that must wait for
+it. Rewording a task changes its name in place, never a new node.
 
 ```sh
 percept maps add-node tasks --actor agent --kind task --name "cancel a turn without quitting" \
   --prop why="Esc drops the whole session on a fifty-call turn" --source $id
-percept maps add-node tasks --actor agent --kind outcome --name "done in 1f1a9a9" \
-  --prop ref=1f1a9a9 --source $id
-percept maps add-edge tasks --actor agent --kind resolves \
-  --from 'outcome:done in 1f1a9a9' --to 'task:cancel a turn without quitting' --source $id
 ```
 
+Close a task, drop it, reopen it, or reword it by changing the node it
+already is - `percept maps record`'s document grammar takes a bare
+short id, `t4`, for that:
+
+```sh
+percept maps record tasks --actor agent --source $id <<'EOF'
+t4
+  state "done"
+  outcome "1f1a9a9: cancel a turn without quitting"
+EOF
+```
+
+A dropped task carries `state "dropped"` and an `outcome` saying why; a
+reopened one `state "open"`.
+
 Open on `percept maps show tasks --format md` before planning, so the
-next item is picked rather than re-derived; add the outcome at commit.
+next item is picked rather than re-derived; close it with its outcome
+at commit.
 
 ## Add a map
 
