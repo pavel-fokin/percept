@@ -25,7 +25,10 @@ No tool owns this job. An agent's memory serves the agent. Git serves
 the code, not the model of it. An ADR serves the human, but the agent
 does not write one and the human stops after the third.
 
-percept automates the coordination, not the coding.
+percept keeps project decisions alive across AI coding sessions. That
+is the sentence a stranger reads first, and the README opens with it.
+percept automates the coordination, not the coding; the rest of this
+document says what keeping a decision alive takes.
 
 ## The hypothesis
 
@@ -81,7 +84,7 @@ the queue, and both are the MVP's to get right.
 | What sets the queue | How |
 |---|---|
 | When the model records | At the moment the user says yes to a proposal, pushed by a hook, not at every step of a plan. One record per settled question. |
-| What the review shows | Headline kinds only: decisions and tasks, never options or evidence. Those stay one hop away. A claim the agent marked as needing a look is raised above the rest. |
+| What the review shows | Headline kinds only: decisions and tasks, never options or evidence. Those stay one hop away. A question that reopens a decision is raised above the rest. |
 
 Open as q84 in the decisions map.
 
@@ -122,9 +125,10 @@ the headlines.
 **A month later.** A decision cited a range of a file, and the file
 changed. The start block says so. The model reads the diff as its last
 act of the session, finds the decision no longer holds, and opens a
-question. The review shows one new question with the agent's mark on
-it. The human answers it in a sentence, and the next session starts
-from the answer.
+question with a `reopens` edge to the decision. It does not rewrite
+the decision: that is the human's to do. The review shows the question
+above the rest. The human answers it in a sentence, and the next
+session starts from the answer.
 
 ## What is built and what remains
 
@@ -136,21 +140,31 @@ from the answer.
 | 4 | A node cites file text; the start block reports what changed | Built 2026-09-09 | Evidence |
 | 5 | The start block carries the three recording rules | To build | Recording in a stranger's project |
 | 6 | A push hook at the yes moment | To build | Recording as a habit; the queue |
-| 7 | `confirms`, `disputes`, `review.finished`; standing in the fold | To build | Correctability |
-| 8 | `percept review`: the page, wrong-only, finish as the batch | To build | Visibility, correctability |
-| 9 | The start block carries standing and the human's words | To build | Continuity |
-| 10 | A tally per session | To build | Falsifiability |
-| 11 | Release binaries and a curl install | To build | A stranger installs |
-| 12 | `init` writes the local, uncommitted config | To build | A teammate without percept is unharmed |
-| 13 | A fold budget on every hook call | To build, q71 | The start hook stays enabled as the log grows |
+| 7 | A `reopens` edge in the decisions schema, from a question to the decision it challenges | To build | An agent disputes without rewriting; the review raises it |
+| 8 | `confirms`, `disputes`, `review.finished`; standing in the fold | To build | Correctability |
+| 9 | `percept review`: the page, wrong-only, finish as the batch | To build | Visibility, correctability |
+| 10 | The start block carries standing and the human's words | To build | Continuity |
+| 11 | A tally per session | To build | Falsifiability |
+| 12 | The hook records prompts and replies; tool capture only behind an `init` flag | To build | Trust; the fold stays small |
+| 13 | Release binaries and a curl install | To build | A stranger installs |
+| 14 | `init` writes the local, uncommitted config | To build | A teammate without percept is unharmed |
 
-Build 5 to 10 in that order and run the tally on this repo and one
-other for two weeks. Then 11 to 13, which a stranger needs and the
+Build 5 to 12 in that order and run the tally on this repo and one
+other for two weeks. Then 13 and 14, which a stranger needs and the
 hypothesis does not.
 
 ## The tally
 
-Per session, counted by hand until change 10 lands.
+After two weeks, three questions the developer answers about
+themselves.
+
+- Did I stop repeating settled decisions to agents?
+- Did I notice a decision no longer fit the project before it cost
+  something?
+- Did my correction reach the next session, in the other client?
+
+A no on any of them is the hypothesis failing. The counts below, per
+session and by hand until change 11 lands, say which property failed.
 
 | Count | Says |
 |---|---|
@@ -168,6 +182,14 @@ Per session, counted by hand until change 10 lands.
 - The `plan` skill. Its trigger, the user said yes, is a prompt, and
   every client hooks prompts. The push hook replaces it.
 - SDKs and the crate split. Both wait for a second consumer.
+- Tool capture. Four days of this repo put 74 MB in the log, and 73
+  of them are tool calls and their results. No MVP mechanism reads
+  them: the since-cut, standing, and the start block run on prompts,
+  replies, and map events, and `file.cited` names the text a claim
+  rests on. What they cost is a stranger's secrets under `~/.percept`
+  and a fold that reads everything to find a little. Capture stays
+  behind an `init` flag for the `percept-code` lab, and the fold
+  budget, q71, leaves the MVP with it.
 - A percept server. The JSONL file under `~/.percept` is the MVP's
   substrate, one person on one machine. A server later syncs the log
   across machines and a team under the same rules, and that is where
