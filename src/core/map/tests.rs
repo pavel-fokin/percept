@@ -315,8 +315,8 @@ fn fold_stamps_a_node_with_its_events_actor_and_time() {
     let map = Map::fold(decisions(), &scope(), &[event]).unwrap();
 
     let node = map.find("option", "Rust").unwrap();
-    assert_eq!(node.actor, Actor::Agent);
-    assert_eq!(node.added_at, created_at);
+    assert_eq!(node.added().actor, Actor::Agent);
+    assert_eq!(node.added().at, created_at);
 }
 
 #[test]
@@ -541,7 +541,7 @@ fn apply_stamps_the_node_with_the_actor_given() {
 
     let node = map.find("option", "Rust").unwrap();
 
-    assert_eq!(node.actor, Actor::Human(me));
+    assert_eq!(node.added().actor, Actor::Human(me));
 }
 
 #[test]
@@ -971,7 +971,7 @@ fn a_change_carrying_only_why_updates_changed_by_changed_why_and_changed_at() {
     let mut map = Map::empty(tasks());
     let me = human();
     map.apply(add_task("cancel a turn"), Actor::Agent).unwrap();
-    let added_at = map.find("task", "cancel a turn").unwrap().changed_at;
+    let added_at = map.find("task", "cancel a turn").unwrap().changed().at;
 
     map.apply(
         change_node_why("task", "cancel a turn", None, BTreeMap::new(), Some("wrong")),
@@ -980,9 +980,9 @@ fn a_change_carrying_only_why_updates_changed_by_changed_why_and_changed_at() {
     .unwrap();
 
     let node = map.find("task", "cancel a turn").unwrap();
-    assert_eq!(node.changed_by, Actor::Human(me));
-    assert_eq!(node.changed_why.as_deref(), Some("wrong"));
-    assert!(node.changed_at >= added_at);
+    assert_eq!(node.changed().actor, Actor::Human(me));
+    assert_eq!(node.changed().why.as_deref(), Some("wrong"));
+    assert!(node.changed().at >= added_at);
 }
 
 #[test]
@@ -991,8 +991,8 @@ fn node_added_sets_changed_by_to_its_actor_and_changed_why_to_none() {
     map.apply(add_node("decision", "Rust"), Actor::Agent).unwrap();
 
     let node = map.find("decision", "Rust").unwrap();
-    assert_eq!(node.changed_by, Actor::Agent);
-    assert_eq!(node.changed_why, None);
+    assert_eq!(node.changed().actor, Actor::Agent);
+    assert_eq!(node.changed().why, None);
 }
 
 #[test]
@@ -1628,8 +1628,8 @@ fn a_state_set_from_below_does_not_lift_the_lock_the_humans_change_put_on_a_node
     .unwrap();
 
     let node = map.find("task", "cancel a turn").unwrap();
-    assert_eq!(node.changed_by, Actor::Agent);
-    assert!(matches!(node.touched_by, Actor::Human(_)), "{:?}", node.touched_by);
+    assert_eq!(node.changed().actor, Actor::Agent);
+    assert!(matches!(node.touched_by(), Actor::Human(_)), "{:?}", node.touched_by());
     let renamed = map
         .apply(
             change_node("task", "cancel a turn", Some("renamed"), BTreeMap::new()),

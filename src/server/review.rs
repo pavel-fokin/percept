@@ -9,7 +9,9 @@
 
 use serde::Serialize;
 
-use crate::core::{Actor, EdgeEnd, EventId, EventLog, HumanId, Map, MapError, Node, Schemas, Source};
+use crate::core::{
+    Actor, EdgeEnd, EventId, EventLog, HumanId, Map, MapError, Node, Schemas, Source, Written,
+};
 use crate::mapstore;
 use crate::shared::Timestamp;
 
@@ -174,10 +176,10 @@ fn map_queue(map: &Map, since: Option<Timestamp>, index: &EventIndex) -> MapQueu
     let schema = map.schema();
     let claims: Vec<&Node> = map
         .headlines()
-        .filter(|node| since.is_none_or(|since| node.changed_at >= since))
+        .filter(|node| since.is_none_or(|since| node.changed().at >= since))
         // The human's own writes - a landmark they added, a Wrong they
         // gave - are not theirs to review.
-        .filter(|node| !matches!(node.changed_by, Actor::Human(_)))
+        .filter(|node| !matches!(node.changed().actor, Actor::Human(_)))
         .collect();
     let groups = grouped(map, &claims);
     MapQueue {
@@ -237,9 +239,9 @@ fn grouped<'a>(map: &'a Map, claims: &[&'a Node]) -> Vec<RawGroup<'a>> {
         }
     }
     for group in &mut groups {
-        group.rows.sort_by_key(|node| node.added_at);
+        group.rows.sort_by_key(|node| node.added().at);
     }
-    groups.sort_by_key(|group| group.of_node.added_at);
+    groups.sort_by_key(|group| group.of_node.added().at);
     groups
 }
 
@@ -251,7 +253,7 @@ fn group_json(map: &Map, group: &RawGroup, index: &EventIndex) -> Group {
     let heading = (!is_self_group).then(|| Heading {
         id: map.short_id(group.of_node.id).unwrap_or_default(),
         title: group.of_node.name.clone(),
-        raised_at: group.of_node.added_at.to_string(),
+        raised_at: group.of_node.added().at.to_string(),
     });
     let related = related_to(map, group.of_node);
     Group {
@@ -303,10 +305,10 @@ fn option_json(map: &Map, node: &Node, index: &EventIndex) -> OptionRow {
         kind: node.kind.clone(),
         name: node.name.clone(),
         why: node.properties.get("why").cloned(),
-        changed_by: node.changed_by.name(),
-        changed_why: node.changed_why.clone(),
-        added_at: node.added_at.to_string(),
-        changed_at: node.changed_at.to_string(),
+        changed_by: node.changed().actor.name(),
+        changed_why: node.changed().why.clone(),
+        added_at: node.added().at.to_string(),
+        changed_at: node.changed().at.to_string(),
         sources: index.sources_json(&node.sources),
     }
 }

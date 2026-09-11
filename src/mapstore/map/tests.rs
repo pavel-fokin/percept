@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::core::testing::{human, schemas, scope, source, source_at, FakeLog};
+use crate::core::testing::{change, human, schemas, scope, source, source_at, FakeLog};
 use crate::core::{Actor, Event, NodeId, NodeRef};
 use crate::shared::Timestamp;
 
@@ -261,12 +261,10 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
         name: "Built both".to_string(),
         properties: BTreeMap::from([("summary".to_string(), "side by side".to_string())]),
         sources: vec![EventId::new()],
-        actor: Actor::Human(me),
-        added_at: Timestamp::now(),
-        changed_at: Timestamp::now(),
-        changed_by: Actor::Agent,
-        changed_why: Some("looked stale".to_string()),
-        touched_by: Actor::Human(me),
+        history: vec![
+            change(Actor::Human(me), Timestamp::now(), None),
+            change(Actor::Agent, Timestamp::now(), Some("looked stale")),
+        ],
         seq: 1,
     };
 
@@ -279,7 +277,7 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
     assert_eq!(line["sources"][0], node.sources[0].as_uuid().to_string());
     assert_eq!(line["actor"]["kind"], "human");
     assert_eq!(line["actor"]["id"], me.unwrap().as_uuid().to_string());
-    assert_eq!(line["added_at"], node.added_at.to_string());
+    assert_eq!(line["added_at"], node.added().at.to_string());
     assert_eq!(line["changed_by"], "agent");
     assert_eq!(line["changed_why"], "looked stale");
 }

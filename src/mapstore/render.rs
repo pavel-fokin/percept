@@ -4,7 +4,7 @@
 
 use std::fmt::Write as _;
 
-use crate::core::{Actor, EdgeEnd, Map, Node, Schema};
+use crate::core::{Actor, EdgeEnd, Map, Node, Schema, Written};
 use crate::store::ids;
 
 /// What every rendered map opens with, so a reader who pastes it
@@ -175,7 +175,7 @@ fn push_node(out: &mut String, map: &Map, node: &Node) {
 /// declares, in schema order.
 fn push_headlines(out: &mut String, map: &Map) {
     let mut headlines: Vec<&Node> = map.headlines().collect();
-    headlines.sort_by_key(|node| (state_rank(map, node), node.added_at));
+    headlines.sort_by_key(|node| (state_rank(map, node), node.added().at));
     if headlines.is_empty() {
         let _ = writeln!(
             out,
@@ -276,7 +276,7 @@ fn marked_name(map: &Map, node: &Node) -> String {
         Some(id) => format!("{id} {:?}", node.name),
         None => format!("{:?}", node.name),
     };
-    if matches!(node.actor, Actor::Agent) {
+    if matches!(node.added().actor, Actor::Agent) {
         label.push_str(" (agent)");
     }
     label

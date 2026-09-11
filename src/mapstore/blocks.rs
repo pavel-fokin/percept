@@ -3,7 +3,7 @@
 //! its last change, and the session rule both a hook and the review
 //! page cut their since by.
 
-use crate::core::{Event, Map, Node, Payload, Source};
+use crate::core::{Event, Map, Node, Payload, Source, Written};
 use crate::shared::Timestamp;
 
 /// How many lines of a gained or changed list a block shows
@@ -60,11 +60,11 @@ pub(crate) fn last_session(events: &[Event], source: &Source) -> Option<Timestam
 /// `None` when `node`'s last change is its addition. The one wording
 /// every render of a node's last change uses.
 pub(crate) fn changed_line(node: &Node) -> Option<String> {
-    if node.changed_at == node.added_at {
+    if node.history.len() <= 1 {
         return None;
     }
-    let mut line = format!("changed by {}", node.changed_by.name());
-    if let Some(why) = &node.changed_why {
+    let mut line = format!("changed by {}", node.changed().actor.name());
+    if let Some(why) = &node.changed().why {
         line.push_str(&format!(": {why:?}"));
     }
     Some(line)

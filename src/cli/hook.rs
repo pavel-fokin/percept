@@ -26,7 +26,9 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::core::{cited_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source};
+use crate::core::{
+    cited_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source, Written,
+};
 use crate::mapstore::{block_header, capped_lines, changed_line, last_session, line_id};
 use crate::shared::Timestamp;
 use crate::store::TurnState;
@@ -243,7 +245,7 @@ recording
 fn gained_block(maps: &[Map], since: Timestamp) -> String {
     let per_map: Vec<Vec<&Node>> = maps
         .iter()
-        .map(|map| map.headlines().filter(|node| node.changed_at >= since).collect())
+        .map(|map| map.headlines().filter(|node| node.changed().at >= since).collect())
         .collect();
 
     let counts = maps

@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::core::{
     Actor, Edge, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation, Node, NodeId,
-    Payload, Schemas, Scope,
+    Payload, Schemas, Scope, Written,
 };
 use crate::shared::Timestamp;
 use crate::store::{ids, parse_event_id};
@@ -227,10 +227,10 @@ struct NodeStamp<'a> {
 impl<'a> NodeStamp<'a> {
     /// `Some` when `stamped`, else `None` - see `Stamp::of`.
     fn of(node: &'a Node, stamped: bool) -> Option<Self> {
-        Stamp::of(node.actor, node.added_at, stamped).map(|stamp| Self {
+        Stamp::of(node.added().actor, node.added().at, stamped).map(|stamp| Self {
             stamp,
-            changed_by: node.changed_by.name(),
-            changed_why: node.changed_why.as_deref(),
+            changed_by: node.changed().actor.name(),
+            changed_why: node.changed().why.as_deref(),
         })
     }
 }
@@ -415,7 +415,7 @@ pub fn encode_edge(map: &Map, edge: &Edge, stamped: bool) -> String {
         from: node_ref(map, edge.from),
         to: node_ref(map, edge.to),
         sources: ids(&edge.sources),
-        stamp: Stamp::of(edge.actor, edge.added_at, stamped),
+        stamp: Stamp::of(edge.added().actor, edge.added().at, stamped),
     })
     .expect("EdgeLine always serializes")
 }

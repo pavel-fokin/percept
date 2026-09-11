@@ -100,12 +100,13 @@ Both are serde-free.
   goes through `Map::apply`, so the rules live once. The core is
   specified in `docs/architecture.md`: five events, four invariants,
   six write rules, and no kind name.
-- A node records who added it and when, and who last changed it and
-  why - `changed_by`, `changed_why`. One rank rule says who may change
-  what: a human is above an agent; renaming or removing another's node
-  needs rank; `state` is anyone's; and a change from above locks the
-  node against everyone below, so after the user's why on an agent's
-  decision the agent can only add beside it. A user-written node is
+- A node and an edge keep their history of changes, from which who
+  added, who last changed and why, and the lock are read. One rank
+  rule says who may change what: a human is above an agent; renaming
+  or removing another's node needs rank; `state` is anyone's; and a
+  change from above locks the node against everyone below, so after
+  the user's why on an agent's decision the agent can only add beside
+  it. A user-written node is
   the human's landmark in a shared map: the model may attach edges to
   it and set its state, nothing else. A decision is corrected by
   adding the new one with a `supersedes` edge to the old, never by

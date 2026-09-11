@@ -13,7 +13,7 @@ The core adds three things a memory lacks:
 | Property | What it means | Where it lives today |
 |---|---|---|
 | Evidence | A claim in a map cites the experience it came from. A reader can check it. | `source` on every node and edge event. |
-| Co-ownership | A map is shared by the human and the agent under one rank rule: a node's name and its removal belong to its writer and to anyone above, and a change from above locks the node below. The human's correction sits on the node as its last change. | `Map::apply`, W6; `actor`, `changed_by`, `changed_why` on a node. |
+| Co-ownership | A map is shared by the human and the agent under one rank rule: a node's name and its removal belong to its writer and to anyone above, and a change from above locks the node below. The human's correction sits on the node as its last change. | `Map::apply`, W6; a node's `history` of `Change`s. |
 | One log | The log spans clients and projects. What one agent learned another can fold. | `~/.percept/percept.jsonl`, `Source` on every event. |
 
 The core is what carries those three. Anything that does not is a
@@ -35,7 +35,7 @@ them.
 | A map is folded deterministically from cognitive commits, and the fold has one implementation. | `Map::apply` in Rust. Nothing stops a second fold yet. |
 | An actor renames or removes only its own node or one below its rank; a change from above is not undone from below. | `Map::apply`, W6. |
 | An alternative is recorded only with the reason it lost. | `requires` on the kind in its schema; the shared write path refuses a node missing one. |
-| A recorded claim is not the human's agreement; silence stays claimed. | Prose. The core keeps no standing: `changed_by` says who last touched a node, and nothing says who agreed. |
+| A recorded claim is not the human's agreement; silence stays claimed. | Prose. The core keeps no standing: a node's last `Change` says who touched it, and nothing says who agreed. |
 | percept never ranks, summarises, or answers; output is constant-size per event. | Prose, and the habit of the search tools. |
 | One log, one writer. | `App::commit` for the loop; the CLI writes on its own. |
 
@@ -64,23 +64,24 @@ nothing more.
 Actor     = Human(id?) | Agent | System
 rank      : Human → 2, Agent → 1, System → 1
 outranks(a, b)  = rank(a) > rank(b)
-owns(a, x)      = a == x.actor            (Agent == Agent: an agent carries no id yet)
-may(a, x)       = (owns(a, x) ∨ outranks(a, x.actor)) ∧ ¬outranks(x.touched_by, a)
+owns(a, x)      = a == x.added.actor      (Agent == Agent: an agent carries no id yet)
+may(a, x)       = (owns(a, x) ∨ outranks(a, x.added.actor)) ∧ ¬outranks(x.touched_by, a)
 
 Schema    = { name, purpose, headlines: {kind}, node_kinds, edge_kinds }
 NodeKind  = { name, gloss, prefix, requires: {key}, states: {value} }
 EdgeKind  = { name, gloss, from: {kind}, to: {kind} }
 
-Node      = { id, seq, kind, name, properties: key → value, sources: [EventId],
-              actor, added_at, changed_at, changed_by, changed_why?, touched_by }
-Edge      = { kind, from: NodeId, to: NodeId, sources, actor, added_at }
+Change    = { actor, at, why? }
+Node      = { id, seq, kind, name, properties: key → value, sources: [EventId], history: [Change] }
+Edge      = { kind, from: NodeId, to: NodeId, sources, history: [Change] }
 Map       = { schema, nodes, edges }
 ```
 
-`states` is a set: no value is the open one by position. `changed_by`
-and `changed_why` are the node's last change, who and why. They are
-what a correction looks like on the node it corrects. `touched_by` is
-the highest-ranked actor to have added or changed the node: the lock,
+`states` is a set: no value is the open one by position. A node and an
+edge keep every write that reached it as a `Change`: who, when, and
+why, when given. `added` is `history`'s first entry, `changed` its
+last - what a correction looks like on the node it corrects.
+`touched_by` is the highest-ranked actor in the history: the lock,
 which a later change from below does not lift.
 
 Invariants, true of every map:
@@ -130,7 +131,7 @@ still do is add a node and an edge beside it, which is how a decision
 is superseded, and the core never learns the word.
 
 A change that carries only `why` is legal. It is a comment, and it
-updates `changed_at`, `changed_by`, and `changed_why` like any change.
+appends a `Change` like any change.
 
 ### Fold rules
 
@@ -139,10 +140,10 @@ checks structure only, so a log written before a rule still folds.
 
 | | |
 |---|---|
-| F1 | `node.added`: W1, I1; `seq = max(seq, next)`; insert with `actor`, `added_at = changed_at = at`, `changed_by = touched_by = actor`. |
-| F2 | `node.changed`: the node is live; apply `name`, merge `properties`, append `sources`; `changed_at = at`, `changed_by = actor`, `changed_why = why`; `touched_by = actor` when `actor` outranks it. |
+| F1 | `node.added`: W1, I1; `seq = max(seq, next)`; insert with `history = [{actor, at}]`. |
+| F2 | `node.changed`: the node is live; apply `name`, merge `properties`, append `sources`; append `{actor, at, why}` to `history`. |
 | F3 | `node.removed`: the node is live; drop it and every edge on it; `seq` is not freed. |
-| F4 | `edge.added`: W1, I2, I3; insert with `actor`, `added_at = at`. |
+| F4 | `edge.added`: W1, I2, I3; insert with `history = [{actor, at}]`. |
 | F5 | `edge.removed`: the edge is live; drop it. |
 
 W3, W4, W5's ends, and W6 are never checked on fold.
@@ -155,7 +156,7 @@ What the core reads out of a map, knowing no kind:
 node(id) · find(kind, name) · resolve(short_id)
 headlines()                     nodes whose kind is in schema.headlines
 linked(id, edge_kind, dir)      the nodes across one edge kind, dir ∈ {from, to}
-since(at)                       nodes with changed_at ≥ at, edges with added_at ≥ at
+since(at)                       nodes with changed.at ≥ at, edges with added.at ≥ at
 Selection { around, depth, since, kinds } → Fragment { nodes, edges, left_out, crossing }
 ```
 
@@ -194,7 +195,7 @@ the way every node carries an actor.
 
 | Piece | What it is |
 |---|---|
-| `changed_by`, `changed_why` | The node's last change: who, and why. A human's "wrong" on an agent's node is a `node.changed` carrying a `why` and nothing else, and it stays on the node until the next change. |
+| `history`'s last `Change` | Who last changed the node, and why. A human's "wrong" on an agent's node is a `node.changed` carrying a `why` and nothing else, and it stays on the node until the next change. |
 | The rank lock, W6 | A change from above is not undone from below. After the human's why, the agent may add beside the node and never rewrite it. |
 
 Silence stays claimed and nothing marks agreement: the core keeps no
@@ -205,13 +206,13 @@ alone looks like one they never opened, and the tally in
 until 2026-09-11; the decisions map holds why it lost.
 
 Who a human contour is stays open. The core has an actor kind for the
-human and no identity behind it. `changed_by` per person needs one
+human and no identity behind it. A `Change` per person needs one
 only when a second person writes, and the question waits for that person.
 
 The maps do not split by contour. One map per contour multiplies what a
 reader holds for a distinction the fold derives, so the contour is a
 view over one map and never a storage boundary. The mixing today is
-right; the surface is the nodes whose `changed_by` is not their `actor`.
+right; the surface is the nodes whose last `Change` is not by their adder.
 
 This is what makes co-ownership an operation rather than a rule: a
 correction with provenance between contours.

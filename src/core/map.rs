@@ -280,26 +280,9 @@ pub struct Node {
     pub name: String,
     pub properties: BTreeMap<String, String>,
     pub sources: Vec<EventId>,
-    /// Who added this node - the actor its `node.added` event carried.
-    pub actor: Actor,
-    /// When this node was added - that event's `created_at`.
-    pub added_at: Timestamp,
-    /// When this node last changed - equal to `added_at` until a
-    /// `node.changed` event lands.
-    pub changed_at: Timestamp,
-    /// Who last changed this node - `actor` until a `node.changed`
-    /// lands, then that event's actor.
-    pub changed_by: Actor,
-    /// The highest-ranked actor to have added or changed this node -
-    /// what `may` weighs: a change from above locks the node against
-    /// everyone below that rank, and a later change from below (a
-    /// state set, a comment) does not lift it.
-    pub touched_by: Actor,
-    /// Why this node's last change was made, when the writer gave one -
-    /// `None` on a plain edit. A human's "wrong" on an agent's node is a
-    /// change carrying only this, and it stays on the node until the
-    /// next change.
-    pub changed_why: Option<String>,
+    /// Every write that reached this node, in log order, the addition
+    /// first. Never empty.
+    pub history: Vec<Change>,
     /// This node's number within its kind, minted once when it was
     /// added - `d41` is its kind's prefix plus this. See
     /// `Payload::NodeAdded`.
@@ -321,10 +304,59 @@ pub struct Edge {
     pub from: NodeId,
     pub to: NodeId,
     pub sources: Vec<EventId>,
-    /// Who added this edge - the actor its `edge.added` event carried.
+    /// One entry today - the addition.
+    pub history: Vec<Change>,
+}
+
+/// One write that reached a node or an edge: who, when, and on what
+/// grounds. `why` is `None` on an addition - a node's own why is a
+/// property - and on a plain edit that gave none.
+#[derive(Clone, Debug)]
+pub struct Change {
     pub actor: Actor,
-    /// When this edge was added - that event's `created_at`.
-    pub added_at: Timestamp,
+    pub at: Timestamp,
+    pub why: Option<String>,
+}
+
+/// A node or an edge that keeps every write that reached it. Default
+/// methods read who added it, who last changed it, and who ranks
+/// highest among everyone who touched it, so that logic lives once for
+/// both.
+pub trait Written {
+    fn history(&self) -> &[Change];
+
+    /// The addition - the first entry in `history`.
+    fn added(&self) -> &Change {
+        self.history().first().expect("history is never empty")
+    }
+
+    /// The last write - the last entry in `history`.
+    fn changed(&self) -> &Change {
+        self.history().last().expect("history is never empty")
+    }
+
+    /// The highest-ranked actor in the history; on a tie, the earliest.
+    fn touched_by(&self) -> Actor {
+        let mut top = self.added().actor;
+        for change in &self.history()[1..] {
+            if outranks(change.actor, top) {
+                top = change.actor;
+            }
+        }
+        top
+    }
+}
+
+impl Written for Node {
+    fn history(&self) -> &[Change] {
+        &self.history
+    }
+}
+
+impl Written for Edge {
+    fn history(&self) -> &[Change] {
+        &self.history
+    }
 }
 
 /// Points at a node the way a writer knows it - by kind and name -
@@ -806,8 +838,8 @@ impl Map {
     /// `None` while it is empty. A removal leaves no trace here - what
     /// was removed lives only in the events.
     pub fn last_changed(&self) -> Option<Timestamp> {
-        let nodes = self.nodes.iter().map(|node| node.changed_at);
-        let edges = self.edges.iter().map(|edge| edge.added_at);
+        let nodes = self.nodes.iter().map(|node| node.changed().at);
+        let edges = self.edges.iter().map(|edge| edge.added().at);
         nodes.chain(edges).max()
     }
 
@@ -928,13 +960,13 @@ impl Map {
         let fresh: Vec<&Edge> = self
             .edges
             .iter()
-            .filter(|edge| edge.added_at >= at)
+            .filter(|edge| edge.added().at >= at)
             .collect();
         let touched: HashSet<NodeId> = fresh.iter().flat_map(|edge| [edge.from, edge.to]).collect();
         let nodes = self
             .nodes
             .iter()
-            .filter(|node| node.changed_at >= at || touched.contains(&node.id))
+            .filter(|node| node.changed().at >= at || touched.contains(&node.id))
             .cloned()
             .collect();
         let edges = fresh.into_iter().cloned().collect();
@@ -1052,7 +1084,7 @@ impl Map {
                 blank_why(why.as_deref())?;
                 let needs_rank = name.is_some() || properties.keys().any(|key| key != "state");
                 if needs_rank {
-                    self.check_may(actor, self.label(node_id), existing.actor, existing.touched_by)?;
+                    self.check_may_of(actor, self.label(node_id), existing)?;
                 }
                 Payload::NodeChanged {
                     map,
@@ -1067,11 +1099,11 @@ impl Map {
                 let node_id = self.resolve(node)?;
                 blank_why(Some(&why))?;
                 let existing = self.node(node_id).expect("resolve returns a live node's id");
-                self.check_may(actor, self.label(node_id), existing.actor, existing.touched_by)?;
+                self.check_may_of(actor, self.label(node_id), existing)?;
                 // Removing a node drops every edge on it, so each one is
                 // weighed as its own removal would be.
                 for edge in self.edges.iter().filter(|edge| edge.from == node_id || edge.to == node_id) {
-                    self.check_may(actor, self.edge_line(edge), edge.actor, edge.actor)?;
+                    self.check_may_of(actor, self.edge_line(edge), edge)?;
                 }
                 Payload::NodeRemoved {
                     map,
@@ -1112,12 +1144,12 @@ impl Map {
                     // highest rank to have touched either end, or the edge
                     // itself, is what locks it.
                     let touched_by = [from_id, to_id]
-                        .map(|id| self.node(id).expect("an edge's ends are live").touched_by)
+                        .map(|id| self.node(id).expect("an edge's ends are live").touched_by())
                         .into_iter()
-                        .chain([edge.actor])
+                        .chain([edge.added().actor])
                         .max_by_key(|touched| rank(*touched))
                         .expect("three candidates");
-                    self.check_may(actor, self.edge_line(edge), edge.actor, touched_by)?;
+                    self.check_may(actor, self.edge_line(edge), edge.added().actor, touched_by)?;
                 }
                 Payload::EdgeRemoved {
                     map,
@@ -1167,12 +1199,7 @@ impl Map {
                     name: name.clone(),
                     properties: properties.clone(),
                     sources: sources.clone(),
-                    actor,
-                    added_at: at,
-                    changed_at: at,
-                    changed_by: actor,
-                    changed_why: None,
-                    touched_by: actor,
+                    history: vec![Change { actor, at, why: None }],
                     seq,
                 });
             }
@@ -1201,12 +1228,11 @@ impl Map {
                         self.nodes[index].sources.push(*source);
                     }
                 }
-                self.nodes[index].changed_at = at;
-                self.nodes[index].changed_by = actor;
-                self.nodes[index].changed_why = why.clone();
-                if outranks(actor, self.nodes[index].touched_by) {
-                    self.nodes[index].touched_by = actor;
-                }
+                self.nodes[index].history.push(Change {
+                    actor,
+                    at,
+                    why: why.clone(),
+                });
             }
             Payload::NodeRemoved { node, .. } => {
                 let removed = self.node(*node).ok_or(MapError::NoSuchNodeId(*node))?;
@@ -1247,8 +1273,7 @@ impl Map {
                     from: *from,
                     to: *to,
                     sources: sources.clone(),
-                    actor,
-                    added_at: at,
+                    history: vec![Change { actor, at, why: None }],
                 });
             }
             Payload::EdgeRemoved { kind, from, to, .. } => {
@@ -1380,6 +1405,12 @@ impl Map {
                 touched_by,
             })
         }
+    }
+
+    /// `check_may`, reading `owner` and `touched_by` off `x` itself -
+    /// the common case, where nothing else weighs in.
+    fn check_may_of(&self, actor: Actor, label: String, x: &impl Written) -> Result<(), MapError> {
+        self.check_may(actor, label, x.added().actor, x.touched_by())
     }
 
     /// The live edge `kind from to` names, if the map holds one - what
