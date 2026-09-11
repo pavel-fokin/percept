@@ -95,7 +95,7 @@ fn is_zero(seq: &u32) -> bool {
 }
 
 /// `Payload::NodeChanged` on the wire. `name` is present only on a
-/// rename.
+/// rename; `why` only when the writer gave one.
 #[derive(Serialize, Deserialize)]
 struct NodeChangedBody {
     map: String,
@@ -104,25 +104,38 @@ struct NodeChangedBody {
     name: Option<String>,
     properties: BTreeMap<String, String>,
     sources: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    why: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct NodeRemovedBody {
     map: String,
     node: String,
-    reason: String,
+    why: String,
     sources: Vec<String>,
 }
 
-/// The shared shape of `EdgeAdded` and `EdgeRemoved` - an edge carries
-/// no id of its own, so `kind`, `from`, and `to` are all either needs.
+/// `Payload::EdgeAdded` on the wire - an edge carries no id of its own,
+/// so `kind`, `from`, and `to` are all it needs.
 #[derive(Serialize, Deserialize)]
-struct EdgeBody {
+struct EdgeAddedBody {
     map: String,
     kind: String,
     from: String,
     to: String,
     sources: Vec<String>,
+}
+
+/// `Payload::EdgeRemoved` on the wire - `EdgeAddedBody` plus `why`.
+#[derive(Serialize, Deserialize)]
+struct EdgeRemovedBody {
+    map: String,
+    kind: String,
+    from: String,
+    to: String,
+    sources: Vec<String>,
+    why: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -510,23 +523,25 @@ impl From<&crate::core::Event> for Event {
                 name,
                 properties,
                 sources,
+                why,
             } => serde_json::to_value(NodeChangedBody {
                 map: map.clone(),
                 node: node.as_uuid().to_string(),
                 name: name.clone(),
                 properties: properties.clone(),
                 sources: ids(sources),
+                why: why.clone(),
             })
             .expect("NodeChangedBody always serializes"),
             Payload::NodeRemoved {
                 map,
                 node,
-                reason,
+                why,
                 sources,
             } => serde_json::to_value(NodeRemovedBody {
                 map: map.clone(),
                 node: node.as_uuid().to_string(),
-                reason: reason.clone(),
+                why: why.clone(),
                 sources: ids(sources),
             })
             .expect("NodeRemovedBody always serializes"),
@@ -536,21 +551,30 @@ impl From<&crate::core::Event> for Event {
                 from,
                 to,
                 sources,
-            }
-            | Payload::EdgeRemoved {
-                map,
-                kind,
-                from,
-                to,
-                sources,
-            } => serde_json::to_value(EdgeBody {
+            } => serde_json::to_value(EdgeAddedBody {
                 map: map.clone(),
                 kind: kind.clone(),
                 from: from.as_uuid().to_string(),
                 to: to.as_uuid().to_string(),
                 sources: ids(sources),
             })
-            .expect("EdgeBody always serializes"),
+            .expect("EdgeAddedBody always serializes"),
+            Payload::EdgeRemoved {
+                map,
+                kind,
+                from,
+                to,
+                sources,
+                why,
+            } => serde_json::to_value(EdgeRemovedBody {
+                map: map.clone(),
+                kind: kind.clone(),
+                from: from.as_uuid().to_string(),
+                to: to.as_uuid().to_string(),
+                sources: ids(sources),
+                why: why.clone(),
+            })
+            .expect("EdgeRemovedBody always serializes"),
             Payload::ModelCalled(usage) => serde_json::to_value(ModelCalledBody {
                 model: usage.model.clone(),
                 input_tokens: usage.input_tokens,
@@ -716,6 +740,7 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 name: body.name,
                 properties: body.properties,
                 sources: parse_event_ids(body.sources)?,
+                why: body.why,
             })
         }
         EventKind::NodeRemoved => {
@@ -724,32 +749,30 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
             Ok(Payload::NodeRemoved {
                 map: body.map,
                 node: parse_node_id(&body.node)?,
-                reason: body.reason,
+                why: body.why,
                 sources: parse_event_ids(body.sources)?,
             })
         }
-        kind @ (EventKind::EdgeAdded | EventKind::EdgeRemoved) => {
-            let body: EdgeBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
-            let (map, kind_name) = (body.map, body.kind);
-            let from = parse_node_id(&body.from)?;
-            let to = parse_node_id(&body.to)?;
-            let sources = parse_event_ids(body.sources)?;
-            Ok(if kind == EventKind::EdgeAdded {
-                Payload::EdgeAdded {
-                    map,
-                    kind: kind_name,
-                    from,
-                    to,
-                    sources,
-                }
-            } else {
-                Payload::EdgeRemoved {
-                    map,
-                    kind: kind_name,
-                    from,
-                    to,
-                    sources,
-                }
+        EventKind::EdgeAdded => {
+            let body: EdgeAddedBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::EdgeAdded {
+                map: body.map,
+                kind: body.kind,
+                from: parse_node_id(&body.from)?,
+                to: parse_node_id(&body.to)?,
+                sources: parse_event_ids(body.sources)?,
+            })
+        }
+        EventKind::EdgeRemoved => {
+            let body: EdgeRemovedBody =
+                serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::EdgeRemoved {
+                map: body.map,
+                kind: body.kind,
+                from: parse_node_id(&body.from)?,
+                to: parse_node_id(&body.to)?,
+                sources: parse_event_ids(body.sources)?,
+                why: body.why,
             })
         }
         EventKind::ModelCalled => {

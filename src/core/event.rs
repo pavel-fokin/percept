@@ -135,20 +135,25 @@ pub enum Payload {
     /// `supersedes` edge. `name` is `Some` only on a rename;
     /// `properties` are merged into the node's own, last write wins, a
     /// key present here replacing that key alone; `sources` join the
-    /// node's. The fold clears whatever the human had judged on the
-    /// node, since the text they judged has changed.
+    /// node's. `why` is the writer's reason, when they gave one - the
+    /// fold carries it as the node's `changed_why`. A change naming
+    /// neither `name` nor a property, only `why`, is a comment: legal,
+    /// and it still becomes the node's last change. The fold clears
+    /// whatever the human had judged on the node, since the text they
+    /// judged has changed.
     NodeChanged {
         map: String,
         node: NodeId,
         name: Option<String>,
         properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
+        why: Option<String>,
     },
     /// A node removed from a cognitive map, with why.
     NodeRemoved {
         map: String,
         node: NodeId,
-        reason: String,
+        why: String,
         sources: Vec<EventId>,
     },
     /// An edge added to a cognitive map. Carries no id of its own -
@@ -160,13 +165,14 @@ pub enum Payload {
         to: NodeId,
         sources: Vec<EventId>,
     },
-    /// An edge removed from a cognitive map.
+    /// An edge removed from a cognitive map, with why.
     EdgeRemoved {
         map: String,
         kind: String,
         from: NodeId,
         to: NodeId,
         sources: Vec<EventId>,
+        why: String,
     },
     /// One round trip to the model - always `System`, never replayed as
     /// dialogue. Caused by the turn's anchor, the same event a thought

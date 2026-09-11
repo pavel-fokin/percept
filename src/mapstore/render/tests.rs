@@ -4,7 +4,10 @@ use super::*;
 use crate::core::testing::{decisions, edge_added, files, human, node_added_citing, node_ref, tasks};
 use crate::core::{Actor, EventId, Mutation, REOPENS, SUPERSEDES};
 
-/// Adds a node with one `why` property when `why` is given.
+/// Adds a node with one `why` property when `why` is given. A `task`
+/// also needs a `state` on add now that `Map::apply` requires one for
+/// any kind that declares states; `open` is the one every fresh task
+/// in these fixtures starts at.
 fn add(
     map: &mut Map,
     kind: &str,
@@ -13,9 +16,12 @@ fn add(
     sources: &[EventId],
     actor: Actor,
 ) {
-    let properties = why
+    let mut properties = why
         .map(|why| BTreeMap::from([("why".to_string(), why.to_string())]))
         .unwrap_or_default();
+    if kind == "task" {
+        properties.insert("state".to_string(), "open".to_string());
+    }
     map.apply(
         Mutation::AddNode {
             kind: kind.to_string(),
@@ -42,6 +48,7 @@ fn change(
             name: None,
             properties,
             sources: Vec::new(),
+            why: None,
         },
         actor,
     )
@@ -738,11 +745,13 @@ fn open_tasks_render_flat_with_why_and_blockers_then_by_state() {
         "{}{}\n\
          ## t2 \"cancel a turn without quitting\"\n\
          \n\
+         state: \"open\"\n\
          why: \"Esc drops the session\"\n\
          waits on t3 \"cancellable reply streams\"\n\
          \n\
          ## t3 \"cancellable reply streams\"\n\
          \n\
+         state: \"open\"\n\
          why: \"nothing can stop a stream today\"\n\
          \n\
          ## done\n\

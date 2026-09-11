@@ -106,7 +106,7 @@ pub enum MapsCommand {
     /// Remove a node from a map, dropping the edges that touch it.
     RemoveNode(RemoveNodeArgs),
     /// Remove an edge from a map.
-    RemoveEdge(EdgeArgs),
+    RemoveEdge(RemoveEdgeArgs),
     /// Add several nodes and edges from a document on stdin, or change
     /// one already in the map - a margin line naming a short id, `t4`,
     /// starts a change block: `state "done"` under it sets a property,
@@ -221,7 +221,7 @@ pub struct RemoveNodeArgs {
     #[arg(long, value_parser = non_blank)]
     node: String,
     #[arg(long, value_parser = non_blank)]
-    reason: String,
+    why: String,
 }
 
 /// An edge to add or remove - the same three things name it either way.
@@ -238,6 +238,16 @@ pub struct EdgeArgs {
     /// `kind:name` of the node the edge points to, or its short id.
     #[arg(long, value_parser = non_blank)]
     to: String,
+}
+
+/// `maps remove-edge`'s arguments: `EdgeArgs` plus why, required only
+/// on removal - `maps add-edge` needs none.
+#[derive(Args)]
+pub struct RemoveEdgeArgs {
+    #[command(flatten)]
+    edge: EdgeArgs,
+    #[arg(long, value_parser = non_blank)]
+    why: String,
 }
 
 #[derive(Args)]
@@ -767,7 +777,7 @@ pub fn maps_remove_node(
     write(args.target, log, schemas, source, me, |sources| {
         Mutation::RemoveNode {
             node,
-            reason: args.reason,
+            why: args.why,
             sources,
         }
     })
@@ -776,22 +786,24 @@ pub fn maps_remove_node(
 
 /// Removes an edge from a map.
 pub fn maps_remove_edge(
-    args: EdgeArgs,
+    args: RemoveEdgeArgs,
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let RemoveEdgeArgs { edge, why } = args;
     let scope = source.scope();
-    let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
-    let from = resolve_ref(&map, &args.from)?;
-    let to = resolve_ref(&map, &args.to)?;
-    write(args.target, log, schemas, source, me, |sources| {
+    let map = mapstore::fold_map(log, schemas, &edge.target.map, &scope)?;
+    let from = resolve_ref(&map, &edge.from)?;
+    let to = resolve_ref(&map, &edge.to)?;
+    write(edge.target, log, schemas, source, me, |sources| {
         Mutation::RemoveEdge {
-            kind: args.kind,
+            kind: edge.kind,
             from,
             to,
             sources,
+            why,
         }
     })
     .map(drop)
@@ -1104,6 +1116,7 @@ fn record_document(
                     name: rename,
                     properties,
                     sources,
+                    why: None,
                 };
                 (mutation, kind, name)
             } else {

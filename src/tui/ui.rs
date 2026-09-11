@@ -273,11 +273,9 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
             ),
             width,
         ),
-        Payload::NodeRemoved {
-            map, node, reason, ..
-        } => tool_lines(
+        Payload::NodeRemoved { map, node, why, .. } => tool_lines(
             chat,
-            &format!("{map}: removed node {} - {reason}", node.as_uuid()),
+            &format!("{map}: removed node {} - {why}", node.as_uuid()),
             width,
         ),
         Payload::EdgeAdded {

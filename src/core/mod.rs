@@ -27,6 +27,12 @@ pub use map::{
     default_prefix, map_of, Edge, EdgeKind, Fragment, Map, MapError, Mutation, Node, NodeId,
     NodeKind, NodeRef, Schema, Schemas, Scope, Selection, Settlement, Standing,
 };
+// `Map::linked` has no caller yet outside its own tests: it is the
+// kind-agnostic query a later issue swaps the decision- and
+// task-specific ones for. Exported now so that issue is a caller
+// change, not a `core` change.
+#[allow(unused_imports)]
+pub use map::Dir;
 pub use map::DECISION;
 pub use map_reader::MapReader;
 pub use search::{EventQuery, EventSearch};

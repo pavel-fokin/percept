@@ -89,7 +89,8 @@ const PARAMETERS: &str = r#"{
               },
               "name": {"type": "string", "description": "a rename, if any"},
               "properties": {"type": "object", "additionalProperties": {"type": "string"}, "description": "merged into the node's own; a key given here replaces that key alone"},
-              "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"}
+              "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"},
+              "why": {"type": "string", "description": "why this change is made, if there is more to say than the properties themselves; a change naming neither a rename nor a property, only this, is a comment"}
             },
             "required": ["op", "node"],
             "additionalProperties": false
@@ -110,10 +111,10 @@ const PARAMETERS: &str = r#"{
                   {"type": "string"}
                 ]
               },
-              "reason": {"type": "string"},
+              "why": {"type": "string"},
               "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"}
             },
-            "required": ["op", "node", "reason"],
+            "required": ["op", "node", "why"],
             "additionalProperties": false
           },
           {
@@ -179,9 +180,10 @@ const PARAMETERS: &str = r#"{
                   {"type": "string"}
                 ]
               },
-              "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"}
+              "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"},
+              "why": {"type": "string"}
             },
-            "required": ["op", "kind", "from", "to"],
+            "required": ["op", "kind", "from", "to", "why"],
             "additionalProperties": false
           }
         ]
@@ -213,10 +215,11 @@ enum ChangeArgs {
         properties: BTreeMap<String, String>,
         #[serde(default)]
         sources: Vec<String>,
+        why: Option<String>,
     },
     RemoveNode {
         node: NodeRefArgs,
-        reason: String,
+        why: String,
         #[serde(default)]
         sources: Vec<String>,
     },
@@ -233,6 +236,7 @@ enum ChangeArgs {
         to: NodeRefArgs,
         #[serde(default)]
         sources: Vec<String>,
+        why: String,
     },
 }
 
@@ -294,7 +298,6 @@ fn apply(
     snapshot: &mut Snapshot,
     change: ChangeArgs,
 ) -> Result<(String, Payload), Box<dyn std::error::Error>> {
-    let adding_edge = matches!(change, ChangeArgs::AddEdge { .. });
     let (mutation, line) = match change {
         ChangeArgs::AddNode {
             kind,
@@ -317,6 +320,7 @@ fn apply(
             name,
             properties,
             sources,
+            why,
         } => {
             let node = node_ref(snapshot.map(), node)?;
             cited(&sources, format_args!("{node}"))?;
@@ -329,14 +333,11 @@ fn apply(
                 name,
                 properties,
                 sources: snapshot.resolve(&sources)?,
+                why,
             };
             (mutation, line)
         }
-        ChangeArgs::RemoveNode {
-            node,
-            reason,
-            sources,
-        } => {
+        ChangeArgs::RemoveNode { node, why, sources } => {
             let node = node_ref(snapshot.map(), node)?;
             if node.kind == DECISION {
                 return Err(format!(
@@ -345,13 +346,13 @@ fn apply(
                 )
                 .into());
             }
-            if let Some(why) = user_guards_node(snapshot.map(), &node) {
-                return Err(why.into());
+            if let Some(guard) = user_guards_node(snapshot.map(), &node) {
+                return Err(guard.into());
             }
             let line = format!("removed {node}");
             let mutation = Mutation::RemoveNode {
                 node,
-                reason,
+                why,
                 sources: snapshot.resolve(&sources)?,
             };
             (mutation, line)
@@ -361,38 +362,42 @@ fn apply(
             from,
             to,
             sources,
+        } => {
+            let from = node_ref(snapshot.map(), from)?;
+            let to = node_ref(snapshot.map(), to)?;
+            let sources = snapshot.resolve(&sources)?;
+            let line = format!("added edge {from} {kind} {to}");
+            let mutation = Mutation::AddEdge {
+                kind,
+                from,
+                to,
+                sources,
+            };
+            (mutation, line)
         }
-        | ChangeArgs::RemoveEdge {
+        ChangeArgs::RemoveEdge {
             kind,
             from,
             to,
             sources,
+            why,
         } => {
             let from = node_ref(snapshot.map(), from)?;
             let to = node_ref(snapshot.map(), to)?;
-            if !adding_edge && user_wrote_edge(snapshot.map(), &kind, &from, &to) {
+            if user_wrote_edge(snapshot.map(), &kind, &from, &to) {
                 return Err(format!(
                     "edge {from} {kind} {to} was written by the user and the model may not remove it"
                 )
                 .into());
             }
             let sources = snapshot.resolve(&sources)?;
-            let verb = if adding_edge { "added" } else { "removed" };
-            let line = format!("{verb} edge {from} {kind} {to}");
-            let mutation = if adding_edge {
-                Mutation::AddEdge {
-                    kind,
-                    from,
-                    to,
-                    sources,
-                }
-            } else {
-                Mutation::RemoveEdge {
-                    kind,
-                    from,
-                    to,
-                    sources,
-                }
+            let line = format!("removed edge {from} {kind} {to}");
+            let mutation = Mutation::RemoveEdge {
+                kind,
+                from,
+                to,
+                sources,
+                why,
             };
             (mutation, line)
         }

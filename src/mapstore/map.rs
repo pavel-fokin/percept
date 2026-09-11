@@ -211,6 +211,31 @@ impl Stamp {
     }
 }
 
+/// `Stamp` plus a node's last change: who, and why, when the writer
+/// gave one - beside `actor`, the way the node itself carries them
+/// beside its own. `NodeLine`'s form of `Stamp`; an edge has no
+/// `changed_by`, so `encode_edge` still uses `Stamp` alone.
+#[derive(Serialize)]
+struct NodeStamp {
+    actor: serde_json::Value,
+    added_at: String,
+    changed_by: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changed_why: Option<String>,
+}
+
+impl NodeStamp {
+    /// `Some` when `stamped`, else `None` - see `Stamp::of`.
+    fn of(node: &Node, stamped: bool) -> Option<Self> {
+        stamped.then(|| Self {
+            actor: crate::store::actor_value(node.actor),
+            added_at: node.added_at.to_string(),
+            changed_by: node.changed_by.name(),
+            changed_why: node.changed_why.clone(),
+        })
+    }
+}
+
 #[derive(Serialize)]
 struct NodeLine<'a> {
     node: String,
@@ -232,7 +257,7 @@ struct NodeLine<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     dispute: Option<&'a str>,
     #[serde(flatten)]
-    stamp: Option<Stamp>,
+    stamp: Option<NodeStamp>,
 }
 
 #[derive(Serialize)]
@@ -387,7 +412,7 @@ pub fn encode_node(map: &Map, node: &Node, stamped: bool) -> String {
         sources: ids(&node.sources),
         standing: map.standing(node.id).map(|standing| standing.to_string()),
         dispute: map.dispute(node.id),
-        stamp: Stamp::of(node.actor, node.added_at, stamped),
+        stamp: NodeStamp::of(node, stamped),
     })
     .expect("NodeLine always serializes")
 }

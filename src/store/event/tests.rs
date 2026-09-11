@@ -495,6 +495,7 @@ fn node_changed_round_trips_through_json() {
             name: Some("cancel a turn cleanly".to_string()),
             properties: properties.clone(),
             sources: Vec::new(),
+            why: Some("clearer".to_string()),
         },
     );
 
@@ -502,6 +503,7 @@ fn node_changed_round_trips_through_json() {
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "node.changed");
     assert_eq!(wire.payload["name"], "cancel a turn cleanly");
+    assert_eq!(wire.payload["why"], "clearer");
     let restored = crate::store::from_wire(wire).unwrap();
 
     match restored.payload() {
@@ -511,15 +513,44 @@ fn node_changed_round_trips_through_json() {
             name,
             properties: restored_properties,
             sources,
+            why,
         } => {
             assert_eq!(map, "tasks");
             assert!(*restored_node == node);
             assert_eq!(name.as_deref(), Some("cancel a turn cleanly"));
             assert_eq!(*restored_properties, properties);
             assert!(sources.is_empty());
+            assert_eq!(why.as_deref(), Some("clearer"));
         }
         _ => panic!("expected NodeChanged"),
     }
+}
+
+#[test]
+fn a_node_changed_with_no_why_omits_it_on_the_wire() {
+    let node = NodeId::new();
+    let original = crate::core::Event::restore(
+        EventId::new(),
+        Actor::Agent,
+        source("cli"),
+        None,
+        Timestamp::now(),
+        Payload::NodeChanged {
+            map: "tasks".to_string(),
+            node,
+            name: None,
+            properties: BTreeMap::new(),
+            sources: Vec::new(),
+            why: None,
+        },
+    );
+
+    let json = serde_json::to_string(&Event::from(&original)).unwrap();
+    let wire: Event = serde_json::from_str(&json).unwrap();
+    assert!(wire.payload.get("why").is_none());
+
+    let restored = crate::store::from_wire(wire).unwrap();
+    assert!(matches!(restored.payload(), Payload::NodeChanged { why: None, .. }));
 }
 
 #[test]
@@ -549,7 +580,7 @@ fn node_removed_round_trips_through_json() {
         Payload::NodeRemoved {
             map: "decisions".to_string(),
             node,
-            reason: "superseded".to_string(),
+            why: "superseded".to_string(),
             sources: Vec::new(),
         },
     );
@@ -565,12 +596,12 @@ fn node_removed_round_trips_through_json() {
         Payload::NodeRemoved {
             map,
             node: restored_node,
-            reason,
+            why,
             sources,
         } => {
             assert_eq!(map, "decisions");
             assert!(*restored_node == node);
-            assert_eq!(reason, "superseded");
+            assert_eq!(why, "superseded");
             assert!(sources.is_empty());
         }
         _ => panic!("expected NodeRemoved"),
@@ -615,6 +646,51 @@ fn edge_added_round_trips_through_json() {
             assert!(*restored_to == to);
         }
         _ => panic!("expected EdgeAdded"),
+    }
+}
+
+#[test]
+fn edge_removed_round_trips_through_json() {
+    let from = NodeId::new();
+    let to = NodeId::new();
+    let original = crate::core::Event::restore(
+        EventId::new(),
+        Actor::System,
+        source("cli"),
+        None,
+        Timestamp::now(),
+        Payload::EdgeRemoved {
+            map: "decisions".to_string(),
+            kind: "supports".to_string(),
+            from,
+            to,
+            sources: Vec::new(),
+            why: "no longer relevant".to_string(),
+        },
+    );
+
+    let json = serde_json::to_string(&Event::from(&original)).unwrap();
+    let wire: Event = serde_json::from_str(&json).unwrap();
+    assert_eq!(wire.kind, "edge.removed");
+    assert_eq!(wire.payload["why"], "no longer relevant");
+    let restored = crate::store::from_wire(wire).unwrap();
+
+    match restored.payload() {
+        Payload::EdgeRemoved {
+            map,
+            kind,
+            from: restored_from,
+            to: restored_to,
+            why,
+            ..
+        } => {
+            assert_eq!(map, "decisions");
+            assert_eq!(kind, "supports");
+            assert!(*restored_from == from);
+            assert!(*restored_to == to);
+            assert_eq!(why, "no longer relevant");
+        }
+        _ => panic!("expected EdgeRemoved"),
     }
 }
 

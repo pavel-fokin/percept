@@ -324,6 +324,15 @@ pub struct Node {
     /// When this node last changed - equal to `added_at` until a
     /// `node.changed` event lands.
     pub changed_at: Timestamp,
+    /// Who last changed this node - `actor` until a `node.changed`
+    /// lands, then that event's actor. What `may` weighs: a change from
+    /// above locks the node against everyone below that rank.
+    pub changed_by: Actor,
+    /// Why this node's last change was made, when the writer gave one -
+    /// `None` on a plain edit. A human's "wrong" on an agent's node is a
+    /// change carrying only this, and it stays on the node until the
+    /// next change.
+    pub changed_why: Option<String>,
     /// This node's number within its kind, minted once when it was
     /// added - `d41` is its kind's prefix plus this. See
     /// `Payload::NodeAdded`.
@@ -363,6 +372,19 @@ impl fmt::Display for NodeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {:?}", self.kind, self.name)
     }
+}
+
+/// Which end of an edge `Map::linked` follows. Not yet called outside
+/// its own tests - see the note on its re-export from `core`.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dir {
+    /// The edge's `to` end, from an edge whose `from` is the node asked
+    /// about.
+    From,
+    /// The edge's `from` end, from an edge whose `to` is the node asked
+    /// about.
+    To,
 }
 
 /// How much of a map a reader asked for. `around` cuts first, then
@@ -423,10 +445,11 @@ pub enum Mutation {
         name: Option<String>,
         properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
+        why: Option<String>,
     },
     RemoveNode {
         node: NodeRef,
-        reason: String,
+        why: String,
         sources: Vec<EventId>,
     },
     AddEdge {
@@ -440,6 +463,7 @@ pub enum Mutation {
         from: NodeRef,
         to: NodeRef,
         sources: Vec<EventId>,
+        why: String,
     },
 }
 
@@ -508,12 +532,14 @@ pub enum MapError {
         value: String,
         states: Vec<String>,
     },
-    /// A `ChangeNode` from the model on a node the human wrote, naming
-    /// something other than its `state` or `outcome` - the model's
-    /// report of what became of it, never the human's name or why.
-    /// Write-only: a human may change anything on any node.
-    HumansNode {
+    /// A rename, a property other than `state`, or a removal that W6's
+    /// rank rule refuses: the actor neither owns nor outranks the
+    /// node's writer, or is outranked by whoever changed it last.
+    /// Write-only: `state` and a new edge are any actor's.
+    NotYours {
         node: String,
+        owner: Actor,
+        changed_by: Actor,
     },
     /// A `ChangeNode` renaming a decision. A decision is corrected by a
     /// successor with a `supersedes` edge, never reworded in place, so
@@ -584,6 +610,9 @@ impl fmt::Display for MapError {
             Self::DuplicateNode { kind, name } => {
                 write!(f, "{kind} {name:?} is already in the map")
             }
+            Self::UnknownState { kind, value, states } if value.is_empty() => {
+                write!(f, "{kind} needs a state; states are {}", states.join(", "))
+            }
             Self::UnknownState { kind, value, states } => write!(
                 f,
                 "{kind} has no state {value:?}; states are {}",
@@ -593,9 +622,16 @@ impl fmt::Display for MapError {
                     states.join(", ")
                 }
             ),
-            Self::HumansNode { node } => write!(
+            Self::NotYours {
+                node,
+                owner,
+                changed_by,
+            } => write!(
                 f,
-                "{node} was written by the user; the model may change only its state and outcome"
+                "{node} was written by {}, last changed by {}; you may still set its state, or \
+                 add a node and an edge beside it",
+                owner.name(),
+                changed_by.name()
             ),
             Self::DecisionRenamed { node } => write!(
                 f,
@@ -656,6 +692,41 @@ impl fmt::Display for Standing {
             Self::Disputed => "disputed",
         })
     }
+}
+
+/// An actor's rank: `Human` above `Agent` and `System`, which sit
+/// level with each other. What W6's `may` weighs - not a property
+/// `Actor` itself carries, since ranking is a rule of the map's rank
+/// lock, not something every reader of an actor needs.
+fn rank(actor: Actor) -> u8 {
+    match actor {
+        Actor::Human(_) => 2,
+        Actor::Agent | Actor::System => 1,
+    }
+}
+
+/// Whether `a` outranks `b` - strictly above it, never level.
+fn outranks(a: Actor, b: Actor) -> bool {
+    rank(a) > rank(b)
+}
+
+/// Whether `a` and `b` are the one who wrote something. A human equals
+/// any human: an actor carries no id yet to tell two humans apart.
+fn same_actor(a: Actor, b: Actor) -> bool {
+    matches!(
+        (a, b),
+        (Actor::Human(_), Actor::Human(_)) | (Actor::Agent, Actor::Agent) | (Actor::System, Actor::System)
+    )
+}
+
+/// W6's rank rule: whether `actor` may rename, change a property beyond
+/// `state`, or remove something `owner` wrote and `changed_by` last
+/// touched. `actor` must own it or outrank `owner`, and must not be
+/// outranked by `changed_by` - a change from above locks what it
+/// touched against everyone below that rank, not only against the
+/// node's original writer.
+fn may(actor: Actor, owner: Actor, changed_by: Actor) -> bool {
+    (same_actor(actor, owner) || outranks(actor, owner)) && !outranks(changed_by, actor)
 }
 
 /// The latest `claim.confirmed`/`claim.disputed` naming a node, so
@@ -983,6 +1054,24 @@ impl Map {
         &self.edges
     }
 
+    /// The nodes across every edge of `edge_kind` touching `id`, in map
+    /// order: the kind-agnostic query behind `blocked_by`, `reopened_by`,
+    /// and the rest, for a caller that knows no kind's name.
+    /// `Dir::From` reads the `to` end of an edge whose `from` is `id`;
+    /// `Dir::To` reads the `from` end of an edge whose `to` is `id`.
+    #[allow(dead_code)]
+    pub fn linked(&self, id: NodeId, edge_kind: &str, dir: Dir) -> Vec<&Node> {
+        self.edges
+            .iter()
+            .filter(|edge| edge.kind == edge_kind)
+            .filter_map(|edge| match dir {
+                Dir::From if edge.from == id => self.node(edge.to),
+                Dir::To if edge.to == id => self.node(edge.from),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// When the map last gained or changed a node, or gained an edge;
     /// `None` while it is empty. A removal leaves no trace here - what
     /// was removed lives only in the events.
@@ -1268,6 +1357,13 @@ impl Map {
                             gloss: node_kind.gloss.clone(),
                         });
                     }
+                    if !node_kind.states.is_empty() && !properties.contains_key("state") {
+                        return Err(MapError::UnknownState {
+                            kind: kind.clone(),
+                            value: String::new(),
+                            states: node_kind.states.clone(),
+                        });
+                    }
                     check_state(node_kind, &properties)?;
                 }
                 Payload::NodeAdded {
@@ -1285,6 +1381,7 @@ impl Map {
                 name,
                 properties,
                 sources,
+                why,
             } => {
                 let node_id = self.resolve(node)?;
                 let existing = self.node(node_id).expect("resolve returns a live node's id");
@@ -1296,16 +1393,13 @@ impl Map {
                         node: self.label(node_id),
                     });
                 }
-                if matches!(actor, Actor::Agent | Actor::System)
-                    && matches!(existing.actor, Actor::Human(_))
-                {
-                    let only_report = name.is_none()
-                        && properties.keys().all(|key| key == "state" || key == "outcome");
-                    if !only_report {
-                        return Err(MapError::HumansNode {
-                            node: self.label(node_id),
-                        });
-                    }
+                let needs_rank = name.is_some() || properties.keys().any(|key| key != "state");
+                if needs_rank && !may(actor, existing.actor, existing.changed_by) {
+                    return Err(MapError::NotYours {
+                        node: self.label(node_id),
+                        owner: existing.actor,
+                        changed_by: existing.changed_by,
+                    });
                 }
                 Payload::NodeChanged {
                     map,
@@ -1313,18 +1407,26 @@ impl Map {
                     name,
                     properties,
                     sources,
+                    why,
                 }
             }
-            Mutation::RemoveNode {
-                node,
-                reason,
-                sources,
-            } => Payload::NodeRemoved {
-                map,
-                node: self.resolve(node)?,
-                reason,
-                sources,
-            },
+            Mutation::RemoveNode { node, why, sources } => {
+                let node_id = self.resolve(node)?;
+                let existing = self.node(node_id).expect("resolve returns a live node's id");
+                if !may(actor, existing.actor, existing.changed_by) {
+                    return Err(MapError::NotYours {
+                        node: self.label(node_id),
+                        owner: existing.actor,
+                        changed_by: existing.changed_by,
+                    });
+                }
+                Payload::NodeRemoved {
+                    map,
+                    node: node_id,
+                    why,
+                    sources,
+                }
+            }
             Mutation::AddEdge {
                 kind,
                 from,
@@ -1347,13 +1449,31 @@ impl Map {
                 from,
                 to,
                 sources,
-            } => Payload::EdgeRemoved {
-                map,
-                kind,
-                from: self.resolve(from)?,
-                to: self.resolve(to)?,
-                sources,
-            },
+                why,
+            } => {
+                let from_id = self.resolve(from)?;
+                let to_id = self.resolve(to)?;
+                let edge_actor = self
+                    .find_edge(&kind, from_id, to_id)
+                    .map(|edge| edge.actor);
+                if let Some(edge_actor) = edge_actor {
+                    if !may(actor, edge_actor, edge_actor) {
+                        return Err(MapError::NotYours {
+                            node: format!("{} {kind} {}", self.label(from_id), self.label(to_id)),
+                            owner: edge_actor,
+                            changed_by: edge_actor,
+                        });
+                    }
+                }
+                Payload::EdgeRemoved {
+                    map,
+                    kind,
+                    from: from_id,
+                    to: to_id,
+                    sources,
+                    why,
+                }
+            }
         };
         self.replay(&payload, actor, Timestamp::now())?;
         Ok(payload)
@@ -1396,6 +1516,8 @@ impl Map {
                     actor,
                     added_at: at,
                     changed_at: at,
+                    changed_by: actor,
+                    changed_why: None,
                     seq,
                 });
             }
@@ -1404,6 +1526,7 @@ impl Map {
                 name,
                 properties,
                 sources,
+                why,
                 ..
             } => {
                 let index = *self.by_id.get(node).ok_or(MapError::NoSuchNodeId(*node))?;
@@ -1428,6 +1551,8 @@ impl Map {
                 self.judgments.remove(node);
                 self.reviewed.remove(node);
                 self.nodes[index].changed_at = at;
+                self.nodes[index].changed_by = actor;
+                self.nodes[index].changed_why = why.clone();
             }
             Payload::NodeRemoved { node, .. } => {
                 let removed = self.node(*node).ok_or(MapError::NoSuchNodeId(*node))?;
@@ -1624,6 +1749,15 @@ impl Map {
         } else {
             Err(MapError::NoSuchNodeId(id))
         }
+    }
+
+    /// The live edge `kind from to` names, if the map holds one - what
+    /// `RemoveEdge`'s W6 check weighs its actor against. `None` when the
+    /// map holds no such edge; `replay` is what reports that missing.
+    fn find_edge(&self, kind: &str, from: NodeId, to: NodeId) -> Option<&Edge> {
+        self.edges
+            .iter()
+            .find(|edge| edge.kind == kind && edge.from == from && edge.to == to)
     }
 
     /// Refuses an `AddEdge` whose `from` or `to` node is not of a kind
