@@ -121,7 +121,7 @@ appended. A refusal is an error, and no event exists.
 | W3 | `requires ⊆ keys(properties)`. | `node.added` |
 | W4 | When the kind declares states, `properties.state ∈ states`: required on add, checked when sent on change. | `node.added`, `node.changed` |
 | W5 | `from.kind ∈ edge_kind.from`, `to.kind ∈ edge_kind.to`; I2. | `edge.added` |
-| W6 | Rank. A rename, a property other than `state`, or a removal needs `may(actor, node)`, and a removal also `may(actor, edge)` for every edge on the node, since it drops them. Removing an edge needs `may(actor, edge)` and neither end touched from above the actor. `state` and a new edge are any actor's. | `node.changed`, `node.removed`, `edge.removed` |
+| W6 | Rank. A rename, a property other than `state`, or a removal needs `may(actor, node)`. Dropping an edge, on its own or with a node it hangs on, needs `may(actor, edge)` and neither end touched from above the actor. `state` and a new edge are any actor's. | `node.changed`, `node.removed`, `edge.removed` |
 
 W6 is everything the core knows about who may do what, and no rule
 names a kind. Because `may` weighs who has touched the node, an agent
@@ -156,7 +156,7 @@ What the core reads out of a map, knowing no kind:
 node(id) · find(kind, name) · resolve(short_id)
 headlines()                     nodes whose kind is in schema.headlines
 linked(id, edge_kind, dir)      the nodes across one edge kind, dir ∈ {from, to}
-since(at)                       nodes with changed.at ≥ at, edges with added.at ≥ at
+since(at)                       nodes and edges with changed.at ≥ at
 Selection { around, depth, since, kinds } → Fragment { nodes, edges, left_out, crossing }
 ```
 

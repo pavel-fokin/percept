@@ -60,11 +60,11 @@ pub(crate) fn last_session(events: &[Event], source: &Source) -> Option<Timestam
 /// `None` when `node`'s last change is its addition. The one wording
 /// every render of a node's last change uses.
 pub(crate) fn changed_line(node: &Node) -> Option<String> {
-    if node.history.len() <= 1 {
+    let [_, .., changed] = node.history() else {
         return None;
-    }
-    let mut line = format!("changed by {}", node.changed().actor.name());
-    if let Some(why) = &node.changed().why {
+    };
+    let mut line = format!("changed by {}", changed.actor.name());
+    if let Some(why) = &changed.why {
         line.push_str(&format!(": {why:?}"));
     }
     Some(line)

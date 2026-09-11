@@ -7,7 +7,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-use crate::core::map::Change;
 use crate::core::{
     Actor, EdgeKind, Event, EventId, EventLog, HumanId, NodeId, NodeKind, NodeRef, Payload,
     Schema, Schemas, Scope, Source, Usage,
@@ -246,16 +245,6 @@ pub fn node_id(event: &Event) -> NodeId {
     match event.payload() {
         Payload::NodeAdded { node, .. } => *node,
         _ => panic!("expected a node.added event"),
-    }
-}
-
-/// A `Change`, for a fixture `Node`/`Edge` literal a test builds by
-/// hand rather than by folding events.
-pub fn change(actor: Actor, at: Timestamp, why: Option<&str>) -> Change {
-    Change {
-        actor,
-        at,
-        why: why.map(str::to_string),
     }
 }
 

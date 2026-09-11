@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::core::testing::{change, human, schemas, scope, source, source_at, FakeLog};
-use crate::core::{Actor, Event, NodeId, NodeRef};
+use crate::core::testing::{human, schemas, scope, source, source_at, FakeLog};
+use crate::core::{Actor, Change, Event, NodeId, NodeRef};
 use crate::shared::Timestamp;
 
 fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
@@ -262,8 +262,16 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
         properties: BTreeMap::from([("summary".to_string(), "side by side".to_string())]),
         sources: vec![EventId::new()],
         history: vec![
-            change(Actor::Human(me), Timestamp::now(), None),
-            change(Actor::Agent, Timestamp::now(), Some("looked stale")),
+            Change {
+                actor: Actor::Human(me),
+                at: Timestamp::now(),
+                why: None,
+            },
+            Change {
+                actor: Actor::Agent,
+                at: Timestamp::now(),
+                why: Some("looked stale".to_string()),
+            },
         ],
         seq: 1,
     };

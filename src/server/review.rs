@@ -300,15 +300,16 @@ fn row_json(map: &Map, node: &Node, related: &[&Node], index: &EventIndex) -> Ro
 
 /// One alternative under a row's `related`, or the claim row itself.
 fn option_json(map: &Map, node: &Node, index: &EventIndex) -> OptionRow {
+    let changed = node.changed();
     OptionRow {
         id: map.short_id(node.id).unwrap_or_default(),
         kind: node.kind.clone(),
         name: node.name.clone(),
         why: node.properties.get("why").cloned(),
-        changed_by: node.changed().actor.name(),
-        changed_why: node.changed().why.clone(),
+        changed_by: changed.actor.name(),
+        changed_why: changed.why.clone(),
         added_at: node.added().at.to_string(),
-        changed_at: node.changed().at.to_string(),
+        changed_at: changed.at.to_string(),
         sources: index.sources_json(&node.sources),
     }
 }

@@ -200,8 +200,8 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
         return Err(format!("{stem}.toml: declares no node kinds").into());
     }
 
-    check_names(stem, "node", file.nodes.iter().map(|n| n.kind.as_str()))?;
-    check_names(stem, "edge", file.edges.iter().map(|e| e.kind.as_str()))?;
+    check_kinds(stem, "node", file.nodes.iter().map(|n| n.kind.as_str()))?;
+    check_kinds(stem, "edge", file.edges.iter().map(|e| e.kind.as_str()))?;
     for node in &file.nodes {
         if node.requires.iter().any(|property| property.trim().is_empty()) {
             return Err(format!(
@@ -291,7 +291,7 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
 
 /// Refuses a blank kind name, or a name repeated within `kinds` -
 /// `group` names the kind (`node` or `edge`) in the error.
-fn check_names<'a>(
+fn check_kinds<'a>(
     stem: &str,
     group: &str,
     kinds: impl Iterator<Item = &'a str>,
@@ -299,7 +299,7 @@ fn check_names<'a>(
     let mut names: Vec<&str> = Vec::new();
     for name in kinds {
         if name.trim().is_empty() {
-            return Err(format!("{stem}.toml: a {group} kind's name must not be blank").into());
+            return Err(format!("{stem}.toml: a {group} kind must not be blank").into());
         }
         names.push(name);
     }

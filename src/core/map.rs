@@ -335,7 +335,7 @@ pub trait Written {
         self.history().last().expect("history is never empty")
     }
 
-    /// The highest-ranked actor in the history; on a tie, the earliest.
+    /// The highest-ranked actor in the history.
     fn touched_by(&self) -> Actor {
         highest(self.history().iter().map(|change| change.actor)).expect("history is never empty")
     }
@@ -598,11 +598,10 @@ impl fmt::Display for MapError {
                 gloss,
             } => {
                 write!(f, "{kind} {name:?} lacks its `{property}` property, which every {kind} carries")?;
-                if gloss.is_empty() {
-                    Ok(())
-                } else {
-                    write!(f, ": {gloss}")
+                if !gloss.is_empty() {
+                    write!(f, ": {gloss}")?;
                 }
+                Ok(())
             }
             Self::DuplicateNode { kind, name } => {
                 write!(f, "{kind} {name:?} is already in the map")
@@ -696,10 +695,9 @@ fn may(actor: Actor, owner: Actor, touched_by: Actor) -> bool {
     (same_actor(actor, owner) || outranks(actor, owner)) && !outranks(touched_by, actor)
 }
 
-/// The highest-ranked of `actors`; on a tie, the earliest. `None` when
-/// there are none.
+/// The highest-ranked of `actors`; `None` when there are none.
 fn highest(actors: impl Iterator<Item = Actor>) -> Option<Actor> {
-    actors.reduce(|top, actor| if outranks(actor, top) { actor } else { top })
+    actors.max_by_key(|actor| rank(*actor))
 }
 
 /// Whether `why`, when given, is blank - W2's `BlankWhy`.
@@ -1401,10 +1399,9 @@ impl Map {
         }
     }
 
-    /// `check_may`, reading `owner` and `touched_by` off `x` itself -
-    /// the common case, where nothing else weighs in.
-    fn check_may_of(&self, actor: Actor, label: String, x: &impl Written) -> Result<(), MapError> {
-        self.check_may(actor, label, x.added().actor, x.touched_by())
+    /// `check_may` for `node` itself, where nothing else weighs in.
+    fn check_may_of(&self, actor: Actor, label: String, node: &Node) -> Result<(), MapError> {
+        self.check_may(actor, label, node.added().actor, node.touched_by())
     }
 
     /// W6 for dropping `edge`, whether on its own or with a node it

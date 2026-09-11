@@ -10,10 +10,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::{
-    Actor, Edge, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation, Node, NodeId,
-    Payload, Schemas, Scope, Written,
+    Actor, Change, Edge, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation, Node,
+    NodeId, Payload, Schemas, Scope, Written,
 };
-use crate::shared::Timestamp;
 use crate::store::{ids, parse_event_id};
 
 /// The map `name` names, folded from every event in `log` that falls
@@ -203,10 +202,10 @@ impl Stamp {
     /// `Option` omits every field of a `None` rather than writing a
     /// null, so the caller's choice is the only branch either encoder
     /// needs.
-    fn of(actor: Actor, added_at: Timestamp, stamped: bool) -> Option<Self> {
+    fn of(added: &Change, stamped: bool) -> Option<Self> {
         stamped.then(|| Self {
-            actor: crate::store::actor_value(actor),
-            added_at: added_at.to_string(),
+            actor: crate::store::actor_value(added.actor),
+            added_at: added.at.to_string(),
         })
     }
 }
@@ -227,10 +226,11 @@ struct NodeStamp<'a> {
 impl<'a> NodeStamp<'a> {
     /// `Some` when `stamped`, else `None` - see `Stamp::of`.
     fn of(node: &'a Node, stamped: bool) -> Option<Self> {
-        Stamp::of(node.added().actor, node.added().at, stamped).map(|stamp| Self {
+        let changed = node.changed();
+        Stamp::of(node.added(), stamped).map(|stamp| Self {
             stamp,
-            changed_by: node.changed().actor.name(),
-            changed_why: node.changed().why.as_deref(),
+            changed_by: changed.actor.name(),
+            changed_why: changed.why.as_deref(),
         })
     }
 }
@@ -416,7 +416,7 @@ pub fn encode_edge(map: &Map, edge: &Edge, stamped: bool) -> String {
         from: node_ref(map, edge.from),
         to: node_ref(map, edge.to),
         sources: ids(&edge.sources),
-        stamp: Stamp::of(edge.added().actor, edge.added().at, stamped),
+        stamp: Stamp::of(edge.added(), stamped),
     })
     .expect("EdgeLine always serializes")
 }
