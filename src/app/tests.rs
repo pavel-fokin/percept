@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::testing::{content, human, node_added, schemas, scope, source, usage, FakeLog};
+use crate::core::testing::{content, human, node_added, schemas, source, usage, FakeLog};
 use crate::core::{Actor, Payload};
 use crate::harness::testing::{FakeCatalog, FakeSnapshot, FakeTool, FixedPolicy, Scripted};
 use crate::harness::{Chunk, Verdict};
@@ -282,7 +282,7 @@ fn another_source_s_map_mutation_in_the_same_project_still_folds() {
     .unwrap();
 
     let decisions = schemas()
-        .fold_all(&scope(), app.events())
+        .fold_all(app.events())
         .unwrap()
         .into_iter()
         .find(|map| map.schema().name == "decisions")

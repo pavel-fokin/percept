@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::core::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Schemas, Scope};
+use crate::core::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Schemas};
 use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::mapstore::{NodeRefArgs, Snapshot};
 
@@ -14,16 +15,12 @@ use crate::mapstore::{NodeRefArgs, Snapshot};
 pub struct ReviseMap {
     log: Arc<dyn EventLog>,
     schemas: Arc<Schemas>,
-    scope: Scope,
+    path: PathBuf,
 }
 
 impl ReviseMap {
-    pub fn new(log: Arc<dyn EventLog>, schemas: Arc<Schemas>, scope: Scope) -> Self {
-        Self {
-            log,
-            schemas,
-            scope,
-        }
+    pub fn new(log: Arc<dyn EventLog>, schemas: Arc<Schemas>, path: PathBuf) -> Self {
+        Self { log, schemas, path }
     }
 }
 
@@ -273,7 +270,7 @@ impl Tool for ReviseMap {
         if args.changes.is_empty() {
             return Err("changes must not be empty".into());
         }
-        let mut snapshot = Snapshot::load(self.log.as_ref(), &self.schemas, &args.map, &self.scope)?;
+        let mut snapshot = Snapshot::load(self.log.as_ref(), &self.schemas, &args.map, &self.path)?;
         let mut lines = Vec::with_capacity(args.changes.len());
         let mut commits = Vec::with_capacity(args.changes.len());
 

@@ -3,50 +3,71 @@
 //! does, and revising it - a writer's `Mutation` checked against a
 //! `Snapshot` of the log and turned into the payload that records it.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::{
-    Actor, Change, Edge, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation, Node,
-    NodeId, Payload, Schemas, Scope, Written,
+    Actor, Change, Edge, Event, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation,
+    Node, NodeId, Payload, Schemas, Written,
 };
 use crate::store::{ids, parse_event_id};
 
-/// The map `name` names, folded from every event in `log` that falls
-/// inside `scope`.
+/// `events`, cut to those whose source ran at `path` - where a reader
+/// cuts the log to one path before `Map::fold`, which takes what it is
+/// given.
+pub fn of_path<'a>(events: &'a [Event], path: &'a Path) -> impl Iterator<Item = &'a Event> + Clone {
+    events.iter().filter(move |event| event.source().path == path)
+}
+
+/// The distinct `Source.path` values `events` carries, sorted - what
+/// `--all-paths` folds a map over, one path at a time.
+pub fn paths(events: &[Event]) -> Vec<PathBuf> {
+    let paths: BTreeSet<&Path> = events.iter().map(|event| event.source().path.as_path()).collect();
+    paths.into_iter().map(Path::to_path_buf).collect()
+}
+
+/// The map `name` names, folded from those of `events` whose source
+/// ran at `path`.
+pub fn fold_map_at(
+    schemas: &Schemas,
+    name: &str,
+    events: &[Event],
+    path: &Path,
+) -> Result<Map, Box<dyn std::error::Error>> {
+    Ok(Map::fold(schemas.find(name)?, of_path(events, path))?)
+}
+
+/// `fold_map_at` over every event in `log`.
 pub fn fold_map(
     log: &dyn EventLog,
     schemas: &Schemas,
     name: &str,
-    scope: &Scope,
+    path: &Path,
 ) -> Result<Map, Box<dyn std::error::Error>> {
-    Ok(Map::fold(schemas.find(name)?, scope, &log.load()?)?)
+    fold_map_at(schemas, name, &log.load()?, path)
 }
 
 /// The `MapReader` over every map `Schemas` knows, each folded from the
-/// log.
+/// log at one path.
 pub struct LogMaps {
     log: Arc<dyn EventLog>,
     schemas: Arc<Schemas>,
-    scope: Scope,
+    path: PathBuf,
 }
 
 impl LogMaps {
-    pub fn new(log: Arc<dyn EventLog>, schemas: Arc<Schemas>, scope: Scope) -> Self {
-        Self {
-            log,
-            schemas,
-            scope,
-        }
+    pub fn new(log: Arc<dyn EventLog>, schemas: Arc<Schemas>, path: PathBuf) -> Self {
+        Self { log, schemas, path }
     }
 }
 
 impl MapReader for LogMaps {
     fn read(&self, name: &str) -> Result<Map, Box<dyn std::error::Error>> {
-        fold_map(self.log.as_ref(), &self.schemas, name, &self.scope)
+        fold_map(self.log.as_ref(), &self.schemas, name, &self.path)
     }
 }
 
@@ -63,23 +84,24 @@ impl Snapshot {
         log: &dyn EventLog,
         schemas: &Schemas,
         name: &str,
-        scope: &Scope,
+        path: &Path,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        Self::from_events(schemas, name, scope, log.load()?)
+        Self::from_events(schemas, name, path, log.load()?)
     }
 
     /// `load`, given the events already read rather than reading them
     /// itself - what `revise` and `commit` share, so a caller holding
     /// events `EventLog::append_computed` handed it under its lock
-    /// folds them the same way a fresh `load` would.
+    /// folds them the same way a fresh `load` would. `ids` is taken
+    /// from every event, not only `path`'s: a node may cite an event
+    /// from any path.
     fn from_events(
         schemas: &Schemas,
         name: &str,
-        scope: &Scope,
+        path: &Path,
         events: Vec<crate::core::Event>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let schema = schemas.find(name)?;
-        let map = Map::fold(schema, scope, &events)?;
+        let map = fold_map_at(schemas, name, &events, path)?;
         let ids = events.iter().map(|event| event.id().as_uuid()).collect();
         Ok(Self { map, ids })
     }
@@ -117,19 +139,20 @@ impl Snapshot {
 fn revised(
     schemas: &Schemas,
     name: &str,
-    scope: &Scope,
+    path: &Path,
     events: Vec<crate::core::Event>,
     sources: &[String],
     actor: Actor,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
-    let mut snapshot = Snapshot::from_events(schemas, name, scope, events)?;
+    let mut snapshot = Snapshot::from_events(schemas, name, path, events)?;
     let sources = snapshot.resolve(sources)?;
     let mutation = mutation(sources);
     Ok(snapshot.apply(mutation, actor)?)
 }
 
-/// One change to the map `name` names, minted and committed atomically:
+/// One change to the map `name` names, folded at `source`'s path and
+/// minted and committed atomically:
 /// `EventLog::append_computed` hands `compute` every event already in
 /// the log under its lock, `revised` checks and applies `mutation`
 /// against that exact fold, and the event built from the payload it
@@ -141,21 +164,20 @@ pub fn commit(
     log: &dyn EventLog,
     schemas: &Schemas,
     name: &str,
-    scope: &Scope,
     source: &crate::core::Source,
     sources: &[String],
     actor: Actor,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<crate::core::Event, Box<dyn std::error::Error>> {
-    let (name, scope, source) = (name.to_string(), scope.clone(), source.clone());
+    let (name, source) = (name.to_string(), source.clone());
     log.append_computed(Box::new(move |events| {
-        let payload = revised(schemas, &name, &scope, events, sources, actor, mutation)?;
+        let payload = revised(schemas, &name, &source.path, events, sources, actor, mutation)?;
         Ok(crate::core::Event::new(actor, source, None, payload))
     }))
 }
 
-/// One batch of changes to the map `name` names, minted and committed
-/// atomically: `EventLog::append_batch_computed` hands `build` a
+/// One batch of changes to the map `name` names, folded at `source`'s
+/// path and minted and committed atomically: `EventLog::append_batch_computed` hands `build` a
 /// `Snapshot` folded from every event already in the log under its
 /// lock, and every event it returns - both the events `build` minted
 /// itself, a citation's `file.cited` among them, and the ones its own
@@ -168,12 +190,12 @@ pub fn commit_batch(
     log: &dyn EventLog,
     schemas: &Schemas,
     name: &str,
-    scope: &Scope,
+    source: &crate::core::Source,
     build: impl FnOnce(&mut Snapshot) -> Result<Vec<crate::core::Event>, Box<dyn std::error::Error>>,
 ) -> Result<Vec<crate::core::Event>, Box<dyn std::error::Error>> {
-    let (name, scope) = (name.to_string(), scope.clone());
+    let (name, path) = (name.to_string(), source.path.clone());
     log.append_batch_computed(Box::new(move |events| {
-        let mut snapshot = Snapshot::from_events(schemas, &name, &scope, events)?;
+        let mut snapshot = Snapshot::from_events(schemas, &name, &path, events)?;
         build(&mut snapshot)
     }))
 }

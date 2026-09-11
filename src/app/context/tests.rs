@@ -1,6 +1,6 @@
 use super::*;
 use crate::app::{Harness, MapShape};
-use crate::core::testing::{human, schemas, scope, source};
+use crate::core::testing::{human, schemas, source};
 use crate::harness::Message;
 
 /// Each message as the one string a comparison cares about.
@@ -29,7 +29,6 @@ fn view(events: &[Event]) -> View<'_> {
         instructions: Some("the rules"),
         events,
         schemas: test_schemas(),
-        scope: scope(),
         turn_start: None,
         context_window: None,
         reasoning_effort: None,

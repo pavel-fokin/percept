@@ -1,6 +1,7 @@
 use super::*;
 use crate::core::testing::{
-    human, node_added, node_added_by, node_id, schemas, source, FakeLog, Fixture, ROOT,
+    human, node_added, node_added_at, node_added_by, node_id, schemas, source, FakeLog, Fixture,
+    ROOT,
 };
 use crate::core::{Actor, Payload};
 use std::path::{Path, PathBuf};
@@ -558,12 +559,23 @@ fn parse_show<const N: usize>(argv: [&str; N]) -> ShowMapArgs {
 }
 
 #[test]
-fn all_projects_scopes_to_every_project_while_the_default_scopes_to_root() {
-    assert_eq!(
-        scope(false, Path::new(ROOT)),
-        crate::core::Scope::Project(PathBuf::from(ROOT))
-    );
-    assert_eq!(scope(true, Path::new(ROOT)), crate::core::Scope::All);
+fn all_paths_folds_every_distinct_path_while_the_default_folds_root() {
+    let events = [
+        node_added_at("/there", "decision", "Go"),
+        node_added_at("/here", "decision", "Rust"),
+    ];
+    let folded = |all_paths: bool| {
+        let mut seen = Vec::new();
+        per_path(all_paths, Format::Json, Path::new(ROOT), &events, |path| {
+            seen.push(path.to_path_buf());
+            Ok(())
+        })
+        .unwrap();
+        seen
+    };
+
+    assert_eq!(folded(false), vec![PathBuf::from(ROOT)]);
+    assert_eq!(folded(true), vec![PathBuf::from("/here"), PathBuf::from("/there")]);
 }
 
 #[test]
@@ -803,10 +815,8 @@ fn a_document_writes_its_nodes_and_edges_in_order() {
 
     let events = log.load().unwrap();
     assert_eq!(events.len(), 3);
-    let scope = crate::core::testing::scope();
     let map = Map::fold(
         crate::core::testing::decisions(),
-        &scope,
         &log.load().unwrap(),
     )
     .unwrap();
@@ -842,8 +852,7 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
     // question node.
     assert!(matches!(events[1].payload(), Payload::FileCited { .. }));
     let cite_id = events[1].id();
-    let scope = crate::core::testing::scope();
-    let map = Map::fold(crate::core::testing::decisions(), &scope, &events).unwrap();
+    let map = Map::fold(crate::core::testing::decisions(), &events).unwrap();
     let decision = map.find("decision", "yes").unwrap();
     assert!(decision.sources.contains(&cite_id));
 }
@@ -865,8 +874,7 @@ fn a_ref_to_an_existing_short_id_resolves() {
     .unwrap();
 
     let events = log.load().unwrap();
-    let scope = crate::core::testing::scope();
-    let map = Map::fold(crate::core::testing::decisions(), &scope, &events).unwrap();
+    let map = Map::fold(crate::core::testing::decisions(), &events).unwrap();
     assert_eq!(map.edges().len(), 1);
     assert_eq!(map.edges()[0].kind, "resolves");
 }
@@ -997,8 +1005,7 @@ fn a_short_id_document_changes_the_node_and_records_node_changed() {
         Payload::NodeChanged { .. }
     ));
 
-    let scope = crate::core::testing::scope();
-    let map = Map::fold(crate::core::testing::tasks(), &scope, &events).unwrap();
+    let map = Map::fold(crate::core::testing::tasks(), &events).unwrap();
     let task = map.find("task", "cancel a turn").unwrap();
     assert_eq!(task.properties.get("state").unwrap(), "done");
     assert_eq!(task.properties.get("outcome").unwrap(), "1f1a9a9: done");
@@ -1071,8 +1078,7 @@ fn a_record_why_line_under_an_existing_node_sets_the_changes_why_not_a_property(
         _ => panic!("expected NodeChanged"),
     }
 
-    let scope = crate::core::testing::scope();
-    let map = Map::fold(crate::core::testing::tasks(), &scope, &events).unwrap();
+    let map = Map::fold(crate::core::testing::tasks(), &events).unwrap();
     let task = map.find("task", "cancel a turn").unwrap();
     assert_eq!(task.properties.get("why").unwrap(), "Esc drops the session");
 }

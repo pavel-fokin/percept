@@ -1,12 +1,14 @@
+use std::path::PathBuf;
+
 use super::*;
 use crate::core::testing::{
-    edge_added, human, node_added, node_added_by, node_id, schemas, scope, source, FakeLog,
+    edge_added, human, node_added, node_added_by, node_id, schemas, source, FakeLog, ROOT,
 };
 use crate::core::{Actor, Event, EventId};
 
 fn tool(events: Vec<Event>) -> ReviseMap {
     let log = Arc::new(FakeLog::seeded(events));
-    ReviseMap::new(log, Arc::new(schemas()), scope())
+    ReviseMap::new(log, Arc::new(schemas()), PathBuf::from(ROOT))
 }
 
 #[test]

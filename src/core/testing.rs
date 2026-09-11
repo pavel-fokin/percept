@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use crate::core::{
     Actor, EdgeKind, Event, EventId, EventLog, HumanId, NodeId, NodeKind, NodeRef, Payload,
-    Schema, Schemas, Scope, Source, Usage,
+    Schema, Schemas, Source, Usage,
 };
 use crate::shared::Timestamp;
 
@@ -47,11 +47,6 @@ impl Fixture {
 /// under `ROOT`, so a caller only names the writer.
 pub fn source(name: &str) -> Source {
     source_at(name, ROOT)
-}
-
-/// The scope `source`'s events fall inside.
-pub fn scope() -> Scope {
-    Scope::Project(PathBuf::from(ROOT))
 }
 
 /// A `HumanId` for a test that needs one but doesn't care which - every
@@ -185,8 +180,8 @@ pub fn node_added_by(actor: Actor, kind: &str, name: &str) -> Event {
     Event::new(actor, source("test"), None, node_added_payload(kind, name))
 }
 
-/// `node_added`, from a project other than `/test` - for a test that
-/// checks a map scoped to one project skips another's.
+/// `node_added`, from a path other than `/test` - for a test that
+/// folds one path's map and not another's.
 pub fn node_added_at(path: &str, kind: &str, name: &str) -> Event {
     Event::new(
         Actor::Human(human()),

@@ -180,8 +180,9 @@ fn discover_root(cwd: &Path, home: Option<&Path>) -> Option<PathBuf> {
     }
 }
 
-/// The project a checkout belongs to - what a `Source` names and a
-/// `Scope` compares. A linked worktree's `.git` is a file pointing at
+/// The project a checkout belongs to - what a `Source` names and
+/// `mapstore::of_path` compares against. A linked worktree's `.git` is
+/// a file pointing at
 /// the main checkout's `.git/worktrees/<name>`; the project is that
 /// main checkout, so every worktree of one repository shares one map
 /// instead of each starting empty. A second clone at another path is
@@ -214,10 +215,10 @@ async fn main() {
         hook_main(args)
     }
 
-    // `root` is the project a `Source` names and a `Scope` compares;
-    // `checkout` is where the files are. They differ only in a linked
-    // worktree, where the map is shared but its render, and the code
-    // map, belong to the checkout being worked in.
+    // `root` is the project a `Source` names and `mapstore::of_path`
+    // compares against; `checkout` is where the files are. They differ
+    // only in a linked worktree, where the map is shared but its
+    // render, and the code map, belong to the checkout being worked in.
     let cwd = match std::env::current_dir() {
         Ok(cwd) => cwd,
         Err(err) => {

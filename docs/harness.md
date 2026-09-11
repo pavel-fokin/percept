@@ -171,8 +171,8 @@ cut to its head with a `read_event` handle, so there is no shape to
 choose. And a window counted in events had no caller once the token
 window existed, so `Window` is a struct, not an enum.
 
-Each section renders itself from a `View`: the transcript, the scope
-the maps fold in, the turn in progress, the model's context window,
+Each section renders itself from a `View`: the transcript, the turn
+in progress, the model's context window,
 and what `App` decided about the tools. One function walks the list:
 
 ```rust
