@@ -22,7 +22,7 @@ pub use event::{
 };
 pub use event_log::EventLog;
 pub use map::{
-    default_prefix, map_of, Dir, Edge, EdgeKind, Fragment, Map, MapError, Mutation, Node, NodeId,
+    default_prefix, map_of, Edge, EdgeEnd, EdgeKind, Fragment, Map, MapError, Mutation, Node, NodeId,
     NodeKind, NodeRef, Schema, Schemas, Scope, Selection,
 };
 pub use map_reader::MapReader;

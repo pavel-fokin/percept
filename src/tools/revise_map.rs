@@ -400,11 +400,7 @@ fn apply(
 /// `--to`, and node arguments do.
 fn node_ref(map: &Map, args: NodeRefArgs) -> Result<NodeRef, Box<dyn std::error::Error>> {
     let id = args.resolve(map)?;
-    let node = map.node(id).expect("resolve returns a live node's id");
-    Ok(NodeRef {
-        kind: node.kind.clone(),
-        name: node.name.clone(),
-    })
+    Ok(NodeRef::from(map.node(id).expect("resolve returns a live node's id")))
 }
 
 /// The model is held to the design's rule that a cognitive commit

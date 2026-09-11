@@ -2,12 +2,9 @@ import { formatDate, plural, summarize } from "./format";
 import type { EdgeRef as EdgeRefT, OptionRow as OptionRowT, Row as RowT, Source as SourceT } from "./types";
 
 /** One quiet line naming who last changed a row, and why, when its
- * last change is not its addition. `addedAt` is the row's `added_at`,
- * given only for a claim - an alternative carries none, so it shows
- * the line whenever a `changed_why` says there was one. */
-function ChangedBy({ base, addedAt }: { base: OptionRowT; addedAt?: string }) {
-  const changed = addedAt !== undefined ? base.changed_at !== addedAt : Boolean(base.changed_why);
-  if (!changed) return null;
+ * last change is not its addition. */
+function ChangedBy({ base }: { base: OptionRowT }) {
+  if (base.changed_at === base.added_at) return null;
   return (
     <p className="text-[var(--ink-3)]">
       changed by {base.changed_by}
@@ -158,12 +155,12 @@ function Edge({ edge }: { edge: EdgeRefT }) {
 }
 
 /** Wrong, on a row or on a folded option. */
-function Acts({ onDispute }: { onDispute: () => void }) {
+function Acts({ onWrong }: { onWrong: () => void }) {
   return (
     <div className="mt-1 flex items-center gap-2">
       <button
         type="button"
-        onClick={onDispute}
+        onClick={onWrong}
         className="min-h-10 rounded-md border-[1.5px] border-[var(--rule)] px-3.5 py-2 font-bold text-[var(--ink)] hover:border-[var(--object)] hover:text-[var(--object)] focus-visible:border-[var(--object)] focus-visible:text-[var(--object)] active:border-[var(--object)] active:text-[var(--object)]"
       >
         Wrong
@@ -172,7 +169,7 @@ function Acts({ onDispute }: { onDispute: () => void }) {
   );
 }
 
-function OptionRow({ option, onDispute }: { option: OptionRowT; onDispute: (id: string) => void }) {
+function OptionRow({ option, onWrong }: { option: OptionRowT; onWrong: (id: string) => void }) {
   return (
     <li className="grid grid-cols-[auto_1fr] items-start gap-2.5 py-2.5">
       <div className="flex flex-col items-start gap-1 text-[var(--ink-2)]">
@@ -188,7 +185,7 @@ function OptionRow({ option, onDispute }: { option: OptionRowT; onDispute: (id: 
           </p>
         )}
         <ChangedBy base={option} />
-        <Acts onDispute={() => onDispute(option.id)} />
+        <Acts onWrong={() => onWrong(option.id)} />
       </div>
     </li>
   );
@@ -202,11 +199,11 @@ function OptionRow({ option, onDispute }: { option: OptionRowT; onDispute: (id: 
 export default function Claim({
   claim,
   focused,
-  onDispute,
+  onWrong,
 }: {
   claim: RowT;
   focused: boolean;
-  onDispute: (id: string) => void;
+  onWrong: (id: string) => void;
 }) {
   return (
     <li
@@ -236,18 +233,18 @@ export default function Claim({
       {claim.edges.map((edge) => (
         <Edge key={`${edge.kind}-${edge.dir}-${edge.node.id}`} edge={edge} />
       ))}
-      <ChangedBy base={claim} addedAt={claim.added_at} />
+      <ChangedBy base={claim} />
       <Sources sources={claim.sources} />
       {claim.related.length > 0 && (
         <Fold summary={`${plural(claim.related.length, "One alternative", "alternatives")} weighed and lost`}>
           <ul className="ml-4 mt-2 list-none border-l-2 border-[var(--rule)] pl-4">
             {claim.related.map((option) => (
-              <OptionRow key={option.id} option={option} onDispute={onDispute} />
+              <OptionRow key={option.id} option={option} onWrong={onWrong} />
             ))}
           </ul>
         </Fold>
       )}
-      <Acts onDispute={() => onDispute(claim.id)} />
+      <Acts onWrong={() => onWrong(claim.id)} />
     </li>
   );
 }

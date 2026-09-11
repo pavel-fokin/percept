@@ -16,7 +16,7 @@ mod map;
 mod render;
 mod schemas;
 
-pub(crate) use blocks::{block_header, capped_lines, latest_session_per_client, line_id};
+pub(crate) use blocks::{block_header, capped_lines, changed_line, last_session, line_id};
 pub use map::{
     commit, commit_batch, encode_fragment, encode_lines, encode_map, encode_schema, fold_map,
     LogMaps, NodeRefArgs, Snapshot,

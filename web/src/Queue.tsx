@@ -12,11 +12,11 @@ import type { MapQueue } from "./types";
 function Queue({
   map,
   focused,
-  onDispute,
+  onWrong,
 }: {
   map: MapQueue;
   focused: string | null;
-  onDispute: (id: string) => void;
+  onWrong: (id: string) => void;
 }) {
   const claims = allClaims(map);
 
@@ -42,7 +42,7 @@ function Queue({
           )}
           <ol className="mt-3 list-none border-t border-[var(--rule)] p-0">
             {group.claims.map((claim) => (
-              <Claim key={claim.id} claim={claim} focused={claim.id === focused} onDispute={onDispute} />
+              <Claim key={claim.id} claim={claim} focused={claim.id === focused} onWrong={onWrong} />
             ))}
           </ol>
         </section>

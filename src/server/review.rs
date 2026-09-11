@@ -6,11 +6,10 @@
 //! it nests mirror `web/src/types.ts` one to one, so the page reads the
 //! same shape this module writes.
 
-use std::collections::HashMap;
 
 use serde::Serialize;
 
-use crate::core::{Actor, Dir, EventId, EventLog, HumanId, Map, MapError, Node, NodeId, Schemas, Source};
+use crate::core::{Actor, EdgeEnd, EventId, EventLog, HumanId, Map, MapError, Node, Schemas, Source};
 use crate::mapstore;
 use crate::shared::Timestamp;
 
@@ -59,6 +58,7 @@ pub struct OptionRow {
     pub why: Option<String>,
     pub changed_by: &'static str,
     pub changed_why: Option<String>,
+    pub added_at: String,
     pub changed_at: String,
     pub sources: Vec<SourceEntry>,
 }
@@ -69,7 +69,6 @@ pub struct OptionRow {
 pub struct Row {
     #[serde(flatten)]
     pub base: OptionRow,
-    pub added_at: String,
     pub edges: Vec<EdgeRef>,
     pub related: Vec<OptionRow>,
 }
@@ -132,20 +131,11 @@ pub fn change(
     node: &str,
     why: String,
 ) -> Result<EventId, Refused> {
-    if why.trim().is_empty() {
-        return Err(Refused::Bad("why must not be blank".to_string()));
-    }
     let scope = source.scope();
     let folded =
         mapstore::fold_map(log, schemas, map, &scope).map_err(|err| Refused::Bad(err.to_string()))?;
-    let node_id = mapstore::NodeRefArgs::ShortId(node.to_string())
-        .resolve(&folded)
-        .map_err(|err| classify(&err))?;
-    let target = folded.node(node_id).expect("resolve returns a live node's id");
-    let node_ref = crate::core::NodeRef {
-        kind: target.kind.clone(),
-        name: target.name.clone(),
-    };
+    let node_id = folded.resolve_str(node).map_err(|err| classify(&err))?;
+    let node_ref = crate::core::NodeRef::from(folded.node(node_id).expect("resolve returns a live node's id"));
     let event = mapstore::commit(
         log,
         schemas,
@@ -198,22 +188,21 @@ fn map_queue(map: &Map, since: Option<Timestamp>, index: &EventIndex) -> MapQueu
     }
 }
 
-/// One heading a queue's rows sit under: `of_node` is the headline node
-/// the rows' edges point at, `None` for the orphan group - the rows
-/// whose edges reach no headline.
+/// One heading a queue's rows sit under: the headline node the rows'
+/// edges point at, or the row itself when they reach none.
 struct RawGroup<'a> {
-    of_node: Option<&'a Node>,
+    of_node: &'a Node,
     rows: Vec<&'a Node>,
 }
 
 /// The first headline node an outgoing edge of `claim` reaches,
 /// checking the schema's edge kinds in order - the core names no kind,
 /// so this is the one rule the review draws from the schema's own
-/// order rather than a settlement pair.
+/// order.
 fn heading_of<'a>(map: &'a Map, claim: &Node) -> Option<&'a Node> {
     let headline_kinds = &map.schema().headline_kinds;
     map.schema().edge_kinds.iter().find_map(|edge_kind| {
-        map.linked(claim.id, &edge_kind.name, Dir::From)
+        map.linked(claim.id, &edge_kind.name, EdgeEnd::From)
             .into_iter()
             .find(|node| headline_kinds.contains(&node.kind))
     })
@@ -226,7 +215,7 @@ fn related_to<'a>(map: &'a Map, heading: &Node) -> Vec<&'a Node> {
     map.schema()
         .edge_kinds
         .iter()
-        .flat_map(|edge_kind| map.linked(heading.id, &edge_kind.name, Dir::To))
+        .flat_map(|edge_kind| map.linked(heading.id, &edge_kind.name, EdgeEnd::To))
         .filter(|node| !headline_kinds.contains(&node.kind))
         .collect()
 }
@@ -235,33 +224,22 @@ fn related_to<'a>(map: &'a Map, heading: &Node) -> Vec<&'a Node> {
 /// a claim that reaches none is its own group, unless something else
 /// in the cut reaches it - then it heads that group instead. Groups
 /// sort by their heading's `added_at`, so nothing here orders one edge
-/// kind ahead of another the way a `reopens` chain once did.
+/// kind ahead of another.
 fn grouped<'a>(map: &'a Map, claims: &[&'a Node]) -> Vec<RawGroup<'a>> {
-    let mut rows_by_heading: HashMap<NodeId, Vec<&'a Node>> = HashMap::new();
-    let mut unheaded: Vec<&'a Node> = Vec::new();
-
+    // A heading that is itself in the cut is a row of its own group,
+    // so its last change and its Wrong stay reachable.
+    let mut groups: Vec<RawGroup<'a>> = Vec::new();
     for &claim in claims {
-        match heading_of(map, claim) {
-            Some(heading) => rows_by_heading.entry(heading.id).or_default().push(claim),
-            None => unheaded.push(claim),
+        let heading = heading_of(map, claim).unwrap_or(claim);
+        match groups.iter_mut().find(|group| group.of_node.id == heading.id) {
+            Some(group) => group.rows.push(claim),
+            None => groups.push(RawGroup { of_node: heading, rows: vec![claim] }),
         }
     }
-
-    // A heading that is itself in the cut is a row too, first in its
-    // own group, so its last change and its Wrong stay reachable.
-    for claim in unheaded {
-        let rows = rows_by_heading.entry(claim.id).or_default();
-        if !rows.iter().any(|row| row.id == claim.id) {
-            rows.insert(0, claim);
-        }
+    for group in &mut groups {
+        group.rows.sort_by_key(|node| node.added_at);
     }
-
-    let mut groups: Vec<RawGroup<'a>> = rows_by_heading
-        .into_iter()
-        .filter_map(|(id, rows)| map.node(id).map(|heading| RawGroup { of_node: Some(heading), rows }))
-        .collect();
-
-    groups.sort_by_key(|group| group.of_node.expect("every group here has a heading").added_at);
+    groups.sort_by_key(|group| group.of_node.added_at);
     groups
 }
 
@@ -269,18 +247,16 @@ fn grouped<'a>(map: &'a Map, claims: &[&'a Node]) -> Vec<RawGroup<'a>> {
 /// a group whose only row is its own heading, and its rows by
 /// `added_at` ascending.
 fn group_json(map: &Map, group: &RawGroup, index: &EventIndex) -> Group {
-    let is_self_group = |of_node: &Node| group.rows.len() == 1 && group.rows[0].id == of_node.id;
-    let heading = group.of_node.filter(|node| !is_self_group(node)).map(|node| Heading {
-        id: map.short_id(node.id).unwrap_or_default(),
-        title: node.name.clone(),
-        raised_at: node.added_at.to_string(),
+    let is_self_group = group.rows.len() == 1 && group.rows[0].id == group.of_node.id;
+    let heading = (!is_self_group).then(|| Heading {
+        id: map.short_id(group.of_node.id).unwrap_or_default(),
+        title: group.of_node.name.clone(),
+        raised_at: group.of_node.added_at.to_string(),
     });
-    let mut rows = group.rows.clone();
-    rows.sort_by_key(|node| node.added_at);
-    let related: Vec<&Node> = group.of_node.map(|node| related_to(map, node)).unwrap_or_default();
+    let related = related_to(map, group.of_node);
     Group {
         heading,
-        claims: rows.iter().map(|node| row_json(map, node, &related, index)).collect(),
+        claims: group.rows.iter().map(|node| row_json(map, node, &related, index)).collect(),
     }
 }
 
@@ -299,19 +275,12 @@ fn edges_of(map: &Map, node: &Node) -> Vec<EdgeRef> {
         .iter()
         .filter(|edge| edge.from == node.id || edge.to == node.id)
         .filter_map(|edge| {
-            if edge.from == node.id {
-                map.node(edge.to).map(|other| EdgeRef {
-                    kind: edge.kind.clone(),
-                    dir: "from",
-                    node: node_ref(map, other),
-                })
-            } else {
-                map.node(edge.from).map(|other| EdgeRef {
-                    kind: edge.kind.clone(),
-                    dir: "to",
-                    node: node_ref(map, other),
-                })
-            }
+            let (dir, other) = if edge.from == node.id { ("from", edge.to) } else { ("to", edge.from) };
+            map.node(other).map(|other| EdgeRef {
+                kind: edge.kind.clone(),
+                dir,
+                node: node_ref(map, other),
+            })
         })
         .collect()
 }
@@ -322,7 +291,6 @@ fn edges_of(map: &Map, node: &Node) -> Vec<EdgeRef> {
 fn row_json(map: &Map, node: &Node, related: &[&Node], index: &EventIndex) -> Row {
     Row {
         base: option_json(map, node, index),
-        added_at: node.added_at.to_string(),
         edges: edges_of(map, node),
         related: related.iter().map(|node| option_json(map, node, index)).collect(),
     }
@@ -337,6 +305,7 @@ fn option_json(map: &Map, node: &Node, index: &EventIndex) -> OptionRow {
         why: node.properties.get("why").cloned(),
         changed_by: node.changed_by.name(),
         changed_why: node.changed_why.clone(),
+        added_at: node.added_at.to_string(),
         changed_at: node.changed_at.to_string(),
         sources: index.sources_json(&node.sources),
     }

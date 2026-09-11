@@ -93,9 +93,7 @@ pub async fn run(
 /// `GET /api/review` cuts the queue to, for the life of this process.
 fn open_session(log: &dyn EventLog, source: &Source) -> Result<Option<Timestamp>, Box<dyn Error>> {
     let events = log.load()?;
-    let since = crate::mapstore::latest_session_per_client(&events, &source.scope())
-        .get(&(source.name.clone(), source.path.clone()))
-        .copied();
+    let since = crate::mapstore::last_session(&events, source);
     log.append(&Event::session_started(source.clone()))?;
     Ok(since)
 }

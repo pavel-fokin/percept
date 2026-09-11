@@ -159,7 +159,7 @@ export default function App() {
         {load.state === "failed" && (
           <p className="py-8">The queue could not be read: {load.message}. Reload to try again.</p>
         )}
-        {load.state === "ready" && map && <Queue map={map} focused={focused} onDispute={onWrong} />}
+        {load.state === "ready" && map && <Queue map={map} focused={focused} onWrong={onWrong} />}
       </main>
 
       {keysShown && (

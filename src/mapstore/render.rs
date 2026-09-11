@@ -4,7 +4,7 @@
 
 use std::fmt::Write as _;
 
-use crate::core::{Actor, Dir, Map, Node, Schema};
+use crate::core::{Actor, EdgeEnd, Map, Node, Schema};
 use crate::store::ids;
 
 /// What every rendered map opens with, so a reader who pastes it
@@ -237,14 +237,9 @@ fn push_props(out: &mut String, node: &Node, indent: &str) {
 /// appended when the change carried one - printed only when `node`'s
 /// last change is not its addition.
 fn push_changed(out: &mut String, node: &Node, indent: &str) {
-    if node.changed_at == node.added_at {
-        return;
+    if let Some(changed) = super::changed_line(node) {
+        let _ = writeln!(out, "{indent}{changed}");
     }
-    let _ = write!(out, "{indent}changed by {}", node.changed_by.name());
-    if let Some(why) = &node.changed_why {
-        let _ = write!(out, ": {why:?}");
-    }
-    out.push('\n');
 }
 
 /// `node`'s edges, one line per edge kind the schema declares, in
@@ -257,13 +252,13 @@ fn push_changed(out: &mut String, node: &Node, indent: &str) {
 fn push_edges(out: &mut String, map: &Map, node: &Node) {
     let headline_kinds = &map.schema().headline_kinds;
     for edge_kind in &map.schema().edge_kinds {
-        for neighbour in map.linked(node.id, &edge_kind.name, Dir::From) {
+        for neighbour in map.linked(node.id, &edge_kind.name, EdgeEnd::From) {
             let _ = writeln!(out, "- {} {}", edge_kind.name, marked_name(map, neighbour));
             if !headline_kinds.contains(&neighbour.kind) {
                 push_props(out, neighbour, "  ");
             }
         }
-        for neighbour in map.linked(node.id, &edge_kind.name, Dir::To) {
+        for neighbour in map.linked(node.id, &edge_kind.name, EdgeEnd::To) {
             let _ = writeln!(out, "- {} {}", marked_name(map, neighbour), edge_kind.name);
             if !headline_kinds.contains(&neighbour.kind) {
                 push_props(out, neighbour, "  ");

@@ -335,21 +335,19 @@ pub struct NodeRef {
     pub name: String,
 }
 
+impl From<&Node> for NodeRef {
+    fn from(node: &Node) -> Self {
+        Self {
+            kind: node.kind.clone(),
+            name: node.name.clone(),
+        }
+    }
+}
+
 impl fmt::Display for NodeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{} {:?}", self.kind, self.name)
     }
-}
-
-/// Which end of an edge `Map::linked` follows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Dir {
-    /// The edge's `to` end, from an edge whose `from` is the node asked
-    /// about.
-    From,
-    /// The edge's `from` end, from an edge whose `to` is the node asked
-    /// about.
-    To,
 }
 
 /// How much of a map a reader asked for. `around` cuts first, then
@@ -432,8 +430,9 @@ pub enum Mutation {
     },
 }
 
-/// Which end of an edge broke a `WrongEdgeEnd` rule.
-#[derive(Debug, PartialEq, Eq)]
+/// One end of an edge: the end `Map::linked` reads across, or the end
+/// that broke a `WrongEdgeEnd` rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EdgeEnd {
     From,
     To,
@@ -495,6 +494,12 @@ pub enum MapError {
     UnknownState {
         kind: String,
         value: String,
+        states: Vec<String>,
+    },
+    /// A new node of a kind that declares states, sent without one.
+    /// Write-only, like `UnknownState`.
+    MissingState {
+        kind: String,
         states: Vec<String>,
     },
     /// A rename, a property other than `state`, or a removal that W6's
@@ -573,7 +578,7 @@ impl fmt::Display for MapError {
             Self::DuplicateNode { kind, name } => {
                 write!(f, "{kind} {name:?} is already in the map")
             }
-            Self::UnknownState { kind, value, states } if value.is_empty() => {
+            Self::MissingState { kind, states } => {
                 write!(f, "{kind} needs a state; states are {}", states.join(", "))
             }
             Self::UnknownState { kind, value, states } => write!(
@@ -782,17 +787,16 @@ impl Map {
     }
 
     /// The nodes across every edge of `edge_kind` touching `id`, in map
-    /// order: the kind-agnostic query behind `blocked_by`, `reopened_by`,
-    /// and the rest, for a caller that knows no kind's name.
-    /// `Dir::From` reads the `to` end of an edge whose `from` is `id`;
-    /// `Dir::To` reads the `from` end of an edge whose `to` is `id`.
-    pub fn linked(&self, id: NodeId, edge_kind: &str, dir: Dir) -> Vec<&Node> {
+    /// order, for a caller that knows no kind's name. `EdgeEnd::From`
+    /// reads the `to` end of an edge whose `from` is `id`; `EdgeEnd::To`
+    /// reads the `from` end of an edge whose `to` is `id`.
+    pub fn linked(&self, id: NodeId, edge_kind: &str, end: EdgeEnd) -> Vec<&Node> {
         self.edges
             .iter()
             .filter(|edge| edge.kind == edge_kind)
-            .filter_map(|edge| match dir {
-                Dir::From if edge.from == id => self.node(edge.to),
-                Dir::To if edge.to == id => self.node(edge.from),
+            .filter_map(|edge| match end {
+                EdgeEnd::From if edge.from == id => self.node(edge.to),
+                EdgeEnd::To if edge.to == id => self.node(edge.from),
                 _ => None,
             })
             .collect()
@@ -1016,9 +1020,8 @@ impl Map {
                         });
                     }
                     if !node_kind.states.is_empty() && !properties.contains_key("state") {
-                        return Err(MapError::UnknownState {
+                        return Err(MapError::MissingState {
                             kind: kind.clone(),
-                            value: String::new(),
                             states: node_kind.states.clone(),
                         });
                     }
@@ -1048,12 +1051,8 @@ impl Map {
                 }
                 blank_why(why.as_deref())?;
                 let needs_rank = name.is_some() || properties.keys().any(|key| key != "state");
-                if needs_rank && !may(actor, existing.actor, existing.touched_by) {
-                    return Err(MapError::NotYours {
-                        node: self.label(node_id),
-                        owner: existing.actor,
-                        touched_by: existing.touched_by,
-                    });
+                if needs_rank {
+                    self.check_may(actor, self.label(node_id), existing.actor, existing.touched_by)?;
                 }
                 Payload::NodeChanged {
                     map,
@@ -1068,25 +1067,11 @@ impl Map {
                 let node_id = self.resolve(node)?;
                 blank_why(Some(&why))?;
                 let existing = self.node(node_id).expect("resolve returns a live node's id");
-                if !may(actor, existing.actor, existing.touched_by) {
-                    return Err(MapError::NotYours {
-                        node: self.label(node_id),
-                        owner: existing.actor,
-                        touched_by: existing.touched_by,
-                    });
-                }
+                self.check_may(actor, self.label(node_id), existing.actor, existing.touched_by)?;
                 // Removing a node drops every edge on it, so each one is
                 // weighed as its own removal would be.
-                if let Some(edge) = self
-                    .edges
-                    .iter()
-                    .find(|edge| (edge.from == node_id || edge.to == node_id) && !may(actor, edge.actor, edge.actor))
-                {
-                    return Err(MapError::NotYours {
-                        node: self.edge_label(edge),
-                        owner: edge.actor,
-                        touched_by: edge.actor,
-                    });
+                for edge in self.edges.iter().filter(|edge| edge.from == node_id || edge.to == node_id) {
+                    self.check_may(actor, self.edge_line(edge), edge.actor, edge.actor)?;
                 }
                 Payload::NodeRemoved {
                     map,
@@ -1123,17 +1108,16 @@ impl Map {
                 let to_id = self.resolve(to)?;
                 blank_why(Some(&why))?;
                 if let Some(edge) = self.find_edge(&kind, from_id, to_id) {
-                    // An edge is part of both ends' neighbourhoods, so a
-                    // lock on either end holds it too.
-                    let ends = [from_id, to_id].map(|id| self.node(id).expect("an edge's ends are live").touched_by);
-                    let lock = ends.into_iter().find(|touched| outranks(*touched, actor));
-                    if !may(actor, edge.actor, edge.actor) || lock.is_some() {
-                        return Err(MapError::NotYours {
-                            node: self.edge_label(edge),
-                            owner: edge.actor,
-                            touched_by: lock.unwrap_or(edge.actor),
-                        });
-                    }
+                    // An edge is part of both ends' neighbourhoods, so the
+                    // highest rank to have touched either end, or the edge
+                    // itself, is what locks it.
+                    let touched_by = [from_id, to_id]
+                        .map(|id| self.node(id).expect("an edge's ends are live").touched_by)
+                        .into_iter()
+                        .chain([edge.actor])
+                        .max_by_key(|touched| rank(*touched))
+                        .expect("three candidates");
+                    self.check_may(actor, self.edge_line(edge), edge.actor, touched_by)?;
                 }
                 Payload::EdgeRemoved {
                     map,
@@ -1385,13 +1369,22 @@ impl Map {
         }
     }
 
-    /// The live edge `kind from to` names, if the map holds one - what
-    /// `RemoveEdge`'s W6 check weighs its actor against. `None` when the
-    /// map holds no such edge; `replay` is what reports that missing.
-    fn edge_label(&self, edge: &Edge) -> String {
-        format!("{} {} {}", self.label(edge.from), edge.kind, self.label(edge.to))
+    /// W6 as a refusal: `NotYours` naming `label` unless `may` holds.
+    fn check_may(&self, actor: Actor, label: String, owner: Actor, touched_by: Actor) -> Result<(), MapError> {
+        if may(actor, owner, touched_by) {
+            Ok(())
+        } else {
+            Err(MapError::NotYours {
+                node: label,
+                owner,
+                touched_by,
+            })
+        }
     }
 
+    /// The live edge `kind from to` names, if the map holds one - what
+    /// `RemoveEdge`'s W6 check weighs. `None` when the map holds no such
+    /// edge; `replay` is what reports that missing.
     fn find_edge(&self, kind: &str, from: NodeId, to: NodeId) -> Option<&Edge> {
         self.edges
             .iter()

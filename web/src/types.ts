@@ -57,6 +57,7 @@ export interface OptionRow {
   why: string | null;
   changed_by: string;
   changed_why: string | null;
+  added_at: string;
   changed_at: string;
   sources: Source[];
 }
@@ -64,7 +65,6 @@ export interface OptionRow {
 /** One claim in the queue: a headline node changed since the review
  * last opened. */
 export interface Row extends OptionRow {
-  added_at: string;
   edges: EdgeRef[];
   related: OptionRow[];
 }

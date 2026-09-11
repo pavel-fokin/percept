@@ -27,7 +27,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::core::{cited_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source};
-use crate::mapstore::{block_header, capped_lines, latest_session_per_client, line_id};
+use crate::mapstore::{block_header, capped_lines, changed_line, last_session, line_id};
 use crate::shared::Timestamp;
 use crate::store::TurnState;
 use crate::workspace;
@@ -263,11 +263,8 @@ fn gained_block(maps: &[Map], since: Timestamp) -> String {
                 .iter()
                 .map(|node| {
                     let mut line = format!("{} {} {:?}", line_id(map, node), node.kind, node.name);
-                    if node.changed_at != node.added_at {
-                        line.push_str(&format!(" \u{b7} changed by {}", node.changed_by.name()));
-                        if let Some(why) = &node.changed_why {
-                            line.push_str(&format!(": {why:?}"));
-                        }
+                    if let Some(changed) = changed_line(node) {
+                        line.push_str(&format!(" \u{b7} {changed}"));
                     }
                     line
                 })
@@ -422,14 +419,6 @@ fn map_pointers(maps: &[Map]) -> Vec<String> {
         .collect()
 }
 
-/// The latest `session.started` event this exact source (client name
-/// and project path) recorded, if any - `None` on a project's first
-/// session with this client.
-fn last_session(events: &[Event], source: &Source) -> Option<Timestamp> {
-    latest_session_per_client(events, &source.scope())
-        .get(&(source.name.clone(), source.path.clone()))
-        .copied()
-}
 
 /// `source.path`'s last component, the name a reader knows the project
 /// by - falling back to the whole path on the rare root with none.

@@ -1,16 +1,12 @@
-//! The block renderers `percept hook`'s session-start block and the
-//! review page's foot both print, and the shared session rule both a
-//! hook and the review page fold sessions by: `latest_session_per
-//! client` picks out the latest `session.started` per writer and
-//! project, in whatever scope the caller folds.
+//! What the session-start block, the review page, and the Markdown
+//! render share: the truncation rule, a node's line id, the wording of
+//! its last change, and the session rule both a hook and the review
+//! page cut their since by.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-
-use crate::core::{Event, Map, Node, Payload, Scope};
+use crate::core::{Event, Map, Node, Payload, Source};
 use crate::shared::Timestamp;
 
-/// How many lines of a gained, changed, or open list a block shows
+/// How many lines of a gained or changed list a block shows
 /// before folding the rest into a trailing count.
 pub(crate) const LIMIT: usize = 5;
 
@@ -42,26 +38,34 @@ pub(crate) fn line_id(map: &Map, node: &Node) -> String {
         .unwrap_or_else(|| format!("{}:{}", node.kind, node.name))
 }
 
-/// The latest `session.started` per writer and project root, among
-/// `events` that fall inside `scope`. `cli::hook::last_session` looks
-/// its own client up in this; `server::review::last_session` takes the
-/// min across every value, with the earliest admitted event as its
-/// fallback.
-pub(crate) fn latest_session_per_client(
-    events: &[Event],
-    scope: &Scope,
-) -> HashMap<(String, PathBuf), Timestamp> {
-    let mut latest: HashMap<(String, PathBuf), Timestamp> = HashMap::new();
-    for event in events
+/// The latest `session.started` this exact source - client name and
+/// project path - recorded, among `events` in its scope: `None` on a
+/// project's first session with this client. The hook and the review
+/// page both cut their since from it, then append a fresh one.
+pub(crate) fn last_session(events: &[Event], source: &Source) -> Option<Timestamp> {
+    let scope = source.scope();
+    events
         .iter()
-        .filter(|event| scope.admits(event) && matches!(event.payload(), Payload::SessionStarted))
-    {
-        let key = (event.source().name.clone(), event.source().path.clone());
-        let at = event.created_at();
-        latest
-            .entry(key)
-            .and_modify(|current| *current = (*current).max(at))
-            .or_insert(at);
+        .filter(|event| {
+            scope.admits(event)
+                && matches!(event.payload(), Payload::SessionStarted)
+                && event.source().name == source.name
+                && event.source().path == source.path
+        })
+        .map(Event::created_at)
+        .max()
+}
+
+/// `changed by <actor>`, with `: "<why>"` when the change carried one -
+/// `None` when `node`'s last change is its addition. The one wording
+/// every render of a node's last change uses.
+pub(crate) fn changed_line(node: &Node) -> Option<String> {
+    if node.changed_at == node.added_at {
+        return None;
     }
-    latest
+    let mut line = format!("changed by {}", node.changed_by.name());
+    if let Some(why) = &node.changed_why {
+        line.push_str(&format!(": {why:?}"));
+    }
+    Some(line)
 }

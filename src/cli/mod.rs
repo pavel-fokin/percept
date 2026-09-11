@@ -430,11 +430,7 @@ fn parse_prop(s: &str) -> Result<(String, String), String> {
 /// and that one is the same one a plain `kind:name` reference always
 /// lived with.
 fn resolve_ref(map: &Map, s: &str) -> Result<NodeRef, Box<dyn std::error::Error>> {
-    let node = resolve_node(map, s)?;
-    Ok(NodeRef {
-        kind: node.kind.clone(),
-        name: node.name.clone(),
-    })
+    Ok(NodeRef::from(resolve_node(map, s)?))
 }
 
 /// The node `s` names - see `resolve_ref` - for a caller that needs
@@ -817,16 +813,15 @@ pub fn maps_change_node(
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let scope = source.scope();
-    let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
-    let node = resolve_ref(&map, &args.node)?;
     let ChangeNodeArgs {
         target,
-        node: _,
+        node,
         name,
         prop,
         why,
     } = args;
+    let map = mapstore::fold_map(log, schemas, &target.map, &source.scope())?;
+    let node = resolve_ref(&map, &node)?;
     let payload = write(target, log, schemas, source, me, |sources| {
         Mutation::ChangeNode {
             node,

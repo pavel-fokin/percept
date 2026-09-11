@@ -60,14 +60,14 @@ fn linked_follows_an_edge_kind_the_core_names_no_meaning_for() {
     let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
     assert_eq!(
-        map.linked(a, "supersedes", Dir::To)
+        map.linked(a, "supersedes", EdgeEnd::To)
             .iter()
             .map(|n| n.id)
             .collect::<Vec<_>>(),
         vec![b]
     );
     assert_eq!(
-        map.linked(c, "supersedes", Dir::From)
+        map.linked(c, "supersedes", EdgeEnd::From)
             .iter()
             .map(|n| n.id)
             .collect::<Vec<_>>(),
@@ -909,10 +909,9 @@ fn human_may_rename_change_and_remove_the_agents_node() {
 }
 
 #[test]
-fn after_the_humans_why_the_agent_may_not_rename_or_remove_but_may_still_set_state() {
+fn after_the_humans_why_the_agent_may_not_rename_or_remove_the_node() {
     let mut map = Map::empty(tasks());
     map.apply(add_task("cancel a turn"), Actor::Agent).unwrap();
-
     map.apply(
         change_node_why("task", "cancel a turn", None, BTreeMap::new(), Some("wrong")),
         Actor::Human(human()),
@@ -940,6 +939,17 @@ fn after_the_humans_why_the_agent_may_not_rename_or_remove_but_may_still_set_sta
         .err()
         .unwrap();
     assert!(matches!(removed, MapError::NotYours { .. }), "{removed}");
+}
+
+#[test]
+fn after_the_humans_why_the_agent_may_still_set_the_nodes_state() {
+    let mut map = Map::empty(tasks());
+    map.apply(add_task("cancel a turn"), Actor::Agent).unwrap();
+    map.apply(
+        change_node_why("task", "cancel a turn", None, BTreeMap::new(), Some("wrong")),
+        Actor::Human(human()),
+    )
+    .unwrap();
 
     map.apply(
         change_node(
@@ -951,6 +961,7 @@ fn after_the_humans_why_the_agent_may_not_rename_or_remove_but_may_still_set_sta
         Actor::Agent,
     )
     .unwrap();
+
     let node = map.find("task", "cancel a turn").unwrap();
     assert_eq!(node.properties.get("state").unwrap(), "done");
 }
@@ -1003,9 +1014,8 @@ fn adding_a_node_of_a_kind_with_states_and_no_state_is_refused() {
 
     assert_eq!(
         err,
-        MapError::UnknownState {
+        MapError::MissingState {
             kind: "task".to_string(),
-            value: String::new(),
             states: vec!["open".to_string(), "done".to_string(), "dropped".to_string()],
         }
     );
@@ -1045,21 +1055,21 @@ fn linked_reads_in_both_directions() {
     let blocked = map.find("task", "cancel a turn").unwrap().id;
 
     let from_blocker: Vec<NodeId> = map
-        .linked(blocker, "blocks", Dir::From)
+        .linked(blocker, "blocks", EdgeEnd::From)
         .iter()
         .map(|node| node.id)
         .collect();
     assert_eq!(from_blocker, vec![blocked]);
 
     let to_blocked: Vec<NodeId> = map
-        .linked(blocked, "blocks", Dir::To)
+        .linked(blocked, "blocks", EdgeEnd::To)
         .iter()
         .map(|node| node.id)
         .collect();
     assert_eq!(to_blocked, vec![blocker]);
 
-    assert!(map.linked(blocked, "blocks", Dir::From).is_empty());
-    assert!(map.linked(blocker, "blocks", Dir::To).is_empty());
+    assert!(map.linked(blocked, "blocks", EdgeEnd::From).is_empty());
+    assert!(map.linked(blocker, "blocks", EdgeEnd::To).is_empty());
 }
 
 #[test]
@@ -1692,20 +1702,27 @@ fn removing_the_agents_own_edge_off_a_node_the_human_touched_is_refused() {
 }
 
 #[test]
-fn a_blank_why_is_refused_on_a_change_and_on_a_removal() {
+fn a_blank_why_is_refused_on_a_change() {
     let mut map = Map::empty(decisions());
     map.apply(add_node("decision", "Rust"), Actor::Agent).unwrap();
 
-    let changed = map
+    let err = map
         .apply(
             change_node_why("decision", "Rust", None, BTreeMap::new(), Some("  ")),
             Actor::Agent,
         )
         .err()
         .unwrap();
-    assert!(matches!(changed, MapError::BlankWhy), "{changed}");
 
-    let removed = map
+    assert!(matches!(err, MapError::BlankWhy), "{err}");
+}
+
+#[test]
+fn a_blank_why_is_refused_on_a_node_removal() {
+    let mut map = Map::empty(decisions());
+    map.apply(add_node("decision", "Rust"), Actor::Agent).unwrap();
+
+    let err = map
         .apply(
             Mutation::RemoveNode {
                 node: node_ref("decision", "Rust"),
@@ -1716,5 +1733,35 @@ fn a_blank_why_is_refused_on_a_change_and_on_a_removal() {
         )
         .err()
         .unwrap();
-    assert!(matches!(removed, MapError::BlankWhy), "{removed}");
+
+    assert!(matches!(err, MapError::BlankWhy), "{err}");
+}
+
+#[test]
+fn a_blank_why_is_refused_on_an_edge_removal() {
+    let mut map = Map::empty(decisions());
+    map.apply(add_node("decision", "Rust"), Actor::Agent).unwrap();
+    map.apply(add_node("question", "Which language?"), Actor::Agent)
+        .unwrap();
+    map.apply(
+        add_edge("resolves", node_ref("decision", "Rust"), node_ref("question", "Which language?")),
+        Actor::Agent,
+    )
+    .unwrap();
+
+    let err = map
+        .apply(
+            Mutation::RemoveEdge {
+                kind: "resolves".to_string(),
+                from: node_ref("decision", "Rust"),
+                to: node_ref("question", "Which language?"),
+                sources: Vec::new(),
+                why: " ".to_string(),
+            },
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
+
+    assert!(matches!(err, MapError::BlankWhy), "{err}");
 }

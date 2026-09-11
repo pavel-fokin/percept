@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 /** The quiet button style: no border, no fill, muted text - shared by
  * a sheet's Close/Cancel. */
-export const QUIET =
+const QUIET =
   "min-h-10 rounded-md border-[1.5px] border-transparent px-3.5 py-2 font-normal text-[var(--ink-3)]";
 
 /** Escape closes a sheet; every other key is left to the page under

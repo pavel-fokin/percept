@@ -216,22 +216,21 @@ impl Stamp {
 /// beside its own. `NodeLine`'s form of `Stamp`; an edge has no
 /// `changed_by`, so `encode_edge` still uses `Stamp` alone.
 #[derive(Serialize)]
-struct NodeStamp {
-    actor: serde_json::Value,
-    added_at: String,
+struct NodeStamp<'a> {
+    #[serde(flatten)]
+    stamp: Stamp,
     changed_by: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    changed_why: Option<String>,
+    changed_why: Option<&'a str>,
 }
 
-impl NodeStamp {
+impl<'a> NodeStamp<'a> {
     /// `Some` when `stamped`, else `None` - see `Stamp::of`.
-    fn of(node: &Node, stamped: bool) -> Option<Self> {
-        stamped.then(|| Self {
-            actor: crate::store::actor_value(node.actor),
-            added_at: node.added_at.to_string(),
+    fn of(node: &'a Node, stamped: bool) -> Option<Self> {
+        Stamp::of(node.actor, node.added_at, stamped).map(|stamp| Self {
+            stamp,
             changed_by: node.changed_by.name(),
-            changed_why: node.changed_why.clone(),
+            changed_why: node.changed_why.as_deref(),
         })
     }
 }
@@ -249,7 +248,7 @@ struct NodeLine<'a> {
     properties: &'a BTreeMap<String, String>,
     sources: Vec<String>,
     #[serde(flatten)]
-    stamp: Option<NodeStamp>,
+    stamp: Option<NodeStamp<'a>>,
 }
 
 #[derive(Serialize)]
