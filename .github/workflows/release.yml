@@ -41,6 +41,7 @@ jobs:
           out="percept-${{ matrix.target }}"
           mkdir "$out"
           cp target/${{ matrix.target }}/release/percept "$out/"
+          cp scripts/lib-install.sh "$out/"
           tar czf "$out.tar.gz" "$out"
       - uses: actions/upload-artifact@v4
         with:
