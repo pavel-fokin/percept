@@ -288,9 +288,13 @@ pub struct Node {
     /// `node.changed` event lands.
     pub changed_at: Timestamp,
     /// Who last changed this node - `actor` until a `node.changed`
-    /// lands, then that event's actor. What `may` weighs: a change from
-    /// above locks the node against everyone below that rank.
+    /// lands, then that event's actor.
     pub changed_by: Actor,
+    /// The highest-ranked actor to have added or changed this node -
+    /// what `may` weighs: a change from above locks the node against
+    /// everyone below that rank, and a later change from below (a
+    /// state set, a comment) does not lift it.
+    pub touched_by: Actor,
     /// Why this node's last change was made, when the writer gave one -
     /// `None` on a plain edit. A human's "wrong" on an agent's node is a
     /// change carrying only this, and it stays on the node until the
@@ -495,13 +499,16 @@ pub enum MapError {
     },
     /// A rename, a property other than `state`, or a removal that W6's
     /// rank rule refuses: the actor neither owns nor outranks the
-    /// node's writer, or is outranked by whoever changed it last.
+    /// writer, or is outranked by whoever touched it since.
     /// Write-only: `state` and a new edge are any actor's.
     NotYours {
         node: String,
         owner: Actor,
-        changed_by: Actor,
+        touched_by: Actor,
     },
+    /// A `why` that is given but blank - on a change, a removal, or an
+    /// edge removal. Write-only.
+    BlankWhy,
     NoSuchNode {
         node: NodeRef,
         /// Nodes of the same kind whose name overlaps `node.name`, as
@@ -552,6 +559,7 @@ impl fmt::Display for MapError {
                 "no edge kind {kind:?} in map {map:?}; kinds are {kinds}"
             ),
             Self::BlankName => write!(f, "a node's name must not be blank"),
+            Self::BlankWhy => write!(f, "a why must not be blank"),
             Self::MissingProperty {
                 kind,
                 name,
@@ -580,13 +588,13 @@ impl fmt::Display for MapError {
             Self::NotYours {
                 node,
                 owner,
-                changed_by,
+                touched_by,
             } => write!(
                 f,
-                "{node} was written by {}, last changed by {}; you may still set its state, or \
-                 add a node and an edge beside it",
+                "{node} was written by {} and touched by {}; you may still set a node's state, \
+                 or add a node and an edge beside it",
                 owner.name(),
-                changed_by.name()
+                touched_by.name()
             ),
             Self::NoSuchNode { node, suggestions } => {
                 write!(f, "no {node} in the map")?;
@@ -637,7 +645,7 @@ fn outranks(a: Actor, b: Actor) -> bool {
 }
 
 /// Whether `a` and `b` are the one who wrote something. A human equals
-/// any human: an actor carries no id yet to tell two humans apart.
+/// any human: two humans are not told apart yet.
 fn same_actor(a: Actor, b: Actor) -> bool {
     matches!(
         (a, b),
@@ -646,13 +654,20 @@ fn same_actor(a: Actor, b: Actor) -> bool {
 }
 
 /// W6's rank rule: whether `actor` may rename, change a property beyond
-/// `state`, or remove something `owner` wrote and `changed_by` last
-/// touched. `actor` must own it or outrank `owner`, and must not be
-/// outranked by `changed_by` - a change from above locks what it
-/// touched against everyone below that rank, not only against the
-/// node's original writer.
-fn may(actor: Actor, owner: Actor, changed_by: Actor) -> bool {
-    (same_actor(actor, owner) || outranks(actor, owner)) && !outranks(changed_by, actor)
+/// `state`, or remove something `owner` wrote and `touched_by` is the
+/// highest rank to have touched. `actor` must own it or outrank
+/// `owner`, and must not be outranked by `touched_by` - a change from
+/// above locks what it touched against everyone below that rank.
+fn may(actor: Actor, owner: Actor, touched_by: Actor) -> bool {
+    (same_actor(actor, owner) || outranks(actor, owner)) && !outranks(touched_by, actor)
+}
+
+/// Whether `why`, when given, is blank - W2's `BlankWhy`.
+fn blank_why(why: Option<&str>) -> Result<(), MapError> {
+    match why {
+        Some(why) if why.trim().is_empty() => Err(MapError::BlankWhy),
+        _ => Ok(()),
+    }
 }
 
 /// A map folded from the log. Holds every node and edge still present;
@@ -1031,12 +1046,13 @@ impl Map {
                 if let Some(node_kind) = self.schema.node_kind(&existing.kind) {
                     check_state(node_kind, &properties)?;
                 }
+                blank_why(why.as_deref())?;
                 let needs_rank = name.is_some() || properties.keys().any(|key| key != "state");
-                if needs_rank && !may(actor, existing.actor, existing.changed_by) {
+                if needs_rank && !may(actor, existing.actor, existing.touched_by) {
                     return Err(MapError::NotYours {
                         node: self.label(node_id),
                         owner: existing.actor,
-                        changed_by: existing.changed_by,
+                        touched_by: existing.touched_by,
                     });
                 }
                 Payload::NodeChanged {
@@ -1050,12 +1066,26 @@ impl Map {
             }
             Mutation::RemoveNode { node, why, sources } => {
                 let node_id = self.resolve(node)?;
+                blank_why(Some(&why))?;
                 let existing = self.node(node_id).expect("resolve returns a live node's id");
-                if !may(actor, existing.actor, existing.changed_by) {
+                if !may(actor, existing.actor, existing.touched_by) {
                     return Err(MapError::NotYours {
                         node: self.label(node_id),
                         owner: existing.actor,
-                        changed_by: existing.changed_by,
+                        touched_by: existing.touched_by,
+                    });
+                }
+                // Removing a node drops every edge on it, so each one is
+                // weighed as its own removal would be.
+                if let Some(edge) = self
+                    .edges
+                    .iter()
+                    .find(|edge| (edge.from == node_id || edge.to == node_id) && !may(actor, edge.actor, edge.actor))
+                {
+                    return Err(MapError::NotYours {
+                        node: self.edge_label(edge),
+                        owner: edge.actor,
+                        touched_by: edge.actor,
                     });
                 }
                 Payload::NodeRemoved {
@@ -1091,15 +1121,17 @@ impl Map {
             } => {
                 let from_id = self.resolve(from)?;
                 let to_id = self.resolve(to)?;
-                let edge_actor = self
-                    .find_edge(&kind, from_id, to_id)
-                    .map(|edge| edge.actor);
-                if let Some(edge_actor) = edge_actor {
-                    if !may(actor, edge_actor, edge_actor) {
+                blank_why(Some(&why))?;
+                if let Some(edge) = self.find_edge(&kind, from_id, to_id) {
+                    // An edge is part of both ends' neighbourhoods, so a
+                    // lock on either end holds it too.
+                    let ends = [from_id, to_id].map(|id| self.node(id).expect("an edge's ends are live").touched_by);
+                    let lock = ends.into_iter().find(|touched| outranks(*touched, actor));
+                    if !may(actor, edge.actor, edge.actor) || lock.is_some() {
                         return Err(MapError::NotYours {
-                            node: format!("{} {kind} {}", self.label(from_id), self.label(to_id)),
-                            owner: edge_actor,
-                            changed_by: edge_actor,
+                            node: self.edge_label(edge),
+                            owner: edge.actor,
+                            touched_by: lock.unwrap_or(edge.actor),
                         });
                     }
                 }
@@ -1156,6 +1188,7 @@ impl Map {
                     changed_at: at,
                     changed_by: actor,
                     changed_why: None,
+                    touched_by: actor,
                     seq,
                 });
             }
@@ -1187,6 +1220,9 @@ impl Map {
                 self.nodes[index].changed_at = at;
                 self.nodes[index].changed_by = actor;
                 self.nodes[index].changed_why = why.clone();
+                if outranks(actor, self.nodes[index].touched_by) {
+                    self.nodes[index].touched_by = actor;
+                }
             }
             Payload::NodeRemoved { node, .. } => {
                 let removed = self.node(*node).ok_or(MapError::NoSuchNodeId(*node))?;
@@ -1352,6 +1388,10 @@ impl Map {
     /// The live edge `kind from to` names, if the map holds one - what
     /// `RemoveEdge`'s W6 check weighs its actor against. `None` when the
     /// map holds no such edge; `replay` is what reports that missing.
+    fn edge_label(&self, edge: &Edge) -> String {
+        format!("{} {} {}", self.label(edge.from), edge.kind, self.label(edge.to))
+    }
+
     fn find_edge(&self, kind: &str, from: NodeId, to: NodeId) -> Option<&Edge> {
         self.edges
             .iter()

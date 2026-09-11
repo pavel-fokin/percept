@@ -266,6 +266,7 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
         changed_at: Timestamp::now(),
         changed_by: Actor::Agent,
         changed_why: Some("looked stale".to_string()),
+        touched_by: Actor::Human(me),
         seq: 1,
     };
 

@@ -80,8 +80,9 @@ fn a_claimed_decision_appears_under_the_question_it_resolves() {
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0]["heading"]["title"], "Which language?");
     let claims = claims_of(&map, 0);
-    assert_eq!(claims.len(), 1);
-    assert_eq!(claims[0]["name"], "Rust");
+    assert_eq!(claims.len(), 2, "the question is a row of its own group too");
+    assert_eq!(claims[0]["name"], "Which language?");
+    assert_eq!(claims[1]["name"], "Rust");
 }
 
 #[test]
@@ -134,7 +135,7 @@ fn a_reopening_question_groups_under_the_decision_it_doubts() {
     assert_eq!(groups.len(), 2);
     assert_eq!(claims_of(&map, 0)[0]["name"], "Older question?");
     assert_eq!(groups[1]["heading"]["title"], "Something");
-    assert_eq!(claims_of(&map, 1)[0]["name"], "Newer, reopening?");
+    assert_eq!(claims_of(&map, 1)[1]["name"], "Newer, reopening?");
 }
 
 #[test]
@@ -169,7 +170,7 @@ fn a_decision_that_supersedes_another_groups_under_that_one_not_its_question() {
     let groups = groups_of(&map);
     assert_eq!(groups.len(), 2);
     assert_eq!(groups[0]["heading"]["title"], "Which language?");
-    assert_eq!(claims_of(&map, 0)[0]["name"], "Rust");
+    assert_eq!(claims_of(&map, 0)[1]["name"], "Rust");
     assert_eq!(groups[1]["heading"]["title"], "Rust");
     assert_eq!(claims_of(&map, 1)[0]["name"], "Go");
 }
@@ -187,7 +188,7 @@ fn an_orphan_group_carries_a_null_heading() {
 
 #[test]
 fn an_option_that_answers_the_question_is_related_under_the_decisions_row() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let question = node_added_by(Actor::Human(None), "question", "Which language?");
     let decision = node_added_by(Actor::Agent, "decision", "Rust");
     let resolves = edge_added("resolves", &decision, &question);
     let option = node_added_by(Actor::Agent, "option", "Go");
@@ -205,7 +206,7 @@ fn an_option_that_answers_the_question_is_related_under_the_decisions_row() {
 #[test]
 fn a_decision_citing_a_human_prompt_carries_the_prompts_content_and_the_agent_reply_before_it_as_its_proposal(
 ) {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let question = node_added_by(Actor::Human(None), "question", "Which language?");
     let t0 = Timestamp::now();
     let proposal = created_at(message_received(Actor::Agent, "Recommendation: Rust."), t0);
     let t1 = t0.minus_minutes(-10).unwrap();
@@ -224,7 +225,7 @@ fn a_decision_citing_a_human_prompt_carries_the_prompts_content_and_the_agent_re
 
 #[test]
 fn a_prompt_with_no_earlier_agent_reply_in_its_source_carries_a_null_proposal() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let question = node_added_by(Actor::Human(None), "question", "Which language?");
     let prompt = message_received(Actor::Human(human()), "Rust, please.");
     let decision = node_added_citing(Actor::Agent, "decision", "Rust", vec![prompt.id()]);
     let resolves = edge_added("resolves", &decision, &question);
@@ -237,7 +238,7 @@ fn a_prompt_with_no_earlier_agent_reply_in_its_source_carries_a_null_proposal() 
 
 #[test]
 fn a_reply_from_another_source_is_not_taken_as_the_proposal() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let question = node_added_by(Actor::Human(None), "question", "Which language?");
     let t0 = Timestamp::now();
     let other_reply = created_at(message_received_at(source_at("other", "/other"), Actor::Agent, "Go."), t0);
     let t1 = t0.minus_minutes(-10).unwrap();
@@ -253,7 +254,7 @@ fn a_reply_from_another_source_is_not_taken_as_the_proposal() {
 
 #[test]
 fn a_file_cited_source_carries_its_path_lines_and_excerpt() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let question = node_added_by(Actor::Human(None), "question", "Which language?");
     let cite = file_cited("src/main.rs", Some((10, 20)), "fn main() {}");
     let decision = node_added_citing(Actor::Agent, "decision", "Rust", vec![cite.id()]);
     let resolves = edge_added("resolves", &decision, &question);
@@ -271,7 +272,7 @@ fn a_file_cited_source_carries_its_path_lines_and_excerpt() {
 
 #[test]
 fn a_source_id_the_log_does_not_hold_reads_as_missing() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let question = node_added_by(Actor::Human(None), "question", "Which language?");
     let missing_id = EventId::new();
     let decision = node_added_citing(Actor::Agent, "decision", "Rust", vec![missing_id]);
     let resolves = edge_added("resolves", &decision, &question);
@@ -284,7 +285,7 @@ fn a_source_id_the_log_does_not_hold_reads_as_missing() {
 
 #[test]
 fn content_over_4000_characters_is_cut_and_marked_truncated() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let question = node_added_by(Actor::Human(None), "question", "Which language?");
     let long = "a".repeat(4001);
     let prompt = message_received(Actor::Human(human()), &long);
     let decision = node_added_citing(Actor::Agent, "decision", "Rust", vec![prompt.id()]);

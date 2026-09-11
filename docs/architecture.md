@@ -65,21 +65,23 @@ Actor     = Human(id?) | Agent | System
 rank      : Human → 2, Agent → 1, System → 1
 outranks(a, b)  = rank(a) > rank(b)
 owns(a, x)      = a == x.actor            (Agent == Agent: an agent carries no id yet)
-may(a, x)       = (owns(a, x) ∨ outranks(a, x.actor)) ∧ ¬outranks(x.changed_by, a)
+may(a, x)       = (owns(a, x) ∨ outranks(a, x.actor)) ∧ ¬outranks(x.touched_by, a)
 
 Schema    = { name, purpose, headlines: {kind}, node_kinds, edge_kinds }
 NodeKind  = { name, gloss, prefix, requires: {key}, states: {value} }
 EdgeKind  = { name, gloss, from: {kind}, to: {kind} }
 
 Node      = { id, seq, kind, name, properties: key → value, sources: [EventId],
-              actor, added_at, changed_at, changed_by, changed_why? }
+              actor, added_at, changed_at, changed_by, changed_why?, touched_by }
 Edge      = { kind, from: NodeId, to: NodeId, sources, actor, added_at }
 Map       = { schema, nodes, edges }
 ```
 
 `states` is a set: no value is the open one by position. `changed_by`
 and `changed_why` are the node's last change, who and why. They are
-what a correction looks like on the node it corrects.
+what a correction looks like on the node it corrects. `touched_by` is
+the highest-ranked actor to have added or changed the node: the lock,
+which a later change from below does not lift.
 
 Invariants, true of every map:
 
@@ -114,15 +116,16 @@ appended. A refusal is an error, and no event exists.
 | | Rule | On |
 |---|---|---|
 | W1 | `kind` is in the schema. | `node.added`, `edge.added` |
-| W2 | `name` is not blank; I1. | `node.added`, `node.changed` with a name |
+| W2 | `name` is not blank; I1. A `why`, when given, is not blank. | `node.added`, `node.changed` with a name; every `why` |
 | W3 | `requires ⊆ keys(properties)`. | `node.added` |
 | W4 | When the kind declares states, `properties.state ∈ states`: required on add, checked when sent on change. | `node.added`, `node.changed` |
 | W5 | `from.kind ∈ edge_kind.from`, `to.kind ∈ edge_kind.to`; I2. | `edge.added` |
-| W6 | Rank. A rename, a property other than `state`, or a removal needs `may(actor, node)`; removing an edge needs `may(actor, edge)`. `state` and a new edge are any actor's. | `node.changed`, `node.removed`, `edge.removed` |
+| W6 | Rank. A rename, a property other than `state`, or a removal needs `may(actor, node)`, and a removal also `may(actor, edge)` for every edge on the node, since it drops them. Removing an edge needs `may(actor, edge)` and neither end touched from above the actor. `state` and a new edge are any actor's. | `node.changed`, `node.removed`, `edge.removed` |
 
 W6 is everything the core knows about who may do what, and no rule
-names a kind. Because `may` weighs the node's last change, an agent
-cannot rewrite or remove a node the human has touched. What it can
+names a kind. Because `may` weighs who has touched the node, an agent
+cannot rewrite or remove a node the human has touched, and cannot
+take an edge off it. What it can
 still do is add a node and an edge beside it, which is how a decision
 is superseded, and the core never learns the word.
 
@@ -136,8 +139,8 @@ checks structure only, so a log written before a rule still folds.
 
 | | |
 |---|---|
-| F1 | `node.added`: W1, I1; `seq = max(seq, next)`; insert with `actor`, `added_at = changed_at = at`, `changed_by = actor`. |
-| F2 | `node.changed`: the node is live; apply `name`, merge `properties`, append `sources`; `changed_at = at`, `changed_by = actor`, `changed_why = why`. |
+| F1 | `node.added`: W1, I1; `seq = max(seq, next)`; insert with `actor`, `added_at = changed_at = at`, `changed_by = touched_by = actor`. |
+| F2 | `node.changed`: the node is live; apply `name`, merge `properties`, append `sources`; `changed_at = at`, `changed_by = actor`, `changed_why = why`; `touched_by = actor` when `actor` outranks it. |
 | F3 | `node.removed`: the node is live; drop it and every edge on it; `seq` is not freed. |
 | F4 | `edge.added`: W1, I2, I3; insert with `actor`, `added_at = at`. |
 | F5 | `edge.removed`: the edge is live; drop it. |

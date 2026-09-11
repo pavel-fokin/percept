@@ -154,7 +154,7 @@ async fn an_unknown_node_id_is_404() {
 }
 
 #[tokio::test]
-async fn api_review_after_a_change_lists_the_node_with_who_changed_it_and_why() {
+async fn a_change_takes_the_node_out_of_the_humans_review_queue() {
     let node = node_added_by(Actor::Agent, "decision", "ship it");
     let (_, addr) = spawn_over(vec![node]).await;
 
@@ -171,7 +171,7 @@ async fn api_review_after_a_change_lists_the_node_with_who_changed_it_and_why() 
         .iter()
         .find(|map| map["name"] == "decisions")
         .expect("a decisions map");
-    let claim = &decisions["groups"][0]["claims"][0];
-    assert_eq!(claim["changed_by"], "human");
-    assert_eq!(claim["changed_why"], "not yet");
+    // The human's own write is not theirs to review: the node's last
+    // change is the human's, so it leaves the queue.
+    assert!(decisions["groups"].as_array().unwrap().is_empty(), "{decisions}");
 }

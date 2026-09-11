@@ -70,6 +70,9 @@ pub async fn run(
         name: SOURCE_NAME.to_string(),
         path: source.path,
     };
+    let (listener, addr) = bind().await?;
+    // The marker lands only once the page can be served, so a bind
+    // that fails does not move the next review's since.
     let since = {
         let log = Arc::clone(&log);
         let source = source.clone();
@@ -77,7 +80,6 @@ pub async fn run(
             .await
             .expect("opening the review session never panics")?
     };
-    let (listener, addr) = bind().await?;
     let url = format!("http://{addr}");
     println!("percept review at {url}");
     open_browser(&url);

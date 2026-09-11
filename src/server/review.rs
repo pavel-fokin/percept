@@ -6,11 +6,11 @@
 //! it nests mirror `web/src/types.ts` one to one, so the page reads the
 //! same shape this module writes.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use serde::Serialize;
 
-use crate::core::{Dir, EventId, EventLog, HumanId, Map, MapError, Node, NodeId, Schemas, Source};
+use crate::core::{Actor, Dir, EventId, EventLog, HumanId, Map, MapError, Node, NodeId, Schemas, Source};
 use crate::mapstore;
 use crate::shared::Timestamp;
 
@@ -185,6 +185,9 @@ fn map_queue(map: &Map, since: Option<Timestamp>, index: &EventIndex) -> MapQueu
     let claims: Vec<&Node> = map
         .headlines()
         .filter(|node| since.is_none_or(|since| node.changed_at >= since))
+        // The human's own writes - a landmark they added, a Wrong they
+        // gave - are not theirs to review.
+        .filter(|node| !matches!(node.changed_by, Actor::Human(_)))
         .collect();
     let groups = grouped(map, &claims);
     MapQueue {
@@ -244,17 +247,19 @@ fn grouped<'a>(map: &'a Map, claims: &[&'a Node]) -> Vec<RawGroup<'a>> {
         }
     }
 
+    // A heading that is itself in the cut is a row too, first in its
+    // own group, so its last change and its Wrong stay reachable.
+    for claim in unheaded {
+        let rows = rows_by_heading.entry(claim.id).or_default();
+        if !rows.iter().any(|row| row.id == claim.id) {
+            rows.insert(0, claim);
+        }
+    }
+
     let mut groups: Vec<RawGroup<'a>> = rows_by_heading
         .into_iter()
         .filter_map(|(id, rows)| map.node(id).map(|heading| RawGroup { of_node: Some(heading), rows }))
         .collect();
-
-    let headed: HashSet<NodeId> = groups.iter().filter_map(|group| group.of_node.map(|node| node.id)).collect();
-    for claim in unheaded {
-        if !headed.contains(&claim.id) {
-            groups.push(RawGroup { of_node: Some(claim), rows: vec![claim] });
-        }
-    }
 
     groups.sort_by_key(|group| group.of_node.expect("every group here has a heading").added_at);
     groups

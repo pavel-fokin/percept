@@ -249,20 +249,23 @@ fn removing_a_user_written_edge_is_refused() {
 }
 
 #[test]
-fn removing_a_model_node_that_a_user_edge_touches_is_allowed_and_drops_the_edge() {
-    // The map's rank rule weighs a node's own last change, not an edge
-    // that happens to touch it: the app-level guard that once refused
-    // this is gone with the kind names it needed to draw the line.
+fn removing_a_model_node_that_a_user_edge_touches_is_refused() {
+    // Removing a node drops every edge on it, so the map weighs each
+    // edge as its own removal would be: the user's edge is not the
+    // model's to drop.
     let model_node = node_added_by(Actor::Agent, "option", "Rust");
     let question = node_added("question", "Which language?");
     let user_edge = edge_added("answers", &model_node, &question);
     let revise = tool(vec![model_node, question, user_edge]);
 
-    let output = revise
+    let err = match revise
         .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"option","name":"Rust"},"why":"wrong"}]}"#)
-        .unwrap();
+    {
+        Ok(_) => panic!("the removal went through"),
+        Err(err) => err.to_string(),
+    };
 
-    assert!(matches!(output.commits[0], Payload::NodeRemoved { .. }));
+    assert!(err.contains("touched by human"), "{err}");
 }
 
 #[test]

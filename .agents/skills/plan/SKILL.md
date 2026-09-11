@@ -65,7 +65,7 @@ Verify: <how to confirm the outcome>
    issue - conventional message, subject line only. An issue that was
    an open task is changed to `state "done"` with the commit in the
    change's `why` (see the percept skill). Work the session found but left
-   undone goes in as a new task, with its why.
+   undone goes in as a new task, with its why and `state "open"`.
 
 ## Recording decisions
 

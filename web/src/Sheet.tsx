@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 /** The quiet button style: no border, no fill, muted text - shared by
- * a sheet's Close/Cancel and a claim's Confirm. */
+ * a sheet's Close/Cancel. */
 export const QUIET =
   "min-h-10 rounded-md border-[1.5px] border-transparent px-3.5 py-2 font-normal text-[var(--ink-3)]";
 
@@ -57,7 +57,7 @@ function Scrim({
  * `initial`, and Save/Close - the sketch's why sheet. The draft lives
  * here, not in the caller, so a keystroke re-renders only this sheet;
  * `onCancel` and `onSave` both hand the caller the text as it stood,
- * so a caller can keep a closed draft or dispute with a saved one.
+ * so a caller can keep a closed draft or replace it with a saved one.
  * `onSave` runs only when the text is non-blank; Save with a blank
  * value refocuses the textarea instead. */
 export function WhySheet({

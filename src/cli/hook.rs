@@ -168,10 +168,9 @@ pub fn run(
 /// source recorded against this project, if any - what a fragment cuts
 /// the log to since - records a fresh one for the next call to find,
 /// and folds every log-backed schema to report what each map gained
-/// since then, what is still open on it, and one concrete next step.
-/// What "gained" and "open" mean is read off `Schema` - `headline_kinds`
-/// and `settlement` - never off a map's name, so a project's own
-/// schema (an `ideas` map with no settlement, say) reports without any
+/// since then and where to read the rest. What "gained" means is read
+/// off `Schema::headline_kinds`, never off a map's name, so a
+/// project's own schema (an `ideas` map, say) reports without any
 /// code naming it.
 fn start_session(
     source: &Source,
@@ -231,6 +230,7 @@ recording
 - A decision that changes an earlier one adds a supersedes <id> line under it; never remove a node.
 - A decision that no longer seems to fit is not yours to rewrite: raise a question with a reopens <id> line under it, and let the user settle it.
 - A node whose last change is the user's carries their why: never propose it again, and never rewrite or remove it - the map refuses; a correction the user agrees is a new decision with a supersedes line.
+- A task is added with its why and state \"open\": task \"what to do\", then why \"what it costs undone\" and state \"open\" indented under it; the map refuses one without both.
 - Close a task by changing it, not by adding a node: t4 on its own line, then state \"done\" and why \"<commit>: what happened\" indented under it - under an existing node, why is the change's why, not a property (state \"dropped\" and why for one dropped, state \"open\" to reopen one). A task the user wrote takes only state from you; its name and why are theirs.
 - Close the session with one line naming what was recorded: Recorded to decisions: q1, d1, o1.";
 

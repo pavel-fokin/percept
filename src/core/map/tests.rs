@@ -1595,3 +1595,126 @@ fn a_node_added_event_with_no_seq_falls_back_to_its_position() {
     assert_eq!(map.short_id(a), Some("d1".to_string()));
     assert_eq!(map.short_id(b), Some("d2".to_string()));
 }
+
+#[test]
+fn a_state_set_from_below_does_not_lift_the_lock_the_humans_change_put_on_a_node() {
+    let mut map = Map::empty(tasks());
+    map.apply(add_task("cancel a turn"), Actor::Agent).unwrap();
+    map.apply(
+        change_node_why("task", "cancel a turn", None, BTreeMap::new(), Some("wrong")),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    map.apply(
+        change_node(
+            "task",
+            "cancel a turn",
+            None,
+            BTreeMap::from([("state".to_string(), "done".to_string())]),
+        ),
+        Actor::Agent,
+    )
+    .unwrap();
+
+    let node = map.find("task", "cancel a turn").unwrap();
+    assert_eq!(node.changed_by, Actor::Agent);
+    assert!(matches!(node.touched_by, Actor::Human(_)), "{:?}", node.touched_by);
+    let renamed = map
+        .apply(
+            change_node("task", "cancel a turn", Some("renamed"), BTreeMap::new()),
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
+    assert!(matches!(renamed, MapError::NotYours { .. }), "{renamed}");
+}
+
+#[test]
+fn removing_a_node_a_humans_edge_touches_is_refused_to_the_agent() {
+    let mut map = Map::empty(decisions());
+    map.apply(add_option("Rust"), Actor::Agent).unwrap();
+    map.apply(add_node("question", "Which language?"), Actor::Human(human()))
+        .unwrap();
+    map.apply(
+        add_edge("answers", node_ref("option", "Rust"), node_ref("question", "Which language?")),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    let err = map
+        .apply(
+            Mutation::RemoveNode {
+                node: node_ref("option", "Rust"),
+                why: "wrong".to_string(),
+                sources: Vec::new(),
+            },
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
+
+    assert!(matches!(err, MapError::NotYours { .. }), "{err}");
+}
+
+#[test]
+fn removing_the_agents_own_edge_off_a_node_the_human_touched_is_refused() {
+    let mut map = Map::empty(decisions());
+    map.apply(add_node("decision", "Rust"), Actor::Agent).unwrap();
+    map.apply(add_node("question", "Which language?"), Actor::Agent)
+        .unwrap();
+    map.apply(
+        add_edge("resolves", node_ref("decision", "Rust"), node_ref("question", "Which language?")),
+        Actor::Agent,
+    )
+    .unwrap();
+    map.apply(
+        change_node_why("decision", "Rust", None, BTreeMap::new(), Some("does not settle it")),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    let err = map
+        .apply(
+            Mutation::RemoveEdge {
+                kind: "resolves".to_string(),
+                from: node_ref("decision", "Rust"),
+                to: node_ref("question", "Which language?"),
+                sources: Vec::new(),
+                why: "re-pointing".to_string(),
+            },
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
+
+    assert!(matches!(err, MapError::NotYours { .. }), "{err}");
+}
+
+#[test]
+fn a_blank_why_is_refused_on_a_change_and_on_a_removal() {
+    let mut map = Map::empty(decisions());
+    map.apply(add_node("decision", "Rust"), Actor::Agent).unwrap();
+
+    let changed = map
+        .apply(
+            change_node_why("decision", "Rust", None, BTreeMap::new(), Some("  ")),
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
+    assert!(matches!(changed, MapError::BlankWhy), "{changed}");
+
+    let removed = map
+        .apply(
+            Mutation::RemoveNode {
+                node: node_ref("decision", "Rust"),
+                why: String::new(),
+                sources: Vec::new(),
+            },
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
+    assert!(matches!(removed, MapError::BlankWhy), "{removed}");
+}
