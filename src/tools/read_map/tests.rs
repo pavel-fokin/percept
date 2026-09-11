@@ -1,5 +1,7 @@
+use std::path::PathBuf;
+
 use super::*;
-use crate::core::testing::{edge_added, node_added, node_added_at, schemas, scope, FakeLog};
+use crate::core::testing::{edge_added, node_added, node_added_at, schemas, FakeLog, ROOT};
 use crate::core::Event;
 use crate::mapstore::LogMaps;
 
@@ -8,7 +10,7 @@ fn tool(log: FakeLog) -> ReadMap {
     ReadMap::new(Arc::new(LogMaps::new(
         Arc::new(log),
         Arc::new(schemas()),
-        scope(),
+        PathBuf::from(ROOT),
     )))
 }
 

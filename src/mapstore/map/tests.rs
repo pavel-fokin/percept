@@ -1,7 +1,5 @@
-use std::path::PathBuf;
-
 use super::*;
-use crate::core::testing::{human, schemas, scope, source, source_at, FakeLog};
+use crate::core::testing::{human, schemas, source, source_at, FakeLog};
 use crate::core::{Actor, Change, Event, NodeId, NodeRef};
 use crate::shared::Timestamp;
 
@@ -18,13 +16,13 @@ fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
 #[test]
 fn an_option_without_a_why_is_refused_as_a_new_write() {
     let log = FakeLog::default();
+    let source = source("cli");
 
     let err = commit(
         &log,
         &schemas(),
         "decisions",
-        &scope(),
-        &source("cli"),
+        &source,
         &[],
         Actor::Human(human()),
         add_node("option", "SQLite"),
@@ -40,13 +38,13 @@ fn an_option_without_a_why_is_refused_as_a_new_write() {
 #[test]
 fn a_task_without_a_why_is_refused_as_a_new_write() {
     let log = FakeLog::default();
+    let source = source("cli");
 
     let err = commit(
         &log,
         &schemas(),
         "tasks",
-        &scope(),
-        &source("cli"),
+        &source,
         &[],
         Actor::Human(human()),
         add_node("task", "cancel a turn without quitting"),
@@ -62,6 +60,7 @@ fn a_task_without_a_why_is_refused_as_a_new_write() {
 #[test]
 fn an_option_with_a_why_is_recorded() {
     let log = FakeLog::default();
+    let source = source("cli");
     let mutation = |sources| Mutation::AddNode {
         kind: "option".to_string(),
         name: "SQLite".to_string(),
@@ -73,8 +72,7 @@ fn an_option_with_a_why_is_recorded() {
         &log,
         &schemas(),
         "decisions",
-        &scope(),
-        &source("cli"),
+        &source,
         &[],
         Actor::Human(human()),
         mutation,
@@ -87,13 +85,13 @@ fn an_option_with_a_why_is_recorded() {
 #[test]
 fn commit_appends_the_event_that_records_the_mutation() {
     let log = FakeLog::default();
+    let source = source("cli");
 
     let event = commit(
         &log,
         &schemas(),
         "decisions",
-        &scope(),
-        &source("cli"),
+        &source,
         &[],
         Actor::Human(human()),
         add_node("decision", "Rust"),
@@ -101,7 +99,7 @@ fn commit_appends_the_event_that_records_the_mutation() {
     .unwrap();
 
     assert!(matches!(event.payload(), Payload::NodeAdded { name, .. } if name == "Rust"));
-    assert!(fold_map(&log, &schemas(), "decisions", &scope())
+    assert!(fold_map(&log, &schemas(), "decisions", &source.path)
         .unwrap()
         .find("decision", "Rust")
         .is_some());
@@ -110,12 +108,12 @@ fn commit_appends_the_event_that_records_the_mutation() {
 #[test]
 fn commit_loads_the_log_so_a_second_call_sees_the_first() {
     let log = FakeLog::default();
+    let source = source("cli");
     commit(
         &log,
         &schemas(),
         "decisions",
-        &scope(),
-        &source("cli"),
+        &source,
         &[],
         Actor::Human(human()),
         add_node("decision", "Rust"),
@@ -126,8 +124,7 @@ fn commit_loads_the_log_so_a_second_call_sees_the_first() {
         &log,
         &schemas(),
         "decisions",
-        &scope(),
-        &source("cli"),
+        &source,
         &[],
         Actor::Human(human()),
         add_node("decision", "Rust"),
@@ -139,17 +136,16 @@ fn commit_loads_the_log_so_a_second_call_sees_the_first() {
 }
 
 #[test]
-fn commit_allows_the_same_name_under_a_different_project_s_path() {
+fn commit_allows_the_same_name_under_a_different_path() {
     let log = FakeLog::default();
-    let here = Scope::Project(PathBuf::from("/here"));
-    let there = Scope::Project(PathBuf::from("/there"));
+    let here = source_at("cli", "/here");
+    let there = source_at("cli", "/there");
 
     commit(
         &log,
         &schemas(),
         "decisions",
         &here,
-        &source_at("cli", "/here"),
         &[],
         Actor::Human(human()),
         add_node("decision", "Rust"),
@@ -160,27 +156,62 @@ fn commit_allows_the_same_name_under_a_different_project_s_path() {
         &schemas(),
         "decisions",
         &there,
-        &source_at("cli", "/there"),
         &[],
         Actor::Human(human()),
         add_node("decision", "Rust"),
     )
     .unwrap();
 
-    assert!(fold_map(&log, &schemas(), "decisions", &there)
+    assert!(fold_map(&log, &schemas(), "decisions", &there.path)
         .unwrap()
         .find("decision", "Rust")
         .is_some());
 }
 
 #[test]
+fn of_path_keeps_only_the_events_whose_source_ran_there() {
+    let here = Event::message_received(
+        Actor::Human(human()),
+        "hi".to_string(),
+        source_at("cli", "/here"),
+        None,
+    );
+    let there = Event::message_received(
+        Actor::Human(human()),
+        "hi".to_string(),
+        source_at("cli", "/there"),
+        None,
+    );
+    let events = vec![here.clone(), there];
+
+    let kept: Vec<_> = of_path(&events, &here.source().path).collect();
+
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].id(), here.id());
+}
+
+#[test]
+fn paths_lists_the_distinct_source_paths_sorted() {
+    let events = vec![
+        Event::message_received(Actor::Human(human()), "a".to_string(), source_at("cli", "/there"), None),
+        Event::message_received(Actor::Human(human()), "b".to_string(), source_at("cli", "/here"), None),
+        Event::message_received(Actor::Human(human()), "c".to_string(), source_at("cli", "/there"), None),
+    ];
+
+    assert_eq!(
+        paths(&events),
+        vec![PathBuf::from("/here"), PathBuf::from("/there")]
+    );
+}
+
+#[test]
 fn committing_to_a_map_no_schema_declares_is_an_error() {
+    let source = source("cli");
     let err = commit(
         &FakeLog::default(),
         &schemas(),
         "code",
-        &scope(),
-        &source("cli"),
+        &source,
         &[],
         Actor::Human(human()),
         add_node("file", "src/main.rs"),
@@ -193,7 +224,8 @@ fn committing_to_a_map_no_schema_declares_is_an_error() {
 
 #[test]
 fn an_unknown_map_is_an_error() {
-    let err = fold_map(&FakeLog::default(), &schemas(), "glossary", &scope())
+    let source = source("cli");
+    let err = fold_map(&FakeLog::default(), &schemas(), "glossary", &source.path)
         .err()
         .unwrap();
 
@@ -205,7 +237,8 @@ fn an_unknown_map_is_an_error() {
 
 #[test]
 fn a_source_is_checked_against_the_loaded_log() {
-    let cited = Event::message_received(Actor::Human(human()), "hi".to_string(), source("t"), None);
+    let source = source("cli");
+    let cited = Event::message_received(Actor::Human(human()), "hi".to_string(), source.clone(), None);
     let known = cited.id().as_uuid().to_string();
     let log = FakeLog::seeded(vec![cited]);
     let unknown = Uuid::now_v7().to_string();
@@ -214,8 +247,7 @@ fn a_source_is_checked_against_the_loaded_log() {
         &log,
         &schemas(),
         "decisions",
-        &scope(),
-        &source("cli"),
+        &source,
         &[known],
         Actor::Human(human()),
         add_node("decision", "Rust"),
@@ -225,8 +257,7 @@ fn a_source_is_checked_against_the_loaded_log() {
         &log,
         &schemas(),
         "decisions",
-        &scope(),
-        &source("cli"),
+        &source,
         std::slice::from_ref(&unknown),
         Actor::Human(human()),
         add_node("decision", "Go"),
@@ -237,8 +268,7 @@ fn a_source_is_checked_against_the_loaded_log() {
         &log,
         &schemas(),
         "decisions",
-        &scope(),
-        &source("cli"),
+        &source,
         &["user".to_string()],
         Actor::Human(human()),
         add_node("decision", "Go"),

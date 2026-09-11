@@ -1,7 +1,7 @@
 use std::fmt;
 
 use crate::app::MapShape;
-use crate::core::{Actor, Event, EventId, EventKind, Map, Schemas, Scope, PREVIEW_CHARS};
+use crate::core::{Actor, Event, EventId, EventKind, Map, Schemas, PREVIEW_CHARS};
 use crate::shared::Timestamp;
 
 /// A map's size and age in one clause, so the model can tell whether
@@ -228,7 +228,6 @@ pub struct View<'a> {
     pub instructions: Option<&'a str>,
     pub events: &'a [Event],
     pub schemas: &'a Schemas,
-    pub scope: Scope,
     /// Where the turn now streaming began in `events`, if any.
     pub turn_start: Option<usize>,
     /// The model's context window in tokens, if it reports one.
@@ -345,7 +344,7 @@ fn render(
             // It says so in words that keep the log in play: the
             // model read a bare "(empty)" as "nothing was ever
             // decided" and stopped searching.
-            for map in view.schemas.fold_all(&view.scope, view.events)? {
+            for map in view.schemas.fold_all(view.events)? {
                 let schema = map.schema();
                 let body = if map.nodes().is_empty() {
                     "(empty: nothing has been recorded here yet. The log may still \

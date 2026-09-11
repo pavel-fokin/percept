@@ -117,8 +117,9 @@ Both are serde-free.
   and compactness: a map may grow, but what a reader has seen does not
   move. The core keeps no standing and no read receipt: the user's
   correction is the node's last change, printed wherever the node is.
-- `Scope` says which project's events a fold reads: the current one by
-  default, every one with `--all-projects`. A map is read live, never
+- A fold reads whatever events it is given; `mapstore::of_path` cuts
+  the log to one `Source.path` before it - the current checkout by
+  default, every path in turn with `--all-paths`. A map is read live, never
   rendered to a file a session commits: one log holds every branch, so
   a committed render would carry whichever branch's fold wrote it
   last. `percept maps show <map> --format md` from the shell,

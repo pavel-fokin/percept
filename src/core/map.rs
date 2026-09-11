@@ -8,40 +8,10 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::{self, Write as _};
-use std::path::PathBuf;
 use std::sync::Arc;
 
-use super::{Actor, Event, EventId, Payload, Source};
+use super::{Actor, Event, EventId, Payload};
 use crate::shared::{Id, Timestamp};
-
-/// Which events a fold may draw from: one project's alone, or every
-/// project's. The log is shared by every project that writes to it;
-/// `Project` is the default a reader wants, `All` the escape hatch.
-/// Never touches `Snapshot::resolve` - a node may cite an event from
-/// any project, whichever map it ends up in.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Scope {
-    Project(PathBuf),
-    All,
-}
-
-impl Scope {
-    /// Whether `event` falls inside this scope.
-    pub fn admits(&self, event: &Event) -> bool {
-        match self {
-            Self::Project(path) => event.source().path == *path,
-            Self::All => true,
-        }
-    }
-}
-
-impl Source {
-    /// The scope of this writer's own project - what every fold on its
-    /// behalf reads.
-    pub fn scope(&self) -> Scope {
-        Scope::Project(self.path.clone())
-    }
-}
 
 /// Which node and edge kinds a map allows. Data, not an enum: adding a
 /// map is adding a value.
@@ -204,14 +174,13 @@ impl Schemas {
         self.schemas.iter()
     }
 
-    /// Every map folded from `events` within `scope` - one per schema.
+    /// Every map `Map::fold` gives for `events` - one per schema.
     pub fn fold_all<'a>(
         &self,
-        scope: &Scope,
         events: impl IntoIterator<Item = &'a Event> + Clone,
     ) -> Result<Vec<Map>, MapError> {
         self.folded()
-            .map(|schema| Map::fold(schema.clone(), scope, events.clone()))
+            .map(|schema| Map::fold(schema.clone(), events.clone()))
             .collect()
     }
 
@@ -769,23 +738,20 @@ impl Map {
         }
     }
 
-    /// Folds the events that belong to `schema`'s map and fall inside
-    /// `scope`, in the order given, which must be log order. Events for
-    /// other maps, of other kinds, or outside `scope` are skipped. An
-    /// event that breaks a rule is an error naming it, not skipped:
-    /// silently dropping it would hide that something went wrong at
-    /// write time.
+    /// Folds every event given that belongs to `schema`'s map, in the
+    /// order given, which must be log order. A fold reads exactly what
+    /// it is given and knows nothing of paths: a caller after one
+    /// path's map filters first. Events for other maps or of other
+    /// kinds are skipped. An event that breaks a rule is an error naming it,
+    /// not skipped: silently dropping it would hide that something
+    /// went wrong at write time.
     pub fn fold<'a>(
         schema: impl Into<Arc<Schema>>,
-        scope: &Scope,
         events: impl IntoIterator<Item = &'a Event>,
     ) -> Result<Self, MapError> {
         let schema = schema.into();
         let mut map = Self::empty(schema.clone());
         for event in events {
-            if !scope.admits(event) {
-                continue;
-            }
             if map_of(event.payload()) != Some(schema.name.as_str()) {
                 continue;
             }

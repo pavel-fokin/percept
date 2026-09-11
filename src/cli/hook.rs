@@ -29,7 +29,7 @@ use serde_json::{json, Value};
 use crate::core::{
     cited_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source, Written,
 };
-use crate::mapstore::{block_header, capped_lines, changed_line, last_session, line_id};
+use crate::mapstore::{block_header, capped_lines, changed_line, last_session, line_id, of_path};
 use crate::shared::Timestamp;
 use crate::store::TurnState;
 use crate::workspace;
@@ -191,7 +191,7 @@ fn start_session(
         None => format!("percept · project {project}\nfirst session here"),
     };
 
-    let maps = schemas.fold_all(&source.scope(), &events)?;
+    let maps = schemas.fold_all(of_path(&events, &source.path))?;
 
     let mut sections = vec![header];
     if let Some(at) = since {

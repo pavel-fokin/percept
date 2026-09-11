@@ -264,11 +264,13 @@ pub fn run_tool(tool: &dyn crate::harness::Tool, arguments: &str) -> crate::harn
 
 /// Whether `event` belongs in `App`'s own transcript cache: either it
 /// is `source`'s own conversation - a message, a thought, a tool call -
-/// or it changes a map, which stays the project's shared history no
-/// matter who wrote it. A conversational event from another writer is
-/// left out, so another client's dialogue never replays as this one's.
+/// or it changes a map at `source`'s path, which stays that path's
+/// shared history no matter who wrote it. A conversational event from
+/// another writer, and anything from another path, is left out, so
+/// another client's dialogue never replays as this one's.
 fn belongs_to_transcript(event: &Event, source: &Source) -> bool {
-    event.source() == source || crate::core::map_of(event.payload()).is_some()
+    event.source() == source
+        || (event.source().path == source.path && crate::core::map_of(event.payload()).is_some())
 }
 
 /// The index of the last `model.called` in `events`, so a reopened log
@@ -360,13 +362,12 @@ impl App {
         source: Source,
         me: Option<HumanId>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let scope = source.scope();
         let events: Vec<Event> = log
             .load()?
             .into_iter()
-            .filter(|event| scope.admits(event) && belongs_to_transcript(event, &source))
+            .filter(|event| belongs_to_transcript(event, &source))
             .collect();
-        schemas.fold_all(&scope, &events)?;
+        schemas.fold_all(&events)?;
         let last_usage = last_model_called(&events);
         let reasoning_effort = chat.capabilities().default_reasoning_effort;
 
@@ -420,7 +421,6 @@ impl App {
             instructions: self.harness.instructions.as_deref(),
             events: &self.events,
             schemas: &self.schemas,
-            scope: self.source.scope(),
             turn_start: self.pending.as_ref().map(|turn| turn.start),
             context_window: capabilities.context_window,
             reasoning_effort: self.reasoning_effort,
@@ -492,7 +492,7 @@ impl App {
             return Ok(());
         }
         self.schemas
-            .fold_all(&self.source.scope(), self.events.iter().chain(new))
+            .fold_all(self.events.iter().chain(new))
             .map(drop)
     }
 

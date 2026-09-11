@@ -101,8 +101,7 @@ pub fn cut(
     since: Option<Timestamp>,
 ) -> Result<ReviewResponse, Box<dyn std::error::Error>> {
     let events = log.load()?;
-    let scope = source.scope();
-    let maps = schemas.fold_all(&scope, &events)?;
+    let maps = schemas.fold_all(mapstore::of_path(&events, &source.path))?;
     let index = EventIndex::new(&events);
     let map_queues: Vec<MapQueue> = maps
         .iter()
@@ -133,16 +132,14 @@ pub fn change(
     node: &str,
     why: String,
 ) -> Result<EventId, Refused> {
-    let scope = source.scope();
-    let folded =
-        mapstore::fold_map(log, schemas, map, &scope).map_err(|err| Refused::Bad(err.to_string()))?;
+    let folded = mapstore::fold_map(log, schemas, map, &source.path)
+        .map_err(|err| Refused::Bad(err.to_string()))?;
     let node_id = folded.resolve_str(node).map_err(|err| classify(&err))?;
     let node_ref = crate::core::NodeRef::from(folded.node(node_id).expect("resolve returns a live node's id"));
     let event = mapstore::commit(
         log,
         schemas,
         map,
-        &scope,
         source,
         &[],
         crate::core::Actor::Human(me),

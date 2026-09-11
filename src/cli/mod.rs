@@ -157,16 +157,19 @@ pub struct ShowMapArgs {
     /// added since, and the ends of the edges added since.
     #[arg(long, value_parser = |s: &str| parse_time("since", s))]
     since: Option<Timestamp>,
-    /// Fold every project's events instead of only this one's.
-    #[arg(long)]
-    all_projects: bool,
+    /// Fold every path's events instead of only this one's, printing
+    /// one map per path. A node named with `--around` lives in one
+    /// path's map, so the two do not combine.
+    #[arg(long, conflicts_with = "around")]
+    all_paths: bool,
 }
 
 #[derive(Args)]
 pub struct ListMapsArgs {
-    /// Fold every project's events instead of only this one's.
+    /// Fold every path's events instead of only this one's, printing
+    /// one map per path.
     #[arg(long)]
-    all_projects: bool,
+    all_paths: bool,
     /// `json` (default) for one JSON object per line, `md` for a
     /// Markdown table.
     #[arg(long, value_enum, default_value_t = Format::Json)]
@@ -616,30 +619,50 @@ fn print_text(text: &str) -> Result<(), Box<dyn std::error::Error>> {
     out.flush().or_else(stop_if_pipe_closed)
 }
 
-/// The scope `maps list` and `maps show` fold: every project's events
-/// with `--all-projects`, else only `root`'s.
-fn scope(all_projects: bool, root: &Path) -> crate::core::Scope {
-    if all_projects {
-        crate::core::Scope::All
-    } else {
-        crate::core::Scope::Project(root.to_path_buf())
+/// Runs `print` for each path `maps list` and `maps show` fold over:
+/// only `root` by default; with `--all-paths`, every distinct path in
+/// `events`, each under a marker naming it - a `path <path>` line in
+/// Markdown, a `{"path": ...}` line in JSON - since the maps of two
+/// paths look alike, short ids included.
+fn per_path(
+    all_paths: bool,
+    format: Format,
+    root: &Path,
+    events: &[crate::core::Event],
+    mut print: impl FnMut(&Path) -> Result<(), Box<dyn std::error::Error>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if !all_paths {
+        return print(root);
     }
+    for (i, path) in mapstore::paths(events).iter().enumerate() {
+        let marker = match format {
+            Format::Md if i == 0 => format!("path {}\n\n", path.display()),
+            Format::Md => format!("\npath {}\n\n", path.display()),
+            Format::Json => format!("{}\n", serde_json::json!({ "path": path })),
+        };
+        print_text(&marker)?;
+        print(path)?;
+    }
+    Ok(())
 }
 
 /// Prints every map percept knows with its size: the log's maps, folded
-/// from one read of `log` and scoped to `project` unless `args` says
-/// otherwise.
+/// from one read of `log` at `project`'s path, or at every path with
+/// `--all-paths`.
 pub fn maps_list(
     args: ListMapsArgs,
     log: &dyn EventLog,
     schemas: &Schemas,
     project: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let maps = schemas.fold_all(&scope(args.all_projects, project), &log.load()?)?;
-    match args.format {
-        Format::Json => print_lines(maps.iter().map(mapstore::encode_map)),
-        Format::Md => print_text(&mapstore::catalogue(&maps)),
-    }
+    let events = log.load()?;
+    per_path(args.all_paths, args.format, project, &events, |path| {
+        let maps = schemas.fold_all(mapstore::of_path(&events, path))?;
+        match args.format {
+            Format::Json => print_lines(maps.iter().map(mapstore::encode_map)),
+            Format::Md => print_text(&mapstore::catalogue(&maps)),
+        }
+    })
 }
 
 /// Prints the map `args.map` names, nodes then edges. `--around` cuts
@@ -651,8 +674,10 @@ pub fn maps_show(
     schemas: &Schemas,
     root: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let map = mapstore::fold_map(log, schemas, &args.map, &scope(args.all_projects, root))?;
-    print_map(map, &args)
+    let events = log.load()?;
+    per_path(args.all_paths, args.format, root, &events, |path| {
+        print_map(mapstore::fold_map_at(schemas, &args.map, &events, path)?, &args)
+    })
 }
 
 /// `maps_show`'s tail: cut `map` to `args`'s filters, then print it
@@ -704,8 +729,7 @@ fn write(
         actor,
     } = target;
     let actor = store::parse_actor(&actor, me)?;
-    let scope = source.scope();
-    let event = mapstore::commit(log, schemas, &map, &scope, source, &cited, actor, mutation)?;
+    let event = mapstore::commit(log, schemas, &map, source, &cited, actor, mutation)?;
     Ok(event.payload().clone())
 }
 
@@ -742,8 +766,7 @@ pub fn maps_add_edge(
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let scope = source.scope();
-    let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
+    let map = mapstore::fold_map(log, schemas, &args.target.map, &source.path)?;
     let from = resolve_ref(&map, &args.from)?;
     let to = resolve_ref(&map, &args.to)?;
     write(args.target, log, schemas, source, me, |sources| {
@@ -765,8 +788,7 @@ pub fn maps_remove_node(
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let scope = source.scope();
-    let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
+    let map = mapstore::fold_map(log, schemas, &args.target.map, &source.path)?;
     let node = resolve_ref(&map, &args.node)?;
     write(args.target, log, schemas, source, me, |sources| {
         Mutation::RemoveNode {
@@ -787,8 +809,7 @@ pub fn maps_remove_edge(
     me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let RemoveEdgeArgs { edge, why } = args;
-    let scope = source.scope();
-    let map = mapstore::fold_map(log, schemas, &edge.target.map, &scope)?;
+    let map = mapstore::fold_map(log, schemas, &edge.target.map, &source.path)?;
     let from = resolve_ref(&map, &edge.from)?;
     let to = resolve_ref(&map, &edge.to)?;
     write(edge.target, log, schemas, source, me, |sources| {
@@ -820,7 +841,7 @@ pub fn maps_change_node(
         prop,
         why,
     } = args;
-    let map = mapstore::fold_map(log, schemas, &target.map, &source.scope())?;
+    let map = mapstore::fold_map(log, schemas, &target.map, &source.path)?;
     let node = resolve_ref(&map, &node)?;
     let payload = write(target, log, schemas, source, me, |sources| {
         Mutation::ChangeNode {
@@ -1059,12 +1080,11 @@ fn record_document(
         None
     };
 
-    let scope = source.scope();
     let RecordArgs { map, actor, .. } = args;
     let actor = store::parse_actor(&actor, me)?;
     let batch_source = source.clone();
 
-    let events = mapstore::commit_batch(log, schemas, &map, &scope, move |snapshot| {
+    let events = mapstore::commit_batch(log, schemas, &map, source, move |snapshot| {
         let mut batch: Vec<Event> = Vec::new();
         let mut last_of_kind: HashMap<String, NodeId> = HashMap::new();
 
@@ -1170,7 +1190,7 @@ fn record_document(
         Ok(batch)
     })?;
 
-    let map = mapstore::fold_map(log, schemas, &map, &scope)?;
+    let map = mapstore::fold_map(log, schemas, &map, &source.path)?;
     let mut node_lines = Vec::new();
     let mut edge_lines = Vec::new();
     let mut cited_lines = Vec::new();

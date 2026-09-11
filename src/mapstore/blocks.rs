@@ -39,18 +39,14 @@ pub(crate) fn line_id(map: &Map, node: &Node) -> String {
 }
 
 /// The latest `session.started` this exact source - client name and
-/// project path - recorded, among `events` in its scope: `None` on a
-/// project's first session with this client. The hook and the review
+/// path - recorded among `events`: `None` on a path's first session
+/// with this client. The hook and the review
 /// page both cut their since from it, then append a fresh one.
 pub(crate) fn last_session(events: &[Event], source: &Source) -> Option<Timestamp> {
-    let scope = source.scope();
     events
         .iter()
         .filter(|event| {
-            scope.admits(event)
-                && matches!(event.payload(), Payload::SessionStarted)
-                && event.source().name == source.name
-                && event.source().path == source.path
+            matches!(event.payload(), Payload::SessionStarted) && event.source() == source
         })
         .map(Event::created_at)
         .max()
