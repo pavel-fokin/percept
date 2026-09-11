@@ -139,12 +139,13 @@ the commit in the change's why.
 ## Add a map
 
 A map is declared by a TOML file at `.percept/schemas/<name>.toml`;
-the next `percept maps` command folds it. Kinds are lowercase, each
-with a gloss a reader meets in `maps list --format md`, and a node
-kind may list the properties a node must carry, and `state = [...]`
-the values its `state` may hold - a set, no value open by position; a
-node of that kind names one when added. `headlines` names the kinds
-the prompt carries.
+the next `percept maps` command folds it. Kinds are lowercase; a gloss
+is optional, written when the name does not say it all, and a reader
+meets it in `maps list --format md`. A node kind may list the
+properties a node must carry, and `state = [...]` the values its
+`state` may hold - a set, no value open by position; a node of that
+kind names one when added. `headlines` names the kinds the prompt
+carries.
 
 ```toml
 name = "glossary"
@@ -152,13 +153,12 @@ purpose = "what a term means in this project, so a word is not redefined"
 headlines = ["term"]
 
 [[node]]
-name = "term"
+kind = "term"
 gloss = "a word and the meaning this project gives it, in its `meaning` property"
 requires = ["meaning"]
 
 [[edge]]
-name = "relates"
-gloss = "from a term to one it is defined against"
+kind = "relates"
 from = "term"
 to = "term"
 ```

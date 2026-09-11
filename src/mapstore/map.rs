@@ -285,7 +285,7 @@ impl<'a> KindLine<'a> {
         kinds
             .iter()
             .map(|kind| Self {
-                name: &kind.name,
+                name: &kind.kind,
                 gloss: &kind.gloss,
                 requires: &kind.requires,
             })
@@ -298,7 +298,7 @@ impl<'a> KindLine<'a> {
         kinds
             .iter()
             .map(|kind| Self {
-                name: &kind.name,
+                name: &kind.kind,
                 gloss: &kind.gloss,
                 requires: &[],
             })

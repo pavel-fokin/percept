@@ -68,8 +68,8 @@ owns(a, x)      = a == x.added.actor      (Agent == Agent: an agent carries no i
 may(a, x)       = (owns(a, x) ∨ outranks(a, x.added.actor)) ∧ ¬outranks(x.touched_by, a)
 
 Schema    = { name, purpose, headlines: {kind}, node_kinds, edge_kinds }
-NodeKind  = { name, gloss, prefix, requires: {key}, states: {value} }
-EdgeKind  = { name, gloss, from: {kind}, to: {kind} }
+NodeKind  = { kind, gloss?, prefix, requires: {key}, states: {value} }
+EdgeKind  = { kind, gloss?, from: {kind}, to: {kind} }
 
 Change    = { actor, at, why? }
 Node      = { id, seq, kind, name, properties: key → value, sources: [EventId], history: [Change] }

@@ -289,12 +289,21 @@ fn the_catalogue_gives_each_map_a_section_with_its_kinds_glossed() {
     assert!(text.contains("## decisions\n"));
     assert!(text.contains(&decisions().purpose));
     assert!(text.contains("1 nodes, 0 edges.\n"));
-    assert!(text.contains("\nNode kinds:\n- `question` - a matter the project had to settle\n"));
     assert!(text.contains(
-        "\nEdge kinds:\n- `answers` (option -> question) - from an option to the question"
+        "- `contradicts` (evidence -> option)\n- `resolves` (decision -> question)"
     ));
     assert!(text.contains("\nExample node and edge:\n\n    {\"node\":"));
     assert!(text.contains("\"name\":\"Where does the log live?\""));
+}
+
+#[test]
+fn a_kind_with_no_gloss_renders_without_a_trailing_dash() {
+    let text = catalogue(&[Map::empty(decisions())]);
+
+    assert!(
+        text.contains("\nNode kinds:\n- `question`\n"),
+        "{text}"
+    );
 }
 
 #[test]

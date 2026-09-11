@@ -204,7 +204,7 @@ struct RawGroup<'a> {
 fn heading_of<'a>(map: &'a Map, claim: &Node) -> Option<&'a Node> {
     let headline_kinds = &map.schema().headline_kinds;
     map.schema().edge_kinds.iter().find_map(|edge_kind| {
-        map.linked(claim.id, &edge_kind.name, EdgeEnd::From)
+        map.linked(claim.id, &edge_kind.kind, EdgeEnd::From)
             .into_iter()
             .find(|node| headline_kinds.contains(&node.kind))
     })
@@ -217,7 +217,7 @@ fn related_to<'a>(map: &'a Map, heading: &Node) -> Vec<&'a Node> {
     map.schema()
         .edge_kinds
         .iter()
-        .flat_map(|edge_kind| map.linked(heading.id, &edge_kind.name, EdgeEnd::To))
+        .flat_map(|edge_kind| map.linked(heading.id, &edge_kind.kind, EdgeEnd::To))
         .filter(|node| !headline_kinds.contains(&node.kind))
         .collect()
 }

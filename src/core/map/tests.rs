@@ -1226,28 +1226,6 @@ fn a_schema_is_found_by_name() {
 }
 
 #[test]
-fn every_kind_of_every_schema_carries_a_gloss() {
-    for schema in [decisions(), tasks()] {
-        for kind in &schema.node_kinds {
-            assert!(
-                !kind.gloss.is_empty(),
-                "{}: kind {:?} has no gloss",
-                schema.name,
-                kind.name
-            );
-        }
-        for kind in &schema.edge_kinds {
-            assert!(
-                !kind.gloss.is_empty(),
-                "{}: kind {:?} has no gloss",
-                schema.name,
-                kind.name
-            );
-        }
-    }
-}
-
-#[test]
 fn a_question_requires_nothing() {
     assert!(decisions().node_kind("question").unwrap().requires.is_empty());
 }

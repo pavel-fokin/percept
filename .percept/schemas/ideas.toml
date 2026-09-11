@@ -13,6 +13,6 @@ purpose = "a candidate worth doing, not yet committed to a task, so a session re
 headlines = ["idea"]
 
 [[node]]
-name = "idea"
+kind = "idea"
 gloss = "something that might be worth building, saying why in its `why` property"
 requires = ["why"]

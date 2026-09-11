@@ -65,7 +65,7 @@ pub struct Schema {
 /// else.
 #[derive(Debug, PartialEq, Eq)]
 pub struct NodeKind {
-    pub name: String,
+    pub kind: String,
     pub gloss: String,
     /// The properties a new node of this kind must carry - `why` on an
     /// option or a task. Checked on a write, never on a fold, so what
@@ -93,10 +93,10 @@ pub fn default_prefix(name: &str) -> String {
 }
 
 impl NodeKind {
-    pub(crate) fn new(name: &str, gloss: &str) -> Self {
+    pub(crate) fn new(kind: &str, gloss: &str) -> Self {
         Self {
-            prefix: default_prefix(name),
-            name: name.to_string(),
+            prefix: default_prefix(kind),
+            kind: kind.to_string(),
             gloss: gloss.to_string(),
             requires: Vec::new(),
             states: Vec::new(),
@@ -127,10 +127,10 @@ impl NodeKind {
     /// everywhere a kind is named.
     pub fn label(&self) -> String {
         if self.requires.is_empty() {
-            format!("`{}`", self.name)
+            format!("`{}`", self.kind)
         } else {
             let requires: Vec<String> = self.requires.iter().map(|p| format!("`{p}`")).collect();
-            format!("`{}` (requires {})", self.name, requires.join(", "))
+            format!("`{}` (requires {})", self.kind, requires.join(", "))
         }
     }
 }
@@ -141,16 +141,16 @@ impl NodeKind {
 /// ends are not of these kinds.
 #[derive(Debug, PartialEq, Eq)]
 pub struct EdgeKind {
-    pub name: String,
+    pub kind: String,
     pub gloss: String,
     pub from: Vec<String>,
     pub to: Vec<String>,
 }
 
 impl EdgeKind {
-    pub(crate) fn new(name: &str, gloss: &str, from: &[&str], to: &[&str]) -> Self {
+    pub(crate) fn new(kind: &str, gloss: &str, from: &[&str], to: &[&str]) -> Self {
         Self {
-            name: name.to_string(),
+            kind: kind.to_string(),
             gloss: gloss.to_string(),
             from: from.iter().map(|s| s.to_string()).collect(),
             to: to.iter().map(|s| s.to_string()).collect(),
@@ -163,7 +163,7 @@ impl EdgeKind {
     pub fn label(&self) -> String {
         format!(
             "`{}` ({} -> {})",
-            self.name,
+            self.kind,
             self.from.join(" | "),
             self.to.join(" | ")
         )
@@ -229,22 +229,22 @@ impl Schemas {
 impl Schema {
     /// The node kind `name` names, when the schema has it.
     pub fn node_kind(&self, name: &str) -> Option<&NodeKind> {
-        self.node_kinds.iter().find(|kind| kind.name == name)
+        self.node_kinds.iter().find(|k| k.kind == name)
     }
 
     /// The edge kind `name` names, when the schema has it.
     pub fn edge_kind(&self, name: &str) -> Option<&EdgeKind> {
-        self.edge_kinds.iter().find(|kind| kind.name == name)
+        self.edge_kinds.iter().find(|k| k.kind == name)
     }
 
     /// The node kind names, in schema order.
     pub fn node_kind_names(&self) -> impl Iterator<Item = &str> + '_ {
-        self.node_kinds.iter().map(|kind| kind.name.as_str())
+        self.node_kinds.iter().map(|k| k.kind.as_str())
     }
 
     /// The edge kind names, in schema order.
     pub fn edge_kind_names(&self) -> impl Iterator<Item = &str> + '_ {
-        self.edge_kinds.iter().map(|kind| kind.name.as_str())
+        self.edge_kinds.iter().map(|k| k.kind.as_str())
     }
 
     /// The node kinds' labels as a `, `-joined list, for a prompt line
@@ -903,7 +903,7 @@ impl Map {
             .ok_or_else(unknown)?;
         let seq: u32 = digits.parse().map_err(|_| unknown())?;
         self.by_seq
-            .get(&(kind.name.clone(), seq))
+            .get(&(kind.kind.clone(), seq))
             .copied()
             .ok_or_else(unknown)
     }
@@ -1549,7 +1549,7 @@ fn check_state(kind: &NodeKind, properties: &BTreeMap<String, String>) -> Result
     if let Some(value) = properties.get("state") {
         if !kind.states.iter().any(|state| state == value) {
             return Err(MapError::UnknownState {
-                kind: kind.name.clone(),
+                kind: kind.kind.clone(),
                 value: value.clone(),
                 states: kind.states.clone(),
             });

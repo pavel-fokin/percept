@@ -89,7 +89,11 @@ fn push_kind_glosses<'a>(
 ) {
     let _ = write!(out, "\n{heading}:\n");
     for (label, gloss) in kinds {
-        let _ = writeln!(out, "- {label} - {gloss}");
+        if gloss.is_empty() {
+            let _ = writeln!(out, "- {label}");
+        } else {
+            let _ = writeln!(out, "- {label} - {gloss}");
+        }
     }
 }
 
@@ -252,14 +256,14 @@ fn push_changed(out: &mut String, node: &Node, indent: &str) {
 fn push_edges(out: &mut String, map: &Map, node: &Node) {
     let headline_kinds = &map.schema().headline_kinds;
     for edge_kind in &map.schema().edge_kinds {
-        for neighbour in map.linked(node.id, &edge_kind.name, EdgeEnd::From) {
-            let _ = writeln!(out, "- {} {}", edge_kind.name, marked_name(map, neighbour));
+        for neighbour in map.linked(node.id, &edge_kind.kind, EdgeEnd::From) {
+            let _ = writeln!(out, "- {} {}", edge_kind.kind, marked_name(map, neighbour));
             if !headline_kinds.contains(&neighbour.kind) {
                 push_props(out, neighbour, "  ");
             }
         }
-        for neighbour in map.linked(node.id, &edge_kind.name, EdgeEnd::To) {
-            let _ = writeln!(out, "- {} {}", marked_name(map, neighbour), edge_kind.name);
+        for neighbour in map.linked(node.id, &edge_kind.kind, EdgeEnd::To) {
+            let _ = writeln!(out, "- {} {}", marked_name(map, neighbour), edge_kind.kind);
             if !headline_kinds.contains(&neighbour.kind) {
                 push_props(out, neighbour, "  ");
             }

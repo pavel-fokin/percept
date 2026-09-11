@@ -100,7 +100,7 @@ fn a_read_opens_with_the_schema_then_the_counts_then_the_nodes_then_the_edges() 
 }
 
 #[test]
-fn the_schema_line_glosses_every_kind_so_a_selector_is_not_a_guess() {
+fn the_schema_line_glosses_a_kind_so_a_selector_is_not_a_guess() {
     let rows = read(r#"{"map":"decisions"}"#).unwrap();
 
     let option = rows[0]["node_kinds"]
@@ -113,16 +113,16 @@ fn the_schema_line_glosses_every_kind_so_a_selector_is_not_a_guess() {
         .as_str()
         .unwrap()
         .contains("weighed and lost"));
-    let resolves = rows[0]["edge_kinds"]
+    let reopens = rows[0]["edge_kinds"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|kind| kind["name"] == "resolves")
+        .find(|kind| kind["name"] == "reopens")
         .unwrap();
-    assert!(resolves["gloss"]
+    assert!(reopens["gloss"]
         .as_str()
         .unwrap()
-        .contains("the question it settles"));
+        .contains("the decision stands until"));
 }
 
 #[test]

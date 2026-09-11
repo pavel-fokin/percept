@@ -8,13 +8,12 @@ purpose = "what is left to do, why it matters, and what it waits on, so a sessio
 headlines = ["task"]
 
 [[node]]
-name = "task"
+kind = "task"
 gloss = "one piece of work left to do, saying why it matters in its `why` property"
 requires = ["why"]
 state = ["open", "done", "dropped"]
 
 [[edge]]
-name = "blocks"
-gloss = "from a task to the one that must wait for it"
+kind = "blocks"
 from = "task"
 to = "task"
