@@ -136,7 +136,7 @@ pub enum Payload {
     /// `properties` are merged into the node's own, last write wins, a
     /// key present here replacing that key alone; `sources` join the
     /// node's. `why` is the writer's reason, when they gave one - the
-    /// fold carries it as the node's `changed_why`. A change naming
+    /// fold carries it in the node's last `Change`. A change naming
     /// neither `name` nor a property, only `why`, is a comment: legal,
     /// and it still becomes the node's last change.
     NodeChanged {

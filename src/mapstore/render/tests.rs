@@ -279,7 +279,7 @@ fn a_schema_with_no_headline_kind_falls_back_to_a_section_per_kind() {
 }
 
 #[test]
-fn the_catalogue_gives_each_map_a_section_with_its_kinds_glossed() {
+fn the_catalogue_gives_each_map_a_section_listing_its_kinds() {
     let mut map = Map::empty(decisions());
     add(&mut map, "question", "Where does the log live?", None, None, &[], Actor::Human(human()));
 

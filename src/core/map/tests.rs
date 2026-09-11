@@ -967,7 +967,7 @@ fn after_the_humans_why_the_agent_may_still_set_the_nodes_state() {
 }
 
 #[test]
-fn a_change_carrying_only_why_updates_changed_by_changed_why_and_changed_at() {
+fn a_change_carrying_only_why_becomes_the_nodes_last_change() {
     let mut map = Map::empty(tasks());
     let me = human();
     map.apply(add_task("cancel a turn"), Actor::Agent).unwrap();
@@ -986,7 +986,7 @@ fn a_change_carrying_only_why_updates_changed_by_changed_why_and_changed_at() {
 }
 
 #[test]
-fn node_added_sets_changed_by_to_its_actor_and_changed_why_to_none() {
+fn an_added_nodes_only_change_is_its_addition_with_no_why() {
     let mut map = Map::empty(decisions());
     map.apply(add_node("decision", "Rust"), Actor::Agent).unwrap();
 
@@ -1670,6 +1670,38 @@ fn removing_the_agents_own_edge_off_a_node_the_human_touched_is_refused() {
                 to: node_ref("question", "Which language?"),
                 sources: Vec::new(),
                 why: "re-pointing".to_string(),
+            },
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
+
+    assert!(matches!(err, MapError::NotYours { .. }), "{err}");
+}
+
+#[test]
+fn removing_the_agents_own_node_is_refused_while_its_edge_hangs_on_a_node_the_human_touched() {
+    let mut map = Map::empty(decisions());
+    map.apply(add_node("decision", "Rust"), Actor::Agent).unwrap();
+    map.apply(add_node("question", "Which language?"), Actor::Agent)
+        .unwrap();
+    map.apply(
+        add_edge("resolves", node_ref("decision", "Rust"), node_ref("question", "Which language?")),
+        Actor::Agent,
+    )
+    .unwrap();
+    map.apply(
+        change_node_why("question", "Which language?", None, BTreeMap::new(), Some("still open")),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    let err = map
+        .apply(
+            Mutation::RemoveNode {
+                node: node_ref("decision", "Rust"),
+                sources: Vec::new(),
+                why: "retracting".to_string(),
             },
             Actor::Agent,
         )

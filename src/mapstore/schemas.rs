@@ -243,7 +243,7 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
             NodeKind {
                 prefix,
                 kind: node.kind,
-                gloss: node.gloss,
+                gloss: node.gloss.trim().to_string(),
                 requires: node.requires,
                 states: node.states,
             }
@@ -259,7 +259,7 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
             check_edge_end(stem, &edge.kind, "to", &edge.to, &node_kinds)?;
             Ok(EdgeKind {
                 kind: edge.kind,
-                gloss: edge.gloss,
+                gloss: edge.gloss.trim().to_string(),
                 from: edge.from,
                 to: edge.to,
             })

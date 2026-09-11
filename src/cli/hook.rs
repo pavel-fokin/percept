@@ -238,7 +238,7 @@ recording
 
 /// What each folded map gained since `since`: a counts line for every
 /// map, in fold order, then up to `mapstore::LIMIT` lines per map that
-/// gained anything - a node's `changed_at` is compared directly, not
+/// gained anything - a node's last change is compared directly, not
 /// `Map::since`, which would also surface an older node a fresh edge
 /// only touched. Each line carries who last changed the node, and why,
 /// when its last change is not its addition.

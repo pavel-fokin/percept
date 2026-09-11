@@ -59,10 +59,10 @@ pub struct Schema {
     pub headline_kinds: Vec<String>,
 }
 
-/// A node kind and one line saying what it is, so a reader who meets
-/// the kind name in a map's output learns its meaning without a
-/// separate doc. The gloss lives here, beside the name, and nowhere
-/// else.
+/// A node kind and, when its name does not say it all, one line saying
+/// what it is, so a reader who meets the kind in a map's output learns
+/// its meaning without a separate doc. The gloss lives here and
+/// nowhere else.
 #[derive(Debug, PartialEq, Eq)]
 pub struct NodeKind {
     pub kind: String,
@@ -337,13 +337,7 @@ pub trait Written {
 
     /// The highest-ranked actor in the history; on a tie, the earliest.
     fn touched_by(&self) -> Actor {
-        let mut top = self.added().actor;
-        for change in &self.history()[1..] {
-            if outranks(change.actor, top) {
-                top = change.actor;
-            }
-        }
-        top
+        highest(self.history().iter().map(|change| change.actor)).expect("history is never empty")
     }
 }
 
@@ -602,11 +596,14 @@ impl fmt::Display for MapError {
                 name,
                 property,
                 gloss,
-            } => write!(
-                f,
-                "{kind} {name:?} lacks its `{property}` property, which every {kind} \
-                 carries: {gloss}"
-            ),
+            } => {
+                write!(f, "{kind} {name:?} lacks its `{property}` property, which every {kind} carries")?;
+                if gloss.is_empty() {
+                    Ok(())
+                } else {
+                    write!(f, ": {gloss}")
+                }
+            }
             Self::DuplicateNode { kind, name } => {
                 write!(f, "{kind} {name:?} is already in the map")
             }
@@ -697,6 +694,12 @@ fn same_actor(a: Actor, b: Actor) -> bool {
 /// above locks what it touched against everyone below that rank.
 fn may(actor: Actor, owner: Actor, touched_by: Actor) -> bool {
     (same_actor(actor, owner) || outranks(actor, owner)) && !outranks(touched_by, actor)
+}
+
+/// The highest-ranked of `actors`; on a tie, the earliest. `None` when
+/// there are none.
+fn highest(actors: impl Iterator<Item = Actor>) -> Option<Actor> {
+    actors.reduce(|top, actor| if outranks(actor, top) { actor } else { top })
 }
 
 /// Whether `why`, when given, is blank - W2's `BlankWhy`.
@@ -839,7 +842,7 @@ impl Map {
     /// was removed lives only in the events.
     pub fn last_changed(&self) -> Option<Timestamp> {
         let nodes = self.nodes.iter().map(|node| node.changed().at);
-        let edges = self.edges.iter().map(|edge| edge.added().at);
+        let edges = self.edges.iter().map(|edge| edge.changed().at);
         nodes.chain(edges).max()
     }
 
@@ -960,7 +963,7 @@ impl Map {
         let fresh: Vec<&Edge> = self
             .edges
             .iter()
-            .filter(|edge| edge.added().at >= at)
+            .filter(|edge| edge.changed().at >= at)
             .collect();
         let touched: HashSet<NodeId> = fresh.iter().flat_map(|edge| [edge.from, edge.to]).collect();
         let nodes = self
@@ -1103,7 +1106,7 @@ impl Map {
                 // Removing a node drops every edge on it, so each one is
                 // weighed as its own removal would be.
                 for edge in self.edges.iter().filter(|edge| edge.from == node_id || edge.to == node_id) {
-                    self.check_may_of(actor, self.edge_line(edge), edge)?;
+                    self.check_may_remove_edge(actor, edge)?;
                 }
                 Payload::NodeRemoved {
                     map,
@@ -1140,16 +1143,7 @@ impl Map {
                 let to_id = self.resolve(to)?;
                 blank_why(Some(&why))?;
                 if let Some(edge) = self.find_edge(&kind, from_id, to_id) {
-                    // An edge is part of both ends' neighbourhoods, so the
-                    // highest rank to have touched either end, or the edge
-                    // itself, is what locks it.
-                    let touched_by = [from_id, to_id]
-                        .map(|id| self.node(id).expect("an edge's ends are live").touched_by())
-                        .into_iter()
-                        .chain([edge.added().actor])
-                        .max_by_key(|touched| rank(*touched))
-                        .expect("three candidates");
-                    self.check_may(actor, self.edge_line(edge), edge.added().actor, touched_by)?;
+                    self.check_may_remove_edge(actor, edge)?;
                 }
                 Payload::EdgeRemoved {
                     map,
@@ -1411,6 +1405,17 @@ impl Map {
     /// the common case, where nothing else weighs in.
     fn check_may_of(&self, actor: Actor, label: String, x: &impl Written) -> Result<(), MapError> {
         self.check_may(actor, label, x.added().actor, x.touched_by())
+    }
+
+    /// W6 for dropping `edge`, whether on its own or with a node it
+    /// hangs on. An edge is part of both ends' neighbourhoods, so the
+    /// highest rank to have touched either end, or the edge itself, is
+    /// what locks it.
+    fn check_may_remove_edge(&self, actor: Actor, edge: &Edge) -> Result<(), MapError> {
+        let ends = [edge.from, edge.to].map(|id| self.node(id).expect("an edge's ends are live"));
+        let touched_by = highest(ends.iter().map(|end| end.touched_by()).chain([edge.touched_by()]))
+            .expect("three candidates");
+        self.check_may(actor, self.edge_line(edge), edge.added().actor, touched_by)
     }
 
     /// The live edge `kind from to` names, if the map holds one - what

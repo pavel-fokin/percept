@@ -213,8 +213,8 @@ impl Stamp {
 
 /// `Stamp` plus a node's last change: who, and why, when the writer
 /// gave one - beside `actor`, the way the node itself carries them
-/// beside its own. `NodeLine`'s form of `Stamp`; an edge has no
-/// `changed_by`, so `encode_edge` still uses `Stamp` alone.
+/// beside its own. `NodeLine`'s form of `Stamp`; an edge is never
+/// changed yet, so `encode_edge` still uses `Stamp` alone.
 #[derive(Serialize)]
 struct NodeStamp<'a> {
     #[serde(flatten)]
@@ -275,6 +275,7 @@ pub fn encode_map(map: &Map) -> String {
 #[derive(Serialize)]
 struct KindLine<'a> {
     name: &'a str,
+    #[serde(skip_serializing_if = "str::is_empty")]
     gloss: &'a str,
     #[serde(skip_serializing_if = "<[String]>::is_empty")]
     requires: &'a [String],
