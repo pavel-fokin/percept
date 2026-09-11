@@ -4,7 +4,9 @@ A proposal, written 2026-09-08. It reimagines how percept serves a
 coding client such as Claude Code or Codex. `docs/architecture.md`
 names the core and its surfaces; this document designs the first
 surface in that table, skills and hooks for a client. Nothing here
-changes behaviour on its own.
+changes behaviour on its own. Standing, confirm, and finish below
+were replaced on 2026-09-11 by the node's last change and the rank
+lock; the core in `docs/architecture.md` is current.
 
 ## The claim
 

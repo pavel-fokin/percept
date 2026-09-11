@@ -63,8 +63,8 @@ Verify: <how to confirm the outcome>
    it back to `software-developer` with the specifics.
 6. **Commit.** Re-run the build and tests yourself first. One commit per
    issue - conventional message, subject line only. An issue that was
-   an open task is changed to `state "done"` with an `outcome` naming
-   the commit (see the percept skill). Work the session found but left
+   an open task is changed to `state "done"` with the commit in the
+   change's `why` (see the percept skill). Work the session found but left
    undone goes in as a new task, with its why.
 
 ## Recording decisions
@@ -146,8 +146,8 @@ $P add-edge decisions --actor agent --kind supersedes \
   --from 'decision:<new>' --to 'decision:<old>' --source $id
 ```
 
-The old decision leaves the headlines and renders as `was` under its
-successor, so a reader who knew it still finds it.
+The old decision stays, one hop away, the edge printed under both, so
+a reader who knew it still finds it.
 
 At the reflect step, record an approach the session tried and abandoned
 as an option under the question it was trying to answer, its `why`
