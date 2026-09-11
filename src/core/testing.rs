@@ -120,7 +120,7 @@ impl EventLog for FakeLog {
     /// ordering `Jsonl`'s file lock gives two processes.
     fn append_computed(
         &self,
-        compute: Box<dyn FnOnce(Vec<Event>) -> Result<Event, Box<dyn std::error::Error>> + '_>,
+        compute: crate::core::ComputeEvent<'_>,
     ) -> Result<Event, Box<dyn std::error::Error>> {
         if self.fail_append.load(Ordering::Relaxed) {
             return Err("append failed".into());
@@ -136,7 +136,7 @@ impl EventLog for FakeLog {
     /// `Jsonl`'s file lock gives two processes.
     fn append_batch_computed(
         &self,
-        compute: Box<dyn FnOnce(Vec<Event>) -> Result<Vec<Event>, Box<dyn std::error::Error>> + '_>,
+        compute: crate::core::ComputeEvents<'_>,
     ) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
         if self.fail_append.load(Ordering::Relaxed) {
             return Err("append failed".into());

@@ -180,10 +180,7 @@ impl EventLog for Jsonl {
     /// nothing between this read and this write releases the lock.
     fn append_computed(
         &self,
-        compute: Box<
-            dyn FnOnce(Vec<crate::core::Event>) -> Result<crate::core::Event, Box<dyn std::error::Error>>
-                + '_,
-        >,
+        compute: crate::core::ComputeEvent<'_>,
     ) -> Result<crate::core::Event, Box<dyn std::error::Error>> {
         self.with_exclusive(|file| {
             truncate_torn_tail(file)?;
@@ -210,12 +207,7 @@ impl EventLog for Jsonl {
     /// this read was taken under is released.
     fn append_batch_computed(
         &self,
-        compute: Box<
-            dyn FnOnce(
-                    Vec<crate::core::Event>,
-                ) -> Result<Vec<crate::core::Event>, Box<dyn std::error::Error>>
-                + '_,
-        >,
+        compute: crate::core::ComputeEvents<'_>,
     ) -> Result<Vec<crate::core::Event>, Box<dyn std::error::Error>> {
         self.with_exclusive(|file| {
             truncate_torn_tail(file)?;

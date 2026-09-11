@@ -937,12 +937,16 @@ fn quote(s: &str) -> String {
     out
 }
 
+/// A cite's path and, when present, the line range after its trailing
+/// `:from-to`.
+type CiteRange = (String, Option<(u32, u32)>);
+
 /// `s`, split at a trailing `:from-to`, when the part after the last
 /// `:` has that shape - a `cites` line's path may itself hold a `:`
 /// that isn't a range. A suffix that looks like two numbers but breaks
 /// the range's own rule (`store::parse_lines`'s) is an error rather
 /// than being read back as part of the path.
-fn split_cite_range(s: &str) -> Result<(String, Option<(u32, u32)>), Box<dyn std::error::Error>> {
+fn split_cite_range(s: &str) -> Result<CiteRange, Box<dyn std::error::Error>> {
     let Some((path, range)) = s.rsplit_once(':') else {
         return Ok((s.to_string(), None));
     };

@@ -1,5 +1,15 @@
 use super::{Event, EventId};
 
+/// `compute` for `append_computed`: builds one event from the events
+/// loaded under the same lock the append takes.
+pub(crate) type ComputeEvent<'a> =
+    Box<dyn FnOnce(Vec<Event>) -> Result<Event, Box<dyn std::error::Error>> + 'a>;
+
+/// `compute` for `append_batch_computed`: builds a whole batch of
+/// events from the events loaded under the same lock the append takes.
+pub(crate) type ComputeEvents<'a> =
+    Box<dyn FnOnce(Vec<Event>) -> Result<Vec<Event>, Box<dyn std::error::Error>> + 'a>;
+
 /// Persists the append-only log so the transcript survives a restart -
 /// domain-owned, the way `Model` is a domain capability rather than an
 /// infrastructure detail. `store::Jsonl` is today's implementation; the
@@ -27,7 +37,7 @@ pub trait EventLog: Send + Sync {
     /// sees the first's event already committed.
     fn append_computed(
         &self,
-        compute: Box<dyn FnOnce(Vec<Event>) -> Result<Event, Box<dyn std::error::Error>> + '_>,
+        compute: ComputeEvent<'_>,
     ) -> Result<Event, Box<dyn std::error::Error>>;
 
     /// As `append_computed`, but `compute` builds a whole batch: every
@@ -38,6 +48,6 @@ pub trait EventLog: Send + Sync {
     /// no other writer's own append can land in between.
     fn append_batch_computed(
         &self,
-        compute: Box<dyn FnOnce(Vec<Event>) -> Result<Vec<Event>, Box<dyn std::error::Error>> + '_>,
+        compute: ComputeEvents<'_>,
     ) -> Result<Vec<Event>, Box<dyn std::error::Error>>;
 }

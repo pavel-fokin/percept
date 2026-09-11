@@ -20,6 +20,7 @@ pub use event::{
     cited_label, Actor, Event, EventId, EventKind, HumanId, LogCursor, LogId, Payload, Source,
     Usage, PREVIEW_CHARS,
 };
+pub(crate) use event_log::{ComputeEvent, ComputeEvents};
 pub use event_log::EventLog;
 pub use map::{
     default_prefix, map_of, Change, Edge, EdgeEnd, EdgeKind, Fragment, Map, MapError, Mutation,
