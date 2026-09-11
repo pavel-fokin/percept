@@ -49,13 +49,7 @@ fi
 
 tar xzf "$work/$asset" -C "$work"
 
-script_dir=$(cd "$(dirname "$0")" && pwd) 2>/dev/null || script_dir=""
-if [ -n "$script_dir" ] && [ -f "$script_dir/lib-install.sh" ]; then
-  . "$script_dir/lib-install.sh"
-else
-  # Piped through `curl | sh`: no local checkout, fetch the helper too.
-  curl -fsSL "https://raw.githubusercontent.com/$repo/main/scripts/lib-install.sh" -o "$work/lib-install.sh"
-  . "$work/lib-install.sh"
-fi
+curl -fsSL "https://raw.githubusercontent.com/$repo/main/scripts/lib-install.sh" -o "$work/lib-install.sh"
+. "$work/lib-install.sh"
 
 install_binary "$work/percept-$target/percept"
