@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use crate::core::{
     Actor, EdgeKind, Event, EventId, EventLog, HumanId, NodeId, NodeKind, NodeRef, Payload,
-    Schema, Schemas, Scope, Settlement, Source, Usage,
+    Schema, Schemas, Scope, Source, Usage,
 };
 use crate::shared::Timestamp;
 
@@ -326,10 +326,6 @@ pub fn decisions() -> Schema {
             ),
         ],
         headline_kinds: vec!["question".to_string(), "decision".to_string()],
-        settlement: Some(Settlement {
-            by: "decision".to_string(),
-            of: "question".to_string(),
-        }),
     }
 }
 
@@ -356,7 +352,6 @@ pub fn tasks() -> Schema {
             &["task"],
         )],
         headline_kinds: vec!["task".to_string()],
-        settlement: None,
     }
 }
 
@@ -404,6 +399,5 @@ pub fn files() -> Schema {
             ),
         ],
         headline_kinds: vec!["file".to_string()],
-        settlement: None,
     }
 }

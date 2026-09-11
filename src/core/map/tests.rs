@@ -32,162 +32,47 @@ fn headlines_are_the_schema_s_headline_kinds_in_map_order() {
 }
 
 #[test]
-fn a_superseded_decision_leaves_the_headlines() {
+fn a_superseded_decision_still_shows_in_the_headlines() {
+    // The core keeps no notion of "superseded": a headline is any node
+    // of a headline kind, full stop. A reader tells the two apart by
+    // the `supersedes` edge itself, not by one dropping out.
     let (old, new) = (NodeId::new(), NodeId::new());
     let events = [
         node_added("decisions", old, "decision", "Go"),
         node_added("decisions", new, "decision", "Rust"),
-        edge_added("decisions", SUPERSEDES, new, old),
+        edge_added("decisions", "supersedes", new, old),
     ];
     let map = Map::fold(decisions(), &scope(), &events).unwrap();
     let names: Vec<&str> = map.headlines().map(|node| node.name.as_str()).collect();
-    assert_eq!(names, ["Rust"]);
-    assert!(map.is_superseded(old));
+    assert_eq!(names, ["Go", "Rust"]);
 }
 
 #[test]
-fn successor_follows_a_supersession_chain_to_its_end() {
+fn linked_follows_an_edge_kind_the_core_names_no_meaning_for() {
     let (a, b, c) = (NodeId::new(), NodeId::new(), NodeId::new());
     let events = [
         node_added("decisions", a, "decision", "A"),
         node_added("decisions", b, "decision", "B"),
         node_added("decisions", c, "decision", "C"),
-        edge_added("decisions", SUPERSEDES, b, a),
-        edge_added("decisions", SUPERSEDES, c, b),
-    ];
-    let map = Map::fold(decisions(), &scope(), &events).unwrap();
-
-    assert_eq!(map.successor(a), c);
-    assert_eq!(map.successor(c), c);
-    let names: Vec<&str> = map
-        .predecessors(c)
-        .iter()
-        .map(|node| node.name.as_str())
-        .collect();
-    assert_eq!(names, ["B", "A"]);
-}
-
-#[test]
-fn a_question_is_settled_by_the_current_end_of_each_resolvers_chain() {
-    let (q, a, b) = (NodeId::new(), NodeId::new(), NodeId::new());
-    let events = [
-        node_added("decisions", q, "question", "Which?"),
-        node_added("decisions", a, "decision", "A"),
-        node_added("decisions", b, "decision", "B"),
-        edge_added("decisions", RESOLVES, a, q),
-        edge_added("decisions", SUPERSEDES, b, a),
-    ];
-    let map = Map::fold(decisions(), &scope(), &events).unwrap();
-
-    let names: Vec<&str> = map
-        .settled_by(q)
-        .iter()
-        .map(|node| node.name.as_str())
-        .collect();
-    assert_eq!(names, ["B"]);
-    assert!(map.settles(a));
-    assert!(map.settles(b));
-}
-
-#[test]
-fn a_task_s_open_list_names_the_ones_it_blocks_on() {
-    let (t, blocker) = (NodeId::new(), NodeId::new());
-    let events = [
-        node_added("tasks", t, "task", "cancel a turn"),
-        node_added("tasks", blocker, "task", "cancellable streams"),
-        edge_added("tasks", "blocks", blocker, t),
-    ];
-    let map = Map::fold(tasks(), &scope(), &events).unwrap();
-
-    assert_eq!(
-        map.blocked_by(t).iter().map(|n| n.id).collect::<Vec<_>>(),
-        vec![blocker]
-    );
-    assert_eq!(
-        map.open().map(|n| n.id).collect::<Vec<_>>(),
-        vec![t, blocker]
-    );
-}
-
-#[test]
-fn open_lists_only_the_settled_kind_never_the_settling_one() {
-    // decisions' headline_kinds is ["question", "decision"], and
-    // nothing ever settles a decision node itself - `open` must filter
-    // to the settled kind (`settlement.of`) first, or every decision
-    // would misreport as open alongside the real open question.
-    let (settled, decision, open) = (NodeId::new(), NodeId::new(), NodeId::new());
-    let events = [
-        node_added("decisions", settled, "question", "settled one"),
-        node_added("decisions", decision, "decision", "the answer"),
-        edge_added("decisions", RESOLVES, decision, settled),
-        node_added("decisions", open, "question", "still open"),
-    ];
-    let map = Map::fold(decisions(), &scope(), &events).unwrap();
-
-    let names: Vec<&str> = map.open().map(|node| node.name.as_str()).collect();
-    assert_eq!(names, ["still open"]);
-}
-
-#[test]
-fn open_is_empty_on_a_map_with_no_settlement() {
-    let mut schema = decisions();
-    schema.settlement = None;
-    let events = [node_added("decisions", NodeId::new(), "question", "Which?")];
-    let map = Map::fold(schema, &scope(), &events).unwrap();
-
-    assert_eq!(map.open().count(), 0);
-}
-
-#[test]
-fn weighed_for_lists_answering_options_but_not_ones_that_restate_the_decision() {
-    let (q, lost, restated, d) = (NodeId::new(), NodeId::new(), NodeId::new(), NodeId::new());
-    let events = [
-        node_added("decisions", q, "question", "Which parser?"),
-        node_added("decisions", lost, "option", "reuse OpenAi"),
-        node_added("decisions", restated, "option", "its own parser"),
-        node_added("decisions", d, "decision", "its own parser"),
-        edge_added("decisions", ANSWERS, lost, q),
-        edge_added("decisions", ANSWERS, restated, q),
-        edge_added("decisions", RESOLVES, d, q),
+        edge_added("decisions", "supersedes", b, a),
+        edge_added("decisions", "supersedes", c, b),
     ];
     let map = Map::fold(decisions(), &scope(), &events).unwrap();
 
     assert_eq!(
-        map.weighed_for(q).iter().map(|n| n.id).collect::<Vec<_>>(),
-        vec![lost]
+        map.linked(a, "supersedes", Dir::To)
+            .iter()
+            .map(|n| n.id)
+            .collect::<Vec<_>>(),
+        vec![b]
     );
-}
-
-#[test]
-fn a_reopening_question_is_listed_under_the_decision_and_names_it() {
-    let (q, d, doubt) = (NodeId::new(), NodeId::new(), NodeId::new());
-    let events = [
-        node_added("decisions", q, "question", "Which parser?"),
-        node_added("decisions", d, "decision", "its own parser"),
-        edge_added("decisions", RESOLVES, d, q),
-        node_added("decisions", doubt, "question", "Does its own parser still fit?"),
-        edge_added("decisions", REOPENS, doubt, d),
-    ];
-    let map = Map::fold(decisions(), &scope(), &events).unwrap();
-
-    assert_eq!(map.reopened_by(d).iter().map(|n| n.id).collect::<Vec<_>>(), vec![doubt]);
-    assert_eq!(map.reopens(doubt).iter().map(|n| n.id).collect::<Vec<_>>(), vec![d]);
-    assert!(map.reopened_by(q).is_empty());
-    assert_eq!(map.settled_by(q).iter().map(|n| n.id).collect::<Vec<_>>(), vec![d]);
-}
-
-#[test]
-fn a_resolves_edge_between_other_kinds_settles_nothing() {
-    let (o, d) = (NodeId::new(), NodeId::new());
-    let events = [
-        node_added("decisions", o, "option", "Go"),
-        node_added("decisions", d, "decision", "Rust"),
-        edge_added("decisions", RESOLVES, d, o),
-    ];
-    let map = Map::fold(decisions(), &scope(), &events).unwrap();
-
-    assert!(map.settled_by(o).is_empty());
-    assert!(!map.settles(d));
+    assert_eq!(
+        map.linked(c, "supersedes", Dir::From)
+            .iter()
+            .map(|n| n.id)
+            .collect::<Vec<_>>(),
+        vec![b]
+    );
 }
 
 #[test]
@@ -1196,26 +1081,6 @@ fn a_human_may_change_anything_on_a_humans_node() {
 
     let node = map.find("task", "cancel a turn cleanly").unwrap();
     assert_eq!(node.properties.get("why").unwrap(), "different");
-}
-
-#[test]
-fn open_on_the_tasks_fixture_lists_first_state_tasks_only() {
-    let mut map = Map::empty(tasks());
-    map.apply(add_task("a"), Actor::Human(human())).unwrap();
-    map.apply(add_task("b"), Actor::Human(human())).unwrap();
-    map.apply(
-        change_node(
-            "task",
-            "b",
-            None,
-            BTreeMap::from([("state".to_string(), "done".to_string())]),
-        ),
-        Actor::Human(human()),
-    )
-    .unwrap();
-
-    let names: Vec<&str> = map.open().map(|node| node.name.as_str()).collect();
-    assert_eq!(names, ["a"]);
 }
 
 #[test]

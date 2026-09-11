@@ -801,47 +801,29 @@ fn malformed_input_reports_an_error_without_blocking() {
     assert!(!err.to_string().is_empty());
 }
 
-/// A project schema with no `Settlement` - an `ideas` map, say - so a
-/// test can prove the open section is skipped by reading the schema,
-/// never by the map's name.
-const IDEAS_TOML: &str = r#"
-name = "ideas"
-purpose = "loose thoughts worth keeping"
-headlines = ["idea"]
-
-[[node]]
-name = "idea"
-gloss = "a loose thought"
-"#;
-
 #[test]
-fn a_first_session_with_history_shows_open_items_but_no_gained_section() {
+fn a_first_session_with_history_points_at_every_map_that_has_a_headline() {
     let fixture = Fixture::new();
     fixture.seed_node("decisions", "question", "why blue?", Timestamp::now());
     fixture.seed_node("tasks", "task", "ship it", Timestamp::now());
 
     let context = fixture.session_start("codex");
 
-    assert!(context.contains("open question (1)"), "{context:?}");
-    assert!(context.contains("open task (1)"), "{context:?}");
+    assert!(context.contains("percept maps show decisions --format md"), "{context:?}");
+    assert!(context.contains("percept maps show tasks --format md"), "{context:?}");
     assert!(!context.contains("decisions +"), "{context:?}");
     assert!(!context.contains("tasks +"), "{context:?}");
 }
 
 #[test]
-fn an_open_question_that_reopens_a_decision_says_which() {
+fn a_map_with_no_headline_yet_has_no_pointer() {
     let fixture = Fixture::new();
-    let at = Timestamp::now();
-    let question = fixture.seed_node("decisions", "question", "which parser?", at);
-    let decision = fixture.seed_node("decisions", "decision", "its own", at);
-    fixture.seed_edge("decisions", "resolves", &decision, &question);
-    let doubt = fixture.seed_node("decisions", "question", "does its own still fit?", at);
-    fixture.seed_edge("decisions", "reopens", &doubt, &decision);
+    fixture.seed_node("tasks", "task", "ship it", Timestamp::now());
 
     let context = fixture.session_start("codex");
 
-    assert!(context.contains("q2 \"does its own still fit?\" reopens d1"), "{context:?}");
-    assert!(context.contains("open question (1)"), "{context:?}");
+    assert!(context.contains("percept maps show tasks --format md"), "{context:?}");
+    assert!(!context.contains("percept maps show decisions --format md"), "{context:?}");
 }
 
 #[test]
@@ -963,55 +945,6 @@ fn resolving_an_old_question_does_not_report_it_as_gained() {
     assert!(context.contains("decisions +1"), "{context:?}");
     assert!(context.contains("decision \"a fresh decision\""), "{context:?}");
     assert!(!context.contains("an old question"), "{context:?}");
-}
-
-#[test]
-fn more_than_five_open_items_shows_five_and_a_correct_more_count() {
-    let fixture = Fixture::new();
-    for n in 1..=6 {
-        fixture.seed_node("decisions", "question", &format!("question {n}"), Timestamp::now());
-    }
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("open question (6, showing 5)"), "{context:?}");
-    for n in 1..=5 {
-        assert!(context.contains(&format!("question {n}")), "{context:?}");
-    }
-    assert!(!context.contains("question 6"), "{context:?}");
-    assert!(context.contains("+1 more"), "{context:?}");
-}
-
-#[test]
-fn a_settled_question_s_decision_does_not_itself_count_as_open() {
-    // decisions' headline_kinds is ["question", "decision"], and
-    // nothing ever resolves a decision node itself - only the settled
-    // kind (`settlement.of`, "question" here) can be open, or every
-    // decision misreports as one.
-    let fixture = Fixture::new();
-    let question = fixture.seed_node("decisions", "question", "settled one", Timestamp::now());
-    let decision = fixture.seed_node("decisions", "decision", "the answer", Timestamp::now());
-    fixture.seed_edge("decisions", "resolves", &decision, &question);
-    fixture.seed_node("decisions", "question", "still open", Timestamp::now());
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("open question (1)"), "{context:?}");
-    assert!(context.contains("still open"), "{context:?}");
-    assert!(!context.contains("settled one"), "{context:?}");
-    assert!(!context.contains("the answer"), "{context:?}");
-}
-
-#[test]
-fn a_map_without_settlement_has_no_open_section() {
-    let fixture = Fixture::new().with_extra_schema("ideas", IDEAS_TOML);
-    fixture.seed_node("ideas", "idea", "a loose thought", Timestamp::now());
-    fixture.seed_node("decisions", "question", "settled how?", Timestamp::now());
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("open question (1)"), "{context:?}");
-    assert!(!context.contains("open idea"), "{context:?}");
 }
 
 #[test]
@@ -1144,7 +1077,10 @@ fn a_re_citation_replaces_the_one_checked() {
 }
 
 #[test]
-fn a_superseded_decisions_seen_file_is_not_checked() {
+fn a_superseded_decision_is_still_a_headline_and_still_checked() {
+    // The core keeps no notion of "superseded" - a `supersedes` edge is
+    // a fact between two headline nodes, not a reason to skip one of
+    // them.
     let fixture = Fixture::new();
     let citation = fixture.seed_citation(
         "src/gone.rs",
@@ -1171,11 +1107,12 @@ fn a_superseded_decisions_seen_file_is_not_checked() {
 
     let context = fixture.session_start("codex");
 
-    assert!(!context.contains("changed since recorded"), "{context:?}");
+    assert!(context.contains("changed since recorded"), "{context:?}");
+    assert!(context.contains("src/gone.rs gone"), "{context:?}");
 }
 
 #[test]
-fn pointer_names_first_open_item_in_schema_fold_order() {
+fn a_map_with_a_headline_points_at_its_own_render() {
     let fixture = Fixture::new();
     fixture.seed_node(
         "tasks",
@@ -1187,11 +1124,8 @@ fn pointer_names_first_open_item_in_schema_fold_order() {
 
     let context = fixture.session_start("codex");
 
-    let pointer = context.lines().find(|line| line.starts_with("fragment:")).unwrap();
-    assert!(
-        pointer.contains("percept maps show decisions --around"),
-        "{pointer:?}"
-    );
+    assert!(context.contains("percept maps show tasks --format md"), "{context:?}");
+    assert!(context.contains("percept maps show decisions --format md"), "{context:?}");
 }
 
 #[test]

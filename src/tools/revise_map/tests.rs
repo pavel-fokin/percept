@@ -217,7 +217,10 @@ fn a_change_can_reference_a_node_an_earlier_change_just_added() {
 }
 
 #[test]
-fn removing_a_user_written_node_is_refused_and_says_to_supersede() {
+fn removing_a_user_written_node_is_refused_by_the_map_s_own_rank_rule() {
+    // No app-level guard names a kind here: the `NotYours` error the
+    // model sees is `Map::apply`'s W6, the same rule that would refuse
+    // a rename or a property change.
     let revise = tool(vec![node_added("question", "Which language?")]);
 
     let err = revise
@@ -226,8 +229,7 @@ fn removing_a_user_written_node_is_refused_and_says_to_supersede() {
         .unwrap()
         .to_string();
 
-    assert!(err.contains("written by the user"), "{err}");
-    assert!(err.contains("supersedes"), "{err}");
+    assert!(err.contains("was written by human"), "{err}");
 }
 
 #[test]
@@ -243,23 +245,24 @@ fn removing_a_user_written_edge_is_refused() {
         .unwrap()
         .to_string();
 
-    assert!(err.contains("written by the user"), "{err}");
+    assert!(err.contains("was written by human"), "{err}");
 }
 
 #[test]
-fn removing_a_model_node_that_a_user_edge_touches_is_refused() {
+fn removing_a_model_node_that_a_user_edge_touches_is_allowed_and_drops_the_edge() {
+    // The map's rank rule weighs a node's own last change, not an edge
+    // that happens to touch it: the app-level guard that once refused
+    // this is gone with the kind names it needed to draw the line.
     let model_node = node_added_by(Actor::Agent, "option", "Rust");
     let question = node_added("question", "Which language?");
     let user_edge = edge_added("answers", &model_node, &question);
     let revise = tool(vec![model_node, question, user_edge]);
 
-    let err = revise
+    let output = revise
         .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"option","name":"Rust"},"why":"wrong"}]}"#)
-        .err()
-        .unwrap()
-        .to_string();
+        .unwrap();
 
-    assert!(err.contains("the user wrote the edge"), "{err}");
+    assert!(matches!(output.commits[0], Payload::NodeRemoved { .. }));
 }
 
 #[test]
@@ -274,17 +277,16 @@ fn removing_a_model_written_node_is_allowed() {
 }
 
 #[test]
-fn removing_a_decision_is_refused_whoever_wrote_it() {
+fn removing_a_model_written_decision_is_allowed() {
+    // The core enforces no kind - a decision the model wrote and never
+    // changed is a node like any other under W6.
     let revise = tool(vec![node_added_by(Actor::Agent, "decision", "Go")]);
 
-    let err = revise
+    let output = revise
         .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"decision","name":"Go"},"why":"wrong"}]}"#)
-        .err()
-        .unwrap()
-        .to_string();
+        .unwrap();
 
-    assert!(err.contains("never removed"), "{err}");
-    assert!(err.contains("supersedes"), "{err}");
+    assert!(matches!(output.commits[0], Payload::NodeRemoved { .. }));
 }
 
 #[test]
@@ -299,7 +301,10 @@ fn a_change_node_op_citing_no_sources_is_refused() {
 }
 
 #[test]
-fn a_change_node_op_renaming_a_decision_is_refused() {
+fn a_change_node_op_renaming_a_decision_the_model_wrote_is_allowed() {
+    // The core enforces no per-kind rule against renaming a decision -
+    // only W6's rank rule, which a model renaming its own untouched
+    // node passes.
     let added = node_added_by(Actor::Agent, "decision", "use axum");
     let source = added.id();
     let revise = tool(vec![added]);
@@ -309,7 +314,7 @@ fn a_change_node_op_renaming_a_decision_is_refused() {
         source.as_uuid()
     );
 
-    let err = revise.run(&args).err().expect("refused");
+    let output = revise.run(&args).unwrap();
 
-    assert!(err.to_string().contains("supersedes"), "{err}");
+    assert!(output.content.contains("use actix"), "{}", output.content);
 }

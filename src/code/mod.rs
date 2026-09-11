@@ -59,7 +59,6 @@ pub fn schema() -> Schema {
             ),
         ],
         headline_kinds: vec!["file".to_string()],
-        settlement: None,
     }
 }
 

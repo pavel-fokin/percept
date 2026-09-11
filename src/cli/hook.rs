@@ -199,9 +199,7 @@ fn start_session(
     if let Some(block) = changed_since_recorded_block(&maps, &events, checkout) {
         sections.push(block);
     }
-    let (open_blocks, pointer) = open_blocks_and_pointer(&maps);
-    sections.extend(open_blocks);
-    sections.extend(pointer);
+    sections.extend(map_pointers(&maps));
     sections.push(RULES.to_string());
 
     Ok(json!({
@@ -414,45 +412,14 @@ fn normalize(text: &str) -> String {
     lines[start..end].join("\n")
 }
 
-/// One `open {kind} (...)` block per map that has open items - a map
-/// with neither a `Settlement` nor a headline kind that declares
-/// states (an `ideas` map, say) is skipped entirely, never by name,
-/// since `Map::open` is empty there - plus the fragment pointer at the
-/// first open item found, walking maps in fold order.
-fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
-    let mut blocks = Vec::new();
-    let mut pointer = None;
-
-    for map in maps {
-        let open: Vec<&Node> = map.open().collect();
-        let Some(first) = open.first() else {
-            continue;
-        };
-
-        let mut lines = vec![block_header(&format!("open {}", first.kind), open.len())];
-        lines.extend(capped_lines(
-            open.iter()
-                .map(|node| {
-                    let mut line = format!("{} {:?}", line_id(map, node), node.name);
-                    for decision in map.reopens(node.id) {
-                        line.push_str(&format!(" reopens {}", line_id(map, decision)));
-                    }
-                    line
-                })
-                .collect(),
-        ));
-        blocks.push(lines.join("\n"));
-
-        pointer.get_or_insert_with(|| {
-            format!(
-                "fragment: percept maps show {} --around {}",
-                map.schema().name,
-                line_id(map, open[0])
-            )
-        });
-    }
-
-    (blocks, pointer)
+/// One pointer line per map that has a headline node, so a session
+/// start names every map worth opening without listing what is in it -
+/// the render behind `percept maps show` is what says that.
+fn map_pointers(maps: &[Map]) -> Vec<String> {
+    maps.iter()
+        .filter(|map| map.headlines().next().is_some())
+        .map(|map| format!("percept maps show {} --format md", map.schema().name))
+        .collect()
 }
 
 /// The latest `session.started` event this exact source (client name

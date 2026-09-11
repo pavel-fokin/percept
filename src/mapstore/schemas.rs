@@ -5,16 +5,15 @@
 //! parsing and the checks a declared schema must pass live here.
 //! `index` is reserved for `.percept/index.md`, the map directory, and
 //! an `index.toml` is refused. A project file that replaces a built-in
-//! may only extend it: it must keep every node and edge kind, the same
-//! `headlines`, and the same `settles` the built-in declares, since the
-//! renderer and the write rules assume those kinds exist; it may add
-//! more.
+//! may only extend it: it must keep every node and edge kind and the
+//! same `headlines` the built-in declares, since the renderer and the
+//! write rules assume those kinds exist; it may add more.
 
 use std::path::Path;
 
 use serde::{Deserialize, Deserializer};
 
-use crate::core::{default_prefix, EdgeKind, NodeKind, Schema, Schemas, Settlement};
+use crate::core::{default_prefix, EdgeKind, NodeKind, Schema, Schemas};
 
 const DECISIONS_TOML: &str = include_str!("schemas/decisions.toml");
 const TASKS_TOML: &str = include_str!("schemas/tasks.toml");
@@ -34,18 +33,10 @@ struct SchemaFile {
     purpose: String,
     #[serde(default)]
     headlines: Vec<String>,
-    settles: Option<SettlesFile>,
     #[serde(default, rename = "node")]
     nodes: Vec<NodeFile>,
     #[serde(default, rename = "edge")]
     edges: Vec<EdgeFile>,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct SettlesFile {
-    by: String,
-    of: String,
 }
 
 #[derive(Deserialize)]
@@ -58,9 +49,9 @@ struct NodeFile {
     /// A node kind's short id prefix, `d` for `decision` - optional,
     /// since `default_prefix` covers the common case.
     prefix: Option<String>,
-    /// The values a `state` property on a node of this kind may hold,
-    /// first listed the open one - `state = ["open", "done",
-    /// "dropped"]`. Empty when the kind carries no state.
+    /// The values a `state` property on a node of this kind may hold -
+    /// `state = ["open", "done", "dropped"]`, a set with no value open
+    /// by position. Empty when the kind carries no state.
     #[serde(default, rename = "state")]
     states: Vec<String>,
 }
@@ -149,8 +140,8 @@ fn project_files(project: &Path) -> Result<Vec<(String, String)>, Box<dyn std::e
 
 /// Refuses `project`, named by `stem`, when it drops or changes what
 /// `built_in` declares: a missing node or edge kind, or a different
-/// `headlines` or `settles`. `project` may add more of either; the
-/// names, not the glosses or `requires`, are what must still match.
+/// `headlines`. `project` may add more of either; the names, not the
+/// glosses or `requires`, are what must still match.
 fn check_extends(
     built_in: &Schema,
     project: &Schema,
@@ -185,13 +176,6 @@ fn check_extends(
         return Err(format!(
             "{stem}.toml: changes headlines from {:?} to {:?}",
             built_in.headline_kinds, project.headline_kinds
-        )
-        .into());
-    }
-    if built_in.settlement != project.settlement {
-        return Err(format!(
-            "{stem}.toml: changes settles from {:?} to {:?}",
-            built_in.settlement, project.settlement
         )
         .into());
     }
@@ -288,13 +272,12 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
         })
         .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
 
-    let mut schema = Schema {
+    let schema = Schema {
         name: file.name,
         purpose: file.purpose,
         node_kinds,
         edge_kinds,
         headline_kinds: file.headlines.clone(),
-        settlement: None,
     };
 
     for headline in &file.headlines {
@@ -307,19 +290,6 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
     }
     if let Some(headline) = repeated(file.headlines.iter().map(String::as_str)) {
         return Err(format!("{stem}.toml: headlines names {headline:?} twice").into());
-    }
-
-    if let Some(SettlesFile { by, of }) = file.settles {
-        for (field, name) in [("by", &by), ("of", &of)] {
-            if schema.node_kind(name).is_none() {
-                return Err(format!(
-                    "{stem}.toml: settles.{field} names {name:?}, which is not a declared node \
-                     kind"
-                )
-                .into());
-            }
-        }
-        schema.settlement = Some(Settlement { by, of });
     }
 
     Ok(schema)

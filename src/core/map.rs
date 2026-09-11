@@ -57,10 +57,6 @@ pub struct Schema {
     /// The node kinds worth a reader's attention without opening the
     /// whole map - what `MapShape::Headlines` sends.
     pub headline_kinds: Vec<String>,
-    /// Which node kind settles which through a `resolves` edge - a
-    /// decision a question, an outcome a task - when the map has such
-    /// a pair. A `resolves` edge between other kinds settles nothing.
-    pub settlement: Option<Settlement>,
 }
 
 /// A node kind and one line saying what it is, so a reader who meets
@@ -78,10 +74,10 @@ pub struct NodeKind {
     /// This node kind's short id prefix - `d` for `decision`, so a
     /// node reads as `d41` rather than its full id.
     pub prefix: String,
-    /// The values a `state` property on a node of this kind may hold,
-    /// first listed the open one - `["open", "done", "dropped"]` on
-    /// `task`. Empty when the kind carries no state at all. Checked on
-    /// a write, never on a fold, the way `requires` is.
+    /// The values a `state` property on a node of this kind may hold -
+    /// `["open", "done", "dropped"]` on `task`, a set with no value
+    /// open by position. Empty when the kind carries no state at all.
+    /// Checked on a write, never on a fold, the way `requires` is.
     pub states: Vec<String>,
 }
 
@@ -117,8 +113,8 @@ impl NodeKind {
     }
 
     /// `self`, with `states` as the values a `state` property on a node
-    /// of this kind may hold, first listed the open one. Used only by
-    /// `core::testing`'s fixture schemas, so `cfg(test)` too.
+    /// of this kind may hold. Used only by `core::testing`'s fixture
+    /// schemas, so `cfg(test)` too.
     #[cfg(test)]
     pub(crate) fn with_states(mut self, states: &[&str]) -> Self {
         self.states = states.iter().map(|s| s.to_string()).collect();
@@ -173,39 +169,6 @@ impl EdgeKind {
         )
     }
 }
-
-/// The two node kinds a `resolves` edge joins: `by` settles `of`.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Settlement {
-    pub by: String,
-    pub of: String,
-}
-
-/// The edge kind that corrects a decision: from the new one to the one
-/// it replaces. The old node stays, one hop away, and leaves the
-/// headlines - a removal would take a reader's landmark with it.
-pub const SUPERSEDES: &str = "supersedes";
-
-/// The edge kind from a question to a decision it puts in doubt. The
-/// decision stands until a successor supersedes it; the question is how
-/// a model raises the doubt without rewriting what the human agreed.
-pub const REOPENS: &str = "reopens";
-
-/// The edge kind from a decision to the question it settles.
-pub const RESOLVES: &str = "resolves";
-
-/// The edge kind from an option to the question it was weighed for.
-pub const ANSWERS: &str = "answers";
-
-/// The edge kind from a task to the task it must land before.
-pub const BLOCKS: &str = "blocks";
-
-/// The one node kind `revise_map` never removes: a decision is corrected
-/// by a successor with a `supersedes` edge, so it is public.
-pub const DECISION: &str = "decision";
-/// An alternative that lost. The store refuses one that does not say
-/// why, so it is public too.
-pub const OPTION: &str = "option";
 
 /// The schemas a project has: every one, folded from the log, in one
 /// list. Built once at the entrypoint from the built-in schemas and a
@@ -374,9 +337,7 @@ impl fmt::Display for NodeRef {
     }
 }
 
-/// Which end of an edge `Map::linked` follows. Not yet called outside
-/// its own tests - see the note on its re-export from `core`.
-#[allow(dead_code)]
+/// Which end of an edge `Map::linked` follows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Dir {
     /// The edge's `to` end, from an edge whose `from` is the node asked
@@ -541,12 +502,6 @@ pub enum MapError {
         owner: Actor,
         changed_by: Actor,
     },
-    /// A `ChangeNode` renaming a decision. A decision is corrected by a
-    /// successor with a `supersedes` edge, never reworded in place, so
-    /// the landmark a reader knows stays where it was. Write-only.
-    DecisionRenamed {
-        node: String,
-    },
     NoSuchNode {
         node: NodeRef,
         /// Nodes of the same kind whose name overlaps `node.name`, as
@@ -632,11 +587,6 @@ impl fmt::Display for MapError {
                  add a node and an edge beside it",
                 owner.name(),
                 changed_by.name()
-            ),
-            Self::DecisionRenamed { node } => write!(
-                f,
-                "{node} is a decision and is not reworded in place; add the corrected decision \
-                 with a supersedes edge to this one"
             ),
             Self::NoSuchNode { node, suggestions } => {
                 write!(f, "no {node} in the map")?;
@@ -803,199 +753,13 @@ impl Map {
         &self.nodes
     }
 
-    /// The nodes of the schema's headline kinds, in map order, less the
-    /// superseded ones - what a reader sees of the map before opening
-    /// it.
+    /// The nodes of the schema's headline kinds, in map order - what a
+    /// reader sees of the map before opening it.
     pub fn headlines(&self) -> impl Iterator<Item = &Node> {
         let headline_kinds = &self.schema.headline_kinds;
         self.nodes
             .iter()
             .filter(move |node| headline_kinds.contains(&node.kind))
-            .filter(|node| !self.is_superseded(node.id))
-    }
-
-    /// The node with a `supersedes` edge to `id`. Two nodes superseding
-    /// one is a writer's mistake; the first in map order wins.
-    fn superseded_by(&self, id: NodeId) -> Option<NodeId> {
-        self.edges
-            .iter()
-            .find(|edge| edge.kind == SUPERSEDES && edge.to == id)
-            .map(|edge| edge.from)
-    }
-
-    pub fn is_superseded(&self, id: NodeId) -> bool {
-        self.superseded_by(id).is_some()
-    }
-
-    /// The nodes `id` supersedes, in map order.
-    fn supersedes(&self, id: NodeId) -> impl Iterator<Item = &Node> {
-        self.edges
-            .iter()
-            .filter(move |edge| edge.kind == SUPERSEDES && edge.from == id)
-            .filter_map(|edge| self.node(edge.to))
-    }
-
-    /// The end of `id`'s supersession chain: `id` itself when nothing
-    /// supersedes it, else the node that does, followed until one is
-    /// current. A cycle stops at the node already seen.
-    pub fn successor(&self, id: NodeId) -> NodeId {
-        let mut seen = HashSet::from([id]);
-        let mut current = id;
-        while let Some(next) = self.superseded_by(current) {
-            if !seen.insert(next) {
-                break;
-            }
-            current = next;
-        }
-        current
-    }
-
-    /// Everything `id` supersedes, transitively, nearest first - the
-    /// `was` lines under a decision.
-    pub fn predecessors(&self, id: NodeId) -> Vec<&Node> {
-        let mut seen = HashSet::from([id]);
-        let mut out = Vec::new();
-        let mut frontier = vec![id];
-        while let Some(current) = frontier.pop() {
-            for node in self.supersedes(current) {
-                if seen.insert(node.id) {
-                    out.push(node);
-                    frontier.push(node.id);
-                }
-            }
-        }
-        out
-    }
-
-    /// The nodes that settle `question` now - the decisions of a
-    /// question, the outcomes of a task: each with a `resolves` edge to
-    /// it, followed to the end of its supersession chain, so a
-    /// correction needs no new `resolves` edge. In map order, each
-    /// once. A `resolves` edge between other kinds settles nothing.
-    pub fn settled_by(&self, question: NodeId) -> Vec<&Node> {
-        let mut out: Vec<&Node> = Vec::new();
-        for edge in self.resolving_edges() {
-            if edge.to != question {
-                continue;
-            }
-            if let Some(current) = self.node(self.successor(edge.from)) {
-                if !out.iter().any(|node| node.id == current.id) {
-                    out.push(current);
-                }
-            }
-        }
-        out
-    }
-
-    /// `node`'s state - its `state` property, or its kind's first
-    /// listed value when it carries none - or `None` for a kind that
-    /// declares no states at all. `d41`'s decision carries no state;
-    /// `t4`'s task does.
-    pub fn state<'a>(&'a self, node: &'a Node) -> Option<&'a str> {
-        let kind = self.schema.node_kind(&node.kind)?;
-        if kind.states.is_empty() {
-            return None;
-        }
-        Some(
-            node.properties
-                .get("state")
-                .map_or(kind.states[0].as_str(), String::as_str),
-        )
-    }
-
-    /// The headline nodes open by either rule a map may declare: a
-    /// node of a kind with states whose `state` is the first listed
-    /// value (a `task`, once nothing has closed it), or, on a map with
-    /// a `Settlement`, an `of` node nothing settles yet (a `question`
-    /// with no `decision`). Headlines also include the settling kind
-    /// itself (`decision` is a headline on `decisions` too, so
-    /// `--around` and the render can name it directly), and nothing
-    /// ever settles a settling-kind node, so the settlement rule never
-    /// picks one up.
-    pub fn open(&self) -> impl Iterator<Item = &Node> {
-        let of = self.schema.settlement.as_ref().map(|s| s.of.as_str());
-        self.headlines().filter(move |node| match self.schema.node_kind(&node.kind) {
-            Some(kind) if !kind.states.is_empty() => {
-                self.state(node) == Some(kind.states[0].as_str())
-            }
-            _ => Some(node.kind.as_str()) == of && self.settled_by(node.id).is_empty(),
-        })
-    }
-
-    /// Whether `decision`, or a decision it supersedes, has a
-    /// `resolves` edge to a question - so it belongs under one in a
-    /// render rather than on its own.
-    pub fn settles(&self, decision: NodeId) -> bool {
-        let chain: HashSet<NodeId> = std::iter::once(decision)
-            .chain(self.predecessors(decision).iter().map(|node| node.id))
-            .collect();
-        self.resolving_edges()
-            .any(|edge| chain.contains(&edge.from))
-    }
-
-    /// The `resolves` edges that run between the schema's settlement
-    /// kinds - none on a map without a settlement.
-    fn resolving_edges(&self) -> impl Iterator<Item = &Edge> {
-        let settlement = self.schema.settlement.as_ref();
-        self.edges.iter().filter(move |edge| {
-            let Some(Settlement { by, of }) = settlement else {
-                return false;
-            };
-            edge.kind == RESOLVES
-                && self.node(edge.from).is_some_and(|node| node.kind == *by)
-                && self.node(edge.to).is_some_and(|node| node.kind == *of)
-        })
-    }
-
-    /// The tasks with a `blocks` edge to `task`, in map order - what it
-    /// waits on.
-    pub fn blocked_by(&self, task: NodeId) -> Vec<&Node> {
-        self.edges
-            .iter()
-            .filter(|edge| edge.kind == BLOCKS && edge.to == task)
-            .filter_map(|edge| self.node(edge.from))
-            .collect()
-    }
-
-    /// The options with an `answers` edge to `question`, in map order -
-    /// the alternatives weighed against its decision. Older entries
-    /// recorded the winning choice, and decisions it later superseded,
-    /// as options too; those are dropped, so a caller is never handed an
-    /// "alternative" that is really the decision under another kind.
-    pub fn weighed_for(&self, question: NodeId) -> Vec<&Node> {
-        let mut restated: HashSet<&str> = HashSet::new();
-        for decision in self.settled_by(question) {
-            restated.insert(decision.name.as_str());
-            restated.extend(
-                self.predecessors(decision.id)
-                    .iter()
-                    .map(|node| node.name.as_str()),
-            );
-        }
-        self.edges
-            .iter()
-            .filter(|edge| edge.kind == ANSWERS && edge.to == question)
-            .filter_map(|edge| self.node(edge.from))
-            .filter(|node| node.kind == OPTION && !restated.contains(node.name.as_str()))
-            .collect()
-    }
-
-    /// The questions with a `reopens` edge to `decision`, in map order.
-    pub fn reopened_by(&self, decision: NodeId) -> Vec<&Node> {
-        self.edges
-            .iter()
-            .filter(|edge| edge.kind == REOPENS && edge.to == decision)
-            .filter_map(|edge| self.node(edge.from))
-            .collect()
-    }
-
-    /// The decisions `question` reopens, in map order.
-    pub fn reopens(&self, question: NodeId) -> Vec<&Node> {
-        self.edges
-            .iter()
-            .filter(|edge| edge.kind == REOPENS && edge.from == question)
-            .filter_map(|edge| self.node(edge.to))
-            .collect()
     }
 
     pub fn edges(&self) -> &[Edge] {
@@ -1007,7 +771,6 @@ impl Map {
     /// and the rest, for a caller that knows no kind's name.
     /// `Dir::From` reads the `to` end of an edge whose `from` is `id`;
     /// `Dir::To` reads the `from` end of an edge whose `to` is `id`.
-    #[allow(dead_code)]
     pub fn linked(&self, id: NodeId, edge_kind: &str, dir: Dir) -> Vec<&Node> {
         self.edges
             .iter()
@@ -1267,11 +1030,6 @@ impl Map {
                 let existing = self.node(node_id).expect("resolve returns a live node's id");
                 if let Some(node_kind) = self.schema.node_kind(&existing.kind) {
                     check_state(node_kind, &properties)?;
-                }
-                if existing.kind == DECISION && name.is_some() {
-                    return Err(MapError::DecisionRenamed {
-                        node: self.label(node_id),
-                    });
                 }
                 let needs_rank = name.is_some() || properties.keys().any(|key| key != "state");
                 if needs_rank && !may(actor, existing.actor, existing.changed_by) {

@@ -1,14 +1,16 @@
 //! The queue `GET /api/review` serves: per map, the headline nodes
-//! changed since the review last opened, grouped by the map's
-//! settlement question. Folded fresh on every call from the log `cut`
-//! is handed - nothing here is cached, so a write between two requests
-//! is seen on the next one. `ReviewResponse` and the structs it nests
-//! mirror `web/src/types.ts` one to one, so the page reads the same
-//! shape this module writes.
+//! changed since the review last opened, grouped by the headline node
+//! each row's edges point at. Folded fresh on every call from the log
+//! `cut` is handed - nothing here is cached, so a write between two
+//! requests is seen on the next one. `ReviewResponse` and the structs
+//! it nests mirror `web/src/types.ts` one to one, so the page reads the
+//! same shape this module writes.
+
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
-use crate::core::{EventId, EventLog, HumanId, Map, MapError, Node, NodeId, Schemas, Settlement, Source};
+use crate::core::{Dir, EventId, EventLog, HumanId, Map, MapError, Node, NodeId, Schemas, Source};
 use crate::mapstore;
 use crate::shared::Timestamp;
 
@@ -22,8 +24,8 @@ pub struct ReviewResponse {
     pub maps: Vec<MapQueue>,
 }
 
-/// One map's queue: its claims, grouped by the question or task each
-/// answers.
+/// One map's queue: its claims, grouped by the headline node each row's
+/// edges point at.
 #[derive(Serialize)]
 pub struct MapQueue {
     pub name: String,
@@ -32,14 +34,14 @@ pub struct MapQueue {
     pub groups: Vec<Group>,
 }
 
-/// Claims that share a settlement question, or a task with none.
+/// Claims that share a heading, or a row with none.
 #[derive(Serialize)]
 pub struct Group {
     pub heading: Option<Heading>,
     pub claims: Vec<Row>,
 }
 
-/// The question or task a group's rows answer.
+/// The headline node a group's rows point at.
 #[derive(Serialize)]
 pub struct Heading {
     pub id: String,
@@ -68,13 +70,21 @@ pub struct Row {
     #[serde(flatten)]
     pub base: OptionRow,
     pub added_at: String,
-    pub was: Option<NodeRef>,
-    pub reopens: Vec<NodeRef>,
-    pub options: Vec<OptionRow>,
+    pub edges: Vec<EdgeRef>,
+    pub related: Vec<OptionRow>,
 }
 
-/// A node this one supersedes, or one it reopens - just enough to link
-/// back to it: its short id and name.
+/// One edge touching a row, named by kind and direction, and the node
+/// on its other end.
+#[derive(Serialize)]
+pub struct EdgeRef {
+    pub kind: String,
+    pub dir: &'static str,
+    pub node: NodeRef,
+}
+
+/// A node reached by an edge - just enough to link back to it: its
+/// short id and name.
 #[derive(Serialize)]
 pub struct NodeRef {
     pub id: String,
@@ -169,17 +179,14 @@ fn classify(error: &MapError) -> Refused {
     }
 }
 
-/// One map's queue: its `since`, and its claims grouped by question.
+/// One map's queue: its `since`, and its claims grouped by heading.
 fn map_queue(map: &Map, since: Option<Timestamp>, index: &EventIndex) -> MapQueue {
     let schema = map.schema();
     let claims: Vec<&Node> = map
         .headlines()
         .filter(|node| since.is_none_or(|since| node.changed_at >= since))
         .collect();
-    let groups = match &schema.settlement {
-        Some(settlement) => grouped(map, settlement, &claims),
-        None => vec![RawGroup { of_node: None, rows: claims }],
-    };
+    let groups = grouped(map, &claims);
     MapQueue {
         name: schema.name.clone(),
         purpose: schema.purpose.clone(),
@@ -188,68 +195,73 @@ fn map_queue(map: &Map, since: Option<Timestamp>, index: &EventIndex) -> MapQueu
     }
 }
 
-/// One heading a queue's rows sit under: `of_node` is the question or
-/// task the rows answer, `None` for a map with no settlement or for the
-/// rows a `by` claim resolves nothing settles.
+/// One heading a queue's rows sit under: `of_node` is the headline node
+/// the rows' edges point at, `None` for the orphan group - the rows
+/// whose edges reach no headline.
 struct RawGroup<'a> {
     of_node: Option<&'a Node>,
     rows: Vec<&'a Node>,
 }
 
-/// `claims` grouped by `settlement`: for every `of` node in the map,
-/// the decision that `Map::settled_by` says settles it now, when that
-/// decision is a `by` claim in the cut - so a decision recorded as a
-/// correction, with a `supersedes` edge and no `resolves` edge of its
-/// own, still lands under the question its predecessor answered. An
-/// `of` claim nothing in the cut settles is its own group, and a `by`
-/// claim that settles no `of` node in the map goes to a last group with
-/// no heading. A group whose `of` node reopens a decision sorts first;
-/// otherwise by the `of` node's `added_at`, ascending.
-fn grouped<'a>(map: &'a Map, settlement: &Settlement, claims: &[&'a Node]) -> Vec<RawGroup<'a>> {
-    let mut resolved: Vec<(&'a Node, Vec<&'a Node>)> = Vec::new();
-    let mut settled_ids: Vec<NodeId> = Vec::new();
-    for of_node in map.nodes().iter().filter(|node| node.kind == settlement.of) {
-        let rows: Vec<&'a Node> = map
-            .settled_by(of_node.id)
+/// The first headline node an outgoing edge of `claim` reaches,
+/// checking the schema's edge kinds in order - the core names no kind,
+/// so this is the one rule the review draws from the schema's own
+/// order rather than a settlement pair.
+fn heading_of<'a>(map: &'a Map, claim: &Node) -> Option<&'a Node> {
+    let headline_kinds = &map.schema().headline_kinds;
+    map.schema().edge_kinds.iter().find_map(|edge_kind| {
+        map.linked(claim.id, &edge_kind.name, Dir::From)
             .into_iter()
-            .filter_map(|decision| claims.iter().copied().find(|claim| claim.id == decision.id))
-            .collect();
-        if !rows.is_empty() {
-            settled_ids.extend(rows.iter().map(|node| node.id));
-            resolved.push((of_node, rows));
-        }
-    }
+            .find(|node| headline_kinds.contains(&node.kind))
+    })
+}
 
-    let grouped_of_ids: Vec<NodeId> = resolved.iter().map(|(of_node, _)| of_node.id).collect();
-    let mut pairs: Vec<(&'a Node, Vec<&'a Node>)> = resolved;
-    for &node in claims.iter().filter(|node| node.kind == settlement.of) {
-        if !grouped_of_ids.contains(&node.id) {
-            pairs.push((node, vec![node]));
-        }
-    }
-
-    // A group whose question reopens a decision sorts first, so
-    // `!reopens` (false before true) beats `added_at` as the key.
-    pairs.sort_by_cached_key(|(of_node, _)| (map.reopens(of_node.id).is_empty(), of_node.added_at));
-
-    let mut groups: Vec<RawGroup<'a>> = pairs
-        .into_iter()
-        .map(|(of_node, rows)| RawGroup { of_node: Some(of_node), rows })
-        .collect();
-
-    let orphaned: Vec<&'a Node> = claims
+/// The non-headline nodes with an edge into `heading` - the
+/// alternatives weighed against it, whatever kind of node they are.
+fn related_to<'a>(map: &'a Map, heading: &Node) -> Vec<&'a Node> {
+    let headline_kinds = &map.schema().headline_kinds;
+    map.schema()
+        .edge_kinds
         .iter()
-        .copied()
-        .filter(|node| node.kind == settlement.by && !settled_ids.contains(&node.id))
-        .collect();
-    if !orphaned.is_empty() {
-        groups.push(RawGroup { of_node: None, rows: orphaned });
+        .flat_map(|edge_kind| map.linked(heading.id, &edge_kind.name, Dir::To))
+        .filter(|node| !headline_kinds.contains(&node.kind))
+        .collect()
+}
+
+/// `claims` grouped by the first headline node each one's edges reach:
+/// a claim that reaches none is its own group, unless something else
+/// in the cut reaches it - then it heads that group instead. Groups
+/// sort by their heading's `added_at`, so nothing here orders one edge
+/// kind ahead of another the way a `reopens` chain once did.
+fn grouped<'a>(map: &'a Map, claims: &[&'a Node]) -> Vec<RawGroup<'a>> {
+    let mut rows_by_heading: HashMap<NodeId, Vec<&'a Node>> = HashMap::new();
+    let mut unheaded: Vec<&'a Node> = Vec::new();
+
+    for &claim in claims {
+        match heading_of(map, claim) {
+            Some(heading) => rows_by_heading.entry(heading.id).or_default().push(claim),
+            None => unheaded.push(claim),
+        }
     }
+
+    let mut groups: Vec<RawGroup<'a>> = rows_by_heading
+        .into_iter()
+        .filter_map(|(id, rows)| map.node(id).map(|heading| RawGroup { of_node: Some(heading), rows }))
+        .collect();
+
+    let headed: HashSet<NodeId> = groups.iter().filter_map(|group| group.of_node.map(|node| node.id)).collect();
+    for claim in unheaded {
+        if !headed.contains(&claim.id) {
+            groups.push(RawGroup { of_node: Some(claim), rows: vec![claim] });
+        }
+    }
+
+    groups.sort_by_key(|group| group.of_node.expect("every group here has a heading").added_at);
     groups
 }
 
 /// One group as JSON: its heading, `None` for the orphan group and for
-/// a group whose only row is its own question, and its rows by
+/// a group whose only row is its own heading, and its rows by
 /// `added_at` ascending.
 fn group_json(map: &Map, group: &RawGroup, index: &EventIndex) -> Group {
     let is_self_group = |of_node: &Node| group.rows.len() == 1 && group.rows[0].id == of_node.id;
@@ -260,14 +272,14 @@ fn group_json(map: &Map, group: &RawGroup, index: &EventIndex) -> Group {
     });
     let mut rows = group.rows.clone();
     rows.sort_by_key(|node| node.added_at);
-    let options: Vec<&Node> = group.of_node.map(|node| map.weighed_for(node.id)).unwrap_or_default();
+    let related: Vec<&Node> = group.of_node.map(|node| related_to(map, node)).unwrap_or_default();
     Group {
         heading,
-        claims: rows.iter().map(|node| row_json(map, node, &options, index)).collect(),
+        claims: rows.iter().map(|node| row_json(map, node, &related, index)).collect(),
     }
 }
 
-/// A node's short id and name - `None` when it has neither.
+/// A node's short id and name.
 fn node_ref(map: &Map, node: &Node) -> NodeRef {
     NodeRef {
         id: map.short_id(node.id).unwrap_or_default(),
@@ -275,22 +287,43 @@ fn node_ref(map: &Map, node: &Node) -> NodeRef {
     }
 }
 
-/// One row: the claim itself, what it replaced and reopens, and the
-/// alternatives weighed against the group's question, computed once per
-/// group and handed to every row in it.
-fn row_json(map: &Map, node: &Node, options: &[&Node], index: &EventIndex) -> Row {
-    let was = map.predecessors(node.id).first().map(|was| node_ref(map, was));
-    let reopens = map.reopens(node.id).into_iter().map(|decision| node_ref(map, decision)).collect();
+/// Every edge touching `node`, named by kind and direction, and the
+/// node on its other end.
+fn edges_of(map: &Map, node: &Node) -> Vec<EdgeRef> {
+    map.edges()
+        .iter()
+        .filter(|edge| edge.from == node.id || edge.to == node.id)
+        .filter_map(|edge| {
+            if edge.from == node.id {
+                map.node(edge.to).map(|other| EdgeRef {
+                    kind: edge.kind.clone(),
+                    dir: "from",
+                    node: node_ref(map, other),
+                })
+            } else {
+                map.node(edge.from).map(|other| EdgeRef {
+                    kind: edge.kind.clone(),
+                    dir: "to",
+                    node: node_ref(map, other),
+                })
+            }
+        })
+        .collect()
+}
+
+/// One row: the claim itself, every edge that touches it, and the
+/// alternatives related to the group's heading, computed once per group
+/// and handed to every row in it.
+fn row_json(map: &Map, node: &Node, related: &[&Node], index: &EventIndex) -> Row {
     Row {
         base: option_json(map, node, index),
         added_at: node.added_at.to_string(),
-        was,
-        reopens,
-        options: options.iter().map(|option| option_json(map, option, index)).collect(),
+        edges: edges_of(map, node),
+        related: related.iter().map(|node| option_json(map, node, index)).collect(),
     }
 }
 
-/// One alternative under a row's `options`, or the claim row itself.
+/// One alternative under a row's `related`, or the claim row itself.
 fn option_json(map: &Map, node: &Node, index: &EventIndex) -> OptionRow {
     OptionRow {
         id: map.short_id(node.id).unwrap_or_default(),

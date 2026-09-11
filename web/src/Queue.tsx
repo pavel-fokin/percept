@@ -5,10 +5,10 @@ import { allClaims } from "./claims";
 import type { MapQueue } from "./types";
 
 /** One map's queue: the since line, the hint, and one `.group` per
- * settlement question - or one plain group when the map has no
- * settlement. `focused` is the id of the row a keyboard user has moved
- * to, if any. Memoised: `App` re-renders on every keystroke in the why
- * sheet, and this list does not change with it. */
+ * heading a row's edges reach - or one plain group for a row that
+ * reaches none. `focused` is the id of the row a keyboard user has
+ * moved to, if any. Memoised: `App` re-renders on every keystroke in
+ * the why sheet, and this list does not change with it. */
 function Queue({
   map,
   focused,

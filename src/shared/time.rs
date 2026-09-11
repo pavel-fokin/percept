@@ -12,18 +12,6 @@ impl Timestamp {
         Self(jiff::Timestamp::now())
     }
 
-    /// The instant `seconds` and `nanos` after the Unix epoch, or `None`
-    /// past the range a timestamp can hold.
-    pub fn from_unix(seconds: i64, nanos: i32) -> Option<Self> {
-        jiff::Timestamp::new(seconds, nanos).ok().map(Self)
-    }
-
-    /// The calendar date in UTC, `2026-09-05` - what a heading wants
-    /// where the full instant would be noise.
-    pub fn date(&self) -> String {
-        self.0.strftime("%Y-%m-%d").to_string()
-    }
-
     /// This instant less `minutes`, or `None` if that leaves the range
     /// a timestamp can hold. Minutes, not days: a day is a calendar
     /// unit, and an instant has no calendar to measure it against.

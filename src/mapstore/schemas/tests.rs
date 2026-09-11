@@ -121,7 +121,9 @@ fn headlines_naming_an_undeclared_kind_is_refused() {
 }
 
 #[test]
-fn settles_naming_an_undeclared_kind_is_refused() {
+fn a_settles_key_is_an_unknown_field() {
+    // The core keeps no settlement pair - "settles" is not a shape any
+    // schema file declares.
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
@@ -132,10 +134,8 @@ fn settles_naming_an_undeclared_kind_is_refused() {
 
     let err = load(fixture.path()).err().unwrap().to_string();
 
-    assert_eq!(
-        err,
-        "glossary.toml: settles.by names \"resolution\", which is not a declared node kind"
-    );
+    assert!(err.starts_with("glossary.toml:"), "{err}");
+    assert!(err.contains("settles"), "{err}");
 }
 
 #[test]

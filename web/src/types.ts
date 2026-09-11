@@ -32,11 +32,19 @@ export type Source =
   | { kind: "event"; id: string; at: string; type: string }
   | { kind: "missing"; id: string };
 
-/** A node this one supersedes, or one it reopens - just enough to link
- * back to it: its short id and name. */
+/** A node an edge reaches - just enough to link back to it: its short
+ * id and name. */
 export interface NodeRef {
   id: string;
   name: string;
+}
+
+/** One edge touching a row, named by kind and direction, and the node
+ * on its other end. */
+export interface EdgeRef {
+  kind: string;
+  dir: "from" | "to";
+  node: NodeRef;
 }
 
 /** An alternative weighed and lost, folded under the row that answers
@@ -57,20 +65,19 @@ export interface OptionRow {
  * last opened. */
 export interface Row extends OptionRow {
   added_at: string;
-  was: NodeRef | null;
-  reopens: NodeRef[];
-  options: OptionRow[];
+  edges: EdgeRef[];
+  related: OptionRow[];
 }
 
-/** The question or task a group's rows answer - absent for the orphan
- * group, and for a group whose only row is its own question. */
+/** The headline node a group's rows point at - absent for the orphan
+ * group, and for a group whose only row is its own heading. */
 export interface Heading {
   id: string;
   title: string;
   raised_at: string;
 }
 
-/** Claims that share a settlement question, or a task with none. */
+/** Claims that share a heading, or a row with none. */
 export interface Group {
   heading: Heading | null;
   claims: Row[];

@@ -1,5 +1,5 @@
 import { formatDate, plural, summarize } from "./format";
-import type { OptionRow as OptionRowT, Row as RowT, Source as SourceT } from "./types";
+import type { EdgeRef as EdgeRefT, OptionRow as OptionRowT, Row as RowT, Source as SourceT } from "./types";
 
 /** One quiet line naming who last changed a row, and why, when its
  * last change is not its addition. `addedAt` is the row's `added_at`,
@@ -143,6 +143,20 @@ function Sources({ sources }: { sources: SourceT[] }) {
   );
 }
 
+/** One quiet line for an edge touching a row: `<kind> <id>, <name>.`
+ * when the edge runs from the row, `<id>, <name>, <kind>.` when it runs
+ * into it - the edge read as the sentence it names, no kind meaning
+ * added past its name. */
+function Edge({ edge }: { edge: EdgeRefT }) {
+  return (
+    <p className="text-[var(--ink-2)]">
+      {edge.dir === "from"
+        ? `${edge.kind} ${edge.node.id}, ${edge.node.name}.`
+        : `${edge.node.id}, ${edge.node.name}, ${edge.kind}.`}
+    </p>
+  );
+}
+
 /** Wrong, on a row or on a folded option. */
 function Acts({ onDispute }: { onDispute: () => void }) {
   return (
@@ -180,9 +194,9 @@ function OptionRow({ option, onDispute }: { option: OptionRowT; onDispute: (id: 
   );
 }
 
-/** One row of the queue: a claim's headline, why, what it replaced or
- * reopens, who last changed it and why, the alternatives weighed
- * against it, and the Wrong act on it and on each alternative.
+/** One row of the queue: a claim's headline, why, every edge that
+ * touches it, who last changed it and why, the alternatives related to
+ * its group, and the Wrong act on it and on each alternative.
  * `focused` renders the keyboard-navigation highlight: an inset bar on
  * a phone, an underlined id from 40rem. */
 export default function Claim({
@@ -219,22 +233,15 @@ export default function Claim({
           <i>because</i> {claim.why}
         </p>
       )}
-      {claim.was && (
-        <p className="text-[var(--ink-2)]">
-          Replaced {claim.was.id}, {claim.was.name}.
-        </p>
-      )}
-      {claim.reopens.map((decision) => (
-        <p key={decision.id} className="text-[var(--focus)]">
-          It reopens {decision.id}, {decision.name}, which stands until you settle this.
-        </p>
+      {claim.edges.map((edge) => (
+        <Edge key={`${edge.kind}-${edge.dir}-${edge.node.id}`} edge={edge} />
       ))}
       <ChangedBy base={claim} addedAt={claim.added_at} />
       <Sources sources={claim.sources} />
-      {claim.options.length > 0 && (
-        <Fold summary={`${plural(claim.options.length, "One alternative", "alternatives")} weighed and lost`}>
+      {claim.related.length > 0 && (
+        <Fold summary={`${plural(claim.related.length, "One alternative", "alternatives")} weighed and lost`}>
           <ul className="ml-4 mt-2 list-none border-l-2 border-[var(--rule)] pl-4">
-            {claim.options.map((option) => (
+            {claim.related.map((option) => (
               <OptionRow key={option.id} option={option} onDispute={onDispute} />
             ))}
           </ul>

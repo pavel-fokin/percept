@@ -119,7 +119,10 @@ fn a_since_at_or_before_a_nodes_changed_at_keeps_it_in_the_cut() {
 }
 
 #[test]
-fn a_question_that_reopens_a_decision_sorts_before_an_older_question() {
+fn a_reopening_question_groups_under_the_decision_it_doubts() {
+    // No edge kind sorts a group ahead of another: groups order by
+    // their heading's `added_at`, so the older, unrelated question
+    // still comes first.
     let older_question = node_added_by(Actor::Agent, "question", "Older question?");
     let decision = node_added_by(Actor::Agent, "decision", "Something");
     let newer_question = node_added_by(Actor::Agent, "question", "Newer, reopening?");
@@ -127,8 +130,11 @@ fn a_question_that_reopens_a_decision_sorts_before_an_older_question() {
 
     let map = cut_decisions(vec![older_question, decision, newer_question, reopens]);
 
-    let claims = claims_of(&map, 0);
-    assert_eq!(claims[0]["name"], "Newer, reopening?");
+    let groups = groups_of(&map);
+    assert_eq!(groups.len(), 2);
+    assert_eq!(claims_of(&map, 0)[0]["name"], "Older question?");
+    assert_eq!(groups[1]["heading"]["title"], "Something");
+    assert_eq!(claims_of(&map, 1)[0]["name"], "Newer, reopening?");
 }
 
 #[test]
@@ -146,7 +152,12 @@ fn an_open_question_with_no_decision_is_its_own_group_with_a_null_heading() {
 }
 
 #[test]
-fn a_decision_that_supersedes_the_one_resolving_a_question_is_grouped_under_that_question() {
+fn a_decision_that_supersedes_another_groups_under_that_one_not_its_question() {
+    // The heading search is one hop, checking edge kinds in schema
+    // order: `correction` has no `resolves` edge of its own, so it
+    // groups under `old_decision`, the node its `supersedes` edge
+    // reaches - the core keeps no supersession chain for the review to
+    // follow further.
     let question = node_added_by(Actor::Agent, "question", "Which language?");
     let old_decision = node_added_by(Actor::Agent, "decision", "Rust");
     let resolves = edge_added("resolves", &old_decision, &question);
@@ -156,11 +167,11 @@ fn a_decision_that_supersedes_the_one_resolving_a_question_is_grouped_under_that
     let map = cut_decisions(vec![question, old_decision, resolves, correction, supersedes]);
 
     let groups = groups_of(&map);
-    assert_eq!(groups.len(), 1);
+    assert_eq!(groups.len(), 2);
     assert_eq!(groups[0]["heading"]["title"], "Which language?");
-    let claims = claims_of(&map, 0);
-    assert_eq!(claims.len(), 1);
-    assert_eq!(claims[0]["name"], "Go");
+    assert_eq!(claims_of(&map, 0)[0]["name"], "Rust");
+    assert_eq!(groups[1]["heading"]["title"], "Rust");
+    assert_eq!(claims_of(&map, 1)[0]["name"], "Go");
 }
 
 #[test]
@@ -175,22 +186,7 @@ fn an_orphan_group_carries_a_null_heading() {
 }
 
 #[test]
-fn an_option_whose_name_equals_the_decisions_is_not_listed_under_it() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
-    let decision = node_added_by(Actor::Agent, "decision", "Rust");
-    let resolves = edge_added("resolves", &decision, &question);
-    let restating_option = node_added_by(Actor::Agent, "option", "Rust");
-    let answers = edge_added("answers", &restating_option, &question);
-
-    let map = cut_decisions(vec![question, decision, resolves, restating_option, answers]);
-
-    let claims = claims_of(&map, 0);
-    let options = claims[0]["options"].as_array().unwrap();
-    assert!(options.is_empty(), "{options:?}");
-}
-
-#[test]
-fn an_option_that_answers_the_question_is_listed_under_the_decisions_row() {
+fn an_option_that_answers_the_question_is_related_under_the_decisions_row() {
     let question = node_added_by(Actor::Agent, "question", "Which language?");
     let decision = node_added_by(Actor::Agent, "decision", "Rust");
     let resolves = edge_added("resolves", &decision, &question);
@@ -200,7 +196,7 @@ fn an_option_that_answers_the_question_is_listed_under_the_decisions_row() {
     let map = cut_decisions(vec![question, decision, resolves, option, answers]);
 
     let claims = claims_of(&map, 0);
-    let options = claims[0]["options"].as_array().unwrap();
+    let options = claims[0]["related"].as_array().unwrap();
     assert_eq!(options.len(), 1);
     assert_eq!(options[0]["name"], "Go");
     assert_eq!(options[0]["changed_by"], "agent");
