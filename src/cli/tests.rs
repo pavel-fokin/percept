@@ -624,7 +624,7 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
         RemoveNodeArgs {
             target: target(),
             node: "file:src/main.rs".to_string(),
-            reason: "gone".to_string(),
+            why: "gone".to_string(),
         },
         &log,
         &schemas(),
@@ -638,7 +638,16 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
         to: "file:src/app/mod.rs".to_string(),
     };
     let add_edge = maps_add_edge(edge_args(), &log, &schemas(), &cli_source, human());
-    let remove_edge = maps_remove_edge(edge_args(), &log, &schemas(), &cli_source, human());
+    let remove_edge = maps_remove_edge(
+        RemoveEdgeArgs {
+            edge: edge_args(),
+            why: "gone".to_string(),
+        },
+        &log,
+        &schemas(),
+        &cli_source,
+        human(),
+    );
 
     for result in [add_node, remove_node, add_edge, remove_edge] {
         let err = result.err().unwrap();
@@ -695,17 +704,28 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_human() {
     assert_eq!(args.target.actor, "human");
 }
 
+fn change_node_args(node: &str, why: Option<&str>) -> ChangeNodeArgs {
+    ChangeNodeArgs {
+        target: MapArgs {
+            map: "decisions".to_string(),
+            source: Vec::new(),
+            actor: "human".to_string(),
+        },
+        node: node.to_string(),
+        name: None,
+        prop: Vec::new(),
+        why: why.map(str::to_string),
+    }
+}
+
 #[test]
-fn maps_confirm_commits_a_claim_confirmed_event_citing_the_node() {
+fn maps_change_node_with_why_appends_a_node_changed_whose_why_is_set() {
     let added = node_added_by(Actor::Agent, "decision", "Rust");
     let node = node_id(&added);
     let log = FakeLog::seeded(vec![added]);
 
-    maps_confirm(
-        StandingArgs {
-            map: "decisions".to_string(),
-            node: "decision:Rust".to_string(),
-        },
+    maps_change_node(
+        change_node_args("decision:Rust", Some("never proposed")),
         &log,
         &schemas(),
         &source("cli"),
@@ -715,63 +735,21 @@ fn maps_confirm_commits_a_claim_confirmed_event_citing_the_node() {
 
     let events = log.load().unwrap();
     match events[1].payload() {
-        Payload::ClaimConfirmed {
-            map,
-            node: confirmed,
-        } => {
-            assert_eq!(map, "decisions");
-            assert!(*confirmed == node);
+        Payload::NodeChanged { node: changed, why, .. } => {
+            assert!(*changed == node);
+            assert_eq!(why.as_deref(), Some("never proposed"));
         }
-        _ => panic!("expected ClaimConfirmed"),
+        _ => panic!("expected NodeChanged"),
     }
     assert!(matches!(events[1].actor(), Actor::Human(_)));
 }
 
 #[test]
-fn maps_dispute_commits_a_claim_disputed_event_with_its_why() {
-    let added = node_added_by(Actor::Agent, "decision", "Rust");
-    let node = node_id(&added);
-    let log = FakeLog::seeded(vec![added]);
-
-    maps_dispute(
-        DisputeArgs {
-            target: StandingArgs {
-                map: "decisions".to_string(),
-                node: "decision:Rust".to_string(),
-            },
-            why: "never proposed".to_string(),
-        },
-        &log,
-        &schemas(),
-        &source("cli"),
-        human(),
-    )
-    .unwrap();
-
-    let events = log.load().unwrap();
-    match events[1].payload() {
-        Payload::ClaimDisputed {
-            map,
-            node: disputed,
-            why,
-        } => {
-            assert_eq!(map, "decisions");
-            assert!(*disputed == node);
-            assert_eq!(why, "never proposed");
-        }
-        _ => panic!("expected ClaimDisputed"),
-    }
-}
-
-#[test]
-fn maps_confirm_refuses_a_node_the_map_does_not_hold() {
+fn maps_change_node_refuses_a_node_the_map_does_not_hold() {
     let log = FakeLog::default();
 
-    let err = maps_confirm(
-        StandingArgs {
-            map: "decisions".to_string(),
-            node: "decision:Rust".to_string(),
-        },
+    let err = maps_change_node(
+        change_node_args("decision:Rust", Some("never proposed")),
         &log,
         &schemas(),
         &source("cli"),
@@ -785,36 +763,17 @@ fn maps_confirm_refuses_a_node_the_map_does_not_hold() {
 }
 
 #[test]
-fn maps_confirm_refuses_the_user_s_own_node() {
-    let added = node_added("decision", "Rust");
+fn maps_change_node_refuses_an_agent_s_property_change_of_a_node_a_human_wrote() {
+    let added = node_added("option", "wasm render");
     let log = FakeLog::seeded(vec![added]);
 
-    let err = maps_confirm(
-        StandingArgs {
-            map: "decisions".to_string(),
-            node: "decision:Rust".to_string(),
-        },
-        &log,
-        &schemas(),
-        &source("cli"),
-        human(),
-    )
-    .err()
-    .unwrap();
+    let mut args = change_node_args("option:wasm render", None);
+    args.target.actor = "agent".to_string();
+    args.prop = vec![("why".to_string(), "faster paint".to_string())];
+    let err = maps_change_node(args, &log, &schemas(), &source("cli"), None).err().unwrap();
 
-    assert_eq!(
-        err.to_string(),
-        "decision:Rust is the user's own; standing is for a model's claim"
-    );
+    assert!(err.to_string().contains("was written by"), "{err}");
     assert_eq!(log.load().unwrap().len(), 1);
-}
-
-#[test]
-fn maps_dispute_without_why_fails_to_parse() {
-    assert!(Cli::try_parse_from([
-        "percept", "maps", "dispute", "decisions", "d1", "--why", ""
-    ])
-    .is_err());
 }
 
 fn record_args(map: &str) -> RecordArgs {
@@ -1011,7 +970,7 @@ fn a_source_id_the_log_lacks_writes_nothing() {
 fn a_short_id_document_changes_the_node_and_records_node_changed() {
     let log = FakeLog::default();
     record_document(
-        "task \"cancel a turn\"\n  why \"Esc drops the session\"\n",
+        "task \"cancel a turn\"\n  why \"Esc drops the session\"\n  state \"open\"\n",
         record_args("tasks"),
         &log,
         &schemas(),
@@ -1076,4 +1035,44 @@ fn a_change_to_an_unknown_short_id_is_an_error() {
     .unwrap_err();
     assert!(err.to_string().contains("t9"), "{err}");
     assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
+fn a_record_why_line_under_an_existing_node_sets_the_changes_why_not_a_property() {
+    let log = FakeLog::default();
+    record_document(
+        "task \"cancel a turn\"\n  why \"Esc drops the session\"\n  state \"open\"\n",
+        record_args("tasks"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+    )
+    .unwrap();
+
+    record_document(
+        "t1\n  why \"never proposed\"\n",
+        record_args("tasks"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    match events.last().unwrap().payload() {
+        Payload::NodeChanged { why, properties, .. } => {
+            assert_eq!(why.as_deref(), Some("never proposed"));
+            assert!(!properties.contains_key("why"), "{properties:?}");
+        }
+        _ => panic!("expected NodeChanged"),
+    }
+
+    let scope = crate::core::testing::scope();
+    let map = Map::fold(crate::core::testing::tasks(), &scope, &events).unwrap();
+    let task = map.find("task", "cancel a turn").unwrap();
+    assert_eq!(task.properties.get("why").unwrap(), "Esc drops the session");
 }

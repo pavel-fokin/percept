@@ -5,16 +5,15 @@
 //! parsing and the checks a declared schema must pass live here.
 //! `index` is reserved for `.percept/index.md`, the map directory, and
 //! an `index.toml` is refused. A project file that replaces a built-in
-//! may only extend it: it must keep every node and edge kind, the same
-//! `headlines`, and the same `settles` the built-in declares, since the
-//! renderer and the write rules assume those kinds exist; it may add
-//! more.
+//! may only extend it: it must keep every node and edge kind and the
+//! same `headlines` the built-in declares, since the renderer and the
+//! write rules assume those kinds exist; it may add more.
 
 use std::path::Path;
 
 use serde::{Deserialize, Deserializer};
 
-use crate::core::{default_prefix, EdgeKind, NodeKind, Schema, Schemas, Settlement};
+use crate::core::{default_prefix, EdgeKind, NodeKind, Schema, Schemas};
 
 const DECISIONS_TOML: &str = include_str!("schemas/decisions.toml");
 const TASKS_TOML: &str = include_str!("schemas/tasks.toml");
@@ -34,7 +33,6 @@ struct SchemaFile {
     purpose: String,
     #[serde(default)]
     headlines: Vec<String>,
-    settles: Option<SettlesFile>,
     #[serde(default, rename = "node")]
     nodes: Vec<NodeFile>,
     #[serde(default, rename = "edge")]
@@ -43,24 +41,18 @@ struct SchemaFile {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct SettlesFile {
-    by: String,
-    of: String,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct NodeFile {
-    name: String,
+    kind: String,
+    #[serde(default)]
     gloss: String,
     #[serde(default)]
     requires: Vec<String>,
     /// A node kind's short id prefix, `d` for `decision` - optional,
     /// since `default_prefix` covers the common case.
     prefix: Option<String>,
-    /// The values a `state` property on a node of this kind may hold,
-    /// first listed the open one - `state = ["open", "done",
-    /// "dropped"]`. Empty when the kind carries no state.
+    /// The values a `state` property on a node of this kind may hold -
+    /// `state = ["open", "done", "dropped"]`, a set with no value open
+    /// by position. Empty when the kind carries no state.
     #[serde(default, rename = "state")]
     states: Vec<String>,
 }
@@ -68,7 +60,8 @@ struct NodeFile {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EdgeFile {
-    name: String,
+    kind: String,
+    #[serde(default)]
     gloss: String,
     #[serde(deserialize_with = "one_or_many")]
     from: Vec<String>,
@@ -149,34 +142,34 @@ fn project_files(project: &Path) -> Result<Vec<(String, String)>, Box<dyn std::e
 
 /// Refuses `project`, named by `stem`, when it drops or changes what
 /// `built_in` declares: a missing node or edge kind, or a different
-/// `headlines` or `settles`. `project` may add more of either; the
-/// names, not the glosses or `requires`, are what must still match.
+/// `headlines`. `project` may add more of either; the names, not the
+/// glosses or `requires`, are what must still match.
 fn check_extends(
     built_in: &Schema,
     project: &Schema,
     stem: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     for kind in &built_in.node_kinds {
-        let Some(project_kind) = project.node_kind(&kind.name) else {
+        let Some(project_kind) = project.node_kind(&kind.kind) else {
             return Err(format!(
                 "{stem}.toml: drops node kind {:?}, which the built-in {:?} declares",
-                kind.name, built_in.name
+                kind.kind, built_in.name
             )
             .into());
         };
         if project_kind.states != kind.states {
             return Err(format!(
                 "{stem}.toml: changes node kind {:?}'s states from {:?} to {:?}",
-                kind.name, kind.states, project_kind.states
+                kind.kind, kind.states, project_kind.states
             )
             .into());
         }
     }
     for kind in &built_in.edge_kinds {
-        if project.edge_kind(&kind.name).is_none() {
+        if project.edge_kind(&kind.kind).is_none() {
             return Err(format!(
                 "{stem}.toml: drops edge kind {:?}, which the built-in {:?} declares",
-                kind.name, built_in.name
+                kind.kind, built_in.name
             )
             .into());
         }
@@ -185,13 +178,6 @@ fn check_extends(
         return Err(format!(
             "{stem}.toml: changes headlines from {:?} to {:?}",
             built_in.headline_kinds, project.headline_kinds
-        )
-        .into());
-    }
-    if built_in.settlement != project.settlement {
-        return Err(format!(
-            "{stem}.toml: changes settles from {:?} to {:?}",
-            built_in.settlement, project.settlement
         )
         .into());
     }
@@ -214,21 +200,13 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
         return Err(format!("{stem}.toml: declares no node kinds").into());
     }
 
-    check_names_and_glosses(
-        stem,
-        "node",
-        file.nodes.iter().map(|n| (n.name.as_str(), n.gloss.as_str())),
-    )?;
-    check_names_and_glosses(
-        stem,
-        "edge",
-        file.edges.iter().map(|e| (e.name.as_str(), e.gloss.as_str())),
-    )?;
+    check_kinds(stem, "node", file.nodes.iter().map(|n| n.kind.as_str()))?;
+    check_kinds(stem, "edge", file.edges.iter().map(|e| e.kind.as_str()))?;
     for node in &file.nodes {
         if node.requires.iter().any(|property| property.trim().is_empty()) {
             return Err(format!(
                 "{stem}.toml: node kind {:?} requires a blank property",
-                node.name
+                node.kind
             )
             .into());
         }
@@ -236,21 +214,21 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
             if node.states.len() < 2 {
                 return Err(format!(
                     "{stem}.toml: node kind {:?} declares fewer than two states",
-                    node.name
+                    node.kind
                 )
                 .into());
             }
             if node.states.iter().any(|state| state.trim().is_empty()) {
                 return Err(format!(
                     "{stem}.toml: node kind {:?} declares a blank state",
-                    node.name
+                    node.kind
                 )
                 .into());
             }
             if let Some(state) = repeated(node.states.iter().map(String::as_str)) {
                 return Err(format!(
                     "{stem}.toml: node kind {:?} declares the state {state:?} twice",
-                    node.name
+                    node.kind
                 )
                 .into());
             }
@@ -261,11 +239,11 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
         .nodes
         .into_iter()
         .map(|node| {
-            let prefix = node.prefix.unwrap_or_else(|| default_prefix(&node.name));
+            let prefix = node.prefix.unwrap_or_else(|| default_prefix(&node.kind));
             NodeKind {
                 prefix,
-                name: node.name,
-                gloss: node.gloss,
+                kind: node.kind,
+                gloss: node.gloss.trim().to_string(),
                 requires: node.requires,
                 states: node.states,
             }
@@ -277,24 +255,23 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
         .edges
         .into_iter()
         .map(|edge| {
-            check_edge_end(stem, &edge.name, "from", &edge.from, &node_kinds)?;
-            check_edge_end(stem, &edge.name, "to", &edge.to, &node_kinds)?;
+            check_edge_end(stem, &edge.kind, "from", &edge.from, &node_kinds)?;
+            check_edge_end(stem, &edge.kind, "to", &edge.to, &node_kinds)?;
             Ok(EdgeKind {
-                name: edge.name,
-                gloss: edge.gloss,
+                kind: edge.kind,
+                gloss: edge.gloss.trim().to_string(),
                 from: edge.from,
                 to: edge.to,
             })
         })
         .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
 
-    let mut schema = Schema {
+    let schema = Schema {
         name: file.name,
         purpose: file.purpose,
         node_kinds,
         edge_kinds,
         headline_kinds: file.headlines.clone(),
-        settlement: None,
     };
 
     for headline in &file.headlines {
@@ -309,37 +286,20 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
         return Err(format!("{stem}.toml: headlines names {headline:?} twice").into());
     }
 
-    if let Some(SettlesFile { by, of }) = file.settles {
-        for (field, name) in [("by", &by), ("of", &of)] {
-            if schema.node_kind(name).is_none() {
-                return Err(format!(
-                    "{stem}.toml: settles.{field} names {name:?}, which is not a declared node \
-                     kind"
-                )
-                .into());
-            }
-        }
-        schema.settlement = Some(Settlement { by, of });
-    }
-
     Ok(schema)
 }
 
-/// Refuses a blank kind name, a name repeated within `kinds`, or a
-/// blank gloss - `group` names the kind (`node` or `edge`) in the
-/// error.
-fn check_names_and_glosses<'a>(
+/// Refuses a blank kind name, or a name repeated within `kinds` -
+/// `group` names the kind (`node` or `edge`) in the error.
+fn check_kinds<'a>(
     stem: &str,
     group: &str,
-    kinds: impl Iterator<Item = (&'a str, &'a str)>,
+    kinds: impl Iterator<Item = &'a str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut names: Vec<&str> = Vec::new();
-    for (name, gloss) in kinds {
+    for name in kinds {
         if name.trim().is_empty() {
-            return Err(format!("{stem}.toml: a {group} kind's name must not be blank").into());
-        }
-        if gloss.trim().is_empty() {
-            return Err(format!("{stem}.toml: {group} kind {name:?} has a blank gloss").into());
+            return Err(format!("{stem}.toml: a {group} kind must not be blank").into());
         }
         names.push(name);
     }
@@ -363,7 +323,7 @@ fn check_edge_end(
         return Err(format!("{stem}.toml: edge kind {edge:?}'s {end} names no node kind").into());
     }
     for kind in kinds {
-        if !node_kinds.iter().any(|node| node.name == *kind) {
+        if !node_kinds.iter().any(|node| node.kind == *kind) {
             return Err(format!(
                 "{stem}.toml: edge kind {edge:?}'s {end} names {kind:?}, which is not a \
                  declared node kind"
@@ -383,7 +343,7 @@ fn check_prefixes(stem: &str, node_kinds: &[NodeKind]) -> Result<(), Box<dyn std
         if let Some(other) = seen.iter().find(|other| other.prefix == kind.prefix) {
             return Err(format!(
                 "{stem}.toml: node kinds {:?} and {:?} both take the short id prefix {:?}",
-                other.name, kind.name, kind.prefix
+                other.kind, kind.kind, kind.prefix
             )
             .into());
         }

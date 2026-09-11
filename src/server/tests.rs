@@ -4,7 +4,7 @@ use std::net::TcpStream;
 use serde_json::json;
 
 use super::*;
-use crate::core::testing::{human, node_added, node_added_by, node_id, schemas, source, FakeLog};
+use crate::core::testing::{human, node_added_by, node_id, schemas, source, FakeLog};
 use crate::core::{Actor, Payload};
 
 /// Binds a server on a spare port, serves it on a spawned task over an
@@ -28,6 +28,7 @@ async fn spawn_over(events: Vec<crate::core::Event>) -> (std::sync::Arc<FakeLog>
         schemas: schemas(),
         source: source("test"),
         me: human(),
+        since: None,
     });
     tokio::spawn(serve(listener, state));
     (handed_back, addr)
@@ -113,76 +114,64 @@ async fn unknown_path_returns_404() {
 }
 
 #[tokio::test]
-async fn dispute_posted_with_a_why_appends_a_claim_disputed_naming_the_node_and_the_why() {
+async fn change_posted_with_a_why_appends_a_node_changed_naming_the_node_and_the_why() {
     let node = node_added_by(Actor::Agent, "decision", "ship it");
     let (log, addr) = spawn_over(vec![node.clone()]).await;
 
     let (status, body) =
-        post(addr, "/api/dispute", &json!({ "map": "decisions", "node": "d1", "why": "not yet" })).await;
+        post(addr, "/api/change", &json!({ "map": "decisions", "node": "d1", "why": "not yet" })).await;
     assert!(status.starts_with("HTTP/1.1 200"), "{status} {body}");
 
     let events = log.load().unwrap();
-    let disputed = events
+    let changed = events
         .iter()
         .find_map(|event| match event.payload() {
-            Payload::ClaimDisputed { node: disputed, why, .. } => Some((*disputed, why.clone())),
+            Payload::NodeChanged { node: changed, why, .. } => Some((*changed, why.clone())),
             _ => None,
         })
-        .expect("a claim.disputed event");
-    assert_eq!(disputed, (node_id(&node), "not yet".to_string()));
+        .expect("a node.changed event");
+    assert_eq!(changed, (node_id(&node), Some("not yet".to_string())));
 }
 
 #[tokio::test]
-async fn dispute_with_a_blank_why_is_refused_with_400_and_appends_nothing() {
+async fn change_with_a_blank_why_is_refused_with_400_and_appends_nothing() {
     let node = node_added_by(Actor::Agent, "decision", "ship it");
     let (log, addr) = spawn_over(vec![node]).await;
 
     let (status, body) =
-        post(addr, "/api/dispute", &json!({ "map": "decisions", "node": "d1", "why": "   " })).await;
+        post(addr, "/api/change", &json!({ "map": "decisions", "node": "d1", "why": "   " })).await;
     assert!(status.starts_with("HTTP/1.1 400"), "{status} {body}");
 
     assert_eq!(log.load().unwrap().len(), 1, "nothing beyond the seeded node.added");
 }
 
 #[tokio::test]
-async fn confirm_appends_a_claim_confirmed() {
-    let node = node_added_by(Actor::Agent, "decision", "ship it");
-    let (log, addr) = spawn_over(vec![node.clone()]).await;
-
-    let (status, body) = post(addr, "/api/confirm", &json!({ "map": "decisions", "node": "d1" })).await;
-    assert!(status.starts_with("HTTP/1.1 200"), "{status} {body}");
-
-    let events = log.load().unwrap();
-    let confirmed = events.iter().any(|event| {
-        matches!(event.payload(), Payload::ClaimConfirmed { node: confirmed, .. } if *confirmed == node_id(&node))
-    });
-    assert!(confirmed, "expected a claim.confirmed for the disputed node");
-}
-
-#[tokio::test]
-async fn finish_appends_one_review_finished_naming_the_resolved_nodes_and_skipping_a_user_written_one() {
-    let decision = node_added_by(Actor::Agent, "decision", "ship it");
-    let question = node_added("question", "should we ship it");
-    let (log, addr) = spawn_over(vec![decision.clone(), question.clone()]).await;
-
-    let (status, body) =
-        post(addr, "/api/finish", &json!({ "map": "decisions", "nodes": ["d1", "q1"] })).await;
-    assert!(status.starts_with("HTTP/1.1 200"), "{status} {body}");
-
-    let events = log.load().unwrap();
-    let finished = events
-        .iter()
-        .find_map(|event| match event.payload() {
-            Payload::ReviewFinished { nodes, .. } => Some(nodes.clone()),
-            _ => None,
-        })
-        .expect("a review.finished event");
-    assert_eq!(finished, vec![node_id(&decision)], "the human-written question is skipped");
-}
-
-#[tokio::test]
 async fn an_unknown_node_id_is_404() {
     let addr = spawn().await;
-    let (status, body) = post(addr, "/api/confirm", &json!({ "map": "decisions", "node": "d99" })).await;
+    let (status, body) =
+        post(addr, "/api/change", &json!({ "map": "decisions", "node": "d99", "why": "not yet" })).await;
     assert!(status.starts_with("HTTP/1.1 404"), "{status} {body}");
+}
+
+#[tokio::test]
+async fn a_change_takes_the_node_out_of_the_humans_review_queue() {
+    let node = node_added_by(Actor::Agent, "decision", "ship it");
+    let (_, addr) = spawn_over(vec![node]).await;
+
+    let (status, _) =
+        post(addr, "/api/change", &json!({ "map": "decisions", "node": "d1", "why": "not yet" })).await;
+    assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+
+    let response = get(addr, "/api/review").await;
+    let (_, body) = split(&response);
+    let json: serde_json::Value = serde_json::from_str(body).expect("valid JSON");
+    let decisions = json["maps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|map| map["name"] == "decisions")
+        .expect("a decisions map");
+    // The human's own write is not theirs to review: the node's last
+    // change is the human's, so it leaves the queue.
+    assert!(decisions["groups"].as_array().unwrap().is_empty(), "{decisions}");
 }

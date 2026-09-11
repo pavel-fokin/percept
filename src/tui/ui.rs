@@ -273,11 +273,9 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
             ),
             width,
         ),
-        Payload::NodeRemoved {
-            map, node, reason, ..
-        } => tool_lines(
+        Payload::NodeRemoved { map, node, why, .. } => tool_lines(
             chat,
-            &format!("{map}: removed node {} - {reason}", node.as_uuid()),
+            &format!("{map}: removed node {} - {why}", node.as_uuid()),
             width,
         ),
         Payload::EdgeAdded {
@@ -313,23 +311,6 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
         Payload::FileCited { path, lines, .. } => tool_lines(
             chat,
             &format!("read {}", crate::core::cited_label(path, *lines)),
-            width,
-        ),
-        // The human's own judgment on a map, not dialogue - shown
-        // dimmed like the map changes above.
-        Payload::ClaimConfirmed { map, node } => tool_lines(
-            chat,
-            &format!("{map}: confirmed node {}", node.as_uuid()),
-            width,
-        ),
-        Payload::ClaimDisputed { map, node, why } => tool_lines(
-            chat,
-            &format!("{map}: disputed node {} - {why}", node.as_uuid()),
-            width,
-        ),
-        Payload::ReviewFinished { map, nodes } => tool_lines(
-            chat,
-            &format!("{map}: review finished, {} nodes seen", nodes.len()),
             width,
         ),
     }

@@ -108,19 +108,20 @@ fn carries(payload: &Payload, term: &str) -> bool {
             properties,
             ..
         } => has(map) || has(kind) || has(name) || properties.values().any(|v| has(v)),
-        Payload::NodeChanged { map, name, properties, .. } => {
-            has(map) || name.as_deref().is_some_and(has) || properties.values().any(|v| has(v))
+        Payload::NodeChanged {
+            map, name, properties, why, ..
+        } => {
+            has(map)
+                || name.as_deref().is_some_and(has)
+                || properties.values().any(|v| has(v))
+                || why.as_deref().is_some_and(has)
         }
-        Payload::NodeRemoved { map, reason, .. } => has(map) || has(reason),
-        Payload::EdgeAdded { map, kind, .. } | Payload::EdgeRemoved { map, kind, .. } => {
-            has(map) || has(kind)
-        }
+        Payload::NodeRemoved { map, why, .. } => has(map) || has(why),
+        Payload::EdgeAdded { map, kind, .. } => has(map) || has(kind),
+        Payload::EdgeRemoved { map, kind, why, .. } => has(map) || has(kind) || has(why),
         Payload::ModelCalled(usage) => has(&usage.model),
         Payload::SessionStarted => false,
         Payload::FileCited { path, excerpt, .. } => has(&path.to_string_lossy()) || has(excerpt),
-        Payload::ClaimConfirmed { map, .. } => has(map),
-        Payload::ClaimDisputed { map, why, .. } => has(map) || has(why),
-        Payload::ReviewFinished { map, .. } => has(map),
     }
 }
 

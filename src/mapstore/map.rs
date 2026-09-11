@@ -10,10 +10,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::{
-    Actor, Edge, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation, Node, NodeId,
-    Payload, Schemas, Scope,
+    Actor, Change, Edge, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation, Node,
+    NodeId, Payload, Schemas, Scope, Written,
 };
-use crate::shared::Timestamp;
 use crate::store::{ids, parse_event_id};
 
 /// The map `name` names, folded from every event in `log` that falls
@@ -203,10 +202,35 @@ impl Stamp {
     /// `Option` omits every field of a `None` rather than writing a
     /// null, so the caller's choice is the only branch either encoder
     /// needs.
-    fn of(actor: Actor, added_at: Timestamp, stamped: bool) -> Option<Self> {
+    fn of(added: &Change, stamped: bool) -> Option<Self> {
         stamped.then(|| Self {
-            actor: crate::store::actor_value(actor),
-            added_at: added_at.to_string(),
+            actor: crate::store::actor_value(added.actor),
+            added_at: added.at.to_string(),
+        })
+    }
+}
+
+/// `Stamp` plus a node's last change: who, and why, when the writer
+/// gave one - beside `actor`, the way the node itself carries them
+/// beside its own. `NodeLine`'s form of `Stamp`; an edge is never
+/// changed yet, so `encode_edge` still uses `Stamp` alone.
+#[derive(Serialize)]
+struct NodeStamp<'a> {
+    #[serde(flatten)]
+    stamp: Stamp,
+    changed_by: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changed_why: Option<&'a str>,
+}
+
+impl<'a> NodeStamp<'a> {
+    /// `Some` when `stamped`, else `None` - see `Stamp::of`.
+    fn of(node: &'a Node, stamped: bool) -> Option<Self> {
+        let changed = node.changed();
+        Stamp::of(node.added(), stamped).map(|stamp| Self {
+            stamp,
+            changed_by: changed.actor.name(),
+            changed_why: changed.why.as_deref(),
         })
     }
 }
@@ -223,16 +247,8 @@ struct NodeLine<'a> {
     name: &'a str,
     properties: &'a BTreeMap<String, String>,
     sources: Vec<String>,
-    /// The human's judgment on this node's claim - `claimed`, `seen`,
-    /// `confirmed`, or `disputed` - omitted for the human's own node,
-    /// which carries no standing.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    standing: Option<String>,
-    /// The latest dispute's why, only while `standing` is `disputed`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    dispute: Option<&'a str>,
     #[serde(flatten)]
-    stamp: Option<Stamp>,
+    stamp: Option<NodeStamp<'a>>,
 }
 
 #[derive(Serialize)]
@@ -259,6 +275,7 @@ pub fn encode_map(map: &Map) -> String {
 #[derive(Serialize)]
 struct KindLine<'a> {
     name: &'a str,
+    #[serde(skip_serializing_if = "str::is_empty")]
     gloss: &'a str,
     #[serde(skip_serializing_if = "<[String]>::is_empty")]
     requires: &'a [String],
@@ -269,7 +286,7 @@ impl<'a> KindLine<'a> {
         kinds
             .iter()
             .map(|kind| Self {
-                name: &kind.name,
+                name: &kind.kind,
                 gloss: &kind.gloss,
                 requires: &kind.requires,
             })
@@ -282,7 +299,7 @@ impl<'a> KindLine<'a> {
         kinds
             .iter()
             .map(|kind| Self {
-                name: &kind.name,
+                name: &kind.kind,
                 gloss: &kind.gloss,
                 requires: &[],
             })
@@ -385,9 +402,7 @@ pub fn encode_node(map: &Map, node: &Node, stamped: bool) -> String {
         name: &node.name,
         properties: &node.properties,
         sources: ids(&node.sources),
-        standing: map.standing(node.id).map(|standing| standing.to_string()),
-        dispute: map.dispute(node.id),
-        stamp: Stamp::of(node.actor, node.added_at, stamped),
+        stamp: NodeStamp::of(node, stamped),
     })
     .expect("NodeLine always serializes")
 }
@@ -401,7 +416,7 @@ pub fn encode_edge(map: &Map, edge: &Edge, stamped: bool) -> String {
         from: node_ref(map, edge.from),
         to: node_ref(map, edge.to),
         sources: ids(&edge.sources),
-        stamp: Stamp::of(edge.actor, edge.added_at, stamped),
+        stamp: Stamp::of(edge.added(), stamped),
     })
     .expect("EdgeLine always serializes")
 }

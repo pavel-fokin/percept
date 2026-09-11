@@ -79,50 +79,55 @@ Both are serde-free.
 - `Actor` (`Human`, `Agent`, `System`) is the one vocabulary for who a
   message or event is attributed to; a human carries an id once a
   server has registered them, kept in the `me` file beside the log, so
-  a claim confirmed or disputed says by whom. Until then they have
+  a change says by whom. Until then they have
   none, and the log they wrote is who they are.
 - `Model` is domain-owned, not infrastructure: `percept` needs "a reply
   given messages," never the mechanism behind it.
 - `Map` is a cognitive map: nodes and edges the model builds from the
-  log, folded from `node.added`, `node.removed`, `edge.added`, and
-  `edge.removed` events in the same log. A `Schema` names a map and
+  log, folded from `node.added`, `node.changed`, `node.removed`,
+  `edge.added`, and `edge.removed` events in the same log. A `Schema` names a map and
   the node and edge kinds it allows, and one line of purpose - what
   the map makes cheap - that the prompt carries in place of the map
   itself. A schema is a TOML file at `.percept/schemas/<name>.toml`,
   so a session adds a map without a Rust change; `decisions` and
   `tasks` ship built in as the same TOML, and a project file of the
-  same name extends one - it keeps every kind, headline, and
-  settlement the built-in declares and may add kinds - never shrinks
-  it, since the log and the render already rest on those kinds. A kind may list the properties a node must
-  carry - `why` on an option or a task - and the write path refuses a
-  node without them. Every change goes through `Map::apply`, so the
-  rules live once.
-- A node records who added it - `User` or `Model` - and when. A
-  user-written node is the human's landmark in a shared map: the model
-  may attach edges to it but never remove it. A decision is corrected by
+  same name extends one - it keeps every kind and headline the
+  built-in declares and may add kinds - never shrinks it, since the
+  log and the render already rest on those kinds. A kind may list the
+  properties a node must carry - `why` on an option or a task - and
+  the values its `state` may hold, a set with no value open by
+  position; the write path refuses a node without them. Every change
+  goes through `Map::apply`, so the rules live once. The core is
+  specified in `docs/architecture.md`: five events, four invariants,
+  six write rules, and no kind name.
+- A node and an edge keep their history of changes, from which who
+  added, who last changed and why, and the lock are read. One rank
+  rule says who may change what: a human is above an agent; renaming
+  or removing another's node needs rank; `state` is anyone's; and a
+  change from above locks the node against everyone below, so after
+  the user's why on an agent's decision the agent can only add beside
+  it. A user-written node is
+  the human's landmark in a shared map: the model may attach edges to
+  it and set its state, nothing else. A decision is corrected by
   adding the new one with a `supersedes` edge to the old, never by
-  removal, so the old landmark stays one hop away and leaves the
-  headlines. A model that finds a decision no longer fits does not
+  rewording, so the old landmark stays one hop away. A model that finds a decision no longer fits does not
   supersede it: it raises a question with a `reopens` edge to the
   decision, which stands until the user settles the question.
   Stability of the representation is a value beside accuracy
   and compactness: a map may grow, but what a reader has seen does not
-  move. A model-written node carries a standing the fold derives from
-  the human's `claim.confirmed`, `claim.disputed`, and
-  `review.finished` events - `claimed`, `seen`, `confirmed`, or
-  `disputed` - never from an edge. A user-written node has none: it is
-  the human's own landmark, not a claim to judge.
+  move. The core keeps no standing and no read receipt: the user's
+  correction is the node's last change, printed wherever the node is.
 - `Scope` says which project's events a fold reads: the current one by
   default, every one with `--all-projects`. A map is read live, never
   rendered to a file a session commits: one log holds every branch, so
   a committed render would carry whichever branch's fold wrote it
   last. `percept maps show <map> --format md` from the shell,
   `read_map` mid-turn, or the bounded fragment a session-start hook
-  prints give the same Markdown a render once did. The decisions
-  render lists questions in the order they were raised, each with the
-  decision that settles it now; options and evidence stay out of it
-  and are reached with `percept maps show decisions --around
-  question:<name>`.
+  prints give the same Markdown a render once did. A render lists a
+  map's headline nodes in the order they were raised, each with its
+  properties, its last change, and its edges by name; a node of
+  another kind is one hop away, under the edge that reaches it, or
+  with `percept maps show decisions --around question:<name>`.
   `--since <time>` on `maps show` lists what a map gained since a
   reader last looked. A `Selection` - around a node, since an instant,
   of some kinds - cuts a map to a `Fragment`, which counts what the cut
@@ -167,7 +172,7 @@ it, never sideways or up:
 | Application | `app` | `App` - orchestrates `core` and `harness` for one use case, no vocabulary beyond theirs. Runs the tool loop: commits `tool.called`, asks the `Policy`, hands the caller a `ToolStep` - run, ask the user, or carry on. A `Harness` groups what `App` is given: the tools, the policy, the cap, the snapshot, the instructions, and a `Context` - the list of sections the request carries, stable first for the provider's cache, with history sized to a share of the model's window and the events just past it indexed one line each. `MapShape` says how much of each map the prompt carries; `PERCEPT_MAPS` sets it at the entrypoint. `docs/harness.md` is the design. The `code` toolset - the TUI's default, `PERCEPT_TOOLS=code` elsewhere - adds the file tools, the policy that asks before a write, a cap of fifty calls, a snapshot per prompt, and the checkout's `AGENTS.md` as system text every round; `undo` restores the last one. |
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. A `ToolStep::Ask` pauses the turn on a row: `y` runs once, `a` runs and allows that tool for the session, `n` declines; `/undo` puts the tree back. |
 | Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps` - the log and its maps without the TUI; `ask` and `reflect` under `lab`. `hook <client>` records a coding client's turn from the hook JSON on stdin; `init <client>` writes the client's config to call it. Headless, a call the policy would ask about is declined unless `ask --yes`. |
-| Presentation | `server` | `percept review` - serves the embedded review page, the queue as `GET /api/review` JSON, and `POST /api/dispute`, `/api/confirm`, `/api/finish`, over the same log and maps the CLI uses. |
+| Presentation | `server` | `percept review` - serves the embedded review page, the queue as `GET /api/review` JSON, and `POST /api/change` - Wrong, a `node.changed` carrying the human's why - over the same log and maps the CLI uses. The queue is what changed since the review last opened. |
 | Infrastructure | `providers` | `Ollama`, `OpenAi`, and `Fireworks` - implement `harness::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` and `FIREWORKS_API_KEY` carry the keys. |
 | Infrastructure | `store` | The JSONL event log - the serde boundary - implements `core::EventLog` and `core::EventSearch`. `event` encodes an event to a log line and back, and reads one out for display. |
 | Infrastructure | `mapstore` | Loads the schemas - the built-in TOML plus `.percept/schemas/*.toml` - and folds a log-backed cognitive map (`LogMaps`, the `core::MapReader`), revises it, and gives it an external form: `encode_*` to JSON lines, `markdown`/`catalogue` to the text `maps show`/`maps list --format md` print - read live, never written to a file. |
@@ -244,8 +249,8 @@ skips it.
   catches mistakes. An approach the session tried and abandoned goes
   into the decisions map as evidence, so no later session tries it
   again. Work the session found and left undone goes into the tasks
-  map with its why, and an issue that was an open task gets its
-  outcome there, so the next session starts from the list and not
+  map with its why, and an issue that was an open task is closed
+  there with the commit in its change's why, so the next session starts from the list and not
   from a re-read.
 
 The TUI builds under `--features lab` and only runs on a real

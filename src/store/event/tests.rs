@@ -495,6 +495,7 @@ fn node_changed_round_trips_through_json() {
             name: Some("cancel a turn cleanly".to_string()),
             properties: properties.clone(),
             sources: Vec::new(),
+            why: Some("clearer".to_string()),
         },
     );
 
@@ -502,6 +503,7 @@ fn node_changed_round_trips_through_json() {
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "node.changed");
     assert_eq!(wire.payload["name"], "cancel a turn cleanly");
+    assert_eq!(wire.payload["why"], "clearer");
     let restored = crate::store::from_wire(wire).unwrap();
 
     match restored.payload() {
@@ -511,15 +513,44 @@ fn node_changed_round_trips_through_json() {
             name,
             properties: restored_properties,
             sources,
+            why,
         } => {
             assert_eq!(map, "tasks");
             assert!(*restored_node == node);
             assert_eq!(name.as_deref(), Some("cancel a turn cleanly"));
             assert_eq!(*restored_properties, properties);
             assert!(sources.is_empty());
+            assert_eq!(why.as_deref(), Some("clearer"));
         }
         _ => panic!("expected NodeChanged"),
     }
+}
+
+#[test]
+fn a_node_changed_with_no_why_omits_it_on_the_wire() {
+    let node = NodeId::new();
+    let original = crate::core::Event::restore(
+        EventId::new(),
+        Actor::Agent,
+        source("cli"),
+        None,
+        Timestamp::now(),
+        Payload::NodeChanged {
+            map: "tasks".to_string(),
+            node,
+            name: None,
+            properties: BTreeMap::new(),
+            sources: Vec::new(),
+            why: None,
+        },
+    );
+
+    let json = serde_json::to_string(&Event::from(&original)).unwrap();
+    let wire: Event = serde_json::from_str(&json).unwrap();
+    assert!(wire.payload.get("why").is_none());
+
+    let restored = crate::store::from_wire(wire).unwrap();
+    assert!(matches!(restored.payload(), Payload::NodeChanged { why: None, .. }));
 }
 
 #[test]
@@ -549,7 +580,7 @@ fn node_removed_round_trips_through_json() {
         Payload::NodeRemoved {
             map: "decisions".to_string(),
             node,
-            reason: "superseded".to_string(),
+            why: "superseded".to_string(),
             sources: Vec::new(),
         },
     );
@@ -565,12 +596,12 @@ fn node_removed_round_trips_through_json() {
         Payload::NodeRemoved {
             map,
             node: restored_node,
-            reason,
+            why,
             sources,
         } => {
             assert_eq!(map, "decisions");
             assert!(*restored_node == node);
-            assert_eq!(reason, "superseded");
+            assert_eq!(why, "superseded");
             assert!(sources.is_empty());
         }
         _ => panic!("expected NodeRemoved"),
@@ -615,6 +646,51 @@ fn edge_added_round_trips_through_json() {
             assert!(*restored_to == to);
         }
         _ => panic!("expected EdgeAdded"),
+    }
+}
+
+#[test]
+fn edge_removed_round_trips_through_json() {
+    let from = NodeId::new();
+    let to = NodeId::new();
+    let original = crate::core::Event::restore(
+        EventId::new(),
+        Actor::System,
+        source("cli"),
+        None,
+        Timestamp::now(),
+        Payload::EdgeRemoved {
+            map: "decisions".to_string(),
+            kind: "supports".to_string(),
+            from,
+            to,
+            sources: Vec::new(),
+            why: "no longer relevant".to_string(),
+        },
+    );
+
+    let json = serde_json::to_string(&Event::from(&original)).unwrap();
+    let wire: Event = serde_json::from_str(&json).unwrap();
+    assert_eq!(wire.kind, "edge.removed");
+    assert_eq!(wire.payload["why"], "no longer relevant");
+    let restored = crate::store::from_wire(wire).unwrap();
+
+    match restored.payload() {
+        Payload::EdgeRemoved {
+            map,
+            kind,
+            from: restored_from,
+            to: restored_to,
+            why,
+            ..
+        } => {
+            assert_eq!(map, "decisions");
+            assert_eq!(kind, "supports");
+            assert!(*restored_from == from);
+            assert!(*restored_to == to);
+            assert_eq!(why, "no longer relevant");
+        }
+        _ => panic!("expected EdgeRemoved"),
     }
 }
 
@@ -859,118 +935,6 @@ fn parse_lines_rejects_a_zero_start() {
 }
 
 #[test]
-fn claim_confirmed_round_trips_through_json() {
-    let node = NodeId::new();
-    let me = human();
-    let original = crate::core::Event::restore(
-        EventId::new(),
-        Actor::Human(me),
-        source("cli"),
-        None,
-        Timestamp::now(),
-        Payload::ClaimConfirmed {
-            map: "decisions".to_string(),
-            node,
-        },
-    );
-
-    let json = serde_json::to_string(&Event::from(&original)).unwrap();
-    let wire: Event = serde_json::from_str(&json).unwrap();
-    assert_eq!(wire.kind, "claim.confirmed");
-    let restored = crate::store::from_wire(wire).unwrap();
-
-    assert!(restored.actor() == Actor::Human(me));
-    match restored.payload() {
-        Payload::ClaimConfirmed {
-            map,
-            node: restored_node,
-        } => {
-            assert_eq!(map, "decisions");
-            assert!(*restored_node == node);
-        }
-        _ => panic!("expected ClaimConfirmed"),
-    }
-}
-
-#[test]
-fn claim_disputed_round_trips_through_json() {
-    let node = NodeId::new();
-    let original = crate::core::Event::restore(
-        EventId::new(),
-        Actor::Human(human()),
-        source("cli"),
-        None,
-        Timestamp::now(),
-        Payload::ClaimDisputed {
-            map: "decisions".to_string(),
-            node,
-            why: "never proposed".to_string(),
-        },
-    );
-
-    let json = serde_json::to_string(&Event::from(&original)).unwrap();
-    let wire: Event = serde_json::from_str(&json).unwrap();
-    assert_eq!(wire.kind, "claim.disputed");
-    let restored = crate::store::from_wire(wire).unwrap();
-
-    match restored.payload() {
-        Payload::ClaimDisputed {
-            map,
-            node: restored_node,
-            why,
-        } => {
-            assert_eq!(map, "decisions");
-            assert!(*restored_node == node);
-            assert_eq!(why, "never proposed");
-        }
-        _ => panic!("expected ClaimDisputed"),
-    }
-}
-
-#[test]
-fn review_finished_round_trips_through_json() {
-    let (a, b) = (NodeId::new(), NodeId::new());
-    let original = crate::core::Event::restore(
-        EventId::new(),
-        Actor::Human(human()),
-        source("cli"),
-        None,
-        Timestamp::now(),
-        Payload::ReviewFinished {
-            map: "decisions".to_string(),
-            nodes: vec![a, b],
-        },
-    );
-
-    let json = serde_json::to_string(&Event::from(&original)).unwrap();
-    let wire: Event = serde_json::from_str(&json).unwrap();
-    assert_eq!(wire.kind, "review.finished");
-    let restored = crate::store::from_wire(wire).unwrap();
-
-    match restored.payload() {
-        Payload::ReviewFinished { map, nodes } => {
-            assert_eq!(map, "decisions");
-            assert_eq!(nodes, &vec![a, b]);
-        }
-        _ => panic!("expected ReviewFinished"),
-    }
-}
-
-#[test]
-fn a_malformed_node_in_a_review_finished_payload_is_an_error() {
-    let payload = serde_json::json!({
-        "map": "decisions",
-        "nodes": ["not-a-uuid"],
-    });
-
-    let err = match decode("user", source("cli"), "review.finished", None, payload, human()) {
-        Err(e) => e,
-        Ok(_) => panic!("expected a malformed node id to be rejected"),
-    };
-    assert!(matches!(err, Error::BadUuid(s) if s == "not-a-uuid"));
-}
-
-#[test]
 fn a_file_cited_payload_with_a_reversed_range_fails_to_decode() {
     let source = source("percept-cli");
     let payload = serde_json::json!({
@@ -1063,9 +1027,6 @@ fn every_kind_names_round_trip_through_the_store_parser() {
         EventKind::ModelCalled,
         EventKind::SessionStarted,
         EventKind::FileCited,
-        EventKind::ClaimConfirmed,
-        EventKind::ClaimDisputed,
-        EventKind::ReviewFinished,
     ];
 
     for kind in kinds {

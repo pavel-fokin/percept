@@ -12,8 +12,8 @@ export async function fetchReview(): Promise<ReviewResponse> {
 }
 
 /** Posts `body` as JSON to `path`, throwing the server's plain-text
- * reason on a refused write - `dispute`, `confirm`, and `finish` below
- * share this, so a 400 or 404 reads the same way at every call site. */
+ * reason on a refused write - `change` below shares this, so a 400 or
+ * 404 reads the same way at every call site. */
 async function post(path: string, body: unknown): Promise<void> {
   const response = await fetch(path, {
     method: "POST",
@@ -25,18 +25,7 @@ async function post(path: string, body: unknown): Promise<void> {
   }
 }
 
-/** `POST /api/dispute`: marks `node` on `map` wrong, with `why`. */
-export function dispute(map: string, node: string, why: string): Promise<void> {
-  return post("/api/dispute", { map, node, why });
-}
-
-/** `POST /api/confirm`: marks `node` on `map` confirmed. */
-export function confirm(map: string, node: string): Promise<void> {
-  return post("/api/confirm", { map, node });
-}
-
-/** `POST /api/finish`: marks every id in `nodes`, on `map`, seen unless
- * already judged. */
-export function finish(map: string, nodes: string[]): Promise<void> {
-  return post("/api/finish", { map, nodes });
+/** `POST /api/change`: changes `node` on `map`, carrying only `why`. */
+export function change(map: string, node: string, why: string): Promise<void> {
+  return post("/api/change", { map, node, why });
 }

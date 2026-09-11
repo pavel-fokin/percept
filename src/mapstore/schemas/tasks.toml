@@ -1,20 +1,19 @@
 # The tasks map: what is left to do. A task says why it matters, its
-# state says what became of it - done with its outcome property, or
-# dropped with the reason - a task blocks the one that must wait for
-# it, and a reworded task changes its name in place.
+# state says what became of it - done or dropped, the why of that
+# change saying what happened - a task blocks the one that must wait
+# for it, and a reworded task changes its name in place.
 
 name = "tasks"
 purpose = "what is left to do, why it matters, and what it waits on, so a session picks up the next item without re-deriving it"
 headlines = ["task"]
 
 [[node]]
-name = "task"
+kind = "task"
 gloss = "one piece of work left to do, saying why it matters in its `why` property"
 requires = ["why"]
 state = ["open", "done", "dropped"]
 
 [[edge]]
-name = "blocks"
-gloss = "from a task to the one that must wait for it"
+kind = "blocks"
 from = "task"
 to = "task"

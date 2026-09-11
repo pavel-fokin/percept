@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use crate::core::{
     Actor, EdgeKind, Event, EventId, EventLog, HumanId, NodeId, NodeKind, NodeRef, Payload,
-    Schema, Schemas, Scope, Settlement, Source, Usage,
+    Schema, Schemas, Scope, Source, Usage,
 };
 use crate::shared::Timestamp;
 
@@ -277,46 +277,21 @@ pub fn decisions() -> Schema {
                   reopened"
             .to_string(),
         node_kinds: vec![
-            NodeKind::new("question", "a matter the project had to settle"),
+            NodeKind::new("question", ""),
             NodeKind::new(
                 "option",
                 "an alternative that was weighed and lost, saying why in its `why` property",
             )
             .requiring("why"),
             NodeKind::new("evidence", "a fact that supports or contradicts an option"),
-            NodeKind::new("decision", "the choice that was made, and the grounds for it"),
+            NodeKind::new("decision", ""),
         ],
         edge_kinds: vec![
-            EdgeKind::new(
-                "answers",
-                "from an option to the question it was weighed for",
-                &["option"],
-                &["question"],
-            ),
-            EdgeKind::new(
-                "supports",
-                "from evidence to an option it backs",
-                &["evidence"],
-                &["option"],
-            ),
-            EdgeKind::new(
-                "contradicts",
-                "from evidence to an option it undercuts",
-                &["evidence"],
-                &["option"],
-            ),
-            EdgeKind::new(
-                "resolves",
-                "from a decision to the question it settles",
-                &["decision"],
-                &["question"],
-            ),
-            EdgeKind::new(
-                "supersedes",
-                "from a decision to an earlier one it replaces",
-                &["decision"],
-                &["decision"],
-            ),
+            EdgeKind::new("answers", "", &["option"], &["question"]),
+            EdgeKind::new("supports", "", &["evidence"], &["option"]),
+            EdgeKind::new("contradicts", "", &["evidence"], &["option"]),
+            EdgeKind::new("resolves", "", &["decision"], &["question"]),
+            EdgeKind::new("supersedes", "", &["decision"], &["decision"]),
             EdgeKind::new(
                 "reopens",
                 "from a question to a decision it puts in doubt; the decision stands until a \
@@ -326,10 +301,6 @@ pub fn decisions() -> Schema {
             ),
         ],
         headline_kinds: vec!["question".to_string(), "decision".to_string()],
-        settlement: Some(Settlement {
-            by: "decision".to_string(),
-            of: "question".to_string(),
-        }),
     }
 }
 
@@ -349,14 +320,8 @@ pub fn tasks() -> Schema {
             .requiring("why")
             .with_states(&["open", "done", "dropped"]),
         ],
-        edge_kinds: vec![EdgeKind::new(
-            "blocks",
-            "from a task to the one that must wait for it",
-            &["task"],
-            &["task"],
-        )],
+        edge_kinds: vec![EdgeKind::new("blocks", "", &["task"], &["task"])],
         headline_kinds: vec!["task".to_string()],
-        settlement: None,
     }
 }
 
@@ -404,6 +369,5 @@ pub fn files() -> Schema {
             ),
         ],
         headline_kinds: vec!["file".to_string()],
-        settlement: None,
     }
 }

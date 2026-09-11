@@ -95,7 +95,7 @@ fn is_zero(seq: &u32) -> bool {
 }
 
 /// `Payload::NodeChanged` on the wire. `name` is present only on a
-/// rename.
+/// rename; `why` only when the writer gave one.
 #[derive(Serialize, Deserialize)]
 struct NodeChangedBody {
     map: String,
@@ -104,25 +104,38 @@ struct NodeChangedBody {
     name: Option<String>,
     properties: BTreeMap<String, String>,
     sources: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    why: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct NodeRemovedBody {
     map: String,
     node: String,
-    reason: String,
+    why: String,
     sources: Vec<String>,
 }
 
-/// The shared shape of `EdgeAdded` and `EdgeRemoved` - an edge carries
-/// no id of its own, so `kind`, `from`, and `to` are all either needs.
+/// `Payload::EdgeAdded` on the wire - an edge carries no id of its own,
+/// so `kind`, `from`, and `to` are all it needs.
 #[derive(Serialize, Deserialize)]
-struct EdgeBody {
+struct EdgeAddedBody {
     map: String,
     kind: String,
     from: String,
     to: String,
     sources: Vec<String>,
+}
+
+/// `Payload::EdgeRemoved` on the wire - `EdgeAddedBody` plus `why`.
+#[derive(Serialize, Deserialize)]
+struct EdgeRemovedBody {
+    map: String,
+    kind: String,
+    from: String,
+    to: String,
+    sources: Vec<String>,
+    why: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -141,25 +154,6 @@ struct FileCitedBody {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     lines: Option<String>,
     excerpt: String,
-}
-
-#[derive(Serialize, Deserialize)]
-struct ClaimConfirmedBody {
-    map: String,
-    node: String,
-}
-
-#[derive(Serialize, Deserialize)]
-struct ClaimDisputedBody {
-    map: String,
-    node: String,
-    why: String,
-}
-
-#[derive(Serialize, Deserialize)]
-struct ReviewFinishedBody {
-    map: String,
-    nodes: Vec<String>,
 }
 
 /// `Payload::FileCited.lines` as `"from-to"` - the wire spelling of a
@@ -196,13 +190,10 @@ const EDGE_REMOVED: &str = "edge.removed";
 const MODEL_CALLED: &str = "model.called";
 const SESSION_STARTED: &str = "session.started";
 const FILE_CITED: &str = "file.cited";
-const CLAIM_CONFIRMED: &str = "claim.confirmed";
-const CLAIM_DISPUTED: &str = "claim.disputed";
-const REVIEW_FINISHED: &str = "review.finished";
 
 /// Every `type` the log records, for the error that lists them when a
 /// caller names one that isn't here.
-pub const KINDS: [&str; 15] = [
+pub const KINDS: [&str; 12] = [
     MESSAGE_RECEIVED,
     THOUGHT_RECORDED,
     TOOL_CALLED,
@@ -215,9 +206,6 @@ pub const KINDS: [&str; 15] = [
     MODEL_CALLED,
     SESSION_STARTED,
     FILE_CITED,
-    CLAIM_CONFIRMED,
-    CLAIM_DISPUTED,
-    REVIEW_FINISHED,
 ];
 
 /// An `EventKind` from its wire spelling - so a caller filtering by
@@ -236,9 +224,6 @@ pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
         MODEL_CALLED => Ok(EventKind::ModelCalled),
         SESSION_STARTED => Ok(EventKind::SessionStarted),
         FILE_CITED => Ok(EventKind::FileCited),
-        CLAIM_CONFIRMED => Ok(EventKind::ClaimConfirmed),
-        CLAIM_DISPUTED => Ok(EventKind::ClaimDisputed),
-        REVIEW_FINISHED => Ok(EventKind::ReviewFinished),
         other => Err(Error::UnknownEventType(other.to_string())),
     }
 }
@@ -510,23 +495,25 @@ impl From<&crate::core::Event> for Event {
                 name,
                 properties,
                 sources,
+                why,
             } => serde_json::to_value(NodeChangedBody {
                 map: map.clone(),
                 node: node.as_uuid().to_string(),
                 name: name.clone(),
                 properties: properties.clone(),
                 sources: ids(sources),
+                why: why.clone(),
             })
             .expect("NodeChangedBody always serializes"),
             Payload::NodeRemoved {
                 map,
                 node,
-                reason,
+                why,
                 sources,
             } => serde_json::to_value(NodeRemovedBody {
                 map: map.clone(),
                 node: node.as_uuid().to_string(),
-                reason: reason.clone(),
+                why: why.clone(),
                 sources: ids(sources),
             })
             .expect("NodeRemovedBody always serializes"),
@@ -536,21 +523,30 @@ impl From<&crate::core::Event> for Event {
                 from,
                 to,
                 sources,
-            }
-            | Payload::EdgeRemoved {
-                map,
-                kind,
-                from,
-                to,
-                sources,
-            } => serde_json::to_value(EdgeBody {
+            } => serde_json::to_value(EdgeAddedBody {
                 map: map.clone(),
                 kind: kind.clone(),
                 from: from.as_uuid().to_string(),
                 to: to.as_uuid().to_string(),
                 sources: ids(sources),
             })
-            .expect("EdgeBody always serializes"),
+            .expect("EdgeAddedBody always serializes"),
+            Payload::EdgeRemoved {
+                map,
+                kind,
+                from,
+                to,
+                sources,
+                why,
+            } => serde_json::to_value(EdgeRemovedBody {
+                map: map.clone(),
+                kind: kind.clone(),
+                from: from.as_uuid().to_string(),
+                to: to.as_uuid().to_string(),
+                sources: ids(sources),
+                why: why.clone(),
+            })
+            .expect("EdgeRemovedBody always serializes"),
             Payload::ModelCalled(usage) => serde_json::to_value(ModelCalledBody {
                 model: usage.model.clone(),
                 input_tokens: usage.input_tokens,
@@ -569,24 +565,6 @@ impl From<&crate::core::Event> for Event {
                 excerpt: excerpt.clone(),
             })
             .expect("FileCitedBody always serializes"),
-            Payload::ClaimConfirmed { map, node } => serde_json::to_value(ClaimConfirmedBody {
-                map: map.clone(),
-                node: node.as_uuid().to_string(),
-            })
-            .expect("ClaimConfirmedBody always serializes"),
-            Payload::ClaimDisputed { map, node, why } => {
-                serde_json::to_value(ClaimDisputedBody {
-                    map: map.clone(),
-                    node: node.as_uuid().to_string(),
-                    why: why.clone(),
-                })
-                .expect("ClaimDisputedBody always serializes")
-            }
-            Payload::ReviewFinished { map, nodes } => serde_json::to_value(ReviewFinishedBody {
-                map: map.clone(),
-                nodes: ids(nodes),
-            })
-            .expect("ReviewFinishedBody always serializes"),
         };
 
         Self {
@@ -716,6 +694,7 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 name: body.name,
                 properties: body.properties,
                 sources: parse_event_ids(body.sources)?,
+                why: body.why,
             })
         }
         EventKind::NodeRemoved => {
@@ -724,32 +703,30 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
             Ok(Payload::NodeRemoved {
                 map: body.map,
                 node: parse_node_id(&body.node)?,
-                reason: body.reason,
+                why: body.why,
                 sources: parse_event_ids(body.sources)?,
             })
         }
-        kind @ (EventKind::EdgeAdded | EventKind::EdgeRemoved) => {
-            let body: EdgeBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
-            let (map, kind_name) = (body.map, body.kind);
-            let from = parse_node_id(&body.from)?;
-            let to = parse_node_id(&body.to)?;
-            let sources = parse_event_ids(body.sources)?;
-            Ok(if kind == EventKind::EdgeAdded {
-                Payload::EdgeAdded {
-                    map,
-                    kind: kind_name,
-                    from,
-                    to,
-                    sources,
-                }
-            } else {
-                Payload::EdgeRemoved {
-                    map,
-                    kind: kind_name,
-                    from,
-                    to,
-                    sources,
-                }
+        EventKind::EdgeAdded => {
+            let body: EdgeAddedBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::EdgeAdded {
+                map: body.map,
+                kind: body.kind,
+                from: parse_node_id(&body.from)?,
+                to: parse_node_id(&body.to)?,
+                sources: parse_event_ids(body.sources)?,
+            })
+        }
+        EventKind::EdgeRemoved => {
+            let body: EdgeRemovedBody =
+                serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::EdgeRemoved {
+                map: body.map,
+                kind: body.kind,
+                from: parse_node_id(&body.from)?,
+                to: parse_node_id(&body.to)?,
+                sources: parse_event_ids(body.sources)?,
+                why: body.why,
             })
         }
         EventKind::ModelCalled => {
@@ -771,39 +748,7 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 excerpt: body.excerpt,
             })
         }
-        EventKind::ClaimConfirmed => {
-            let body: ClaimConfirmedBody =
-                serde_json::from_value(payload).map_err(Error::BadPayload)?;
-            Ok(Payload::ClaimConfirmed {
-                map: body.map,
-                node: parse_node_id(&body.node)?,
-            })
-        }
-        EventKind::ClaimDisputed => {
-            let body: ClaimDisputedBody =
-                serde_json::from_value(payload).map_err(Error::BadPayload)?;
-            Ok(Payload::ClaimDisputed {
-                map: body.map,
-                node: parse_node_id(&body.node)?,
-                why: body.why,
-            })
-        }
-        EventKind::ReviewFinished => {
-            let body: ReviewFinishedBody =
-                serde_json::from_value(payload).map_err(Error::BadPayload)?;
-            Ok(Payload::ReviewFinished {
-                map: body.map,
-                nodes: parse_node_ids(&body.nodes)?,
-            })
-        }
     }
-}
-
-/// `Payload::ReviewFinished.nodes` off the wire - each UUID string
-/// parsed to a `NodeId`, so one malformed entry fails the whole payload
-/// rather than being dropped silently, matching `parse_event_ids`.
-fn parse_node_ids(nodes: &[String]) -> Result<Vec<NodeId>, Error> {
-    nodes.iter().map(|s| parse_node_id(s)).collect()
 }
 
 /// `sources` off the wire - each UUID string parsed to an `EventId`, so

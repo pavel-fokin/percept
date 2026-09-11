@@ -7,57 +7,49 @@
 name = "decisions"
 purpose = "what was asked, what was chosen, and why, so a settled question is not reopened"
 headlines = ["question", "decision"]
-settles = { by = "decision", of = "question" }
 
 [[node]]
-name = "question"
-gloss = "a matter the project had to settle"
+kind = "question"
 
 [[node]]
-name = "option"
+kind = "option"
 gloss = "an alternative that was weighed and lost, saying why in its `why` property"
 requires = ["why"]
 
 [[node]]
-name = "evidence"
+kind = "evidence"
 gloss = "a fact that supports or contradicts an option"
 
 [[node]]
-name = "decision"
-gloss = "the choice that was made, and the grounds for it"
+kind = "decision"
 
 [[edge]]
-name = "answers"
-gloss = "from an option to the question it was weighed for"
+kind = "answers"
 from = "option"
 to = "question"
 
 [[edge]]
-name = "supports"
-gloss = "from evidence to an option it backs"
+kind = "supports"
 from = "evidence"
 to = "option"
 
 [[edge]]
-name = "contradicts"
-gloss = "from evidence to an option it undercuts"
+kind = "contradicts"
 from = "evidence"
 to = "option"
 
 [[edge]]
-name = "resolves"
-gloss = "from a decision to the question it settles"
+kind = "resolves"
 from = "decision"
 to = "question"
 
 [[edge]]
-name = "supersedes"
-gloss = "from a decision to an earlier one it replaces"
+kind = "supersedes"
 from = "decision"
 to = "decision"
 
 [[edge]]
-name = "reopens"
+kind = "reopens"
 gloss = "from a question to a decision it puts in doubt; the decision stands until a new one supersedes it"
 from = "question"
 to = "decision"

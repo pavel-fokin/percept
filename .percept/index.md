@@ -5,8 +5,8 @@ prints each map's purpose and current size.
 
 | Map | Use it for | Origin | Entry point |
 |---|---|---|---|
-| decisions | Why a choice was made: the question, the options weighed, the decision that settles it now, and the ones it superseded. | Cognitive commits in this project's event log. | `maps show decisions --format md`, then `--around 'question:<name>'`. `--since 1d` for what changed since yesterday. |
-| tasks | What is left to do, why it matters, and what it waits on: open tasks first, done ones below with their outcome. | Cognitive commits in this project's event log. | `maps show tasks --format md`, then `--around 'task:<name>'` for a task's blockers and outcome. |
+| decisions | Why a choice was made: the question, the decision that resolves it, the one it superseded, and the options weighed one hop away. | Cognitive commits in this project's event log. | `maps show decisions --format md`, then `--around 'question:<name>'`. `--since 1d` for what changed since yesterday. |
+| tasks | What is left to do, why it matters, and what it waits on; a closed task carries the commit in the why of the change that closed it. | Cognitive commits in this project's event log. | `maps show tasks --format md`, then `--around 'task:<name>'` for a task's blockers and history. |
 | ideas | A candidate worth doing that nobody has committed to yet - not a task, which is already committed and just waiting. Never built without the user discussing it first. | Cognitive commits in this project's event log. | `maps show ideas --format md`, then `--around 'idea:<name>'`. |
 
 A new map is a TOML file at `schemas/<name>.toml` beside this index;

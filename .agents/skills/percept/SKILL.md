@@ -108,11 +108,12 @@ it. Its `state` property is `open`, `done`, or `dropped` - `open`
 until something changes it. A task `blocks` the one that must wait for
 it. Rewording a task changes its name in place, never a new node. The
 model may reword only a task it wrote; on a task the user wrote it may
-change `state` and `outcome` and nothing else.
+set `state` and nothing else, and once the user has changed a task the
+model wrote, the same lock holds there.
 
 ```sh
 percept maps add-node tasks --actor agent --kind task --name "cancel a turn without quitting" \
-  --prop why="Esc drops the whole session on a fifty-call turn" --source $id
+  --prop why="Esc drops the whole session on a fifty-call turn" --prop state=open --source $id
 ```
 
 Close a task, drop it, reopen it, or reword it by changing the node it
@@ -123,25 +124,28 @@ short id, `t4`, for that:
 percept maps record tasks --actor agent --source $id <<'EOF'
 t4
   state "done"
-  outcome "1f1a9a9: cancel a turn without quitting"
+  why "1f1a9a9: cancel a turn without quitting"
 EOF
 ```
 
-A dropped task carries `state "dropped"` and an `outcome` saying why; a
-reopened one `state "open"`.
+Under an existing node, `why` is the change's why - what happened -
+not the task's own `why` property. A dropped task carries `state
+"dropped"` and a why saying why; a reopened one `state "open"`.
 
 Open on `percept maps show tasks --format md` before planning, so the
-next item is picked rather than re-derived; close it with its outcome
-at commit.
+next item is picked rather than re-derived; close it at commit, with
+the commit in the change's why.
 
 ## Add a map
 
 A map is declared by a TOML file at `.percept/schemas/<name>.toml`;
-the next `percept maps` command folds it. Kinds are lowercase, each
-with a gloss a reader meets in `maps list --format md`, and a node
-kind may list the properties a node must carry. `headlines` names the
-kinds the prompt carries; `settles` names the pair a `resolves` edge
-joins.
+the next `percept maps` command folds it. Kinds are lowercase; a gloss
+is optional, written when the name does not say it all, and a reader
+meets it in `maps list --format md`. A node kind may list the
+properties a node must carry, and `state = [...]` the values its
+`state` may hold - a set, no value open by position; a node of that
+kind names one when added. `headlines` names the kinds the prompt
+carries.
 
 ```toml
 name = "glossary"
@@ -149,20 +153,19 @@ purpose = "what a term means in this project, so a word is not redefined"
 headlines = ["term"]
 
 [[node]]
-name = "term"
+kind = "term"
 gloss = "a word and the meaning this project gives it, in its `meaning` property"
 requires = ["meaning"]
 
 [[edge]]
-name = "relates"
-gloss = "from a term to one it is defined against"
+kind = "relates"
 from = "term"
 to = "term"
 ```
 
 `decisions` and `tasks` are built in as the same TOML; a project file
-of the same name extends one - keep every kind, headline, and settles
-entry, add more - and is refused if it drops any, since the log and
+of the same name extends one - keep every kind and headline, add
+more - and is refused if it drops any, since the log and
 the render rest on them. `index` cannot be declared: it is this
 directory's index. Add a row to `.percept/index.md` so a reader finds
 the new map.
@@ -184,11 +187,13 @@ percept maps add-edge decisions --kind supersedes \
   --from 'decision:<new>' --to 'decision:<old>' --source $id
 ```
 
-The old node leaves the headlines and renders as `was` under its
-successor, one hop away. A user-written node is the user's landmark:
-the model may attach edges to it, but `revise_map` refuses to remove it,
-to remove a user-written edge, or to remove a model node a user edge
-touches. Removing any node drops its edges with it; look before you do.
+The old node stays, one hop away, the `supersedes` edge printed under
+both. A user-written node is the user's landmark: the model may attach
+edges to it and set its `state`, and the map refuses anything else - a
+rename, another property, a removal, or removing a user-written edge.
+The same lock falls on a model node once the user has changed it: their
+why is the node's last change, printed wherever the node is, and the
+model's answer is a new node beside it, citing the prompt. Removing any node drops its edges with it; look before you do.
 Nothing already rendered moves when a node is added: questions keep
 their first-seen order and their raising prompt as the heading.
 

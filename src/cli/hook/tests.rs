@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
@@ -215,39 +216,23 @@ impl Fixture {
         self.log.append(&event).unwrap();
     }
 
-    /// Appends a `claim.confirmed` event for `node`, at `at`.
-    fn seed_confirmed(&self, map: &str, node: &Event, at: Timestamp) {
-        self.seed_judgment(
-            Payload::ClaimConfirmed {
-                map: map.to_string(),
-                node: node_id(node),
-            },
-            at,
-        );
-    }
-
-    /// Appends a `claim.disputed` event for `node`, with `why`, at `at`.
-    fn seed_disputed(&self, map: &str, node: &Event, why: &str, at: Timestamp) {
-        self.seed_judgment(
-            Payload::ClaimDisputed {
-                map: map.to_string(),
-                node: node_id(node),
-                why: why.to_string(),
-            },
-            at,
-        );
-    }
-
-    /// Appends the human's judgment `payload` at `at` - the moment a
-    /// "judged since" test needs to control.
-    fn seed_judgment(&self, payload: Payload, at: Timestamp) {
+    /// Appends a `node.changed` event for `node`, carrying only `why`,
+    /// at `at` - the moment a "gained" test needs to control.
+    fn seed_changed(&self, map: &str, node: &Event, why: &str, at: Timestamp) {
         let event = Event::restore(
             EventId::new(),
             Actor::Human(self.me),
             self.source(),
             None,
             at,
-            payload,
+            Payload::NodeChanged {
+                map: map.to_string(),
+                node: node_id(node),
+                name: None,
+                properties: BTreeMap::new(),
+                sources: Vec::new(),
+                why: Some(why.to_string()),
+            },
         );
         self.log.append(&event).unwrap();
     }
@@ -816,47 +801,29 @@ fn malformed_input_reports_an_error_without_blocking() {
     assert!(!err.to_string().is_empty());
 }
 
-/// A project schema with no `Settlement` - an `ideas` map, say - so a
-/// test can prove the open section is skipped by reading the schema,
-/// never by the map's name.
-const IDEAS_TOML: &str = r#"
-name = "ideas"
-purpose = "loose thoughts worth keeping"
-headlines = ["idea"]
-
-[[node]]
-name = "idea"
-gloss = "a loose thought"
-"#;
-
 #[test]
-fn a_first_session_with_history_shows_open_items_but_no_gained_section() {
+fn a_first_session_with_history_points_at_every_map_that_has_a_headline() {
     let fixture = Fixture::new();
     fixture.seed_node("decisions", "question", "why blue?", Timestamp::now());
     fixture.seed_node("tasks", "task", "ship it", Timestamp::now());
 
     let context = fixture.session_start("codex");
 
-    assert!(context.contains("open question (1)"), "{context:?}");
-    assert!(context.contains("open task (1)"), "{context:?}");
+    assert!(context.contains("percept maps show decisions --format md"), "{context:?}");
+    assert!(context.contains("percept maps show tasks --format md"), "{context:?}");
     assert!(!context.contains("decisions +"), "{context:?}");
     assert!(!context.contains("tasks +"), "{context:?}");
 }
 
 #[test]
-fn an_open_question_that_reopens_a_decision_says_which() {
+fn a_map_with_no_headline_yet_has_no_pointer() {
     let fixture = Fixture::new();
-    let at = Timestamp::now();
-    let question = fixture.seed_node("decisions", "question", "which parser?", at);
-    let decision = fixture.seed_node("decisions", "decision", "its own", at);
-    fixture.seed_edge("decisions", "resolves", &decision, &question);
-    let doubt = fixture.seed_node("decisions", "question", "does its own still fit?", at);
-    fixture.seed_edge("decisions", "reopens", &doubt, &decision);
+    fixture.seed_node("tasks", "task", "ship it", Timestamp::now());
 
     let context = fixture.session_start("codex");
 
-    assert!(context.contains("q2 \"does its own still fit?\" reopens d1"), "{context:?}");
-    assert!(context.contains("open question (1)"), "{context:?}");
+    assert!(context.contains("percept maps show tasks --format md"), "{context:?}");
+    assert!(!context.contains("percept maps show decisions --format md"), "{context:?}");
 }
 
 #[test]
@@ -870,7 +837,10 @@ fn every_session_start_ends_with_the_recording_rules() {
         let rules = context.rsplit("\n\n").next().unwrap();
         assert!(rules.starts_with("recording\n"), "{context:?}");
         assert!(rules.contains("percept maps record decisions --actor agent --source <prompt id>"));
-        assert!(rules.contains("A node marked disputed carries the human's why: never propose it again"));
+        assert!(rules.contains(
+            "A node whose last change is the user's carries their why: never propose it again"
+        ));
+        assert!(rules.contains("why is the change's why, not a property"));
         assert!(rules.contains("Recorded to decisions:"));
     }
 }
@@ -901,138 +871,50 @@ fn a_returning_session_reports_counts_and_excludes_older_gains() {
 }
 
 #[test]
-fn a_node_disputed_after_the_previous_session_shows_its_why() {
+fn a_node_changed_by_the_human_since_the_previous_session_shows_who_and_why() {
     let fixture = Fixture::new();
     fixture.session_start("codex");
     let since = fixture.since();
 
-    let option = fixture.seed_agent_node(
+    let decision = fixture.seed_agent_node(
         "decisions",
-        "option",
+        "decision",
         "a terminal render of the since-cut, the page later",
         since.minus_minutes(120).unwrap(),
     );
-    fixture.seed_disputed(
+    fixture.seed_changed(
         "decisions",
-        &option,
+        &decision,
         "never proposed",
         since.minus_minutes(-30).unwrap(),
     );
 
     let context = fixture.session_start("codex");
 
-    assert!(context.contains("judged since your last session (1)"), "{context:?}");
     assert!(
         context.contains(
-            "option \"a terminal render of the since-cut, the page later\" \u{b7} disputed: \"never proposed\""
+            "decision \"a terminal render of the since-cut, the page later\" \u{b7} changed by human: \"never proposed\""
         ),
         "{context:?}"
     );
 }
 
 #[test]
-fn a_node_confirmed_shows_confirmed_with_no_why() {
-    let fixture = Fixture::new();
-    fixture.session_start("codex");
-    let since = fixture.since();
-
-    let decision = fixture.seed_agent_node(
-        "decisions",
-        "decision",
-        "percept review serves a local web page",
-        since.minus_minutes(120).unwrap(),
-    );
-    fixture.seed_confirmed("decisions", &decision, since.minus_minutes(-30).unwrap());
-
-    let context = fixture.session_start("codex");
-
-    assert!(
-        context.contains("decision \"percept review serves a local web page\" \u{b7} confirmed"),
-        "{context:?}"
-    );
-    assert!(!context.contains("confirmed: "), "{context:?}");
-}
-
-#[test]
-fn a_judgment_from_before_the_previous_session_is_not_shown() {
-    let fixture = Fixture::new();
-    fixture.session_start("codex");
-    let since = fixture.since();
-
-    let decision = fixture.seed_agent_node(
-        "decisions",
-        "decision",
-        "an old decision",
-        since.minus_minutes(120).unwrap(),
-    );
-    fixture.seed_confirmed("decisions", &decision, since.minus_minutes(90).unwrap());
-
-    let context = fixture.session_start("codex");
-
-    assert!(!context.contains("judged since your last session"), "{context:?}");
-}
-
-#[test]
-fn disputed_lines_come_before_confirmed_ones() {
-    let fixture = Fixture::new();
-    fixture.session_start("codex");
-    let since = fixture.since();
-
-    let confirmed = fixture.seed_agent_node(
-        "decisions",
-        "decision",
-        "confirmed one",
-        since.minus_minutes(120).unwrap(),
-    );
-    fixture.seed_confirmed("decisions", &confirmed, since.minus_minutes(-10).unwrap());
-    let disputed = fixture.seed_agent_node(
-        "decisions",
-        "option",
-        "disputed one",
-        since.minus_minutes(120).unwrap(),
-    );
-    fixture.seed_disputed(
-        "decisions",
-        &disputed,
-        "why not",
-        since.minus_minutes(-20).unwrap(),
-    );
-
-    let context = fixture.session_start("codex");
-
-    let judged = context.split("judged since your last session").nth(1).unwrap();
-    let disputed_at = judged.find("disputed one").unwrap();
-    let confirmed_at = judged.find("confirmed one").unwrap();
-    assert!(disputed_at < confirmed_at, "{context:?}");
-}
-
-#[test]
-fn no_judgment_means_no_judged_since_block() {
+fn a_gained_node_never_changed_carries_no_changed_by_mark() {
     let fixture = Fixture::new();
     fixture.session_start("codex");
     let since = fixture.since();
     fixture.seed_node(
         "decisions",
         "question",
-        "unjudged",
+        "unchanged",
         since.minus_minutes(-10).unwrap(),
     );
 
     let context = fixture.session_start("codex");
 
-    assert!(!context.contains("judged since your last session"), "{context:?}");
-}
-
-#[test]
-fn a_first_session_prints_no_judged_block_even_with_judgments() {
-    let fixture = Fixture::new();
-    let decision = fixture.seed_agent_node("decisions", "decision", "a decision", Timestamp::now());
-    fixture.seed_confirmed("decisions", &decision, Timestamp::now());
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("first session here"), "{context:?}");
-    assert!(!context.contains("judged since your last session"), "{context:?}");
+    assert!(context.contains("question \"unchanged\""), "{context:?}");
+    assert!(!context.contains("unchanged\" \u{b7} changed by"), "{context:?}");
 }
 
 #[test]
@@ -1063,55 +945,6 @@ fn resolving_an_old_question_does_not_report_it_as_gained() {
     assert!(context.contains("decisions +1"), "{context:?}");
     assert!(context.contains("decision \"a fresh decision\""), "{context:?}");
     assert!(!context.contains("an old question"), "{context:?}");
-}
-
-#[test]
-fn more_than_five_open_items_shows_five_and_a_correct_more_count() {
-    let fixture = Fixture::new();
-    for n in 1..=6 {
-        fixture.seed_node("decisions", "question", &format!("question {n}"), Timestamp::now());
-    }
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("open question (6, showing 5)"), "{context:?}");
-    for n in 1..=5 {
-        assert!(context.contains(&format!("question {n}")), "{context:?}");
-    }
-    assert!(!context.contains("question 6"), "{context:?}");
-    assert!(context.contains("+1 more"), "{context:?}");
-}
-
-#[test]
-fn a_settled_question_s_decision_does_not_itself_count_as_open() {
-    // decisions' headline_kinds is ["question", "decision"], and
-    // nothing ever resolves a decision node itself - only the settled
-    // kind (`settlement.of`, "question" here) can be open, or every
-    // decision misreports as one.
-    let fixture = Fixture::new();
-    let question = fixture.seed_node("decisions", "question", "settled one", Timestamp::now());
-    let decision = fixture.seed_node("decisions", "decision", "the answer", Timestamp::now());
-    fixture.seed_edge("decisions", "resolves", &decision, &question);
-    fixture.seed_node("decisions", "question", "still open", Timestamp::now());
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("open question (1)"), "{context:?}");
-    assert!(context.contains("still open"), "{context:?}");
-    assert!(!context.contains("settled one"), "{context:?}");
-    assert!(!context.contains("the answer"), "{context:?}");
-}
-
-#[test]
-fn a_map_without_settlement_has_no_open_section() {
-    let fixture = Fixture::new().with_extra_schema("ideas", IDEAS_TOML);
-    fixture.seed_node("ideas", "idea", "a loose thought", Timestamp::now());
-    fixture.seed_node("decisions", "question", "settled how?", Timestamp::now());
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("open question (1)"), "{context:?}");
-    assert!(!context.contains("open idea"), "{context:?}");
 }
 
 #[test]
@@ -1244,7 +1077,10 @@ fn a_re_citation_replaces_the_one_checked() {
 }
 
 #[test]
-fn a_superseded_decisions_seen_file_is_not_checked() {
+fn a_superseded_decision_is_still_a_headline_and_still_checked() {
+    // The core keeps no notion of "superseded" - a `supersedes` edge is
+    // a fact between two headline nodes, not a reason to skip one of
+    // them.
     let fixture = Fixture::new();
     let citation = fixture.seed_citation(
         "src/gone.rs",
@@ -1271,11 +1107,12 @@ fn a_superseded_decisions_seen_file_is_not_checked() {
 
     let context = fixture.session_start("codex");
 
-    assert!(!context.contains("changed since recorded"), "{context:?}");
+    assert!(context.contains("changed since recorded"), "{context:?}");
+    assert!(context.contains("src/gone.rs gone"), "{context:?}");
 }
 
 #[test]
-fn pointer_names_first_open_item_in_schema_fold_order() {
+fn a_map_with_a_headline_points_at_its_own_render() {
     let fixture = Fixture::new();
     fixture.seed_node(
         "tasks",
@@ -1287,11 +1124,8 @@ fn pointer_names_first_open_item_in_schema_fold_order() {
 
     let context = fixture.session_start("codex");
 
-    let pointer = context.lines().find(|line| line.starts_with("fragment:")).unwrap();
-    assert!(
-        pointer.contains("percept maps show decisions --around"),
-        "{pointer:?}"
-    );
+    assert!(context.contains("percept maps show tasks --format md"), "{context:?}");
+    assert!(context.contains("percept maps show decisions --format md"), "{context:?}");
 }
 
 #[test]

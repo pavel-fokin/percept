@@ -281,7 +281,7 @@ fn a_text_term_matches_every_payload_kind() {
         Payload::NodeRemoved {
             map: "tasks".to_string(),
             node: NodeId::new(),
-            reason: "deployed already".to_string(),
+            why: "deployed already".to_string(),
             sources: Vec::new(),
         },
         Payload::EdgeAdded {
@@ -297,6 +297,7 @@ fn a_text_term_matches_every_payload_kind() {
             from: NodeId::new(),
             to: NodeId::new(),
             sources: Vec::new(),
+            why: "deployed already".to_string(),
         },
     ];
     let query = EventQuery {

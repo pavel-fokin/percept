@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::core::testing::{human, schemas, scope, source, source_at, FakeLog};
-use crate::core::{Actor, Event, NodeId, NodeRef};
+use crate::core::{Actor, Change, Event, NodeId, NodeRef};
 use crate::shared::Timestamp;
 
 fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
@@ -261,9 +261,18 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
         name: "Built both".to_string(),
         properties: BTreeMap::from([("summary".to_string(), "side by side".to_string())]),
         sources: vec![EventId::new()],
-        actor: Actor::Human(me),
-        added_at: Timestamp::now(),
-        changed_at: Timestamp::now(),
+        history: vec![
+            Change {
+                actor: Actor::Human(me),
+                at: Timestamp::now(),
+                why: None,
+            },
+            Change {
+                actor: Actor::Agent,
+                at: Timestamp::now(),
+                why: Some("looked stale".to_string()),
+            },
+        ],
         seq: 1,
     };
 
@@ -276,7 +285,9 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
     assert_eq!(line["sources"][0], node.sources[0].as_uuid().to_string());
     assert_eq!(line["actor"]["kind"], "human");
     assert_eq!(line["actor"]["id"], me.unwrap().as_uuid().to_string());
-    assert_eq!(line["added_at"], node.added_at.to_string());
+    assert_eq!(line["added_at"], node.added().at.to_string());
+    assert_eq!(line["changed_by"], "agent");
+    assert_eq!(line["changed_why"], "looked stale");
 }
 
 #[test]
@@ -338,69 +349,6 @@ fn an_edge_line_names_its_ends_as_kind_and_name() {
     assert_eq!(line["from"], "file:src/main.rs");
     assert_eq!(line["to"], "package:clap");
     assert_eq!(line["sources"], serde_json::json!([]));
-}
-
-#[test]
-fn a_node_line_omits_standing_and_dispute_for_a_claim_nobody_has_judged() {
-    let events = [Event::new(
-        Actor::Agent,
-        source("test"),
-        None,
-        Payload::NodeAdded {
-            map: "decisions".to_string(),
-            node: NodeId::new(),
-            kind: "decision".to_string(),
-            name: "Rust".to_string(),
-            properties: BTreeMap::new(),
-            sources: Vec::new(),
-            seq: 0,
-        },
-    )];
-    let map = Map::fold(crate::core::testing::decisions(), &scope(), &events).unwrap();
-    let node = map.find("decision", "Rust").unwrap();
-
-    let line: serde_json::Value = serde_json::from_str(&encode_node(&map, node, true)).unwrap();
-
-    assert_eq!(line["standing"], "claimed");
-    assert!(line.get("dispute").is_none());
-}
-
-#[test]
-fn a_node_line_carries_a_disputed_standing_and_its_why() {
-    let node_id = NodeId::new();
-    let events = [
-        Event::new(
-            Actor::Agent,
-            source("test"),
-            None,
-            Payload::NodeAdded {
-                map: "decisions".to_string(),
-                node: node_id,
-                kind: "decision".to_string(),
-                name: "Rust".to_string(),
-                properties: BTreeMap::new(),
-                sources: Vec::new(),
-                seq: 0,
-            },
-        ),
-        Event::new(
-            Actor::Human(human()),
-            source("test"),
-            None,
-            Payload::ClaimDisputed {
-                map: "decisions".to_string(),
-                node: node_id,
-                why: "never proposed".to_string(),
-            },
-        ),
-    ];
-    let map = Map::fold(crate::core::testing::decisions(), &scope(), &events).unwrap();
-    let node = map.find("decision", "Rust").unwrap();
-
-    let line: serde_json::Value = serde_json::from_str(&encode_node(&map, node, true)).unwrap();
-
-    assert_eq!(line["standing"], "disputed");
-    assert_eq!(line["dispute"], "never proposed");
 }
 
 fn map_with_a_decision() -> Map {

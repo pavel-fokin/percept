@@ -39,8 +39,8 @@ properties hold.
 | Property | The human gets | The mechanism |
 |---|---|---|
 | Visibility | What the agent added to our model of the system since I last looked. Durable semantic changes, never the transcript. | The since-cut of a map's headline kinds, sized to one sitting. |
-| Correctability | "This part is wrong," said once, and it outlives the session. | A `disputes` edge from the human and a standing the fold derives, in the same log as the claim. |
-| Continuity | The next agent does not start from zero. It inherits the model with its evidence, its standing, the corrections, and the disagreements. | The session-start cut carries standing and the human's words, in any client. |
+| Correctability | "This part is wrong," said once, and it outlives the session. | A `node.changed` from the human carrying only a why, kept on the node as its last change, and a rank lock that stops the agent rewriting it. |
+| Continuity | The next agent does not start from zero. It inherits the model with its evidence, its standing, the corrections, and the disagreements. | The session-start cut carries each gained node's last change and the human's words, in any client. |
 
 This is what "keep humans in cognitive control" means. Not approval
 of every action. The ability to see, correct, and keep what was
@@ -49,7 +49,7 @@ control is the promise.
 
 Confidence is not a fourth property. A number the agent attaches to
 its own claim is a ranking, and percept does not rank. Evidence and
-standing say the same thing without the number.
+the node's last change say the same thing without the number.
 
 ## What proves it wrong
 
@@ -60,8 +60,8 @@ project.
   job exists, but not at this price.
 - The review is finished unread. Visibility is not consumed: the cut
   is too big, or it says nothing they did not know.
-- A correction does not change agent behaviour. A disputed claim comes
-  back, or a settled decision is reopened anyway. Continuity failed.
+- A correction does not change agent behaviour. A claim the human
+  wrote on comes back, or a settled decision is reopened anyway. Continuity failed.
 - The client's own memory alone shows the same drop in reopenings.
   Then percept delivered memory, not control, and the three properties
   added ceremony.
@@ -116,7 +116,7 @@ press `f`. The page shows the two lines the next session will start
 with. Two keystrokes and one sentence.
 
 **The next session, in Codex.** The same binary prints the start
-block. It carries the review: one claim seen, one disputed, with their
+block. It carries the review: the claim the human wrote on, with their
 sentence. The model builds on the seen decision and does not propose
 the disputed alternative. It records the correction with a
 `supersedes` edge, so the wrong claim stays one hop away and leaves
@@ -141,9 +141,9 @@ session starts from the answer.
 | 5 | The start block carries the recording rules | Built 2026-09-10 | Recording in a stranger's project |
 | 6 | A push hook at the yes moment | To build | Recording as a habit; the queue |
 | 7 | A `reopens` edge in the decisions schema, from a question to the decision it challenges | Built 2026-09-10 | An agent disputes without rewriting; the review raises it |
-| 8 | `claim.confirmed`, `claim.disputed`, `review.finished`; standing in the fold; `maps confirm` and `maps dispute` | Built 2026-09-10 | Correctability |
-| 9 | `percept review`: the page, wrong-only, finish as the batch | Built 2026-09-10 | Visibility, correctability |
-| 10 | The start block carries standing and the human's words | Built 2026-09-10 | Continuity |
+| 8 | A node's last change, `changed_by` and `changed_why`, and the rank lock; Wrong is a `node.changed` with a why, `maps change-node` from the shell | Built 2026-09-10 as standing, rebuilt 2026-09-11 | Correctability |
+| 9 | `percept review`: the page, wrong-only; the cut is since the review last opened, no Finish | Built 2026-09-10, Finish removed 2026-09-11 | Visibility, correctability |
+| 10 | The start block carries who last changed each gained node and why | Built 2026-09-10, rebuilt 2026-09-11 | Continuity |
 | 11 | A tally per session | To build | Falsifiability |
 | 12 | The hook records prompts and replies; tool capture only behind `init --capture` | Built 2026-09-10 | Trust; the fold stays small |
 | 13 | Release binaries and a curl install | To build | A stranger installs |
@@ -191,7 +191,7 @@ session and by hand until change 11 lands, say which property failed.
 - SDKs and the crate split. Both wait for a second consumer.
 - Tool capture. Four days of this repo put 74 MB in the log, and 73
   of them are tool calls and their results. No MVP mechanism reads
-  them: the since-cut, standing, and the start block run on prompts,
+  them: the since-cut and the start block run on prompts,
   replies, and map events, and `file.cited` names the text a claim
   rests on. What they cost is a stranger's secrets under `~/.percept`
   and a fold that reads everything to find a little. Capture stays
@@ -214,6 +214,6 @@ write and agents only read. Memco pools abstracted patterns across
 teams.
 
 None of them lets the human say "wrong" on an agent's claim so that it
-outlives the session, and none derives the human's standing on what
-the agent wrote. That is the ground the hypothesis stands on, and it
+outlives the session, and none keeps the human's correction on the
+node the agent wrote. That is the ground the hypothesis stands on, and it
 is the part not built.

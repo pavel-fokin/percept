@@ -27,9 +27,9 @@ const NAME: &str = "read_map";
 const DESCRIPTION: &str = "Read one cognitive map by name, whole or cut to \
     a fragment: around one node to a depth, since an instant, of some \
     kinds. The maps are the ones the catalogue lists. Returns JSONL: \
-    first a line naming the map's node and edge kinds, each with one \
-    line on what it is - read it before choosing an `around` selector, \
-    since a kind's name alone can mislead. Then a line counting what \
+    first a line naming the map's node and edge kinds, with a gloss on \
+    a kind whose name does not say it all - read it before choosing an \
+    `around` selector. Then a line counting what \
     was shown of the whole and how many edges cross the cut, then \
     every node, then every edge, each with the event ids it cites. A \
     crossing edge is where to widen when an exception or a \

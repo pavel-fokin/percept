@@ -26,8 +26,10 @@ use std::path::{Path, PathBuf};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::core::{cited_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source};
-use crate::mapstore::{block_header, capped_lines, judged_since_block, latest_session_per_client, line_id};
+use crate::core::{
+    cited_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source, Written,
+};
+use crate::mapstore::{block_header, capped_lines, changed_line, last_session, line_id};
 use crate::shared::Timestamp;
 use crate::store::TurnState;
 use crate::workspace;
@@ -168,10 +170,9 @@ pub fn run(
 /// source recorded against this project, if any - what a fragment cuts
 /// the log to since - records a fresh one for the next call to find,
 /// and folds every log-backed schema to report what each map gained
-/// since then, what is still open on it, and one concrete next step.
-/// What "gained" and "open" mean is read off `Schema` - `headline_kinds`
-/// and `settlement` - never off a map's name, so a project's own
-/// schema (an `ideas` map with no settlement, say) reports without any
+/// since then and where to read the rest. What "gained" means is read
+/// off `Schema::headline_kinds`, never off a map's name, so a
+/// project's own schema (an `ideas` map, say) reports without any
 /// code naming it.
 fn start_session(
     source: &Source,
@@ -195,16 +196,11 @@ fn start_session(
     let mut sections = vec![header];
     if let Some(at) = since {
         sections.push(gained_block(&maps, at));
-        if let Some(block) = judged_since_block(&maps, at) {
-            sections.push(block);
-        }
     }
     if let Some(block) = changed_since_recorded_block(&maps, &events, checkout) {
         sections.push(block);
     }
-    let (open_blocks, pointer) = open_blocks_and_pointer(&maps);
-    sections.extend(open_blocks);
-    sections.extend(pointer);
+    sections.extend(map_pointers(&maps));
     sections.push(RULES.to_string());
 
     Ok(json!({
@@ -235,19 +231,21 @@ recording
 - A claim that rests on a file cites the text it read: an indented line, cites src/path.rs:10-20, under the node.
 - A decision that changes an earlier one adds a supersedes <id> line under it; never remove a node.
 - A decision that no longer seems to fit is not yours to rewrite: raise a question with a reopens <id> line under it, and let the user settle it.
-- A node marked disputed carries the human's why: never propose it again; a correction the user agrees is a new decision with a supersedes line.
-- Close a task by changing it, not by adding a node: t4 on its own line, then state \"done\" and outcome \"<commit>: what happened\" indented under it (state \"dropped\" and why for one dropped, state \"open\" to reopen one). A task the user wrote takes only state and outcome from you; its name and why are theirs.
+- A node whose last change is the user's carries their why: never propose it again, and never rewrite or remove it - the map refuses; a correction the user agrees is a new decision with a supersedes line.
+- A task is added with its why and state \"open\": task \"what to do\", then why \"what it costs undone\" and state \"open\" indented under it; the map refuses one without both.
+- Close a task by changing it, not by adding a node: t4 on its own line, then state \"done\" and why \"<commit>: what happened\" indented under it - under an existing node, why is the change's why, not a property (state \"dropped\" and why for one dropped, state \"open\" to reopen one). A task the user wrote takes only state from you; its name and why are theirs.
 - Close the session with one line naming what was recorded: Recorded to decisions: q1, d1, o1.";
 
 /// What each folded map gained since `since`: a counts line for every
-/// map, in fold order, then up to `mapstore::judge::LIMIT` lines per
-/// map that gained anything - a node's `added_at` is compared
-/// directly, not `Map::since`, which would also surface an older node
-/// a fresh edge only touched.
+/// map, in fold order, then up to `mapstore::LIMIT` lines per map that
+/// gained anything - a node's last change is compared directly, not
+/// `Map::since`, which would also surface an older node a fresh edge
+/// only touched. Each line carries who last changed the node, and why,
+/// when its last change is not its addition.
 fn gained_block(maps: &[Map], since: Timestamp) -> String {
     let per_map: Vec<Vec<&Node>> = maps
         .iter()
-        .map(|map| map.headlines().filter(|node| node.changed_at >= since).collect())
+        .map(|map| map.headlines().filter(|node| node.changed().at >= since).collect())
         .collect();
 
     let counts = maps
@@ -265,7 +263,13 @@ fn gained_block(maps: &[Map], since: Timestamp) -> String {
         lines.extend(capped_lines(
             gained
                 .iter()
-                .map(|node| format!("{} {} {:?}", line_id(map, node), node.kind, node.name))
+                .map(|node| {
+                    let mut line = format!("{} {} {:?}", line_id(map, node), node.kind, node.name);
+                    if let Some(changed) = changed_line(node) {
+                        line.push_str(&format!(" \u{b7} {changed}"));
+                    }
+                    line
+                })
                 .collect(),
         ));
     }
@@ -407,55 +411,16 @@ fn normalize(text: &str) -> String {
     lines[start..end].join("\n")
 }
 
-/// One `open {kind} (...)` block per map that has open items - a map
-/// with neither a `Settlement` nor a headline kind that declares
-/// states (an `ideas` map, say) is skipped entirely, never by name,
-/// since `Map::open` is empty there - plus the fragment pointer at the
-/// first open item found, walking maps in fold order.
-fn open_blocks_and_pointer(maps: &[Map]) -> (Vec<String>, Option<String>) {
-    let mut blocks = Vec::new();
-    let mut pointer = None;
-
-    for map in maps {
-        let open: Vec<&Node> = map.open().collect();
-        let Some(first) = open.first() else {
-            continue;
-        };
-
-        let mut lines = vec![block_header(&format!("open {}", first.kind), open.len())];
-        lines.extend(capped_lines(
-            open.iter()
-                .map(|node| {
-                    let mut line = format!("{} {:?}", line_id(map, node), node.name);
-                    for decision in map.reopens(node.id) {
-                        line.push_str(&format!(" reopens {}", line_id(map, decision)));
-                    }
-                    line
-                })
-                .collect(),
-        ));
-        blocks.push(lines.join("\n"));
-
-        pointer.get_or_insert_with(|| {
-            format!(
-                "fragment: percept maps show {} --around {}",
-                map.schema().name,
-                line_id(map, open[0])
-            )
-        });
-    }
-
-    (blocks, pointer)
+/// One pointer line per map that has a headline node, so a session
+/// start names every map worth opening without listing what is in it -
+/// the render behind `percept maps show` is what says that.
+fn map_pointers(maps: &[Map]) -> Vec<String> {
+    maps.iter()
+        .filter(|map| map.headlines().next().is_some())
+        .map(|map| format!("percept maps show {} --format md", map.schema().name))
+        .collect()
 }
 
-/// The latest `session.started` event this exact source (client name
-/// and project path) recorded, if any - `None` on a project's first
-/// session with this client.
-fn last_session(events: &[Event], source: &Source) -> Option<Timestamp> {
-    latest_session_per_client(events, &source.scope())
-        .get(&(source.name.clone(), source.path.clone()))
-        .copied()
-}
 
 /// `source.path`'s last component, the name a reader knows the project
 /// by - falling back to the whole path on the rare root with none.

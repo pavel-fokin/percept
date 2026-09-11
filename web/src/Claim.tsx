@@ -1,27 +1,15 @@
-import { QUIET } from "./Sheet";
-import Mark from "./Mark";
 import { formatDate, plural, summarize } from "./format";
-import type { OptionRow as OptionRowT, Row as RowT, Source as SourceT, Standing } from "./types";
+import type { EdgeRef as EdgeRefT, OptionRow as OptionRowT, Row as RowT, Source as SourceT } from "./types";
 
-const standingText: Partial<Record<Standing, { text: string; color: string }>> = {
-  seen: { text: "Seen by you.", color: "text-[var(--ink-3)]" },
-  confirmed: { text: "Confirmed by you.", color: "text-[var(--agree)]" },
-  disputed: { text: "Marked wrong by you.", color: "text-[var(--object)]" },
-};
-
-function StandingText({ standing }: { standing: Standing }) {
-  const entry = standingText[standing];
-  if (!entry) return null;
-  return <p className={entry.color}>{entry.text}</p>;
-}
-
-function Dispute({ dispute }: { dispute: string | null }) {
-  if (!dispute) return null;
+/** One quiet line naming who last changed a row, and why, when its
+ * last change is not its addition. */
+function ChangedBy({ base }: { base: OptionRowT }) {
+  if (base.changed_at === base.added_at) return null;
   return (
-    <div className="mt-1 border-l-2 border-[var(--object)] pl-4 font-serif">
-      <p className="text-[var(--ink-2)]">Why you marked it wrong.</p>
-      <p>{dispute}</p>
-    </div>
+    <p className="text-[var(--ink-3)]">
+      changed by {base.changed_by}
+      {base.changed_why ? `: ${base.changed_why}` : ""}
+    </p>
   );
 }
 
@@ -152,49 +140,39 @@ function Sources({ sources }: { sources: SourceT[] }) {
   );
 }
 
-/** Wrong and Confirm, on a row or on a folded option - the sketch's
- * `acts()`, ported label for label: "Wrong instead" once confirmed,
- * "Confirm instead" once disputed, Confirm hidden once confirmed. */
-function Acts({
-  standing,
-  onDispute,
-  onConfirm,
-}: {
-  standing: Standing;
-  onDispute: () => void;
-  onConfirm: () => void;
-}) {
+/** One quiet line for an edge touching a row: `<kind> <id>, <name>.`
+ * when the edge runs from the row, `<id>, <name>, <kind>.` when it runs
+ * into it - the edge read as the sentence it names, no kind meaning
+ * added past its name. */
+function Edge({ edge }: { edge: EdgeRefT }) {
+  return (
+    <p className="text-[var(--ink-2)]">
+      {edge.dir === "from"
+        ? `${edge.kind} ${edge.node.id}, ${edge.node.name}.`
+        : `${edge.node.id}, ${edge.node.name}, ${edge.kind}.`}
+    </p>
+  );
+}
+
+/** Wrong, on a row or on a folded option. */
+function Acts({ onWrong }: { onWrong: () => void }) {
   return (
     <div className="mt-1 flex items-center gap-2">
       <button
         type="button"
-        onClick={onDispute}
+        onClick={onWrong}
         className="min-h-10 rounded-md border-[1.5px] border-[var(--rule)] px-3.5 py-2 font-bold text-[var(--ink)] hover:border-[var(--object)] hover:text-[var(--object)] focus-visible:border-[var(--object)] focus-visible:text-[var(--object)] active:border-[var(--object)] active:text-[var(--object)]"
       >
-        {standing === "confirmed" ? "Wrong instead" : "Wrong"}
+        Wrong
       </button>
-      {standing !== "confirmed" && (
-        <button type="button" onClick={onConfirm} className={`${QUIET} hover:text-[var(--agree)]`}>
-          {standing === "disputed" ? "Confirm instead" : "Confirm"}
-        </button>
-      )}
     </div>
   );
 }
 
-function OptionRow({
-  option,
-  onDispute,
-  onConfirm,
-}: {
-  option: OptionRowT;
-  onDispute: (id: string) => void;
-  onConfirm: (id: string) => void;
-}) {
+function OptionRow({ option, onWrong }: { option: OptionRowT; onWrong: (id: string) => void }) {
   return (
     <li className="grid grid-cols-[auto_1fr] items-start gap-2.5 py-2.5">
       <div className="flex flex-col items-start gap-1 text-[var(--ink-2)]">
-        <Mark standing={option.standing} />
         <span className="text-[var(--ink)]">{option.id}</span>
       </div>
       <div>
@@ -206,33 +184,26 @@ function OptionRow({
             <i>because</i> {option.why}
           </p>
         )}
-        <StandingText standing={option.standing} />
-        <Dispute dispute={option.dispute} />
-        <Acts
-          standing={option.standing}
-          onDispute={() => onDispute(option.id)}
-          onConfirm={() => onConfirm(option.id)}
-        />
+        <ChangedBy base={option} />
+        <Acts onWrong={() => onWrong(option.id)} />
       </div>
     </li>
   );
 }
 
-/** One row of the queue: a claim's mark, headline, why, what it
- * replaced or reopens, its standing, the alternatives weighed against
- * it, and the Wrong/Confirm acts on it and on each alternative - the
- * sketch's `.claim`. `focused` renders the keyboard-navigation
- * highlight: an inset bar on a phone, an underlined id from 40rem. */
+/** One row of the queue: a claim's headline, why, every edge that
+ * touches it, who last changed it and why, the alternatives related to
+ * its group, and the Wrong act on it and on each alternative.
+ * `focused` renders the keyboard-navigation highlight: an inset bar on
+ * a phone, an underlined id from 40rem. */
 export default function Claim({
   claim,
   focused,
-  onDispute,
-  onConfirm,
+  onWrong,
 }: {
   claim: RowT;
   focused: boolean;
-  onDispute: (id: string) => void;
-  onConfirm: (id: string) => void;
+  onWrong: (id: string) => void;
 }) {
   return (
     <li
@@ -243,7 +214,6 @@ export default function Claim({
       }
     >
       <div className="flex items-center gap-2.5 text-[var(--ink-2)]">
-        <Mark standing={claim.standing} />
         <span
           className={
             "font-bold text-[var(--ink)]" +
@@ -260,33 +230,21 @@ export default function Claim({
           <i>because</i> {claim.why}
         </p>
       )}
-      {claim.was && (
-        <p className="text-[var(--ink-2)]">
-          Replaced {claim.was.id}, {claim.was.name}.
-        </p>
-      )}
-      {claim.reopens.map((decision) => (
-        <p key={decision.id} className="text-[var(--focus)]">
-          It reopens {decision.id}, {decision.name}, which stands until you settle this.
-        </p>
+      {claim.edges.map((edge) => (
+        <Edge key={`${edge.kind}-${edge.dir}-${edge.node.id}`} edge={edge} />
       ))}
-      <StandingText standing={claim.standing} />
-      <Dispute dispute={claim.dispute} />
+      <ChangedBy base={claim} />
       <Sources sources={claim.sources} />
-      {claim.options.length > 0 && (
-        <Fold summary={`${plural(claim.options.length, "One alternative", "alternatives")} weighed and lost`}>
+      {claim.related.length > 0 && (
+        <Fold summary={`${plural(claim.related.length, "One alternative", "alternatives")} weighed and lost`}>
           <ul className="ml-4 mt-2 list-none border-l-2 border-[var(--rule)] pl-4">
-            {claim.options.map((option) => (
-              <OptionRow key={option.id} option={option} onDispute={onDispute} onConfirm={onConfirm} />
+            {claim.related.map((option) => (
+              <OptionRow key={option.id} option={option} onWrong={onWrong} />
             ))}
           </ul>
         </Fold>
       )}
-      <Acts
-        standing={claim.standing}
-        onDispute={() => onDispute(claim.id)}
-        onConfirm={() => onConfirm(claim.id)}
-      />
+      <Acts onWrong={() => onWrong(claim.id)} />
     </li>
   );
 }

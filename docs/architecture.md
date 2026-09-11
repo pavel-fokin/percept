@@ -13,7 +13,7 @@ The core adds three things a memory lacks:
 | Property | What it means | Where it lives today |
 |---|---|---|
 | Evidence | A claim in a map cites the experience it came from. A reader can check it. | `source` on every node and edge event. |
-| Co-ownership | A map is shared by the human and the agent under landmark rules: a user-written node is never removed by the model, a decision is superseded and never deleted. The human confirms or disputes what the agent wrote. | `Map::apply`; the `actor` on a node. Confirmation is not built: see the surface below. |
+| Co-ownership | A map is shared by the human and the agent under one rank rule: a node's name and its removal belong to its writer and to anyone above, and a change from above locks the node below. The human's correction sits on the node as its last change. | `Map::apply`, W6; a node's `history` of `Change`s. |
 | One log | The log spans clients and projects. What one agent learned another can fold. | `~/.percept/percept.jsonl`, `Source` on every event. |
 
 The core is what carries those three. Anything that does not is a
@@ -33,9 +33,9 @@ them.
 | Experience is append-only and never changes. | The log store. |
 | A claim in a map cites the experience it came from. | `source` required on every map event. |
 | A map is folded deterministically from cognitive commits, and the fold has one implementation. | `Map::apply` in Rust. Nothing stops a second fold yet. |
-| The model never removes what a user wrote; a decision is superseded, never deleted. | `Map::apply` refuses; `revise_map` says to supersede. |
+| An actor renames or removes only its own node or one below its rank; a change from above is not undone from below. | `Map::apply`, W6. |
 | An alternative is recorded only with the reason it lost. | `requires` on the kind in its schema; the shared write path refuses a node missing one. |
-| A recorded claim is not the human's agreement; silence stays claimed. | Prose only. The surface below is the enforcement, not built. |
+| A recorded claim is not the human's agreement; silence stays claimed. | Prose. The core keeps no standing: a node's last `Change` says who touched it, and nothing says who agreed. |
 | percept never ranks, summarises, or answers; output is constant-size per event. | Prose, and the habit of the search tools. |
 | One log, one writer. | `App::commit` for the loop; the CLI writes on its own. |
 
@@ -53,29 +53,130 @@ rules need something to attach to.
 
 ## The core
 
-Small: events, maps, and the rules between them.
+Small: events, maps, and the rules between them. This section is the
+specification, written 2026-09-11: what the core holds, what may be
+done to it, and what must stay true. `src/core` implements it and
+nothing more.
 
-| Part | Holds |
+### Types
+
+```
+Actor     = Human(id?) | Agent | System
+rank      : Human → 2, Agent → 1, System → 1
+outranks(a, b)  = rank(a) > rank(b)
+owns(a, x)      = a == x.added.actor      (Agent == Agent: an agent carries no id yet)
+may(a, x)       = (owns(a, x) ∨ outranks(a, x.added.actor)) ∧ ¬outranks(x.touched_by, a)
+
+Schema    = { name, purpose, headlines: {kind}, node_kinds, edge_kinds }
+NodeKind  = { kind, gloss?, prefix, requires: {key}, states: {value} }
+EdgeKind  = { kind, gloss?, from: {kind}, to: {kind} }
+
+Change    = { actor, at, why? }
+Node      = { id, seq, kind, name, properties: key → value, sources: [EventId], history: [Change] }
+Edge      = { kind, from: NodeId, to: NodeId, sources, history: [Change] }
+Map       = { schema, nodes, edges }
+```
+
+`states` is a set: no value is the open one by position. A node and an
+edge keep every write that reached it as a `Change`: who, when, and
+why, when given. `added` is `history`'s first entry, `changed` its
+last - what a correction looks like on the node it corrects.
+`touched_by` is the highest-ranked actor in the history: the lock,
+which a later change from below does not lift.
+
+Invariants, true of every map:
+
+| | |
 |---|---|
-| Event | An append-only entry: id, actor, source, causation, time, payload. Never changes. |
-| Map, Schema | Nodes and edges folded from `node.added`, `node.changed`, `edge.added` and the removals. A schema names the kinds it allows and one line of purpose. |
-| Rules | Who may remove what; an option needs a why; a decision is superseded, never removed. One place, `Map::apply`. |
-| Selection, Fragment | A cut of a map around a node, since an instant, of some kinds, with counts of what the cut left out. |
-| Ports | Append, load, search the log; read and render a map. |
-| Format | The JSONL line. The contract every language speaks. |
+| I1 | `(kind, name)` is unique among live nodes. |
+| I2 | `(kind, from, to)` is unique among live edges. |
+| I3 | Every edge's `from` and `to` are live nodes. |
+| I4 | `seq` is minted per kind, monotonically, and never reused. |
+
+### Events
+
+Every event carries `id`, `actor`, `source`, `causation_id?`, and
+`created_at`. Five payloads change a map:
+
+```
+node.added    { map, node, seq, kind, name, properties, sources }
+node.changed  { map, node, name?, properties, sources, why? }
+node.removed  { map, node, why, sources }
+edge.added    { map, kind, from, to, sources }
+edge.removed  { map, kind, from, to, why, sources }
+```
+
+`why` is carried where something a reader has seen changes or goes. A
+new node's reason is its own property, when `requires` asks for one.
+
+### Write rules
+
+`Map::apply(mutation, actor)` checks these before anything is
+appended. A refusal is an error, and no event exists.
+
+| | Rule | On |
+|---|---|---|
+| W1 | `kind` is in the schema. | `node.added`, `edge.added` |
+| W2 | `name` is not blank; I1. A `why`, when given, is not blank. | `node.added`, `node.changed` with a name; every `why` |
+| W3 | `requires ⊆ keys(properties)`. | `node.added` |
+| W4 | When the kind declares states, `properties.state ∈ states`: required on add, checked when sent on change. | `node.added`, `node.changed` |
+| W5 | `from.kind ∈ edge_kind.from`, `to.kind ∈ edge_kind.to`; I2. | `edge.added` |
+| W6 | Rank. A rename, a property other than `state`, or a removal needs `may(actor, node)`. Dropping an edge, on its own or with a node it hangs on, needs `may(actor, edge)` and neither end touched from above the actor. `state` and a new edge are any actor's. | `node.changed`, `node.removed`, `edge.removed` |
+
+W6 is everything the core knows about who may do what, and no rule
+names a kind. Because `may` weighs who has touched the node, an agent
+cannot rewrite or remove a node the human has touched, and cannot
+take an edge off it. What it can
+still do is add a node and an edge beside it, which is how a decision
+is superseded, and the core never learns the word.
+
+A change that carries only `why` is legal. It is a comment, and it
+appends a `Change` like any change.
+
+### Fold rules
+
+`Map::replay(payload, actor, at)` applies what the log recorded. It
+checks structure only, so a log written before a rule still folds.
+
+| | |
+|---|---|
+| F1 | `node.added`: W1, I1; `seq = max(seq, next)`; insert with `history = [{actor, at}]`. |
+| F2 | `node.changed`: the node is live; apply `name`, merge `properties`, append `sources`; append `{actor, at, why}` to `history`. |
+| F3 | `node.removed`: the node is live; drop it and every edge on it; `seq` is not freed. |
+| F4 | `edge.added`: W1, I2, I3; insert with `history = [{actor, at}]`. |
+| F5 | `edge.removed`: the edge is live; drop it. |
+
+W3, W4, W5's ends, and W6 are never checked on fold.
+
+### Queries
+
+What the core reads out of a map, knowing no kind:
+
+```
+node(id) · find(kind, name) · resolve(short_id)
+headlines()                     nodes whose kind is in schema.headlines
+linked(id, edge_kind, dir)      the nodes across one edge kind, dir ∈ {from, to}
+since(at)                       nodes and edges with changed.at ≥ at
+Selection { around, depth, since, kinds } → Fragment { nodes, edges, left_out, crossing }
+```
+
+### Not in the core
+
+- Standing, read receipts, who has seen what. A since-cut runs from a
+  time the caller gives: the hook from its source's last
+  `session.started`, the review from its own, the shell from `--since`.
+- Open and settled, a settling pair, an order on states. A question
+  with no incoming `resolves` edge reads as open in the render, by eye.
+- A successor chain. An edge is printed as an edge: `d9 supersedes d7`.
+- A question to a node, or an obligation to answer one. That is a rule
+  in the text a session starts with.
+- Any kind or edge name: `decision`, `option`, `supersedes`, `reopens`,
+  `resolves`, `answers`, `blocks`.
 
 A schema is data: a TOML file at `.percept/schemas/<name>.toml`,
 which a loader outside the core parses and hands in. `decisions` and
 `tasks` ship as the same TOML, embedded, and a project file of the same
 name extends one without shrinking it. The core folds any schema it is handed.
-
-Two things belong here that the code does not have yet.
-
-- **Lifecycle on a schema.** A schema says which edge kinds move a node
-  between which states: `resolves` makes a question settled,
-  `supersedes` makes a decision past. The fold derives the state; the
-  renderer stops branching on kind names.
-- **The surface between contours.** Below.
 
 ### Contours of two kinds, one surface
 
@@ -89,41 +190,32 @@ kind is transparent to the system and the other opaque, and the core
 models a human no further than what crosses.
 
 The surface is where contours meet: the nodes more than one has
-touched. The rule "a recorded claim is not the human's agreement" names
-it, but today it has no operation behind it. A user-written node is a
-human's, a model node is an agent's, and a model node a human has read
-and not objected to is in limbo.
-
-The mechanism is one edge and one derived state, and it is the core's,
-not any one map's. Every schema carries it, the way every schema
-carries an actor on a node.
+touched. The core marks it with two things, and both are every map's,
+the way every node carries an actor.
 
 | Piece | What it is |
 |---|---|
-| `confirms`, `disputes` | An edge from a human contour to a node another contour wrote. An event like any other: it cites its prompt and never changes. |
-| Standing | Derived by the fold, per confirmer: claimed, confirmed by whom, disputed by whom. A user-written node is confirmed by its writer by construction. |
+| `history`'s last `Change` | Who last changed the node, and why. A human's "wrong" on an agent's node is a `node.changed` carrying a `why` and nothing else, and it stays on the node until the next change. |
+| The rank lock, W6 | A change from above is not undone from below. After the human's why, the agent may add beside the node and never rewrite it. |
 
-Only a human contour confirms. An agent confirming another agent's node
-is a second claim from inside the log, and the rule exists for the
-cognition whose head is outside it.
-
-Standing is a lifecycle keyed by actor, where the lifecycle above is
-keyed by edge kind; the two compose. A render shows standing where it
-matters, on a decision or a task, and not on evidence. Silence stays
-claimed, never rejected. Confirmation must cost a keystroke or a batch,
-or the human stops giving it and the state means nothing.
+Silence stays claimed and nothing marks agreement: the core keeps no
+standing and no read receipt. A model node the human read and left
+alone looks like one they never opened, and the tally in
+`docs/mvp.md` is what tells the two apart. A `confirms` and
+`disputes` edge with a standing derived per confirmer was the design
+until 2026-09-11; the decisions map holds why it lost.
 
 Who a human contour is stays open. The core has an actor kind for the
-human and no identity behind it. Standing per confirmer needs one only
-when a second person confirms, and the question waits for that person.
+human and no identity behind it. A `Change` per person needs one
+only when a second person writes, and the question waits for that person.
 
 The maps do not split by contour. One map per contour multiplies what a
 reader holds for a distinction the fold derives, so the contour is a
 view over one map and never a storage boundary. The mixing today is
-right; the surface becomes visible when it gets its one missing edge.
+right; the surface is the nodes whose last `Change` is not by their adder.
 
-This is what makes co-ownership an operation rather than a rule:
-agreement with provenance between contours.
+This is what makes co-ownership an operation rather than a rule: a
+correction with provenance between contours.
 
 The domain is now two modules. `core` holds experience and maps; `harness`
 holds the ports a loop needs to drive a model over them - `Model`, `Tool`,
@@ -131,8 +223,7 @@ holds the ports a loop needs to drive a model over them - `Model`, `Tool`,
 `core`. A Python SDK that folds a map never sees a `Model` trait.
 
 One thing did not move. The core keeps the name `Policy` for the
-ask-before-write gate, and the collaboration rule - who may remove what,
-an option needs a why, a decision is superseded - stays inside
+ask-before-write gate, and the collaboration rule, W6, stays inside
 `Map::apply` unnamed. Whether the core should reserve "policy" for the
 collaboration rule is open.
 
@@ -245,10 +336,8 @@ core. The three properties above are what the checks must show.
 
 1. The lib target. The harness ports are already out of `core`; a
    library beside the binary makes the shape checkable from outside.
-2. Lifecycle on schemas.
-3. The surface: the `confirms` and `disputes` edges, standing in the
-   fold, and a mark in the render. A `confirm` verb on `percept maps`
-   and a `y` on a row in the TUI are the two cheapest ways to give it.
+2. The surface, built 2026-09-11 as the rank lock and the last change
+   on a node. What remains is the tally that says whether it is read.
 
 ## Recommendation
 

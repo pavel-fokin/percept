@@ -4,61 +4,47 @@
 
 use std::fmt::Write as _;
 
-use crate::core::{Actor, EventId, Map, Node, Schema, Standing};
+use crate::core::{Actor, EdgeEnd, Map, Node, Schema, Written};
 use crate::store::ids;
 
-/// What every rendered map opens with, so a reader who lands on the
-/// file the way they'd land on a README knows not to hand-edit it.
-const PREAMBLE: &str = "Folded from the percept log for this project and rerendered on every \
-    write. Change it with `percept maps`, not by hand.";
-
-/// What the decisions map adds to the preamble: how the list below
-/// reads and where the detail it leaves out still lives.
-const DECISIONS_GUIDE: &str = "A `## contents` list, then every question at `##` in the order it \
-    was raised - its decision, what that decision replaced (`was`), and the alternatives \
-    weighed against it. Evidence and full detail: `percept maps show decisions --around \
-    'question:<name>'`. What changed lately: `percept maps show decisions --since 1d`.";
-
-/// What the tasks map adds to the preamble.
-const TASKS_GUIDE: &str = "A `## contents` list, then every open task at `##` in the order it \
-    was raised, each with why it matters and what it waits on. Done and dropped tasks follow \
-    under one `##` section per state, each with its outcome. A task's own history: `percept \
-    maps show tasks --around 'task:<name>'`. What changed lately: `percept maps show tasks \
-    --since 1d`.";
+/// What every rendered map opens with, so a reader who pastes it
+/// somewhere knows it is a fold, not a file to hand-edit.
+const PREAMBLE: &str = "Folded live from the percept log for this project, never written to a \
+    file. Change it with `percept maps`, not by hand.";
 
 /// `map` as Markdown: a heading and the preamble, then the map's body.
-/// The decisions map renders as a `## contents` list and then one `##`
-/// per question, first-seen order - see `push_decisions`; the tasks map
-/// the same way, then the done ones - see `push_tasks`. Every other
-/// schema keeps one `## <kind>` section per node kind that holds a node
-/// and a `## edges` section - see `push_by_kind`. Empty for a map with
-/// no nodes, past the preamble.
+/// A map with any headline kind renders as a `## contents` list and one
+/// `##` section per headline node, in the order `push_headlines` gives -
+/// see there. A map with none renders one `## <kind>` section per node
+/// kind that holds a node, plus a `## edges` section - see
+/// `push_by_kind`. Empty for a map with no nodes, past the preamble.
 pub fn markdown(map: &Map) -> String {
     let schema = map.schema();
-    let mut out = format!("# {}\n\n{PREAMBLE}", schema.name);
-    let guide = match schema.name.as_str() {
-        "decisions" => Some(DECISIONS_GUIDE),
-        "tasks" => Some(TASKS_GUIDE),
-        _ => None,
-    };
-    if let Some(guide) = guide {
-        out.push(' ');
-        out.push_str(guide);
-    }
-    out.push('\n');
+    let mut out = format!("# {}\n\n{PREAMBLE} {}\n", schema.name, guide(&schema.name));
 
     if map.nodes().is_empty() {
         out.push_str("\n(empty: nothing has been recorded here yet.)\n");
         return out;
     }
 
-    match schema.name.as_str() {
-        "decisions" => push_decisions(&mut out, map),
-        "tasks" => push_tasks(&mut out, map),
-        _ => push_by_kind(&mut out, map),
+    if schema.headline_kinds.is_empty() {
+        push_by_kind(&mut out, map);
+    } else {
+        push_headlines(&mut out, map);
     }
 
     out
+}
+
+/// The line every map's intro adds to the preamble, naming no kind:
+/// what the contents list gives, and the two ways to look further -
+/// around a node, or since an instant.
+fn guide(map: &str) -> String {
+    format!(
+        "A `## contents` list, then one `##` section per node it names, holding that node's \
+         properties and its edges. A node's neighbourhood: `percept maps show {map} --around \
+         'kind:name'`. What changed lately: `percept maps show {map} --since 1d`."
+    )
 }
 
 /// `maps list --format md`: one `##` section per map, in the order the
@@ -103,7 +89,11 @@ fn push_kind_glosses<'a>(
 ) {
     let _ = write!(out, "\n{heading}:\n");
     for (label, gloss) in kinds {
-        let _ = writeln!(out, "- {label} - {gloss}");
+        if gloss.is_empty() {
+            let _ = writeln!(out, "- {label}");
+        } else {
+            let _ = writeln!(out, "- {label} - {gloss}");
+        }
     }
 }
 
@@ -127,7 +117,9 @@ fn push_example(out: &mut String, map: &Map) {
 
 /// One `## <kind>` section per node kind that holds a node - headline
 /// kinds first, then the schema's remaining kinds - then a `## edges`
-/// section when the map has any.
+/// section when the map has any. The fallback for a schema that
+/// declares no headline kind at all, so a map like that still lists
+/// everything somewhere.
 fn push_by_kind(out: &mut String, map: &Map) {
     for kind in ordered_kinds(map.schema()) {
         let nodes: Vec<&Node> = map
@@ -172,183 +164,115 @@ fn ordered_kinds(schema: &Schema) -> Vec<&str> {
 /// when it cites any.
 fn push_node(out: &mut String, map: &Map, node: &Node) {
     let _ = writeln!(out, "- {}{}", marked_name(map, node), node.properties_line());
+    push_changed(out, node, "  ");
     if !node.sources.is_empty() {
         let _ = writeln!(out, "  sources: {}", ids(&node.sources).join(", "));
     }
 }
 
-/// The decisions map's body: a `## contents` list, then one `##` per
-/// question - and per decision that resolves none - in the order it was
-/// raised, which never changes, so nothing a reader has seen moves.
-/// Under a question: its decision, or `- open`, then the options
-/// weighed against it. Under a decision: its properties one per line,
-/// the prompt it cites, and one `was` line per decision it superseded,
-/// nearest first.
-fn push_decisions(out: &mut String, map: &Map) {
-    // The headlines are the questions and the standalone decisions; a
-    // decision that settles a question is shown under it, not on its own.
-    let headlines: Vec<&Node> = map
-        .headlines()
-        .filter(|node| node.kind == "question" || !map.settles(node.id))
-        .collect();
+/// A `## contents` list, then one `##` section per headline node, in an
+/// order this render alone gives meaning to - never the core's: by the
+/// index of its `state` property in its kind's declared list, unknown
+/// or missing last, then by when it was added. A kind with no states
+/// sorts by `added_at` alone. Under each heading: the node's own
+/// properties, then its edges, one line per edge kind the schema
+/// declares, in schema order.
+fn push_headlines(out: &mut String, map: &Map) {
+    let mut headlines: Vec<&Node> = map.headlines().collect();
+    headlines.sort_by_key(|node| (state_rank(map, node), node.added().at));
     if headlines.is_empty() {
         let _ = writeln!(
             out,
-            "\n(no question or decision yet; {} nodes of other kinds.)",
+            "\n(no headline node yet; {} nodes of other kinds.)",
             map.nodes().len()
         );
         return;
     }
 
     push_contents(out, map, &headlines);
-    for node in headlines {
+    for node in &headlines {
         let _ = write!(out, "\n## {}\n\n", marked_name(map, node));
-        if node.kind == "question" {
-            push_question_body(out, map, node);
-        } else {
-            // A standalone decision's `##` already names it; pass its own
-            // prompt as `raised_by` so it prints no redundant `source`.
-            push_decision(out, map, node, node.sources.first().copied());
-        }
+        push_props(out, node, "");
+        push_edges(out, map, node);
     }
 }
 
-/// The tasks map's body: a `## contents` list, then one `##` per open
-/// task - one whose state is still the kind's first listed value - in
-/// the order it was raised, each with why it matters and the tasks it
-/// waits on; then one `##` section per later state that has tasks -
-/// `## done`, `## dropped` - each task a bullet with its properties. A
-/// task never moves in the open list; changing its state is the one
-/// move, and the agreed one.
-fn push_tasks(out: &mut String, map: &Map) {
-    let tasks: Vec<&Node> = map.headlines().collect();
-    if tasks.is_empty() {
-        let _ = writeln!(
-            out,
-            "\n(no task yet; {} nodes of other kinds.)",
-            map.nodes().len()
-        );
-        return;
-    }
-
-    let open: Vec<&Node> = map.open().collect();
-    if !open.is_empty() {
-        push_contents(out, map, &open);
-    }
-    for task in &open {
-        let _ = write!(out, "\n## {}\n\n", marked_name(map, task));
-        push_props(out, map, task, "");
-        for blocker in map.blocked_by(task.id) {
-            let _ = writeln!(out, "waits on {}", marked_name(map, blocker));
-        }
-    }
-
-    // One section per declared state after the first, then any value
-    // the fold met that the schema no longer lists, so no task is
-    // rendered nowhere. Open is whatever `Map::open` said above.
-    let declared = map
-        .schema()
-        .node_kind("task")
-        .map(|kind| kind.states.as_slice())
-        .unwrap_or_default();
-    let mut states: Vec<&str> = declared.iter().skip(1).map(String::as_str).collect();
-    for task in tasks.iter().filter(|task| !open.iter().any(|o| o.id == task.id)) {
-        if let Some(state) = map.state(task) {
-            if !states.contains(&state) {
-                states.push(state);
-            }
-        }
-    }
-    for state in states {
-        let in_state: Vec<&Node> = tasks
-            .iter()
-            .copied()
-            .filter(|task| map.state(task) == Some(state))
-            .collect();
-        if in_state.is_empty() {
-            continue;
-        }
-        let _ = writeln!(out, "\n## {state}");
-        for task in in_state {
-            let _ = writeln!(out, "- {}", marked_name(map, task));
-            push_props(out, map, task, "  ");
-        }
-    }
+/// `node`'s position among its kind's declared states - unknown,
+/// missing, or a kind with no states sort last, so listing order says
+/// nothing the core does not already know from the property itself.
+fn state_rank(map: &Map, node: &Node) -> usize {
+    let Some(kind) = map.schema().node_kind(&node.kind) else {
+        return usize::MAX;
+    };
+    let Some(value) = node.properties.get("state") else {
+        return usize::MAX;
+    };
+    kind.states
+        .iter()
+        .position(|state| state == value)
+        .unwrap_or(usize::MAX)
 }
 
-/// One `## contents` line per headline - its text and the date its
-/// raising prompt was minted, in first-seen order - the overview a
-/// reader scans before the entries.
+/// One `## contents` line per headline, in the order given: its short
+/// id and name, plus `[<state>]` when it carries a `state` property.
 fn push_contents(out: &mut String, map: &Map, headlines: &[&Node]) {
     out.push_str("\n## contents\n");
     for node in headlines {
         let _ = write!(out, "- {}", marked_name(map, node));
-        match node.sources.first().and_then(|id| id.minted_at()) {
-            Some(at) => {
-                let _ = writeln!(out, " \u{b7} {}", at.date());
-            }
-            None => out.push_str(" \u{b7} uncited\n"),
+        if let Some(state) = node.properties.get("state") {
+            let _ = write!(out, " [{state}]");
         }
+        out.push('\n');
     }
 }
 
 /// A node's properties, each on its own line under `indent` - a long
 /// `why` reads on a line of its own, never wrapped onto the name - then
-/// one `disputed` line with the latest dispute's why, when the node has
-/// one.
-fn push_props(out: &mut String, map: &Map, node: &Node, indent: &str) {
+/// one `changed by` line, when the node's last change is not its
+/// addition.
+fn push_props(out: &mut String, node: &Node, indent: &str) {
     for (key, value) in &node.properties {
         let _ = writeln!(out, "{indent}{key}: {value:?}");
     }
-    if let Some(why) = map.dispute(node.id) {
-        let _ = writeln!(out, "{indent}disputed: {why:?}");
+    push_changed(out, node, indent);
+}
+
+/// One `changed by <actor>` line under `indent`, with `: "<why>"`
+/// appended when the change carried one - printed only when `node`'s
+/// last change is not its addition.
+fn push_changed(out: &mut String, node: &Node, indent: &str) {
+    if let Some(changed) = super::changed_line(node) {
+        let _ = writeln!(out, "{indent}{changed}");
     }
 }
 
-/// The body under a question's `##`: the question's own properties, its
-/// decision - or `- open` when none settles it - then one `- weighed`
-/// bullet per alternative that lost, each with its own `why`.
-fn push_question_body(out: &mut String, map: &Map, question: &Node) {
-    push_props(out, map, question, "");
-    let decisions = map.settled_by(question.id);
-    if decisions.is_empty() {
-        out.push_str("- open\n");
-    }
-    for decision in &decisions {
-        push_decision(out, map, decision, question.sources.first().copied());
-    }
-    for option in map.weighed_for(question.id) {
-        let _ = writeln!(out, "- weighed {}", marked_name(map, option));
-        push_props(out, map, option, "  ");
-    }
-}
-
-/// A `- decision` bullet, its properties one per line, the prompt it
-/// cites when that is not `raised_by` - the prompt already shown for the
-/// headline this sits under - one `was` line per decision it
-/// superseded, nearest first, and one `reopened by` line per question
-/// that puts it in doubt.
-fn push_decision(out: &mut String, map: &Map, decision: &Node, raised_by: Option<EventId>) {
-    let _ = writeln!(out, "- decision {}", marked_name(map, decision));
-    push_props(out, map, decision, "  ");
-    if let Some(source) = decision
-        .sources
-        .first()
-        .filter(|id| Some(**id) != raised_by)
-    {
-        let _ = writeln!(out, "  source {}", source.as_uuid());
-    }
-    for was in map.predecessors(decision.id) {
-        let _ = writeln!(out, "  was {}", marked_name(map, was));
-    }
-    for question in map.reopened_by(decision.id) {
-        let _ = writeln!(out, "  reopened by {}", marked_name(map, question));
+/// `node`'s edges, one line per edge kind the schema declares, in
+/// schema order: an outgoing edge as `- <kind> <neighbour>`, an
+/// incoming one as `- <neighbour> <kind>`, the neighbour named the way
+/// `marked_name` names any node. A neighbour of a kind that is not a
+/// headline also prints its own properties indented under that line -
+/// the one hop an option's `why` stays from its question; a second hop,
+/// like evidence under that option, is never reached from here.
+fn push_edges(out: &mut String, map: &Map, node: &Node) {
+    let headline_kinds = &map.schema().headline_kinds;
+    for edge_kind in &map.schema().edge_kinds {
+        for neighbour in map.linked(node.id, &edge_kind.kind, EdgeEnd::From) {
+            let _ = writeln!(out, "- {} {}", edge_kind.kind, marked_name(map, neighbour));
+            if !headline_kinds.contains(&neighbour.kind) {
+                push_props(out, neighbour, "  ");
+            }
+        }
+        for neighbour in map.linked(node.id, &edge_kind.kind, EdgeEnd::To) {
+            let _ = writeln!(out, "- {} {}", marked_name(map, neighbour), edge_kind.kind);
+            if !headline_kinds.contains(&neighbour.kind) {
+                push_props(out, neighbour, "  ");
+            }
+        }
     }
 }
 
 /// A node's short id and quoted name, marked `(agent)` when the model
-/// wrote it - `Actor::Human` and `Actor::System` are unmarked - and, when
-/// its standing is not `Claimed`, ` \u{b7} <standing>` after that. The
+/// wrote it - `Actor::Human` and `Actor::System` are unmarked. The
 /// short id is the same `d41` `--around`, `--from`/`--to`, and a bare
 /// short id in `revise_map`'s arguments all resolve.
 fn marked_name(map: &Map, node: &Node) -> String {
@@ -356,11 +280,8 @@ fn marked_name(map: &Map, node: &Node) -> String {
         Some(id) => format!("{id} {:?}", node.name),
         None => format!("{:?}", node.name),
     };
-    if matches!(node.actor, Actor::Agent) {
+    if matches!(node.added().actor, Actor::Agent) {
         label.push_str(" (agent)");
-    }
-    if let Some(standing) = map.standing(node.id).filter(|s| *s != Standing::Claimed) {
-        let _ = write!(label, " \u{b7} {standing}");
     }
     label
 }

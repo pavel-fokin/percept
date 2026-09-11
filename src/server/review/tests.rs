@@ -4,10 +4,10 @@ use serde_json::Value;
 
 use super::*;
 use crate::core::testing::{
-    created_at, edge_added, human, node_added_by, node_added_citing, node_id, schemas, source,
-    source_at, FakeLog, ROOT,
+    created_at, edge_added, human, node_added_by, node_added_citing, schemas, source, source_at,
+    FakeLog,
 };
-use crate::core::{Actor, Event, EventId, NodeId, Payload};
+use crate::core::{Actor, Event, EventId, Payload};
 use crate::shared::Timestamp;
 
 fn message_received(actor: Actor, content: &str) -> Event {
@@ -31,40 +31,19 @@ fn file_cited(path: &str, lines: Option<(u32, u32)>, excerpt: &str) -> Event {
     )
 }
 
-fn review_finished(map: &str, nodes: Vec<NodeId>) -> Event {
-    Event::new(
-        Actor::Human(human()),
-        source("test"),
-        None,
-        Payload::ReviewFinished {
-            map: map.to_string(),
-            nodes,
-        },
-    )
-}
-
-fn claim_disputed(node: NodeId, why: &str) -> Event {
-    Event::new(
-        Actor::Human(human()),
-        source("test"),
-        None,
-        Payload::ClaimDisputed {
-            map: "decisions".to_string(),
-            node,
-            why: why.to_string(),
-        },
-    )
-}
-
-fn cut_body(events: Vec<Event>) -> Value {
+fn cut_body_since(events: Vec<Event>, since: Option<Timestamp>) -> Value {
     let log = FakeLog::seeded(events);
     let schemas = schemas();
     let src = source("test");
-    serde_json::to_value(cut(&log, &schemas, &src).unwrap()).unwrap()
+    serde_json::to_value(cut(&log, &schemas, &src, since).unwrap()).unwrap()
 }
 
 fn cut_decisions(events: Vec<Event>) -> Value {
-    let body = cut_body(events);
+    cut_decisions_since(events, None)
+}
+
+fn cut_decisions_since(events: Vec<Event>, since: Option<Timestamp>) -> Value {
+    let body = cut_body_since(events, since);
     body["maps"]
         .as_array()
         .unwrap()
@@ -101,53 +80,50 @@ fn a_claimed_decision_appears_under_the_question_it_resolves() {
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0]["heading"]["title"], "Which language?");
     let claims = claims_of(&map, 0);
-    assert_eq!(claims.len(), 1);
-    assert_eq!(claims[0]["name"], "Rust");
-    assert_eq!(claims[0]["standing"], "claimed");
+    assert_eq!(claims.len(), 2, "the question is a row of its own group too");
+    assert_eq!(claims[0]["name"], "Which language?");
+    assert_eq!(claims[1]["name"], "Rust");
 }
 
 #[test]
-fn a_decision_a_review_has_finished_is_not_in_the_cut() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+fn cut_with_a_since_after_a_nodes_changed_at_leaves_it_out() {
     let decision = node_added_by(Actor::Agent, "decision", "Rust");
-    let resolves = edge_added("resolves", &decision, &question);
-    let finished = review_finished("decisions", vec![node_id(&decision)]);
+    let t0 = Timestamp::now();
+    let seeded = created_at(decision, t0);
+    let since = t0.minus_minutes(-10).unwrap();
 
-    let map = cut_decisions(vec![question, decision, resolves, finished]);
+    let map = cut_decisions_since(vec![seeded], Some(since));
 
-    let seen_anywhere = groups_of(&map).iter().any(|group| {
-        group["claims"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|claim| claim["name"] == "Rust")
-    });
-    assert!(!seen_anywhere, "{map:?}");
+    assert!(groups_of(&map).is_empty(), "{map:?}");
 }
 
 #[test]
-fn a_decision_disputed_after_the_last_finish_stays_in_the_cut_with_its_why() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+fn cut_with_no_since_includes_every_headline_node() {
     let decision = node_added_by(Actor::Agent, "decision", "Rust");
-    let resolves = edge_added("resolves", &decision, &question);
-    let t1 = Timestamp::now();
-    let finished = created_at(review_finished("decisions", vec![node_id(&decision)]), t1);
-    let t2 = t1.minus_minutes(-10).unwrap();
-    let disputed = created_at(claim_disputed(node_id(&decision), "never proposed"), t2);
 
-    let map = cut_decisions(vec![question, decision, resolves, finished, disputed]);
+    let map = cut_decisions(vec![decision]);
 
     let groups = groups_of(&map);
     assert_eq!(groups.len(), 1);
-    let claims = claims_of(&map, 0);
-    assert_eq!(claims.len(), 1);
-    assert_eq!(claims[0]["name"], "Rust");
-    assert_eq!(claims[0]["standing"], "disputed");
-    assert_eq!(claims[0]["dispute"], "never proposed");
+    assert_eq!(claims_of(&map, 0)[0]["name"], "Rust");
 }
 
 #[test]
-fn a_question_that_reopens_a_decision_sorts_before_an_older_question() {
+fn a_since_at_or_before_a_nodes_changed_at_keeps_it_in_the_cut() {
+    let decision = node_added_by(Actor::Agent, "decision", "Rust");
+    let t0 = Timestamp::now();
+    let seeded = created_at(decision, t0);
+
+    let map = cut_decisions_since(vec![seeded], Some(t0));
+
+    assert_eq!(claims_of(&map, 0)[0]["name"], "Rust");
+}
+
+#[test]
+fn a_reopening_question_groups_under_the_decision_it_doubts() {
+    // No edge kind sorts a group ahead of another: groups order by
+    // their heading's `added_at`, so the older, unrelated question
+    // still comes first.
     let older_question = node_added_by(Actor::Agent, "question", "Older question?");
     let decision = node_added_by(Actor::Agent, "decision", "Something");
     let newer_question = node_added_by(Actor::Agent, "question", "Newer, reopening?");
@@ -155,8 +131,11 @@ fn a_question_that_reopens_a_decision_sorts_before_an_older_question() {
 
     let map = cut_decisions(vec![older_question, decision, newer_question, reopens]);
 
-    let claims = claims_of(&map, 0);
-    assert_eq!(claims[0]["name"], "Newer, reopening?");
+    let groups = groups_of(&map);
+    assert_eq!(groups.len(), 2);
+    assert_eq!(claims_of(&map, 0)[0]["name"], "Older question?");
+    assert_eq!(groups[1]["heading"]["title"], "Something");
+    assert_eq!(claims_of(&map, 1)[1]["name"], "Newer, reopening?");
 }
 
 #[test]
@@ -174,32 +153,12 @@ fn an_open_question_with_no_decision_is_its_own_group_with_a_null_heading() {
 }
 
 #[test]
-fn next_carries_a_disputed_nodes_line_with_its_why_once_a_session_started_precedes_the_dispute() {
-    let decision = node_added_by(Actor::Agent, "decision", "Rust");
-    let t0 = Timestamp::now();
-    let started = created_at(Event::session_started(source("test")), t0);
-    let t1 = t0.minus_minutes(-10).unwrap();
-    let disputed = created_at(claim_disputed(node_id(&decision), "nah"), t1);
-
-    let body = cut_body(vec![decision, started, disputed]);
-
-    let next = body["next"].as_str().expect("next carries the judged block");
-    assert!(next.contains("d1"), "{next}");
-    assert!(next.contains("nah"), "{next}");
-}
-
-#[test]
-fn next_is_null_when_nothing_was_judged() {
-    let decision = node_added_by(Actor::Agent, "decision", "Rust");
-    let started = Event::session_started(source("test"));
-
-    let body = cut_body(vec![decision, started]);
-
-    assert!(body["next"].is_null(), "{body}");
-}
-
-#[test]
-fn a_decision_that_supersedes_the_one_resolving_a_question_is_grouped_under_that_question() {
+fn a_decision_that_supersedes_another_groups_under_that_one_not_its_question() {
+    // The heading search is one hop, checking edge kinds in schema
+    // order: `correction` has no `resolves` edge of its own, so it
+    // groups under `old_decision`, the node its `supersedes` edge
+    // reaches - the core keeps no supersession chain for the review to
+    // follow further.
     let question = node_added_by(Actor::Agent, "question", "Which language?");
     let old_decision = node_added_by(Actor::Agent, "decision", "Rust");
     let resolves = edge_added("resolves", &old_decision, &question);
@@ -209,11 +168,11 @@ fn a_decision_that_supersedes_the_one_resolving_a_question_is_grouped_under_that
     let map = cut_decisions(vec![question, old_decision, resolves, correction, supersedes]);
 
     let groups = groups_of(&map);
-    assert_eq!(groups.len(), 1);
+    assert_eq!(groups.len(), 2);
     assert_eq!(groups[0]["heading"]["title"], "Which language?");
-    let claims = claims_of(&map, 0);
-    assert_eq!(claims.len(), 1);
-    assert_eq!(claims[0]["name"], "Go");
+    assert_eq!(claims_of(&map, 0)[1]["name"], "Rust");
+    assert_eq!(groups[1]["heading"]["title"], "Rust");
+    assert_eq!(claims_of(&map, 1)[0]["name"], "Go");
 }
 
 #[test]
@@ -228,23 +187,8 @@ fn an_orphan_group_carries_a_null_heading() {
 }
 
 #[test]
-fn an_option_whose_name_equals_the_decisions_is_not_listed_under_it() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
-    let decision = node_added_by(Actor::Agent, "decision", "Rust");
-    let resolves = edge_added("resolves", &decision, &question);
-    let restating_option = node_added_by(Actor::Agent, "option", "Rust");
-    let answers = edge_added("answers", &restating_option, &question);
-
-    let map = cut_decisions(vec![question, decision, resolves, restating_option, answers]);
-
-    let claims = claims_of(&map, 0);
-    let options = claims[0]["options"].as_array().unwrap();
-    assert!(options.is_empty(), "{options:?}");
-}
-
-#[test]
-fn an_option_that_answers_the_question_is_listed_under_the_decisions_row() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+fn an_option_that_answers_the_question_is_related_under_the_decisions_row() {
+    let question = node_added_by(Actor::Human(None), "question", "Which language?");
     let decision = node_added_by(Actor::Agent, "decision", "Rust");
     let resolves = edge_added("resolves", &decision, &question);
     let option = node_added_by(Actor::Agent, "option", "Go");
@@ -253,16 +197,16 @@ fn an_option_that_answers_the_question_is_listed_under_the_decisions_row() {
     let map = cut_decisions(vec![question, decision, resolves, option, answers]);
 
     let claims = claims_of(&map, 0);
-    let options = claims[0]["options"].as_array().unwrap();
+    let options = claims[0]["related"].as_array().unwrap();
     assert_eq!(options.len(), 1);
     assert_eq!(options[0]["name"], "Go");
-    assert_eq!(options[0]["standing"], "claimed");
+    assert_eq!(options[0]["changed_by"], "agent");
 }
 
 #[test]
 fn a_decision_citing_a_human_prompt_carries_the_prompts_content_and_the_agent_reply_before_it_as_its_proposal(
 ) {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let question = node_added_by(Actor::Human(None), "question", "Which language?");
     let t0 = Timestamp::now();
     let proposal = created_at(message_received(Actor::Agent, "Recommendation: Rust."), t0);
     let t1 = t0.minus_minutes(-10).unwrap();
@@ -281,7 +225,7 @@ fn a_decision_citing_a_human_prompt_carries_the_prompts_content_and_the_agent_re
 
 #[test]
 fn a_prompt_with_no_earlier_agent_reply_in_its_source_carries_a_null_proposal() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let question = node_added_by(Actor::Human(None), "question", "Which language?");
     let prompt = message_received(Actor::Human(human()), "Rust, please.");
     let decision = node_added_citing(Actor::Agent, "decision", "Rust", vec![prompt.id()]);
     let resolves = edge_added("resolves", &decision, &question);
@@ -294,7 +238,7 @@ fn a_prompt_with_no_earlier_agent_reply_in_its_source_carries_a_null_proposal() 
 
 #[test]
 fn a_reply_from_another_source_is_not_taken_as_the_proposal() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let question = node_added_by(Actor::Human(None), "question", "Which language?");
     let t0 = Timestamp::now();
     let other_reply = created_at(message_received_at(source_at("other", "/other"), Actor::Agent, "Go."), t0);
     let t1 = t0.minus_minutes(-10).unwrap();
@@ -310,7 +254,7 @@ fn a_reply_from_another_source_is_not_taken_as_the_proposal() {
 
 #[test]
 fn a_file_cited_source_carries_its_path_lines_and_excerpt() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let question = node_added_by(Actor::Human(None), "question", "Which language?");
     let cite = file_cited("src/main.rs", Some((10, 20)), "fn main() {}");
     let decision = node_added_citing(Actor::Agent, "decision", "Rust", vec![cite.id()]);
     let resolves = edge_added("resolves", &decision, &question);
@@ -328,7 +272,7 @@ fn a_file_cited_source_carries_its_path_lines_and_excerpt() {
 
 #[test]
 fn a_source_id_the_log_does_not_hold_reads_as_missing() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let question = node_added_by(Actor::Human(None), "question", "Which language?");
     let missing_id = EventId::new();
     let decision = node_added_citing(Actor::Agent, "decision", "Rust", vec![missing_id]);
     let resolves = edge_added("resolves", &decision, &question);
@@ -340,82 +284,8 @@ fn a_source_id_the_log_does_not_hold_reads_as_missing() {
 }
 
 #[test]
-fn a_finish_naming_an_unknown_id_still_appends_a_review_finished_naming_the_ones_that_resolved() {
-    let decision = node_added_by(Actor::Agent, "decision", "Rust");
-    let log = FakeLog::seeded(vec![decision.clone()]);
-    let schemas = schemas();
-    let src = source("test");
-
-    let outcome = finish(&log, &schemas, &src, human(), "decisions", &["d1".to_string(), "d99".to_string()]);
-
-    assert!(outcome.is_ok());
-    let events = log.load().unwrap();
-    let finished = events
-        .iter()
-        .find_map(|event| match event.payload() {
-            Payload::ReviewFinished { nodes, .. } => Some(nodes.clone()),
-            _ => None,
-        })
-        .expect("a review.finished event");
-    assert_eq!(finished, vec![node_id(&decision)]);
-}
-
-#[test]
-fn finish_given_only_a_rows_id_also_names_its_groups_heading() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
-    let decision = node_added_by(Actor::Agent, "decision", "Rust");
-    let resolves = edge_added("resolves", &decision, &question);
-    let log = FakeLog::seeded(vec![question.clone(), decision.clone(), resolves]);
-    let schemas = schemas();
-    let src = source("test");
-
-    finish(&log, &schemas, &src, human(), "decisions", &["d1".to_string()]).expect("finish succeeds");
-
-    let events = log.load().unwrap();
-    let finished = events
-        .iter()
-        .find_map(|event| match event.payload() {
-            Payload::ReviewFinished { nodes, .. } => Some(nodes.clone()),
-            _ => None,
-        })
-        .expect("a review.finished event");
-    assert!(finished.contains(&node_id(&question)), "{finished:?}");
-    assert!(finished.contains(&node_id(&decision)), "{finished:?}");
-}
-
-#[test]
-fn a_judgment_between_two_clients_last_sessions_is_in_next() {
-    let decision = node_added_by(Actor::Agent, "decision", "Rust");
-    let t0 = Timestamp::now();
-    let earlier_session = created_at(Event::session_started(source_at("claude-code", ROOT)), t0);
-    let t1 = t0.minus_minutes(-10).unwrap();
-    let disputed = created_at(claim_disputed(node_id(&decision), "nah"), t1);
-    let t2 = t1.minus_minutes(-10).unwrap();
-    let later_session = created_at(Event::session_started(source_at("codex", ROOT)), t2);
-
-    let body = cut_body(vec![decision, earlier_session, disputed, later_session]);
-
-    let next = body["next"].as_str().expect("next carries the judged block");
-    assert!(next.contains("nah"), "{next}");
-}
-
-#[test]
-fn a_judgment_with_no_session_at_all_is_in_next() {
-    let decision = node_added_by(Actor::Agent, "decision", "Rust");
-    let t0 = Timestamp::now();
-    let seeded_decision = created_at(decision.clone(), t0);
-    let t1 = t0.minus_minutes(-10).unwrap();
-    let disputed = created_at(claim_disputed(node_id(&decision), "nah"), t1);
-
-    let body = cut_body(vec![seeded_decision, disputed]);
-
-    let next = body["next"].as_str().expect("next carries the judged block");
-    assert!(next.contains("nah"), "{next}");
-}
-
-#[test]
 fn content_over_4000_characters_is_cut_and_marked_truncated() {
-    let question = node_added_by(Actor::Agent, "question", "Which language?");
+    let question = node_added_by(Actor::Human(None), "question", "Which language?");
     let long = "a".repeat(4001);
     let prompt = message_received(Actor::Human(human()), &long);
     let decision = node_added_citing(Actor::Agent, "decision", "Rust", vec![prompt.id()]);

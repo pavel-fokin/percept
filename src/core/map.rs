@@ -57,19 +57,15 @@ pub struct Schema {
     /// The node kinds worth a reader's attention without opening the
     /// whole map - what `MapShape::Headlines` sends.
     pub headline_kinds: Vec<String>,
-    /// Which node kind settles which through a `resolves` edge - a
-    /// decision a question, an outcome a task - when the map has such
-    /// a pair. A `resolves` edge between other kinds settles nothing.
-    pub settlement: Option<Settlement>,
 }
 
-/// A node kind and one line saying what it is, so a reader who meets
-/// the kind name in a map's output learns its meaning without a
-/// separate doc. The gloss lives here, beside the name, and nowhere
-/// else.
+/// A node kind and, when its name does not say it all, one line saying
+/// what it is, so a reader who meets the kind in a map's output learns
+/// its meaning without a separate doc. The gloss lives here and
+/// nowhere else.
 #[derive(Debug, PartialEq, Eq)]
 pub struct NodeKind {
-    pub name: String,
+    pub kind: String,
     pub gloss: String,
     /// The properties a new node of this kind must carry - `why` on an
     /// option or a task. Checked on a write, never on a fold, so what
@@ -78,10 +74,10 @@ pub struct NodeKind {
     /// This node kind's short id prefix - `d` for `decision`, so a
     /// node reads as `d41` rather than its full id.
     pub prefix: String,
-    /// The values a `state` property on a node of this kind may hold,
-    /// first listed the open one - `["open", "done", "dropped"]` on
-    /// `task`. Empty when the kind carries no state at all. Checked on
-    /// a write, never on a fold, the way `requires` is.
+    /// The values a `state` property on a node of this kind may hold -
+    /// `["open", "done", "dropped"]` on `task`, a set with no value
+    /// open by position. Empty when the kind carries no state at all.
+    /// Checked on a write, never on a fold, the way `requires` is.
     pub states: Vec<String>,
 }
 
@@ -97,10 +93,10 @@ pub fn default_prefix(name: &str) -> String {
 }
 
 impl NodeKind {
-    pub(crate) fn new(name: &str, gloss: &str) -> Self {
+    pub(crate) fn new(kind: &str, gloss: &str) -> Self {
         Self {
-            prefix: default_prefix(name),
-            name: name.to_string(),
+            prefix: default_prefix(kind),
+            kind: kind.to_string(),
             gloss: gloss.to_string(),
             requires: Vec::new(),
             states: Vec::new(),
@@ -117,8 +113,8 @@ impl NodeKind {
     }
 
     /// `self`, with `states` as the values a `state` property on a node
-    /// of this kind may hold, first listed the open one. Used only by
-    /// `core::testing`'s fixture schemas, so `cfg(test)` too.
+    /// of this kind may hold. Used only by `core::testing`'s fixture
+    /// schemas, so `cfg(test)` too.
     #[cfg(test)]
     pub(crate) fn with_states(mut self, states: &[&str]) -> Self {
         self.states = states.iter().map(|s| s.to_string()).collect();
@@ -131,10 +127,10 @@ impl NodeKind {
     /// everywhere a kind is named.
     pub fn label(&self) -> String {
         if self.requires.is_empty() {
-            format!("`{}`", self.name)
+            format!("`{}`", self.kind)
         } else {
             let requires: Vec<String> = self.requires.iter().map(|p| format!("`{p}`")).collect();
-            format!("`{}` (requires {})", self.name, requires.join(", "))
+            format!("`{}` (requires {})", self.kind, requires.join(", "))
         }
     }
 }
@@ -145,16 +141,16 @@ impl NodeKind {
 /// ends are not of these kinds.
 #[derive(Debug, PartialEq, Eq)]
 pub struct EdgeKind {
-    pub name: String,
+    pub kind: String,
     pub gloss: String,
     pub from: Vec<String>,
     pub to: Vec<String>,
 }
 
 impl EdgeKind {
-    pub(crate) fn new(name: &str, gloss: &str, from: &[&str], to: &[&str]) -> Self {
+    pub(crate) fn new(kind: &str, gloss: &str, from: &[&str], to: &[&str]) -> Self {
         Self {
-            name: name.to_string(),
+            kind: kind.to_string(),
             gloss: gloss.to_string(),
             from: from.iter().map(|s| s.to_string()).collect(),
             to: to.iter().map(|s| s.to_string()).collect(),
@@ -167,45 +163,12 @@ impl EdgeKind {
     pub fn label(&self) -> String {
         format!(
             "`{}` ({} -> {})",
-            self.name,
+            self.kind,
             self.from.join(" | "),
             self.to.join(" | ")
         )
     }
 }
-
-/// The two node kinds a `resolves` edge joins: `by` settles `of`.
-#[derive(Debug, PartialEq, Eq)]
-pub struct Settlement {
-    pub by: String,
-    pub of: String,
-}
-
-/// The edge kind that corrects a decision: from the new one to the one
-/// it replaces. The old node stays, one hop away, and leaves the
-/// headlines - a removal would take a reader's landmark with it.
-pub const SUPERSEDES: &str = "supersedes";
-
-/// The edge kind from a question to a decision it puts in doubt. The
-/// decision stands until a successor supersedes it; the question is how
-/// a model raises the doubt without rewriting what the human agreed.
-pub const REOPENS: &str = "reopens";
-
-/// The edge kind from a decision to the question it settles.
-pub const RESOLVES: &str = "resolves";
-
-/// The edge kind from an option to the question it was weighed for.
-pub const ANSWERS: &str = "answers";
-
-/// The edge kind from a task to the task it must land before.
-pub const BLOCKS: &str = "blocks";
-
-/// The one node kind `revise_map` never removes: a decision is corrected
-/// by a successor with a `supersedes` edge, so it is public.
-pub const DECISION: &str = "decision";
-/// An alternative that lost. The store refuses one that does not say
-/// why, so it is public too.
-pub const OPTION: &str = "option";
 
 /// The schemas a project has: every one, folded from the log, in one
 /// list. Built once at the entrypoint from the built-in schemas and a
@@ -266,22 +229,22 @@ impl Schemas {
 impl Schema {
     /// The node kind `name` names, when the schema has it.
     pub fn node_kind(&self, name: &str) -> Option<&NodeKind> {
-        self.node_kinds.iter().find(|kind| kind.name == name)
+        self.node_kinds.iter().find(|k| k.kind == name)
     }
 
     /// The edge kind `name` names, when the schema has it.
     pub fn edge_kind(&self, name: &str) -> Option<&EdgeKind> {
-        self.edge_kinds.iter().find(|kind| kind.name == name)
+        self.edge_kinds.iter().find(|k| k.kind == name)
     }
 
     /// The node kind names, in schema order.
     pub fn node_kind_names(&self) -> impl Iterator<Item = &str> + '_ {
-        self.node_kinds.iter().map(|kind| kind.name.as_str())
+        self.node_kinds.iter().map(|k| k.kind.as_str())
     }
 
     /// The edge kind names, in schema order.
     pub fn edge_kind_names(&self) -> impl Iterator<Item = &str> + '_ {
-        self.edge_kinds.iter().map(|kind| kind.name.as_str())
+        self.edge_kinds.iter().map(|k| k.kind.as_str())
     }
 
     /// The node kinds' labels as a `, `-joined list, for a prompt line
@@ -317,13 +280,9 @@ pub struct Node {
     pub name: String,
     pub properties: BTreeMap<String, String>,
     pub sources: Vec<EventId>,
-    /// Who added this node - the actor its `node.added` event carried.
-    pub actor: Actor,
-    /// When this node was added - that event's `created_at`.
-    pub added_at: Timestamp,
-    /// When this node last changed - equal to `added_at` until a
-    /// `node.changed` event lands.
-    pub changed_at: Timestamp,
+    /// Every write that reached this node, in log order, the addition
+    /// first. Never empty.
+    pub history: Vec<Change>,
     /// This node's number within its kind, minted once when it was
     /// added - `d41` is its kind's prefix plus this. See
     /// `Payload::NodeAdded`.
@@ -345,10 +304,53 @@ pub struct Edge {
     pub from: NodeId,
     pub to: NodeId,
     pub sources: Vec<EventId>,
-    /// Who added this edge - the actor its `edge.added` event carried.
+    /// One entry today - the addition.
+    pub history: Vec<Change>,
+}
+
+/// One write that reached a node or an edge: who, when, and on what
+/// grounds. `why` is `None` on an addition - a node's own why is a
+/// property - and on a plain edit that gave none.
+#[derive(Clone, Debug)]
+pub struct Change {
     pub actor: Actor,
-    /// When this edge was added - that event's `created_at`.
-    pub added_at: Timestamp,
+    pub at: Timestamp,
+    pub why: Option<String>,
+}
+
+/// A node or an edge that keeps every write that reached it. Default
+/// methods read who added it, who last changed it, and who ranks
+/// highest among everyone who touched it, so that logic lives once for
+/// both.
+pub trait Written {
+    fn history(&self) -> &[Change];
+
+    /// The addition - the first entry in `history`.
+    fn added(&self) -> &Change {
+        self.history().first().expect("history is never empty")
+    }
+
+    /// The last write - the last entry in `history`.
+    fn changed(&self) -> &Change {
+        self.history().last().expect("history is never empty")
+    }
+
+    /// The highest-ranked actor in the history.
+    fn touched_by(&self) -> Actor {
+        highest(self.history().iter().map(|change| change.actor)).expect("history is never empty")
+    }
+}
+
+impl Written for Node {
+    fn history(&self) -> &[Change] {
+        &self.history
+    }
+}
+
+impl Written for Edge {
+    fn history(&self) -> &[Change] {
+        &self.history
+    }
 }
 
 /// Points at a node the way a writer knows it - by kind and name -
@@ -357,6 +359,15 @@ pub struct Edge {
 pub struct NodeRef {
     pub kind: String,
     pub name: String,
+}
+
+impl From<&Node> for NodeRef {
+    fn from(node: &Node) -> Self {
+        Self {
+            kind: node.kind.clone(),
+            name: node.name.clone(),
+        }
+    }
 }
 
 impl fmt::Display for NodeRef {
@@ -423,10 +434,11 @@ pub enum Mutation {
         name: Option<String>,
         properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
+        why: Option<String>,
     },
     RemoveNode {
         node: NodeRef,
-        reason: String,
+        why: String,
         sources: Vec<EventId>,
     },
     AddEdge {
@@ -440,11 +452,13 @@ pub enum Mutation {
         from: NodeRef,
         to: NodeRef,
         sources: Vec<EventId>,
+        why: String,
     },
 }
 
-/// Which end of an edge broke a `WrongEdgeEnd` rule.
-#[derive(Debug, PartialEq, Eq)]
+/// One end of an edge: the end `Map::linked` reads across, or the end
+/// that broke a `WrongEdgeEnd` rule.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EdgeEnd {
     From,
     To,
@@ -508,19 +522,24 @@ pub enum MapError {
         value: String,
         states: Vec<String>,
     },
-    /// A `ChangeNode` from the model on a node the human wrote, naming
-    /// something other than its `state` or `outcome` - the model's
-    /// report of what became of it, never the human's name or why.
-    /// Write-only: a human may change anything on any node.
-    HumansNode {
-        node: String,
+    /// A new node of a kind that declares states, sent without one.
+    /// Write-only, like `UnknownState`.
+    MissingState {
+        kind: String,
+        states: Vec<String>,
     },
-    /// A `ChangeNode` renaming a decision. A decision is corrected by a
-    /// successor with a `supersedes` edge, never reworded in place, so
-    /// the landmark a reader knows stays where it was. Write-only.
-    DecisionRenamed {
+    /// A rename, a property other than `state`, or a removal that W6's
+    /// rank rule refuses: the actor neither owns nor outranks the
+    /// writer, or is outranked by whoever touched it since.
+    /// Write-only: `state` and a new edge are any actor's.
+    NotYours {
         node: String,
+        owner: Actor,
+        touched_by: Actor,
     },
+    /// A `why` that is given but blank - on a change, a removal, or an
+    /// edge removal. Write-only.
+    BlankWhy,
     NoSuchNode {
         node: NodeRef,
         /// Nodes of the same kind whose name overlaps `node.name`, as
@@ -571,18 +590,24 @@ impl fmt::Display for MapError {
                 "no edge kind {kind:?} in map {map:?}; kinds are {kinds}"
             ),
             Self::BlankName => write!(f, "a node's name must not be blank"),
+            Self::BlankWhy => write!(f, "a why must not be blank"),
             Self::MissingProperty {
                 kind,
                 name,
                 property,
                 gloss,
-            } => write!(
-                f,
-                "{kind} {name:?} lacks its `{property}` property, which every {kind} \
-                 carries: {gloss}"
-            ),
+            } => {
+                write!(f, "{kind} {name:?} lacks its `{property}` property, which every {kind} carries")?;
+                if !gloss.is_empty() {
+                    write!(f, ": {gloss}")?;
+                }
+                Ok(())
+            }
             Self::DuplicateNode { kind, name } => {
                 write!(f, "{kind} {name:?} is already in the map")
+            }
+            Self::MissingState { kind, states } => {
+                write!(f, "{kind} needs a state; states are {}", states.join(", "))
             }
             Self::UnknownState { kind, value, states } => write!(
                 f,
@@ -593,14 +618,16 @@ impl fmt::Display for MapError {
                     states.join(", ")
                 }
             ),
-            Self::HumansNode { node } => write!(
+            Self::NotYours {
+                node,
+                owner,
+                touched_by,
+            } => write!(
                 f,
-                "{node} was written by the user; the model may change only its state and outcome"
-            ),
-            Self::DecisionRenamed { node } => write!(
-                f,
-                "{node} is a decision and is not reworded in place; add the corrected decision \
-                 with a supersedes edge to this one"
+                "{node} was written by {} and touched by {}; you may still set a node's state, \
+                 or add a node and an edge beside it",
+                owner.name(),
+                touched_by.name()
             ),
             Self::NoSuchNode { node, suggestions } => {
                 write!(f, "no {node} in the map")?;
@@ -634,44 +661,51 @@ impl fmt::Display for MapError {
 
 impl std::error::Error for MapError {}
 
-/// How the human has judged a model's claim, derived - never stored
-/// directly - from the `claim.confirmed`, `claim.disputed`, and
-/// `review.finished` events that name a node, latest by log order.
-/// `Claimed` is a model's claim nobody has judged yet; a user-written
-/// node has no standing at all (see `Map::standing`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Standing {
-    Claimed,
-    Seen,
-    Confirmed,
-    Disputed,
-}
-
-impl fmt::Display for Standing {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Claimed => "claimed",
-            Self::Seen => "seen",
-            Self::Confirmed => "confirmed",
-            Self::Disputed => "disputed",
-        })
+/// An actor's rank: `Human` above `Agent` and `System`, which sit
+/// level with each other. What W6's `may` weighs - not a property
+/// `Actor` itself carries, since ranking is a rule of the map's rank
+/// lock, not something every reader of an actor needs.
+fn rank(actor: Actor) -> u8 {
+    match actor {
+        Actor::Human(_) => 2,
+        Actor::Agent | Actor::System => 1,
     }
 }
 
-/// The latest `claim.confirmed`/`claim.disputed` naming a node, so
-/// `Map::dispute` can hand back the why without walking the log again,
-/// and `at` its event's `created_at`, so `Map::judged_since` can tell a
-/// fresh judgment from an old one.
-#[derive(Clone)]
-struct Judgment {
-    at: Timestamp,
-    kind: JudgmentKind,
+/// Whether `a` outranks `b` - strictly above it, never level.
+fn outranks(a: Actor, b: Actor) -> bool {
+    rank(a) > rank(b)
 }
 
-#[derive(Clone)]
-enum JudgmentKind {
-    Confirmed,
-    Disputed(String),
+/// Whether `a` and `b` are the one who wrote something. A human equals
+/// any human: two humans are not told apart yet.
+fn same_actor(a: Actor, b: Actor) -> bool {
+    matches!(
+        (a, b),
+        (Actor::Human(_), Actor::Human(_)) | (Actor::Agent, Actor::Agent) | (Actor::System, Actor::System)
+    )
+}
+
+/// W6's rank rule: whether `actor` may rename, change a property beyond
+/// `state`, or remove something `owner` wrote and `touched_by` is the
+/// highest rank to have touched. `actor` must own it or outrank
+/// `owner`, and must not be outranked by `touched_by` - a change from
+/// above locks what it touched against everyone below that rank.
+fn may(actor: Actor, owner: Actor, touched_by: Actor) -> bool {
+    (same_actor(actor, owner) || outranks(actor, owner)) && !outranks(touched_by, actor)
+}
+
+/// The highest-ranked of `actors`; `None` when there are none.
+fn highest(actors: impl Iterator<Item = Actor>) -> Option<Actor> {
+    actors.max_by_key(|actor| rank(*actor))
+}
+
+/// Whether `why`, when given, is blank - W2's `BlankWhy`.
+fn blank_why(why: Option<&str>) -> Result<(), MapError> {
+    match why {
+        Some(why) if why.trim().is_empty() => Err(MapError::BlankWhy),
+        _ => Ok(()),
+    }
 }
 
 /// A map folded from the log. Holds every node and edge still present;
@@ -697,15 +731,6 @@ pub struct Map {
     // point at the wrong node.
     next_seq_by_kind: HashMap<String, u32>,
     edge_keys: HashSet<(String, NodeId, NodeId)>,
-    // The latest `claim.confirmed`/`claim.disputed` naming each node, in
-    // log order - what `standing` and `dispute` read.
-    judgments: HashMap<NodeId, Judgment>,
-    // Nodes at least one `review.finished` has named - `Standing::Seen`
-    // for one with no judgment yet.
-    reviewed: HashSet<NodeId>,
-    // The latest `review.finished`'s `at`, across every one folded in -
-    // what `last_finished` reports.
-    last_finished: Option<Timestamp>,
 }
 
 impl Map {
@@ -741,9 +766,6 @@ impl Map {
             by_seq,
             next_seq_by_kind,
             edge_keys,
-            judgments: HashMap::new(),
-            reviewed: HashSet::new(),
-            last_finished: None,
         }
     }
 
@@ -784,276 +806,46 @@ impl Map {
         &self.nodes
     }
 
-    /// The nodes of the schema's headline kinds, in map order, less the
-    /// superseded ones - what a reader sees of the map before opening
-    /// it.
+    /// The nodes of the schema's headline kinds, in map order - what a
+    /// reader sees of the map before opening it.
     pub fn headlines(&self) -> impl Iterator<Item = &Node> {
         let headline_kinds = &self.schema.headline_kinds;
         self.nodes
             .iter()
             .filter(move |node| headline_kinds.contains(&node.kind))
-            .filter(|node| !self.is_superseded(node.id))
-    }
-
-    /// The node with a `supersedes` edge to `id`. Two nodes superseding
-    /// one is a writer's mistake; the first in map order wins.
-    fn superseded_by(&self, id: NodeId) -> Option<NodeId> {
-        self.edges
-            .iter()
-            .find(|edge| edge.kind == SUPERSEDES && edge.to == id)
-            .map(|edge| edge.from)
-    }
-
-    pub fn is_superseded(&self, id: NodeId) -> bool {
-        self.superseded_by(id).is_some()
-    }
-
-    /// The nodes `id` supersedes, in map order.
-    fn supersedes(&self, id: NodeId) -> impl Iterator<Item = &Node> {
-        self.edges
-            .iter()
-            .filter(move |edge| edge.kind == SUPERSEDES && edge.from == id)
-            .filter_map(|edge| self.node(edge.to))
-    }
-
-    /// The end of `id`'s supersession chain: `id` itself when nothing
-    /// supersedes it, else the node that does, followed until one is
-    /// current. A cycle stops at the node already seen.
-    pub fn successor(&self, id: NodeId) -> NodeId {
-        let mut seen = HashSet::from([id]);
-        let mut current = id;
-        while let Some(next) = self.superseded_by(current) {
-            if !seen.insert(next) {
-                break;
-            }
-            current = next;
-        }
-        current
-    }
-
-    /// Everything `id` supersedes, transitively, nearest first - the
-    /// `was` lines under a decision.
-    pub fn predecessors(&self, id: NodeId) -> Vec<&Node> {
-        let mut seen = HashSet::from([id]);
-        let mut out = Vec::new();
-        let mut frontier = vec![id];
-        while let Some(current) = frontier.pop() {
-            for node in self.supersedes(current) {
-                if seen.insert(node.id) {
-                    out.push(node);
-                    frontier.push(node.id);
-                }
-            }
-        }
-        out
-    }
-
-    /// The nodes that settle `question` now - the decisions of a
-    /// question, the outcomes of a task: each with a `resolves` edge to
-    /// it, followed to the end of its supersession chain, so a
-    /// correction needs no new `resolves` edge. In map order, each
-    /// once. A `resolves` edge between other kinds settles nothing.
-    pub fn settled_by(&self, question: NodeId) -> Vec<&Node> {
-        let mut out: Vec<&Node> = Vec::new();
-        for edge in self.resolving_edges() {
-            if edge.to != question {
-                continue;
-            }
-            if let Some(current) = self.node(self.successor(edge.from)) {
-                if !out.iter().any(|node| node.id == current.id) {
-                    out.push(current);
-                }
-            }
-        }
-        out
-    }
-
-    /// `node`'s state - its `state` property, or its kind's first
-    /// listed value when it carries none - or `None` for a kind that
-    /// declares no states at all. `d41`'s decision carries no state;
-    /// `t4`'s task does.
-    pub fn state<'a>(&'a self, node: &'a Node) -> Option<&'a str> {
-        let kind = self.schema.node_kind(&node.kind)?;
-        if kind.states.is_empty() {
-            return None;
-        }
-        Some(
-            node.properties
-                .get("state")
-                .map_or(kind.states[0].as_str(), String::as_str),
-        )
-    }
-
-    /// The headline nodes open by either rule a map may declare: a
-    /// node of a kind with states whose `state` is the first listed
-    /// value (a `task`, once nothing has closed it), or, on a map with
-    /// a `Settlement`, an `of` node nothing settles yet (a `question`
-    /// with no `decision`). Headlines also include the settling kind
-    /// itself (`decision` is a headline on `decisions` too, so
-    /// `--around` and the render can name it directly), and nothing
-    /// ever settles a settling-kind node, so the settlement rule never
-    /// picks one up.
-    pub fn open(&self) -> impl Iterator<Item = &Node> {
-        let of = self.schema.settlement.as_ref().map(|s| s.of.as_str());
-        self.headlines().filter(move |node| match self.schema.node_kind(&node.kind) {
-            Some(kind) if !kind.states.is_empty() => {
-                self.state(node) == Some(kind.states[0].as_str())
-            }
-            _ => Some(node.kind.as_str()) == of && self.settled_by(node.id).is_empty(),
-        })
-    }
-
-    /// Whether `decision`, or a decision it supersedes, has a
-    /// `resolves` edge to a question - so it belongs under one in a
-    /// render rather than on its own.
-    pub fn settles(&self, decision: NodeId) -> bool {
-        let chain: HashSet<NodeId> = std::iter::once(decision)
-            .chain(self.predecessors(decision).iter().map(|node| node.id))
-            .collect();
-        self.resolving_edges()
-            .any(|edge| chain.contains(&edge.from))
-    }
-
-    /// The `resolves` edges that run between the schema's settlement
-    /// kinds - none on a map without a settlement.
-    fn resolving_edges(&self) -> impl Iterator<Item = &Edge> {
-        let settlement = self.schema.settlement.as_ref();
-        self.edges.iter().filter(move |edge| {
-            let Some(Settlement { by, of }) = settlement else {
-                return false;
-            };
-            edge.kind == RESOLVES
-                && self.node(edge.from).is_some_and(|node| node.kind == *by)
-                && self.node(edge.to).is_some_and(|node| node.kind == *of)
-        })
-    }
-
-    /// The tasks with a `blocks` edge to `task`, in map order - what it
-    /// waits on.
-    pub fn blocked_by(&self, task: NodeId) -> Vec<&Node> {
-        self.edges
-            .iter()
-            .filter(|edge| edge.kind == BLOCKS && edge.to == task)
-            .filter_map(|edge| self.node(edge.from))
-            .collect()
-    }
-
-    /// The options with an `answers` edge to `question`, in map order -
-    /// the alternatives weighed against its decision. Older entries
-    /// recorded the winning choice, and decisions it later superseded,
-    /// as options too; those are dropped, so a caller is never handed an
-    /// "alternative" that is really the decision under another kind.
-    pub fn weighed_for(&self, question: NodeId) -> Vec<&Node> {
-        let mut restated: HashSet<&str> = HashSet::new();
-        for decision in self.settled_by(question) {
-            restated.insert(decision.name.as_str());
-            restated.extend(
-                self.predecessors(decision.id)
-                    .iter()
-                    .map(|node| node.name.as_str()),
-            );
-        }
-        self.edges
-            .iter()
-            .filter(|edge| edge.kind == ANSWERS && edge.to == question)
-            .filter_map(|edge| self.node(edge.from))
-            .filter(|node| node.kind == OPTION && !restated.contains(node.name.as_str()))
-            .collect()
-    }
-
-    /// The questions with a `reopens` edge to `decision`, in map order.
-    pub fn reopened_by(&self, decision: NodeId) -> Vec<&Node> {
-        self.edges
-            .iter()
-            .filter(|edge| edge.kind == REOPENS && edge.to == decision)
-            .filter_map(|edge| self.node(edge.from))
-            .collect()
-    }
-
-    /// The decisions `question` reopens, in map order.
-    pub fn reopens(&self, question: NodeId) -> Vec<&Node> {
-        self.edges
-            .iter()
-            .filter(|edge| edge.kind == REOPENS && edge.from == question)
-            .filter_map(|edge| self.node(edge.to))
-            .collect()
     }
 
     pub fn edges(&self) -> &[Edge] {
         &self.edges
     }
 
+    /// The nodes across every edge of `edge_kind` touching `id`, in map
+    /// order, for a caller that knows no kind's name. `EdgeEnd::From`
+    /// reads the `to` end of an edge whose `from` is `id`; `EdgeEnd::To`
+    /// reads the `from` end of an edge whose `to` is `id`.
+    pub fn linked(&self, id: NodeId, edge_kind: &str, end: EdgeEnd) -> Vec<&Node> {
+        self.edges
+            .iter()
+            .filter(|edge| edge.kind == edge_kind)
+            .filter_map(|edge| match end {
+                EdgeEnd::From if edge.from == id => self.node(edge.to),
+                EdgeEnd::To if edge.to == id => self.node(edge.from),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// When the map last gained or changed a node, or gained an edge;
     /// `None` while it is empty. A removal leaves no trace here - what
     /// was removed lives only in the events.
     pub fn last_changed(&self) -> Option<Timestamp> {
-        let nodes = self.nodes.iter().map(|node| node.changed_at);
-        let edges = self.edges.iter().map(|edge| edge.added_at);
+        let nodes = self.nodes.iter().map(|node| node.changed().at);
+        let edges = self.edges.iter().map(|edge| edge.changed().at);
         nodes.chain(edges).max()
     }
 
     pub fn node(&self, id: NodeId) -> Option<&Node> {
         self.by_id.get(&id).map(|&i| &self.nodes[i])
-    }
-
-    /// `id`'s standing - `None` when the map holds no such node, or when
-    /// it is the human's own landmark (`Actor::Human`): a user-written
-    /// node is never a claim to judge. Otherwise `Disputed` or
-    /// `Confirmed` from the latest `claim.disputed`/`claim.confirmed`
-    /// naming it, else `Seen` when a `review.finished` has, else
-    /// `Claimed`.
-    pub fn standing(&self, id: NodeId) -> Option<Standing> {
-        let node = self.node(id)?;
-        if matches!(node.actor, Actor::Human(_)) {
-            return None;
-        }
-        Some(match self.judgments.get(&id).map(|j| &j.kind) {
-            Some(JudgmentKind::Confirmed) => Standing::Confirmed,
-            Some(JudgmentKind::Disputed(_)) => Standing::Disputed,
-            None if self.reviewed.contains(&id) => Standing::Seen,
-            None => Standing::Claimed,
-        })
-    }
-
-    /// The why of the latest `claim.disputed` naming `id`, only while its
-    /// standing is `Disputed` - `None` once a later `claim.confirmed`
-    /// supersedes it.
-    pub fn dispute(&self, id: NodeId) -> Option<&str> {
-        if self.standing(id) != Some(Standing::Disputed) {
-            return None;
-        }
-        match self.judgments.get(&id).map(|j| &j.kind) {
-            Some(JudgmentKind::Disputed(why)) => Some(why.as_str()),
-            _ => None,
-        }
-    }
-
-    /// Every node whose latest judgment - `claim.confirmed` or
-    /// `claim.disputed` - landed at or after `at`, each with the
-    /// standing it now carries and when that judgment landed. A node
-    /// only ever `review.finished` has named is not a judgment, so it
-    /// is never in this list.
-    pub fn judged_since(&self, at: Timestamp) -> impl Iterator<Item = (&Node, Standing, Timestamp)> {
-        self.judgments.iter().filter_map(move |(id, judgment)| {
-            if judgment.at < at {
-                return None;
-            }
-            let node = self.node(*id)?;
-            let standing = self.standing(*id)?;
-            Some((node, standing, judgment.at))
-        })
-    }
-
-    /// When the latest `review.finished` folded into this map landed,
-    /// or `None` if it holds none.
-    pub fn last_finished(&self) -> Option<Timestamp> {
-        self.last_finished
-    }
-
-    /// When `id` was last judged - the latest `claim.confirmed` or
-    /// `claim.disputed` naming it - or `None` if it never was.
-    pub fn judged_at(&self, id: NodeId) -> Option<Timestamp> {
-        self.judgments.get(&id).map(|j| j.at)
     }
 
     pub fn find(&self, kind: &str, name: &str) -> Option<&Node> {
@@ -1112,7 +904,7 @@ impl Map {
             .ok_or_else(unknown)?;
         let seq: u32 = digits.parse().map_err(|_| unknown())?;
         self.by_seq
-            .get(&(kind.name.clone(), seq))
+            .get(&(kind.kind.clone(), seq))
             .copied()
             .ok_or_else(unknown)
     }
@@ -1169,21 +961,17 @@ impl Map {
         let fresh: Vec<&Edge> = self
             .edges
             .iter()
-            .filter(|edge| edge.added_at >= at)
+            .filter(|edge| edge.changed().at >= at)
             .collect();
         let touched: HashSet<NodeId> = fresh.iter().flat_map(|edge| [edge.from, edge.to]).collect();
         let nodes = self
             .nodes
             .iter()
-            .filter(|node| node.changed_at >= at || touched.contains(&node.id))
+            .filter(|node| node.changed().at >= at || touched.contains(&node.id))
             .cloned()
             .collect();
         let edges = fresh.into_iter().cloned().collect();
-        let mut cut = Self::from_parts(self.schema.clone(), nodes, edges);
-        cut.judgments = self.judgments.clone();
-        cut.reviewed = self.reviewed.clone();
-        cut.last_finished = self.last_finished;
-        cut
+        Self::from_parts(self.schema.clone(), nodes, edges)
     }
 
     /// The map cut to `selection`, in its fixed order, counting what
@@ -1235,11 +1023,7 @@ impl Map {
             .filter(|edge| kept.contains(&edge.from) && kept.contains(&edge.to))
             .cloned()
             .collect();
-        let mut cut = Self::from_parts(self.schema.clone(), nodes, edges);
-        cut.judgments = self.judgments.clone();
-        cut.reviewed = self.reviewed.clone();
-        cut.last_finished = self.last_finished;
-        cut
+        Self::from_parts(self.schema.clone(), nodes, edges)
     }
 
     /// Checks `mutation` against the schema and the map's current
@@ -1268,6 +1052,12 @@ impl Map {
                             gloss: node_kind.gloss.clone(),
                         });
                     }
+                    if !node_kind.states.is_empty() && !properties.contains_key("state") {
+                        return Err(MapError::MissingState {
+                            kind: kind.clone(),
+                            states: node_kind.states.clone(),
+                        });
+                    }
                     check_state(node_kind, &properties)?;
                 }
                 Payload::NodeAdded {
@@ -1285,27 +1075,17 @@ impl Map {
                 name,
                 properties,
                 sources,
+                why,
             } => {
                 let node_id = self.resolve(node)?;
                 let existing = self.node(node_id).expect("resolve returns a live node's id");
                 if let Some(node_kind) = self.schema.node_kind(&existing.kind) {
                     check_state(node_kind, &properties)?;
                 }
-                if existing.kind == DECISION && name.is_some() {
-                    return Err(MapError::DecisionRenamed {
-                        node: self.label(node_id),
-                    });
-                }
-                if matches!(actor, Actor::Agent | Actor::System)
-                    && matches!(existing.actor, Actor::Human(_))
-                {
-                    let only_report = name.is_none()
-                        && properties.keys().all(|key| key == "state" || key == "outcome");
-                    if !only_report {
-                        return Err(MapError::HumansNode {
-                            node: self.label(node_id),
-                        });
-                    }
+                blank_why(why.as_deref())?;
+                let needs_rank = name.is_some() || properties.keys().any(|key| key != "state");
+                if needs_rank {
+                    self.check_may_of(actor, self.label(node_id), existing)?;
                 }
                 Payload::NodeChanged {
                     map,
@@ -1313,18 +1093,26 @@ impl Map {
                     name,
                     properties,
                     sources,
+                    why,
                 }
             }
-            Mutation::RemoveNode {
-                node,
-                reason,
-                sources,
-            } => Payload::NodeRemoved {
-                map,
-                node: self.resolve(node)?,
-                reason,
-                sources,
-            },
+            Mutation::RemoveNode { node, why, sources } => {
+                let node_id = self.resolve(node)?;
+                blank_why(Some(&why))?;
+                let existing = self.node(node_id).expect("resolve returns a live node's id");
+                self.check_may_of(actor, self.label(node_id), existing)?;
+                // Removing a node drops every edge on it, so each one is
+                // weighed as its own removal would be.
+                for edge in self.edges.iter().filter(|edge| edge.from == node_id || edge.to == node_id) {
+                    self.check_may_remove_edge(actor, edge)?;
+                }
+                Payload::NodeRemoved {
+                    map,
+                    node: node_id,
+                    why,
+                    sources,
+                }
+            }
             Mutation::AddEdge {
                 kind,
                 from,
@@ -1347,13 +1135,23 @@ impl Map {
                 from,
                 to,
                 sources,
-            } => Payload::EdgeRemoved {
-                map,
-                kind,
-                from: self.resolve(from)?,
-                to: self.resolve(to)?,
-                sources,
-            },
+                why,
+            } => {
+                let from_id = self.resolve(from)?;
+                let to_id = self.resolve(to)?;
+                blank_why(Some(&why))?;
+                if let Some(edge) = self.find_edge(&kind, from_id, to_id) {
+                    self.check_may_remove_edge(actor, edge)?;
+                }
+                Payload::EdgeRemoved {
+                    map,
+                    kind,
+                    from: from_id,
+                    to: to_id,
+                    sources,
+                    why,
+                }
+            }
         };
         self.replay(&payload, actor, Timestamp::now())?;
         Ok(payload)
@@ -1393,9 +1191,7 @@ impl Map {
                     name: name.clone(),
                     properties: properties.clone(),
                     sources: sources.clone(),
-                    actor,
-                    added_at: at,
-                    changed_at: at,
+                    history: vec![Change { actor, at, why: None }],
                     seq,
                 });
             }
@@ -1404,6 +1200,7 @@ impl Map {
                 name,
                 properties,
                 sources,
+                why,
                 ..
             } => {
                 let index = *self.by_id.get(node).ok_or(MapError::NoSuchNodeId(*node))?;
@@ -1423,11 +1220,11 @@ impl Map {
                         self.nodes[index].sources.push(*source);
                     }
                 }
-                // The human judged the text they saw; changed text is a
-                // new claim, so it goes back to the review queue.
-                self.judgments.remove(node);
-                self.reviewed.remove(node);
-                self.nodes[index].changed_at = at;
+                self.nodes[index].history.push(Change {
+                    actor,
+                    at,
+                    why: why.clone(),
+                });
             }
             Payload::NodeRemoved { node, .. } => {
                 let removed = self.node(*node).ok_or(MapError::NoSuchNodeId(*node))?;
@@ -1468,8 +1265,7 @@ impl Map {
                     from: *from,
                     to: *to,
                     sources: sources.clone(),
-                    actor,
-                    added_at: at,
+                    history: vec![Change { actor, at, why: None }],
                 });
             }
             Payload::EdgeRemoved { kind, from, to, .. } => {
@@ -1482,42 +1278,6 @@ impl Map {
                 }
                 self.edges
                     .retain(|e| !(e.kind == *kind && e.from == *from && e.to == *to));
-            }
-            // A node the fold no longer holds is ignored, not an error:
-            // the log is append-only, and a node named here may since
-            // have been removed.
-            Payload::ClaimConfirmed { node, .. } => {
-                if self.node(*node).is_some() {
-                    self.judgments.insert(
-                        *node,
-                        Judgment {
-                            at,
-                            kind: JudgmentKind::Confirmed,
-                        },
-                    );
-                }
-            }
-            Payload::ClaimDisputed { node, why, .. } => {
-                if self.node(*node).is_some() {
-                    self.judgments.insert(
-                        *node,
-                        Judgment {
-                            at,
-                            kind: JudgmentKind::Disputed(why.clone()),
-                        },
-                    );
-                }
-            }
-            Payload::ReviewFinished { nodes, .. } => {
-                for node in nodes {
-                    if self.node(*node).is_some() {
-                        self.reviewed.insert(*node);
-                    }
-                }
-                self.last_finished = Some(match self.last_finished {
-                    Some(last) => last.max(at),
-                    None => at,
-                });
             }
             _ => {}
         }
@@ -1624,6 +1384,44 @@ impl Map {
         } else {
             Err(MapError::NoSuchNodeId(id))
         }
+    }
+
+    /// W6 as a refusal: `NotYours` naming `label` unless `may` holds.
+    fn check_may(&self, actor: Actor, label: String, owner: Actor, touched_by: Actor) -> Result<(), MapError> {
+        if may(actor, owner, touched_by) {
+            Ok(())
+        } else {
+            Err(MapError::NotYours {
+                node: label,
+                owner,
+                touched_by,
+            })
+        }
+    }
+
+    /// `check_may` for `node` itself, where nothing else weighs in.
+    fn check_may_of(&self, actor: Actor, label: String, node: &Node) -> Result<(), MapError> {
+        self.check_may(actor, label, node.added().actor, node.touched_by())
+    }
+
+    /// W6 for dropping `edge`, whether on its own or with a node it
+    /// hangs on. An edge is part of both ends' neighbourhoods, so the
+    /// highest rank to have touched either end, or the edge itself, is
+    /// what locks it.
+    fn check_may_remove_edge(&self, actor: Actor, edge: &Edge) -> Result<(), MapError> {
+        let ends = [edge.from, edge.to].map(|id| self.node(id).expect("an edge's ends are live"));
+        let touched_by = highest(ends.iter().map(|end| end.touched_by()).chain([edge.touched_by()]))
+            .expect("three candidates");
+        self.check_may(actor, self.edge_line(edge), edge.added().actor, touched_by)
+    }
+
+    /// The live edge `kind from to` names, if the map holds one - what
+    /// `RemoveEdge`'s W6 check weighs. `None` when the map holds no such
+    /// edge; `replay` is what reports that missing.
+    fn find_edge(&self, kind: &str, from: NodeId, to: NodeId) -> Option<&Edge> {
+        self.edges
+            .iter()
+            .find(|edge| edge.kind == kind && edge.from == from && edge.to == to)
     }
 
     /// Refuses an `AddEdge` whose `from` or `to` node is not of a kind
@@ -1740,10 +1538,7 @@ pub fn map_of(payload: &Payload) -> Option<&str> {
         | Payload::NodeChanged { map, .. }
         | Payload::NodeRemoved { map, .. }
         | Payload::EdgeAdded { map, .. }
-        | Payload::EdgeRemoved { map, .. }
-        | Payload::ClaimConfirmed { map, .. }
-        | Payload::ClaimDisputed { map, .. }
-        | Payload::ReviewFinished { map, .. } => Some(map),
+        | Payload::EdgeRemoved { map, .. } => Some(map),
         _ => None,
     }
 }
@@ -1756,7 +1551,7 @@ fn check_state(kind: &NodeKind, properties: &BTreeMap<String, String>) -> Result
     if let Some(value) = properties.get("state") {
         if !kind.states.iter().any(|state| state == value) {
             return Err(MapError::UnknownState {
-                kind: kind.name.clone(),
+                kind: kind.kind.clone(),
                 value: value.clone(),
                 states: kind.states.clone(),
             });
