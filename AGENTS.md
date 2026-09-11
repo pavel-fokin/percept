@@ -84,8 +84,8 @@ Both are serde-free.
 - `Model` is domain-owned, not infrastructure: `percept` needs "a reply
   given messages," never the mechanism behind it.
 - `Map` is a cognitive map: nodes and edges the model builds from the
-  log, folded from `node.added`, `node.changed`, and `edge.added`
-  events in the same log. A `Schema` names a map and
+  log, folded from `node.added`, `node.removed`, `edge.added`, and
+  `edge.removed` events in the same log. A `Schema` names a map and
   the node and edge kinds it allows, and one line of purpose - what
   the map makes cheap - that the prompt carries in place of the map
   itself. A schema is a TOML file at `.percept/schemas/<name>.toml`,
@@ -99,11 +99,10 @@ Both are serde-free.
   rules live once.
 - A node records who added it - `User` or `Model` - and when. A
   user-written node is the human's landmark in a shared map: the model
-  may attach edges to it and close it by state, never touch its text.
-  A decision is corrected by
+  may attach edges to it but never remove it. A decision is corrected by
   adding the new one with a `supersedes` edge to the old, never by
-  changing it in place, so the old landmark stays one hop away and
-  leaves the headlines. A model that finds a decision no longer fits does not
+  removal, so the old landmark stays one hop away and leaves the
+  headlines. A model that finds a decision no longer fits does not
   supersede it: it raises a question with a `reopens` edge to the
   decision, which stands until the user settles the question.
   Stability of the representation is a value beside accuracy

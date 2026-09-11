@@ -538,6 +538,46 @@ fn a_node_changed_line_with_no_name_decodes_to_none() {
 }
 
 #[test]
+fn node_removed_round_trips_through_json() {
+    let node = NodeId::new();
+    let original = crate::core::Event::restore(
+        EventId::new(),
+        Actor::System,
+        source("cli"),
+        None,
+        Timestamp::now(),
+        Payload::NodeRemoved {
+            map: "decisions".to_string(),
+            node,
+            reason: "superseded".to_string(),
+            sources: Vec::new(),
+        },
+    );
+
+    let json = serde_json::to_string(&Event::from(&original)).unwrap();
+    let wire: Event = serde_json::from_str(&json).unwrap();
+    assert_eq!(wire.kind, "node.removed");
+    // Empty `sources` encodes as `[]`, never omitted.
+    assert_eq!(wire.payload["sources"], serde_json::json!([]));
+    let restored = crate::store::from_wire(wire).unwrap();
+
+    match restored.payload() {
+        Payload::NodeRemoved {
+            map,
+            node: restored_node,
+            reason,
+            sources,
+        } => {
+            assert_eq!(map, "decisions");
+            assert!(*restored_node == node);
+            assert_eq!(reason, "superseded");
+            assert!(sources.is_empty());
+        }
+        _ => panic!("expected NodeRemoved"),
+    }
+}
+
+#[test]
 fn edge_added_round_trips_through_json() {
     let from = NodeId::new();
     let to = NodeId::new();
@@ -1017,7 +1057,9 @@ fn every_kind_names_round_trip_through_the_store_parser() {
         EventKind::ToolCalled,
         EventKind::ToolResulted,
         EventKind::NodeAdded,
+        EventKind::NodeRemoved,
         EventKind::EdgeAdded,
+        EventKind::EdgeRemoved,
         EventKind::ModelCalled,
         EventKind::SessionStarted,
         EventKind::FileCited,

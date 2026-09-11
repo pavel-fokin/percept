@@ -1,5 +1,7 @@
 use super::*;
-use crate::core::testing::{human, node_added_by, node_id, schemas, scope, source, FakeLog};
+use crate::core::testing::{
+    edge_added, human, node_added, node_added_by, node_id, schemas, scope, source, FakeLog,
+};
 use crate::core::{Actor, Event, EventId};
 
 fn tool(events: Vec<Event>) -> ReviseMap {
@@ -212,6 +214,77 @@ fn a_change_can_reference_a_node_an_earlier_change_just_added() {
         output.content.lines().last().unwrap(),
         "added edge decision \"Rust over Go\" resolves question \"Which language?\""
     );
+}
+
+#[test]
+fn removing_a_user_written_node_is_refused_and_says_to_supersede() {
+    let revise = tool(vec![node_added("question", "Which language?")]);
+
+    let err = revise
+        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"question","name":"Which language?"},"reason":"wrong"}]}"#)
+        .err()
+        .unwrap()
+        .to_string();
+
+    assert!(err.contains("written by the user"), "{err}");
+    assert!(err.contains("supersedes"), "{err}");
+}
+
+#[test]
+fn removing_a_user_written_edge_is_refused() {
+    let decision = node_added("decision", "Rust");
+    let question = node_added("question", "Which language?");
+    let edge = edge_added("resolves", &decision, &question);
+    let revise = tool(vec![decision, question, edge]);
+
+    let err = revise
+        .run(r#"{"map":"decisions","changes":[{"op":"remove_edge","kind":"resolves","from":{"kind":"decision","name":"Rust"},"to":{"kind":"question","name":"Which language?"}}]}"#)
+        .err()
+        .unwrap()
+        .to_string();
+
+    assert!(err.contains("written by the user"), "{err}");
+}
+
+#[test]
+fn removing_a_model_node_that_a_user_edge_touches_is_refused() {
+    let model_node = node_added_by(Actor::Agent, "option", "Rust");
+    let question = node_added("question", "Which language?");
+    let user_edge = edge_added("answers", &model_node, &question);
+    let revise = tool(vec![model_node, question, user_edge]);
+
+    let err = revise
+        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"option","name":"Rust"},"reason":"wrong"}]}"#)
+        .err()
+        .unwrap()
+        .to_string();
+
+    assert!(err.contains("the user wrote the edge"), "{err}");
+}
+
+#[test]
+fn removing_a_model_written_node_is_allowed() {
+    let revise = tool(vec![node_added_by(Actor::Agent, "option", "Go")]);
+
+    let output = revise
+        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"option","name":"Go"},"reason":"wrong"}]}"#)
+        .unwrap();
+
+    assert!(matches!(output.commits[0], Payload::NodeRemoved { .. }));
+}
+
+#[test]
+fn removing_a_decision_is_refused_whoever_wrote_it() {
+    let revise = tool(vec![node_added_by(Actor::Agent, "decision", "Go")]);
+
+    let err = revise
+        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"decision","name":"Go"},"reason":"wrong"}]}"#)
+        .err()
+        .unwrap()
+        .to_string();
+
+    assert!(err.contains("never removed"), "{err}");
+    assert!(err.contains("supersedes"), "{err}");
 }
 
 #[test]

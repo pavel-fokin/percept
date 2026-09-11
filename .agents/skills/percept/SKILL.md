@@ -186,10 +186,9 @@ percept maps add-edge decisions --kind supersedes \
 
 The old node leaves the headlines and renders as `was` under its
 successor, one hop away. A user-written node is the user's landmark:
-the model may attach edges to it, but `revise_map` refuses to change it
-beyond its state or outcome. Nothing in a map is ever removed; a wrong
-node is changed in place with `change_node`, a decision is corrected
-by a successor, a task is dropped by state.
+the model may attach edges to it, but `revise_map` refuses to remove it,
+to remove a user-written edge, or to remove a model node a user edge
+touches. Removing any node drops its edges with it; look before you do.
 Nothing already rendered moves when a node is added: questions keep
 their first-seen order and their raising prompt as the heading.
 

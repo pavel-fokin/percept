@@ -278,9 +278,22 @@ fn a_text_term_matches_every_payload_kind() {
             sources: Vec::new(),
             seq: 2,
         },
+        Payload::NodeRemoved {
+            map: "tasks".to_string(),
+            node: NodeId::new(),
+            reason: "deployed already".to_string(),
+            sources: Vec::new(),
+        },
         Payload::EdgeAdded {
             map: "deploys".to_string(),
             kind: "blocks".to_string(),
+            from: NodeId::new(),
+            to: NodeId::new(),
+            sources: Vec::new(),
+        },
+        Payload::EdgeRemoved {
+            map: "tasks".to_string(),
+            kind: "deploys_to".to_string(),
             from: NodeId::new(),
             to: NodeId::new(),
             sources: Vec::new(),

@@ -103,6 +103,10 @@ pub enum MapsCommand {
     AddNode(AddNodeArgs),
     /// Add an edge between two nodes already in a map.
     AddEdge(EdgeArgs),
+    /// Remove a node from a map, dropping the edges that touch it.
+    RemoveNode(RemoveNodeArgs),
+    /// Remove an edge from a map.
+    RemoveEdge(EdgeArgs),
     /// Add several nodes and edges from a document on stdin, or change
     /// one already in the map - a margin line naming a short id, `t4`,
     /// starts a change block: `state "done"` under it sets a property,
@@ -208,7 +212,19 @@ pub struct AddNodeArgs {
     prop: Vec<(String, String)>,
 }
 
-/// An edge to add - the same three things name it.
+#[derive(Args)]
+pub struct RemoveNodeArgs {
+    #[command(flatten)]
+    target: MapArgs,
+    /// `kind:name` of the node to remove, or the short id its map
+    /// shows it as, `d41`.
+    #[arg(long, value_parser = non_blank)]
+    node: String,
+    #[arg(long, value_parser = non_blank)]
+    reason: String,
+}
+
+/// An edge to add or remove - the same three things name it either way.
 #[derive(Args)]
 pub struct EdgeArgs {
     #[command(flatten)]
@@ -737,6 +753,49 @@ pub fn maps_add_edge(
     .map(drop)
 }
 
+/// Removes a node from a map, dropping the edges that touch it.
+pub fn maps_remove_node(
+    args: RemoveNodeArgs,
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &crate::core::Source,
+    me: Option<crate::core::HumanId>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let scope = source.scope();
+    let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
+    let node = resolve_ref(&map, &args.node)?;
+    write(args.target, log, schemas, source, me, |sources| {
+        Mutation::RemoveNode {
+            node,
+            reason: args.reason,
+            sources,
+        }
+    })
+    .map(drop)
+}
+
+/// Removes an edge from a map.
+pub fn maps_remove_edge(
+    args: EdgeArgs,
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &crate::core::Source,
+    me: Option<crate::core::HumanId>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let scope = source.scope();
+    let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
+    let from = resolve_ref(&map, &args.from)?;
+    let to = resolve_ref(&map, &args.to)?;
+    write(args.target, log, schemas, source, me, |sources| {
+        Mutation::RemoveEdge {
+            kind: args.kind,
+            from,
+            to,
+            sources,
+        }
+    })
+    .map(drop)
+}
 
 /// Marks `args.node`'s claim confirmed - always the human's own
 /// judgment, never the model's. Prints the committed event's id.

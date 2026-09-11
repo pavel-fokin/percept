@@ -13,7 +13,7 @@ The core adds three things a memory lacks:
 | Property | What it means | Where it lives today |
 |---|---|---|
 | Evidence | A claim in a map cites the experience it came from. A reader can check it. | `source` on every node and edge event. |
-| Co-ownership | A map is shared by the human and the agent under landmark rules: the model may close a user-written node by state but never rewrite its text, a decision is corrected by a successor with a `supersedes` edge, never reworded. The human confirms or disputes what the agent wrote. | `Map::apply`; the `actor` on a node. Confirmation is not built: see the surface below. |
+| Co-ownership | A map is shared by the human and the agent under landmark rules: a user-written node is never removed by the model, a decision is superseded and never deleted. The human confirms or disputes what the agent wrote. | `Map::apply`; the `actor` on a node. Confirmation is not built: see the surface below. |
 | One log | The log spans clients and projects. What one agent learned another can fold. | `~/.percept/percept.jsonl`, `Source` on every event. |
 
 The core is what carries those three. Anything that does not is a
@@ -33,7 +33,7 @@ them.
 | Experience is append-only and never changes. | The log store. |
 | A claim in a map cites the experience it came from. | `source` required on every map event. |
 | A map is folded deterministically from cognitive commits, and the fold has one implementation. | `Map::apply` in Rust. Nothing stops a second fold yet. |
-| The model never rewrites what a user wrote, only its state and outcome; a decision is corrected by a successor, never reworded. | `Map::apply` refuses; `revise_map` says to supersede. |
+| The model never removes what a user wrote; a decision is superseded, never deleted. | `Map::apply` refuses; `revise_map` says to supersede. |
 | An alternative is recorded only with the reason it lost. | `requires` on the kind in its schema; the shared write path refuses a node missing one. |
 | A recorded claim is not the human's agreement; silence stays claimed. | Prose only. The surface below is the enforcement, not built. |
 | percept never ranks, summarises, or answers; output is constant-size per event. | Prose, and the habit of the search tools. |
@@ -58,8 +58,8 @@ Small: events, maps, and the rules between them.
 | Part | Holds |
 |---|---|
 | Event | An append-only entry: id, actor, source, causation, time, payload. Never changes. |
-| Map, Schema | Nodes and edges folded from `node.added`, `node.changed`, `edge.added`. Nothing is removed. A schema names the kinds it allows and one line of purpose. |
-| Rules | Who may change what; an option needs a why; a decision is superseded, never reworded. One place, `Map::apply`. |
+| Map, Schema | Nodes and edges folded from `node.added`, `node.changed`, `edge.added` and the removals. A schema names the kinds it allows and one line of purpose. |
+| Rules | Who may remove what; an option needs a why; a decision is superseded, never removed. One place, `Map::apply`. |
 | Selection, Fragment | A cut of a map around a node, since an instant, of some kinds, with counts of what the cut left out. |
 | Ports | Append, load, search the log; read and render a map. |
 | Format | The JSONL line. The contract every language speaks. |
@@ -131,7 +131,7 @@ holds the ports a loop needs to drive a model over them - `Model`, `Tool`,
 `core`. A Python SDK that folds a map never sees a `Model` trait.
 
 One thing did not move. The core keeps the name `Policy` for the
-ask-before-write gate, and the collaboration rule - who may change what,
+ask-before-write gate, and the collaboration rule - who may remove what,
 an option needs a why, a decision is superseded - stays inside
 `Map::apply` unnamed. Whether the core should reserve "policy" for the
 collaboration rule is open.

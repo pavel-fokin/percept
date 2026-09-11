@@ -140,7 +140,7 @@ since a user-written node carries no standing to judge.
 A map's schema is a TOML file at `.percept/schemas/<name>.toml` naming
 its node and edge kinds and one line of purpose. `decisions` and
 `tasks` ship built in; this repo adds `ideas`. The rules for a map -
-who may change what, how a decision is corrected - are in
+who may remove what, how a decision is corrected - are in
 [AGENTS.md](AGENTS.md). How to read, check, and revise one is in the
 [percept skill](.agents/skills/percept/SKILL.md).
 

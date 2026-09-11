@@ -111,7 +111,10 @@ fn carries(payload: &Payload, term: &str) -> bool {
         Payload::NodeChanged { map, name, properties, .. } => {
             has(map) || name.as_deref().is_some_and(has) || properties.values().any(|v| has(v))
         }
-        Payload::EdgeAdded { map, kind, .. } => has(map) || has(kind),
+        Payload::NodeRemoved { map, reason, .. } => has(map) || has(reason),
+        Payload::EdgeAdded { map, kind, .. } | Payload::EdgeRemoved { map, kind, .. } => {
+            has(map) || has(kind)
+        }
         Payload::ModelCalled(usage) => has(&usage.model),
         Payload::SessionStarted => false,
         Payload::FileCited { path, excerpt, .. } => has(&path.to_string_lossy()) || has(excerpt),

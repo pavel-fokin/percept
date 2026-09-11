@@ -233,7 +233,7 @@ recording
       answers question
     EOF
 - A claim that rests on a file cites the text it read: an indented line, cites src/path.rs:10-20, under the node.
-- A decision that changes an earlier one adds a supersedes <id> line under it; nothing is ever removed from a map.
+- A decision that changes an earlier one adds a supersedes <id> line under it; never remove a node.
 - A decision that no longer seems to fit is not yours to rewrite: raise a question with a reopens <id> line under it, and let the user settle it.
 - A node marked disputed carries the human's why: never propose it again; a correction the user agrees is a new decision with a supersedes line.
 - Close a task by changing it, not by adding a node: t4 on its own line, then state \"done\" and outcome \"<commit>: what happened\" indented under it (state \"dropped\" and why for one dropped, state \"open\" to reopen one). A task the user wrote takes only state and outcome from you; its name and why are theirs.

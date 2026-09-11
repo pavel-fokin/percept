@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, ListState, Para
 use ratatui::Frame;
 
 use super::{Chat, ModelsMenu};
-use crate::core::{Actor, Event, EventId, Payload};
+use crate::core::{Actor, Event, EventId, EventKind, Payload};
 
 /// One marker plus a space. Every wrapped line of a turn indents past
 /// it, so the gutter stays a column of markers and nothing else.
@@ -273,21 +273,41 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
             ),
             width,
         ),
+        Payload::NodeRemoved {
+            map, node, reason, ..
+        } => tool_lines(
+            chat,
+            &format!("{map}: removed node {} - {reason}", node.as_uuid()),
+            width,
+        ),
         Payload::EdgeAdded {
             map,
             kind,
             from,
             to,
             ..
-        } => tool_lines(
-            chat,
-            &format!(
-                "{map}: added edge {kind} {} \u{2192} {}",
-                from.as_uuid(),
-                to.as_uuid()
-            ),
-            width,
-        ),
+        }
+        | Payload::EdgeRemoved {
+            map,
+            kind,
+            from,
+            to,
+            ..
+        } => {
+            let verb = match event.kind() {
+                EventKind::EdgeAdded => "added",
+                _ => "removed",
+            };
+            tool_lines(
+                chat,
+                &format!(
+                    "{map}: {verb} edge {kind} {} \u{2192} {}",
+                    from.as_uuid(),
+                    to.as_uuid()
+                ),
+                width,
+            )
+        }
         // A file citation shows dimmed too - it's experience the
         // model recorded, not dialogue.
         Payload::FileCited { path, lines, .. } => tool_lines(
