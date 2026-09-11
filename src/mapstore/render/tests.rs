@@ -473,9 +473,9 @@ fn a_decision_resolving_no_question_gets_its_own_h2() {
     );
 }
 
-/// Folds `events` into the decisions map - what a standing test needs,
-/// since `claim.confirmed`/`claim.disputed` are not `Mutation`s and so
-/// never go through `add`/`link`'s `Map::apply`.
+/// Folds `events` into the decisions map - what a `changed by` test
+/// needs, since `node.changed` carrying only `why` is not a
+/// `Mutation` `add`/`link` builds through `Map::apply`.
 fn folded(events: &[crate::core::Event]) -> Map {
     Map::fold(decisions(), &crate::core::testing::scope(), events).unwrap()
 }
@@ -500,45 +500,56 @@ fn node_added(node: crate::core::NodeId, kind: &str, name: &str, why: Option<&st
     )
 }
 
-fn claim_disputed(node: crate::core::NodeId, why: &str) -> crate::core::Event {
+fn node_changed(node: crate::core::NodeId, why: Option<&str>) -> crate::core::Event {
     crate::core::Event::new(
         Actor::Human(human()),
         crate::core::testing::source("test"),
         None,
-        crate::core::Payload::ClaimDisputed {
+        crate::core::Payload::NodeChanged {
             map: "decisions".to_string(),
             node,
-            why: why.to_string(),
+            name: None,
+            properties: BTreeMap::new(),
+            sources: Vec::new(),
+            why: why.map(str::to_string),
         },
     )
 }
 
 #[test]
-fn a_disputed_decision_is_marked_with_its_why() {
+fn a_changed_node_renders_its_changed_by_line_with_its_why() {
     let node = crate::core::NodeId::new();
     let map = folded(&[
         node_added(node, "decision", "gemma4 by default", Some("the local model")),
-        claim_disputed(node, "never proposed"),
+        node_changed(node, Some("never proposed")),
     ]);
 
     let text = markdown(&map);
 
-    assert!(
-        text.contains("## d1 \"gemma4 by default\" (agent) \u{b7} disputed\n"),
-        "{text}"
-    );
-    assert!(text.contains("disputed: \"never proposed\"\n"), "{text}");
+    assert!(text.contains("changed by human: \"never proposed\"\n"), "{text}");
 }
 
 #[test]
-fn a_claimed_decision_carries_no_standing_mark() {
+fn a_changed_node_renders_its_changed_by_line_without_a_why() {
+    let node = crate::core::NodeId::new();
+    let map = folded(&[
+        node_added(node, "decision", "gemma4 by default", Some("the local model")),
+        node_changed(node, None),
+    ]);
+
+    let text = markdown(&map);
+
+    assert!(text.contains("changed by human\n"), "{text}");
+}
+
+#[test]
+fn an_unchanged_node_carries_no_changed_by_line() {
     let node = crate::core::NodeId::new();
     let map = folded(&[node_added(node, "decision", "gemma4 by default", None)]);
 
     let text = markdown(&map);
 
-    assert!(text.contains("## d1 \"gemma4 by default\" (agent)\n"), "{text}");
-    assert!(!text.contains("\u{b7} claimed"), "{text}");
+    assert!(!text.contains("changed by"), "{text}");
 }
 
 #[test]
@@ -758,7 +769,8 @@ fn open_tasks_render_flat_with_why_and_blockers_then_by_state() {
          - t1 \"send AGENTS.md to a coding turn\" (agent)\n\
          \x20 outcome: \"done in 1f1a9a9\"\n\
          \x20 state: \"done\"\n\
-         \x20 why: \"the model never saw the rules\"\n",
+         \x20 why: \"the model never saw the rules\"\n\
+         \x20 changed by agent\n",
         tasks_head(),
         contents(&[
             ("t2", "cancel a turn without quitting", first),
@@ -798,7 +810,8 @@ fn a_dropped_task_renders_under_dropped_with_its_outcome() {
          - t1 \"rewrite the render in wasm\"\n\
          \x20 outcome: \"not worth the build complexity\"\n\
          \x20 state: \"dropped\"\n\
-         \x20 why: \"faster paint\"\n",
+         \x20 why: \"faster paint\"\n\
+         \x20 changed by human\n",
         tasks_head(),
     );
 

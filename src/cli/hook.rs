@@ -27,7 +27,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::core::{cited_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source};
-use crate::mapstore::{block_header, capped_lines, judged_since_block, latest_session_per_client, line_id};
+use crate::mapstore::{block_header, capped_lines, latest_session_per_client, line_id};
 use crate::shared::Timestamp;
 use crate::store::TurnState;
 use crate::workspace;
@@ -195,9 +195,6 @@ fn start_session(
     let mut sections = vec![header];
     if let Some(at) = since {
         sections.push(gained_block(&maps, at));
-        if let Some(block) = judged_since_block(&maps, at) {
-            sections.push(block);
-        }
     }
     if let Some(block) = changed_since_recorded_block(&maps, &events, checkout) {
         sections.push(block);
@@ -235,15 +232,16 @@ recording
 - A claim that rests on a file cites the text it read: an indented line, cites src/path.rs:10-20, under the node.
 - A decision that changes an earlier one adds a supersedes <id> line under it; never remove a node.
 - A decision that no longer seems to fit is not yours to rewrite: raise a question with a reopens <id> line under it, and let the user settle it.
-- A node marked disputed carries the human's why: never propose it again; a correction the user agrees is a new decision with a supersedes line.
-- Close a task by changing it, not by adding a node: t4 on its own line, then state \"done\" and outcome \"<commit>: what happened\" indented under it (state \"dropped\" and why for one dropped, state \"open\" to reopen one). A task the user wrote takes only state and outcome from you; its name and why are theirs.
+- A node whose last change is the user's carries their why: never propose it again, and never rewrite or remove it - the map refuses; a correction the user agrees is a new decision with a supersedes line.
+- Close a task by changing it, not by adding a node: t4 on its own line, then state \"done\" and why \"<commit>: what happened\" indented under it - under an existing node, why is the change's why, not a property (state \"dropped\" and why for one dropped, state \"open\" to reopen one). A task the user wrote takes only state from you; its name and why are theirs.
 - Close the session with one line naming what was recorded: Recorded to decisions: q1, d1, o1.";
 
 /// What each folded map gained since `since`: a counts line for every
-/// map, in fold order, then up to `mapstore::judge::LIMIT` lines per
-/// map that gained anything - a node's `added_at` is compared
-/// directly, not `Map::since`, which would also surface an older node
-/// a fresh edge only touched.
+/// map, in fold order, then up to `mapstore::LIMIT` lines per map that
+/// gained anything - a node's `changed_at` is compared directly, not
+/// `Map::since`, which would also surface an older node a fresh edge
+/// only touched. Each line carries who last changed the node, and why,
+/// when its last change is not its addition.
 fn gained_block(maps: &[Map], since: Timestamp) -> String {
     let per_map: Vec<Vec<&Node>> = maps
         .iter()
@@ -265,7 +263,16 @@ fn gained_block(maps: &[Map], since: Timestamp) -> String {
         lines.extend(capped_lines(
             gained
                 .iter()
-                .map(|node| format!("{} {} {:?}", line_id(map, node), node.kind, node.name))
+                .map(|node| {
+                    let mut line = format!("{} {} {:?}", line_id(map, node), node.kind, node.name);
+                    if node.changed_at != node.added_at {
+                        line.push_str(&format!(" \u{b7} changed by {}", node.changed_by.name()));
+                        if let Some(why) = &node.changed_why {
+                            line.push_str(&format!(": {why:?}"));
+                        }
+                    }
+                    line
+                })
                 .collect(),
         ));
     }

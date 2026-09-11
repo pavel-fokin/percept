@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { confirm, dispute, fetchReview, finish } from "./api";
-import { messageOf, plural } from "./format";
+import { change, fetchReview } from "./api";
+import { messageOf } from "./format";
 import Queue from "./Queue";
-import { allClaims, claimedRows } from "./claims";
-import { FinishSheet, WhySheet } from "./Sheet";
+import { allClaims } from "./claims";
+import { WhySheet } from "./Sheet";
 import Toast from "./Toast";
 import type { ReviewResponse } from "./types";
 
@@ -12,9 +12,9 @@ type Load =
   | { state: "failed"; message: string }
   | { state: "ready"; response: ReviewResponse };
 
-type Sheet = { kind: "why"; id: string; name: string } | { kind: "finish" } | null;
+type Sheet = { kind: "why"; id: string; name: string } | null;
 
-/** One keyboard shortcut's key cap - what the seven identical `<kbd>`
+/** One keyboard shortcut's key cap - what the identical `<kbd>`
  * elements in the shortcuts footer shared inline. */
 function Key({ children }: { children: React.ReactNode }) {
   return (
@@ -58,7 +58,7 @@ export default function App() {
     setFocused(rowIds[next]);
   }
 
-  const onDispute = useCallback(
+  const onWrong = useCallback(
     (id: string) => {
       const name = map ? allClaims(map).find((claim) => claim.id === id)?.name : undefined;
       setSheet({ kind: "why", id, name: name ?? "" });
@@ -68,7 +68,7 @@ export default function App() {
 
   function saveWhy(id: string, why: string) {
     if (!current) return;
-    dispute(current, id, why)
+    change(current, id, why)
       .then(() => {
         setDrafts((drafts) => {
           const { [id]: _removed, ...rest } = drafts;
@@ -81,39 +81,9 @@ export default function App() {
       .catch((error: unknown) => setToast(messageOf(error)));
   }
 
-  const onConfirm = useCallback(
-    (id: string) => {
-      if (!current) return;
-      confirm(current, id)
-        .then(() => {
-          refetch();
-          setToast(`Confirmed ${id}.`);
-        })
-        .catch((error: unknown) => setToast(messageOf(error)));
-    },
-    [current],
-  );
-
-  function openFinish() {
-    if (!map || rowIds.length === 0) return;
-    setSheet({ kind: "finish" });
-  }
-
   function toggleSource(id: string) {
     const row = document.querySelector(`li[data-id="${CSS.escape(id)}"] details.source`);
     if (row instanceof HTMLDetailsElement) row.open = !row.open;
-  }
-
-  function markSeen() {
-    if (!current || !map) return;
-    const count = claimedRows(map).length;
-    finish(current, rowIds)
-      .then(() => {
-        setSheet(null);
-        refetch();
-        setToast(`Review finished. ${plural(count, "One claim", "claims")} seen.`);
-      })
-      .catch((error: unknown) => setToast(messageOf(error)));
   }
 
   useEffect(() => {
@@ -134,18 +104,10 @@ export default function App() {
         event.preventDefault();
         setKeysShown((shown) => !shown);
       }
-      if (event.key === "f") {
-        event.preventDefault();
-        openFinish();
-      }
       if (!focused) return;
       if (event.key === "w") {
         event.preventDefault();
-        onDispute(focused);
-      }
-      if (event.key === "y") {
-        event.preventDefault();
-        onConfirm(focused);
+        onWrong(focused);
       }
       if (event.key === "s") {
         event.preventDefault();
@@ -154,7 +116,7 @@ export default function App() {
     }
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [sheet, focused, rowIds, map, onDispute, onConfirm]);
+  }, [sheet, focused, rowIds, map, onWrong]);
 
   return (
     <div className="min-h-screen pb-24 font-sans text-[15px] leading-normal">
@@ -166,7 +128,7 @@ export default function App() {
           {load.state === "ready" && (
             <nav className="ml-auto flex gap-4" aria-label="maps">
               {load.response.maps.map((map) => {
-                const claimed = claimedRows(map).length;
+                const count = allClaims(map).length;
                 return (
                   <button
                     key={map.name}
@@ -184,7 +146,7 @@ export default function App() {
                     }
                   >
                     {map.name}
-                    <b className="ml-1 font-normal text-[var(--ink-3)]">{claimed}</b>
+                    <b className="ml-1 font-normal text-[var(--ink-3)]">{count}</b>
                   </button>
                 );
               })}
@@ -197,20 +159,7 @@ export default function App() {
         {load.state === "failed" && (
           <p className="py-8">The queue could not be read: {load.message}. Reload to try again.</p>
         )}
-        {load.state === "ready" && map && (
-          <Queue map={map} focused={focused} onDispute={onDispute} onConfirm={onConfirm} />
-        )}
-        <section className="mt-12">
-          <h2 className="text-base font-bold">What the next session starts with</h2>
-          <p className="mt-1 text-[var(--ink-2)]">
-            These lines are printed to the model when it next opens this project, in any client.
-          </p>
-          <pre className="mt-3 whitespace-pre-wrap break-words rounded-md bg-[var(--ground-2)] p-3.5 font-mono text-sm leading-relaxed text-[var(--ink)]">
-            {load.state === "ready" && load.response.next
-              ? load.response.next
-              : "Nothing judged yet. Seen is not listed: it changes nothing the model does."}
-          </pre>
-        </section>
+        {load.state === "ready" && map && <Queue map={map} focused={focused} onDispute={onWrong} />}
       </main>
 
       {keysShown && (
@@ -226,16 +175,8 @@ export default function App() {
               wrong
             </span>
             <span>
-              <Key>y</Key>
-              confirm
-            </span>
-            <span>
               <Key>s</Key>
               show the exchange
-            </span>
-            <span>
-              <Key>f</Key>
-              finish, after a check
             </span>
             <span>
               <Key>?</Key>
@@ -245,15 +186,7 @@ export default function App() {
         </footer>
       )}
       <div className="fixed inset-x-0 bottom-0 z-[6] border-t border-[var(--rule)] bg-[var(--ground)] pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto flex max-w-2xl items-center gap-3 px-4 py-2.5">
-          <button
-            type="button"
-            disabled={rowIds.length === 0}
-            onClick={openFinish}
-            className="min-h-11 flex-1 rounded-md bg-[var(--ink)] px-4 py-2 font-bold text-[var(--ground)] disabled:bg-[var(--ground-2)] disabled:text-[var(--ink-3)]"
-          >
-            Finish review
-          </button>
+        <div className="mx-auto flex max-w-2xl items-center justify-end gap-3 px-4 py-2.5">
           <button
             type="button"
             aria-label="keyboard shortcuts"
@@ -275,14 +208,6 @@ export default function App() {
             setSheet(null);
           }}
           onSave={(value) => saveWhy(sheet.id, value)}
-        />
-      )}
-      {sheet?.kind === "finish" && map && (
-        <FinishSheet
-          map={map.name}
-          count={claimedRows(map).length}
-          onCancel={() => setSheet(null)}
-          onConfirm={markSeen}
         />
       )}
       <Toast text={toast} />

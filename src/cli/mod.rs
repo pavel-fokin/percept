@@ -53,7 +53,7 @@ leave relevance to the caller.
 
 `events publish` appends one event, `events search` and `events show` \
 query it, `maps list` and `maps show` print a cognitive map folded \
-from it, `maps record`, `confirm`, and `dispute` change one, `hook \
+from it, `maps record` and `maps change-node` change one, `hook \
 <client>` records one coding client's turn from the hook JSON it reads \
 on stdin, and `init <client>` writes that client's project config to \
 call it.")]
@@ -110,15 +110,15 @@ pub enum MapsCommand {
     /// Add several nodes and edges from a document on stdin, or change
     /// one already in the map - a margin line naming a short id, `t4`,
     /// starts a change block: `state "done"` under it sets a property,
-    /// `name "..."` renames it. Prints one line per node or change,
-    /// then one per edge, then one per `cites` line.
+    /// `name "..."` renames it, and an indented `why "..."` line under
+    /// it sets the change's own why rather than a property. Prints one
+    /// line per node or change, then one per edge, then one per `cites`
+    /// line.
     Record(RecordArgs),
-    /// Mark a node's claim confirmed - always the human's own judgment.
-    /// Prints the committed event's id.
-    Confirm(StandingArgs),
-    /// Mark a node's claim disputed, with why - always the human's own
-    /// judgment. Prints the committed event's id.
-    Dispute(DisputeArgs),
+    /// Change a node already in a map - a rename, a property, or a
+    /// `why`-only comment - subject to the same rank rule a rename or
+    /// removal always has. Prints the node's id.
+    ChangeNode(ChangeNodeArgs),
 }
 
 /// How `maps show` and `maps list` print a map.
@@ -268,25 +268,23 @@ pub struct RecordArgs {
     causation: Option<String>,
 }
 
-/// What `maps confirm` and the shared half of `maps dispute` name: the
-/// map, and the node whose claim is being judged.
 #[derive(Args)]
-pub struct StandingArgs {
-    /// The map's name, as `maps list` prints it.
-    map: String,
-    /// `kind:name` of the node, or the short id its map shows it as,
-    /// `d41`.
-    #[arg(value_parser = non_blank)]
-    node: String,
-}
-
-#[derive(Args)]
-pub struct DisputeArgs {
+pub struct ChangeNodeArgs {
     #[command(flatten)]
-    target: StandingArgs,
-    /// Why the claim is disputed.
+    target: MapArgs,
+    /// `kind:name` of the node to change, or the short id its map
+    /// shows it as, `d41`.
     #[arg(long, value_parser = non_blank)]
-    why: String,
+    node: String,
+    /// A new name for the node.
+    #[arg(long)]
+    name: Option<String>,
+    /// Repeatable `key=value`.
+    #[arg(long = "prop", value_parser = parse_prop)]
+    prop: Vec<(String, String)>,
+    /// Why this change was made.
+    #[arg(long)]
+    why: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -809,38 +807,39 @@ pub fn maps_remove_edge(
     .map(drop)
 }
 
-/// Marks `args.node`'s claim confirmed - always the human's own
-/// judgment, never the model's. Prints the committed event's id.
-pub fn maps_confirm(
-    args: StandingArgs,
+/// Changes a node already in a map - a rename, a property, or a
+/// `why`-only comment - and prints the event id, the way `maps
+/// add-node` prints the node it minted.
+pub fn maps_change_node(
+    args: ChangeNodeArgs,
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let event = mapstore::confirm(log, schemas, source, me, &args.map, &args.node)?;
-    print_lines(std::iter::once(event.id().as_uuid().to_string()))
-}
-
-/// Marks `args.target.node`'s claim disputed, with `args.why` - always
-/// the human's own judgment. Prints the committed event's id.
-pub fn maps_dispute(
-    args: DisputeArgs,
-    log: &dyn EventLog,
-    schemas: &Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let event = mapstore::dispute(
-        log,
-        schemas,
-        source,
-        me,
-        &args.target.map,
-        &args.target.node,
-        args.why,
-    )?;
-    print_lines(std::iter::once(event.id().as_uuid().to_string()))
+    let scope = source.scope();
+    let map = mapstore::fold_map(log, schemas, &args.target.map, &scope)?;
+    let node = resolve_ref(&map, &args.node)?;
+    let ChangeNodeArgs {
+        target,
+        node: _,
+        name,
+        prop,
+        why,
+    } = args;
+    let payload = write(target, log, schemas, source, me, |sources| {
+        Mutation::ChangeNode {
+            node,
+            name,
+            properties: prop.into_iter().collect::<BTreeMap<_, _>>(),
+            sources,
+            why,
+        }
+    })?;
+    if let Payload::NodeChanged { node, .. } = &payload {
+        println!("{}", node.as_uuid());
+    }
+    Ok(())
 }
 
 /// One `cites` line under a node: the file it rested on, and the range
@@ -944,10 +943,12 @@ fn split_cite_range(s: &str) -> Result<(String, Option<(u32, u32)>), Box<dyn std
 /// either `<kind> "<name>"`, which adds a node, or a bare short id,
 /// `t4`, which starts a change to the node it names - each owns every
 /// indented line under it - a `<key> "<value>"` property (`name
-/// "<value>"` is a rename, only meaningful under a change), an `<edge
-/// kind> <ref>`, or a `cites <path>[:<from>-<to>]` - until the next
-/// node line or the document's end. A blank line is ignored; anything
-/// else names its line number.
+/// "<value>"` is a rename, only meaningful under a change; `why
+/// "<value>"` under a change is the change's own why rather than a
+/// property, but stays a property under a fresh node), an `<edge kind>
+/// <ref>`, or a `cites <path>[:<from>-<to>]` - until the next node line
+/// or the document's end. A blank line is ignored; anything else names
+/// its line number.
 fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>> {
     let mut nodes: Vec<DocNode> = Vec::new();
     for (i, raw) in text.lines().enumerate() {
@@ -1107,6 +1108,7 @@ fn record_document(
                 let (kind, old_name) = (target.kind.clone(), target.name.clone());
                 let mut properties = node.properties;
                 let rename = properties.remove("name");
+                let why = properties.remove("why");
                 let name = rename.clone().unwrap_or_else(|| old_name.clone());
                 let mutation = Mutation::ChangeNode {
                     node: NodeRef {
@@ -1116,7 +1118,7 @@ fn record_document(
                     name: rename,
                     properties,
                     sources,
-                    why: None,
+                    why,
                 };
                 (mutation, kind, name)
             } else {

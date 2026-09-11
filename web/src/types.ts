@@ -1,6 +1,3 @@
-/** A node's standing, as `Map::standing` reports it. */
-export type Standing = "claimed" | "seen" | "confirmed" | "disputed";
-
 /** The proposal a human prompt's "yes" answered: the latest agent
  * reply in the same source before it, or `null` when there is none. */
 export interface Proposal {
@@ -50,13 +47,14 @@ export interface OptionRow {
   kind: string;
   name: string;
   why: string | null;
-  standing: Standing;
-  dispute: string | null;
+  changed_by: string;
+  changed_why: string | null;
+  changed_at: string;
   sources: Source[];
 }
 
-/** One claim in the queue: a headline node the map's fold marks
- * `claimed`, or judged since the map was last finished. */
+/** One claim in the queue: a headline node changed since the review
+ * last opened. */
 export interface Row extends OptionRow {
   added_at: string;
   was: NodeRef | null;
@@ -87,11 +85,7 @@ export interface MapQueue {
   groups: Group[];
 }
 
-/** `GET /api/review`'s response. `next` is the lines the next session's
- * start block will print - the same text `judged_since_block` builds
- * for the hook - or `null` when nothing was judged since the project's
- * last session. */
+/** `GET /api/review`'s response. */
 export interface ReviewResponse {
   maps: MapQueue[];
-  next: string | null;
 }

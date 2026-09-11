@@ -1,32 +1,25 @@
-//! The queue `GET /api/review` serves: per map, the claims a reader has
-//! not yet reviewed, grouped by the map's settlement question. Folded
-//! fresh on every call from the log `cut` is handed - nothing here is
-//! cached, so a write between two requests is seen on the next one.
-//! `ReviewResponse` and the structs it nests mirror `web/src/types.ts`
-//! one to one, so the page reads the same shape this module writes.
+//! The queue `GET /api/review` serves: per map, the headline nodes
+//! changed since the review last opened, grouped by the map's
+//! settlement question. Folded fresh on every call from the log `cut`
+//! is handed - nothing here is cached, so a write between two requests
+//! is seen on the next one. `ReviewResponse` and the structs it nests
+//! mirror `web/src/types.ts` one to one, so the page reads the same
+//! shape this module writes.
 
 use serde::Serialize;
 
-use crate::core::{
-    Event, EventId, EventLog, HumanId, Map, MapError, Node, NodeId, Schemas, Scope, Settlement,
-    Source, Standing,
-};
-use crate::mapstore::{self, JudgeError};
+use crate::core::{EventId, EventLog, HumanId, Map, MapError, Node, NodeId, Schemas, Settlement, Source};
+use crate::mapstore;
 use crate::shared::Timestamp;
 
 mod sources;
 use sources::{EventIndex, SourceEntry};
 
 /// `GET /api/review`'s response: one entry per schema with at least one
-/// headline kind, each folded from `log.load()` fresh. `next` is the
-/// same lines `judged_since_block` builds for the session-start hook,
-/// cut to what was judged since the project's latest `session.started`
-/// event from any source - the page has no client of its own to filter
-/// by - or `None` when nothing was.
+/// headline kind, each folded from `log.load()` fresh.
 #[derive(Serialize)]
 pub struct ReviewResponse {
     pub maps: Vec<MapQueue>,
-    pub next: Option<String>,
 }
 
 /// One map's queue: its claims, grouped by the question or task each
@@ -62,13 +55,14 @@ pub struct OptionRow {
     pub kind: String,
     pub name: String,
     pub why: Option<String>,
-    pub standing: Option<String>,
-    pub dispute: Option<String>,
+    pub changed_by: &'static str,
+    pub changed_why: Option<String>,
+    pub changed_at: String,
     pub sources: Vec<SourceEntry>,
 }
 
-/// One claim in the queue: a headline node the map's fold marks
-/// `claimed`, or judged since the map was last finished.
+/// One claim in the queue: a headline node changed since the review
+/// last opened.
 #[derive(Serialize)]
 pub struct Row {
     #[serde(flatten)]
@@ -87,10 +81,13 @@ pub struct NodeRef {
     pub name: String,
 }
 
+/// The queue as of now: every headline node whose `changed_at` is at or
+/// after `since`, of any actor - every node when `since` is `None`.
 pub fn cut(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &Source,
+    since: Option<Timestamp>,
 ) -> Result<ReviewResponse, Box<dyn std::error::Error>> {
     let events = log.load()?;
     let scope = source.scope();
@@ -99,59 +96,24 @@ pub fn cut(
     let map_queues: Vec<MapQueue> = maps
         .iter()
         .filter(|map| !map.schema().headline_kinds.is_empty())
-        .map(|map| map_queue(map, &index))
+        .map(|map| map_queue(map, since, &index))
         .collect();
-    let next = last_session(&events, &scope).and_then(|at| mapstore::judged_since_block(&maps, at));
-    Ok(ReviewResponse { maps: map_queues, next })
+    Ok(ReviewResponse { maps: map_queues })
 }
 
-/// The `since` every client's next `session.started` block will use, so
-/// a judgment the foot names here is one the model is guaranteed to
-/// see next: for each client - grouped by source name and path - the
-/// latest `session.started` in `scope`, then the earliest of those
-/// maxes across clients, since that is the oldest `since` any client's
-/// next start will compute. `None` when `scope` holds no events at all;
-/// when it holds events but no `session.started`, the earliest event's
-/// `created_at` stands in, so a judgment made before any hook ran still
-/// shows.
-fn last_session(events: &[Event], scope: &Scope) -> Option<Timestamp> {
-    let latest_by_client = mapstore::latest_session_per_client(events, scope);
-    if latest_by_client.is_empty() {
-        return events
-            .iter()
-            .filter(|event| scope.admits(event))
-            .map(|event| event.created_at())
-            .min();
-    }
-    latest_by_client.into_values().min()
-}
-
-/// What a `/api/dispute`, `/api/confirm`, or `/api/finish` write is
-/// refused for: the HTTP status it earns - 404 for a node id no map
-/// holds, 400 for anything else a write path refuses.
+/// What a `/api/change` write is refused for: the HTTP status it
+/// earns - 404 for a node id no map holds, 400 for anything else a
+/// write path refuses.
 #[derive(Debug)]
 pub enum Refused {
     Bad(String),
     NotFound(String),
 }
 
-impl From<JudgeError> for Refused {
-    fn from(err: JudgeError) -> Self {
-        let not_found = matches!(
-            &err,
-            JudgeError::Map(MapError::NoSuchNode { .. } | MapError::UnknownShortId(_))
-        );
-        if not_found {
-            Self::NotFound(err.to_string())
-        } else {
-            Self::Bad(err.to_string())
-        }
-    }
-}
-
-/// `POST /api/dispute`: appends a `claim.disputed` naming `node` on
-/// `map`, with `why` - refused with `Bad` when `why` is blank.
-pub fn dispute(
+/// `POST /api/change`: appends a `node.changed` naming `node` on `map`,
+/// carrying only `why` - refused with `Bad` when `why` is blank, with
+/// `NotFound` when `node` resolves against no node in `map`.
+pub fn change(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &Source,
@@ -160,64 +122,60 @@ pub fn dispute(
     node: &str,
     why: String,
 ) -> Result<EventId, Refused> {
-    Ok(mapstore::dispute(log, schemas, source, me, map, node, why)?.id())
-}
-
-/// `POST /api/confirm`: appends a `claim.confirmed` naming `node` on
-/// `map`.
-pub fn confirm(
-    log: &dyn EventLog,
-    schemas: &Schemas,
-    source: &Source,
-    me: Option<HumanId>,
-    map: &str,
-    node: &str,
-) -> Result<EventId, Refused> {
-    Ok(mapstore::confirm(log, schemas, source, me, map, node)?.id())
-}
-
-/// `POST /api/finish`: appends one `review.finished` naming every id in
-/// `nodes` that still resolves against `map` - a short id or
-/// `kind:name`, as `maps confirm` accepts - skipping one the human
-/// wrote themselves, the same as one that no longer resolves: a node
-/// removed since the page loaded must not block finishing until a
-/// reload. Also names the heading of every group one of those rows
-/// sits in, so the page need not send heading ids of its own.
-pub fn finish(
-    log: &dyn EventLog,
-    schemas: &Schemas,
-    source: &Source,
-    me: Option<HumanId>,
-    map: &str,
-    nodes: &[String],
-) -> Result<EventId, Refused> {
+    if why.trim().is_empty() {
+        return Err(Refused::Bad("why must not be blank".to_string()));
+    }
+    let scope = source.scope();
     let folded =
-        mapstore::fold_map(log, schemas, map, &source.scope()).map_err(|err| Refused::Bad(err.to_string()))?;
-    let mut ids: Vec<NodeId> = Vec::new();
-    for node in nodes {
-        if let Ok(id) = mapstore::resolve_judged_node(&folded, node) {
-            ids.push(id);
-        }
-    }
-    if let Some(settlement) = &folded.schema().settlement {
-        let claims: Vec<&Node> = folded.headlines().filter(|node| is_claim(&folded, node)).collect();
-        for group in grouped(&folded, settlement, &claims) {
-            let Some(of_node) = group.of_node else { continue };
-            let already_in = group.rows.iter().any(|row| ids.contains(&row.id));
-            if already_in && !ids.contains(&of_node.id) {
-                ids.push(of_node.id);
-            }
-        }
-    }
-    let event = Event::review_finished(map.to_string(), ids, me, source.clone(), None);
-    log.append(&event).map_err(|err| Refused::Bad(err.to_string()))?;
+        mapstore::fold_map(log, schemas, map, &scope).map_err(|err| Refused::Bad(err.to_string()))?;
+    let node_id = mapstore::NodeRefArgs::ShortId(node.to_string())
+        .resolve(&folded)
+        .map_err(|err| classify(&err))?;
+    let target = folded.node(node_id).expect("resolve returns a live node's id");
+    let node_ref = crate::core::NodeRef {
+        kind: target.kind.clone(),
+        name: target.name.clone(),
+    };
+    let event = mapstore::commit(
+        log,
+        schemas,
+        map,
+        &scope,
+        source,
+        &[],
+        crate::core::Actor::Human(me),
+        move |sources| crate::core::Mutation::ChangeNode {
+            node: node_ref,
+            name: None,
+            properties: Default::default(),
+            sources,
+            why: Some(why),
+        },
+    )
+    .map_err(|err| Refused::Bad(err.to_string()))?;
     Ok(event.id())
 }
 
+/// `Bad` or `NotFound`, from the `MapError` a write refused with.
+fn classify(error: &MapError) -> Refused {
+    let not_found = matches!(
+        error,
+        MapError::NoSuchNode { .. } | MapError::UnknownShortId(_)
+    );
+    if not_found {
+        Refused::NotFound(error.to_string())
+    } else {
+        Refused::Bad(error.to_string())
+    }
+}
+
 /// One map's queue: its `since`, and its claims grouped by question.
-fn map_queue(map: &Map, index: &EventIndex) -> MapQueue {
+fn map_queue(map: &Map, since: Option<Timestamp>, index: &EventIndex) -> MapQueue {
     let schema = map.schema();
-    let claims: Vec<&Node> = map.headlines().filter(|node| is_claim(map, node)).collect();
+    let claims: Vec<&Node> = map
+        .headlines()
+        .filter(|node| since.is_none_or(|since| node.changed_at >= since))
+        .collect();
     let groups = match &schema.settlement {
         Some(settlement) => grouped(map, settlement, &claims),
         None => vec![RawGroup { of_node: None, rows: claims }],
@@ -225,24 +183,8 @@ fn map_queue(map: &Map, index: &EventIndex) -> MapQueue {
     MapQueue {
         name: schema.name.clone(),
         purpose: schema.purpose.clone(),
-        since: map.last_finished().map(|at| at.to_string()),
+        since: since.map(|at| at.to_string()),
         groups: groups.iter().map(|group| group_json(map, group, index)).collect(),
-    }
-}
-
-/// Whether `node` belongs in the cut: a model-written node whose
-/// standing is `Claimed`, or whose latest judgment landed at or after
-/// the map's last finish. A user-written node's standing is `None`, so
-/// it is never a claim. No finish yet means every judgment still
-/// counts.
-fn is_claim(map: &Map, node: &Node) -> bool {
-    match map.standing(node.id) {
-        Some(Standing::Claimed) => true,
-        Some(_) => match map.last_finished() {
-            None => true,
-            Some(finished) => map.judged_at(node.id).is_some_and(|at| at >= finished),
-        },
-        None => false,
     }
 }
 
@@ -355,8 +297,9 @@ fn option_json(map: &Map, node: &Node, index: &EventIndex) -> OptionRow {
         kind: node.kind.clone(),
         name: node.name.clone(),
         why: node.properties.get("why").cloned(),
-        standing: map.standing(node.id).map(|standing| standing.to_string()),
-        dispute: map.dispute(node.id).map(str::to_string),
+        changed_by: node.changed_by.name(),
+        changed_why: node.changed_why.clone(),
+        changed_at: node.changed_at.to_string(),
         sources: index.sources_json(&node.sources),
     }
 }

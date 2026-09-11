@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { plural } from "./format";
 
 /** The quiet button style: no border, no fill, muted text - shared by
  * a sheet's Close/Cancel and a claim's Confirm. */
@@ -127,55 +126,3 @@ export function WhySheet({
   );
 }
 
-/** "Mark N claims seen?": the finish sheet Finish opens, naming `count`
- * - the map's claimed headline rows shown when it opened - and
- * `map`'s name. With no claimed rows left, every row in the cut is
- * already judged, and the sheet says so instead of naming a count. */
-export function FinishSheet({
-  map,
-  count,
-  onCancel,
-  onConfirm,
-}: {
-  map: string;
-  count: number;
-  onCancel: () => void;
-  onConfirm: () => void;
-}) {
-  useEscape(onCancel);
-  return (
-    <Scrim
-      onClose={onCancel}
-      titleId="finish-title"
-      actions={
-        <>
-          <button type="button" onClick={onCancel} className={QUIET}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            autoFocus
-            onClick={onConfirm}
-            className="min-h-10 rounded-md border-[1.5px] border-[var(--ink)] bg-[var(--ink)] px-3.5 py-2 font-bold text-[var(--ground)]"
-          >
-            Mark seen
-          </button>
-        </>
-      }
-    >
-      <h2 id="finish-title" className="text-base font-bold">
-        {count === 0 ? "Finish this review?" : `Mark ${plural(count, "one claim", "claims")} seen?`}
-      </h2>
-      <p className="mt-2 text-[var(--ink-2)]">
-        {count === 0 ? (
-          "Everything here is judged. Finishing closes this sitting."
-        ) : (
-          <>
-            Every claim to {map} you did not mark becomes seen, in one event. Seen is not undone. An
-            alternative folded under a decision stays unjudged.
-          </>
-        )}
-      </p>
-    </Scrim>
-  );
-}

@@ -670,30 +670,6 @@ impl fmt::Display for MapError {
 
 impl std::error::Error for MapError {}
 
-/// How the human has judged a model's claim, derived - never stored
-/// directly - from the `claim.confirmed`, `claim.disputed`, and
-/// `review.finished` events that name a node, latest by log order.
-/// `Claimed` is a model's claim nobody has judged yet; a user-written
-/// node has no standing at all (see `Map::standing`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Standing {
-    Claimed,
-    Seen,
-    Confirmed,
-    Disputed,
-}
-
-impl fmt::Display for Standing {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::Claimed => "claimed",
-            Self::Seen => "seen",
-            Self::Confirmed => "confirmed",
-            Self::Disputed => "disputed",
-        })
-    }
-}
-
 /// An actor's rank: `Human` above `Agent` and `System`, which sit
 /// level with each other. What W6's `may` weighs - not a property
 /// `Actor` itself carries, since ranking is a rule of the map's rank
@@ -729,22 +705,6 @@ fn may(actor: Actor, owner: Actor, changed_by: Actor) -> bool {
     (same_actor(actor, owner) || outranks(actor, owner)) && !outranks(changed_by, actor)
 }
 
-/// The latest `claim.confirmed`/`claim.disputed` naming a node, so
-/// `Map::dispute` can hand back the why without walking the log again,
-/// and `at` its event's `created_at`, so `Map::judged_since` can tell a
-/// fresh judgment from an old one.
-#[derive(Clone)]
-struct Judgment {
-    at: Timestamp,
-    kind: JudgmentKind,
-}
-
-#[derive(Clone)]
-enum JudgmentKind {
-    Confirmed,
-    Disputed(String),
-}
-
 /// A map folded from the log. Holds every node and edge still present;
 /// what was removed lives only in the events.
 pub struct Map {
@@ -768,15 +728,6 @@ pub struct Map {
     // point at the wrong node.
     next_seq_by_kind: HashMap<String, u32>,
     edge_keys: HashSet<(String, NodeId, NodeId)>,
-    // The latest `claim.confirmed`/`claim.disputed` naming each node, in
-    // log order - what `standing` and `dispute` read.
-    judgments: HashMap<NodeId, Judgment>,
-    // Nodes at least one `review.finished` has named - `Standing::Seen`
-    // for one with no judgment yet.
-    reviewed: HashSet<NodeId>,
-    // The latest `review.finished`'s `at`, across every one folded in -
-    // what `last_finished` reports.
-    last_finished: Option<Timestamp>,
 }
 
 impl Map {
@@ -812,9 +763,6 @@ impl Map {
             by_seq,
             next_seq_by_kind,
             edge_keys,
-            judgments: HashMap::new(),
-            reviewed: HashSet::new(),
-            last_finished: None,
         }
     }
 
@@ -1085,66 +1033,6 @@ impl Map {
         self.by_id.get(&id).map(|&i| &self.nodes[i])
     }
 
-    /// `id`'s standing - `None` when the map holds no such node, or when
-    /// it is the human's own landmark (`Actor::Human`): a user-written
-    /// node is never a claim to judge. Otherwise `Disputed` or
-    /// `Confirmed` from the latest `claim.disputed`/`claim.confirmed`
-    /// naming it, else `Seen` when a `review.finished` has, else
-    /// `Claimed`.
-    pub fn standing(&self, id: NodeId) -> Option<Standing> {
-        let node = self.node(id)?;
-        if matches!(node.actor, Actor::Human(_)) {
-            return None;
-        }
-        Some(match self.judgments.get(&id).map(|j| &j.kind) {
-            Some(JudgmentKind::Confirmed) => Standing::Confirmed,
-            Some(JudgmentKind::Disputed(_)) => Standing::Disputed,
-            None if self.reviewed.contains(&id) => Standing::Seen,
-            None => Standing::Claimed,
-        })
-    }
-
-    /// The why of the latest `claim.disputed` naming `id`, only while its
-    /// standing is `Disputed` - `None` once a later `claim.confirmed`
-    /// supersedes it.
-    pub fn dispute(&self, id: NodeId) -> Option<&str> {
-        if self.standing(id) != Some(Standing::Disputed) {
-            return None;
-        }
-        match self.judgments.get(&id).map(|j| &j.kind) {
-            Some(JudgmentKind::Disputed(why)) => Some(why.as_str()),
-            _ => None,
-        }
-    }
-
-    /// Every node whose latest judgment - `claim.confirmed` or
-    /// `claim.disputed` - landed at or after `at`, each with the
-    /// standing it now carries and when that judgment landed. A node
-    /// only ever `review.finished` has named is not a judgment, so it
-    /// is never in this list.
-    pub fn judged_since(&self, at: Timestamp) -> impl Iterator<Item = (&Node, Standing, Timestamp)> {
-        self.judgments.iter().filter_map(move |(id, judgment)| {
-            if judgment.at < at {
-                return None;
-            }
-            let node = self.node(*id)?;
-            let standing = self.standing(*id)?;
-            Some((node, standing, judgment.at))
-        })
-    }
-
-    /// When the latest `review.finished` folded into this map landed,
-    /// or `None` if it holds none.
-    pub fn last_finished(&self) -> Option<Timestamp> {
-        self.last_finished
-    }
-
-    /// When `id` was last judged - the latest `claim.confirmed` or
-    /// `claim.disputed` naming it - or `None` if it never was.
-    pub fn judged_at(&self, id: NodeId) -> Option<Timestamp> {
-        self.judgments.get(&id).map(|j| j.at)
-    }
-
     pub fn find(&self, kind: &str, name: &str) -> Option<&Node> {
         let id = self.by_name.get(&(kind.to_string(), name.to_string()))?;
         self.node(*id)
@@ -1268,11 +1156,7 @@ impl Map {
             .cloned()
             .collect();
         let edges = fresh.into_iter().cloned().collect();
-        let mut cut = Self::from_parts(self.schema.clone(), nodes, edges);
-        cut.judgments = self.judgments.clone();
-        cut.reviewed = self.reviewed.clone();
-        cut.last_finished = self.last_finished;
-        cut
+        Self::from_parts(self.schema.clone(), nodes, edges)
     }
 
     /// The map cut to `selection`, in its fixed order, counting what
@@ -1324,11 +1208,7 @@ impl Map {
             .filter(|edge| kept.contains(&edge.from) && kept.contains(&edge.to))
             .cloned()
             .collect();
-        let mut cut = Self::from_parts(self.schema.clone(), nodes, edges);
-        cut.judgments = self.judgments.clone();
-        cut.reviewed = self.reviewed.clone();
-        cut.last_finished = self.last_finished;
-        cut
+        Self::from_parts(self.schema.clone(), nodes, edges)
     }
 
     /// Checks `mutation` against the schema and the map's current
@@ -1546,10 +1426,6 @@ impl Map {
                         self.nodes[index].sources.push(*source);
                     }
                 }
-                // The human judged the text they saw; changed text is a
-                // new claim, so it goes back to the review queue.
-                self.judgments.remove(node);
-                self.reviewed.remove(node);
                 self.nodes[index].changed_at = at;
                 self.nodes[index].changed_by = actor;
                 self.nodes[index].changed_why = why.clone();
@@ -1607,42 +1483,6 @@ impl Map {
                 }
                 self.edges
                     .retain(|e| !(e.kind == *kind && e.from == *from && e.to == *to));
-            }
-            // A node the fold no longer holds is ignored, not an error:
-            // the log is append-only, and a node named here may since
-            // have been removed.
-            Payload::ClaimConfirmed { node, .. } => {
-                if self.node(*node).is_some() {
-                    self.judgments.insert(
-                        *node,
-                        Judgment {
-                            at,
-                            kind: JudgmentKind::Confirmed,
-                        },
-                    );
-                }
-            }
-            Payload::ClaimDisputed { node, why, .. } => {
-                if self.node(*node).is_some() {
-                    self.judgments.insert(
-                        *node,
-                        Judgment {
-                            at,
-                            kind: JudgmentKind::Disputed(why.clone()),
-                        },
-                    );
-                }
-            }
-            Payload::ReviewFinished { nodes, .. } => {
-                for node in nodes {
-                    if self.node(*node).is_some() {
-                        self.reviewed.insert(*node);
-                    }
-                }
-                self.last_finished = Some(match self.last_finished {
-                    Some(last) => last.max(at),
-                    None => at,
-                });
             }
             _ => {}
         }
@@ -1874,10 +1714,7 @@ pub fn map_of(payload: &Payload) -> Option<&str> {
         | Payload::NodeChanged { map, .. }
         | Payload::NodeRemoved { map, .. }
         | Payload::EdgeAdded { map, .. }
-        | Payload::EdgeRemoved { map, .. }
-        | Payload::ClaimConfirmed { map, .. }
-        | Payload::ClaimDisputed { map, .. }
-        | Payload::ReviewFinished { map, .. } => Some(map),
+        | Payload::EdgeRemoved { map, .. } => Some(map),
         _ => None,
     }
 }

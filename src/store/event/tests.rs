@@ -935,118 +935,6 @@ fn parse_lines_rejects_a_zero_start() {
 }
 
 #[test]
-fn claim_confirmed_round_trips_through_json() {
-    let node = NodeId::new();
-    let me = human();
-    let original = crate::core::Event::restore(
-        EventId::new(),
-        Actor::Human(me),
-        source("cli"),
-        None,
-        Timestamp::now(),
-        Payload::ClaimConfirmed {
-            map: "decisions".to_string(),
-            node,
-        },
-    );
-
-    let json = serde_json::to_string(&Event::from(&original)).unwrap();
-    let wire: Event = serde_json::from_str(&json).unwrap();
-    assert_eq!(wire.kind, "claim.confirmed");
-    let restored = crate::store::from_wire(wire).unwrap();
-
-    assert!(restored.actor() == Actor::Human(me));
-    match restored.payload() {
-        Payload::ClaimConfirmed {
-            map,
-            node: restored_node,
-        } => {
-            assert_eq!(map, "decisions");
-            assert!(*restored_node == node);
-        }
-        _ => panic!("expected ClaimConfirmed"),
-    }
-}
-
-#[test]
-fn claim_disputed_round_trips_through_json() {
-    let node = NodeId::new();
-    let original = crate::core::Event::restore(
-        EventId::new(),
-        Actor::Human(human()),
-        source("cli"),
-        None,
-        Timestamp::now(),
-        Payload::ClaimDisputed {
-            map: "decisions".to_string(),
-            node,
-            why: "never proposed".to_string(),
-        },
-    );
-
-    let json = serde_json::to_string(&Event::from(&original)).unwrap();
-    let wire: Event = serde_json::from_str(&json).unwrap();
-    assert_eq!(wire.kind, "claim.disputed");
-    let restored = crate::store::from_wire(wire).unwrap();
-
-    match restored.payload() {
-        Payload::ClaimDisputed {
-            map,
-            node: restored_node,
-            why,
-        } => {
-            assert_eq!(map, "decisions");
-            assert!(*restored_node == node);
-            assert_eq!(why, "never proposed");
-        }
-        _ => panic!("expected ClaimDisputed"),
-    }
-}
-
-#[test]
-fn review_finished_round_trips_through_json() {
-    let (a, b) = (NodeId::new(), NodeId::new());
-    let original = crate::core::Event::restore(
-        EventId::new(),
-        Actor::Human(human()),
-        source("cli"),
-        None,
-        Timestamp::now(),
-        Payload::ReviewFinished {
-            map: "decisions".to_string(),
-            nodes: vec![a, b],
-        },
-    );
-
-    let json = serde_json::to_string(&Event::from(&original)).unwrap();
-    let wire: Event = serde_json::from_str(&json).unwrap();
-    assert_eq!(wire.kind, "review.finished");
-    let restored = crate::store::from_wire(wire).unwrap();
-
-    match restored.payload() {
-        Payload::ReviewFinished { map, nodes } => {
-            assert_eq!(map, "decisions");
-            assert_eq!(nodes, &vec![a, b]);
-        }
-        _ => panic!("expected ReviewFinished"),
-    }
-}
-
-#[test]
-fn a_malformed_node_in_a_review_finished_payload_is_an_error() {
-    let payload = serde_json::json!({
-        "map": "decisions",
-        "nodes": ["not-a-uuid"],
-    });
-
-    let err = match decode("user", source("cli"), "review.finished", None, payload, human()) {
-        Err(e) => e,
-        Ok(_) => panic!("expected a malformed node id to be rejected"),
-    };
-    assert!(matches!(err, Error::BadUuid(s) if s == "not-a-uuid"));
-}
-
-#[test]
 fn a_file_cited_payload_with_a_reversed_range_fails_to_decode() {
     let source = source("percept-cli");
     let payload = serde_json::json!({
@@ -1139,9 +1027,6 @@ fn every_kind_names_round_trip_through_the_store_parser() {
         EventKind::ModelCalled,
         EventKind::SessionStarted,
         EventKind::FileCited,
-        EventKind::ClaimConfirmed,
-        EventKind::ClaimDisputed,
-        EventKind::ReviewFinished,
     ];
 
     for kind in kinds {

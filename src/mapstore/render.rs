@@ -4,7 +4,7 @@
 
 use std::fmt::Write as _;
 
-use crate::core::{Actor, EventId, Map, Node, Schema, Standing};
+use crate::core::{Actor, EventId, Map, Node, Schema};
 use crate::store::ids;
 
 /// What every rendered map opens with, so a reader who lands on the
@@ -172,6 +172,7 @@ fn ordered_kinds(schema: &Schema) -> Vec<&str> {
 /// when it cites any.
 fn push_node(out: &mut String, map: &Map, node: &Node) {
     let _ = writeln!(out, "- {}{}", marked_name(map, node), node.properties_line());
+    push_changed(out, node, "  ");
     if !node.sources.is_empty() {
         let _ = writeln!(out, "  sources: {}", ids(&node.sources).join(", "));
     }
@@ -237,7 +238,7 @@ fn push_tasks(out: &mut String, map: &Map) {
     }
     for task in &open {
         let _ = write!(out, "\n## {}\n\n", marked_name(map, task));
-        push_props(out, map, task, "");
+        push_props(out, task, "");
         for blocker in map.blocked_by(task.id) {
             let _ = writeln!(out, "waits on {}", marked_name(map, blocker));
         }
@@ -271,7 +272,7 @@ fn push_tasks(out: &mut String, map: &Map) {
         let _ = writeln!(out, "\n## {state}");
         for task in in_state {
             let _ = writeln!(out, "- {}", marked_name(map, task));
-            push_props(out, map, task, "  ");
+            push_props(out, task, "  ");
         }
     }
 }
@@ -294,22 +295,34 @@ fn push_contents(out: &mut String, map: &Map, headlines: &[&Node]) {
 
 /// A node's properties, each on its own line under `indent` - a long
 /// `why` reads on a line of its own, never wrapped onto the name - then
-/// one `disputed` line with the latest dispute's why, when the node has
-/// one.
-fn push_props(out: &mut String, map: &Map, node: &Node, indent: &str) {
+/// one `changed by` line, when the node's last change is not its
+/// addition.
+fn push_props(out: &mut String, node: &Node, indent: &str) {
     for (key, value) in &node.properties {
         let _ = writeln!(out, "{indent}{key}: {value:?}");
     }
-    if let Some(why) = map.dispute(node.id) {
-        let _ = writeln!(out, "{indent}disputed: {why:?}");
+    push_changed(out, node, indent);
+}
+
+/// One `changed by <actor>` line under `indent`, with `: "<why>"`
+/// appended when the change carried one - printed only when `node`'s
+/// last change is not its addition.
+fn push_changed(out: &mut String, node: &Node, indent: &str) {
+    if node.changed_at == node.added_at {
+        return;
     }
+    let _ = write!(out, "{indent}changed by {}", node.changed_by.name());
+    if let Some(why) = &node.changed_why {
+        let _ = write!(out, ": {why:?}");
+    }
+    out.push('\n');
 }
 
 /// The body under a question's `##`: the question's own properties, its
 /// decision - or `- open` when none settles it - then one `- weighed`
 /// bullet per alternative that lost, each with its own `why`.
 fn push_question_body(out: &mut String, map: &Map, question: &Node) {
-    push_props(out, map, question, "");
+    push_props(out, question, "");
     let decisions = map.settled_by(question.id);
     if decisions.is_empty() {
         out.push_str("- open\n");
@@ -319,7 +332,7 @@ fn push_question_body(out: &mut String, map: &Map, question: &Node) {
     }
     for option in map.weighed_for(question.id) {
         let _ = writeln!(out, "- weighed {}", marked_name(map, option));
-        push_props(out, map, option, "  ");
+        push_props(out, option, "  ");
     }
 }
 
@@ -330,7 +343,7 @@ fn push_question_body(out: &mut String, map: &Map, question: &Node) {
 /// that puts it in doubt.
 fn push_decision(out: &mut String, map: &Map, decision: &Node, raised_by: Option<EventId>) {
     let _ = writeln!(out, "- decision {}", marked_name(map, decision));
-    push_props(out, map, decision, "  ");
+    push_props(out, decision, "  ");
     if let Some(source) = decision
         .sources
         .first()
@@ -347,8 +360,7 @@ fn push_decision(out: &mut String, map: &Map, decision: &Node, raised_by: Option
 }
 
 /// A node's short id and quoted name, marked `(agent)` when the model
-/// wrote it - `Actor::Human` and `Actor::System` are unmarked - and, when
-/// its standing is not `Claimed`, ` \u{b7} <standing>` after that. The
+/// wrote it - `Actor::Human` and `Actor::System` are unmarked. The
 /// short id is the same `d41` `--around`, `--from`/`--to`, and a bare
 /// short id in `revise_map`'s arguments all resolve.
 fn marked_name(map: &Map, node: &Node) -> String {
@@ -358,9 +370,6 @@ fn marked_name(map: &Map, node: &Node) -> String {
     };
     if matches!(node.actor, Actor::Agent) {
         label.push_str(" (agent)");
-    }
-    if let Some(standing) = map.standing(node.id).filter(|s| *s != Standing::Claimed) {
-        let _ = write!(label, " \u{b7} {standing}");
     }
     label
 }

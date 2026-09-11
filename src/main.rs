@@ -269,11 +269,8 @@ async fn main() {
                 MapsCommand::Record(args) => {
                     cli::maps_record(args, &log, &schemas, &cli_source, &checkout, me)
                 }
-                MapsCommand::Confirm(args) => {
-                    cli::maps_confirm(args, &log, &schemas, &cli_source, me)
-                }
-                MapsCommand::Dispute(args) => {
-                    cli::maps_dispute(args, &log, &schemas, &cli_source, me)
+                MapsCommand::ChangeNode(args) => {
+                    cli::maps_change_node(args, &log, &schemas, &cli_source, me)
                 }
             }
         }),

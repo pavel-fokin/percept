@@ -25,7 +25,7 @@ pub use event_log::EventLog;
 pub use map::{REOPENS, SUPERSEDES};
 pub use map::{
     default_prefix, map_of, Edge, EdgeKind, Fragment, Map, MapError, Mutation, Node, NodeId,
-    NodeKind, NodeRef, Schema, Schemas, Scope, Selection, Settlement, Standing,
+    NodeKind, NodeRef, Schema, Schemas, Scope, Selection, Settlement,
 };
 // `Map::linked` has no caller yet outside its own tests: it is the
 // kind-agnostic query a later issue swaps the decision- and

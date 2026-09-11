@@ -313,23 +313,6 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
             &format!("read {}", crate::core::cited_label(path, *lines)),
             width,
         ),
-        // The human's own judgment on a map, not dialogue - shown
-        // dimmed like the map changes above.
-        Payload::ClaimConfirmed { map, node } => tool_lines(
-            chat,
-            &format!("{map}: confirmed node {}", node.as_uuid()),
-            width,
-        ),
-        Payload::ClaimDisputed { map, node, why } => tool_lines(
-            chat,
-            &format!("{map}: disputed node {} - {why}", node.as_uuid()),
-            width,
-        ),
-        Payload::ReviewFinished { map, nodes } => tool_lines(
-            chat,
-            &format!("{map}: review finished, {} nodes seen", nodes.len()),
-            width,
-        ),
     }
 }
 

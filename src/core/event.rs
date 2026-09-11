@@ -138,9 +138,7 @@ pub enum Payload {
     /// node's. `why` is the writer's reason, when they gave one - the
     /// fold carries it as the node's `changed_why`. A change naming
     /// neither `name` nor a property, only `why`, is a comment: legal,
-    /// and it still becomes the node's last change. The fold clears
-    /// whatever the human had judged on the node, since the text they
-    /// judged has changed.
+    /// and it still becomes the node's last change.
     NodeChanged {
         map: String,
         node: NodeId,
@@ -196,27 +194,6 @@ pub enum Payload {
         lines: Option<(u32, u32)>,
         excerpt: String,
     },
-    /// The human confirming a node's claim - always `Actor::Human`. Named
-    /// events, never edges, so a map's fold derives standing from the log
-    /// rather than from a mutable graph fact.
-    ClaimConfirmed {
-        map: String,
-        node: NodeId,
-    },
-    /// The human disputing a node's claim, with why - always
-    /// `Actor::Human`.
-    ClaimDisputed {
-        map: String,
-        node: NodeId,
-        why: String,
-    },
-    /// The node ids a human's review showed - always `Actor::Human`. Marks
-    /// each `Standing::Seen` until a later `claim.confirmed` or
-    /// `claim.disputed` names it.
-    ReviewFinished {
-        map: String,
-        nodes: Vec<NodeId>,
-    },
 }
 
 /// `path`, with `:from-to` appended for a ranged citation - the
@@ -250,10 +227,7 @@ impl Payload {
             | Self::EdgeAdded { .. }
             | Self::EdgeRemoved { .. }
             | Self::ModelCalled(..)
-            | Self::SessionStarted
-            | Self::ClaimConfirmed { .. }
-            | Self::ClaimDisputed { .. }
-            | Self::ReviewFinished { .. } => None,
+            | Self::SessionStarted => None,
         }
     }
 }
@@ -276,9 +250,6 @@ pub enum EventKind {
     ModelCalled,
     SessionStarted,
     FileCited,
-    ClaimConfirmed,
-    ClaimDisputed,
-    ReviewFinished,
 }
 
 impl EventKind {
@@ -298,9 +269,6 @@ impl EventKind {
             Self::ModelCalled => "model.called",
             Self::SessionStarted => "session.started",
             Self::FileCited => "file.cited",
-            Self::ClaimConfirmed => "claim.confirmed",
-            Self::ClaimDisputed => "claim.disputed",
-            Self::ReviewFinished => "review.finished",
         }
     }
 }
@@ -415,60 +383,6 @@ impl Event {
         Self::new(Actor::System, source, None, Payload::SessionStarted)
     }
 
-    /// A `claim.confirmed` event - always the human's own judgment on a
-    /// node's claim, never the model's. `human` is the one who judged
-    /// it, from `Jsonl::me`.
-    pub fn claim_confirmed(
-        map: String,
-        node: NodeId,
-        human: Option<HumanId>,
-        source: Source,
-        causation_id: Option<EventId>,
-    ) -> Self {
-        Self::new(
-            Actor::Human(human),
-            source,
-            causation_id,
-            Payload::ClaimConfirmed { map, node },
-        )
-    }
-
-    /// A `claim.disputed` event - always the human's own judgment, with
-    /// why. `human` is the one who judged it, from `Jsonl::me`.
-    pub fn claim_disputed(
-        map: String,
-        node: NodeId,
-        why: String,
-        human: Option<HumanId>,
-        source: Source,
-        causation_id: Option<EventId>,
-    ) -> Self {
-        Self::new(
-            Actor::Human(human),
-            source,
-            causation_id,
-            Payload::ClaimDisputed { map, node, why },
-        )
-    }
-
-    /// A `review.finished` event - always the human's own, naming the
-    /// node ids their review showed. `human` is the one who reviewed,
-    /// from `Jsonl::me`.
-    pub fn review_finished(
-        map: String,
-        nodes: Vec<NodeId>,
-        human: Option<HumanId>,
-        source: Source,
-        causation_id: Option<EventId>,
-    ) -> Self {
-        Self::new(
-            Actor::Human(human),
-            source,
-            causation_id,
-            Payload::ReviewFinished { map, nodes },
-        )
-    }
-
     /// Rebuilds an Event from stored fields - the persistence boundary,
     /// where `id` and `created_at` come from storage rather than being
     /// minted fresh.
@@ -528,9 +442,6 @@ impl Event {
             Payload::ModelCalled(..) => EventKind::ModelCalled,
             Payload::SessionStarted => EventKind::SessionStarted,
             Payload::FileCited { .. } => EventKind::FileCited,
-            Payload::ClaimConfirmed { .. } => EventKind::ClaimConfirmed,
-            Payload::ClaimDisputed { .. } => EventKind::ClaimDisputed,
-            Payload::ReviewFinished { .. } => EventKind::ReviewFinished,
         }
     }
 }

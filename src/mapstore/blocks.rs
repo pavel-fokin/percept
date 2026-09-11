@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use crate::core::{Event, Map, Node, Payload, Scope, Standing};
+use crate::core::{Event, Map, Node, Payload, Scope};
 use crate::shared::Timestamp;
 
 /// How many lines of a gained, changed, or open list a block shows
@@ -40,44 +40,6 @@ pub(crate) fn block_header(label: &str, total: usize) -> String {
 pub(crate) fn line_id(map: &Map, node: &Node) -> String {
     map.short_id(node.id)
         .unwrap_or_else(|| format!("{}:{}", node.kind, node.name))
-}
-
-/// What the human judged since `since`: every node, of any kind, whose
-/// latest `claim.confirmed`/`claim.disputed` landed at or after `since`,
-/// across every folded map in fold order. Disputed nodes first, then
-/// confirmed, each group by when the judgment landed, then by short id
-/// so equal times print in one order. `None` when nothing was judged
-/// since, so a caller omits the block rather than printing an empty
-/// one.
-pub(crate) fn judged_since_block(maps: &[Map], since: Timestamp) -> Option<String> {
-    let mut judged: Vec<(&Map, &Node, Standing, Timestamp)> = maps
-        .iter()
-        .flat_map(|map| {
-            map.judged_since(since)
-                .map(move |(node, standing, at)| (map, node, standing, at))
-        })
-        .collect();
-    if judged.is_empty() {
-        return None;
-    }
-    judged.sort_by_cached_key(|(_, node, standing, at)| {
-        (*standing == Standing::Confirmed, *at, node.kind.clone(), node.seq)
-    });
-
-    let lines = judged
-        .iter()
-        .map(|(map, node, standing, _)| {
-            let mut line = format!("{} {node} \u{b7} {standing}", line_id(map, node));
-            if let Some(why) = map.dispute(node.id) {
-                line.push_str(&format!(": {why:?}"));
-            }
-            line
-        })
-        .collect();
-
-    let mut block = vec![block_header("judged since your last session", judged.len())];
-    block.extend(capped_lines(lines));
-    Some(block.join("\n"))
 }
 
 /// The latest `session.started` per writer and project root, among
