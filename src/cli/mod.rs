@@ -686,6 +686,21 @@ pub fn maps_show(
     })
 }
 
+/// `percept start`: loads the log, folds every schema at `root`'s path,
+/// and prints `mapstore::start`'s render, cut since the last session
+/// anyone started here. Appends nothing: a look, not a checkpoint.
+pub fn start(
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    root: &Path,
+    checkout: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let events = log.load()?;
+    let maps = schemas.fold_all(mapstore::of_path(&events, root))?;
+    let since = mapstore::last_session(mapstore::of_path(&events, root));
+    print_text(&mapstore::start(&maps, &events, root, checkout, since))
+}
+
 /// Prints the map `args.map` names' capabilities from its schema alone:
 /// what it can hold and how to write to it. Needs no log and no fold,
 /// so it works on an empty map.
@@ -1323,7 +1338,6 @@ fn parse_time(flag: &str, s: &str) -> Result<Timestamp, String> {
 
 pub mod hook;
 pub mod init;
-pub mod start;
 
 #[cfg(test)]
 mod tests;

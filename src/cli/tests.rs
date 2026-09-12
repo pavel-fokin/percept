@@ -1068,3 +1068,13 @@ fn a_record_why_line_under_an_existing_node_sets_the_changes_why_not_a_property(
     let task = map.find("task", "cancel a turn").unwrap();
     assert_eq!(task.properties.get("why").unwrap(), "Esc drops the session");
 }
+
+#[test]
+fn start_reads_and_appends_no_event() {
+    let log = FakeLog::seeded(vec![node_added("question", "why?")]);
+    let checkout = Fixture::new();
+
+    start(&log, &schemas(), Path::new(ROOT), checkout.path()).unwrap();
+
+    assert_eq!(log.load().unwrap().len(), 1);
+}

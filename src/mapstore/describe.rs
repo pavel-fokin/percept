@@ -58,16 +58,17 @@ fn push_node_kinds(out: &mut String, schema: &Schema) {
         .map(|kind| kind.kind.chars().count())
         .max()
         .unwrap_or(0);
+    let suffixes: Vec<String> = schema.node_kinds.iter().map(kind_suffix).collect();
     let gloss_width = schema
         .node_kinds
         .iter()
-        .filter(|kind| has_suffix(kind))
-        .map(|kind| kind.gloss.chars().count())
+        .zip(&suffixes)
+        .filter(|(_, suffix)| !suffix.is_empty())
+        .map(|(kind, _)| kind.gloss.chars().count())
         .max()
         .unwrap_or(0);
 
-    for kind in &schema.node_kinds {
-        let suffix = kind_suffix(kind);
+    for (kind, suffix) in schema.node_kinds.iter().zip(&suffixes) {
         let line = if suffix.is_empty() {
             format!("  {:<name_width$}   {}", kind.kind, kind.gloss)
         } else {
@@ -78,10 +79,6 @@ fn push_node_kinds(out: &mut String, schema: &Schema) {
         };
         let _ = writeln!(out, "{}", line.trim_end());
     }
-}
-
-fn has_suffix(kind: &NodeKind) -> bool {
-    !kind.requires.is_empty() || !kind.states.is_empty()
 }
 
 /// `requires <prop> <prop>`, ` · state <a> | <b>`, both, or neither.
@@ -105,18 +102,21 @@ fn push_record(out: &mut String, schema: &Schema) {
         "  percept maps record {} --actor <human|agent> --source <event id> <<'EOF'",
         schema.name
     );
-    out.push_str("  <document>\n");
-    out.push_str("  EOF\n");
-    out.push('\n');
-    out.push_str("  A line at the margin is a node, kind \"name\". An indented line under it is a\n");
-    out.push_str("  property, why \"...\"; an edge to a short id or to the latest node of that kind\n");
-    out.push_str("  above it, resolves question; or cites src/path.rs:10-20, which records the\n");
-    out.push_str("  text as seen and adds it to the node's sources. A margin line naming a short\n");
-    out.push_str("  id, t4, changes that node: state \"done\" under it sets a property, name \"...\"\n");
-    out.push_str("  renames it, and why \"...\" is the change's own reason, not a property. A node\n");
-    out.push_str("  is refused without its required properties; a node the user last changed\n");
-    out.push_str("  takes only state from an agent.\n");
+    out.push_str("  <document>\n  EOF\n\n");
+    out.push_str(GRAMMAR);
 }
+
+/// The record document's grammar, the same for every map.
+const GRAMMAR: &str = "\
+  A line at the margin is a node, kind \"name\". An indented line under it is a
+  property, why \"...\"; an edge to a short id or to the latest node of that kind
+  above it, resolves question; or cites src/path.rs:10-20, which records the
+  text as seen and adds it to the node's sources. A margin line naming a short
+  id, t4, changes that node: state \"done\" under it sets a property, name \"...\"
+  renames it, and why \"...\" is the change's own reason, not a property. A node
+  is refused without its required properties; a node the user last changed
+  takes only state from an agent.
+";
 
 /// One node per node kind, in schema order, its name always `"..."`,
 /// each required property under it as `<prop> "..."`, its first

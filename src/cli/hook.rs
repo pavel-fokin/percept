@@ -18,7 +18,7 @@
 //! held exclusively for the length of one hook call, so two hook calls
 //! for the same turn never race.
 //!
-//! `SessionStart`'s `additionalContext` is exactly `start::render`'s
+//! `SessionStart`'s `additionalContext` is exactly `mapstore::start`'s
 //! output - the same text `percept start` prints from the shell.
 
 use std::fs::File;
@@ -29,10 +29,9 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::core::{Actor, Event, EventId, EventLog, Schemas, Source};
-use crate::mapstore::{last_session, of_path};
+use crate::mapstore::{self, last_session, of_path};
 use crate::store::TurnState;
 
-use super::start;
 
 /// `percept hook <client>` - `client` names the writer whose turn this
 /// is, and becomes every event's source.
@@ -167,7 +166,7 @@ pub fn run(
 }
 
 /// `SessionStart`: folds every log-backed schema from the events
-/// recorded before this call, so `start::render`'s own since-cut finds
+/// recorded before this call, so `mapstore::start`'s own since-cut finds
 /// the previous session and not this one, then records a fresh
 /// `session.started` for the next call to find. The
 /// `additionalContext` is exactly what `percept start` prints from the
@@ -180,8 +179,8 @@ fn start_session(
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let events = log.load()?;
     let maps = schemas.fold_all(of_path(&events, &source.path))?;
-    let since = last_session(&events, source);
-    let rendered = start::render(&maps, &events, &source.path, checkout, since);
+    let since = last_session(events.iter().filter(|event| event.source() == source));
+    let rendered = mapstore::start(&maps, &events, &source.path, checkout, since);
 
     log.append(&Event::session_started(source.clone()))?;
 

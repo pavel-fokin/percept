@@ -3,9 +3,7 @@
 //! its last change, and the session rule both a hook and the review
 //! page cut their since by.
 
-use std::path::Path;
-
-use crate::core::{Event, Map, Node, Payload, Source, Written};
+use crate::core::{Event, Map, Node, Payload, Written};
 use crate::shared::Timestamp;
 
 /// How many lines of a gained or changed list a block shows
@@ -30,29 +28,15 @@ pub(crate) fn line_id(map: &Map, node: &Node) -> String {
         .unwrap_or_else(|| format!("{}:{}", node.kind, node.name))
 }
 
-/// The latest `session.started` this exact source - client name and
-/// path - recorded among `events`: `None` on a path's first session
-/// with this client. The hook and the review
-/// page both cut their since from it, then append a fresh one.
-pub(crate) fn last_session(events: &[Event], source: &Source) -> Option<Timestamp> {
+/// The latest `session.started` among `events`, already cut to whose
+/// sessions count: the hook and the review page pass their own exact
+/// source, and record a fresh one after; `percept start` from the
+/// shell records none, so it passes `of_path` - the last look by
+/// anyone here. `None` when no session has started.
+pub(crate) fn last_session<'a>(events: impl IntoIterator<Item = &'a Event>) -> Option<Timestamp> {
     events
-        .iter()
-        .filter(|event| {
-            matches!(event.payload(), Payload::SessionStarted) && event.source() == source
-        })
-        .map(Event::created_at)
-        .max()
-}
-
-/// The latest `session.started` recorded against `path`, from any
-/// source name - unlike `last_session`, which cuts to one exact
-/// `Source`. `percept start` from the shell records no session of its
-/// own, so it counts from the last look by anyone: a coding client's
-/// hook or the review page.
-pub(crate) fn last_session_at(events: &[Event], path: &Path) -> Option<Timestamp> {
-    events
-        .iter()
-        .filter(|event| matches!(event.payload(), Payload::SessionStarted) && event.source().path == path)
+        .into_iter()
+        .filter(|event| matches!(event.payload(), Payload::SessionStarted))
         .map(Event::created_at)
         .max()
 }

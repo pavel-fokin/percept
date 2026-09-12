@@ -1,56 +1,81 @@
-//! `percept start` - a read-only render of a project's cognitive
-//! state: what each map holds, what changed since the last session,
-//! and where to read more. Unlike `percept hook`, it appends nothing
-//! to the log: a session-start hook records `session.started` as it
-//! reports, but a plain `start` is a look, not a checkpoint.
-//!
-//! `render` is pure - it takes whatever `start` already folded and
-//! read - so `hook`'s `SessionStart` can print exactly this output as
-//! its `additionalContext`, after recording its own `session.started`.
+//! `percept start`'s text, and the session-start hook's: a read-only
+//! render of a project's cognitive state - what each map holds, what
+//! moved since the caller's last look, what it cites that the working
+//! tree no longer holds, and the command that opens each. Beside
+//! `markdown`, `catalogue`, and `describe`: one more external form of
+//! a map, folded by the caller and rendered here.
 
 use std::collections::{HashMap, HashSet};
-use std::error::Error;
 use std::path::{Path, PathBuf};
 
-use crate::core::{cited_label, Event, EventId, EventLog, Map, Node, Payload, Schemas, Written};
-use crate::mapstore::{self, capped_lines, changed_line, last_session_at, line_id, LIMIT};
+use super::blocks::{capped_lines, changed_line, line_id, LIMIT};
+use crate::core::{cited_label, Event, EventId, Map, Node, Payload, Written};
 use crate::shared::Timestamp;
 use crate::workspace;
 
-/// Loads the log, folds every schema at `root`'s path, and prints the
-/// render. `checkout` is where a headline node's citations are checked
-/// against the working tree - the same file `render` reads through
-/// `workspace::read_text_lossy`.
-pub fn start(
-    log: &dyn EventLog,
-    schemas: &Schemas,
-    root: &Path,
-    checkout: &Path,
-) -> Result<(), Box<dyn Error>> {
-    let events = log.load()?;
-    let maps = schemas.fold_all(mapstore::of_path(&events, root))?;
-    let since = last_session_at(&events, root);
-    println!("{}", render(&maps, &events, root, checkout, since));
-    Ok(())
+/// `maps`, `events`, `root`, and `checkout` as the three blocks
+/// `start` prints: State, what each map holds; Attention, what moved
+/// since `since` and what it cites that no longer matches the tree;
+/// Next, the command that opens each. Empty when no map holds any node
+/// at all - a stranger's first run. `since` is the caller's cut: the
+/// hook passes its own client's last session, so a review-page open
+/// never hides a client's gains from it, and `percept start` from the
+/// shell passes the last look by anyone, the running session's own
+/// start included. `checkout` is where cited files are read.
+pub fn start(maps: &[Map], events: &[Event], root: &Path, checkout: &Path, since: Option<Timestamp>) -> String {
+    let project = project_name(root);
+
+    if maps.iter().all(|map| map.nodes().is_empty()) {
+        let mut lines = vec![format!("percept \u{b7} {project}\nnothing recorded yet\n\nNext")];
+        lines.extend(pad_rows(&[how_to_record()]));
+        return lines.join("\n");
+    }
+
+    let names: Vec<&str> = maps.iter().map(|map| map.schema().name.as_str()).collect();
+    let mut sections = vec![format!(
+        "percept \u{b7} {project}\nkeeps what this project settled: {}",
+        names.join(", ")
+    )];
+
+    let moved: Vec<Vec<&Node>> = maps
+        .iter()
+        .map(|map| since.map_or_else(Vec::new, |since| gained(map, since)))
+        .collect();
+    sections.push(state_block(maps, &moved));
+    let (attention, printed) = attention_block(maps, &moved, events, checkout);
+    sections.extend(attention);
+    sections.push(next_block(maps, &printed));
+
+    sections.join("\n\n")
 }
 
 /// `root`'s last path component, the name a reader knows the project
 /// by - falling back to the whole path on the rare root with none.
-pub(crate) fn project_name(root: &Path) -> String {
+fn project_name(root: &Path) -> String {
     root.file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_else(|| root.display().to_string())
 }
 
 /// The headline nodes of `map` whose last change happened at or after
-/// `since` - what a session gained since it last looked.
-fn gained_nodes(map: &Map, since: Timestamp) -> Vec<&Node> {
+/// `since` - a node's last change is compared directly, not
+/// `Map::since`, which would also surface an older node a fresh edge
+/// only touched.
+fn gained(map: &Map, since: Timestamp) -> Vec<&Node> {
     map.headlines().filter(|node| node.changed().at >= since).collect()
 }
 
+/// One Attention row: the node's short id and the map it is on, which
+/// `next_block` turns into a `read around` line, and the line printed.
+struct Row {
+    id: String,
+    map: String,
+    line: String,
+}
+
 /// What every current headline node cites that no longer matches the
-/// working tree - one `(map, node, findings)` per node with at least one
-/// stale citation, `findings` each `"<label> changed"` or `"<label>
+/// working tree - one Attention row per node with at least one stale
+/// citation, `<id> cites <label> changed, <label> gone`, `findings` each `"<label> changed"` or `"<label>
 /// gone"`. This module's Attention block builds its lines from this.
 ///
 /// Builds two indexes over `events` once, both over `file.cited`
@@ -61,11 +86,7 @@ fn gained_nodes(map: &Map, since: Timestamp) -> Vec<&Node> {
 /// it is checked against the tree. `cache` memoises each cited path's
 /// normalised tree text - `None` for one that is gone - for the rest
 /// of this call, so a path cited by more than one node is read once.
-fn citation_findings<'a>(
-    maps: &'a [Map],
-    events: &[Event],
-    checkout: &Path,
-) -> Vec<(&'a Map, &'a Node, Vec<String>)> {
+fn citation_rows(maps: &[Map], events: &[Event], checkout: &Path) -> Vec<Row> {
     let file_cited: Vec<&Event> = events
         .iter()
         .filter(|event| matches!(event.payload(), Payload::FileCited { .. }))
@@ -80,16 +101,18 @@ fn citation_findings<'a>(
     }
 
     let mut cache: HashMap<PathBuf, Option<String>> = HashMap::new();
-    let mut findings = Vec::new();
+    let mut rows = Vec::new();
     for map in maps {
         for node in map.headlines() {
-            let node_findings = node_changes(node, &id_to_event, &later_citations, checkout, &mut cache);
-            if !node_findings.is_empty() {
-                findings.push((map, node, node_findings));
+            let findings = node_changes(node, &id_to_event, &later_citations, checkout, &mut cache);
+            if !findings.is_empty() {
+                let id = line_id(map, node);
+                let line = format!("{id} cites {}", findings.join(", "));
+                rows.push(Row { id, map: map.schema().name.clone(), line });
             }
         }
     }
-    findings
+    rows
 }
 
 /// `node`'s own `changed`/`gone` findings, one per source that names a
@@ -190,40 +213,39 @@ fn pad_rows(rows: &[(String, String)]) -> Vec<String> {
         .collect()
 }
 
-/// `<n> <state>` for every headline kind of `map` that declares
-/// `states`, counting the headline nodes currently in the first state
-/// it names - `1 open` for a tasks map with one open task - omitted
-/// when none are.
+/// `<n> <state>` for every declared state of every headline kind of
+/// `map`, in declared order, skipping states no headline node is in -
+/// `1 open   2 done` for a tasks map. Every state is counted, since a
+/// schema lists them as a set and no position means "initial".
 fn state_counts(map: &Map) -> Vec<String> {
     let schema = map.schema();
     schema
         .node_kinds
         .iter()
         .filter(|kind| schema.headline_kinds.contains(&kind.kind))
-        .filter_map(|kind| {
-            let first = kind.states.first()?;
-            let count = map
-                .headlines()
-                .filter(|node| {
-                    node.kind == kind.kind && node.properties.get("state").map(String::as_str) == Some(first.as_str())
-                })
-                .count();
-            (count > 0).then(|| format!("{count} {first}"))
+        .flat_map(|kind| {
+            kind.states.iter().filter_map(|state| {
+                let count = map
+                    .headlines()
+                    .filter(|node| node.kind == kind.kind && node.properties.get("state") == Some(state))
+                    .count();
+                (count > 0).then(|| format!("{count} {state}"))
+            })
         })
         .collect()
 }
 
 /// The State block: one line per map in fold order - its headline
-/// count, `+N since last session` when `since` is given and non-zero,
-/// then any state counts `state_counts` finds.
-fn state_block(maps: &[Map], since: Option<Timestamp>) -> String {
+/// count, `+N since last session` when that map's `moved` list is not
+/// empty, then any state counts `state_counts` finds.
+fn state_block(maps: &[Map], moved: &[Vec<&Node>]) -> String {
     let rows: Vec<(String, String)> = maps
         .iter()
-        .map(|map| {
+        .zip(moved)
+        .map(|(map, moved)| {
             let mut parts = vec![map.headlines().count().to_string()];
-            let gained = since.map_or(0, |since| gained_nodes(map, since).len());
-            if gained > 0 {
-                parts.push(format!("+{gained} since last session"));
+            if !moved.is_empty() {
+                parts.push(format!("+{} since last session", moved.len()));
             }
             parts.extend(state_counts(map));
             (map.schema().name.clone(), parts.join("   "))
@@ -235,61 +257,56 @@ fn state_block(maps: &[Map], since: Option<Timestamp>) -> String {
     lines.join("\n")
 }
 
-/// The Attention block: the headline nodes moved since `since`, each
-/// with `added` or its last change after a ` · `, then the stale
-/// citations, each list capped at `LIMIT` lines. Rows are not padded
-/// into columns: a node's name sets no column width. Returns the block
-/// with the `(id, map name)` of every node it printed, in order, each
-/// once - the `+N more` line names none - so `next_block` can offer a
-/// `read around` for each. `None` when both lists are empty, so
-/// `render` omits the block rather than printing an empty one.
+/// The Attention block: each map's `moved` nodes, with `added` or the
+/// node's last change after a ` · `, then the stale citations, each
+/// list capped at `LIMIT` lines. Rows are not padded into columns: a
+/// node's name sets no column width. Returns the block with the id and
+/// map of every node it printed, in order, each once - the `+N more`
+/// line names none - so `next_block` offers a `read around` for each.
+/// `None` when both lists are empty, so `start` omits the block rather
+/// than printing an empty one.
 fn attention_block(
     maps: &[Map],
+    moved: &[Vec<&Node>],
     events: &[Event],
     checkout: &Path,
-    since: Option<Timestamp>,
-) -> Option<(String, Vec<(String, String)>)> {
-    let mut moved: Vec<(&Map, &Node, String)> = Vec::new();
-    if let Some(since) = since {
-        for map in maps {
-            for node in gained_nodes(map, since) {
+) -> (Option<String>, Vec<(String, String)>) {
+    let moved: Vec<Row> = maps
+        .iter()
+        .zip(moved)
+        .flat_map(|(map, nodes)| {
+            nodes.iter().map(move |node| {
+                let id = line_id(map, node);
                 let change = changed_line(node).unwrap_or_else(|| "added".to_string());
-                let line = format!("{} {} {:?} \u{b7} {change}", line_id(map, node), node.kind, node.name);
-                moved.push((map, node, line));
-            }
-        }
-    }
-    let cited: Vec<(&Map, &Node, String)> = citation_findings(maps, events, checkout)
-        .into_iter()
-        .map(|(map, node, findings)| {
-            let line = format!("{} cites {}", line_id(map, node), findings.join(", "));
-            (map, node, line)
+                let line = format!("{id} {} {:?} \u{b7} {change}", node.kind, node.name);
+                Row { id, map: map.schema().name.clone(), line }
+            })
         })
         .collect();
+    let cited = citation_rows(maps, events, checkout);
 
     if moved.is_empty() && cited.is_empty() {
-        return None;
+        return (None, Vec::new());
     }
 
     let mut lines = vec!["Attention".to_string()];
-    let mut ids: Vec<(String, String)> = Vec::new();
-    for list in [&moved, &cited] {
-        let rows = list.iter().map(|(_, _, line)| line.clone()).collect();
-        lines.extend(capped_lines(rows).into_iter().map(|line| format!("  {line}")));
-        for (map, node, _) in list.iter().take(LIMIT) {
-            let id = line_id(map, node);
-            if !ids.iter().any(|(seen, _)| *seen == id) {
-                ids.push((id, map.schema().name.clone()));
+    let mut printed: Vec<(String, String)> = Vec::new();
+    for rows in [moved, cited] {
+        for row in rows.iter().take(LIMIT) {
+            if !printed.iter().any(|(id, _)| *id == row.id) {
+                printed.push((row.id.clone(), row.map.clone()));
             }
         }
+        let capped = capped_lines(rows.into_iter().map(|row| row.line).collect());
+        lines.extend(capped.into_iter().map(|line| format!("  {line}")));
     }
-    Some((lines.join("\n"), ids))
+    (Some(lines.join("\n")), printed)
 }
 
 /// The Next block: `read <map>` for every map with a headline node,
-/// `read around <id>` for every id Attention printed, then the two
+/// `read around <id>` for every node Attention printed, then the two
 /// fixed pointers every render carries.
-fn next_block(maps: &[Map], ids: &[(String, String)]) -> String {
+fn next_block(maps: &[Map], printed: &[(String, String)]) -> String {
     let mut rows: Vec<(String, String)> = maps
         .iter()
         .filter(|map| map.headlines().next().is_some())
@@ -298,7 +315,7 @@ fn next_block(maps: &[Map], ids: &[(String, String)]) -> String {
             (format!("read {name}"), format!("percept maps show {name}"))
         })
         .collect();
-    for (id, map_name) in ids {
+    for (id, map_name) in printed {
         rows.push((
             format!("read around {id}"),
             format!("percept maps show {map_name} --around {id}"),
@@ -318,47 +335,6 @@ fn next_block(maps: &[Map], ids: &[(String, String)]) -> String {
 /// The one Next row every render carries, the empty state included.
 fn how_to_record() -> (String, String) {
     ("how to record".to_string(), "percept maps describe <map>".to_string())
-}
-
-/// `maps`, `events`, `root`, and `checkout` as the three blocks
-/// `start` prints: State, what each map holds; Attention, what moved
-/// since `since` and what it cites that no longer matches the tree;
-/// Next, the command that opens each. Empty when no map holds any node
-/// at all - a stranger's first run. `since` is the caller's: the hook
-/// cuts to its own client's last session, so a review-page open never
-/// hides a client's gains from it, and `start` from the shell cuts to
-/// the last look by anyone, the running session's own start included.
-pub(crate) fn render(
-    maps: &[Map],
-    events: &[Event],
-    root: &Path,
-    checkout: &Path,
-    since: Option<Timestamp>,
-) -> String {
-    let project = project_name(root);
-
-    if maps.iter().all(|map| map.nodes().is_empty()) {
-        let mut lines = vec![format!("percept \u{b7} {project}\nnothing recorded yet\n\nNext")];
-        lines.extend(pad_rows(&[how_to_record()]));
-        return lines.join("\n");
-    }
-
-    let names: Vec<&str> = maps.iter().map(|map| map.schema().name.as_str()).collect();
-    let mut sections = vec![format!(
-        "percept \u{b7} {project}\nkeeps what this project settled: {}",
-        names.join(", ")
-    )];
-
-    sections.push(state_block(maps, since));
-
-    let mut ids: Vec<(String, String)> = Vec::new();
-    if let Some((block, printed)) = attention_block(maps, events, checkout, since) {
-        sections.push(block);
-        ids = printed;
-    }
-    sections.push(next_block(maps, &ids));
-
-    sections.join("\n\n")
 }
 
 #[cfg(test)]

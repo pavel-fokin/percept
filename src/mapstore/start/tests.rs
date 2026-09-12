@@ -3,20 +3,19 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::core::testing::{
-    created_at, edge_added, human, node_added, node_added_citing, node_id, schemas, source_at,
-    FakeLog, ROOT,
+    created_at, edge_added, human, node_added, node_added_citing, node_id, schemas, source_at, ROOT,
 };
 use crate::core::{Actor, Event, EventId, NodeId};
-use crate::mapstore;
+use crate::mapstore::{last_session, of_path};
 
 fn root() -> PathBuf {
     PathBuf::from(ROOT)
 }
 
-/// `events`, folded exactly as `start::start` folds them: every schema,
+/// `events`, folded exactly as `cli::start` folds them: every schema,
 /// cut to `root`'s own path.
 fn fold(events: &[Event]) -> Vec<Map> {
-    schemas().fold_all(mapstore::of_path(events, &root())).unwrap()
+    schemas().fold_all(of_path(events, &root())).unwrap()
 }
 
 /// A `node.added` event for `map`, with `properties` - what a task's
@@ -105,7 +104,7 @@ fn scratch_checkout() -> tempfile::TempDir {
 
 #[test]
 fn nothing_recorded_prints_the_empty_state_and_only_a_describe_pointer() {
-    let text = render(&fold(&[]), &[], &root(), scratch_checkout().path(), None);
+    let text = start(&fold(&[]), &[], &root(), scratch_checkout().path(), None);
 
     assert_eq!(
         text,
@@ -117,7 +116,7 @@ fn nothing_recorded_prints_the_empty_state_and_only_a_describe_pointer() {
 #[test]
 fn the_state_line_shows_a_maps_headline_count() {
     let events = vec![node_added("question", "why blue?")];
-    let text = render(&fold(&events), &events, &root(), scratch_checkout().path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), scratch_checkout().path(), last_session(of_path(&events, &root())));
 
     assert!(text.contains("decisions   1"), "{text:?}");
 }
@@ -129,7 +128,7 @@ fn a_session_from_another_client_at_this_path_sets_the_since_count() {
     let after = since.minus_minutes(-10).unwrap();
     let events = vec![session, created_at(node_added("question", "fresh"), after)];
 
-    let text = render(&fold(&events), &events, &root(), scratch_checkout().path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), scratch_checkout().path(), last_session(of_path(&events, &root())));
 
     assert!(text.contains("+1 since last session"), "{text:?}");
 }
@@ -139,7 +138,7 @@ fn a_session_at_a_different_path_does_not_set_the_since_count() {
     let session = Event::session_started(source_at("claude-code", "/elsewhere"));
     let events = vec![session, node_added("question", "fresh")];
 
-    let text = render(&fold(&events), &events, &root(), scratch_checkout().path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), scratch_checkout().path(), last_session(of_path(&events, &root())));
 
     assert!(!text.contains("since last session"), "{text:?}");
 }
@@ -151,7 +150,7 @@ fn one_open_task_shows_its_state_count() {
     properties.insert("state".to_string(), "open".to_string());
     let events = vec![node_on("tasks", "task", "ship it", properties)];
 
-    let text = render(&fold(&events), &events, &root(), scratch_checkout().path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), scratch_checkout().path(), last_session(of_path(&events, &root())));
 
     assert!(text.contains("1 open"), "{text:?}");
 }
@@ -163,7 +162,7 @@ fn attention_marks_a_fresh_node_as_added() {
     let after = since.minus_minutes(-10).unwrap();
     let events = vec![session, created_at(node_added("question", "fresh one"), after)];
 
-    let text = render(&fold(&events), &events, &root(), scratch_checkout().path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), scratch_checkout().path(), last_session(of_path(&events, &root())));
 
     assert!(text.contains("question \"fresh one\""), "{text:?}");
     assert!(text.contains("added"), "{text:?}");
@@ -180,7 +179,7 @@ fn attention_marks_a_node_changed_by_a_human_with_who_and_why() {
     let change = changed_by_human("decisions", &decision, "still hurts", after);
     let events = vec![session, decision, change];
 
-    let text = render(&fold(&events), &events, &root(), scratch_checkout().path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), scratch_checkout().path(), last_session(of_path(&events, &root())));
 
     assert!(text.contains("decision \"old one\""), "{text:?}");
     assert!(text.contains("changed by human: \"still hurts\""), "{text:?}");
@@ -195,7 +194,7 @@ fn attention_marks_a_stale_citation_as_changed() {
     let node = node_added_citing(Actor::Human(human()), "question", "why a?", vec![cited.id()]);
     let events = vec![cited, node];
 
-    let text = render(&fold(&events), &events, &root(), checkout.path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), checkout.path(), last_session(of_path(&events, &root())));
 
     assert!(text.contains("cites a.rs:1-1"), "{text:?}");
     assert!(text.contains("changed"), "{text:?}");
@@ -210,7 +209,7 @@ fn next_offers_a_read_around_for_every_attention_id() {
     let node = node_added_citing(Actor::Human(human()), "question", "why a?", vec![cited.id()]);
     let events = vec![cited, node];
 
-    let text = render(&fold(&events), &events, &root(), checkout.path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), checkout.path(), last_session(of_path(&events, &root())));
 
     assert!(text.contains("read around q1"), "{text:?}");
     assert!(text.contains("percept maps show decisions --around q1"), "{text:?}");
@@ -220,21 +219,10 @@ fn next_offers_a_read_around_for_every_attention_id() {
 fn next_has_no_read_line_for_a_map_with_no_headline() {
     let events = vec![node_added("question", "why?")];
 
-    let text = render(&fold(&events), &events, &root(), scratch_checkout().path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), scratch_checkout().path(), last_session(of_path(&events, &root())));
 
     assert!(text.contains("percept maps show decisions"), "{text:?}");
     assert!(!text.contains("percept maps show tasks"), "{text:?}");
-}
-
-#[test]
-fn start_reads_and_appends_no_event() {
-    let log = FakeLog::seeded(vec![node_added("question", "why?")]);
-    let schemas = schemas();
-    let checkout = scratch_checkout();
-
-    start(&log, &schemas, &root(), checkout.path()).unwrap();
-
-    assert_eq!(log.load().unwrap().len(), 1);
 }
 
 #[test]
@@ -246,7 +234,7 @@ fn an_unchanged_seen_file_reports_nothing() {
     let node = node_added_citing(Actor::Human(human()), "question", "why a?", vec![cited.id()]);
     let events = vec![cited, node];
 
-    let text = render(&fold(&events), &events, &root(), checkout.path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), checkout.path(), last_session(of_path(&events, &root())));
 
     assert!(!text.contains("Attention"), "{text:?}");
 }
@@ -260,7 +248,7 @@ fn a_deleted_file_reports_gone() {
     let node = node_on_citing("tasks", "task", "fix it", properties, vec![cited.id()]);
     let events = vec![cited, node];
 
-    let text = render(&fold(&events), &events, &root(), checkout.path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), checkout.path(), last_session(of_path(&events, &root())));
 
     assert!(text.contains("cites src/missing.rs gone"), "{text:?}");
 }
@@ -274,7 +262,7 @@ fn text_moved_to_other_lines_reports_nothing() {
     let node = node_added_citing(Actor::Human(human()), "question", "why a?", vec![cited.id()]);
     let events = vec![cited, node];
 
-    let text = render(&fold(&events), &events, &root(), checkout.path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), checkout.path(), last_session(of_path(&events, &root())));
 
     assert!(!text.contains("Attention"), "{text:?}");
 }
@@ -289,7 +277,7 @@ fn a_re_citation_replaces_the_one_checked() {
     let node = node_added_citing(Actor::Human(human()), "question", "why a?", vec![first.id()]);
     let events = vec![first, second, node];
 
-    let text = render(&fold(&events), &events, &root(), checkout.path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), checkout.path(), last_session(of_path(&events, &root())));
 
     assert!(!text.contains("Attention"), "{text:?}");
 }
@@ -306,7 +294,7 @@ fn a_later_citation_of_a_different_path_does_not_replace_the_one_checked() {
     let node = node_added_citing(Actor::Human(human()), "question", "why a?", vec![first.id()]);
     let events = vec![first, other, node];
 
-    let text = render(&fold(&events), &events, &root(), checkout.path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), checkout.path(), last_session(of_path(&events, &root())));
 
     assert!(!text.contains("Attention"), "{text:?}");
 }
@@ -323,7 +311,7 @@ fn a_cited_file_with_one_invalid_utf8_byte_elsewhere_still_reads() {
     let node = node_added_citing(Actor::Human(human()), "question", "why a?", vec![cited.id()]);
     let events = vec![cited, node];
 
-    let text = render(&fold(&events), &events, &root(), checkout.path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), checkout.path(), last_session(of_path(&events, &root())));
 
     assert!(!text.contains("Attention"), "{text:?}");
 }
@@ -337,7 +325,7 @@ fn a_citation_whose_excerpt_is_blank_reports_changed() {
     let node = node_added_citing(Actor::Human(human()), "question", "why a?", vec![cited.id()]);
     let events = vec![cited, node];
 
-    let text = render(&fold(&events), &events, &root(), checkout.path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), checkout.path(), last_session(of_path(&events, &root())));
 
     assert!(text.contains("cites a.rs changed"), "{text:?}");
 }
@@ -354,7 +342,7 @@ fn a_superseded_decision_is_still_a_headline_and_still_checked() {
     let edge = edge_added("supersedes", &new, &old);
     let events = vec![cited, old, new, edge];
 
-    let text = render(&fold(&events), &events, &root(), checkout.path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), checkout.path(), last_session(of_path(&events, &root())));
 
     assert!(text.contains("cites src/gone.rs gone"), "{text:?}");
 }
@@ -378,7 +366,7 @@ fn resolving_an_old_question_does_not_report_it_as_gained() {
     );
     let events = vec![session, question, decision, edge];
 
-    let text = render(&fold(&events), &events, &root(), scratch_checkout().path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), scratch_checkout().path(), last_session(of_path(&events, &root())));
 
     assert!(text.contains("+1 since last session"), "{text:?}");
     assert!(text.contains("decision \"a fresh decision\""), "{text:?}");
@@ -390,15 +378,15 @@ fn next_offers_read_around_only_for_the_ids_attention_printed() {
     let session = Event::session_started(source_at("claude-code", ROOT));
     let since = session.created_at();
     let mut events = vec![session];
-    for i in 0..=mapstore::LIMIT {
+    for i in 0..=LIMIT {
         let at = since.minus_minutes(-(10 + i as i64)).unwrap();
         events.push(created_at(node_added("question", &format!("q{i}")), at));
     }
 
-    let text = render(&fold(&events), &events, &root(), scratch_checkout().path(), last_session_at(&events, &root()));
+    let text = start(&fold(&events), &events, &root(), scratch_checkout().path(), last_session(of_path(&events, &root())));
 
-    assert_eq!(text.matches("read around").count(), mapstore::LIMIT, "{text:?}");
+    assert_eq!(text.matches("read around").count(), LIMIT, "{text:?}");
     assert!(text.contains("+1 more"), "{text:?}");
-    let folded_id = format!("q{}", mapstore::LIMIT + 1);
+    let folded_id = format!("q{}", LIMIT + 1);
     assert!(!text.contains(&format!("read around {folded_id}")), "{text:?}");
 }
