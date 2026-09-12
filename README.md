@@ -36,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/pavel-fokin/percept/main/scripts/ge
 
 Downloads the newest binary for your platform (macOS or Linux, Intel
 or ARM) and copies it to `~/.percept/bin`, beside the log. If that
-directory is not on `PATH`, the script puts a copy in `~/.local/bin`
+directory is not on `PATH`, the script symlinks it from `~/.local/bin`
 or `~/bin`, and otherwise prints the line to add.
 
 ### Building from source
