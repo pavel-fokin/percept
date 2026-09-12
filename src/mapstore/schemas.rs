@@ -13,21 +13,18 @@ use serde::{Deserialize, Deserializer};
 
 use crate::core::{default_prefix, EdgeKind, NodeKind, Schema, Schemas};
 
-const DECISIONS_TOML: &str = include_str!("schemas/decisions.toml");
-const CONCEPTS_TOML: &str = include_str!("schemas/concepts.toml");
-
 /// The two schema templates `percept init <client>` copies into a
-/// fresh checkout's `.percept/schemas/`, named `(<name>, <text>)` -
-/// `decisions` first, `concepts` second. Nothing else reads these; a
-/// loaded project's schemas come only from `load`, over the files
-/// `init` (or the project's own author) wrote.
-pub fn templates() -> [(&'static str, &'static str); 2] {
-    [("decisions", DECISIONS_TOML), ("concepts", CONCEPTS_TOML)]
-}
+/// fresh checkout's `SCHEMAS_DIR`, as `(<name>, <text>)`. Nothing else
+/// reads these; a loaded project's schemas come only from `load`, over
+/// the files `init` or the project's own author wrote.
+pub const TEMPLATES: [(&str, &str); 2] = [
+    ("decisions", include_str!("schemas/decisions.toml")),
+    ("concepts", include_str!("schemas/concepts.toml")),
+];
 
-/// Where a project's own schema files live, under the project root
-/// `checkout_root` finds.
-const SCHEMAS_DIR: &str = ".percept/schemas";
+/// Where a project's schema files live, under the project root
+/// `checkout_root` finds - what `load` reads and `init` writes.
+pub const SCHEMAS_DIR: &str = ".percept/schemas";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -11,7 +11,7 @@ fn a_project_with_no_schemas_directory_has_no_maps() {
 
 #[test]
 fn each_shipped_template_parses_under_its_own_name() {
-    for (name, text) in templates() {
+    for (name, text) in TEMPLATES {
         let schema = parse(name, text).unwrap();
         assert_eq!(schema.name, name);
     }

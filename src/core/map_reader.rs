@@ -1,7 +1,7 @@
 use super::Map;
 
-/// Opens a cognitive map by name - folded from the log for `decisions`
-/// and `tasks`, walked from the working tree for `code`. Domain-owned
+/// Opens a cognitive map by name - folded from the log for a declared
+/// map, walked from the working tree for `code`. Domain-owned
 /// the way `EventLog` and `MapRenderer` are, so `ReadMap` opens a map
 /// without knowing which source built it.
 pub trait MapReader: Send + Sync {

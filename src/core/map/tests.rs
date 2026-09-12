@@ -1206,11 +1206,11 @@ fn a_map_reads_as_one_line_per_node_then_per_edge() {
 }
 
 #[test]
-fn an_unknown_map_with_no_schemas_says_none_is_declared() {
+fn an_unknown_map_with_no_schemas_says_maps_are_none() {
     let schemas = Schemas::new(Vec::new());
     assert_eq!(
         schemas.find("decisions").err().unwrap().to_string(),
-        "no map named \"decisions\"; no map is declared"
+        "no map named \"decisions\"; maps are none"
     );
 }
 

@@ -77,7 +77,7 @@ pub fn run(args: InitArgs, checkout: &Path) -> Result<(), Box<dyn std::error::Er
                 args.client
             )
         })?;
-    for (name, text) in mapstore::templates() {
+    for (name, text) in mapstore::TEMPLATES {
         write_schema(checkout, name, text)?;
     }
     let command = format!("percept hook {}", client.name);
@@ -92,23 +92,23 @@ pub fn run(args: InitArgs, checkout: &Path) -> Result<(), Box<dyn std::error::Er
 /// schema is never overwritten. Prints `wrote <rel>` or `unchanged
 /// <rel>`, the same style `write_config` uses.
 fn write_schema(checkout: &Path, name: &str, text: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let rel = format!(".percept/schemas/{name}.toml");
-    let path = checkout.join(&rel);
-    if path.exists() {
+    let rel = format!("{}/{name}.toml", mapstore::SCHEMAS_DIR);
+    if checkout.join(&rel).exists() {
         println!("unchanged {rel}");
         return Ok(());
     }
-    write_new(&path, &rel, text)
+    write_new(checkout, &rel, text)
 }
 
-/// Writes `text` to `path`, creating its directory, and prints
+/// Writes `text` to `checkout/rel`, creating its directory, and prints
 /// `wrote <rel>` - the tail both `write_schema` and `write_config`
 /// end in.
-fn write_new(path: &Path, rel: &str, text: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn write_new(checkout: &Path, rel: &str, text: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let path = checkout.join(rel);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, text)?;
+    fs::write(&path, text)?;
     println!("wrote {rel}");
     Ok(())
 }
@@ -141,7 +141,7 @@ fn write_config(
         println!("unchanged {rel}");
         return Ok(());
     }
-    write_new(&path, rel, &text)
+    write_new(checkout, rel, &text)
 }
 
 /// `path`'s parsed contents as an object - empty when it doesn't exist

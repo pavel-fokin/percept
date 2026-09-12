@@ -187,11 +187,19 @@ impl Schemas {
     /// Every schema's name, in stored order, for an "expected one of"
     /// error.
     fn names_csv(&self) -> String {
-        self.schemas
-            .iter()
-            .map(|schema| schema.name.clone())
-            .collect::<Vec<_>>()
-            .join(", ")
+        csv_or_none(self.schemas.iter().map(|schema| schema.name.clone()))
+    }
+}
+
+/// `items` joined by `, ` for an "expected one of" message - `none`
+/// when there is nothing to expect, so the message never ends on a
+/// dangling "are ".
+fn csv_or_none(items: impl Iterator<Item = String>) -> String {
+    let csv = items.collect::<Vec<_>>().join(", ");
+    if csv.is_empty() {
+        "none".to_string()
+    } else {
+        csv
     }
 }
 
@@ -219,20 +227,12 @@ impl Schema {
     /// The node kinds' labels as a `, `-joined list, for a prompt line
     /// or an "expected one of" error.
     pub fn node_kinds_csv(&self) -> String {
-        self.node_kinds
-            .iter()
-            .map(NodeKind::label)
-            .collect::<Vec<_>>()
-            .join(", ")
+        csv_or_none(self.node_kinds.iter().map(NodeKind::label))
     }
 
     /// The edge kinds' labels as a `, `-joined list.
     pub fn edge_kinds_csv(&self) -> String {
-        self.edge_kinds
-            .iter()
-            .map(EdgeKind::label)
-            .collect::<Vec<_>>()
-            .join(", ")
+        csv_or_none(self.edge_kinds.iter().map(EdgeKind::label))
     }
 }
 
@@ -549,9 +549,6 @@ pub enum MapError {
 impl fmt::Display for MapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnknownMap { name, maps } if maps.is_empty() => {
-                write!(f, "no map named {name:?}; no map is declared")
-            }
             Self::UnknownMap { name, maps } => write!(f, "no map named {name:?}; maps are {maps}"),
             Self::UnknownNodeKind { map, kinds, kind } => write!(
                 f,

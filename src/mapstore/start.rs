@@ -25,21 +25,21 @@ use crate::workspace;
 /// shell passes the last look by anyone, the running session's own
 /// start included. `checkout` is where cited files are read.
 pub fn start(maps: &[Map], events: &[Event], root: &Path, checkout: &Path, since: Option<Timestamp>) -> String {
-    let project = project_name(root);
+    let header = format!("percept \u{b7} {}", project_name(root));
 
     if maps.is_empty() {
-        return format!("percept \u{b7} {project}\n{}", super::NO_SCHEMAS_HINT);
+        return format!("{header}\n{}", super::NO_SCHEMAS_HINT);
     }
 
     if maps.iter().all(|map| map.nodes().is_empty()) {
-        let mut lines = vec![format!("percept \u{b7} {project}\nnothing recorded yet\n\nNext")];
+        let mut lines = vec![format!("{header}\nnothing recorded yet\n\nNext")];
         lines.extend(pad_rows(&[how_to_record()]));
         return lines.join("\n");
     }
 
     let names: Vec<&str> = maps.iter().map(|map| map.schema().name.as_str()).collect();
     let mut sections = vec![format!(
-        "percept \u{b7} {project}\nkeeps what this project settled: {}",
+        "{header}\nkeeps what this project settled: {}",
         names.join(", ")
     )];
 
@@ -339,7 +339,8 @@ fn next_block(maps: &[Map], printed: &[(String, String)]) -> String {
     lines.join("\n")
 }
 
-/// The one Next row every render carries, the empty state included.
+/// The one Next row every render of a declared map carries, the
+/// empty state included.
 fn how_to_record() -> (String, String) {
     ("how to record".to_string(), "percept maps describe <map>".to_string())
 }
