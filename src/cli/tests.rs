@@ -458,11 +458,11 @@ fn a_prop_with_no_equals_sign_is_rejected() {
     assert!(parse_prop("summary").is_err());
 }
 
-fn map_with_a_decision() -> Map {
-    let mut map = Map::empty(crate::core::testing::decisions());
+fn map_with_a_verdict() -> Map {
+    let mut map = Map::empty(crate::core::testing::debates());
     map.apply(
         Mutation::AddNode {
-            kind: "decision".to_string(),
+            kind: "verdict".to_string(),
             name: "Rust over Go".to_string(),
             properties: Default::default(),
             sources: Vec::new(),
@@ -475,22 +475,22 @@ fn map_with_a_decision() -> Map {
 
 #[test]
 fn a_node_ref_splits_on_the_first_colon() {
-    let node = resolve_ref(&map_with_a_decision(), "decision:Rust over Go").unwrap();
-    assert_eq!(node.kind, "decision");
+    let node = resolve_ref(&map_with_a_verdict(), "verdict:Rust over Go").unwrap();
+    assert_eq!(node.kind, "verdict");
     assert_eq!(node.name, "Rust over Go");
 }
 
 #[test]
 fn a_node_ref_resolves_by_its_short_id_too() {
-    let node = resolve_ref(&map_with_a_decision(), "d1").unwrap();
-    assert_eq!(node.kind, "decision");
+    let node = resolve_ref(&map_with_a_verdict(), "v1").unwrap();
+    assert_eq!(node.kind, "verdict");
     assert_eq!(node.name, "Rust over Go");
 }
 
 #[test]
 fn an_unknown_node_ref_is_rejected() {
-    assert!(resolve_ref(&map_with_a_decision(), "decision:Go alone").is_err());
-    assert!(resolve_ref(&map_with_a_decision(), "d9").is_err());
+    assert!(resolve_ref(&map_with_a_verdict(), "verdict:Go alone").is_err());
+    assert!(resolve_ref(&map_with_a_verdict(), "v9").is_err());
 }
 
 #[test]
@@ -499,29 +499,29 @@ fn maps_show_kind_is_repeatable() {
         "percept",
         "maps",
         "show",
-        "decisions",
+        "debates",
         "--kind",
-        "question",
+        "topic",
         "--kind",
-        "decision",
+        "verdict",
     ])
     .unwrap();
     match cli.command {
         Some(Command::Maps {
             command: MapsCommand::Show(args),
-        }) => assert_eq!(args.kind, ["question", "decision"]),
+        }) => assert_eq!(args.kind, ["topic", "verdict"]),
         _ => panic!("expected maps show"),
     }
 }
 
 #[test]
 fn maps_show_json_defaults_to_false() {
-    assert!(!parse_show(["percept", "maps", "show", "decisions"]).json);
+    assert!(!parse_show(["percept", "maps", "show", "debates"]).json);
 }
 
 #[test]
 fn maps_show_json_flag_sets_it() {
-    assert!(parse_show(["percept", "maps", "show", "decisions", "--json"]).json);
+    assert!(parse_show(["percept", "maps", "show", "debates", "--json"]).json);
 }
 
 fn parse_show<const N: usize>(argv: [&str; N]) -> ShowMapArgs {
@@ -535,11 +535,11 @@ fn parse_show<const N: usize>(argv: [&str; N]) -> ShowMapArgs {
 
 #[test]
 fn maps_describe_parses_the_map_name() {
-    let cli = Cli::try_parse_from(["percept", "maps", "describe", "decisions"]).unwrap();
+    let cli = Cli::try_parse_from(["percept", "maps", "describe", "debates"]).unwrap();
     match cli.command {
         Some(Command::Maps {
             command: MapsCommand::Describe(args),
-        }) => assert_eq!(args.map, "decisions"),
+        }) => assert_eq!(args.map, "debates"),
         _ => panic!("expected maps describe"),
     }
 }
@@ -547,8 +547,8 @@ fn maps_describe_parses_the_map_name() {
 #[test]
 fn all_paths_folds_every_distinct_path_while_the_default_folds_root() {
     let events = [
-        node_added_at("/there", "decision", "Go"),
-        node_added_at("/here", "decision", "Rust"),
+        node_added_at("/there", "verdict", "Go"),
+        node_added_at("/here", "verdict", "Rust"),
     ];
     let folded = |all_paths: bool| {
         let mut seen = Vec::new();
@@ -566,15 +566,15 @@ fn all_paths_folds_every_distinct_path_while_the_default_folds_root() {
 
 #[test]
 fn depth_is_refused_without_around() {
-    let alone = Cli::try_parse_from(["percept", "maps", "show", "decisions", "--depth", "2"]);
+    let alone = Cli::try_parse_from(["percept", "maps", "show", "debates", "--depth", "2"]);
     assert!(alone.is_err());
     let with = Cli::try_parse_from([
         "percept",
         "maps",
         "show",
-        "decisions",
+        "debates",
         "--around",
-        "question:Why?",
+        "topic:Why?",
         "--depth",
         "2",
     ]);
@@ -584,7 +584,7 @@ fn depth_is_refused_without_around() {
 #[test]
 fn since_on_maps_show_parses_like_events_search() {
     let cli =
-        Cli::try_parse_from(["percept", "maps", "show", "decisions", "--since", "1d"]).unwrap();
+        Cli::try_parse_from(["percept", "maps", "show", "debates", "--since", "1d"]).unwrap();
     match cli.command {
         Some(Command::Maps {
             command: MapsCommand::Show(args),
@@ -592,7 +592,7 @@ fn since_on_maps_show_parses_like_events_search() {
         _ => panic!("expected maps show"),
     }
     assert!(
-        Cli::try_parse_from(["percept", "maps", "show", "decisions", "--since", "soon"]).is_err()
+        Cli::try_parse_from(["percept", "maps", "show", "debates", "--since", "soon"]).is_err()
     );
 }
 
@@ -661,15 +661,13 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_human() {
         "percept",
         "maps",
         "add-node",
-        "decisions",
+        "debates",
         "--actor",
         "model",
         "--kind",
-        "question",
+        "topic",
         "--name",
         "Which?",
-        "--prop",
-        "state=open",
     ])
     .unwrap();
     let Some(Command::Maps {
@@ -688,13 +686,11 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_human() {
         "percept",
         "maps",
         "add-node",
-        "decisions",
+        "debates",
         "--kind",
-        "question",
+        "topic",
         "--name",
         "Which?",
-        "--prop",
-        "state=open",
     ])
     .unwrap();
     let Some(Command::Maps {
@@ -709,7 +705,7 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_human() {
 fn change_node_args(node: &str, why: Option<&str>) -> ChangeNodeArgs {
     ChangeNodeArgs {
         target: MapArgs {
-            map: "decisions".to_string(),
+            map: "debates".to_string(),
             source: Vec::new(),
             actor: "human".to_string(),
         },
@@ -722,12 +718,12 @@ fn change_node_args(node: &str, why: Option<&str>) -> ChangeNodeArgs {
 
 #[test]
 fn maps_change_node_with_why_appends_a_node_changed_whose_why_is_set() {
-    let added = node_added_by(Actor::Agent, "decision", "Rust");
+    let added = node_added_by(Actor::Agent, "verdict", "Rust");
     let node = node_id(&added);
     let log = FakeLog::seeded(vec![added]);
 
     maps_change_node(
-        change_node_args("decision:Rust", Some("never proposed")),
+        change_node_args("verdict:Rust", Some("never proposed")),
         &log,
         &schemas(),
         &source("cli"),
@@ -751,7 +747,7 @@ fn maps_change_node_refuses_a_node_the_map_does_not_hold() {
     let log = FakeLog::default();
 
     let err = maps_change_node(
-        change_node_args("decision:Rust", Some("never proposed")),
+        change_node_args("verdict:Rust", Some("never proposed")),
         &log,
         &schemas(),
         &source("cli"),
@@ -760,16 +756,16 @@ fn maps_change_node_refuses_a_node_the_map_does_not_hold() {
     .err()
     .unwrap();
 
-    assert!(err.to_string().contains("no decision"), "{err}");
+    assert!(err.to_string().contains("no verdict"), "{err}");
     assert!(log.load().unwrap().is_empty());
 }
 
 #[test]
 fn maps_change_node_refuses_an_agent_s_property_change_of_a_node_a_human_wrote() {
-    let added = node_added("option", "wasm render");
+    let added = node_added("claim", "wasm render");
     let log = FakeLog::seeded(vec![added]);
 
-    let mut args = change_node_args("option:wasm render", None);
+    let mut args = change_node_args("claim:wasm render", None);
     args.target.actor = "agent".to_string();
     args.prop = vec![("why".to_string(), "faster paint".to_string())];
     let err = maps_change_node(args, &log, &schemas(), &source("cli"), None).err().unwrap();
@@ -790,11 +786,11 @@ fn record_args(map: &str) -> RecordArgs {
 #[test]
 fn a_document_writes_its_nodes_and_edges_in_order() {
     let log = FakeLog::default();
-    let document = "question \"Does record work?\"\n  state \"open\"\n\
-                     decision \"yes\"\n  why \"it ran\"\n  resolves question\n";
+    let document = "topic \"Does record work?\"\n\
+                     verdict \"yes\"\n  why \"it ran\"\n  settles topic\n";
     record_document(
         document,
-        record_args("decisions"),
+        record_args("debates"),
         &log,
         &schemas(),
         &source("cli"),
@@ -806,15 +802,15 @@ fn a_document_writes_its_nodes_and_edges_in_order() {
     let events = log.load().unwrap();
     assert_eq!(events.len(), 3);
     let map = Map::fold(
-        crate::core::testing::decisions(),
+        crate::core::testing::debates(),
         &log.load().unwrap(),
     )
     .unwrap();
-    assert!(map.find("question", "Does record work?").is_some());
-    let decision = map.find("decision", "yes").unwrap();
-    assert_eq!(decision.properties.get("why").unwrap(), "it ran");
+    assert!(map.find("topic", "Does record work?").is_some());
+    let verdict = map.find("verdict", "yes").unwrap();
+    assert_eq!(verdict.properties.get("why").unwrap(), "it ran");
     assert_eq!(map.edges().len(), 1);
-    assert_eq!(map.edges()[0].kind, "resolves");
+    assert_eq!(map.edges()[0].kind, "settles");
 }
 
 #[test]
@@ -822,12 +818,12 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
     let fixture = Fixture::new();
     fixture.write("src/cli/mod.rs", "one\ntwo\nthree\n");
     let log = FakeLog::default();
-    let document = "question \"Does record work?\"\n  state \"open\"\n\
-                     decision \"yes\"\n  why \"it ran\"\n  resolves question\n  \
+    let document = "topic \"Does record work?\"\n\
+                     verdict \"yes\"\n  why \"it ran\"\n  settles topic\n  \
                      cites src/cli/mod.rs:1-3\n";
     record_document(
         document,
-        record_args("decisions"),
+        record_args("debates"),
         &log,
         &schemas(),
         &source("cli"),
@@ -839,22 +835,22 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
     let events = log.load().unwrap();
     // The `cites` event is published before the node it cites - `record`
     // writes a node's cites first - so it lands second, right after the
-    // question node.
+    // topic node.
     assert!(matches!(events[1].payload(), Payload::FileCited { .. }));
     let cite_id = events[1].id();
-    let map = Map::fold(crate::core::testing::decisions(), &events).unwrap();
-    let decision = map.find("decision", "yes").unwrap();
-    assert!(decision.sources.contains(&cite_id));
+    let map = Map::fold(crate::core::testing::debates(), &events).unwrap();
+    let verdict = map.find("verdict", "yes").unwrap();
+    assert!(verdict.sources.contains(&cite_id));
 }
 
 #[test]
 fn a_ref_to_an_existing_short_id_resolves() {
     let log = FakeLog::default();
-    log.append(&node_added("question", "Does record work?")).unwrap();
-    let document = "decision \"yes\"\n  why \"it ran\"\n  resolves q1\n";
+    log.append(&node_added("topic", "Does record work?")).unwrap();
+    let document = "verdict \"yes\"\n  why \"it ran\"\n  settles t1\n";
     record_document(
         document,
-        record_args("decisions"),
+        record_args("debates"),
         &log,
         &schemas(),
         &source("cli"),
@@ -864,9 +860,9 @@ fn a_ref_to_an_existing_short_id_resolves() {
     .unwrap();
 
     let events = log.load().unwrap();
-    let map = Map::fold(crate::core::testing::decisions(), &events).unwrap();
+    let map = Map::fold(crate::core::testing::debates(), &events).unwrap();
     assert_eq!(map.edges().len(), 1);
-    assert_eq!(map.edges()[0].kind, "resolves");
+    assert_eq!(map.edges()[0].kind, "settles");
 }
 
 #[test]
@@ -875,7 +871,7 @@ fn an_unknown_node_kind_fails_before_anything_is_written() {
     let document = "riddle \"what?\"\n";
     let err = record_document(
         document,
-        record_args("decisions"),
+        record_args("debates"),
         &log,
         &schemas(),
         &source("cli"),
@@ -890,11 +886,11 @@ fn an_unknown_node_kind_fails_before_anything_is_written() {
 #[test]
 fn a_missing_required_property_fails_before_anything_is_written() {
     let log = FakeLog::default();
-    let document = "question \"Does record work?\"\n  state \"open\"\n\
-                     option \"maybe\"\n  answers question\n";
+    let document = "topic \"Does record work?\"\n\
+                     claim \"maybe\"\n  about topic\n";
     let err = record_document(
         document,
-        record_args("decisions"),
+        record_args("debates"),
         &log,
         &schemas(),
         &source("cli"),
@@ -909,11 +905,11 @@ fn a_missing_required_property_fails_before_anything_is_written() {
 #[test]
 fn a_bad_ref_names_its_line_number() {
     let log = FakeLog::default();
-    let document = "question \"Does record work?\"\n  state \"open\"\n\
-                     decision \"yes\"\n  why \"it ran\"\n  resolves q9\n";
+    let document = "topic \"Does record work?\"\n\
+                     verdict \"yes\"\n  why \"it ran\"\n  settles t9\n";
     let err = record_document(
         document,
-        record_args("decisions"),
+        record_args("debates"),
         &log,
         &schemas(),
         &source("cli"),
@@ -921,18 +917,18 @@ fn a_bad_ref_names_its_line_number() {
         human(),
     )
     .unwrap_err();
-    assert!(err.to_string().starts_with("line 5:"), "{err}");
+    assert!(err.to_string().starts_with("line 4:"), "{err}");
     assert!(log.load().unwrap().is_empty());
 }
 
 #[test]
 fn a_duplicate_name_in_a_later_node_writes_nothing() {
     let log = FakeLog::default();
-    let document = "question \"Does record work?\"\n  state \"open\"\n\
-                     question \"Does record work?\"\n  state \"open\"\n";
+    let document = "topic \"Does record work?\"\n\
+                     topic \"Does record work?\"\n";
     let err = record_document(
         document,
-        record_args("decisions"),
+        record_args("debates"),
         &log,
         &schemas(),
         &source("cli"),
@@ -947,8 +943,8 @@ fn a_duplicate_name_in_a_later_node_writes_nothing() {
 #[test]
 fn a_source_id_the_log_lacks_writes_nothing() {
     let log = FakeLog::default();
-    let document = "question \"Does record work?\"\n  state \"open\"\n";
-    let mut args = record_args("decisions");
+    let document = "topic \"Does record work?\"\n";
+    let mut args = record_args("debates");
     args.source = vec![crate::core::EventId::new().as_uuid().to_string()];
     let err = record_document(
         document,
@@ -968,8 +964,8 @@ fn a_source_id_the_log_lacks_writes_nothing() {
 fn a_short_id_document_changes_the_node_and_records_node_changed() {
     let log = FakeLog::default();
     record_document(
-        "task \"cancel a turn\"\n  why \"Esc drops the session\"\n  state \"open\"\n",
-        record_args("tasks"),
+        "chore \"cancel a turn\"\n  why \"Esc drops the session\"\n  state \"open\"\n",
+        record_args("chores"),
         &log,
         &schemas(),
         &source("cli"),
@@ -979,8 +975,8 @@ fn a_short_id_document_changes_the_node_and_records_node_changed() {
     .unwrap();
 
     record_document(
-        "t1\n  state \"done\"\n  outcome \"1f1a9a9: done\"\n",
-        record_args("tasks"),
+        "c1\n  state \"done\"\n  outcome \"1f1a9a9: done\"\n",
+        record_args("chores"),
         &log,
         &schemas(),
         &source("cli"),
@@ -995,18 +991,18 @@ fn a_short_id_document_changes_the_node_and_records_node_changed() {
         Payload::NodeChanged { .. }
     ));
 
-    let map = Map::fold(crate::core::testing::tasks(), &events).unwrap();
-    let task = map.find("task", "cancel a turn").unwrap();
-    assert_eq!(task.properties.get("state").unwrap(), "done");
-    assert_eq!(task.properties.get("outcome").unwrap(), "1f1a9a9: done");
+    let map = Map::fold(crate::core::testing::chores(), &events).unwrap();
+    let chore = map.find("chore", "cancel a turn").unwrap();
+    assert_eq!(chore.properties.get("state").unwrap(), "done");
+    assert_eq!(chore.properties.get("outcome").unwrap(), "1f1a9a9: done");
 }
 
 #[test]
 fn a_short_id_line_with_a_quoted_name_is_an_error() {
     let log = FakeLog::default();
     let err = record_document(
-        "t4 \"name\"\n",
-        record_args("tasks"),
+        "c4 \"name\"\n",
+        record_args("chores"),
         &log,
         &schemas(),
         &source("cli"),
@@ -1021,8 +1017,8 @@ fn a_short_id_line_with_a_quoted_name_is_an_error() {
 fn a_change_to_an_unknown_short_id_is_an_error() {
     let log = FakeLog::default();
     let err = record_document(
-        "t9\n  state \"done\"\n",
-        record_args("tasks"),
+        "c9\n  state \"done\"\n",
+        record_args("chores"),
         &log,
         &schemas(),
         &source("cli"),
@@ -1030,7 +1026,7 @@ fn a_change_to_an_unknown_short_id_is_an_error() {
         human(),
     )
     .unwrap_err();
-    assert!(err.to_string().contains("t9"), "{err}");
+    assert!(err.to_string().contains("c9"), "{err}");
     assert!(log.load().unwrap().is_empty());
 }
 
@@ -1038,8 +1034,8 @@ fn a_change_to_an_unknown_short_id_is_an_error() {
 fn a_record_why_line_under_an_existing_node_sets_the_changes_why_not_a_property() {
     let log = FakeLog::default();
     record_document(
-        "task \"cancel a turn\"\n  why \"Esc drops the session\"\n  state \"open\"\n",
-        record_args("tasks"),
+        "chore \"cancel a turn\"\n  why \"Esc drops the session\"\n  state \"open\"\n",
+        record_args("chores"),
         &log,
         &schemas(),
         &source("cli"),
@@ -1049,8 +1045,8 @@ fn a_record_why_line_under_an_existing_node_sets_the_changes_why_not_a_property(
     .unwrap();
 
     record_document(
-        "t1\n  why \"never proposed\"\n",
-        record_args("tasks"),
+        "c1\n  why \"never proposed\"\n",
+        record_args("chores"),
         &log,
         &schemas(),
         &source("cli"),
@@ -1068,14 +1064,14 @@ fn a_record_why_line_under_an_existing_node_sets_the_changes_why_not_a_property(
         _ => panic!("expected NodeChanged"),
     }
 
-    let map = Map::fold(crate::core::testing::tasks(), &events).unwrap();
-    let task = map.find("task", "cancel a turn").unwrap();
-    assert_eq!(task.properties.get("why").unwrap(), "Esc drops the session");
+    let map = Map::fold(crate::core::testing::chores(), &events).unwrap();
+    let chore = map.find("chore", "cancel a turn").unwrap();
+    assert_eq!(chore.properties.get("why").unwrap(), "Esc drops the session");
 }
 
 #[test]
 fn start_reads_and_appends_no_event() {
-    let log = FakeLog::seeded(vec![node_added("question", "why?")]);
+    let log = FakeLog::seeded(vec![node_added("topic", "why?")]);
     let checkout = Fixture::new();
 
     start(&log, &schemas(), Path::new(ROOT), checkout.path()).unwrap();

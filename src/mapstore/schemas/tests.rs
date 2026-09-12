@@ -1,17 +1,5 @@
 use super::*;
-use crate::core::testing::{concepts, decisions, Fixture};
-
-#[test]
-fn the_embedded_decisions_toml_folds_to_the_decisions_fixture() {
-    let schema = parse("decisions", DECISIONS_TOML).unwrap();
-    assert_eq!(schema, decisions());
-}
-
-#[test]
-fn the_embedded_concepts_toml_folds_to_the_concepts_fixture() {
-    let schema = parse("concepts", CONCEPTS_TOML).unwrap();
-    assert_eq!(schema, concepts());
-}
+use crate::core::testing::Fixture;
 
 #[test]
 fn a_project_with_no_schemas_directory_has_only_the_built_ins() {

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::core::testing::{decisions, files, human, node_ref, tasks};
+use crate::core::testing::{chores, debates, files, human, node_ref};
 use crate::core::{Actor, EventId, Mutation};
 
 /// Adds a node with one `why` property when `why` is given, and one
@@ -72,49 +72,48 @@ fn link(map: &mut Map, kind: &str, from: (&str, &str), to: (&str, &str)) {
 
 #[test]
 fn an_empty_map_renders_its_title_and_the_empty_notice() {
-    let map = Map::empty(decisions());
-    assert_eq!(markdown(&map), "# decisions\n\n(empty: nothing has been recorded here yet.)\n");
+    let map = Map::empty(debates());
+    assert_eq!(markdown(&map), "# debates\n\n(empty: nothing has been recorded here yet.)\n");
 }
 
 #[test]
 fn sections_order_headlines_by_state_then_by_when_they_were_added() {
-    let mut map = Map::empty(tasks());
-    add(&mut map, "task", "a", Some("first added"), Some("open"), &[], Actor::Human(human()));
-    add(&mut map, "task", "b", Some("second added"), Some("done"), &[], Actor::Human(human()));
-    add(&mut map, "task", "c", Some("third added"), Some("open"), &[], Actor::Human(human()));
+    let mut map = Map::empty(chores());
+    add(&mut map, "chore", "a", Some("first added"), Some("open"), &[], Actor::Human(human()));
+    add(&mut map, "chore", "b", Some("second added"), Some("done"), &[], Actor::Human(human()));
+    add(&mut map, "chore", "c", Some("third added"), Some("open"), &[], Actor::Human(human()));
 
     let text = markdown(&map);
 
     // "open" sorts before "done" - both before an added-order tiebreak
-    // among tasks sharing a state; the core holds no such ordering, the
+    // among chores sharing a state; the core holds no such ordering, the
     // render alone gives this listing its meaning.
     let at = |name: &str| text.find(&format!("\n## {name}\n")).unwrap();
-    assert!(at("t1 \"a\"") < at("t3 \"c\"") && at("t3 \"c\"") < at("t2 \"b\""), "{text}");
+    assert!(at("c1 \"a\"") < at("c3 \"c\"") && at("c3 \"c\"") < at("c2 \"b\""), "{text}");
 }
 
 #[test]
-fn an_option_is_printed_under_its_question_with_its_why() {
-    let mut map = Map::empty(decisions());
-    add(&mut map, "question", "Which parser?", None, Some("open"), &[], Actor::Human(human()));
+fn a_claim_is_printed_under_its_topic_with_its_why() {
+    let mut map = Map::empty(debates());
+    add(&mut map, "topic", "Which parser?", None, None, &[], Actor::Human(human()));
     add(
         &mut map,
-        "option",
+        "claim",
         "reuse OpenAi",
         Some("the wire shapes differ"),
         None,
         &[],
         Actor::Human(human()),
     );
-    link(&mut map, "answers", ("option", "reuse OpenAi"), ("question", "Which parser?"));
+    link(&mut map, "about", ("claim", "reuse OpenAi"), ("topic", "Which parser?"));
 
     let text = markdown(&map);
 
     assert!(
         text.contains(
-            "## q1 \"Which parser?\"\n\
+            "## t1 \"Which parser?\"\n\
              \n\
-             state: \"open\"\n\
-             - o1 \"reuse OpenAi\" answers\n\
+             - c1 \"reuse OpenAi\" about\n\
              \x20 why: \"the wire shapes differ\"\n"
         ),
         "{text}"
@@ -122,81 +121,81 @@ fn an_option_is_printed_under_its_question_with_its_why() {
 }
 
 #[test]
-fn a_supersedes_and_a_reopens_edge_are_printed_by_name() {
-    let mut map = Map::empty(decisions());
-    add(&mut map, "decision", "Go", None, None, &[], Actor::Human(human()));
-    add(&mut map, "decision", "Rust", None, None, &[], Actor::Human(human()));
-    link(&mut map, "supersedes", ("decision", "Rust"), ("decision", "Go"));
-    add(&mut map, "question", "Does Rust still fit?", None, Some("open"), &[], Actor::Human(human()));
-    link(&mut map, "reopens", ("question", "Does Rust still fit?"), ("decision", "Rust"));
+fn a_replaces_and_a_doubts_edge_are_printed_by_name() {
+    let mut map = Map::empty(debates());
+    add(&mut map, "verdict", "Go", None, None, &[], Actor::Human(human()));
+    add(&mut map, "verdict", "Rust", None, None, &[], Actor::Human(human()));
+    link(&mut map, "replaces", ("verdict", "Rust"), ("verdict", "Go"));
+    add(&mut map, "topic", "Does Rust still fit?", None, None, &[], Actor::Human(human()));
+    link(&mut map, "doubts", ("topic", "Does Rust still fit?"), ("verdict", "Rust"));
 
     let text = markdown(&map);
 
     assert!(
-        text.contains("## d2 \"Rust\"\n\n- supersedes d1 \"Go\"\n- q1 \"Does Rust still fit?\" reopens\n"),
+        text.contains("## v2 \"Rust\"\n\n- replaces v1 \"Go\"\n- t1 \"Does Rust still fit?\" doubts\n"),
         "{text}"
     );
-    assert!(text.contains("## d1 \"Go\"\n\n- d2 \"Rust\" supersedes\n"), "{text}");
+    assert!(text.contains("## v1 \"Go\"\n\n- v2 \"Rust\" replaces\n"), "{text}");
 }
 
 #[test]
-fn a_tasks_blocks_edge_is_printed_by_name_on_both_ends() {
-    let mut map = Map::empty(tasks());
-    add(&mut map, "task", "cancel a turn", Some("Esc drops the session"), Some("open"), &[], Actor::Human(human()));
+fn a_chores_blocks_edge_is_printed_by_name_on_both_ends() {
+    let mut map = Map::empty(chores());
+    add(&mut map, "chore", "cancel a turn", Some("Esc drops the session"), Some("open"), &[], Actor::Human(human()));
     add(
         &mut map,
-        "task",
+        "chore",
         "cancellable streams",
         Some("nothing can stop a stream today"),
         Some("open"),
         &[],
         Actor::Human(human()),
     );
-    link(&mut map, "blocks", ("task", "cancellable streams"), ("task", "cancel a turn"));
+    link(&mut map, "blocks", ("chore", "cancellable streams"), ("chore", "cancel a turn"));
 
     let text = markdown(&map);
 
     assert!(
-        text.contains("- t2 \"cancellable streams\" blocks\n"),
+        text.contains("- c2 \"cancellable streams\" blocks\n"),
         "{text}"
     );
     assert!(
-        text.contains("- blocks t1 \"cancel a turn\"\n"),
+        text.contains("- blocks c1 \"cancel a turn\"\n"),
         "{text}"
     );
 }
 
 #[test]
 fn a_map_with_no_headlines_says_so() {
-    let map = Map::empty(decisions());
-    // The map has a node, but no headline kind: no question or decision
+    let map = Map::empty(debates());
+    // The map has a node, but no headline kind: no topic or verdict
     // was ever added.
     let mut map = map;
-    add(&mut map, "option", "Rust", Some("only alternative weighed"), None, &[], Actor::Human(human()));
+    add(&mut map, "claim", "Rust", Some("only alternative weighed"), None, &[], Actor::Human(human()));
 
     assert_eq!(
         markdown(&map),
-        "# decisions\n\n(no headline node yet; 1 nodes of other kinds.)\n"
+        "# debates\n\n(no headline node yet; 1 nodes of other kinds.)\n"
     );
 }
 
 #[test]
 fn a_model_written_node_is_marked() {
-    let mut map = Map::empty(decisions());
-    add(&mut map, "question", "Which key?", None, Some("open"), &[], Actor::Agent);
+    let mut map = Map::empty(debates());
+    add(&mut map, "topic", "Which key?", None, None, &[], Actor::Agent);
 
     let text = markdown(&map);
 
-    assert!(text.contains("## q1 \"Which key?\" (agent)\n"), "{text}");
+    assert!(text.contains("## t1 \"Which key?\" (agent)\n"), "{text}");
 }
 
 #[test]
 fn a_changed_node_renders_its_changed_by_line_with_its_why() {
-    let mut map = Map::empty(decisions());
-    add(&mut map, "decision", "gemma4 by default", Some("the local model"), None, &[], Actor::Agent);
+    let mut map = Map::empty(debates());
+    add(&mut map, "verdict", "gemma4 by default", Some("the local model"), None, &[], Actor::Agent);
     change(
         &mut map,
-        "decision",
+        "verdict",
         "gemma4 by default",
         BTreeMap::new(),
         Some("never proposed"),
@@ -210,8 +209,8 @@ fn a_changed_node_renders_its_changed_by_line_with_its_why() {
 
 #[test]
 fn an_unchanged_node_carries_no_changed_by_line() {
-    let mut map = Map::empty(decisions());
-    add(&mut map, "decision", "gemma4 by default", None, None, &[], Actor::Human(human()));
+    let mut map = Map::empty(debates());
+    add(&mut map, "verdict", "gemma4 by default", None, None, &[], Actor::Human(human()));
 
     let text = markdown(&map);
 
@@ -268,17 +267,17 @@ fn a_schema_with_no_headline_kind_falls_back_to_a_section_per_kind() {
 
 #[test]
 fn the_catalogue_gives_each_map_a_section_listing_its_kinds() {
-    let mut map = Map::empty(decisions());
-    add(&mut map, "question", "Where does the log live?", None, Some("open"), &[], Actor::Human(human()));
+    let mut map = Map::empty(debates());
+    add(&mut map, "topic", "Where does the log live?", None, None, &[], Actor::Human(human()));
 
     let text = catalogue(std::slice::from_ref(&map));
 
     assert!(text.starts_with("# maps\n"));
-    assert!(text.contains("## decisions\n"));
-    assert!(text.contains(&decisions().purpose));
+    assert!(text.contains("## debates\n"));
+    assert!(text.contains(&debates().purpose));
     assert!(text.contains("1 nodes, 0 edges.\n"));
     assert!(text.contains(
-        "- `contradicts` (evidence -> option)\n- `resolves` (decision -> question)"
+        "- `backs` (fact -> claim)\n- `settles` (verdict -> topic)"
     ));
     assert!(text.contains("\nExample node and edge:\n\n    {\"node\":"));
     assert!(text.contains("\"name\":\"Where does the log live?\""));
@@ -286,21 +285,21 @@ fn the_catalogue_gives_each_map_a_section_listing_its_kinds() {
 
 #[test]
 fn a_kind_with_no_gloss_renders_without_a_trailing_dash() {
-    let text = catalogue(&[Map::empty(decisions())]);
+    let text = catalogue(&[Map::empty(debates())]);
 
     assert!(
-        text.contains("\n- `decision`\n"),
+        text.contains("\n- `verdict`\n"),
         "{text}"
     );
 }
 
 #[test]
 fn the_catalogue_names_a_kinds_required_properties() {
-    let text = catalogue(&[Map::empty(decisions())]);
+    let text = catalogue(&[Map::empty(debates())]);
 
     assert!(
         text.contains(
-            "- `option` (requires `why`) - an alternative that was weighed and lost, saying \
+            "- `claim` (requires `why`) - a side taken on a topic, saying \
              why in its `why` property"
         ),
         "{text}"

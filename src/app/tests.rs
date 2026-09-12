@@ -260,9 +260,9 @@ fn another_source_s_map_mutation_in_the_same_project_still_folds() {
         source("codex"),
         None,
         Payload::NodeAdded {
-            map: "decisions".to_string(),
+            map: "debates".to_string(),
             node: crate::core::NodeId::new(),
-            kind: "question".to_string(),
+            kind: "topic".to_string(),
             name: "why?".to_string(),
             properties: Default::default(),
             sources: Vec::new(),
@@ -281,13 +281,13 @@ fn another_source_s_map_mutation_in_the_same_project_still_folds() {
     )
     .unwrap();
 
-    let decisions = schemas()
+    let debates = schemas()
         .fold_all(app.events())
         .unwrap()
         .into_iter()
-        .find(|map| map.schema().name == "decisions")
+        .find(|map| map.schema().name == "debates")
         .unwrap();
-    assert_eq!(decisions.nodes().len(), 1);
+    assert_eq!(debates.nodes().len(), 1);
 }
 
 #[test]
@@ -595,9 +595,9 @@ fn instructions_go_to_the_model_as_system_text_before_the_maps_every_round() {
     run_one_tool(&mut app, "search_events", "{}");
 
     let sent = model.last_request();
-    // The instructions, then the decisions map; the time goes last.
+    // The instructions, then the debates map; the time goes last.
     assert!(sent[0].contains("Commit subjects stay under 72 chars."));
-    assert!(sent[1].starts_with("The decisions map"));
+    assert!(sent[1].starts_with("The debates map"));
 }
 
 #[test]
@@ -931,7 +931,7 @@ fn a_log_longer_than_the_window_sends_only_its_newest_events() {
 fn a_long_tool_loop_never_evicts_the_prompt_it_is_answering() {
     let (model, mut app) = seeded_app(Vec::new(), vec![Arc::new(FakeTool)]);
 
-    let _ = app.submit("the question".to_string()).unwrap();
+    let _ = app.submit("the topic".to_string()).unwrap();
     // Each round commits four events: thought, reply, call, result.
     // Five hundred tokens of replies are four times what history may
     // take of the scripted model's window.
@@ -941,7 +941,7 @@ fn a_long_tool_loop_never_evicts_the_prompt_it_is_answering() {
         run_one_tool(&mut app, "search_events", "{}");
     }
 
-    assert!(model.last_request().contains(&"the question".to_string()));
+    assert!(model.last_request().contains(&"the topic".to_string()));
 }
 
 #[test]
@@ -951,9 +951,9 @@ fn a_map_is_sent_with_its_kinds_ahead_of_the_transcript_and_outside_the_window()
         source(SOURCE),
         None,
         crate::core::Payload::NodeAdded {
-            map: "decisions".to_string(),
+            map: "debates".to_string(),
             node: crate::core::NodeId::new(),
-            kind: "decision".to_string(),
+            kind: "verdict".to_string(),
             name: "Rust over Go".to_string(),
             properties: Default::default(),
             sources: Vec::new(),
@@ -967,21 +967,21 @@ fn a_map_is_sent_with_its_kinds_ahead_of_the_transcript_and_outside_the_window()
 
     let sent = model.last_request();
     assert!(!has_filler(&sent, "0"));
-    assert_decisions_header(&sent[0]);
-    assert!(sent[0].contains("- decision \"Rust over Go\""));
+    assert_debates_header(&sent[0]);
+    assert!(sent[0].contains("- verdict \"Rust over Go\""));
 }
 
-/// The catalogue line every shape of the decisions map opens with.
-fn assert_decisions_header(message: &str) {
-    assert!(message.starts_with(
-        "The decisions map: what was asked, what was chosen, and why, so a settled question is \
-         not reopened. It holds "
-    ));
+/// The catalogue line every shape of the debates map opens with.
+fn assert_debates_header(message: &str) {
+    assert!(message.starts_with(&format!(
+        "The debates map: {}. It holds ",
+        crate::core::testing::debates().purpose
+    )));
     assert!(message.contains(
-        ". Node kinds: `question`, `option` (requires `why`), `evidence`, `decision`. Edge \
-         kinds: `answers` (option -> question), `supports` (evidence -> option), `contradicts` \
-         (evidence -> option), `resolves` (decision -> question), `supersedes` (decision -> \
-         decision), `reopens` (question -> decision).\n"
+        ". Node kinds: `topic`, `claim` (requires `why`), `fact`, `verdict`. Edge \
+         kinds: `about` (claim -> topic), `backs` (fact -> claim), `settles` \
+         (verdict -> topic), `replaces` (verdict -> verdict), `doubts` (topic -> \
+         verdict).\n"
     ));
 }
 
@@ -995,7 +995,7 @@ fn an_empty_map_is_still_sent_with_its_kinds() {
     // One message per map, the prompt, the time.
     assert_eq!(sent.len(), 2 + schemas().folded().count());
     assert!(sent[0].contains(
-        "Node kinds: `question`, `option` (requires `why`), `evidence`, `decision`."
+        "Node kinds: `topic`, `claim` (requires `why`), `fact`, `verdict`."
     ));
     assert!(sent[0].contains("\n(empty:"), "{}", sent[0]);
 }
@@ -1003,8 +1003,8 @@ fn an_empty_map_is_still_sent_with_its_kinds() {
 #[test]
 fn a_headlines_map_sends_only_its_headline_nodes() {
     let mut events = vec![
-        node_added("decision", "Rust over Go"),
-        node_added("evidence", "benchmarks"),
+        node_added("verdict", "Rust over Go"),
+        node_added("fact", "benchmarks"),
     ];
     events.extend(filler(25));
     let (model, mut app) = seeded_app_with_shape(events, Vec::new(), MapShape::Headlines);
@@ -1012,21 +1012,21 @@ fn a_headlines_map_sends_only_its_headline_nodes() {
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    assert_decisions_header(&sent[0]);
+    assert_debates_header(&sent[0]);
     assert!(
         sent[0].contains(
-            "Its question and decision nodes follow; read_map opens the rest, whole or around one node.\n"
+            "Its topic and verdict nodes follow; read_map opens the rest, whole or around one node.\n"
         )
     );
-    assert!(sent[0].contains("- decision \"Rust over Go\""));
+    assert!(sent[0].contains("- verdict \"Rust over Go\""));
     assert!(!sent[0].contains("benchmarks"));
 }
 
 #[test]
 fn a_tool_shape_map_sends_only_its_size() {
     let mut events = vec![
-        node_added("decision", "Rust over Go"),
-        node_added("evidence", "benchmarks"),
+        node_added("verdict", "Rust over Go"),
+        node_added("fact", "benchmarks"),
     ];
     events.extend(filler(25));
     let (model, mut app) = seeded_app_with_shape(events, Vec::new(), MapShape::Tool);
@@ -1034,7 +1034,7 @@ fn a_tool_shape_map_sends_only_its_size() {
     let _ = app.submit("now".to_string()).unwrap();
 
     let sent = model.last_request();
-    assert_decisions_header(&sent[0]);
+    assert_debates_header(&sent[0]);
     assert!(sent[0].contains("It holds 2 nodes and 0 edges, last changed "));
     assert!(sent[0].ends_with("\nread_map shows it."));
     assert!(!sent[0].contains("Rust over Go"));
@@ -1042,7 +1042,7 @@ fn a_tool_shape_map_sends_only_its_size() {
 
 #[test]
 fn a_map_header_carries_its_purpose_size_and_last_change() {
-    let events = vec![node_added("decision", "Rust over Go")];
+    let events = vec![node_added("verdict", "Rust over Go")];
     let changed = events[0].created_at();
     let (model, mut app) = seeded_app(events, Vec::new());
 
@@ -1050,8 +1050,8 @@ fn a_map_header_carries_its_purpose_size_and_last_change() {
 
     let sent = model.last_request();
     assert!(sent[0].starts_with(&format!(
-        "The decisions map: {}. It holds 1 nodes and 0 edges, last changed {changed}. Node kinds:",
-        crate::core::testing::decisions().purpose
+        "The debates map: {}. It holds 1 nodes and 0 edges, last changed {changed}. Node kinds:",
+        crate::core::testing::debates().purpose
     )));
 }
 
@@ -1076,7 +1076,7 @@ fn a_map_that_does_not_fold_fails_at_open() {
         source(SOURCE),
         None,
         crate::core::Payload::NodeAdded {
-            map: "decisions".to_string(),
+            map: "debates".to_string(),
             node: crate::core::NodeId::new(),
             kind: "goal".to_string(),
             name: "Ship".to_string(),
@@ -1103,8 +1103,8 @@ fn a_map_that_does_not_fold_fails_at_open() {
 #[test]
 fn a_tool_commit_the_transcript_cannot_fold_becomes_the_result_not_a_crash() {
     let dangling = Payload::EdgeAdded {
-        map: "decisions".to_string(),
-        kind: "supports".to_string(),
+        map: "debates".to_string(),
+        kind: "backs".to_string(),
         from: crate::core::NodeId::new(),
         to: crate::core::NodeId::new(),
         sources: Vec::new(),
@@ -1304,7 +1304,7 @@ fn set_reasoning_effort_refuses_a_level_the_model_cannot_use() {
 }
 
 #[test]
-fn set_reasoning_effort_takes_a_level_the_model_supports() {
+fn set_reasoning_effort_takes_a_level_the_model_backs() {
     let mut app = app_on(thinking_model(), FakeCatalog::default());
 
     app.set_reasoning_effort(crate::harness::ReasoningEffort::High)
@@ -1335,7 +1335,7 @@ fn switching_to_a_model_without_a_reasoning_control_drops_the_selection() {
 }
 
 #[test]
-fn switching_models_keeps_a_selected_level_the_new_model_also_supports() {
+fn switching_models_keeps_a_selected_level_the_new_model_also_backs() {
     let descriptor = crate::harness::ModelDescriptor {
         provider: crate::harness::Provider::OpenAi,
         model: "next".to_string(),
