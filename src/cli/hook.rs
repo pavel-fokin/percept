@@ -18,21 +18,19 @@
 //! held exclusively for the length of one hook call, so two hook calls
 //! for the same turn never race.
 
-use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, Read};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::core::{
-    cited_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source, Written,
-};
+use crate::core::{Actor, Event, EventId, EventLog, Map, Node, Schemas, Source};
 use crate::mapstore::{block_header, capped_lines, changed_line, last_session, line_id, of_path};
 use crate::shared::Timestamp;
 use crate::store::TurnState;
-use crate::workspace;
+
+use super::start;
 
 /// `percept hook <client>` - `client` names the writer whose turn this
 /// is, and becomes every event's source.
@@ -185,7 +183,7 @@ fn start_session(
 
     log.append(&Event::session_started(source.clone()))?;
 
-    let project = project_name(source);
+    let project = start::project_name(&source.path);
     let header = match since {
         Some(at) => format!("percept · project {project}\nsince your last session here ({at})"),
         None => format!("percept · project {project}\nfirst session here"),
@@ -243,10 +241,7 @@ recording
 /// only touched. Each line carries who last changed the node, and why,
 /// when its last change is not its addition.
 fn gained_block(maps: &[Map], since: Timestamp) -> String {
-    let per_map: Vec<Vec<&Node>> = maps
-        .iter()
-        .map(|map| map.headlines().filter(|node| node.changed().at >= since).collect())
-        .collect();
+    let per_map: Vec<Vec<&Node>> = maps.iter().map(|map| start::gained_nodes(map, since)).collect();
 
     let counts = maps
         .iter()
@@ -279,40 +274,14 @@ fn gained_block(maps: &[Map], since: Timestamp) -> String {
 /// What every current headline node cites that no longer matches the
 /// working tree - a citation whose file moved on since it was
 /// seen. `None` when nothing changed, so `start_session` omits
-/// the block entirely rather than printing an empty one.
-///
-/// Builds two indexes over `events` once, both over `file.cited`
-/// events only - id to event, and causation id to the events it
-/// caused - so no node's check re-reads the log: `id_to_event`
-/// resolves a node's `sources` entries, `later_citations` walks a
-/// citation forward to the newest re-citation of the same file before
-/// it is checked against the tree. `cache` memoises each cited path's
-/// normalised tree text - `None` for one that is gone - for the rest
-/// of this call, so a path cited by more than one node is read once.
+/// the block entirely rather than printing an empty one. The line
+/// building itself is `start::citation_findings`, shared with
+/// `percept start`'s own Attention block.
 fn changed_since_recorded_block(maps: &[Map], events: &[Event], checkout: &Path) -> Option<String> {
-    let file_cited: Vec<&Event> = events
-        .iter()
-        .filter(|event| matches!(event.payload(), Payload::FileCited { .. }))
+    let lines: Vec<String> = start::citation_findings(maps, events, checkout)
+        .into_iter()
+        .map(|(map, node, findings)| format!("{} cites {}", line_id(map, node), findings.join(", ")))
         .collect();
-    let id_to_event: HashMap<EventId, &Event> =
-        file_cited.iter().map(|event| (event.id(), *event)).collect();
-    let mut later_citations: HashMap<EventId, Vec<&Event>> = HashMap::new();
-    for event in &file_cited {
-        if let Some(cause) = event.causation_id() {
-            later_citations.entry(cause).or_default().push(event);
-        }
-    }
-
-    let mut cache: HashMap<PathBuf, Option<String>> = HashMap::new();
-    let mut lines: Vec<String> = Vec::new();
-    for map in maps {
-        for node in map.headlines() {
-            let findings = node_changes(node, &id_to_event, &later_citations, checkout, &mut cache);
-            if !findings.is_empty() {
-                lines.push(format!("{} cites {}", line_id(map, node), findings.join(", ")));
-            }
-        }
-    }
 
     if lines.is_empty() {
         return None;
@@ -323,94 +292,6 @@ fn changed_since_recorded_block(maps: &[Map], events: &[Event], checkout: &Path)
     Some(block.join("\n"))
 }
 
-/// `node`'s own `changed`/`gone` findings, one per source that names a
-/// `file.cited` event, checked at its newest re-citation.
-fn node_changes(
-    node: &Node,
-    id_to_event: &HashMap<EventId, &Event>,
-    later_citations: &HashMap<EventId, Vec<&Event>>,
-    checkout: &Path,
-    cache: &mut HashMap<PathBuf, Option<String>>,
-) -> Vec<String> {
-    node.sources
-        .iter()
-        .filter_map(|source_id| {
-            let event = id_to_event.get(source_id)?;
-            let newest = newest_citation(event, later_citations);
-            let Payload::FileCited { path, lines, excerpt } = newest.payload() else {
-                return None;
-            };
-            citation_status(cache, checkout, path, excerpt)
-                .map(|status| format!("{} {status}", cited_label(path, *lines)))
-        })
-        .collect()
-}
-
-/// Follows `event` forward through `later_citations`, each hop the
-/// latest re-citation of the same file caused by the one before it -
-/// a later citation of a different path is not a re-citation of this
-/// one, so it is ignored. A visited set stops a causation cycle a
-/// hand-edited log could hold from spinning forever.
-fn newest_citation<'a>(
-    event: &'a Event,
-    later_citations: &HashMap<EventId, Vec<&'a Event>>,
-) -> &'a Event {
-    let Payload::FileCited { path, .. } = event.payload() else {
-        return event;
-    };
-    let mut current = event;
-    let mut visited = HashSet::from([event.id()]);
-    while let Some(next) = later_citations
-        .get(&current.id())
-        .into_iter()
-        .flatten()
-        .filter(|candidate| {
-            matches!(candidate.payload(), Payload::FileCited { path: p, .. } if p == path)
-        })
-        .filter(|candidate| visited.insert(candidate.id()))
-        .max_by_key(|candidate| candidate.created_at())
-    {
-        current = next;
-    }
-    current
-}
-
-/// `gone` when `path` under `checkout` is missing or binary; `changed`
-/// when it no longer contains `excerpt` as a substring, or `excerpt`
-/// normalises to nothing to compare against; `None` when it still
-/// reads. Both sides go through `normalize`; the tree's side is read
-/// through `cache`, so a path more than one citation names is read and
-/// normalised once.
-fn citation_status(
-    cache: &mut HashMap<PathBuf, Option<String>>,
-    checkout: &Path,
-    path: &Path,
-    excerpt: &str,
-) -> Option<&'static str> {
-    let excerpt = normalize(excerpt);
-    if excerpt.is_empty() {
-        return Some("changed");
-    }
-    let text = cache
-        .entry(path.to_path_buf())
-        .or_insert_with(|| workspace::read_text_lossy(&checkout.join(path)).ok().map(|t| normalize(&t)));
-    match text {
-        Some(text) if text.contains(&excerpt) => None,
-        _ => Some(if text.is_some() { "changed" } else { "gone" }),
-    }
-}
-
-/// Each line's trailing whitespace stripped, then leading and trailing
-/// blank lines trimmed - the one normalisation both sides of a
-/// `changed since recorded` comparison go through, so a citation whose
-/// stored excerpt padded its range with context still matches.
-fn normalize(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().map(|line| line.trim_end()).collect();
-    let start = lines.iter().position(|line| !line.is_empty()).unwrap_or(lines.len());
-    let end = lines.iter().rposition(|line| !line.is_empty()).map_or(start, |i| i + 1);
-    lines[start..end].join("\n")
-}
-
 /// One pointer line per map that has a headline node, so a session
 /// start names every map worth opening without listing what is in it -
 /// the render behind `percept maps show` is what says that.
@@ -419,17 +300,6 @@ fn map_pointers(maps: &[Map]) -> Vec<String> {
         .filter(|map| map.headlines().next().is_some())
         .map(|map| format!("percept maps show {}", map.schema().name))
         .collect()
-}
-
-
-/// `source.path`'s last component, the name a reader knows the project
-/// by - falling back to the whole path on the rare root with none.
-fn project_name(source: &Source) -> String {
-    source
-        .path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| source.path.display().to_string())
 }
 
 /// `UserPromptSubmit`: clears the turn's previous cause before doing

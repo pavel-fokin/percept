@@ -62,6 +62,7 @@ claude                         # work as usual; prompts and replies are recorded
 
 percept events search --since 1h
 percept maps show decisions
+percept start                 # what's recorded, what needs attention, and where to go next
 ```
 
 `percept init codex` does the same for Codex. The [Coding

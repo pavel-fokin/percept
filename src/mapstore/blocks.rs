@@ -3,6 +3,8 @@
 //! its last change, and the session rule both a hook and the review
 //! page cut their since by.
 
+use std::path::Path;
+
 use crate::core::{Event, Map, Node, Payload, Source, Written};
 use crate::shared::Timestamp;
 
@@ -48,6 +50,19 @@ pub(crate) fn last_session(events: &[Event], source: &Source) -> Option<Timestam
         .filter(|event| {
             matches!(event.payload(), Payload::SessionStarted) && event.source() == source
         })
+        .map(Event::created_at)
+        .max()
+}
+
+/// The latest `session.started` recorded against `path`, from any
+/// source name - unlike `last_session`, which cuts to one exact
+/// `Source`. `start`'s render has no one client to cut to: a session
+/// begun under Claude Code counts for a start run under Codex, since
+/// both look at the same project.
+pub(crate) fn last_session_at(events: &[Event], path: &Path) -> Option<Timestamp> {
+    events
+        .iter()
+        .filter(|event| matches!(event.payload(), Payload::SessionStarted) && event.source().path == path)
         .map(Event::created_at)
         .max()
 }

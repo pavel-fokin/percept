@@ -91,6 +91,9 @@ pub enum Command {
     /// Open the review page: an HTTP server on `127.0.0.1` serving the
     /// embedded page, until the process is killed.
     Review,
+    /// What this project has recorded, what needs attention, and where
+    /// to go next.
+    Start,
 }
 
 #[derive(Subcommand)]
@@ -1320,6 +1323,7 @@ fn parse_time(flag: &str, s: &str) -> Result<Timestamp, String> {
 
 pub mod hook;
 pub mod init;
+pub mod start;
 
 #[cfg(test)]
 mod tests;
