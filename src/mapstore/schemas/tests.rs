@@ -2,11 +2,19 @@ use super::*;
 use crate::core::testing::Fixture;
 
 #[test]
-fn a_project_with_no_schemas_directory_has_only_the_built_ins() {
+fn a_project_with_no_schemas_directory_has_no_maps() {
     let fixture = Fixture::new();
     let schemas = load(fixture.path()).unwrap();
     let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, ["decisions", "concepts"]);
+    assert!(names.is_empty(), "{names:?}");
+}
+
+#[test]
+fn each_shipped_template_parses_under_its_own_name() {
+    for (name, text) in templates() {
+        let schema = parse(name, text).unwrap();
+        assert_eq!(schema.name, name);
+    }
 }
 
 #[test]
@@ -27,28 +35,9 @@ fn a_project_schema_of_a_new_name_is_added() {
     let schemas = load(fixture.path()).unwrap();
 
     let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, ["decisions", "concepts", "glossary"]);
+    assert_eq!(names, ["glossary"]);
     let glossary = schemas.find("glossary").unwrap();
     assert_eq!(glossary.node_kind("term").unwrap().requires, ["meaning"]);
-}
-
-#[test]
-fn a_project_file_named_for_a_built_in_replaces_it() {
-    let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/decisions.toml",
-        &DECISIONS_TOML.replacen(
-            "what was asked, what was chosen, and why, so a settled question is not reopened",
-            "a changed purpose",
-            1,
-        ),
-    );
-
-    let schemas = load(fixture.path()).unwrap();
-
-    let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, ["decisions", "concepts"], "the built-in's slot, not appended");
-    assert_eq!(schemas.find("decisions").unwrap().purpose, "a changed purpose");
 }
 
 #[test]
@@ -127,50 +116,6 @@ fn a_settles_key_is_an_unknown_field() {
 }
 
 #[test]
-fn a_built_in_replacement_that_drops_a_kind_is_refused() {
-    let fixture = Fixture::new();
-    let dropped = DECISIONS_TOML.replacen("[[node]]\nkind = \"decision\"\n\n", "", 1);
-    fixture.write(".percept/schemas/decisions.toml", &dropped);
-
-    let err = load(fixture.path()).err().unwrap().to_string();
-
-    assert!(err.starts_with("decisions.toml:"), "{err}");
-    assert!(err.contains("decision"), "{err}");
-}
-
-#[test]
-fn a_built_in_replacement_that_keeps_every_kind_and_adds_one_loads() {
-    let fixture = Fixture::new();
-    let extended = format!(
-        "{DECISIONS_TOML}\n[[node]]\nkind = \"goal\"\ngloss = \"what the project is trying to \
-         reach\"\n"
-    );
-    fixture.write(".percept/schemas/decisions.toml", &extended);
-
-    let schemas = load(fixture.path()).unwrap();
-
-    let decisions = schemas.find("decisions").unwrap();
-    assert!(decisions.node_kind("goal").is_some());
-    assert!(decisions.node_kind("option").is_some());
-}
-
-#[test]
-fn a_built_in_replacement_that_changes_headlines_is_refused() {
-    let fixture = Fixture::new();
-    let changed = DECISIONS_TOML.replacen(
-        "headlines = [\"question\", \"decision\"]",
-        "headlines = [\"question\"]",
-        1,
-    );
-    fixture.write(".percept/schemas/decisions.toml", &changed);
-
-    let err = load(fixture.path()).err().unwrap().to_string();
-
-    assert!(err.starts_with("decisions.toml:"), "{err}");
-    assert!(err.contains("headlines"), "{err}");
-}
-
-#[test]
 fn a_directory_named_dot_toml_is_ignored() {
     let fixture = Fixture::new();
     std::fs::create_dir_all(fixture.path().join(".percept/schemas/x.toml")).unwrap();
@@ -178,7 +123,7 @@ fn a_directory_named_dot_toml_is_ignored() {
     let schemas = load(fixture.path()).unwrap();
 
     let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, ["decisions", "concepts"]);
+    assert!(names.is_empty(), "{names:?}");
 }
 
 #[test]
@@ -401,22 +346,6 @@ fn a_repeated_state_entry_is_refused() {
     let err = load(fixture.path()).err().unwrap().to_string();
 
     assert!(err.contains("twice"), "{err}");
-}
-
-#[test]
-fn a_built_in_replacement_that_changes_a_kind_s_states_is_refused() {
-    let fixture = Fixture::new();
-    let changed = DECISIONS_TOML.replacen(
-        "[[node]]\nkind = \"question\"\n",
-        "[[node]]\nkind = \"question\"\nstate = [\"open\", \"answered\"]\n",
-        1,
-    );
-    fixture.write(".percept/schemas/decisions.toml", &changed);
-
-    let err = load(fixture.path()).err().unwrap().to_string();
-
-    assert!(err.starts_with("decisions.toml:"), "{err}");
-    assert!(err.contains("states"), "{err}");
 }
 
 #[test]

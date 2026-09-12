@@ -1,0 +1,41 @@
+# The decisions map: what was asked, what was weighed, what was chosen
+# and on what grounds. An option answers its question and says why it
+# lost, a decision resolves the question, a later decision supersedes
+# an earlier one, and a question reopens a decision it puts in doubt,
+# so --around a question reaches everything weighed for it.
+
+name = "decisions"
+purpose = "what was asked, what was chosen, and why, so a settled question is not reopened"
+headlines = ["question", "decision"]
+
+[[node]]
+kind = "question"
+
+[[node]]
+kind = "option"
+gloss = "an alternative that was weighed and lost, saying why in its `why` property"
+requires = ["why"]
+
+[[node]]
+kind = "decision"
+
+[[edge]]
+kind = "answers"
+from = "option"
+to = "question"
+
+[[edge]]
+kind = "resolves"
+from = "decision"
+to = "question"
+
+[[edge]]
+kind = "supersedes"
+from = "decision"
+to = "decision"
+
+[[edge]]
+kind = "reopens"
+gloss = "from a question to a decision it puts in doubt; the decision stands until a new one supersedes it"
+from = "question"
+to = "decision"

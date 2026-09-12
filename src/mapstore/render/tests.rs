@@ -307,6 +307,13 @@ fn the_catalogue_names_a_kinds_required_properties() {
 }
 
 #[test]
+fn the_catalogue_of_no_maps_prints_the_no_schemas_hint() {
+    let text = catalogue(&[]);
+
+    assert_eq!(text, format!("# maps\n\n{}\n", crate::mapstore::NO_SCHEMAS_HINT));
+}
+
+#[test]
 fn the_catalogue_glosses_a_package_kind_as_an_external_crate() {
     let text = catalogue(&[Map::empty(files())]);
 

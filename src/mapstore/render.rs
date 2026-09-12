@@ -35,7 +35,13 @@ pub fn markdown(map: &Map) -> String {
 /// node and edge kinds with the gloss each carries on its `Schema`, and
 /// shows one real node line and one real edge line so a reader sees the
 /// shape the JSONL takes and how an edge names its ends (`kind:name`).
+/// `maps` empty - a project with no schema declared - prints the
+/// header and `super::NO_SCHEMAS_HINT` alone.
 pub fn catalogue(maps: &[Map]) -> String {
+    if maps.is_empty() {
+        return format!("# maps\n\n{}\n", super::NO_SCHEMAS_HINT);
+    }
+
     let mut out = String::from(
         "# maps\n\nEvery map percept knows: what it makes cheap, how big it is, \
          its node and edge kinds, and one line from it.\n",

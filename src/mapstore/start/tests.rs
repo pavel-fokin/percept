@@ -44,6 +44,16 @@ fn nothing_recorded_prints_the_empty_state_and_only_a_describe_pointer() {
 }
 
 #[test]
+fn no_schemas_prints_the_hint_and_nothing_else() {
+    let text = start(&[], &[], &root(), Fixture::new().path(), None);
+
+    assert_eq!(
+        text,
+        format!("percept \u{b7} test\n{}", crate::mapstore::NO_SCHEMAS_HINT)
+    );
+}
+
+#[test]
 fn the_state_line_shows_a_maps_headline_count() {
     let events = vec![node_added("topic", "why blue?")];
     let text = rendered(&events, Fixture::new().path());

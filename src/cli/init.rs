@@ -1,12 +1,18 @@
 //! `percept init <client>` - writes a coding client's project config so
-//! its hooks call `percept hook <client>`. Run from anywhere inside a
+//! its hooks call `percept hook <client>`, and, first, the project's
+//! schema files - `.percept/schemas/decisions.toml` and
+//! `.percept/schemas/concepts.toml` - from the templates
+//! `mapstore::templates` embeds, so a fresh checkout has maps to fold
+//! before its first session opens. Run from anywhere inside a
 //! checkout; the files land at the checkout root `main` resolves.
 //!
-//! An existing file is merged, never overwritten: every key it already
-//! holds is kept, a hook entry naming the command to write is not
-//! duplicated, and an allow string already present is not repeated.
-//! Running `init` twice leaves the file byte-identical after the
-//! first run.
+//! An existing file - a schema or the client's config - is never
+//! overwritten: a schema file already at that path is left exactly as
+//! it is, whatever it holds, and the client's config is merged - every
+//! key it already holds is kept, a hook entry naming the command to
+//! write is not duplicated, and an allow string already present is not
+//! repeated. Running `init` twice leaves every file byte-identical
+//! after the first run.
 
 use std::fs;
 use std::path::Path;
@@ -14,6 +20,7 @@ use std::path::Path;
 use serde_json::{json, Map as JsonMap, Value};
 
 use crate::cli::hook::EVENTS;
+use crate::mapstore;
 
 /// `percept init <client>` - `client` names the coding client whose
 /// project config to write - `claude-code` or `codex`. `--capture`
@@ -58,8 +65,9 @@ const CLIENTS: [Client; 2] = [
     },
 ];
 
-/// Writes `args.client`'s config under `checkout`, printing one line
-/// naming what it did.
+/// Writes `args.client`'s schema files and config under `checkout`,
+/// printing one line naming what each did - schemas first, so the
+/// output reads schemas before the config that depends on them.
 pub fn run(args: InitArgs, checkout: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let client = CLIENTS
         .iter()
@@ -70,11 +78,33 @@ pub fn run(args: InitArgs, checkout: &Path) -> Result<(), Box<dyn std::error::Er
                 args.client
             )
         })?;
+    for (name, text) in mapstore::templates() {
+        write_schema(checkout, name, text)?;
+    }
     let command = format!("percept hook {}", client.name);
     let events = hook_events(args.capture);
     write_config(checkout, client.path, |root| {
         merge(root, &command, &events, client.allow)
     })
+}
+
+/// Writes `.percept/schemas/<name>.toml` under `checkout` from `text`
+/// unless a file is already there, whatever it holds - a project's own
+/// schema is never overwritten. Prints `wrote <rel>` or `unchanged
+/// <rel>`, the same style `write_config` uses.
+fn write_schema(checkout: &Path, name: &str, text: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let rel = format!(".percept/schemas/{name}.toml");
+    let path = checkout.join(&rel);
+    if path.exists() {
+        println!("unchanged {rel}");
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, text)?;
+    println!("wrote {rel}");
+    Ok(())
 }
 
 /// The hook events `init` writes: every one in `EVENTS` with
