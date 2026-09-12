@@ -1206,6 +1206,15 @@ fn a_map_reads_as_one_line_per_node_then_per_edge() {
 }
 
 #[test]
+fn an_unknown_map_with_no_schemas_says_none_is_declared() {
+    let schemas = Schemas::new(Vec::new());
+    assert_eq!(
+        schemas.find("decisions").err().unwrap().to_string(),
+        "no map named \"decisions\"; no map is declared"
+    );
+}
+
+#[test]
 fn a_schema_is_found_by_name() {
     let schemas = crate::core::testing::schemas();
     assert_eq!(schemas.find("debates").unwrap().name, "debates");

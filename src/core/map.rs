@@ -141,9 +141,9 @@ impl EdgeKind {
 }
 
 /// The schemas a project has: every one, folded from the log, in one
-/// list. Built once at the entrypoint from the built-in schemas and a
-/// project's own TOML files; every fold, write, and error message goes
-/// through this, so no caller keeps its own list.
+/// list. Built once at the entrypoint from the project's own TOML
+/// files; every fold, write, and error message goes through this, so
+/// no caller keeps its own list.
 pub struct Schemas {
     schemas: Vec<Arc<Schema>>,
 }
@@ -549,6 +549,9 @@ pub enum MapError {
 impl fmt::Display for MapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::UnknownMap { name, maps } if maps.is_empty() => {
+                write!(f, "no map named {name:?}; no map is declared")
+            }
             Self::UnknownMap { name, maps } => write!(f, "no map named {name:?}; maps are {maps}"),
             Self::UnknownNodeKind { map, kinds, kind } => write!(
                 f,

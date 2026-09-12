@@ -65,9 +65,8 @@ const CLIENTS: [Client; 2] = [
     },
 ];
 
-/// Writes `args.client`'s schema files and config under `checkout`,
-/// printing one line naming what each did - schemas first, so the
-/// output reads schemas before the config that depends on them.
+/// Writes the shipped schema files and `args.client`'s config under
+/// `checkout`, printing one line naming what each did.
 pub fn run(args: InitArgs, checkout: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let client = CLIENTS
         .iter()
@@ -99,10 +98,17 @@ fn write_schema(checkout: &Path, name: &str, text: &str) -> Result<(), Box<dyn s
         println!("unchanged {rel}");
         return Ok(());
     }
+    write_new(&path, &rel, text)
+}
+
+/// Writes `text` to `path`, creating its directory, and prints
+/// `wrote <rel>` - the tail both `write_schema` and `write_config`
+/// end in.
+fn write_new(path: &Path, rel: &str, text: &str) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(&path, text)?;
+    fs::write(path, text)?;
     println!("wrote {rel}");
     Ok(())
 }
@@ -135,12 +141,7 @@ fn write_config(
         println!("unchanged {rel}");
         return Ok(());
     }
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    fs::write(&path, &text)?;
-    println!("wrote {rel}");
-    Ok(())
+    write_new(&path, rel, &text)
 }
 
 /// `path`'s parsed contents as an object - empty when it doesn't exist

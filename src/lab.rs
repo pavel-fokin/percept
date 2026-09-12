@@ -70,7 +70,7 @@ const FIREWORKS_KEY_VAR: &str = "FIREWORKS_API_KEY";
 /// like the ollama settings above.
 pub const REFLECT_PROMPT: &str = "Revise the decisions map from recent events. \
     First call search_events for questions raised, options weighed, \
-    evidence given, and decisions taken that the map does not yet hold; \
+    and decisions taken that the map does not yet hold; \
     only its results carry event ids. Then record them with revise_map, \
     citing those ids in each node's sources - a node without one is \
     refused. A decision that no longer holds is not removed: add the one \

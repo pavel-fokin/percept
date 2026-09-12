@@ -28,7 +28,7 @@ const NAME: &str = "revise_map";
 
 const DESCRIPTION: &str = "Record into a named map what you have judged \
     from the log: a question that was raised, the options weighed, \
-    evidence for or against, the decision taken. One call carries a \
+    the decision taken. One call carries a \
     batch of changes to one map, checked together in order and \
     committed only if every change passes - a later change may refer to \
     a node an earlier one in the same batch just added. Cite the event \
