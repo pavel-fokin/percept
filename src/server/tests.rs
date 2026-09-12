@@ -115,11 +115,11 @@ async fn unknown_path_returns_404() {
 
 #[tokio::test]
 async fn change_posted_with_a_why_appends_a_node_changed_naming_the_node_and_the_why() {
-    let node = node_added_by(Actor::Agent, "decision", "ship it");
+    let node = node_added_by(Actor::Agent, "verdict", "ship it");
     let (log, addr) = spawn_over(vec![node.clone()]).await;
 
     let (status, body) =
-        post(addr, "/api/change", &json!({ "map": "decisions", "node": "d1", "why": "not yet" })).await;
+        post(addr, "/api/change", &json!({ "map": "debates", "node": "v1", "why": "not yet" })).await;
     assert!(status.starts_with("HTTP/1.1 200"), "{status} {body}");
 
     let events = log.load().unwrap();
@@ -135,11 +135,11 @@ async fn change_posted_with_a_why_appends_a_node_changed_naming_the_node_and_the
 
 #[tokio::test]
 async fn change_with_a_blank_why_is_refused_with_400_and_appends_nothing() {
-    let node = node_added_by(Actor::Agent, "decision", "ship it");
+    let node = node_added_by(Actor::Agent, "verdict", "ship it");
     let (log, addr) = spawn_over(vec![node]).await;
 
     let (status, body) =
-        post(addr, "/api/change", &json!({ "map": "decisions", "node": "d1", "why": "   " })).await;
+        post(addr, "/api/change", &json!({ "map": "debates", "node": "v1", "why": "   " })).await;
     assert!(status.starts_with("HTTP/1.1 400"), "{status} {body}");
 
     assert_eq!(log.load().unwrap().len(), 1, "nothing beyond the seeded node.added");
@@ -149,29 +149,29 @@ async fn change_with_a_blank_why_is_refused_with_400_and_appends_nothing() {
 async fn an_unknown_node_id_is_404() {
     let addr = spawn().await;
     let (status, body) =
-        post(addr, "/api/change", &json!({ "map": "decisions", "node": "d99", "why": "not yet" })).await;
+        post(addr, "/api/change", &json!({ "map": "debates", "node": "v99", "why": "not yet" })).await;
     assert!(status.starts_with("HTTP/1.1 404"), "{status} {body}");
 }
 
 #[tokio::test]
 async fn a_change_takes_the_node_out_of_the_humans_review_queue() {
-    let node = node_added_by(Actor::Agent, "decision", "ship it");
+    let node = node_added_by(Actor::Agent, "verdict", "ship it");
     let (_, addr) = spawn_over(vec![node]).await;
 
     let (status, _) =
-        post(addr, "/api/change", &json!({ "map": "decisions", "node": "d1", "why": "not yet" })).await;
+        post(addr, "/api/change", &json!({ "map": "debates", "node": "v1", "why": "not yet" })).await;
     assert!(status.starts_with("HTTP/1.1 200"), "{status}");
 
     let response = get(addr, "/api/review").await;
     let (_, body) = split(&response);
     let json: serde_json::Value = serde_json::from_str(body).expect("valid JSON");
-    let decisions = json["maps"]
+    let debates = json["maps"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|map| map["name"] == "decisions")
-        .expect("a decisions map");
+        .find(|map| map["name"] == "debates")
+        .expect("a debates map");
     // The human's own write is not theirs to review: the node's last
     // change is the human's, so it leaves the queue.
-    assert!(decisions["groups"].as_array().unwrap().is_empty(), "{decisions}");
+    assert!(debates["groups"].as_array().unwrap().is_empty(), "{debates}");
 }

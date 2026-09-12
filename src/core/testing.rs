@@ -168,7 +168,7 @@ pub fn usage() -> Usage {
     }
 }
 
-/// A node on the decisions map, written by the user and cited from one
+/// A node on the debates map, written by the user and cited from one
 /// event, for tests that need a map with something in it.
 pub fn node_added(kind: &str, name: &str) -> Event {
     node_added_by(Actor::Human(human()), kind, name)
@@ -187,7 +187,7 @@ pub fn node_added_at(path: &str, kind: &str, name: &str) -> Event {
         Actor::Human(human()),
         source_at("test", path),
         None,
-        node_added_payload("decisions", kind, name, BTreeMap::new(), vec![EventId::new()]),
+        node_added_payload("debates", kind, name, BTreeMap::new(), vec![EventId::new()]),
     )
 }
 
@@ -213,7 +213,7 @@ pub fn node_added_payload(
     }
 }
 
-/// A `node.added` event on the decisions map, citing `sources` - for a
+/// A `node.added` event on the debates map, citing `sources` - for a
 /// test that points a row at events of its own choosing, rather than
 /// the fresh id `node_added_by` mints for one no event answers to.
 pub fn node_added_citing(actor: Actor, kind: &str, name: &str, sources: Vec<EventId>) -> Event {
@@ -221,13 +221,13 @@ pub fn node_added_citing(actor: Actor, kind: &str, name: &str, sources: Vec<Even
         actor,
         source("test"),
         None,
-        node_added_payload("decisions", kind, name, BTreeMap::new(), sources),
+        node_added_payload("debates", kind, name, BTreeMap::new(), sources),
     )
 }
 
 /// A `node.added` event on `map`, of `kind` and `name`, with
 /// `properties` and citing `sources`, written by a human at the test
-/// project root - for a test that needs a node outside the decisions
+/// project root - for a test that needs a node outside the debates
 /// map, which `node_added_citing` always writes to.
 pub fn node_added_on(
     map: &str,
@@ -291,7 +291,7 @@ pub fn node_id(event: &Event) -> NodeId {
     }
 }
 
-/// An edge on the decisions map, written by the user, between two nodes
+/// An edge on the debates map, written by the user, between two nodes
 /// `node_added` minted.
 pub fn edge_added(kind: &str, from: &Event, to: &Event) -> Event {
     Event::new(
@@ -299,7 +299,7 @@ pub fn edge_added(kind: &str, from: &Event, to: &Event) -> Event {
         source("test"),
         None,
         Payload::EdgeAdded {
-            map: "decisions".to_string(),
+            map: "debates".to_string(),
             kind: kind.to_string(),
             from: node_id(from),
             to: node_id(to),
@@ -342,71 +342,59 @@ pub fn file_cited_citing(
     )
 }
 
-/// The built-in decisions schema, as `mapstore`'s embedded
-/// `schemas/decisions.toml` must fold to. A fixture, not production
-/// code: `core` reads no file, and production starts from that
-/// embedded TOML, replaced by a project's own
-/// `.percept/schemas/decisions.toml` when one exists.
-pub fn decisions() -> Schema {
+/// A test-only map shaped like a decisions map, but not one: it exists
+/// so a change to a built-in TOML never touches a map-mechanics test.
+pub fn debates() -> Schema {
     Schema {
-        name: "decisions".to_string(),
-        purpose: "what was asked, what was chosen, and why, so a settled question is not \
-                  reopened"
-            .to_string(),
+        name: "debates".to_string(),
+        purpose: "what a test needs from a question-and-answer map".to_string(),
         node_kinds: vec![
-            NodeKind::new("question", ""),
+            NodeKind::new("topic", ""),
             NodeKind::new(
-                "option",
-                "an alternative that was weighed and lost, saying why in its `why` property",
+                "claim",
+                "a side taken on a topic, saying why in its `why` property",
             )
             .requiring("why"),
-            NodeKind::new("evidence", "a fact that supports or contradicts an option"),
-            NodeKind::new("decision", ""),
+            NodeKind::new("fact", "a fact that backs a claim"),
+            NodeKind::new("verdict", ""),
         ],
         edge_kinds: vec![
-            EdgeKind::new("answers", "", &["option"], &["question"]),
-            EdgeKind::new("supports", "", &["evidence"], &["option"]),
-            EdgeKind::new("contradicts", "", &["evidence"], &["option"]),
-            EdgeKind::new("resolves", "", &["decision"], &["question"]),
-            EdgeKind::new("supersedes", "", &["decision"], &["decision"]),
+            EdgeKind::new("about", "", &["claim"], &["topic"]),
+            EdgeKind::new("backs", "", &["fact"], &["claim"]),
+            EdgeKind::new("settles", "", &["verdict"], &["topic"]),
+            EdgeKind::new("replaces", "", &["verdict"], &["verdict"]),
             EdgeKind::new(
-                "reopens",
-                "from a question to a decision it puts in doubt; the decision stands until a \
-                 new one supersedes it",
-                &["question"],
-                &["decision"],
+                "doubts",
+                "from a topic to a verdict it puts in doubt; the verdict stands until a new \
+                 one replaces it",
+                &["topic"],
+                &["verdict"],
             ),
         ],
-        headline_kinds: vec!["question".to_string(), "decision".to_string()],
+        headline_kinds: vec!["topic".to_string(), "verdict".to_string()],
     }
 }
 
-/// The built-in tasks schema, as `mapstore`'s embedded TOML must fold
-/// to - see `decisions`.
-pub fn tasks() -> Schema {
+/// A test-only map shaped like a tasks map, but not one - see
+/// `debates`.
+pub fn chores() -> Schema {
     Schema {
-        name: "tasks".to_string(),
-        purpose: "what is left to do, why it matters, and what it waits on, so a session picks \
-                  up the next item without re-deriving it"
-            .to_string(),
+        name: "chores".to_string(),
+        purpose: "what a test needs from a to-do map".to_string(),
         node_kinds: vec![
-            NodeKind::new(
-                "task",
-                "one piece of work left to do, saying why it matters in its `why` property",
-            )
-            .requiring("why")
-            .with_states(&["open", "done", "dropped"]),
+            NodeKind::new("chore", "one piece of work, saying why it matters in its `why` property")
+                .requiring("why")
+                .with_states(&["open", "done", "dropped"]),
         ],
-        edge_kinds: vec![EdgeKind::new("blocks", "", &["task"], &["task"])],
-        headline_kinds: vec!["task".to_string()],
+        edge_kinds: vec![EdgeKind::new("blocks", "", &["chore"], &["chore"])],
+        headline_kinds: vec!["chore".to_string()],
     }
 }
 
-/// The schemas a test project has: `decisions` and `tasks`, the same
-/// set `main` builds from the embedded and project TOML files, without
-/// touching a filesystem.
+/// The schemas a test project has: `debates` and `chores`, neither
+/// mirroring a built-in map, without touching a filesystem.
 pub fn schemas() -> Schemas {
-    Schemas::new(vec![decisions(), tasks()])
+    Schemas::new(vec![debates(), chores()])
 }
 
 /// A schema fixture with `file`, `function`, and `package` node kinds

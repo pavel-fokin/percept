@@ -7,7 +7,7 @@ constrain what an agent may write to its record and read from it.
 They prescribe no thinking loop and filter nothing the model says. On
 them an agent keeps an immutable history of experience and a mutable
 set of maps built from it. A map is an explicit external representation - a
-decision map, a task map, a glossary - and each kind makes a different
+decision map, a concept map - and each kind makes a different
 reasoning operation cheap. The shape comes from Recursive Language
 Models (arxiv.org/abs/2512.24601), where a model holds a corpus as an
 environment and writes programs over it instead of reading it as
@@ -24,10 +24,7 @@ prompt text.
     ┌────────────────────┐
     │ Maps               │
     │   decisions        │
-    │   tasks            │
-    │   glossary         │
-    │   taxonomy         │
-    │   domain           │
+    │   concepts         │
     │   ...              │
     └────────────────────┘
            │
@@ -89,12 +86,13 @@ Both are serde-free.
   the node and edge kinds it allows, and one line of purpose - what
   the map makes cheap - that the prompt carries in place of the map
   itself. A schema is a TOML file at `.percept/schemas/<name>.toml`,
-  so a session adds a map without a Rust change; `decisions` and
-  `tasks` ship built in as the same TOML, and a project file of the
-  same name extends one - it keeps every kind and headline the
-  built-in declares and may add kinds - never shrinks it, since the
-  log and the render already rest on those kinds. A kind may list the
-  properties a node must carry - `why` on an option or a task - and
+  and those files are the only schemas a project has, so a session
+  adds a map without a Rust change and edits a shipped one in place.
+  `percept init <client>` writes `decisions` and `concepts` there from
+  the templates in the binary, leaving a file that already exists
+  alone; with no schema files, a project has no maps and every render
+  says so. A kind may list the
+  properties a node must carry - `why` on an option - and
   the values its `state` may hold, a set with no value open by
   position; the write path refuses a node without them. Every change
   goes through `Map::apply`, so the rules live once. The core is
@@ -169,11 +167,11 @@ it, never sideways or up:
 | Domain | `harness` | `Message`, `Model`, `Tool`, `Snapshot`, `Policy` - what a loop needs to drive a model over `core`. `Policy` says whether a tool call runs at once or asks the user; `Snapshot` saves the working tree under a prompt and puts it back. Depends on `core` and on `futures-core`, for the stream type its reply port returns. |
 | Application | `app` | `App` - orchestrates `core` and `harness` for one use case, no vocabulary beyond theirs. Runs the tool loop: commits `tool.called`, asks the `Policy`, hands the caller a `ToolStep` - run, ask the user, or carry on. A `Harness` groups what `App` is given: the tools, the policy, the cap, the snapshot, the instructions, and a `Context` - the list of sections the request carries, stable first for the provider's cache, with history sized to a share of the model's window and the events just past it indexed one line each. `MapShape` says how much of each map the prompt carries; `PERCEPT_MAPS` sets it at the entrypoint. `docs/harness.md` is the design. The `code` toolset - the TUI's default, `PERCEPT_TOOLS=code` elsewhere - adds the file tools, the policy that asks before a write, a cap of fifty calls, a snapshot per prompt, and the checkout's `AGENTS.md` as system text every round; `undo` restores the last one. |
 | Presentation | `tui` | Renders the transcript, forwards input. No chat logic of its own. A `ToolStep::Ask` pauses the turn on a row: `y` runs once, `a` runs and allows that tool for the session, `n` declines; `/undo` puts the tree back. |
-| Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps` - the log and its maps without the TUI, `describe` for one map's kinds and how to record to it, from its schema alone; `start` prints what this project has recorded, what needs attention, and where to go next, read-only; `ask` and `reflect` under `lab`. `hook <client>` records a coding client's turn from the hook JSON on stdin; `init <client>` writes the client's config to call it. Headless, a call the policy would ask about is declined unless `ask --yes`. |
+| Presentation | `cli` | `percept events publish`, `search`, `show`, `percept maps` - the log and its maps without the TUI, `describe` for one map's kinds and how to record to it, from its schema alone; `start` prints what this project has recorded, what needs attention, and where to go next, read-only; `ask` and `reflect` under `lab`. `hook <client>` records a coding client's turn from the hook JSON on stdin; `init <client>` writes the shipped schemas to `.percept/schemas` and the client's config to call the hook. Headless, a call the policy would ask about is declined unless `ask --yes`. |
 | Presentation | `server` | `percept review` - serves the embedded review page, the queue as `GET /api/review` JSON, and `POST /api/change` - Wrong, a `node.changed` carrying the human's why - over the same log and maps the CLI uses. The queue is what changed since the review last opened. |
 | Infrastructure | `providers` | `Ollama`, `OpenAi`, and `Fireworks` - implement `harness::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` and `FIREWORKS_API_KEY` carry the keys. |
 | Infrastructure | `store` | The JSONL event log - the serde boundary - implements `core::EventLog` and `core::EventSearch`. `event` encodes an event to a log line and back, and reads one out for display. |
-| Infrastructure | `mapstore` | Loads the schemas - the built-in TOML plus `.percept/schemas/*.toml` - and folds a log-backed cognitive map (`LogMaps`, the `core::MapReader`), revises it, and gives it an external form: `encode_*` to JSON lines, `markdown`/`catalogue`/`describe`/`start` to the text `maps show`/`maps list`/`maps describe`/`percept start` and the session-start hook print - read live, never written to a file. |
+| Infrastructure | `mapstore` | Loads the schemas from `.percept/schemas/*.toml`, holds the templates `init` writes there, and folds a log-backed cognitive map (`LogMaps`, the `core::MapReader`), revises it, and gives it an external form: `encode_*` to JSON lines, `markdown`/`catalogue`/`describe`/`start` to the text `maps show`/`maps list`/`maps describe`/`percept start` and the session-start hook print - read live, never written to a file. |
 | Infrastructure | `code` | Walks the working tree with `ignore`, parses each file with `tree-sitter`, and builds a `Map` of the tree's files, the symbols they define, and what imports what: a `file` keyed by repo-relative path, a `function` or `type` keyed by `path::Name`, a `package` per external crate. Not a map percept keeps - it has no author and no history, is never folded from the log, never in the catalogue, never carried in the prompt. It reaches the model only as the `read_code` tool. |
 | Infrastructure | `tools` | Every tool the model calls. `search_events`, `read_event`, `revise_map`, `read_map` run over the log and its maps through `store` and `mapstore`. `read_code` walks the checkout through `code` with the same `around`, `depth`, and `kinds` as `read_map`. `read_file`, `write_file`, `edit_file`, `list_files`, `find_files`, `grep_files` run over a working tree, native over the `workspace` module's `Workspace` - the one place a path the model gave becomes a real path, refusing any outside the checkout, shared with the CLI's citations - and `bash`, one `sh -c` at the root with a timeout. The file tools and `read_code` come in under `PERCEPT_TOOLS=code`. `AskBeforeWrites` is the `Policy`; `GitSnapshot` the `Snapshot`, a commit under `refs/percept/snapshots/<prompt>` built through a scratch index. |
 | Infrastructure | `workspace` | `Workspace`, `is_binary`, `read_text_lossy` - the one place a path the model gave becomes a real path, and the text reader both a file tool and the CLI's `file.cited` citations read through. Builds without `lab`. |
@@ -220,10 +218,11 @@ skips it.
   An option is recorded only for an alternative that lost, with the
   reason it lost; the pick is the decision itself. A decision that
   changes an earlier one is added with a `supersedes` edge to it; the
-  old node is never removed. An idea in the ideas map is a candidate,
-  never an approved issue: it is built only after the user has
-  discussed it and agreed it into the set, and an agent that finds one
-  while building leaves it there and says so.
+  old node is never removed. A candidate worth doing that nobody has
+  committed to is an open `question` in the decisions map, never an
+  approved issue: it is built only after the user has discussed it and
+  agreed it into the set, and an agent that finds one while building
+  leaves it there and says so.
 - **Build.** An issue with no design left in it, touching one or two
   files, the main agent builds itself. Anything larger goes to the
   `software-developer` subagent, which follows this file, writes the
@@ -245,11 +244,10 @@ skips it.
   the process fit the work needs no reflection. Cutting a step counts
   for more than adding one. Aim for the smallest process that still
   catches mistakes. An approach the session tried and abandoned goes
-  into the decisions map as evidence, so no later session tries it
-  again. Work the session found and left undone goes into the tasks
-  map with its why, and an issue that was an open task is closed
-  there with the commit in its change's why, so the next session starts from the list and not
-  from a re-read.
+  into the decisions map as an option with why it lost, so no later
+  session tries it again. Work the session found and left undone goes into the
+  decisions map as an open question with its why, so the next session
+  starts from the list and not from a re-read.
 
 The TUI builds under `--features lab` and only runs on a real
 terminal. `scripts/drive.py` forks a pty,

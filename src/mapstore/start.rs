@@ -17,23 +17,29 @@ use crate::workspace;
 /// `start` prints: State, what each map holds; Attention, what moved
 /// since `since` and what it cites that no longer matches the tree;
 /// Next, the command that opens each. Empty when no map holds any node
-/// at all - a stranger's first run. `since` is the caller's cut: the
+/// at all - a stranger's first run; when `maps` itself is empty - a
+/// project with no schema declared - only the project line and
+/// `super::NO_SCHEMAS_HINT` print. `since` is the caller's cut: the
 /// hook passes its own client's last session, so a review-page open
 /// never hides a client's gains from it, and `percept start` from the
 /// shell passes the last look by anyone, the running session's own
 /// start included. `checkout` is where cited files are read.
 pub fn start(maps: &[Map], events: &[Event], root: &Path, checkout: &Path, since: Option<Timestamp>) -> String {
-    let project = project_name(root);
+    let header = format!("percept \u{b7} {}", project_name(root));
+
+    if maps.is_empty() {
+        return format!("{header}\n{}", super::NO_SCHEMAS_HINT);
+    }
 
     if maps.iter().all(|map| map.nodes().is_empty()) {
-        let mut lines = vec![format!("percept \u{b7} {project}\nnothing recorded yet\n\nNext")];
+        let mut lines = vec![format!("{header}\nnothing recorded yet\n\nNext")];
         lines.extend(pad_rows(&[how_to_record()]));
         return lines.join("\n");
     }
 
     let names: Vec<&str> = maps.iter().map(|map| map.schema().name.as_str()).collect();
     let mut sections = vec![format!(
-        "percept \u{b7} {project}\nkeeps what this project settled: {}",
+        "{header}\nkeeps what this project settled: {}",
         names.join(", ")
     )];
 
@@ -215,8 +221,9 @@ fn pad_rows(rows: &[(String, String)]) -> Vec<String> {
 
 /// `<n> <state>` for every declared state of every headline kind of
 /// `map`, in declared order, skipping states no headline node is in -
-/// `1 open   2 done` for a tasks map. Every state is counted, since a
-/// schema lists them as a set and no position means "initial".
+/// `1 open   2 done` for a kind with those states. Every state is
+/// counted, since a schema lists them as a set and no position means
+/// "initial".
 fn state_counts(map: &Map) -> Vec<String> {
     let schema = map.schema();
     schema
@@ -332,7 +339,8 @@ fn next_block(maps: &[Map], printed: &[(String, String)]) -> String {
     lines.join("\n")
 }
 
-/// The one Next row every render carries, the empty state included.
+/// The one Next row every render of a declared map carries, the
+/// empty state included.
 fn how_to_record() -> (String, String) {
     ("how to record".to_string(), "percept maps describe <map>".to_string())
 }

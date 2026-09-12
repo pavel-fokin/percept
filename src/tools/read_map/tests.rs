@@ -24,9 +24,9 @@ fn spec_names_the_tool_and_carries_valid_schema_json() {
 
 #[test]
 fn a_map_reads_as_its_nodes_and_edges() {
-    let log = FakeLog::seeded(vec![node_added("decision", "JSONL for the log")]);
-    let out = tool(log).run(r#"{"map":"decisions"}"#).unwrap();
-    assert!(out.content.contains("decision"));
+    let log = FakeLog::seeded(vec![node_added("verdict", "JSONL for the log")]);
+    let out = tool(log).run(r#"{"map":"debates"}"#).unwrap();
+    assert!(out.content.contains("verdict"));
     assert!(out.content.contains("JSONL for the log"));
     assert!(out.commits.is_empty());
 }
@@ -34,7 +34,7 @@ fn a_map_reads_as_its_nodes_and_edges() {
 #[test]
 fn an_empty_map_says_so() {
     let out = tool(FakeLog::default())
-        .run(r#"{"map":"decisions"}"#)
+        .run(r#"{"map":"debates"}"#)
         .unwrap();
     assert!(out.content.contains("nothing has been recorded"));
 }
@@ -43,10 +43,10 @@ fn an_empty_map_says_so() {
 fn a_node_from_another_project_never_reaches_the_read() {
     let log = FakeLog::seeded(vec![node_added_at(
         "/other",
-        "decision",
+        "verdict",
         "Not this project's",
     )]);
-    let out = tool(log).run(r#"{"map":"decisions"}"#).unwrap();
+    let out = tool(log).run(r#"{"map":"debates"}"#).unwrap();
     assert!(out.content.contains("nothing has been recorded"));
 }
 
@@ -63,23 +63,23 @@ fn a_missing_name_is_an_error() {
     assert!(tool(FakeLog::default()).run("{}").is_err());
 }
 
-/// A question with its decision, one option, and the evidence for that
-/// option: four nodes, three edges, every edge one hop from the last.
-fn weighed_question() -> Vec<Event> {
-    let question = node_added("question", "Where?");
-    let decision = node_added("decision", "JSONL");
-    let option = node_added("option", "SQLite");
-    let evidence = node_added("evidence", "benchmarks");
-    let resolves = edge_added("resolves", &decision, &question);
-    let answers = edge_added("answers", &option, &question);
-    let supports = edge_added("supports", &evidence, &option);
+/// A topic with its verdict, one claim, and the fact for that
+/// claim: four nodes, three edges, every edge one hop from the last.
+fn weighed_topic() -> Vec<Event> {
+    let topic = node_added("topic", "Where?");
+    let verdict = node_added("verdict", "JSONL");
+    let claim = node_added("claim", "SQLite");
+    let fact = node_added("fact", "benchmarks");
+    let settles = edge_added("settles", &verdict, &topic);
+    let about = edge_added("about", &claim, &topic);
+    let backs = edge_added("backs", &fact, &claim);
     vec![
-        question, decision, option, evidence, resolves, answers, supports,
+        topic, verdict, claim, fact, settles, about, backs,
     ]
 }
 
 fn read(args: &str) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error>> {
-    let out = tool(FakeLog::seeded(weighed_question())).run(args)?;
+    let out = tool(FakeLog::seeded(weighed_topic())).run(args)?;
     Ok(out
         .content
         .lines()
@@ -89,9 +89,9 @@ fn read(args: &str) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error>
 
 #[test]
 fn a_read_opens_with_the_schema_then_the_counts_then_the_nodes_then_the_edges() {
-    let rows = read(r#"{"map":"decisions","around":{"kind":"question","name":"Where?"}}"#).unwrap();
+    let rows = read(r#"{"map":"debates","around":{"kind":"topic","name":"Where?"}}"#).unwrap();
 
-    assert_eq!(rows[0]["schema"], "decisions");
+    assert_eq!(rows[0]["schema"], "debates");
     assert_eq!(rows[1]["shown_nodes"], 3);
     assert_eq!(rows[1]["total_nodes"], 4);
     assert_eq!(rows[1]["boundary_edges"], 1);
@@ -103,33 +103,33 @@ fn a_read_opens_with_the_schema_then_the_counts_then_the_nodes_then_the_edges() 
 
 #[test]
 fn the_schema_line_glosses_a_kind_so_a_selector_is_not_a_guess() {
-    let rows = read(r#"{"map":"decisions"}"#).unwrap();
+    let rows = read(r#"{"map":"debates"}"#).unwrap();
 
-    let option = rows[0]["node_kinds"]
+    let claim = rows[0]["node_kinds"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|kind| kind["name"] == "option")
+        .find(|kind| kind["name"] == "claim")
         .unwrap();
-    assert!(option["gloss"]
+    assert!(claim["gloss"]
         .as_str()
         .unwrap()
-        .contains("weighed and lost"));
-    let reopens = rows[0]["edge_kinds"]
+        .contains("saying why"));
+    let doubts = rows[0]["edge_kinds"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|kind| kind["name"] == "reopens")
+        .find(|kind| kind["name"] == "doubts")
         .unwrap();
-    assert!(reopens["gloss"]
+    assert!(doubts["gloss"]
         .as_str()
         .unwrap()
-        .contains("the decision stands until"));
+        .contains("the verdict stands until"));
 }
 
 #[test]
 fn an_empty_cut_of_a_full_map_is_not_an_empty_map() {
-    let rows = read(r#"{"map":"decisions","since":"2999-01-01T00:00:00Z"}"#).unwrap();
+    let rows = read(r#"{"map":"debates","since":"2999-01-01T00:00:00Z"}"#).unwrap();
 
     assert_eq!(rows.len(), 2);
     assert_eq!(rows[1]["shown_nodes"], 0);
@@ -139,7 +139,7 @@ fn an_empty_cut_of_a_full_map_is_not_an_empty_map() {
 
 #[test]
 fn depth_without_around_is_a_whole_read_not_a_wasted_call() {
-    let rows = read(r#"{"map":"decisions","depth":2}"#).unwrap();
+    let rows = read(r#"{"map":"debates","depth":2}"#).unwrap();
 
     assert_eq!(rows[1]["shown_nodes"], 4);
 }
@@ -147,7 +147,7 @@ fn depth_without_around_is_a_whole_read_not_a_wasted_call() {
 #[test]
 fn around_on_an_empty_map_still_says_nothing_is_recorded() {
     let out = tool(FakeLog::default())
-        .run(r#"{"map":"decisions","around":{"kind":"question","name":"Where?"}}"#)
+        .run(r#"{"map":"debates","around":{"kind":"topic","name":"Where?"}}"#)
         .unwrap();
 
     assert!(out.content.contains("nothing has been recorded"));
@@ -155,12 +155,12 @@ fn around_on_an_empty_map_still_says_nothing_is_recorded() {
 
 #[test]
 fn since_takes_the_shorthand_the_cli_takes() {
-    let rows = read(r#"{"map":"decisions","since":"1d"}"#).unwrap();
+    let rows = read(r#"{"map":"debates","since":"1d"}"#).unwrap();
 
     assert_eq!(rows[1]["shown_nodes"], 4, "everything was added just now");
 }
 
 #[test]
 fn a_since_that_is_neither_iso8601_nor_shorthand_is_an_error() {
-    assert!(read(r#"{"map":"decisions","since":"yesterday"}"#).is_err());
+    assert!(read(r#"{"map":"debates","since":"yesterday"}"#).is_err());
 }

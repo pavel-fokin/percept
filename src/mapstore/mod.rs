@@ -5,7 +5,12 @@
 //! `encode_*` serialize a map or a fragment to JSON lines; `markdown`,
 //! `catalogue`, `describe`, and `start` render it to text for `maps
 //! show`, `maps list`, `maps describe`, and `percept start`. The tools
-//! that call these live in `src/tools`.
+//! that call these live in `src/tools`. `load_schemas` reads a
+//! project's schemas from `SCHEMAS_DIR` alone; `TEMPLATES` are the
+//! `decisions` and `concepts` TOML `percept init <client>` copies there
+//! for a project that has none yet. A project with no
+//! schemas has no maps: `catalogue` and `start` print `NO_SCHEMAS_HINT`
+//! in place of their usual body.
 
 // Reachability here is judged with the lab present: the lab build is
 // the one that sees every consumer, and `--all-features` clippy is
@@ -26,5 +31,11 @@ pub use map::{
     of_path, paths, LogMaps, NodeRefArgs, Snapshot,
 };
 pub use render::{catalogue, markdown};
-pub use schemas::load as load_schemas;
+pub use schemas::{load as load_schemas, SCHEMAS_DIR, TEMPLATES};
 pub use start::start;
+
+/// Printed in place of `catalogue`'s and `start`'s usual body when a
+/// project has declared no schema at all: the one line both renders
+/// share, so a stranger sees the same instruction from either command.
+pub(crate) const NO_SCHEMAS_HINT: &str =
+    "no maps declared under .percept/schemas; run percept init <client>";

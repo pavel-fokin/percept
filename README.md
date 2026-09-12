@@ -5,7 +5,7 @@ percept keeps project decisions alive across AI coding sessions.
 It records what happens across your tools - prompts, replies,
 tool calls, files read - as an append-only log of events. A model
 searches that log and writes what it concludes into maps: a decisions
-map, a tasks map, an ideas map, or one you define. Every change to a
+map, a concepts map, or one you define. Every change to a
 map is itself an event in the same log, citing the experience it was
 drawn from. A map can be rebuilt from its history, and every claim in
 it can be checked against what was actually seen.
@@ -56,7 +56,7 @@ Record a Claude Code session and read what it left behind:
 
 ```sh
 cd your-project
-percept init claude-code       # writes .claude/settings.json hooks
+percept init claude-code       # writes .percept/schemas and .claude/settings.json hooks
 claude                         # work as usual; prompts and replies are recorded
 
 percept events search --since 1h
@@ -101,12 +101,12 @@ percept maps list
 percept maps show decisions
 percept maps show decisions --around 'question:Where does the event log live?'
 percept maps show decisions --since 1d
-percept maps show tasks --since 1d
+percept maps show concepts
 ```
 
 The Markdown render of the decisions map lists each question with the
-decision that settles it now. Options, evidence, and superseded
-decisions stay one hop away through `--around`. A cut reports on
+decision that settles it now. Options and superseded decisions stay
+one hop away through `--around`. A cut reports on
 stderr how much of the map it left out.
 
 Writes go through the same binary. Every one cites the events it was
@@ -145,8 +145,9 @@ why. Both refuse a node the map does not hold and the human's own node,
 since a user-written node carries no standing to judge.
 
 A map's schema is a TOML file at `.percept/schemas/<name>.toml` naming
-its node and edge kinds and one line of purpose. `decisions` and
-`tasks` ship built in; this repo adds `ideas`. The rules for a map -
+its node and edge kinds and one line of purpose. `percept init`
+writes `decisions` and `concepts` there; a project with no schema
+files has no maps. The rules for a map -
 who may remove what, how a decision is corrected - are in
 [AGENTS.md](AGENTS.md).
 
@@ -163,8 +164,10 @@ and per client only the files that point at it.
 | `.agents/agents/software-developer.md` | `.claude/agents/software-developer.md` | `.codex/agents/software-developer.toml` |
 | `percept hook <client>` | `.claude/settings.json` | `.codex/hooks.json` |
 
-`percept init <client>` writes the client's hook entries into the
-checkout, merging into an existing file. For Claude Code it also
+`percept init <client>` writes the shipped schemas under
+`.percept/schemas`, leaving a file already there alone, and the
+client's hook entries into the checkout, merging into an existing
+file. For Claude Code it also
 allows `percept maps`, `percept events`, and `percept start` without a
 permission prompt. Both files are committed in this repo. Open the client from
 the checkout and trust the repository; in Codex, `/hooks` reviews the

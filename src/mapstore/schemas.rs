@@ -1,12 +1,11 @@
-//! Loads a project's cognitive-map schemas from TOML: `decisions` and
-//! `tasks`, embedded in the binary, and
-//! `<project>/.percept/schemas/*.toml`, which may replace a built-in
-//! by name or declare a new map. `core` stays serde-free, so the
-//! parsing and the checks a declared schema must pass live here. A
-//! project file that replaces a built-in may only extend it: it must
-//! keep every node and edge kind and the same `headlines` the built-in
-//! declares, since the renderer and the write rules assume those kinds
-//! exist; it may add more.
+//! Loads a project's cognitive-map schemas from
+//! `<project>/.percept/schemas/*.toml`. `core` stays serde-free, so
+//! the parsing and the checks a declared schema must pass live here. A
+//! project with no such directory, or none in it, declares no maps at
+//! all: `load` returns an empty `Schemas`, and `percept init <client>`
+//! is what gives a fresh checkout its first schema files, copied from
+//! the `decisions` and `concepts` templates this binary embeds - see
+//! `templates`.
 
 use std::path::Path;
 
@@ -14,12 +13,18 @@ use serde::{Deserialize, Deserializer};
 
 use crate::core::{default_prefix, EdgeKind, NodeKind, Schema, Schemas};
 
-const DECISIONS_TOML: &str = include_str!("schemas/decisions.toml");
-const TASKS_TOML: &str = include_str!("schemas/tasks.toml");
+/// The two schema templates `percept init <client>` copies into a
+/// fresh checkout's `SCHEMAS_DIR`, as `(<name>, <text>)`. Nothing else
+/// reads these; a loaded project's schemas come only from `load`, over
+/// the files `init` or the project's own author wrote.
+pub const TEMPLATES: [(&str, &str); 2] = [
+    ("decisions", include_str!("schemas/decisions.toml")),
+    ("concepts", include_str!("schemas/concepts.toml")),
+];
 
-/// Where a project's own schema files live, under the project root
-/// `checkout_root` finds.
-const SCHEMAS_DIR: &str = ".percept/schemas";
+/// Where a project's schema files live, under the project root
+/// `checkout_root` finds - what `load` reads and `init` writes.
+pub const SCHEMAS_DIR: &str = ".percept/schemas";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -82,22 +87,16 @@ where
     })
 }
 
-/// Every schema `project` has: `decisions` and `tasks`, each replaced
-/// by a project file of the same name when one exists, plus whatever
-/// else `<project>/.percept/schemas` declares. Each error names the
-/// file it came from.
+/// Every schema `<project>/.percept/schemas` declares, in the stable
+/// order `project_files` gives - empty when the directory is missing
+/// or holds no `.toml` file, so a project that has not run `percept
+/// init <client>` yet has no maps at all. Each error names the file it
+/// came from.
 pub fn load(project: &Path) -> Result<Schemas, Box<dyn std::error::Error>> {
-    let mut folded = vec![parse("decisions", DECISIONS_TOML)?, parse("tasks", TASKS_TOML)?];
-    for (stem, text) in project_files(project)? {
-        let schema = parse(&stem, &text)?;
-        match folded.iter().position(|built_in| built_in.name == schema.name) {
-            Some(at) => {
-                check_extends(&folded[at], &schema, &stem)?;
-                folded[at] = schema;
-            }
-            None => folded.push(schema),
-        }
-    }
+    let folded = project_files(project)?
+        .into_iter()
+        .map(|(stem, text)| parse(&stem, &text))
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(Schemas::new(folded))
 }
 
@@ -127,50 +126,6 @@ fn project_files(project: &Path) -> Result<Vec<(String, String)>, Box<dyn std::e
             Ok((stem, text))
         })
         .collect()
-}
-
-/// Refuses `project`, named by `stem`, when it drops or changes what
-/// `built_in` declares: a missing node or edge kind, or a different
-/// `headlines`. `project` may add more of either; the names, not the
-/// glosses or `requires`, are what must still match.
-fn check_extends(
-    built_in: &Schema,
-    project: &Schema,
-    stem: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    for kind in &built_in.node_kinds {
-        let Some(project_kind) = project.node_kind(&kind.kind) else {
-            return Err(format!(
-                "{stem}.toml: drops node kind {:?}, which the built-in {:?} declares",
-                kind.kind, built_in.name
-            )
-            .into());
-        };
-        if project_kind.states != kind.states {
-            return Err(format!(
-                "{stem}.toml: changes node kind {:?}'s states from {:?} to {:?}",
-                kind.kind, kind.states, project_kind.states
-            )
-            .into());
-        }
-    }
-    for kind in &built_in.edge_kinds {
-        if project.edge_kind(&kind.kind).is_none() {
-            return Err(format!(
-                "{stem}.toml: drops edge kind {:?}, which the built-in {:?} declares",
-                kind.kind, built_in.name
-            )
-            .into());
-        }
-    }
-    if built_in.headline_kinds != project.headline_kinds {
-        return Err(format!(
-            "{stem}.toml: changes headlines from {:?} to {:?}",
-            built_in.headline_kinds, project.headline_kinds
-        )
-        .into());
-    }
-    Ok(())
 }
 
 /// Parses and validates one schema file: `stem` names it in every

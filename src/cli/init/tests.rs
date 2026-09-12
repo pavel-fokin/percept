@@ -1,6 +1,7 @@
 use serde_json::json;
 
 use super::*;
+use crate::core::testing::Fixture;
 
 fn as_map(existing: Value) -> JsonMap<String, Value> {
     existing.as_object().unwrap().clone()
@@ -265,6 +266,29 @@ fn writes_claude_code_settings_to_disk() {
         value["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"],
         "percept hook claude-code"
     );
+}
+
+#[test]
+fn init_writes_the_shipped_schemas() {
+    let fixture = Fixture::new();
+
+    run(init("claude-code", true), fixture.path()).unwrap();
+
+    let schemas = mapstore::load_schemas(fixture.path()).unwrap();
+    let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["concepts", "decisions"]);
+}
+
+#[test]
+fn init_keeps_an_existing_schema_file() {
+    let fixture = Fixture::new();
+    let other = "name = \"decisions\"\npurpose = \"p\"\n\n[[node]]\nkind = \"decision\"\n";
+    fixture.write(".percept/schemas/decisions.toml", other);
+
+    run(init("claude-code", true), fixture.path()).unwrap();
+
+    let text = std::fs::read_to_string(fixture.path().join(".percept/schemas/decisions.toml")).unwrap();
+    assert_eq!(text, other);
 }
 
 #[test]

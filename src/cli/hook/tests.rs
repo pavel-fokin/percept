@@ -9,12 +9,24 @@ use crate::core::testing::{content, file_cited_payload, human, node_added_payloa
 use crate::core::{HumanId, Payload};
 use crate::shared::Timestamp;
 
+/// The one map a hook test's project declares: `debates`, with a
+/// `topic` headline kind and nothing else - a mini schema of this
+/// fixture's own, so no test here rests on a shipped template.
+const DEBATES_TOML: &str = "name = \"debates\"\npurpose = \"what a hook test needs\"\n\
+                            headlines = [\"topic\"]\n\n[[node]]\nkind = \"topic\"\n";
+
+fn write_debates_schema(root: &Path) {
+    let dir = root.join(".percept/schemas");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("debates.toml"), DEBATES_TOML).unwrap();
+}
+
 /// A checkout `run` can discover a root in - a `.percept` marker is
 /// enough, so a test needs no `git init` - plus the sessions directory
-/// and log `run` is given. `run` now loads schemas itself, from this
-/// same root, exactly as production does - decisions and tasks come
-/// built in, free of any file; `with_extra_schema` adds a project one
-/// for a test that needs a map shape the built-ins don't have.
+/// and log `run` is given. `run` loads schemas itself, from this same
+/// root, exactly as production does, so this fixture writes its own
+/// `debates` schema there; `with_extra_schema` adds another beside
+/// it, for a test that needs a map shape `debates` doesn't have.
 struct Fixture {
     _temp: TempDir,
     root: PathBuf,
@@ -33,6 +45,7 @@ impl Fixture {
         // that compares an event's source path must compare the same
         // canonical form.
         let root = root.canonicalize().unwrap();
+        write_debates_schema(&root);
         Self {
             sessions: temp.path().join("storage/hook-sessions"),
             root,
@@ -43,9 +56,8 @@ impl Fixture {
     }
 
     /// Writes `<root>/.percept/schemas/<name>.toml`, so the next
-    /// `session_start` folds a project schema alongside the built-in
-    /// decisions and tasks - the same file `load_schemas` reads in
-    /// production.
+    /// `session_start` folds a project schema alongside the shipped
+    /// decisions and concepts templates.
     fn with_extra_schema(self, name: &str, toml: &str) -> Self {
         let dir = self.root.join(".percept/schemas");
         std::fs::create_dir_all(&dir).unwrap();
@@ -54,11 +66,14 @@ impl Fixture {
     }
 
     /// Another project, so a test can tell one checkout's cause from
-    /// another's.
+    /// another's - with the same `debates` schema `new` gives this
+    /// fixture's own root.
     fn other_root(&self) -> PathBuf {
         let other = self._temp.path().join("second checkout");
         std::fs::create_dir_all(other.join(".percept")).unwrap();
-        other.canonicalize().unwrap()
+        let other = other.canonicalize().unwrap();
+        write_debates_schema(&other);
+        other
     }
 
     fn call(&self, client: &str, body: Value) -> Result<Value, Box<dyn std::error::Error>> {
@@ -377,7 +392,7 @@ fn the_context_carries_no_recording_section() {
     let context = fixture.session_start("codex");
 
     assert!(!context.contains("recording\n"), "{context:?}");
-    assert!(!context.contains("Recorded to decisions:"), "{context:?}");
+    assert!(!context.contains("Recorded to debates:"), "{context:?}");
 }
 
 #[test]
@@ -387,8 +402,8 @@ fn the_sessions_own_marker_does_not_count_as_the_last_session() {
     let since = fixture.since();
 
     fixture.seed_node(
-        "decisions",
-        "question",
+        "debates",
+        "topic",
         "a fresh one",
         since.minus_minutes(-10).unwrap(),
     );
@@ -410,8 +425,8 @@ fn a_changed_cited_file_reaches_the_hook_context() {
         None,
     );
     fixture.seed_node_with_sources(
-        "decisions",
-        "question",
+        "debates",
+        "topic",
         "why a?",
         Timestamp::now(),
         vec![citation.id()],

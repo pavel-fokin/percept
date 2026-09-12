@@ -27,7 +27,7 @@ fn a_valid_batch_returns_the_payloads_and_content() {
     let revise = tool(vec![cited]);
 
     let args = format!(
-        r#"{{"map":"decisions","changes":[{{"op":"add_node","kind":"option","name":"Rust","properties":{{"summary":"fast","why":"lost to Go on ecosystem"}},"sources":["{}"]}}]}}"#,
+        r#"{{"map":"debates","changes":[{{"op":"add_node","kind":"claim","name":"Rust","properties":{{"summary":"fast","why":"lost to Go on ecosystem"}},"sources":["{}"]}}]}}"#,
         cited_id.as_uuid()
     );
 
@@ -43,7 +43,7 @@ fn a_valid_batch_returns_the_payloads_and_content() {
             sources,
             ..
         } => {
-            assert_eq!(kind, "option");
+            assert_eq!(kind, "claim");
             assert_eq!(name, "Rust");
             assert_eq!(properties["summary"], "fast");
             assert_eq!(sources, &vec![cited_id]);
@@ -53,19 +53,19 @@ fn a_valid_batch_returns_the_payloads_and_content() {
     };
     assert_eq!(
         output.content,
-        format!("added option \"Rust\" as {}", node_id.as_uuid())
+        format!("added claim \"Rust\" as {}", node_id.as_uuid())
     );
 }
 
 #[test]
 fn a_change_node_op_applies() {
-    let added = node_added_by(Actor::Agent, "option", "Rust");
+    let added = node_added_by(Actor::Agent, "claim", "Rust");
     let id = node_id(&added);
     let source = added.id();
     let revise = tool(vec![added]);
 
     let args = format!(
-        r#"{{"map":"decisions","changes":[{{"op":"change_node","node":{{"kind":"option","name":"Rust"}},"properties":{{"summary":"fast"}},"sources":["{}"]}}]}}"#,
+        r#"{{"map":"debates","changes":[{{"op":"change_node","node":{{"kind":"claim","name":"Rust"}},"properties":{{"summary":"fast"}},"sources":["{}"]}}]}}"#,
         source.as_uuid()
     );
 
@@ -85,7 +85,7 @@ fn a_change_node_op_applies() {
         }
         _ => panic!("expected a NodeChanged payload"),
     }
-    assert_eq!(output.content, "changed option \"Rust\"");
+    assert_eq!(output.content, "changed claim \"Rust\"");
 }
 
 #[test]
@@ -96,8 +96,8 @@ fn a_failing_change_names_its_index_and_commits_nothing() {
 
     let err = revise
         .run(&format!(
-            r#"{{"map":"decisions","changes":[
-                {{"op":"add_node","kind":"option","name":"Rust","properties":{{"why":"lost to Go on ecosystem"}},"sources":["{id}"]}},
+            r#"{{"map":"debates","changes":[
+                {{"op":"add_node","kind":"claim","name":"Rust","properties":{{"why":"lost to Go on ecosystem"}},"sources":["{id}"]}},
                 {{"op":"add_node","kind":"goal","name":"Ship","sources":["{id}"]}}
             ]}}"#
         ))
@@ -117,7 +117,7 @@ fn a_node_with_no_sources_is_refused_and_the_error_names_the_rule() {
     let revise = tool(Vec::new());
 
     let err = revise
-        .run(r#"{"map":"decisions","changes":[{"op":"add_node","kind":"option","name":"Rust","sources":[]}]}"#)
+        .run(r#"{"map":"debates","changes":[{"op":"add_node","kind":"claim","name":"Rust","sources":[]}]}"#)
         .err()
         .unwrap();
 
@@ -125,7 +125,7 @@ fn a_node_with_no_sources_is_refused_and_the_error_names_the_rule() {
     assert!(
         revise
             .run(
-                r#"{"map":"decisions","changes":[{"op":"add_node","kind":"option","name":"Rust"}]}"#
+                r#"{"map":"debates","changes":[{"op":"add_node","kind":"claim","name":"Rust"}]}"#
             )
             .is_err(),
         "an omitted sources list is as empty as an empty one"
@@ -133,13 +133,13 @@ fn a_node_with_no_sources_is_refused_and_the_error_names_the_rule() {
 }
 
 #[test]
-fn an_option_with_no_why_is_refused() {
+fn a_claim_with_no_why_is_refused() {
     let cited = Event::message_received(Actor::Human(human()), "Rust".to_string(), source("tui"), None);
     let cited_id = cited.id();
     let revise = tool(vec![cited]);
 
     let args = format!(
-        r#"{{"map":"decisions","changes":[{{"op":"add_node","kind":"option","name":"Rust","sources":["{}"]}}]}}"#,
+        r#"{{"map":"debates","changes":[{{"op":"add_node","kind":"claim","name":"Rust","sources":["{}"]}}]}}"#,
         cited_id.as_uuid()
     );
 
@@ -157,7 +157,7 @@ fn an_unknown_map_is_an_error() {
         .err()
         .unwrap();
 
-    assert!(err.to_string().contains("decisions"), "{err}");
+    assert!(err.to_string().contains("debates"), "{err}");
 }
 
 #[test]
@@ -176,7 +176,7 @@ fn a_map_named_code_fails_the_same_as_any_unknown_map() {
 fn an_empty_changes_list_is_an_error() {
     let revise = tool(Vec::new());
 
-    assert!(revise.run(r#"{"map":"decisions","changes":[]}"#).is_err());
+    assert!(revise.run(r#"{"map":"debates","changes":[]}"#).is_err());
 }
 
 #[test]
@@ -186,7 +186,7 @@ fn a_sources_id_the_log_lacks_is_an_error() {
 
     let err = revise
         .run(&format!(
-            r#"{{"map":"decisions","changes":[{{"op":"add_node","kind":"option","name":"Rust","sources":["{unknown}"]}}]}}"#
+            r#"{{"map":"debates","changes":[{{"op":"add_node","kind":"claim","name":"Rust","sources":["{unknown}"]}}]}}"#
         ))
         .err()
         .unwrap();
@@ -202,10 +202,10 @@ fn a_change_can_reference_a_node_an_earlier_change_just_added() {
 
     let output = revise
         .run(&format!(
-            r#"{{"map":"decisions","changes":[
-                {{"op":"add_node","kind":"question","name":"Which language?","sources":["{id}"]}},
-                {{"op":"add_node","kind":"decision","name":"Rust over Go","sources":["{id}"]}},
-                {{"op":"add_edge","kind":"resolves","from":{{"kind":"decision","name":"Rust over Go"}},"to":{{"kind":"question","name":"Which language?"}},"sources":[]}}
+            r#"{{"map":"debates","changes":[
+                {{"op":"add_node","kind":"topic","name":"Which language?","sources":["{id}"]}},
+                {{"op":"add_node","kind":"verdict","name":"Rust over Go","sources":["{id}"]}},
+                {{"op":"add_edge","kind":"settles","from":{{"kind":"verdict","name":"Rust over Go"}},"to":{{"kind":"topic","name":"Which language?"}},"sources":[]}}
             ]}}"#
         ))
         .unwrap();
@@ -214,7 +214,7 @@ fn a_change_can_reference_a_node_an_earlier_change_just_added() {
     assert!(matches!(output.commits[2], Payload::EdgeAdded { .. }));
     assert_eq!(
         output.content.lines().last().unwrap(),
-        "added edge decision \"Rust over Go\" resolves question \"Which language?\""
+        "added edge verdict \"Rust over Go\" settles topic \"Which language?\""
     );
 }
 
@@ -223,10 +223,10 @@ fn removing_a_user_written_node_is_refused_by_the_map_s_own_rank_rule() {
     // No app-level guard names a kind here: the `NotYours` error the
     // model sees is `Map::apply`'s W6, the same rule that would refuse
     // a rename or a property change.
-    let revise = tool(vec![node_added("question", "Which language?")]);
+    let revise = tool(vec![node_added("topic", "Which language?")]);
 
     let err = revise
-        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"question","name":"Which language?"},"why":"wrong"}]}"#)
+        .run(r#"{"map":"debates","changes":[{"op":"remove_node","node":{"kind":"topic","name":"Which language?"},"why":"wrong"}]}"#)
         .err()
         .unwrap()
         .to_string();
@@ -236,13 +236,13 @@ fn removing_a_user_written_node_is_refused_by_the_map_s_own_rank_rule() {
 
 #[test]
 fn removing_a_user_written_edge_is_refused() {
-    let decision = node_added("decision", "Rust");
-    let question = node_added("question", "Which language?");
-    let edge = edge_added("resolves", &decision, &question);
-    let revise = tool(vec![decision, question, edge]);
+    let verdict = node_added("verdict", "Rust");
+    let topic = node_added("topic", "Which language?");
+    let edge = edge_added("settles", &verdict, &topic);
+    let revise = tool(vec![verdict, topic, edge]);
 
     let err = revise
-        .run(r#"{"map":"decisions","changes":[{"op":"remove_edge","kind":"resolves","from":{"kind":"decision","name":"Rust"},"to":{"kind":"question","name":"Which language?"},"why":"wrong"}]}"#)
+        .run(r#"{"map":"debates","changes":[{"op":"remove_edge","kind":"settles","from":{"kind":"verdict","name":"Rust"},"to":{"kind":"topic","name":"Which language?"},"why":"wrong"}]}"#)
         .err()
         .unwrap()
         .to_string();
@@ -255,13 +255,13 @@ fn removing_a_model_node_that_a_user_edge_touches_is_refused() {
     // Removing a node drops every edge on it, so the map weighs each
     // edge as its own removal would be: the user's edge is not the
     // model's to drop.
-    let model_node = node_added_by(Actor::Agent, "option", "Rust");
-    let question = node_added("question", "Which language?");
-    let user_edge = edge_added("answers", &model_node, &question);
-    let revise = tool(vec![model_node, question, user_edge]);
+    let model_node = node_added_by(Actor::Agent, "claim", "Rust");
+    let topic = node_added("topic", "Which language?");
+    let user_edge = edge_added("about", &model_node, &topic);
+    let revise = tool(vec![model_node, topic, user_edge]);
 
     let err = match revise
-        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"option","name":"Rust"},"why":"wrong"}]}"#)
+        .run(r#"{"map":"debates","changes":[{"op":"remove_node","node":{"kind":"claim","name":"Rust"},"why":"wrong"}]}"#)
     {
         Ok(_) => panic!("the removal went through"),
         Err(err) => err.to_string(),
@@ -272,23 +272,23 @@ fn removing_a_model_node_that_a_user_edge_touches_is_refused() {
 
 #[test]
 fn removing_a_model_written_node_is_allowed() {
-    let revise = tool(vec![node_added_by(Actor::Agent, "option", "Go")]);
+    let revise = tool(vec![node_added_by(Actor::Agent, "claim", "Go")]);
 
     let output = revise
-        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"option","name":"Go"},"why":"wrong"}]}"#)
+        .run(r#"{"map":"debates","changes":[{"op":"remove_node","node":{"kind":"claim","name":"Go"},"why":"wrong"}]}"#)
         .unwrap();
 
     assert!(matches!(output.commits[0], Payload::NodeRemoved { .. }));
 }
 
 #[test]
-fn removing_a_model_written_decision_is_allowed() {
-    // The core enforces no kind - a decision the model wrote and never
+fn removing_a_model_written_verdict_is_allowed() {
+    // The core enforces no kind - a verdict the model wrote and never
     // changed is a node like any other under W6.
-    let revise = tool(vec![node_added_by(Actor::Agent, "decision", "Go")]);
+    let revise = tool(vec![node_added_by(Actor::Agent, "verdict", "Go")]);
 
     let output = revise
-        .run(r#"{"map":"decisions","changes":[{"op":"remove_node","node":{"kind":"decision","name":"Go"},"why":"wrong"}]}"#)
+        .run(r#"{"map":"debates","changes":[{"op":"remove_node","node":{"kind":"verdict","name":"Go"},"why":"wrong"}]}"#)
         .unwrap();
 
     assert!(matches!(output.commits[0], Payload::NodeRemoved { .. }));
@@ -296,9 +296,9 @@ fn removing_a_model_written_decision_is_allowed() {
 
 #[test]
 fn a_change_node_op_citing_no_sources_is_refused() {
-    let revise = tool(vec![node_added_by(Actor::Agent, "option", "Rust")]);
+    let revise = tool(vec![node_added_by(Actor::Agent, "claim", "Rust")]);
 
-    let args = r#"{"map":"decisions","changes":[{"op":"change_node","node":{"kind":"option","name":"Rust"},"properties":{"summary":"fast"},"sources":[]}]}"#;
+    let args = r#"{"map":"debates","changes":[{"op":"change_node","node":{"kind":"claim","name":"Rust"},"properties":{"summary":"fast"},"sources":[]}]}"#;
 
     let err = revise.run(args).err().expect("refused");
 
@@ -306,16 +306,16 @@ fn a_change_node_op_citing_no_sources_is_refused() {
 }
 
 #[test]
-fn a_change_node_op_renaming_a_decision_the_model_wrote_is_allowed() {
-    // The core enforces no per-kind rule against renaming a decision -
+fn a_change_node_op_renaming_a_verdict_the_model_wrote_is_allowed() {
+    // The core enforces no per-kind rule against renaming a verdict -
     // only W6's rank rule, which a model renaming its own untouched
     // node passes.
-    let added = node_added_by(Actor::Agent, "decision", "use axum");
+    let added = node_added_by(Actor::Agent, "verdict", "use axum");
     let source = added.id();
     let revise = tool(vec![added]);
 
     let args = format!(
-        r#"{{"map":"decisions","changes":[{{"op":"change_node","node":{{"kind":"decision","name":"use axum"}},"name":"use actix","sources":["{}"]}}]}}"#,
+        r#"{{"map":"debates","changes":[{{"op":"change_node","node":{{"kind":"verdict","name":"use axum"}},"name":"use actix","sources":["{}"]}}]}}"#,
         source.as_uuid()
     );
 
