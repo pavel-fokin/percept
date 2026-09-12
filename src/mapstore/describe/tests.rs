@@ -40,8 +40,16 @@ fn the_add_example_only_edges_to_kinds_already_listed() {
     // What is listed by the time each kind is reached does appear.
     assert!(text.contains("answers question"));
     assert!(text.contains("resolves question"));
+    // One edge per neighbour: evidence supports the option it is shown
+    // with, never also contradicting it.
     assert!(text.contains("supports option"));
-    assert!(text.contains("contradicts option"));
+    assert!(!text.contains("contradicts option"));
+}
+
+#[test]
+fn the_add_example_sets_the_first_state_on_a_kind_that_declares_states() {
+    let text = describe(&tasks());
+    assert!(text.contains("  task \"...\"\n    why \"...\"\n    state \"open\"\n"), "{text}");
 }
 
 #[test]

@@ -249,6 +249,11 @@ async fn main() {
                 EventsCommand::Show(args) => cli::show(args, &log),
             }
         }),
+        // Before the log opens: a schema-only read must not fail on a
+        // log that cannot be opened.
+        Some(Command::Maps {
+            command: MapsCommand::Describe(args),
+        }) => mapstore::load_schemas(&checkout).and_then(|schemas| cli::maps_describe(args, &schemas)),
         Some(Command::Maps { command }) => open_log(&checkout).and_then(|log| {
             let schemas = mapstore::load_schemas(&checkout)?;
             let me = log.me();

@@ -29,7 +29,8 @@ pub fn start(
 ) -> Result<(), Box<dyn Error>> {
     let events = log.load()?;
     let maps = schemas.fold_all(mapstore::of_path(&events, root))?;
-    println!("{}", render(&maps, &events, root, checkout));
+    let since = last_session_at(&events, root);
+    println!("{}", render(&maps, &events, root, checkout, since));
     Ok(())
 }
 
@@ -183,7 +184,7 @@ fn normalize(text: &str) -> String {
 /// starts at the same column - the widest left-hand text in the block
 /// plus three spaces.
 fn pad_rows(rows: &[(String, String)]) -> Vec<String> {
-    let width = rows.iter().map(|(left, _)| left.len()).max().unwrap_or(0) + 3;
+    let width = rows.iter().map(|(left, _)| left.chars().count()).max().unwrap_or(0) + 3;
     rows.iter()
         .map(|(left, right)| format!("  {left:<width$}{right}"))
         .collect()
@@ -321,10 +322,19 @@ fn how_to_record() -> (String, String) {
 
 /// `maps`, `events`, `root`, and `checkout` as the three blocks
 /// `start` prints: State, what each map holds; Attention, what moved
-/// since the last session here and what it cites that no longer
-/// matches the tree; Next, the command that opens each. Empty when no
-/// map holds any node at all - a stranger's first run.
-pub(crate) fn render(maps: &[Map], events: &[Event], root: &Path, checkout: &Path) -> String {
+/// since `since` and what it cites that no longer matches the tree;
+/// Next, the command that opens each. Empty when no map holds any node
+/// at all - a stranger's first run. `since` is the caller's: the hook
+/// cuts to its own client's last session, so a review-page open never
+/// hides a client's gains from it, and `start` from the shell cuts to
+/// the last look by anyone, the running session's own start included.
+pub(crate) fn render(
+    maps: &[Map],
+    events: &[Event],
+    root: &Path,
+    checkout: &Path,
+    since: Option<Timestamp>,
+) -> String {
     let project = project_name(root);
 
     if maps.iter().all(|map| map.nodes().is_empty()) {
@@ -339,7 +349,6 @@ pub(crate) fn render(maps: &[Map], events: &[Event], root: &Path, checkout: &Pat
         names.join(", ")
     )];
 
-    let since = last_session_at(events, root);
     sections.push(state_block(maps, since));
 
     let mut ids: Vec<(String, String)> = Vec::new();

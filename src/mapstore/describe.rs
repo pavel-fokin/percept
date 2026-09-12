@@ -119,10 +119,12 @@ fn push_record(out: &mut String, schema: &Schema) {
 }
 
 /// One node per node kind, in schema order, its name always `"..."`,
-/// each required property under it as `<prop> "..."`, and one indented
-/// edge line per edge kind whose `from` is this kind and whose `to`
-/// names a kind already listed above it - so the document would
-/// actually run.
+/// each required property under it as `<prop> "..."`, its first
+/// declared state when it has any, and one indented edge line per kind
+/// already listed above it that an edge from this kind may reach - the
+/// first such edge kind, so a node is not shown both supporting and
+/// contradicting the same neighbour. Every line is one the map accepts,
+/// so the document would actually run.
 fn push_example(out: &mut String, schema: &Schema) {
     let mut listed: Vec<&str> = Vec::new();
     for kind in &schema.node_kinds {
@@ -130,12 +132,21 @@ fn push_example(out: &mut String, schema: &Schema) {
         for property in &kind.requires {
             let _ = writeln!(out, "    {property} \"...\"");
         }
+        if let Some(state) = kind.states.first() {
+            let _ = writeln!(out, "    state \"{state}\"");
+        }
+        let mut reached: Vec<&str> = Vec::new();
         for edge in &schema.edge_kinds {
             if !edge.from.iter().any(|from| from == kind.kind.as_str()) {
                 continue;
             }
-            if let Some(to) = edge.to.iter().find(|to| listed.contains(&to.as_str())) {
+            let to = edge
+                .to
+                .iter()
+                .find(|to| listed.contains(&to.as_str()) && !reached.contains(&to.as_str()));
+            if let Some(to) = to {
                 let _ = writeln!(out, "    {} {}", edge.kind, to);
+                reached.push(to);
             }
         }
         listed.push(&kind.kind);

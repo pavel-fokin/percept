@@ -29,7 +29,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::core::{Actor, Event, EventId, EventLog, Schemas, Source};
-use crate::mapstore::of_path;
+use crate::mapstore::{last_session, of_path};
 use crate::store::TurnState;
 
 use super::start;
@@ -180,7 +180,8 @@ fn start_session(
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let events = log.load()?;
     let maps = schemas.fold_all(of_path(&events, &source.path))?;
-    let rendered = start::render(&maps, &events, &source.path, checkout);
+    let since = last_session(&events, source);
+    let rendered = start::render(&maps, &events, &source.path, checkout, since);
 
     log.append(&Event::session_started(source.clone()))?;
 

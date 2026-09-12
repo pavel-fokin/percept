@@ -46,9 +46,9 @@ pub(crate) fn last_session(events: &[Event], source: &Source) -> Option<Timestam
 
 /// The latest `session.started` recorded against `path`, from any
 /// source name - unlike `last_session`, which cuts to one exact
-/// `Source`. `start`'s render has no one client to cut to: a session
-/// begun under Claude Code counts for a start run under Codex, since
-/// both look at the same project.
+/// `Source`. `percept start` from the shell records no session of its
+/// own, so it counts from the last look by anyone: a coding client's
+/// hook or the review page.
 pub(crate) fn last_session_at(events: &[Event], path: &Path) -> Option<Timestamp> {
     events
         .iter()
