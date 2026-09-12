@@ -30,6 +30,17 @@ maps on the command line.
 
 ## Install
 
+```sh
+curl -fsSL https://raw.githubusercontent.com/pavel-fokin/percept/main/scripts/get.sh | sh
+```
+
+Downloads the newest binary for your platform (macOS or Linux, Intel
+or ARM) and copies it to `~/.percept/bin`, beside the log. If that
+directory is not on `PATH`, the script symlinks it from `~/.local/bin`
+or `~/bin`, and otherwise prints the line to add.
+
+### Building from source
+
 Requires a Rust toolchain.
 
 ```sh
@@ -38,11 +49,8 @@ cd percept
 make install
 ```
 
-This builds a release binary and copies it to `~/.percept/bin`, beside
-the log. If that directory is not on `PATH`, the script puts a copy in
-`~/.local/bin` or `~/bin`, and otherwise prints the line to add. Rerun
-after every change: the hooks run whichever `percept` is first on
-`PATH`.
+Installs the same way as `get.sh`. Rerun after every change: the
+hooks run whichever `percept` is first on `PATH`.
 
 ## Quick start
 
