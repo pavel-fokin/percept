@@ -225,6 +225,16 @@ fn add_node(kind: &str, name: &str) -> Mutation {
     }
 }
 
+/// A `question` node with the `state` its kind requires on add.
+fn add_question(name: &str) -> Mutation {
+    Mutation::AddNode {
+        kind: "question".to_string(),
+        name: name.to_string(),
+        properties: BTreeMap::from([("state".to_string(), "open".to_string())]),
+        sources: Vec::new(),
+    }
+}
+
 /// An `option` node with the `why` its kind requires - `add_node`
 /// leaves `properties` empty, which `Map::apply` now refuses for a
 /// kind that requires one.
@@ -496,7 +506,7 @@ fn removing_an_edge_that_is_not_there_fails_the_fold() {
 fn apply_records_what_a_fold_rebuilds() {
     let mut built = Map::empty(decisions());
     let events: Vec<Event> = vec![
-        add_node("question", "Which language?"),
+        add_question("Which language?"),
         add_node("decision", "Rust over Go"),
         add_edge(
             "resolves",
@@ -1079,7 +1089,7 @@ fn a_human_may_change_anything_on_a_humans_node() {
 #[test]
 fn apply_refuses_an_edge_whose_from_node_is_the_wrong_kind() {
     let mut map = Map::empty(decisions());
-    map.apply(add_node("question", "Which language?"), Actor::Human(human()))
+    map.apply(add_question("Which language?"), Actor::Human(human()))
         .unwrap();
     map.apply(add_option("Go"), Actor::Human(human())).unwrap();
 
@@ -1128,7 +1138,7 @@ fn a_fold_still_accepts_an_edge_between_the_wrong_kinds_from_history() {
 #[test]
 fn apply_removes_a_node_by_name_and_its_edges_with_it() {
     let mut map = Map::empty(decisions());
-    map.apply(add_node("question", "Which language?"), Actor::Human(human()))
+    map.apply(add_question("Which language?"), Actor::Human(human()))
         .unwrap();
     map.apply(add_node("decision", "Rust over Go"), Actor::Human(human()))
         .unwrap();
@@ -1161,7 +1171,7 @@ fn apply_removes_a_node_by_name_and_its_edges_with_it() {
 #[test]
 fn a_map_reads_as_one_line_per_node_then_per_edge() {
     let mut map = Map::empty(decisions());
-    map.apply(add_node("question", "Which language?"), Actor::Human(human()))
+    map.apply(add_question("Which language?"), Actor::Human(human()))
         .unwrap();
     map.apply(
         Mutation::AddNode {
@@ -1190,7 +1200,7 @@ fn a_map_reads_as_one_line_per_node_then_per_edge() {
 
     assert_eq!(
         map.to_string(),
-        "- question \"Which language?\"\n\
+        "- question \"Which language?\": state: \"open\"\n\
          - evidence \"Built both\": summary: \"side by\\nside\"; when: \"August\"\n\
          - decision \"Rust over Go\"\n\
          - decision \"Rust over Go\" resolves question \"Which language?\"\n"
@@ -1204,7 +1214,7 @@ fn a_schema_is_found_by_name() {
     assert_eq!(schemas.find("decisions").unwrap().name, "decisions");
     assert_eq!(
         schemas.find("glossary").err().unwrap().to_string(),
-        "no map named \"glossary\"; maps are decisions, tasks"
+        "no map named \"glossary\"; maps are decisions, concepts, tasks"
     );
 }
 
@@ -1250,7 +1260,7 @@ fn keeping_a_kind_the_schema_lacks_is_an_error() {
 /// whose ends are not of the kinds its edge kind declares.
 fn chain() -> Map {
     let mut map = Map::empty(decisions());
-    map.apply(add_node("question", "Which language?"), Actor::Human(human()))
+    map.apply(add_question("Which language?"), Actor::Human(human()))
         .unwrap();
     map.apply(add_node("decision", "Rust over Go"), Actor::Human(human()))
         .unwrap();
@@ -1487,7 +1497,7 @@ fn a_missing_prose_node_does_not_cross_kinds_on_one_shared_word() {
 #[test]
 fn a_short_id_is_its_kind_s_prefix_and_its_mint_order() {
     let mut map = Map::empty(decisions());
-    map.apply(add_node("question", "Which language?"), Actor::Human(human()))
+    map.apply(add_question("Which language?"), Actor::Human(human()))
         .unwrap();
     map.apply(add_node("decision", "Rust"), Actor::Human(human()))
         .unwrap();
@@ -1605,7 +1615,7 @@ fn a_state_set_from_below_does_not_lift_the_lock_the_humans_change_put_on_a_node
 fn removing_a_node_a_humans_edge_touches_is_refused_to_the_agent() {
     let mut map = Map::empty(decisions());
     map.apply(add_option("Rust"), Actor::Agent).unwrap();
-    map.apply(add_node("question", "Which language?"), Actor::Human(human()))
+    map.apply(add_question("Which language?"), Actor::Human(human()))
         .unwrap();
     map.apply(
         add_edge("answers", node_ref("option", "Rust"), node_ref("question", "Which language?")),
@@ -1632,7 +1642,7 @@ fn removing_a_node_a_humans_edge_touches_is_refused_to_the_agent() {
 fn removing_the_agents_own_edge_off_a_node_the_human_touched_is_refused() {
     let mut map = Map::empty(decisions());
     map.apply(add_node("decision", "Rust"), Actor::Agent).unwrap();
-    map.apply(add_node("question", "Which language?"), Actor::Agent)
+    map.apply(add_question("Which language?"), Actor::Agent)
         .unwrap();
     map.apply(
         add_edge("resolves", node_ref("decision", "Rust"), node_ref("question", "Which language?")),
@@ -1666,7 +1676,7 @@ fn removing_the_agents_own_edge_off_a_node_the_human_touched_is_refused() {
 fn removing_the_agents_own_node_is_refused_while_its_edge_hangs_on_a_node_the_human_touched() {
     let mut map = Map::empty(decisions());
     map.apply(add_node("decision", "Rust"), Actor::Agent).unwrap();
-    map.apply(add_node("question", "Which language?"), Actor::Agent)
+    map.apply(add_question("Which language?"), Actor::Agent)
         .unwrap();
     map.apply(
         add_edge("resolves", node_ref("decision", "Rust"), node_ref("question", "Which language?")),
@@ -1734,7 +1744,7 @@ fn a_blank_why_is_refused_on_a_node_removal() {
 fn a_blank_why_is_refused_on_an_edge_removal() {
     let mut map = Map::empty(decisions());
     map.apply(add_node("decision", "Rust"), Actor::Agent).unwrap();
-    map.apply(add_node("question", "Which language?"), Actor::Agent)
+    map.apply(add_question("Which language?"), Actor::Agent)
         .unwrap();
     map.apply(
         add_edge("resolves", node_ref("decision", "Rust"), node_ref("question", "Which language?")),

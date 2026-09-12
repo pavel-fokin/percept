@@ -24,10 +24,8 @@ prompt text.
     ┌────────────────────┐
     │ Maps               │
     │   decisions        │
+    │   concepts         │
     │   tasks            │
-    │   glossary         │
-    │   taxonomy         │
-    │   domain           │
     │   ...              │
     └────────────────────┘
            │
@@ -89,11 +87,11 @@ Both are serde-free.
   the node and edge kinds it allows, and one line of purpose - what
   the map makes cheap - that the prompt carries in place of the map
   itself. A schema is a TOML file at `.percept/schemas/<name>.toml`,
-  so a session adds a map without a Rust change; `decisions` and
-  `tasks` ship built in as the same TOML, and a project file of the
-  same name extends one - it keeps every kind and headline the
-  built-in declares and may add kinds - never shrinks it, since the
-  log and the render already rest on those kinds. A kind may list the
+  so a session adds a map without a Rust change; `decisions`,
+  `concepts`, and `tasks` ship built in as the same TOML, and a
+  project file of the same name extends one - it keeps every kind and
+  headline the built-in declares and may add kinds - never shrinks it,
+  since the log and the render already rest on those kinds. A kind may list the
   properties a node must carry - `why` on an option or a task - and
   the values its `state` may hold, a set with no value open by
   position; the write path refuses a node without them. Every change
@@ -220,10 +218,11 @@ skips it.
   An option is recorded only for an alternative that lost, with the
   reason it lost; the pick is the decision itself. A decision that
   changes an earlier one is added with a `supersedes` edge to it; the
-  old node is never removed. An idea in the ideas map is a candidate,
-  never an approved issue: it is built only after the user has
-  discussed it and agreed it into the set, and an agent that finds one
-  while building leaves it there and says so.
+  old node is never removed. A candidate worth doing that nobody has
+  committed to is an open `question` in the decisions map, never an
+  approved issue: it is built only after the user has discussed it and
+  agreed it into the set, and an agent that finds one while building
+  leaves it there and says so.
 - **Build.** An issue with no design left in it, touching one or two
   files, the main agent builds itself. Anything larger goes to the
   `software-developer` subagent, which follows this file, writes the

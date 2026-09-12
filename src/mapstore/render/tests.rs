@@ -95,7 +95,7 @@ fn sections_order_headlines_by_state_then_by_when_they_were_added() {
 #[test]
 fn an_option_is_printed_under_its_question_with_its_why() {
     let mut map = Map::empty(decisions());
-    add(&mut map, "question", "Which parser?", None, None, &[], Actor::Human(human()));
+    add(&mut map, "question", "Which parser?", None, Some("open"), &[], Actor::Human(human()));
     add(
         &mut map,
         "option",
@@ -113,6 +113,7 @@ fn an_option_is_printed_under_its_question_with_its_why() {
         text.contains(
             "## q1 \"Which parser?\"\n\
              \n\
+             state: \"open\"\n\
              - o1 \"reuse OpenAi\" answers\n\
              \x20 why: \"the wire shapes differ\"\n"
         ),
@@ -126,7 +127,7 @@ fn a_supersedes_and_a_reopens_edge_are_printed_by_name() {
     add(&mut map, "decision", "Go", None, None, &[], Actor::Human(human()));
     add(&mut map, "decision", "Rust", None, None, &[], Actor::Human(human()));
     link(&mut map, "supersedes", ("decision", "Rust"), ("decision", "Go"));
-    add(&mut map, "question", "Does Rust still fit?", None, None, &[], Actor::Human(human()));
+    add(&mut map, "question", "Does Rust still fit?", None, Some("open"), &[], Actor::Human(human()));
     link(&mut map, "reopens", ("question", "Does Rust still fit?"), ("decision", "Rust"));
 
     let text = markdown(&map);
@@ -182,7 +183,7 @@ fn a_map_with_no_headlines_says_so() {
 #[test]
 fn a_model_written_node_is_marked() {
     let mut map = Map::empty(decisions());
-    add(&mut map, "question", "Which key?", None, None, &[], Actor::Agent);
+    add(&mut map, "question", "Which key?", None, Some("open"), &[], Actor::Agent);
 
     let text = markdown(&map);
 
@@ -268,7 +269,7 @@ fn a_schema_with_no_headline_kind_falls_back_to_a_section_per_kind() {
 #[test]
 fn the_catalogue_gives_each_map_a_section_listing_its_kinds() {
     let mut map = Map::empty(decisions());
-    add(&mut map, "question", "Where does the log live?", None, None, &[], Actor::Human(human()));
+    add(&mut map, "question", "Where does the log live?", None, Some("open"), &[], Actor::Human(human()));
 
     let text = catalogue(std::slice::from_ref(&map));
 
@@ -288,7 +289,7 @@ fn a_kind_with_no_gloss_renders_without_a_trailing_dash() {
     let text = catalogue(&[Map::empty(decisions())]);
 
     assert!(
-        text.contains("\nNode kinds:\n- `question`\n"),
+        text.contains("\n- `decision`\n"),
         "{text}"
     );
 }

@@ -203,7 +203,7 @@ fn a_change_can_reference_a_node_an_earlier_change_just_added() {
     let output = revise
         .run(&format!(
             r#"{{"map":"decisions","changes":[
-                {{"op":"add_node","kind":"question","name":"Which language?","sources":["{id}"]}},
+                {{"op":"add_node","kind":"question","name":"Which language?","properties":{{"state":"open"}},"sources":["{id}"]}},
                 {{"op":"add_node","kind":"decision","name":"Rust over Go","sources":["{id}"]}},
                 {{"op":"add_edge","kind":"resolves","from":{{"kind":"decision","name":"Rust over Go"}},"to":{{"kind":"question","name":"Which language?"}},"sources":[]}}
             ]}}"#

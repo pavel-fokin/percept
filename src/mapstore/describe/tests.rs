@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::testing::{decisions, tasks};
+use crate::core::testing::{concepts, decisions, tasks};
 
 #[test]
 fn the_purpose_line_follows_the_map_name() {
@@ -63,6 +63,6 @@ fn the_change_example_is_present_for_a_schema_with_states() {
 
 #[test]
 fn the_change_example_is_absent_for_a_schema_with_no_states() {
-    let text = describe(&decisions());
+    let text = describe(&concepts());
     assert!(!text.contains("example: change"));
 }

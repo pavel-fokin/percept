@@ -2,7 +2,9 @@
 # and on what grounds. An option answers its question, evidence
 # supports or contradicts an option, a decision resolves the question,
 # and a later decision supersedes an earlier one, so --around a
-# question reaches everything weighed for it.
+# question reaches everything weighed for it. A question's state says
+# what became of it - answered, by a decision or by evidence alone, or
+# dropped - and the why of that change says how.
 
 name = "decisions"
 purpose = "what was asked, what was chosen, and why, so a settled question is not reopened"
@@ -10,6 +12,8 @@ headlines = ["question", "decision"]
 
 [[node]]
 kind = "question"
+gloss = "what was asked; its state says whether it is still open, answered, or dropped"
+state = ["open", "answered", "dropped"]
 
 [[node]]
 kind = "option"

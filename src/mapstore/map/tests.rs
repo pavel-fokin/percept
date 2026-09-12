@@ -231,7 +231,7 @@ fn an_unknown_map_is_an_error() {
 
     assert_eq!(
         err.to_string(),
-        "no map named \"glossary\"; maps are decisions, tasks"
+        "no map named \"glossary\"; maps are decisions, concepts, tasks"
     );
 }
 

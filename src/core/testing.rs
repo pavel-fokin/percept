@@ -354,7 +354,11 @@ pub fn decisions() -> Schema {
                   reopened"
             .to_string(),
         node_kinds: vec![
-            NodeKind::new("question", ""),
+            NodeKind::new(
+                "question",
+                "what was asked; its state says whether it is still open, answered, or dropped",
+            )
+            .with_states(&["open", "answered", "dropped"]),
             NodeKind::new(
                 "option",
                 "an alternative that was weighed and lost, saying why in its `why` property",
@@ -381,6 +385,33 @@ pub fn decisions() -> Schema {
     }
 }
 
+/// The built-in concepts schema, as `mapstore`'s embedded TOML must
+/// fold to - see `decisions`.
+pub fn concepts() -> Schema {
+    Schema {
+        name: "concepts".to_string(),
+        purpose: "what a term means here and how it relates to the others, so a reader meets \
+                  a word once and holds it"
+            .to_string(),
+        node_kinds: vec![NodeKind::new(
+            "concept",
+            "one term as this project uses it, its meaning in the `definition` property",
+        )
+        .requiring("definition")],
+        edge_kinds: vec![
+            EdgeKind::new("kind_of", "", &["concept"], &["concept"]),
+            EdgeKind::new("part_of", "", &["concept"], &["concept"]),
+            EdgeKind::new(
+                "distinct_from",
+                "two terms a reader would conflate; each definition says the difference",
+                &["concept"],
+                &["concept"],
+            ),
+        ],
+        headline_kinds: vec!["concept".to_string()],
+    }
+}
+
 /// The built-in tasks schema, as `mapstore`'s embedded TOML must fold
 /// to - see `decisions`.
 pub fn tasks() -> Schema {
@@ -402,11 +433,11 @@ pub fn tasks() -> Schema {
     }
 }
 
-/// The schemas a test project has: `decisions` and `tasks`, the same
+/// The schemas a test project has: `decisions`, `concepts`, and `tasks`, the same
 /// set `main` builds from the embedded and project TOML files, without
 /// touching a filesystem.
 pub fn schemas() -> Schemas {
-    Schemas::new(vec![decisions(), tasks()])
+    Schemas::new(vec![decisions(), concepts(), tasks()])
 }
 
 /// A schema fixture with `file`, `function`, and `package` node kinds

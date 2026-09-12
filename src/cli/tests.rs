@@ -668,6 +668,8 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_human() {
         "question",
         "--name",
         "Which?",
+        "--prop",
+        "state=open",
     ])
     .unwrap();
     let Some(Command::Maps {
@@ -691,6 +693,8 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_human() {
         "question",
         "--name",
         "Which?",
+        "--prop",
+        "state=open",
     ])
     .unwrap();
     let Some(Command::Maps {
@@ -786,7 +790,7 @@ fn record_args(map: &str) -> RecordArgs {
 #[test]
 fn a_document_writes_its_nodes_and_edges_in_order() {
     let log = FakeLog::default();
-    let document = "question \"Does record work?\"\n\
+    let document = "question \"Does record work?\"\n  state \"open\"\n\
                      decision \"yes\"\n  why \"it ran\"\n  resolves question\n";
     record_document(
         document,
@@ -818,7 +822,7 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
     let fixture = Fixture::new();
     fixture.write("src/cli/mod.rs", "one\ntwo\nthree\n");
     let log = FakeLog::default();
-    let document = "question \"Does record work?\"\n\
+    let document = "question \"Does record work?\"\n  state \"open\"\n\
                      decision \"yes\"\n  why \"it ran\"\n  resolves question\n  \
                      cites src/cli/mod.rs:1-3\n";
     record_document(
@@ -886,7 +890,7 @@ fn an_unknown_node_kind_fails_before_anything_is_written() {
 #[test]
 fn a_missing_required_property_fails_before_anything_is_written() {
     let log = FakeLog::default();
-    let document = "question \"Does record work?\"\n\
+    let document = "question \"Does record work?\"\n  state \"open\"\n\
                      option \"maybe\"\n  answers question\n";
     let err = record_document(
         document,
@@ -905,7 +909,7 @@ fn a_missing_required_property_fails_before_anything_is_written() {
 #[test]
 fn a_bad_ref_names_its_line_number() {
     let log = FakeLog::default();
-    let document = "question \"Does record work?\"\n\
+    let document = "question \"Does record work?\"\n  state \"open\"\n\
                      decision \"yes\"\n  why \"it ran\"\n  resolves q9\n";
     let err = record_document(
         document,
@@ -917,15 +921,15 @@ fn a_bad_ref_names_its_line_number() {
         human(),
     )
     .unwrap_err();
-    assert!(err.to_string().starts_with("line 4:"), "{err}");
+    assert!(err.to_string().starts_with("line 5:"), "{err}");
     assert!(log.load().unwrap().is_empty());
 }
 
 #[test]
 fn a_duplicate_name_in_a_later_node_writes_nothing() {
     let log = FakeLog::default();
-    let document = "question \"Does record work?\"\n\
-                     question \"Does record work?\"\n";
+    let document = "question \"Does record work?\"\n  state \"open\"\n\
+                     question \"Does record work?\"\n  state \"open\"\n";
     let err = record_document(
         document,
         record_args("decisions"),
@@ -943,7 +947,7 @@ fn a_duplicate_name_in_a_later_node_writes_nothing() {
 #[test]
 fn a_source_id_the_log_lacks_writes_nothing() {
     let log = FakeLog::default();
-    let document = "question \"Does record work?\"\n";
+    let document = "question \"Does record work?\"\n  state \"open\"\n";
     let mut args = record_args("decisions");
     args.source = vec![crate::core::EventId::new().as_uuid().to_string()];
     let err = record_document(

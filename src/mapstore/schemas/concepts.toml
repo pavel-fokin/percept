@@ -1,0 +1,30 @@
+# The concepts map: what a term means in this project and how it
+# relates to the others. A concept carries its meaning in `definition`;
+# `kind_of` is the taxonomy, `part_of` the domain model, and
+# `distinct_from` joins two terms a reader would conflate, each
+# definition saying the difference.
+
+name = "concepts"
+purpose = "what a term means here and how it relates to the others, so a reader meets a word once and holds it"
+headlines = ["concept"]
+
+[[node]]
+kind = "concept"
+gloss = "one term as this project uses it, its meaning in the `definition` property"
+requires = ["definition"]
+
+[[edge]]
+kind = "kind_of"
+from = "concept"
+to = "concept"
+
+[[edge]]
+kind = "part_of"
+from = "concept"
+to = "concept"
+
+[[edge]]
+kind = "distinct_from"
+gloss = "two terms a reader would conflate; each definition says the difference"
+from = "concept"
+to = "concept"
