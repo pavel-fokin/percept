@@ -12,11 +12,13 @@
 #![cfg_attr(not(feature = "lab"), allow(dead_code, unused_imports))]
 
 mod blocks;
+mod describe;
 mod map;
 mod render;
 mod schemas;
 
 pub(crate) use blocks::{block_header, capped_lines, changed_line, last_session, line_id};
+pub use describe::describe;
 pub use map::{
     commit, commit_batch, encode_fragment, encode_lines, encode_map, encode_schema, fold_map, fold_map_at,
     of_path, paths, LogMaps, NodeRefArgs, Snapshot,

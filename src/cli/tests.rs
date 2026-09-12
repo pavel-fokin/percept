@@ -534,6 +534,17 @@ fn parse_show<const N: usize>(argv: [&str; N]) -> ShowMapArgs {
 }
 
 #[test]
+fn maps_describe_parses_the_map_name() {
+    let cli = Cli::try_parse_from(["percept", "maps", "describe", "decisions"]).unwrap();
+    match cli.command {
+        Some(Command::Maps {
+            command: MapsCommand::Describe(args),
+        }) => assert_eq!(args.map, "decisions"),
+        _ => panic!("expected maps describe"),
+    }
+}
+
+#[test]
 fn all_paths_folds_every_distinct_path_while_the_default_folds_root() {
     let events = [
         node_added_at("/there", "decision", "Go"),

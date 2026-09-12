@@ -255,6 +255,7 @@ async fn main() {
             match command {
                 MapsCommand::List(args) => cli::maps_list(args, &log, &schemas, &root),
                 MapsCommand::Show(args) => cli::maps_show(args, &log, &schemas, &root),
+                MapsCommand::Describe(args) => cli::maps_describe(args, &schemas),
                 MapsCommand::AddNode(args) => {
                     cli::maps_add_node(args, &log, &schemas, &cli_source, me)
                 }

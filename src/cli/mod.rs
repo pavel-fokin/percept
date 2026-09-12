@@ -121,6 +121,15 @@ pub enum MapsCommand {
     /// `why`-only comment - subject to the same rank rule a rename or
     /// removal always has. Prints the node's id.
     ChangeNode(ChangeNodeArgs),
+    /// One map's kinds, relations, and how to record to it, from its
+    /// schema.
+    Describe(DescribeMapArgs),
+}
+
+#[derive(Args)]
+pub struct DescribeMapArgs {
+    /// The map's name, as `maps list` prints it.
+    map: String,
 }
 
 #[derive(Args)]
@@ -672,6 +681,14 @@ pub fn maps_show(
     per_path(args.all_paths, args.json, root, &events, |path| {
         print_map(mapstore::fold_map_at(schemas, &args.map, &events, path)?, &args)
     })
+}
+
+/// Prints the map `args.map` names' capabilities from its schema alone:
+/// what it can hold and how to write to it. Needs no log and no fold,
+/// so it works on an empty map.
+pub fn maps_describe(args: DescribeMapArgs, schemas: &Schemas) -> Result<(), Box<dyn std::error::Error>> {
+    let schema = schemas.find(&args.map)?;
+    print_text(&mapstore::describe(&schema))
 }
 
 /// `maps_show`'s tail: cut `map` to `args`'s filters, then print it
