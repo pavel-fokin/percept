@@ -66,3 +66,6 @@ tar xzf "$work/$asset" -C "$work"
 . "$work/percept-$target/lib-install.sh"
 
 install_binary "$work/percept-$target/percept"
+
+echo
+echo "next: cd into a project and run 'percept init claude-code' or 'percept init codex'"
