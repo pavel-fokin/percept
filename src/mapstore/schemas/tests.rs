@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::testing::{concepts, decisions, tasks, Fixture};
+use crate::core::testing::{concepts, decisions, Fixture};
 
 #[test]
 fn the_embedded_decisions_toml_folds_to_the_decisions_fixture() {
@@ -14,17 +14,11 @@ fn the_embedded_concepts_toml_folds_to_the_concepts_fixture() {
 }
 
 #[test]
-fn the_embedded_tasks_toml_folds_to_the_tasks_fixture() {
-    let schema = parse("tasks", TASKS_TOML).unwrap();
-    assert_eq!(schema, tasks());
-}
-
-#[test]
 fn a_project_with_no_schemas_directory_has_only_the_built_ins() {
     let fixture = Fixture::new();
     let schemas = load(fixture.path()).unwrap();
     let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, ["decisions", "concepts", "tasks"]);
+    assert_eq!(names, ["decisions", "concepts"]);
 }
 
 #[test]
@@ -45,7 +39,7 @@ fn a_project_schema_of_a_new_name_is_added() {
     let schemas = load(fixture.path()).unwrap();
 
     let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, ["decisions", "concepts", "tasks", "glossary"]);
+    assert_eq!(names, ["decisions", "concepts", "glossary"]);
     let glossary = schemas.find("glossary").unwrap();
     assert_eq!(glossary.node_kind("term").unwrap().requires, ["meaning"]);
 }
@@ -65,7 +59,7 @@ fn a_project_file_named_for_a_built_in_replaces_it() {
     let schemas = load(fixture.path()).unwrap();
 
     let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, ["decisions", "concepts", "tasks"], "the built-in's slot, not appended");
+    assert_eq!(names, ["decisions", "concepts"], "the built-in's slot, not appended");
     assert_eq!(schemas.find("decisions").unwrap().purpose, "a changed purpose");
 }
 
@@ -201,7 +195,7 @@ fn a_directory_named_dot_toml_is_ignored() {
     let schemas = load(fixture.path()).unwrap();
 
     let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, ["decisions", "concepts", "tasks"]);
+    assert_eq!(names, ["decisions", "concepts"]);
 }
 
 #[test]
@@ -429,16 +423,16 @@ fn a_repeated_state_entry_is_refused() {
 #[test]
 fn a_built_in_replacement_that_changes_a_kind_s_states_is_refused() {
     let fixture = Fixture::new();
-    let changed = TASKS_TOML.replacen(
-        "state = [\"open\", \"done\", \"dropped\"]",
-        "state = [\"open\", \"done\"]",
+    let changed = DECISIONS_TOML.replacen(
+        "state = [\"open\", \"answered\", \"dropped\"]",
+        "state = [\"open\", \"answered\"]",
         1,
     );
-    fixture.write(".percept/schemas/tasks.toml", &changed);
+    fixture.write(".percept/schemas/decisions.toml", &changed);
 
     let err = load(fixture.path()).err().unwrap().to_string();
 
-    assert!(err.starts_with("tasks.toml:"), "{err}");
+    assert!(err.starts_with("decisions.toml:"), "{err}");
     assert!(err.contains("states"), "{err}");
 }
 

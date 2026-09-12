@@ -7,7 +7,7 @@ constrain what an agent may write to its record and read from it.
 They prescribe no thinking loop and filter nothing the model says. On
 them an agent keeps an immutable history of experience and a mutable
 set of maps built from it. A map is an explicit external representation - a
-decision map, a task map, a glossary - and each kind makes a different
+decision map, a concept map - and each kind makes a different
 reasoning operation cheap. The shape comes from Recursive Language
 Models (arxiv.org/abs/2512.24601), where a model holds a corpus as an
 environment and writes programs over it instead of reading it as
@@ -25,7 +25,6 @@ prompt text.
     │ Maps               │
     │   decisions        │
     │   concepts         │
-    │   tasks            │
     │   ...              │
     └────────────────────┘
            │
@@ -87,12 +86,12 @@ Both are serde-free.
   the node and edge kinds it allows, and one line of purpose - what
   the map makes cheap - that the prompt carries in place of the map
   itself. A schema is a TOML file at `.percept/schemas/<name>.toml`,
-  so a session adds a map without a Rust change; `decisions`,
-  `concepts`, and `tasks` ship built in as the same TOML, and a
-  project file of the same name extends one - it keeps every kind and
-  headline the built-in declares and may add kinds - never shrinks it,
-  since the log and the render already rest on those kinds. A kind may list the
-  properties a node must carry - `why` on an option or a task - and
+  so a session adds a map without a Rust change; `decisions` and
+  `concepts` ship built in as the same TOML, and a project file of the
+  same name extends one - it keeps every kind and headline the
+  built-in declares and may add kinds - never shrinks it, since the
+  log and the render already rest on those kinds. A kind may list the
+  properties a node must carry - `why` on an option - and
   the values its `state` may hold, a set with no value open by
   position; the write path refuses a node without them. Every change
   goes through `Map::apply`, so the rules live once. The core is
@@ -245,10 +244,9 @@ skips it.
   for more than adding one. Aim for the smallest process that still
   catches mistakes. An approach the session tried and abandoned goes
   into the decisions map as evidence, so no later session tries it
-  again. Work the session found and left undone goes into the tasks
-  map with its why, and an issue that was an open task is closed
-  there with the commit in its change's why, so the next session starts from the list and not
-  from a re-read.
+  again. Work the session found and left undone goes into the
+  decisions map as an open question with its why, so the next session
+  starts from the list and not from a re-read.
 
 The TUI builds under `--features lab` and only runs on a real
 terminal. `scripts/drive.py` forks a pty,

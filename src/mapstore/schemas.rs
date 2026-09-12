@@ -1,5 +1,5 @@
-//! Loads a project's cognitive-map schemas from TOML: `decisions`,
-//! `concepts`, and `tasks`, embedded in the binary, and
+//! Loads a project's cognitive-map schemas from TOML: `decisions` and
+//! `concepts`, embedded in the binary, and
 //! `<project>/.percept/schemas/*.toml`, which may replace a built-in
 //! by name or declare a new map. `core` stays serde-free, so the
 //! parsing and the checks a declared schema must pass live here. A
@@ -16,7 +16,6 @@ use crate::core::{default_prefix, EdgeKind, NodeKind, Schema, Schemas};
 
 const DECISIONS_TOML: &str = include_str!("schemas/decisions.toml");
 const CONCEPTS_TOML: &str = include_str!("schemas/concepts.toml");
-const TASKS_TOML: &str = include_str!("schemas/tasks.toml");
 
 /// Where a project's own schema files live, under the project root
 /// `checkout_root` finds.
@@ -83,16 +82,12 @@ where
     })
 }
 
-/// Every schema `project` has: `decisions`, `concepts`, and `tasks`, each replaced
+/// Every schema `project` has: `decisions` and `concepts`, each replaced
 /// by a project file of the same name when one exists, plus whatever
 /// else `<project>/.percept/schemas` declares. Each error names the
 /// file it came from.
 pub fn load(project: &Path) -> Result<Schemas, Box<dyn std::error::Error>> {
-    let mut folded = vec![
-        parse("decisions", DECISIONS_TOML)?,
-        parse("concepts", CONCEPTS_TOML)?,
-        parse("tasks", TASKS_TOML)?,
-    ];
+    let mut folded = vec![parse("decisions", DECISIONS_TOML)?, parse("concepts", CONCEPTS_TOML)?];
     for (stem, text) in project_files(project)? {
         let schema = parse(&stem, &text)?;
         match folded.iter().position(|built_in| built_in.name == schema.name) {
