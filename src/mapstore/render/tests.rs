@@ -121,7 +121,7 @@ fn a_claim_is_printed_under_its_topic_with_its_why() {
 }
 
 #[test]
-fn a_replaces_and_a_doubts_edge_are_printed_by_name() {
+fn a_replaced_verdict_and_a_doubting_topic_nest_under_the_verdict_that_claims_them() {
     let mut map = Map::empty(debates());
     add(&mut map, "verdict", "Go", None, None, &[], Actor::Human(human()));
     add(&mut map, "verdict", "Rust", None, None, &[], Actor::Human(human()));
@@ -131,15 +131,46 @@ fn a_replaces_and_a_doubts_edge_are_printed_by_name() {
 
     let text = markdown(&map);
 
-    assert!(
-        text.contains("## v2 \"Rust\"\n\n- replaces v1 \"Go\"\n- t1 \"Does Rust still fit?\" doubts\n"),
-        "{text}"
+    assert_eq!(
+        text,
+        "# debates\n\
+         \n\
+         ## v2 \"Rust\"\n\
+         \n\
+         - replaces v1 \"Go\"\n\
+         - t1 \"Does Rust still fit?\" doubts\n"
     );
-    assert!(text.contains("## v1 \"Go\"\n\n- v2 \"Rust\" replaces\n"), "{text}");
 }
 
 #[test]
-fn a_chores_blocks_edge_is_printed_by_name_on_both_ends() {
+fn a_verdict_nests_under_its_topic_and_the_one_it_replaces_under_it() {
+    let mut map = Map::empty(debates());
+    add(&mut map, "topic", "Which language?", None, None, &[], Actor::Human(human()));
+    add(&mut map, "verdict", "Go", None, None, &[], Actor::Human(human()));
+    link(&mut map, "settles", ("verdict", "Go"), ("topic", "Which language?"));
+    add(&mut map, "verdict", "Rust", None, None, &[], Actor::Human(human()));
+    link(&mut map, "settles", ("verdict", "Rust"), ("topic", "Which language?"));
+    link(&mut map, "replaces", ("verdict", "Rust"), ("verdict", "Go"));
+    add(&mut map, "claim", "Java", Some("no one here writes it"), None, &[], Actor::Human(human()));
+    link(&mut map, "about", ("claim", "Java"), ("topic", "Which language?"));
+
+    let text = markdown(&map);
+
+    assert_eq!(
+        text,
+        "# debates\n\
+         \n\
+         ## t1 \"Which language?\"\n\
+         \n\
+         - c1 \"Java\" about\n\
+         \x20 why: \"no one here writes it\"\n\
+         - v2 \"Rust\" settles\n\
+         \x20 - replaces v1 \"Go\"\n"
+    );
+}
+
+#[test]
+fn a_blocked_chore_nests_under_the_chore_that_blocks_it() {
     let mut map = Map::empty(chores());
     add(&mut map, "chore", "cancel a turn", Some("Esc drops the session"), Some("open"), &[], Actor::Human(human()));
     add(
@@ -156,13 +187,14 @@ fn a_chores_blocks_edge_is_printed_by_name_on_both_ends() {
     let text = markdown(&map);
 
     assert!(
-        text.contains("- c2 \"cancellable streams\" blocks\n"),
+        text.contains("## c2 \"cancellable streams\"\n"),
         "{text}"
     );
     assert!(
         text.contains("- blocks c1 \"cancel a turn\"\n"),
         "{text}"
     );
+    assert!(!text.contains("## c1"), "{text}");
 }
 
 #[test]
@@ -180,13 +212,27 @@ fn a_map_with_no_headlines_says_so() {
 }
 
 #[test]
-fn a_model_written_node_is_marked() {
+fn a_map_the_agent_wrote_alone_is_marked_once_on_its_heading() {
     let mut map = Map::empty(debates());
     add(&mut map, "topic", "Which key?", None, None, &[], Actor::Agent);
 
     let text = markdown(&map);
 
+    assert!(text.starts_with("# debates (agent)\n"), "{text}");
+    assert!(text.contains("## t1 \"Which key?\"\n"), "{text}");
+}
+
+#[test]
+fn a_map_with_both_authors_marks_each_agent_node() {
+    let mut map = Map::empty(debates());
+    add(&mut map, "topic", "Which key?", None, None, &[], Actor::Agent);
+    add(&mut map, "topic", "Which lock?", None, None, &[], Actor::Human(human()));
+
+    let text = markdown(&map);
+
+    assert!(text.starts_with("# debates\n"), "{text}");
     assert!(text.contains("## t1 \"Which key?\" (agent)\n"), "{text}");
+    assert!(text.contains("## t2 \"Which lock?\"\n"), "{text}");
 }
 
 #[test]

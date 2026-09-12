@@ -20,13 +20,13 @@ requires = ["why"]
 kind = "decision"
 
 [[edge]]
-kind = "answers"
-from = "option"
+kind = "resolves"
+from = "decision"
 to = "question"
 
 [[edge]]
-kind = "resolves"
-from = "decision"
+kind = "answers"
+from = "option"
 to = "question"
 
 [[edge]]

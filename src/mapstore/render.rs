@@ -2,19 +2,29 @@
 //! summary of several - the text powering `maps show` and `maps
 //! list`.
 
+use std::collections::HashSet;
 use std::fmt::Write as _;
 
-use crate::core::{Actor, EdgeEnd, Map, Node, Schema, Written};
+use crate::core::{Actor, EdgeEnd, Map, Node, NodeId, Schema, Written};
 use crate::store::ids;
 
 /// `map` as Markdown: a heading, then the map's body. A map with any
-/// headline kind renders one `##` section per headline node, in the
-/// order `push_headlines` gives - see there. A map with none renders one `## <kind>` section per node
-/// kind that holds a node, plus a `## edges` section - see
+/// headline kind renders one `##` section per headline node nobody
+/// claims, the claimed ones nested under their claimant - see
+/// `push_headlines`. A map with none renders one `## <kind>` section
+/// per node kind that holds a node, plus a `## edges` section - see
 /// `push_by_kind`. Empty for a map with no nodes, past the preamble.
+/// A map the agent wrote alone says so once, on the heading; a map
+/// with both human and agent nodes marks each agent line instead.
 pub fn markdown(map: &Map) -> String {
     let schema = map.schema();
-    let mut out = format!("# {}\n", schema.name);
+    let mark = mixed_authors(map);
+    let all_agent = !mark && map.nodes().iter().any(|node| matches!(node.added().actor, Actor::Agent));
+    let mut out = if all_agent {
+        format!("# {} (agent)\n", schema.name)
+    } else {
+        format!("# {}\n", schema.name)
+    };
 
     if map.nodes().is_empty() {
         out.push_str("\n(empty: nothing has been recorded here yet.)\n");
@@ -22,12 +32,19 @@ pub fn markdown(map: &Map) -> String {
     }
 
     if schema.headline_kinds.is_empty() {
-        push_by_kind(&mut out, map);
+        push_by_kind(&mut out, map, mark);
     } else {
-        push_headlines(&mut out, map);
+        push_headlines(&mut out, map, mark);
     }
 
     out
+}
+
+/// Whether `map` holds nodes by the agent and by someone else both -
+/// when a per-line `(agent)` mark tells them apart.
+fn mixed_authors(map: &Map) -> bool {
+    let agent = |node: &Node| matches!(node.added().actor, Actor::Agent);
+    map.nodes().iter().any(agent) && !map.nodes().iter().all(agent)
 }
 
 /// `maps list`: one `##` section per map, in the order the
@@ -109,7 +126,7 @@ fn push_example(out: &mut String, map: &Map) {
 /// section when the map has any. The fallback for a schema that
 /// declares no headline kind at all, so a map like that still lists
 /// everything somewhere.
-fn push_by_kind(out: &mut String, map: &Map) {
+fn push_by_kind(out: &mut String, map: &Map, mark: bool) {
     for kind in ordered_kinds(map.schema()) {
         let nodes: Vec<&Node> = map
             .nodes()
@@ -123,7 +140,7 @@ fn push_by_kind(out: &mut String, map: &Map) {
         out.push_str(kind);
         out.push('\n');
         for node in nodes {
-            push_node(out, map, node);
+            push_node(out, map, node, mark);
         }
     }
 
@@ -151,22 +168,24 @@ fn ordered_kinds(schema: &Schema) -> Vec<&str> {
 /// One node's bullet - its name and properties, the kind being the
 /// section's - then, on its own indented line, the sources it cites,
 /// when it cites any.
-fn push_node(out: &mut String, map: &Map, node: &Node) {
-    let _ = writeln!(out, "- {}{}", marked_name(map, node), node.properties_line());
+fn push_node(out: &mut String, map: &Map, node: &Node, mark: bool) {
+    let _ = writeln!(out, "- {}{}", marked_name(map, node, mark), node.properties_line());
     push_changed(out, node, "  ");
     if !node.sources.is_empty() {
         let _ = writeln!(out, "  sources: {}", ids(&node.sources).join(", "));
     }
 }
 
-/// One `##` section per headline node, in an
-/// order this render alone gives meaning to - never the core's: by the
-/// index of its `state` property in its kind's declared list, unknown
-/// or missing last, then by when it was added. A kind with no states
+/// One `##` section per headline node nobody claims, in an order this
+/// render alone gives meaning to - never the core's: by the index of
+/// its `state` property in its kind's declared list, unknown or
+/// missing last, then by when it was added. A kind with no states
 /// sorts by `added_at` alone. Under each heading: the node's own
-/// properties, then its edges, one line per edge kind the schema
-/// declares, in schema order.
-fn push_headlines(out: &mut String, map: &Map) {
+/// properties, then its neighbours as `push_tree` prints them, the
+/// headline nodes it claims nested with theirs. A headline node left
+/// unprinted - claimed in a cycle - heads a section of its own at the
+/// end, so nothing a map holds goes unseen.
+fn push_headlines(out: &mut String, map: &Map, mark: bool) {
     let mut headlines: Vec<&Node> = map.headlines().collect();
     headlines.sort_by_key(|node| (state_rank(map, node), node.added().at));
     if headlines.is_empty() {
@@ -178,10 +197,84 @@ fn push_headlines(out: &mut String, map: &Map) {
         return;
     }
 
-    for node in &headlines {
-        let _ = write!(out, "\n## {}\n\n", marked_name(map, node));
+    let roots: Vec<&Node> = headlines
+        .iter()
+        .copied()
+        .filter(|node| claimant(map, node).is_none())
+        .collect();
+    let mut printed: HashSet<NodeId> = HashSet::new();
+    for node in roots.iter().chain(headlines.iter()) {
+        if !printed.insert(node.id) {
+            continue;
+        }
+        let _ = write!(out, "\n## {}\n\n", marked_name(map, node, mark));
         push_props(out, node, "");
-        push_edges(out, map, node);
+        push_tree(out, map, node, "", &mut printed, mark);
+    }
+}
+
+/// The headline node `node` prints under, if any: the first headline
+/// of its own kind pointing at it - the decision that supersedes it -
+/// else the first headline of another kind it points at - the question
+/// it resolves. A node nobody claims heads a section of its own. The
+/// rule names no kind, so it holds for any schema: a `blocks` chore
+/// claims the one it blocks the way `supersedes` claims the old
+/// decision.
+fn claimant<'a>(map: &'a Map, node: &Node) -> Option<&'a Node> {
+    let headline_kinds = &map.schema().headline_kinds;
+    let mut same_kind = None;
+    let mut other_kind = None;
+    for edge_kind in &map.schema().edge_kinds {
+        for from in map.linked(node.id, &edge_kind.kind, EdgeEnd::To) {
+            if same_kind.is_none() && from.kind == node.kind && headline_kinds.contains(&from.kind) {
+                same_kind = Some(from);
+            }
+        }
+        for to in map.linked(node.id, &edge_kind.kind, EdgeEnd::From) {
+            if other_kind.is_none() && to.kind != node.kind && headline_kinds.contains(&to.kind) {
+                other_kind = Some(to);
+            }
+        }
+    }
+    same_kind.or(other_kind)
+}
+
+/// `node`'s neighbours, one line per edge, under `indent`: an outgoing
+/// edge as `- <kind> <neighbour>`, an incoming one as `- <neighbour>
+/// <kind>`, edge kinds in schema order, outgoing before incoming. Each
+/// neighbour prints its properties indented under its line. A
+/// neighbour already printed in this map is skipped, so a node appears
+/// once, where it was first reached; a headline neighbour prints here
+/// only when `node` is its claimant, and then its own neighbours nest
+/// one level deeper.
+fn push_tree(out: &mut String, map: &Map, node: &Node, indent: &str, printed: &mut HashSet<NodeId>, mark: bool) {
+    let headline_kinds = &map.schema().headline_kinds;
+    let deeper = format!("{indent}  ");
+    for edge_kind in &map.schema().edge_kinds {
+        let outgoing = map.linked(node.id, &edge_kind.kind, EdgeEnd::From);
+        let incoming = map.linked(node.id, &edge_kind.kind, EdgeEnd::To);
+        let ends = outgoing
+            .into_iter()
+            .map(|neighbour| (EdgeEnd::From, neighbour))
+            .chain(incoming.into_iter().map(|neighbour| (EdgeEnd::To, neighbour)));
+        for (end, neighbour) in ends {
+            let headline = headline_kinds.contains(&neighbour.kind);
+            if headline && claimant(map, neighbour).is_none_or(|claimant| claimant.id != node.id) {
+                continue;
+            }
+            if !printed.insert(neighbour.id) {
+                continue;
+            }
+            let name = marked_name(map, neighbour, mark);
+            let _ = match end {
+                EdgeEnd::From => writeln!(out, "{indent}- {} {name}", edge_kind.kind),
+                EdgeEnd::To => writeln!(out, "{indent}- {name} {}", edge_kind.kind),
+            };
+            push_props(out, neighbour, &deeper);
+            if headline {
+                push_tree(out, map, neighbour, &deeper, printed, mark);
+            }
+        }
     }
 }
 
@@ -221,41 +314,17 @@ fn push_changed(out: &mut String, node: &Node, indent: &str) {
     }
 }
 
-/// `node`'s edges, one line per edge kind the schema declares, in
-/// schema order: an outgoing edge as `- <kind> <neighbour>`, an
-/// incoming one as `- <neighbour> <kind>`, the neighbour named the way
-/// `marked_name` names any node. A neighbour of a kind that is not a
-/// headline also prints its own properties indented under that line -
-/// the one hop an option's `why` stays from its question; a second hop
-/// is never reached from here.
-fn push_edges(out: &mut String, map: &Map, node: &Node) {
-    let headline_kinds = &map.schema().headline_kinds;
-    for edge_kind in &map.schema().edge_kinds {
-        for neighbour in map.linked(node.id, &edge_kind.kind, EdgeEnd::From) {
-            let _ = writeln!(out, "- {} {}", edge_kind.kind, marked_name(map, neighbour));
-            if !headline_kinds.contains(&neighbour.kind) {
-                push_props(out, neighbour, "  ");
-            }
-        }
-        for neighbour in map.linked(node.id, &edge_kind.kind, EdgeEnd::To) {
-            let _ = writeln!(out, "- {} {}", marked_name(map, neighbour), edge_kind.kind);
-            if !headline_kinds.contains(&neighbour.kind) {
-                push_props(out, neighbour, "  ");
-            }
-        }
-    }
-}
-
-/// A node's short id and quoted name, marked `(agent)` when the model
-/// wrote it - `Actor::Human` and `Actor::System` are unmarked. The
-/// short id is the same `d41` `--around`, `--from`/`--to`, and a bare
-/// short id in `revise_map`'s arguments all resolve.
-fn marked_name(map: &Map, node: &Node) -> String {
+/// A node's short id and quoted name, marked `(agent)` when `mark` is
+/// set and the model wrote it - `Actor::Human` and `Actor::System` are
+/// never marked. The short id is the same `d41` `--around`,
+/// `--from`/`--to`, and a bare short id in `revise_map`'s arguments
+/// all resolve.
+fn marked_name(map: &Map, node: &Node, mark: bool) -> String {
     let mut label = match map.short_id(node.id) {
         Some(id) => format!("{id} {:?}", node.name),
         None => format!("{:?}", node.name),
     };
-    if matches!(node.added().actor, Actor::Agent) {
+    if mark && matches!(node.added().actor, Actor::Agent) {
         label.push_str(" (agent)");
     }
     label
