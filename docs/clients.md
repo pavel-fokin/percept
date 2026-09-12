@@ -88,9 +88,9 @@ e07  Evidence has no standing.
 
 | Client | Files | Content |
 |---|---|---|
-| Claude Code | `.claude/settings.json` | Hook lines for session start, prompt, and stop, each calling the binary with the client's name, and tool use under `--capture`; a bash allowlist for `percept maps` and `percept events`. `percept init claude-code` writes them. |
+| Claude Code | `.claude/settings.json` | Hook lines for session start, prompt, and stop, each calling the binary with the client's name, and tool use under `--capture`; a bash allowlist for `percept maps`, `percept events`, and `percept start`. `percept init claude-code` writes them. |
 | Codex | `.codex/hooks.json` | The same, in its hook shape, without an allowlist. `percept init codex` writes it. |
-| Both | nothing | The session-start block ends with the recording rules: look before proposing, record when the user says yes citing the prompt id, cite file text, supersede rather than remove, close by naming what was recorded. |
+| Both | nothing | The session-start block is what `percept start` prints: what each map holds, what moved since the last session and which cited files changed, and the commands to go next. `percept maps describe <map>` is where the record grammar lives. |
 
 The plan skill goes. The trigger is "the user said yes to a proposal,"
 which is a prompt, and every client hooks prompts. A client's plan

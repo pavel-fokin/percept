@@ -138,7 +138,7 @@ session starts from the answer.
 | 2 | Short ids on every node, `maps record` on stdin | Built 2026-09-09 | Recording |
 | 3 | The start block prints a since-cut; the render leaves the tree | Built 2026-09-09 | Visibility, continuity |
 | 4 | A node cites file text; the start block reports what changed | Built 2026-09-09 | Evidence |
-| 5 | The start block carries the recording rules | Built 2026-09-10 | Recording in a stranger's project |
+| 5 | The start block carries the recording rules | Built 2026-09-10, removed 2026-09-12: the rules were a loop prescription; `percept start` and `maps describe` replace them | Recording in a stranger's project |
 | 6 | A push hook at the yes moment | To build | Recording as a habit; the queue |
 | 7 | A `reopens` edge in the decisions schema, from a question to the decision it challenges | Built 2026-09-10 | An agent disputes without rewriting; the review raises it |
 | 8 | A node's last change, `changed_by` and `changed_why`, and the rank lock; Wrong is a `node.changed` with a why, `maps change-node` from the shell | Built 2026-09-10 as standing, rebuilt 2026-09-11 | Correctability |
