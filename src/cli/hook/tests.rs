@@ -809,8 +809,8 @@ fn a_first_session_with_history_points_at_every_map_that_has_a_headline() {
 
     let context = fixture.session_start("codex");
 
-    assert!(context.contains("percept maps show decisions --format md"), "{context:?}");
-    assert!(context.contains("percept maps show tasks --format md"), "{context:?}");
+    assert!(context.contains("percept maps show decisions"), "{context:?}");
+    assert!(context.contains("percept maps show tasks"), "{context:?}");
     assert!(!context.contains("decisions +"), "{context:?}");
     assert!(!context.contains("tasks +"), "{context:?}");
 }
@@ -822,8 +822,8 @@ fn a_map_with_no_headline_yet_has_no_pointer() {
 
     let context = fixture.session_start("codex");
 
-    assert!(context.contains("percept maps show tasks --format md"), "{context:?}");
-    assert!(!context.contains("percept maps show decisions --format md"), "{context:?}");
+    assert!(context.contains("percept maps show tasks\n"), "{context:?}");
+    assert!(!context.contains("percept maps show decisions\n"), "{context:?}");
 }
 
 #[test]
@@ -1124,8 +1124,8 @@ fn a_map_with_a_headline_points_at_its_own_render() {
 
     let context = fixture.session_start("codex");
 
-    assert!(context.contains("percept maps show tasks --format md"), "{context:?}");
-    assert!(context.contains("percept maps show decisions --format md"), "{context:?}");
+    assert!(context.contains("percept maps show tasks"), "{context:?}");
+    assert!(context.contains("percept maps show decisions"), "{context:?}");
 }
 
 #[test]

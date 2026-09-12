@@ -3,8 +3,8 @@
 //! opened through; `fold_map` builds one and `commit` mints and
 //! applies one change to it atomically, under the log's own lock;
 //! `encode_*` serialize a map or a fragment to JSON lines; `markdown`
-//! and `catalogue` render it to text for `maps show`/`maps list
-//! --format md`. The tools that call these live in `src/tools`.
+//! and `catalogue` render it to text for `maps show`/`maps list`. The
+//! tools that call these live in `src/tools`.
 
 // Reachability here is judged with the lab present: the lab build is
 // the one that sees every consumer, and `--all-features` clippy is

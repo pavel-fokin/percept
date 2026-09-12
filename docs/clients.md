@@ -113,7 +113,7 @@ into context. The model enters the client's plan mode. Before
 proposing, it looks at the question nearest the change:
 
 ```
-percept maps show decisions --around q19 --format md
+percept maps show decisions --around q19
 ```
 
 It sees the TOML decision, that it was superseded once, and why. It

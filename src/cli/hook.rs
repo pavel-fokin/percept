@@ -217,7 +217,7 @@ fn start_session(
 /// recipe is complete enough to run as printed.
 const RULES: &str = "\
 recording
-- Before proposing a design, look: percept maps show decisions --around <id>, or --format md for the whole map.
+- Before proposing a design, look: percept maps show decisions --around <id>, or the whole map with no filter.
 - When the user says yes to a proposal, record it at once, citing the prompt id the hook printed:
     percept maps record decisions --actor agent --source <prompt id> <<'EOF'
     question \"what was asked\"
@@ -417,7 +417,7 @@ fn normalize(text: &str) -> String {
 fn map_pointers(maps: &[Map]) -> Vec<String> {
     maps.iter()
         .filter(|map| map.headlines().next().is_some())
-        .map(|map| format!("percept maps show {} --format md", map.schema().name))
+        .map(|map| format!("percept maps show {}", map.schema().name))
         .collect()
 }
 

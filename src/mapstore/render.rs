@@ -1,6 +1,6 @@
 //! A map's Markdown: `markdown` renders one map, `catalogue` a
-//! summary of several - the text powering `maps show --format md`
-//! and `maps list --format md`.
+//! summary of several - the text powering `maps show` and `maps
+//! list`.
 
 use std::fmt::Write as _;
 
@@ -47,7 +47,7 @@ fn guide(map: &str) -> String {
     )
 }
 
-/// `maps list --format md`: one `##` section per map, in the order the
+/// `maps list`: one `##` section per map, in the order the
 /// caller folded them. Each names the map's purpose and size, lists its
 /// node and edge kinds with the gloss each carries on its `Schema`, and
 /// shows one real node line and one real edge line so a reader sees the

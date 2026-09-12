@@ -61,7 +61,7 @@ percept init claude-code       # writes .claude/settings.json hooks
 claude                         # work as usual; prompts and replies are recorded
 
 percept events search --since 1h
-percept maps show decisions --format md
+percept maps show decisions
 ```
 
 `percept init codex` does the same for Codex. The [Coding
@@ -97,8 +97,8 @@ A map is folded live from the log on every read. Nothing is rendered
 to a file.
 
 ```sh
-percept maps list --format md
-percept maps show decisions --format md
+percept maps list
+percept maps show decisions
 percept maps show decisions --around 'question:Where does the event log live?'
 percept maps show decisions --since 1d
 percept maps show tasks --since 1d

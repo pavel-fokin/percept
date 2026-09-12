@@ -122,7 +122,7 @@ Both are serde-free.
   default, every path in turn with `--all-paths`. A map is read live, never
   rendered to a file a session commits: one log holds every branch, so
   a committed render would carry whichever branch's fold wrote it
-  last. `percept maps show <map> --format md` from the shell,
+  last. `percept maps show <map>` from the shell,
   `read_map` mid-turn, or the bounded fragment a session-start hook
   prints give the same Markdown a render once did. A render lists a
   map's headline nodes in the order they were raised, each with its
@@ -137,7 +137,7 @@ Both are serde-free.
 
 ## Maps
 
-Start with `percept maps list --format md`: one section per map
+Start with `percept maps list`: one section per map
 saying what it is for, its size, and its kinds.
 
 A map is judged by what it costs its reader, on three budgets:
@@ -154,7 +154,7 @@ never move or merge it without the user's say.
 ## Decisions
 
 The decisions map for this repo, folded live from percept's own log:
-`percept maps show decisions --format md`, or the bounded fragment a
+`percept maps show decisions`, or the bounded fragment a
 session start prints. Every node cites the event it was drawn from. It
 is the record of why; where it disagrees with a rule above, the rule
 wins and the map says what the rule cost.
@@ -174,7 +174,7 @@ it, never sideways or up:
 | Presentation | `server` | `percept review` - serves the embedded review page, the queue as `GET /api/review` JSON, and `POST /api/change` - Wrong, a `node.changed` carrying the human's why - over the same log and maps the CLI uses. The queue is what changed since the review last opened. |
 | Infrastructure | `providers` | `Ollama`, `OpenAi`, and `Fireworks` - implement `harness::Model`. `PERCEPT_PROVIDER` picks one at the entrypoint; `OPENAI_API_KEY` and `FIREWORKS_API_KEY` carry the keys. |
 | Infrastructure | `store` | The JSONL event log - the serde boundary - implements `core::EventLog` and `core::EventSearch`. `event` encodes an event to a log line and back, and reads one out for display. |
-| Infrastructure | `mapstore` | Loads the schemas - the built-in TOML plus `.percept/schemas/*.toml` - and folds a log-backed cognitive map (`LogMaps`, the `core::MapReader`), revises it, and gives it an external form: `encode_*` to JSON lines, `markdown`/`catalogue` to the text `maps show`/`maps list --format md` print - read live, never written to a file. |
+| Infrastructure | `mapstore` | Loads the schemas - the built-in TOML plus `.percept/schemas/*.toml` - and folds a log-backed cognitive map (`LogMaps`, the `core::MapReader`), revises it, and gives it an external form: `encode_*` to JSON lines, `markdown`/`catalogue` to the text `maps show`/`maps list` print - read live, never written to a file. |
 | Infrastructure | `code` | Walks the working tree with `ignore`, parses each file with `tree-sitter`, and builds a `Map` of the tree's files, the symbols they define, and what imports what: a `file` keyed by repo-relative path, a `function` or `type` keyed by `path::Name`, a `package` per external crate. Not a map percept keeps - it has no author and no history, is never folded from the log, never in the catalogue, never carried in the prompt. It reaches the model only as the `read_code` tool. |
 | Infrastructure | `tools` | Every tool the model calls. `search_events`, `read_event`, `revise_map`, `read_map` run over the log and its maps through `store` and `mapstore`. `read_code` walks the checkout through `code` with the same `around`, `depth`, and `kinds` as `read_map`. `read_file`, `write_file`, `edit_file`, `list_files`, `find_files`, `grep_files` run over a working tree, native over the `workspace` module's `Workspace` - the one place a path the model gave becomes a real path, refusing any outside the checkout, shared with the CLI's citations - and `bash`, one `sh -c` at the root with a timeout. The file tools and `read_code` come in under `PERCEPT_TOOLS=code`. `AskBeforeWrites` is the `Policy`; `GitSnapshot` the `Snapshot`, a commit under `refs/percept/snapshots/<prompt>` built through a scratch index. |
 | Infrastructure | `workspace` | `Workspace`, `is_binary`, `read_text_lossy` - the one place a path the model gave becomes a real path, and the text reader both a file tool and the CLI's `file.cited` citations read through. Builds without `lab`. |
