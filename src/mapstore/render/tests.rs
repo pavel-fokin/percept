@@ -70,22 +70,14 @@ fn link(map: &mut Map, kind: &str, from: (&str, &str), to: (&str, &str)) {
     .unwrap();
 }
 
-fn head(map: &Map) -> String {
-    let schema = map.schema();
-    format!("# {}\n\n{PREAMBLE} {}\n", schema.name, guide(&schema.name))
-}
-
 #[test]
-fn an_empty_map_renders_the_preamble_and_the_empty_notice() {
+fn an_empty_map_renders_its_title_and_the_empty_notice() {
     let map = Map::empty(decisions());
-    assert_eq!(
-        markdown(&map),
-        format!("{}\n(empty: nothing has been recorded here yet.)\n", head(&map))
-    );
+    assert_eq!(markdown(&map), "# decisions\n\n(empty: nothing has been recorded here yet.)\n");
 }
 
 #[test]
-fn contents_orders_headlines_by_state_then_by_when_they_were_added() {
+fn sections_order_headlines_by_state_then_by_when_they_were_added() {
     let mut map = Map::empty(tasks());
     add(&mut map, "task", "a", Some("first added"), Some("open"), &[], Actor::Human(human()));
     add(&mut map, "task", "b", Some("second added"), Some("done"), &[], Actor::Human(human()));
@@ -96,12 +88,8 @@ fn contents_orders_headlines_by_state_then_by_when_they_were_added() {
     // "open" sorts before "done" - both before an added-order tiebreak
     // among tasks sharing a state; the core holds no such ordering, the
     // render alone gives this listing its meaning.
-    assert!(text.contains(
-        "\n## contents\n\
-         - t1 \"a\" [open]\n\
-         - t3 \"c\" [open]\n\
-         - t2 \"b\" [done]\n"
-    ));
+    let at = |name: &str| text.find(&format!("\n## {name}\n")).unwrap();
+    assert!(at("t1 \"a\"") < at("t3 \"c\"") && at("t3 \"c\"") < at("t2 \"b\""), "{text}");
 }
 
 #[test]
@@ -187,7 +175,7 @@ fn a_map_with_no_headlines_says_so() {
 
     assert_eq!(
         markdown(&map),
-        format!("{}\n(no headline node yet; 1 nodes of other kinds.)\n", head(&map))
+        "# decisions\n\n(no headline node yet; 1 nodes of other kinds.)\n"
     );
 }
 
@@ -198,7 +186,6 @@ fn a_model_written_node_is_marked() {
 
     let text = markdown(&map);
 
-    assert!(text.contains("- q1 \"Which key?\" (agent)\n"), "{text}");
     assert!(text.contains("## q1 \"Which key?\" (agent)\n"), "{text}");
 }
 

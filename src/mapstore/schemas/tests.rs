@@ -139,19 +139,6 @@ fn a_settles_key_is_an_unknown_field() {
 }
 
 #[test]
-fn a_file_named_index_is_refused() {
-    let fixture = Fixture::new();
-    fixture.write(".percept/schemas/index.toml", "name = \"index\"\npurpose = \"p\"\n");
-
-    let err = load(fixture.path()).err().unwrap().to_string();
-
-    assert_eq!(
-        err,
-        "index.toml: index.md is the hand-written map directory, not a declared map"
-    );
-}
-
-#[test]
 fn a_built_in_replacement_that_drops_a_kind_is_refused() {
     let fixture = Fixture::new();
     let dropped = DECISIONS_TOML.replacen(

@@ -3,7 +3,7 @@
 //! its last change, and the session rule both a hook and the review
 //! page cut their since by.
 
-use crate::core::{Event, Map, Node, Payload, Source, Written};
+use crate::core::{Event, Map, Node, Payload, Written};
 use crate::shared::Timestamp;
 
 /// How many lines of a gained or changed list a block shows
@@ -21,16 +21,6 @@ pub(crate) fn capped_lines(mut lines: Vec<String>) -> Vec<String> {
     lines
 }
 
-/// The header of a capped block: `label (total)`, or `label (total,
-/// showing LIMIT)` when `capped_lines` folds the rest into a count.
-pub(crate) fn block_header(label: &str, total: usize) -> String {
-    if total > LIMIT {
-        format!("{label} ({total}, showing {LIMIT})")
-    } else {
-        format!("{label} ({total})")
-    }
-}
-
 /// The short id `node` has on `map`, or a `kind:name` fallback for the
 /// unexpected case a headline node carries none.
 pub(crate) fn line_id(map: &Map, node: &Node) -> String {
@@ -38,16 +28,15 @@ pub(crate) fn line_id(map: &Map, node: &Node) -> String {
         .unwrap_or_else(|| format!("{}:{}", node.kind, node.name))
 }
 
-/// The latest `session.started` this exact source - client name and
-/// path - recorded among `events`: `None` on a path's first session
-/// with this client. The hook and the review
-/// page both cut their since from it, then append a fresh one.
-pub(crate) fn last_session(events: &[Event], source: &Source) -> Option<Timestamp> {
+/// The latest `session.started` among `events`, already cut to whose
+/// sessions count: the hook and the review page pass their own exact
+/// source, and record a fresh one after; `percept start` from the
+/// shell records none, so it passes `of_path` - the last look by
+/// anyone here. `None` when no session has started.
+pub(crate) fn last_session<'a>(events: impl IntoIterator<Item = &'a Event>) -> Option<Timestamp> {
     events
-        .iter()
-        .filter(|event| {
-            matches!(event.payload(), Payload::SessionStarted) && event.source() == source
-        })
+        .into_iter()
+        .filter(|event| matches!(event.payload(), Payload::SessionStarted))
         .map(Event::created_at)
         .max()
 }

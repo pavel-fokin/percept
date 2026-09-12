@@ -7,7 +7,7 @@ use crate::workspace::temp_workspace;
 fn walk_enters_dot_directories_but_not_git_itself() {
     let (dir, workspace) = temp_workspace();
     fs::create_dir_all(dir.path().join(".percept")).unwrap();
-    fs::write(dir.path().join(".percept/index.md"), "").unwrap();
+    fs::write(dir.path().join(".percept/log-id"), "").unwrap();
     fs::create_dir_all(dir.path().join(".git/objects")).unwrap();
     fs::write(dir.path().join(".git/HEAD"), "").unwrap();
 
@@ -15,5 +15,5 @@ fn walk_enters_dot_directories_but_not_git_itself() {
         .map(|entry| workspace.relative(entry.path()))
         .collect();
 
-    assert_eq!(seen, vec![".percept/index.md"]);
+    assert_eq!(seen, vec![".percept/log-id"]);
 }

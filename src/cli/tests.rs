@@ -515,38 +515,13 @@ fn maps_show_kind_is_repeatable() {
 }
 
 #[test]
-fn maps_show_format_defaults_to_json() {
-    assert_eq!(
-        parse_show(["percept", "maps", "show", "decisions"]).format,
-        Format::Json
-    );
+fn maps_show_json_defaults_to_false() {
+    assert!(!parse_show(["percept", "maps", "show", "decisions"]).json);
 }
 
 #[test]
-fn maps_show_format_md_and_its_markdown_alias_both_parse_to_md() {
-    assert_eq!(
-        parse_show(["percept", "maps", "show", "decisions", "--format", "md"]).format,
-        Format::Md
-    );
-    assert_eq!(
-        parse_show([
-            "percept",
-            "maps",
-            "show",
-            "decisions",
-            "--format",
-            "markdown"
-        ])
-        .format,
-        Format::Md
-    );
-}
-
-#[test]
-fn maps_show_rejects_an_unknown_format() {
-    assert!(
-        Cli::try_parse_from(["percept", "maps", "show", "decisions", "--format", "yaml"]).is_err()
-    );
+fn maps_show_json_flag_sets_it() {
+    assert!(parse_show(["percept", "maps", "show", "decisions", "--json"]).json);
 }
 
 fn parse_show<const N: usize>(argv: [&str; N]) -> ShowMapArgs {
@@ -559,6 +534,17 @@ fn parse_show<const N: usize>(argv: [&str; N]) -> ShowMapArgs {
 }
 
 #[test]
+fn maps_describe_parses_the_map_name() {
+    let cli = Cli::try_parse_from(["percept", "maps", "describe", "decisions"]).unwrap();
+    match cli.command {
+        Some(Command::Maps {
+            command: MapsCommand::Describe(args),
+        }) => assert_eq!(args.map, "decisions"),
+        _ => panic!("expected maps describe"),
+    }
+}
+
+#[test]
 fn all_paths_folds_every_distinct_path_while_the_default_folds_root() {
     let events = [
         node_added_at("/there", "decision", "Go"),
@@ -566,7 +552,7 @@ fn all_paths_folds_every_distinct_path_while_the_default_folds_root() {
     ];
     let folded = |all_paths: bool| {
         let mut seen = Vec::new();
-        per_path(all_paths, Format::Json, Path::new(ROOT), &events, |path| {
+        per_path(all_paths, false, Path::new(ROOT), &events, |path| {
             seen.push(path.to_path_buf());
             Ok(())
         })
@@ -1081,4 +1067,14 @@ fn a_record_why_line_under_an_existing_node_sets_the_changes_why_not_a_property(
     let map = Map::fold(crate::core::testing::tasks(), &events).unwrap();
     let task = map.find("task", "cancel a turn").unwrap();
     assert_eq!(task.properties.get("why").unwrap(), "Esc drops the session");
+}
+
+#[test]
+fn start_reads_and_appends_no_event() {
+    let log = FakeLog::seeded(vec![node_added("question", "why?")]);
+    let checkout = Fixture::new();
+
+    start(&log, &schemas(), Path::new(ROOT), checkout.path()).unwrap();
+
+    assert_eq!(log.load().unwrap().len(), 1);
 }

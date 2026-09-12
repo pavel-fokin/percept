@@ -91,13 +91,18 @@ pub enum Command {
     /// Open the review page: an HTTP server on `127.0.0.1` serving the
     /// embedded page, until the process is killed.
     Review,
+    /// What this project has recorded, what needs attention, and where
+    /// to go next.
+    Start,
 }
 
 #[derive(Subcommand)]
 pub enum MapsCommand {
-    /// Every map with its node and edge counts, one JSON object per line.
+    /// Every map with its purpose, size, and kinds; `--json` for one
+    /// object per line.
     List(ListMapsArgs),
-    /// One map's nodes, then its edges, one JSON object per line.
+    /// One map as Markdown; `--json` for its nodes, then its edges, one
+    /// object per line.
     Show(ShowMapArgs),
     /// Add a node to a map. Prints the minted node id.
     AddNode(AddNodeArgs),
@@ -119,27 +124,25 @@ pub enum MapsCommand {
     /// `why`-only comment - subject to the same rank rule a rename or
     /// removal always has. Prints the node's id.
     ChangeNode(ChangeNodeArgs),
+    /// One map's kinds, relations, and how to record to it, from its
+    /// schema.
+    Describe(DescribeMapArgs),
 }
 
-/// How `maps show` and `maps list` print a map.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
-pub enum Format {
-    /// One JSON object per line - map, then node, then edge.
-    #[default]
-    Json,
-    /// The rendered Markdown, as written to `.percept/<map>.md`.
-    #[value(alias = "markdown")]
-    Md,
+#[derive(Args)]
+pub struct DescribeMapArgs {
+    /// The map's name, as `maps list` prints it.
+    map: String,
 }
 
 #[derive(Args)]
 pub struct ShowMapArgs {
     /// The map's name, as `maps list` prints it.
     map: String,
-    /// `json` (default) for one JSON object per line, `md` for the
-    /// rendered Markdown.
-    #[arg(long, value_enum, default_value_t = Format::Json)]
-    format: Format,
+    /// Print one JSON object per line - map, then node, then edge -
+    /// instead of the default Markdown.
+    #[arg(long)]
+    json: bool,
     /// Repeatable. Keep only nodes of any of these kinds, and the edges
     /// between them.
     #[arg(long)]
@@ -170,10 +173,10 @@ pub struct ListMapsArgs {
     /// one map per path.
     #[arg(long)]
     all_paths: bool,
-    /// `json` (default) for one JSON object per line, `md` for a
-    /// Markdown table.
-    #[arg(long, value_enum, default_value_t = Format::Json)]
-    format: Format,
+    /// Print one JSON object per line instead of the default Markdown
+    /// table.
+    #[arg(long)]
+    json: bool,
 }
 
 /// What every map change names: the map, and the events it was drawn
@@ -626,7 +629,7 @@ fn print_text(text: &str) -> Result<(), Box<dyn std::error::Error>> {
 /// paths look alike, short ids included.
 fn per_path(
     all_paths: bool,
-    format: Format,
+    json: bool,
     root: &Path,
     events: &[crate::core::Event],
     mut print: impl FnMut(&Path) -> Result<(), Box<dyn std::error::Error>>,
@@ -635,10 +638,12 @@ fn per_path(
         return print(root);
     }
     for (i, path) in mapstore::paths(events).iter().enumerate() {
-        let marker = match format {
-            Format::Md if i == 0 => format!("path {}\n\n", path.display()),
-            Format::Md => format!("\npath {}\n\n", path.display()),
-            Format::Json => format!("{}\n", serde_json::json!({ "path": path })),
+        let marker = if json {
+            format!("{}\n", serde_json::json!({ "path": path }))
+        } else if i == 0 {
+            format!("path {}\n\n", path.display())
+        } else {
+            format!("\npath {}\n\n", path.display())
         };
         print_text(&marker)?;
         print(path)?;
@@ -656,11 +661,12 @@ pub fn maps_list(
     project: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let events = log.load()?;
-    per_path(args.all_paths, args.format, project, &events, |path| {
+    per_path(args.all_paths, args.json, project, &events, |path| {
         let maps = schemas.fold_all(mapstore::of_path(&events, path))?;
-        match args.format {
-            Format::Json => print_lines(maps.iter().map(mapstore::encode_map)),
-            Format::Md => print_text(&mapstore::catalogue(&maps)),
+        if args.json {
+            print_lines(maps.iter().map(mapstore::encode_map))
+        } else {
+            print_text(&mapstore::catalogue(&maps))
         }
     })
 }
@@ -675,9 +681,32 @@ pub fn maps_show(
     root: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let events = log.load()?;
-    per_path(args.all_paths, args.format, root, &events, |path| {
+    per_path(args.all_paths, args.json, root, &events, |path| {
         print_map(mapstore::fold_map_at(schemas, &args.map, &events, path)?, &args)
     })
+}
+
+/// `percept start`: loads the log, folds every schema at `root`'s path,
+/// and prints `mapstore::start`'s render, cut since the last session
+/// anyone started here. Appends nothing: a look, not a checkpoint.
+pub fn start(
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    root: &Path,
+    checkout: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let events = log.load()?;
+    let maps = schemas.fold_all(mapstore::of_path(&events, root))?;
+    let since = mapstore::last_session(mapstore::of_path(&events, root));
+    print_text(&mapstore::start(&maps, &events, root, checkout, since))
+}
+
+/// Prints the map `args.map` names' capabilities from its schema alone:
+/// what it can hold and how to write to it. Needs no log and no fold,
+/// so it works on an empty map.
+pub fn maps_describe(args: DescribeMapArgs, schemas: &Schemas) -> Result<(), Box<dyn std::error::Error>> {
+    let schema = schemas.find(&args.map)?;
+    print_text(&mapstore::describe(&schema))
 }
 
 /// `maps_show`'s tail: cut `map` to `args`'s filters, then print it
@@ -704,9 +733,10 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
     if !selection.is_whole() {
         eprintln!("{}", mapstore::encode_fragment(&fragment));
     }
-    match args.format {
-        Format::Json => print_lines(mapstore::encode_lines(fragment.map(), true)),
-        Format::Md => print_text(&mapstore::markdown(fragment.map())),
+    if args.json {
+        print_lines(mapstore::encode_lines(fragment.map(), true))
+    } else {
+        print_text(&mapstore::markdown(fragment.map()))
     }
 }
 

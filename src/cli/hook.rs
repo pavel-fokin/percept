@@ -17,22 +17,21 @@
 //! or reply can name it as its cause. Opening it also takes its lock,
 //! held exclusively for the length of one hook call, so two hook calls
 //! for the same turn never race.
+//!
+//! `SessionStart`'s `additionalContext` is exactly `mapstore::start`'s
+//! output - the same text `percept start` prints from the shell.
 
-use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{BufRead, Read};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::core::{
-    cited_label, Actor, Event, EventId, EventLog, Map, Node, Payload, Schemas, Source, Written,
-};
-use crate::mapstore::{block_header, capped_lines, changed_line, last_session, line_id, of_path};
-use crate::shared::Timestamp;
+use crate::core::{Actor, Event, EventId, EventLog, Schemas, Source};
+use crate::mapstore::{self, last_session, of_path};
 use crate::store::TurnState;
-use crate::workspace;
+
 
 /// `percept hook <client>` - `client` names the writer whose turn this
 /// is, and becomes every event's source.
@@ -166,14 +165,12 @@ pub fn run(
     }
 }
 
-/// `SessionStart`: finds the previous `session.started` event this
-/// source recorded against this project, if any - what a fragment cuts
-/// the log to since - records a fresh one for the next call to find,
-/// and folds every log-backed schema to report what each map gained
-/// since then and where to read the rest. What "gained" means is read
-/// off `Schema::headline_kinds`, never off a map's name, so a
-/// project's own schema (an `ideas` map, say) reports without any
-/// code naming it.
+/// `SessionStart`: folds every log-backed schema from the events
+/// recorded before this call, so `mapstore::start`'s own since-cut finds
+/// the previous session and not this one, then records a fresh
+/// `session.started` for the next call to find. The
+/// `additionalContext` is exactly what `percept start` prints from the
+/// shell.
 fn start_session(
     source: &Source,
     log: &dyn EventLog,
@@ -181,255 +178,18 @@ fn start_session(
     checkout: &Path,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let events = log.load()?;
-    let since = last_session(&events, source);
+    let maps = schemas.fold_all(of_path(&events, &source.path))?;
+    let since = last_session(events.iter().filter(|event| event.source() == source));
+    let rendered = mapstore::start(&maps, &events, &source.path, checkout, since);
 
     log.append(&Event::session_started(source.clone()))?;
-
-    let project = project_name(source);
-    let header = match since {
-        Some(at) => format!("percept · project {project}\nsince your last session here ({at})"),
-        None => format!("percept · project {project}\nfirst session here"),
-    };
-
-    let maps = schemas.fold_all(of_path(&events, &source.path))?;
-
-    let mut sections = vec![header];
-    if let Some(at) = since {
-        sections.push(gained_block(&maps, at));
-    }
-    if let Some(block) = changed_since_recorded_block(&maps, &events, checkout) {
-        sections.push(block);
-    }
-    sections.extend(map_pointers(&maps));
-    sections.push(RULES.to_string());
 
     Ok(json!({
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
-            "additionalContext": sections.join("\n\n"),
+            "additionalContext": rendered,
         }
     }))
-}
-
-/// The recording rules, printed after the fragment on every session
-/// start. A stranger's project has no AGENTS.md or skill naming them,
-/// so this block is the one place the model meets them, and the
-/// recipe is complete enough to run as printed.
-const RULES: &str = "\
-recording
-- Before proposing a design, look: percept maps show decisions --around <id>, or --format md for the whole map.
-- When the user says yes to a proposal, record it at once, citing the prompt id the hook printed:
-    percept maps record decisions --actor agent --source <prompt id> <<'EOF'
-    question \"what was asked\"
-    decision \"what was chosen\"
-      why \"the grounds\"
-      resolves question
-    option \"an alternative that lost\"
-      why \"why it lost\"
-      answers question
-    EOF
-- A claim that rests on a file cites the text it read: an indented line, cites src/path.rs:10-20, under the node.
-- A decision that changes an earlier one adds a supersedes <id> line under it; never remove a node.
-- A decision that no longer seems to fit is not yours to rewrite: raise a question with a reopens <id> line under it, and let the user settle it.
-- A node whose last change is the user's carries their why: never propose it again, and never rewrite or remove it - the map refuses; a correction the user agrees is a new decision with a supersedes line.
-- A task is added with its why and state \"open\": task \"what to do\", then why \"what it costs undone\" and state \"open\" indented under it; the map refuses one without both.
-- Close a task by changing it, not by adding a node: t4 on its own line, then state \"done\" and why \"<commit>: what happened\" indented under it - under an existing node, why is the change's why, not a property (state \"dropped\" and why for one dropped, state \"open\" to reopen one). A task the user wrote takes only state from you; its name and why are theirs.
-- Close the session with one line naming what was recorded: Recorded to decisions: q1, d1, o1.";
-
-/// What each folded map gained since `since`: a counts line for every
-/// map, in fold order, then up to `mapstore::LIMIT` lines per map that
-/// gained anything - a node's last change is compared directly, not
-/// `Map::since`, which would also surface an older node a fresh edge
-/// only touched. Each line carries who last changed the node, and why,
-/// when its last change is not its addition.
-fn gained_block(maps: &[Map], since: Timestamp) -> String {
-    let per_map: Vec<Vec<&Node>> = maps
-        .iter()
-        .map(|map| map.headlines().filter(|node| node.changed().at >= since).collect())
-        .collect();
-
-    let counts = maps
-        .iter()
-        .zip(&per_map)
-        .map(|(map, gained)| format!("{} +{}", map.schema().name, gained.len()))
-        .collect::<Vec<_>>()
-        .join("   ");
-
-    let mut lines = vec![counts];
-    for (map, gained) in maps.iter().zip(&per_map) {
-        if gained.is_empty() {
-            continue;
-        }
-        lines.extend(capped_lines(
-            gained
-                .iter()
-                .map(|node| {
-                    let mut line = format!("{} {} {:?}", line_id(map, node), node.kind, node.name);
-                    if let Some(changed) = changed_line(node) {
-                        line.push_str(&format!(" \u{b7} {changed}"));
-                    }
-                    line
-                })
-                .collect(),
-        ));
-    }
-    lines.join("\n")
-}
-
-/// What every current headline node cites that no longer matches the
-/// working tree - a citation whose file moved on since it was
-/// seen. `None` when nothing changed, so `start_session` omits
-/// the block entirely rather than printing an empty one.
-///
-/// Builds two indexes over `events` once, both over `file.cited`
-/// events only - id to event, and causation id to the events it
-/// caused - so no node's check re-reads the log: `id_to_event`
-/// resolves a node's `sources` entries, `later_citations` walks a
-/// citation forward to the newest re-citation of the same file before
-/// it is checked against the tree. `cache` memoises each cited path's
-/// normalised tree text - `None` for one that is gone - for the rest
-/// of this call, so a path cited by more than one node is read once.
-fn changed_since_recorded_block(maps: &[Map], events: &[Event], checkout: &Path) -> Option<String> {
-    let file_cited: Vec<&Event> = events
-        .iter()
-        .filter(|event| matches!(event.payload(), Payload::FileCited { .. }))
-        .collect();
-    let id_to_event: HashMap<EventId, &Event> =
-        file_cited.iter().map(|event| (event.id(), *event)).collect();
-    let mut later_citations: HashMap<EventId, Vec<&Event>> = HashMap::new();
-    for event in &file_cited {
-        if let Some(cause) = event.causation_id() {
-            later_citations.entry(cause).or_default().push(event);
-        }
-    }
-
-    let mut cache: HashMap<PathBuf, Option<String>> = HashMap::new();
-    let mut lines: Vec<String> = Vec::new();
-    for map in maps {
-        for node in map.headlines() {
-            let findings = node_changes(node, &id_to_event, &later_citations, checkout, &mut cache);
-            if !findings.is_empty() {
-                lines.push(format!("{} cites {}", line_id(map, node), findings.join(", ")));
-            }
-        }
-    }
-
-    if lines.is_empty() {
-        return None;
-    }
-
-    let mut block = vec![block_header("changed since recorded", lines.len())];
-    block.extend(capped_lines(lines));
-    Some(block.join("\n"))
-}
-
-/// `node`'s own `changed`/`gone` findings, one per source that names a
-/// `file.cited` event, checked at its newest re-citation.
-fn node_changes(
-    node: &Node,
-    id_to_event: &HashMap<EventId, &Event>,
-    later_citations: &HashMap<EventId, Vec<&Event>>,
-    checkout: &Path,
-    cache: &mut HashMap<PathBuf, Option<String>>,
-) -> Vec<String> {
-    node.sources
-        .iter()
-        .filter_map(|source_id| {
-            let event = id_to_event.get(source_id)?;
-            let newest = newest_citation(event, later_citations);
-            let Payload::FileCited { path, lines, excerpt } = newest.payload() else {
-                return None;
-            };
-            citation_status(cache, checkout, path, excerpt)
-                .map(|status| format!("{} {status}", cited_label(path, *lines)))
-        })
-        .collect()
-}
-
-/// Follows `event` forward through `later_citations`, each hop the
-/// latest re-citation of the same file caused by the one before it -
-/// a later citation of a different path is not a re-citation of this
-/// one, so it is ignored. A visited set stops a causation cycle a
-/// hand-edited log could hold from spinning forever.
-fn newest_citation<'a>(
-    event: &'a Event,
-    later_citations: &HashMap<EventId, Vec<&'a Event>>,
-) -> &'a Event {
-    let Payload::FileCited { path, .. } = event.payload() else {
-        return event;
-    };
-    let mut current = event;
-    let mut visited = HashSet::from([event.id()]);
-    while let Some(next) = later_citations
-        .get(&current.id())
-        .into_iter()
-        .flatten()
-        .filter(|candidate| {
-            matches!(candidate.payload(), Payload::FileCited { path: p, .. } if p == path)
-        })
-        .filter(|candidate| visited.insert(candidate.id()))
-        .max_by_key(|candidate| candidate.created_at())
-    {
-        current = next;
-    }
-    current
-}
-
-/// `gone` when `path` under `checkout` is missing or binary; `changed`
-/// when it no longer contains `excerpt` as a substring, or `excerpt`
-/// normalises to nothing to compare against; `None` when it still
-/// reads. Both sides go through `normalize`; the tree's side is read
-/// through `cache`, so a path more than one citation names is read and
-/// normalised once.
-fn citation_status(
-    cache: &mut HashMap<PathBuf, Option<String>>,
-    checkout: &Path,
-    path: &Path,
-    excerpt: &str,
-) -> Option<&'static str> {
-    let excerpt = normalize(excerpt);
-    if excerpt.is_empty() {
-        return Some("changed");
-    }
-    let text = cache
-        .entry(path.to_path_buf())
-        .or_insert_with(|| workspace::read_text_lossy(&checkout.join(path)).ok().map(|t| normalize(&t)));
-    match text {
-        Some(text) if text.contains(&excerpt) => None,
-        _ => Some(if text.is_some() { "changed" } else { "gone" }),
-    }
-}
-
-/// Each line's trailing whitespace stripped, then leading and trailing
-/// blank lines trimmed - the one normalisation both sides of a
-/// `changed since recorded` comparison go through, so a citation whose
-/// stored excerpt padded its range with context still matches.
-fn normalize(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().map(|line| line.trim_end()).collect();
-    let start = lines.iter().position(|line| !line.is_empty()).unwrap_or(lines.len());
-    let end = lines.iter().rposition(|line| !line.is_empty()).map_or(start, |i| i + 1);
-    lines[start..end].join("\n")
-}
-
-/// One pointer line per map that has a headline node, so a session
-/// start names every map worth opening without listing what is in it -
-/// the render behind `percept maps show` is what says that.
-fn map_pointers(maps: &[Map]) -> Vec<String> {
-    maps.iter()
-        .filter(|map| map.headlines().next().is_some())
-        .map(|map| format!("percept maps show {} --format md", map.schema().name))
-        .collect()
-}
-
-
-/// `source.path`'s last component, the name a reader knows the project
-/// by - falling back to the whole path on the rare root with none.
-fn project_name(source: &Source) -> String {
-    source
-        .path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| source.path.display().to_string())
 }
 
 /// `UserPromptSubmit`: clears the turn's previous cause before doing

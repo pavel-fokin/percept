@@ -48,7 +48,8 @@
   "permissions": {
     "allow": [
       "Bash(percept maps *)",
-      "Bash(percept events *)"
+      "Bash(percept events *)",
+      "Bash(percept start*)"
     ]
   }
 }

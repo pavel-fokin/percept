@@ -1,11 +1,9 @@
-use std::path::PathBuf;
-
 use serde_json::Value;
 
 use super::*;
 use crate::core::testing::{
-    created_at, edge_added, human, node_added_by, node_added_citing, schemas, source, source_at,
-    FakeLog,
+    created_at, edge_added, file_cited, human, node_added_by, node_added_citing, schemas, source,
+    source_at, FakeLog,
 };
 use crate::core::{Actor, Event, EventId, Payload};
 use crate::shared::Timestamp;
@@ -16,19 +14,6 @@ fn message_received(actor: Actor, content: &str) -> Event {
 
 fn message_received_at(source: Source, actor: Actor, content: &str) -> Event {
     Event::new(actor, source, None, Payload::MessageReceived { content: content.to_string() })
-}
-
-fn file_cited(path: &str, lines: Option<(u32, u32)>, excerpt: &str) -> Event {
-    Event::new(
-        Actor::Agent,
-        source("test"),
-        None,
-        Payload::FileCited {
-            path: PathBuf::from(path),
-            lines,
-            excerpt: excerpt.to_string(),
-        },
-    )
 }
 
 fn cut_body_since(events: Vec<Event>, since: Option<Timestamp>) -> Value {

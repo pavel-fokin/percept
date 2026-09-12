@@ -14,8 +14,6 @@ It serves Claude Code and Codex through hooks and exposes the log and
 maps on the command line.
 
 - [AGENTS.md](AGENTS.md) - the design, the domain, and the architecture.
-- [.percept/index.md](.percept/index.md) - the directory of this repo's maps.
-- [docs](docs) - proposals and related work.
 
 ## Contents
 
@@ -62,7 +60,8 @@ percept init claude-code       # writes .claude/settings.json hooks
 claude                         # work as usual; prompts and replies are recorded
 
 percept events search --since 1h
-percept maps show decisions --format md
+percept maps show decisions
+percept start                 # what's recorded, what needs attention, and where to go next
 ```
 
 `percept init codex` does the same for Codex. The [Coding
@@ -98,8 +97,8 @@ A map is folded live from the log on every read. Nothing is rendered
 to a file.
 
 ```sh
-percept maps list --format md
-percept maps show decisions --format md
+percept maps list
+percept maps show decisions
 percept maps show decisions --around 'question:Where does the event log live?'
 percept maps show decisions --since 1d
 percept maps show tasks --since 1d
@@ -149,8 +148,7 @@ A map's schema is a TOML file at `.percept/schemas/<name>.toml` naming
 its node and edge kinds and one line of purpose. `decisions` and
 `tasks` ship built in; this repo adds `ideas`. The rules for a map -
 who may remove what, how a decision is corrected - are in
-[AGENTS.md](AGENTS.md). How to read, check, and revise one is in the
-[percept skill](.agents/skills/percept/SKILL.md).
+[AGENTS.md](AGENTS.md).
 
 ## Coding clients
 
@@ -167,8 +165,8 @@ and per client only the files that point at it.
 
 `percept init <client>` writes the client's hook entries into the
 checkout, merging into an existing file. For Claude Code it also
-allows `percept maps` and `percept events` without a permission
-prompt. Both files are committed in this repo. Open the client from
+allows `percept maps`, `percept events`, and `percept start` without a
+permission prompt. Both files are committed in this repo. Open the client from
 the checkout and trust the repository; in Codex, `/hooks` reviews the
 capture hooks. Restart a running session to load the configuration.
 
@@ -176,12 +174,10 @@ The hooks call `percept hook <client>` on session start, each prompt,
 and each reply. `percept init <client> --capture` adds each completed
 tool call and its result, which fills the log with every file the
 agent read; this repo's own configs carry it, a project that only
-wants its decisions does not. Session start prints a bounded fragment
-of every map into the client's context: what changed since the last
-session, what you confirmed or disputed since then with your words,
-what is open, and whether any cited file has changed, then the
-recording rules. The other hooks append events under the client's
-name. A
+wants its decisions does not. Session start prints what `percept
+start` prints from the shell: what each map holds, what moved since
+the last session and which cited files changed, and the commands to
+go next. The other hooks append events under the client's name. A
 capture error goes to stderr and the hook exits non-zero, which is how
 the client shows it; the turn continues.
 

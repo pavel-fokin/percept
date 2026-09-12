@@ -249,10 +249,16 @@ async fn main() {
                 EventsCommand::Show(args) => cli::show(args, &log),
             }
         }),
-        Some(Command::Maps { command }) => open_log(&checkout).and_then(|log| {
-            let schemas = mapstore::load_schemas(&checkout)?;
+        // Schemas first: `describe` reads them alone, and must not fail
+        // on a log that cannot be opened.
+        Some(Command::Maps { command }) => mapstore::load_schemas(&checkout).and_then(|schemas| {
+            if let MapsCommand::Describe(args) = command {
+                return cli::maps_describe(args, &schemas);
+            }
+            let log = open_log(&checkout)?;
             let me = log.me();
             match command {
+                MapsCommand::Describe(_) => unreachable!(),
                 MapsCommand::List(args) => cli::maps_list(args, &log, &schemas, &root),
                 MapsCommand::Show(args) => cli::maps_show(args, &log, &schemas, &root),
                 MapsCommand::AddNode(args) => {
@@ -280,6 +286,10 @@ async fn main() {
             lab::headless_turn(false, args.prompt, args.yes, cli_source, &checkout).await
         }
         Some(Command::Init(args)) => cli::init::run(args, &checkout),
+        Some(Command::Start) => open_log(&checkout).and_then(|log| {
+            let schemas = mapstore::load_schemas(&checkout)?;
+            cli::start(&log, &schemas, &root, &checkout)
+        }),
         Some(Command::Review) => {
             let opened = open_log(&checkout).and_then(|log| {
                 let schemas = mapstore::load_schemas(&checkout)?;

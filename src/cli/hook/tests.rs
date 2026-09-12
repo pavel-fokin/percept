@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
 
@@ -6,8 +5,9 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::*;
-use crate::core::testing::{content, human, node_id, FakeLog};
+use crate::core::testing::{content, file_cited_payload, human, node_added_payload, FakeLog};
 use crate::core::{HumanId, Payload};
+use crate::shared::Timestamp;
 
 /// A checkout `run` can discover a root in - a `.percept` marker is
 /// enough, so a test needs no `git init` - plus the sessions directory
@@ -196,47 +196,6 @@ impl Fixture {
         self.seed_node_with_sources(map, kind, name, at, Vec::new())
     }
 
-    /// Appends an `edge.added` event resolving `from` against `to`, at
-    /// the same moment as `from` was recorded.
-    fn seed_edge(&self, map: &str, kind: &str, from: &Event, to: &Event) {
-        let event = Event::restore(
-            EventId::new(),
-            Actor::Human(human()),
-            self.source(),
-            None,
-            from.created_at(),
-            Payload::EdgeAdded {
-                map: map.to_string(),
-                kind: kind.to_string(),
-                from: node_id(from),
-                to: node_id(to),
-                sources: Vec::new(),
-            },
-        );
-        self.log.append(&event).unwrap();
-    }
-
-    /// Appends a `node.changed` event for `node`, carrying only `why`,
-    /// at `at` - the moment a "gained" test needs to control.
-    fn seed_changed(&self, map: &str, node: &Event, why: &str, at: Timestamp) {
-        let event = Event::restore(
-            EventId::new(),
-            Actor::Human(self.me),
-            self.source(),
-            None,
-            at,
-            Payload::NodeChanged {
-                map: map.to_string(),
-                node: node_id(node),
-                name: None,
-                properties: BTreeMap::new(),
-                sources: Vec::new(),
-                why: Some(why.to_string()),
-            },
-        );
-        self.log.append(&event).unwrap();
-    }
-
     /// Appends a `file.cited` event citing `path` (repo-relative)
     /// with `excerpt` as its text, `lines` the ranged read or `None`
     /// for the whole file, `at` the moment it was seen, caused by
@@ -255,11 +214,7 @@ impl Fixture {
             self.source(),
             causation,
             at,
-            Payload::FileCited {
-                path: PathBuf::from(path),
-                lines,
-                excerpt: excerpt.to_string(),
-            },
+            file_cited_payload(path, lines, excerpt),
         );
         self.log.append(&event).unwrap();
         event
@@ -279,12 +234,6 @@ impl Fixture {
         self.seed_node_by(Actor::Human(human()), map, kind, name, at, sources)
     }
 
-    /// `seed_node`, but written by the model - a judgment test needs
-    /// one, since a user-written node carries no standing to judge.
-    fn seed_agent_node(&self, map: &str, kind: &str, name: &str, at: Timestamp) -> Event {
-        self.seed_node_by(Actor::Agent, map, kind, name, at, Vec::new())
-    }
-
     fn seed_node_by(
         &self,
         actor: Actor,
@@ -300,15 +249,7 @@ impl Fixture {
             self.source(),
             None,
             at,
-            Payload::NodeAdded {
-                map: map.to_string(),
-                node: crate::core::NodeId::new(),
-                kind: kind.to_string(),
-                name: name.to_string(),
-                properties: std::collections::BTreeMap::new(),
-                sources,
-                seq: 0,
-            },
+            node_added_payload(map, kind, name, std::collections::BTreeMap::new(), sources),
         );
         self.log.append(&event).unwrap();
         event
@@ -409,11 +350,11 @@ fn prompt_context_names_the_committed_event() {
 }
 
 #[test]
-fn a_first_session_here_records_the_marker_and_says_so() {
+fn a_first_session_here_prints_starts_render_and_records_the_marker() {
     let fixture = Fixture::new();
     let context = fixture.session_start("codex");
 
-    assert!(context.contains("first session here"), "{context:?}");
+    assert!(context.contains("nothing recorded yet"), "{context:?}");
     let events = fixture.events();
     assert_eq!(events.len(), 1);
     assert!(matches!(events[0].payload(), Payload::SessionStarted));
@@ -421,14 +362,64 @@ fn a_first_session_here_records_the_marker_and_says_so() {
 }
 
 #[test]
-fn a_returning_session_reports_since_the_previous_one() {
+fn a_returning_session_still_prints_starts_render() {
     let fixture = Fixture::new();
     fixture.session_start("codex");
     let context = fixture.session_start("codex");
 
-    assert!(context.contains("since your last session here"), "{context:?}");
-    assert!(!context.contains("first session here"), "{context:?}");
+    assert!(context.contains("nothing recorded yet"), "{context:?}");
     assert_eq!(fixture.events().len(), 2);
+}
+
+#[test]
+fn the_context_carries_no_recording_section() {
+    let fixture = Fixture::new();
+    let context = fixture.session_start("codex");
+
+    assert!(!context.contains("recording\n"), "{context:?}");
+    assert!(!context.contains("Recorded to decisions:"), "{context:?}");
+}
+
+#[test]
+fn the_sessions_own_marker_does_not_count_as_the_last_session() {
+    let fixture = Fixture::new();
+    fixture.session_start("codex");
+    let since = fixture.since();
+
+    fixture.seed_node(
+        "decisions",
+        "question",
+        "a fresh one",
+        since.minus_minutes(-10).unwrap(),
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("+1 since last session"), "{context:?}");
+}
+
+#[test]
+fn a_changed_cited_file_reaches_the_hook_context() {
+    let fixture = Fixture::new();
+    fixture.write_file("src/a.rs", "fn one() { edited }\n");
+    let citation = fixture.seed_citation(
+        "src/a.rs",
+        Some((1, 1)),
+        "fn one() {}",
+        Timestamp::now(),
+        None,
+    );
+    fixture.seed_node_with_sources(
+        "decisions",
+        "question",
+        "why a?",
+        Timestamp::now(),
+        vec![citation.id()],
+    );
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("cites src/a.rs:1-1 changed"), "{context:?}");
 }
 
 #[test]
@@ -436,7 +427,7 @@ fn a_different_client_or_project_sees_its_own_first_session() {
     let fixture = Fixture::new();
     fixture.session_start("codex");
 
-    assert!(fixture.session_start("claude-code").contains("first session here"));
+    assert!(fixture.session_start("claude-code").contains("nothing recorded yet"));
 
     let other = fixture.other_root();
     let output = fixture
@@ -452,7 +443,7 @@ fn a_different_client_or_project_sees_its_own_first_session() {
     let context = output["hookSpecificOutput"]["additionalContext"]
         .as_str()
         .unwrap();
-    assert!(context.contains("first session here"), "{context:?}");
+    assert!(context.contains("nothing recorded yet"), "{context:?}");
 }
 
 #[test]
@@ -799,413 +790,4 @@ fn malformed_input_reports_an_error_without_blocking() {
     let fixture = Fixture::new();
     let err = fixture.call_raw("codex", "{broken").unwrap_err();
     assert!(!err.to_string().is_empty());
-}
-
-#[test]
-fn a_first_session_with_history_points_at_every_map_that_has_a_headline() {
-    let fixture = Fixture::new();
-    fixture.seed_node("decisions", "question", "why blue?", Timestamp::now());
-    fixture.seed_node("tasks", "task", "ship it", Timestamp::now());
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("percept maps show decisions --format md"), "{context:?}");
-    assert!(context.contains("percept maps show tasks --format md"), "{context:?}");
-    assert!(!context.contains("decisions +"), "{context:?}");
-    assert!(!context.contains("tasks +"), "{context:?}");
-}
-
-#[test]
-fn a_map_with_no_headline_yet_has_no_pointer() {
-    let fixture = Fixture::new();
-    fixture.seed_node("tasks", "task", "ship it", Timestamp::now());
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("percept maps show tasks --format md"), "{context:?}");
-    assert!(!context.contains("percept maps show decisions --format md"), "{context:?}");
-}
-
-#[test]
-fn every_session_start_ends_with_the_recording_rules() {
-    let fixture = Fixture::new();
-
-    let first = fixture.session_start("codex");
-    let returning = fixture.session_start("codex");
-
-    for context in [first, returning] {
-        let rules = context.rsplit("\n\n").next().unwrap();
-        assert!(rules.starts_with("recording\n"), "{context:?}");
-        assert!(rules.contains("percept maps record decisions --actor agent --source <prompt id>"));
-        assert!(rules.contains(
-            "A node whose last change is the user's carries their why: never propose it again"
-        ));
-        assert!(rules.contains("why is the change's why, not a property"));
-        assert!(rules.contains("Recorded to decisions:"));
-    }
-}
-
-#[test]
-fn a_returning_session_reports_counts_and_excludes_older_gains() {
-    let fixture = Fixture::new();
-    fixture.session_start("codex");
-    let since = fixture.since();
-
-    fixture.seed_node("decisions", "question", "an older one", since.minus_minutes(60).unwrap());
-    fixture.seed_node(
-        "decisions",
-        "question",
-        "a fresh one",
-        since.minus_minutes(-60).unwrap(),
-    );
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("decisions +1"), "{context:?}");
-    assert!(context.contains("tasks +0"), "{context:?}");
-    // The gained line for a question names its kind; the open section's
-    // line for the same node does not, so this pattern only ever comes
-    // from the gained block.
-    assert!(context.contains("question \"a fresh one\""), "{context:?}");
-    assert!(!context.contains("question \"an older one\""), "{context:?}");
-}
-
-#[test]
-fn a_node_changed_by_the_human_since_the_previous_session_shows_who_and_why() {
-    let fixture = Fixture::new();
-    fixture.session_start("codex");
-    let since = fixture.since();
-
-    let decision = fixture.seed_agent_node(
-        "decisions",
-        "decision",
-        "a terminal render of the since-cut, the page later",
-        since.minus_minutes(120).unwrap(),
-    );
-    fixture.seed_changed(
-        "decisions",
-        &decision,
-        "never proposed",
-        since.minus_minutes(-30).unwrap(),
-    );
-
-    let context = fixture.session_start("codex");
-
-    assert!(
-        context.contains(
-            "decision \"a terminal render of the since-cut, the page later\" \u{b7} changed by human: \"never proposed\""
-        ),
-        "{context:?}"
-    );
-}
-
-#[test]
-fn a_gained_node_never_changed_carries_no_changed_by_mark() {
-    let fixture = Fixture::new();
-    fixture.session_start("codex");
-    let since = fixture.since();
-    fixture.seed_node(
-        "decisions",
-        "question",
-        "unchanged",
-        since.minus_minutes(-10).unwrap(),
-    );
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("question \"unchanged\""), "{context:?}");
-    assert!(!context.contains("unchanged\" \u{b7} changed by"), "{context:?}");
-}
-
-#[test]
-fn resolving_an_old_question_does_not_report_it_as_gained() {
-    // `Map::since` would also surface `question` here, since a fresh
-    // `resolves` edge touches it; the gained block compares `added_at`
-    // directly instead, so only the decision itself counts as new.
-    let fixture = Fixture::new();
-    fixture.session_start("codex");
-    let since = fixture.since();
-
-    let question = fixture.seed_node(
-        "decisions",
-        "question",
-        "an old question",
-        since.minus_minutes(120).unwrap(),
-    );
-    let decision = fixture.seed_node(
-        "decisions",
-        "decision",
-        "a fresh decision",
-        since.minus_minutes(-30).unwrap(),
-    );
-    fixture.seed_edge("decisions", "resolves", &decision, &question);
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("decisions +1"), "{context:?}");
-    assert!(context.contains("decision \"a fresh decision\""), "{context:?}");
-    assert!(!context.contains("an old question"), "{context:?}");
-}
-
-#[test]
-fn an_unchanged_seen_file_reports_nothing() {
-    let fixture = Fixture::new();
-    fixture.write_file("src/a.rs", "fn one() {}\nfn two() {}\n");
-    let citation = fixture.seed_citation(
-        "src/a.rs",
-        Some((1, 1)),
-        "fn one() {}",
-        Timestamp::now(),
-        None,
-    );
-    fixture.seed_node_with_sources(
-        "decisions",
-        "question",
-        "why a?",
-        Timestamp::now(),
-        vec![citation.id()],
-    );
-
-    let context = fixture.session_start("codex");
-
-    assert!(!context.contains("changed since recorded"), "{context:?}");
-}
-
-#[test]
-fn an_edited_range_reports_changed() {
-    let fixture = Fixture::new();
-    fixture.write_file("src/a.rs", "fn one() { edited }\n");
-    let citation = fixture.seed_citation(
-        "src/a.rs",
-        Some((1, 1)),
-        "fn one() {}",
-        Timestamp::now(),
-        None,
-    );
-    fixture.seed_node_with_sources(
-        "decisions",
-        "question",
-        "why a?",
-        Timestamp::now(),
-        vec![citation.id()],
-    );
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("changed since recorded"), "{context:?}");
-    assert!(context.contains("src/a.rs:1-1 changed"), "{context:?}");
-}
-
-#[test]
-fn a_deleted_file_reports_gone() {
-    let fixture = Fixture::new();
-    let citation = fixture.seed_citation(
-        "src/missing.rs",
-        None,
-        "fn gone() {}",
-        Timestamp::now(),
-        None,
-    );
-    fixture.seed_node_with_sources(
-        "tasks",
-        "task",
-        "fix it",
-        Timestamp::now(),
-        vec![citation.id()],
-    );
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("changed since recorded"), "{context:?}");
-    assert!(context.contains("src/missing.rs gone"), "{context:?}");
-}
-
-#[test]
-fn text_moved_to_other_lines_reports_nothing() {
-    let fixture = Fixture::new();
-    fixture.write_file("src/a.rs", "fn zero() {}\nfn one() {}\n");
-    let citation = fixture.seed_citation(
-        "src/a.rs",
-        Some((5, 5)),
-        "fn one() {}",
-        Timestamp::now(),
-        None,
-    );
-    fixture.seed_node_with_sources(
-        "decisions",
-        "question",
-        "why a?",
-        Timestamp::now(),
-        vec![citation.id()],
-    );
-
-    let context = fixture.session_start("codex");
-
-    assert!(!context.contains("changed since recorded"), "{context:?}");
-}
-
-#[test]
-fn a_re_citation_replaces_the_one_checked() {
-    let fixture = Fixture::new();
-    fixture.write_file("src/a.rs", "fn two() {}\n");
-    let first = fixture.seed_citation(
-        "src/a.rs",
-        Some((1, 1)),
-        "fn one() {}",
-        Timestamp::now().minus_minutes(10).unwrap(),
-        None,
-    );
-    let second = fixture.seed_citation(
-        "src/a.rs",
-        Some((1, 1)),
-        "fn two() {}",
-        Timestamp::now(),
-        Some(first.id()),
-    );
-    fixture.seed_node_with_sources(
-        "decisions",
-        "question",
-        "why a?",
-        Timestamp::now(),
-        vec![first.id()],
-    );
-    let _ = second;
-
-    let context = fixture.session_start("codex");
-
-    assert!(!context.contains("changed since recorded"), "{context:?}");
-}
-
-#[test]
-fn a_superseded_decision_is_still_a_headline_and_still_checked() {
-    // The core keeps no notion of "superseded" - a `supersedes` edge is
-    // a fact between two headline nodes, not a reason to skip one of
-    // them.
-    let fixture = Fixture::new();
-    let citation = fixture.seed_citation(
-        "src/gone.rs",
-        None,
-        "fn gone() {}",
-        Timestamp::now(),
-        None,
-    );
-    let old = fixture.seed_node_with_sources(
-        "decisions",
-        "decision",
-        "old answer",
-        Timestamp::now(),
-        vec![citation.id()],
-    );
-    let new = fixture.seed_node_with_sources(
-        "decisions",
-        "decision",
-        "new answer",
-        Timestamp::now(),
-        Vec::new(),
-    );
-    fixture.seed_edge("decisions", "supersedes", &new, &old);
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("changed since recorded"), "{context:?}");
-    assert!(context.contains("src/gone.rs gone"), "{context:?}");
-}
-
-#[test]
-fn a_map_with_a_headline_points_at_its_own_render() {
-    let fixture = Fixture::new();
-    fixture.seed_node(
-        "tasks",
-        "task",
-        "an older task",
-        Timestamp::now().minus_minutes(60).unwrap(),
-    );
-    fixture.seed_node("decisions", "question", "a newer question", Timestamp::now());
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("percept maps show tasks --format md"), "{context:?}");
-    assert!(context.contains("percept maps show decisions --format md"), "{context:?}");
-}
-
-#[test]
-fn a_later_citation_of_a_different_path_does_not_replace_the_one_checked() {
-    let fixture = Fixture::new();
-    fixture.write_file("src/a.rs", "fn one() {}\n");
-    let first = fixture.seed_citation(
-        "src/a.rs",
-        None,
-        "fn one() {}",
-        Timestamp::now().minus_minutes(10).unwrap(),
-        None,
-    );
-    // Caused by `first`, but a different path - not a re-citation of
-    // `src/a.rs`, so it must not stand in for it.
-    fixture.seed_citation(
-        "src/b.rs",
-        None,
-        "fn two() {}",
-        Timestamp::now(),
-        Some(first.id()),
-    );
-    fixture.seed_node_with_sources(
-        "decisions",
-        "question",
-        "why a?",
-        Timestamp::now(),
-        vec![first.id()],
-    );
-
-    let context = fixture.session_start("codex");
-
-    // `src/a.rs` still reads as recorded, so nothing changed.
-    assert!(!context.contains("changed since recorded"), "{context:?}");
-}
-
-#[test]
-fn a_cited_file_with_one_invalid_utf8_byte_elsewhere_still_reads() {
-    let fixture = Fixture::new();
-    let mut bytes = b"fn one() {}\n// ".to_vec();
-    bytes.push(0xff);
-    bytes.extend_from_slice(b"\n");
-    let full = fixture.root.join("src/a.rs");
-    std::fs::create_dir_all(full.parent().unwrap()).unwrap();
-    std::fs::write(&full, &bytes).unwrap();
-    let citation = fixture.seed_citation(
-        "src/a.rs",
-        Some((1, 1)),
-        "fn one() {}",
-        Timestamp::now(),
-        None,
-    );
-    fixture.seed_node_with_sources(
-        "decisions",
-        "question",
-        "why a?",
-        Timestamp::now(),
-        vec![citation.id()],
-    );
-
-    let context = fixture.session_start("codex");
-
-    assert!(!context.contains("changed since recorded"), "{context:?}");
-}
-
-#[test]
-fn a_citation_whose_excerpt_is_blank_reports_changed() {
-    let fixture = Fixture::new();
-    fixture.write_file("src/a.rs", "fn one() {}\n");
-    let citation = fixture.seed_citation("src/a.rs", None, "   \n  ", Timestamp::now(), None);
-    fixture.seed_node_with_sources(
-        "decisions",
-        "question",
-        "why a?",
-        Timestamp::now(),
-        vec![citation.id()],
-    );
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("changed since recorded"), "{context:?}");
-    assert!(context.contains("src/a.rs changed"), "{context:?}");
 }
