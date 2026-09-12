@@ -2,12 +2,11 @@
 //! `tasks`, embedded in the binary, and
 //! `<project>/.percept/schemas/*.toml`, which may replace a built-in
 //! by name or declare a new map. `core` stays serde-free, so the
-//! parsing and the checks a declared schema must pass live here.
-//! `index` is reserved for `.percept/index.md`, the map directory, and
-//! an `index.toml` is refused. A project file that replaces a built-in
-//! may only extend it: it must keep every node and edge kind and the
-//! same `headlines` the built-in declares, since the renderer and the
-//! write rules assume those kinds exist; it may add more.
+//! parsing and the checks a declared schema must pass live here. A
+//! project file that replaces a built-in may only extend it: it must
+//! keep every node and edge kind and the same `headlines` the built-in
+//! declares, since the renderer and the write rules assume those kinds
+//! exist; it may add more.
 
 use std::path::Path;
 
@@ -21,10 +20,6 @@ const TASKS_TOML: &str = include_str!("schemas/tasks.toml");
 /// Where a project's own schema files live, under the project root
 /// `checkout_root` finds.
 const SCHEMAS_DIR: &str = ".percept/schemas";
-
-/// `.percept/index.md` is the hand-written map directory; a schema by
-/// this name would clobber it when rendered.
-const INDEX: &str = "index";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -94,12 +89,6 @@ where
 pub fn load(project: &Path) -> Result<Schemas, Box<dyn std::error::Error>> {
     let mut folded = vec![parse("decisions", DECISIONS_TOML)?, parse("tasks", TASKS_TOML)?];
     for (stem, text) in project_files(project)? {
-        if stem == INDEX {
-            return Err(format!(
-                "{stem}.toml: index.md is the hand-written map directory, not a declared map"
-            )
-            .into());
-        }
         let schema = parse(&stem, &text)?;
         match folded.iter().position(|built_in| built_in.name == schema.name) {
             Some(at) => {
