@@ -215,7 +215,7 @@ fn pad_rows(rows: &[(String, String)]) -> Vec<String> {
 
 /// `<n> <state>` for every declared state of every headline kind of
 /// `map`, in declared order, skipping states no headline node is in -
-/// `3 open   2 answered` for the decisions map. Every state is
+/// `1 open   2 done` for a kind with those states. Every state is
 /// counted, since a schema lists them as a set and no position means
 /// "initial".
 fn state_counts(map: &Map) -> Vec<String> {

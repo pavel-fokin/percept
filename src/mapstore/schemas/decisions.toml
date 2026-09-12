@@ -1,10 +1,8 @@
 # The decisions map: what was asked, what was weighed, what was chosen
-# and on what grounds. An option answers its question, evidence
-# supports or contradicts an option, a decision resolves the question,
-# and a later decision supersedes an earlier one, so --around a
-# question reaches everything weighed for it. A question's state says
-# what became of it - answered, by a decision or by evidence alone, or
-# dropped - and the why of that change says how.
+# and on what grounds. An option answers its question and says why it
+# lost, a decision resolves the question, a later decision supersedes
+# an earlier one, and a question reopens a decision it puts in doubt,
+# so --around a question reaches everything weighed for it.
 
 name = "decisions"
 purpose = "what was asked, what was chosen, and why, so a settled question is not reopened"
@@ -12,17 +10,11 @@ headlines = ["question", "decision"]
 
 [[node]]
 kind = "question"
-gloss = "what was asked; its state says whether it is still open, answered, or dropped"
-state = ["open", "answered", "dropped"]
 
 [[node]]
 kind = "option"
 gloss = "an alternative that was weighed and lost, saying why in its `why` property"
 requires = ["why"]
-
-[[node]]
-kind = "evidence"
-gloss = "a fact that supports or contradicts an option"
 
 [[node]]
 kind = "decision"
@@ -31,16 +23,6 @@ kind = "decision"
 kind = "answers"
 from = "option"
 to = "question"
-
-[[edge]]
-kind = "supports"
-from = "evidence"
-to = "option"
-
-[[edge]]
-kind = "contradicts"
-from = "evidence"
-to = "option"
 
 [[edge]]
 kind = "resolves"

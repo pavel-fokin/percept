@@ -243,8 +243,8 @@ skips it.
   the process fit the work needs no reflection. Cutting a step counts
   for more than adding one. Aim for the smallest process that still
   catches mistakes. An approach the session tried and abandoned goes
-  into the decisions map as evidence, so no later session tries it
-  again. Work the session found and left undone goes into the
+  into the decisions map as an option with why it lost, so no later
+  session tries it again. Work the session found and left undone goes into the
   decisions map as an open question with its why, so the next session
   starts from the list and not from a re-read.
 

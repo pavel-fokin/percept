@@ -220,8 +220,8 @@ fn push_changed(out: &mut String, node: &Node, indent: &str) {
 /// incoming one as `- <neighbour> <kind>`, the neighbour named the way
 /// `marked_name` names any node. A neighbour of a kind that is not a
 /// headline also prints its own properties indented under that line -
-/// the one hop an option's `why` stays from its question; a second hop,
-/// like evidence under that option, is never reached from here.
+/// the one hop an option's `why` stays from its question; a second hop
+/// is never reached from here.
 fn push_edges(out: &mut String, map: &Map, node: &Node) {
     let headline_kinds = &map.schema().headline_kinds;
     for edge_kind in &map.schema().edge_kinds {

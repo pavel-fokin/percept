@@ -129,18 +129,13 @@ fn a_settles_key_is_an_unknown_field() {
 #[test]
 fn a_built_in_replacement_that_drops_a_kind_is_refused() {
     let fixture = Fixture::new();
-    let dropped = DECISIONS_TOML.replacen(
-        "[[node]]\nkind = \"evidence\"\ngloss = \"a fact that supports or contradicts an \
-         option\"\n\n",
-        "",
-        1,
-    );
+    let dropped = DECISIONS_TOML.replacen("[[node]]\nkind = \"decision\"\n\n", "", 1);
     fixture.write(".percept/schemas/decisions.toml", &dropped);
 
     let err = load(fixture.path()).err().unwrap().to_string();
 
     assert!(err.starts_with("decisions.toml:"), "{err}");
-    assert!(err.contains("evidence"), "{err}");
+    assert!(err.contains("decision"), "{err}");
 }
 
 #[test]
@@ -156,7 +151,7 @@ fn a_built_in_replacement_that_keeps_every_kind_and_adds_one_loads() {
 
     let decisions = schemas.find("decisions").unwrap();
     assert!(decisions.node_kind("goal").is_some());
-    assert!(decisions.node_kind("evidence").is_some());
+    assert!(decisions.node_kind("option").is_some());
 }
 
 #[test]
@@ -412,8 +407,8 @@ fn a_repeated_state_entry_is_refused() {
 fn a_built_in_replacement_that_changes_a_kind_s_states_is_refused() {
     let fixture = Fixture::new();
     let changed = DECISIONS_TOML.replacen(
-        "state = [\"open\", \"answered\", \"dropped\"]",
-        "state = [\"open\", \"answered\"]",
+        "[[node]]\nkind = \"question\"\n",
+        "[[node]]\nkind = \"question\"\nstate = [\"open\", \"answered\"]\n",
         1,
     );
     fixture.write(".percept/schemas/decisions.toml", &changed);
