@@ -33,13 +33,15 @@ fn rendered(events: &[Event], checkout: &Path) -> String {
 }
 
 #[test]
-fn nothing_recorded_prints_the_empty_state_and_only_a_describe_pointer() {
+fn nothing_recorded_names_every_map_and_how_to_record_to_each() {
     let text = start(&fold(&[]), &[], &root(), Fixture::new().path(), None);
 
     assert_eq!(
         text,
-        "percept \u{b7} test\nnothing recorded yet\n\n\
-         Next\n  how to record   percept maps describe <map>"
+        "percept \u{b7} test\nkeeps what this project settled: debates, chores\n\
+         nothing recorded yet\n\n\
+         Next\n  how to record debates   percept maps describe debates\n\
+         \x20 how to record chores    percept maps describe chores"
     );
 }
 

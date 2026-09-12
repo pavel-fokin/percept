@@ -16,9 +16,10 @@ use crate::workspace;
 /// `maps`, `events`, `root`, and `checkout` as the three blocks
 /// `start` prints: State, what each map holds; Attention, what moved
 /// since `since` and what it cites that no longer matches the tree;
-/// Next, the command that opens each. Empty when no map holds any node
-/// at all - a stranger's first run; when `maps` itself is empty - a
-/// project with no schema declared - only the project line and
+/// Next, the command that opens each. When no map holds any node at
+/// all - a stranger's first run - the maps are named and Next says how
+/// to record to each; when `maps` itself is empty - a project with no
+/// schema declared - only the project line and
 /// `super::NO_SCHEMAS_HINT` print. `since` is the caller's cut: the
 /// hook passes its own client's last session, so a review-page open
 /// never hides a client's gains from it, and `percept start` from the
@@ -31,17 +32,19 @@ pub fn start(maps: &[Map], events: &[Event], root: &Path, checkout: &Path, since
         return format!("{header}\n{}", super::NO_SCHEMAS_HINT);
     }
 
+    let names: Vec<&str> = maps.iter().map(|map| map.schema().name.as_str()).collect();
+    let header = format!(
+        "{header}\nkeeps what this project settled: {}",
+        names.join(", ")
+    );
+
     if maps.iter().all(|map| map.nodes().is_empty()) {
         let mut lines = vec![format!("{header}\nnothing recorded yet\n\nNext")];
-        lines.extend(pad_rows(&[how_to_record()]));
+        lines.extend(pad_rows(&describe_rows(maps)));
         return lines.join("\n");
     }
 
-    let names: Vec<&str> = maps.iter().map(|map| map.schema().name.as_str()).collect();
-    let mut sections = vec![format!(
-        "{header}\nkeeps what this project settled: {}",
-        names.join(", ")
-    )];
+    let mut sections = vec![header];
 
     let moved: Vec<Vec<&Node>> = maps
         .iter()
@@ -339,8 +342,20 @@ fn next_block(maps: &[Map], printed: &[(String, String)]) -> String {
     lines.join("\n")
 }
 
-/// The one Next row every render of a declared map carries, the
-/// empty state included.
+/// `how to record <map>` for every declared map - the empty state's
+/// whole Next block, where there is nothing to read and the map names
+/// are the only thing a first reader can act on.
+fn describe_rows(maps: &[Map]) -> Vec<(String, String)> {
+    maps.iter()
+        .map(|map| {
+            let name = &map.schema().name;
+            (format!("how to record {name}"), format!("percept maps describe {name}"))
+        })
+        .collect()
+}
+
+/// The one Next row every render of a map that holds something
+/// carries; its `read <map>` rows name the maps the placeholder takes.
 fn how_to_record() -> (String, String) {
     ("how to record".to_string(), "percept maps describe <map>".to_string())
 }
