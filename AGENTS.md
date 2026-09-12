@@ -139,8 +139,7 @@ Both are serde-free.
 
 Start with [.percept/index.md](.percept/index.md): one row per map
 saying what it is for, where it comes from, and how to open a fragment
-of it. The shared [percept skill](.agents/skills/percept/SKILL.md)
-covers selecting a fragment, checking a claim, and revising.
+of it.
 
 A map is judged by what it costs its reader, on three budgets:
 
