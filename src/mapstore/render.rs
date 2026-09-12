@@ -7,20 +7,14 @@ use std::fmt::Write as _;
 use crate::core::{Actor, EdgeEnd, Map, Node, Schema, Written};
 use crate::store::ids;
 
-/// What every rendered map opens with, so a reader who pastes it
-/// somewhere knows it is a fold, not a file to hand-edit.
-const PREAMBLE: &str = "Folded live from the percept log for this project, never written to a \
-    file. Change it with `percept maps`, not by hand.";
-
-/// `map` as Markdown: a heading and the preamble, then the map's body.
-/// A map with any headline kind renders as a `## contents` list and one
-/// `##` section per headline node, in the order `push_headlines` gives -
-/// see there. A map with none renders one `## <kind>` section per node
+/// `map` as Markdown: a heading, then the map's body. A map with any
+/// headline kind renders one `##` section per headline node, in the
+/// order `push_headlines` gives - see there. A map with none renders one `## <kind>` section per node
 /// kind that holds a node, plus a `## edges` section - see
 /// `push_by_kind`. Empty for a map with no nodes, past the preamble.
 pub fn markdown(map: &Map) -> String {
     let schema = map.schema();
-    let mut out = format!("# {}\n\n{PREAMBLE} {}\n", schema.name, guide(&schema.name));
+    let mut out = format!("# {}\n", schema.name);
 
     if map.nodes().is_empty() {
         out.push_str("\n(empty: nothing has been recorded here yet.)\n");
@@ -34,17 +28,6 @@ pub fn markdown(map: &Map) -> String {
     }
 
     out
-}
-
-/// The line every map's intro adds to the preamble, naming no kind:
-/// what the contents list gives, and the two ways to look further -
-/// around a node, or since an instant.
-fn guide(map: &str) -> String {
-    format!(
-        "A `## contents` list, then one `##` section per node it names, holding that node's \
-         properties and its edges. A node's neighbourhood: `percept maps show {map} --around \
-         'kind:name'`. What changed lately: `percept maps show {map} --since 1d`."
-    )
 }
 
 /// `maps list`: one `##` section per map, in the order the
@@ -170,7 +153,7 @@ fn push_node(out: &mut String, map: &Map, node: &Node) {
     }
 }
 
-/// A `## contents` list, then one `##` section per headline node, in an
+/// One `##` section per headline node, in an
 /// order this render alone gives meaning to - never the core's: by the
 /// index of its `state` property in its kind's declared list, unknown
 /// or missing last, then by when it was added. A kind with no states
@@ -189,7 +172,6 @@ fn push_headlines(out: &mut String, map: &Map) {
         return;
     }
 
-    push_contents(out, map, &headlines);
     for node in &headlines {
         let _ = write!(out, "\n## {}\n\n", marked_name(map, node));
         push_props(out, node, "");
@@ -211,19 +193,6 @@ fn state_rank(map: &Map, node: &Node) -> usize {
         .iter()
         .position(|state| state == value)
         .unwrap_or(usize::MAX)
-}
-
-/// One `## contents` line per headline, in the order given: its short
-/// id and name, plus `[<state>]` when it carries a `state` property.
-fn push_contents(out: &mut String, map: &Map, headlines: &[&Node]) {
-    out.push_str("\n## contents\n");
-    for node in headlines {
-        let _ = write!(out, "- {}", marked_name(map, node));
-        if let Some(state) = node.properties.get("state") {
-            let _ = write!(out, " [{state}]");
-        }
-        out.push('\n');
-    }
 }
 
 /// A node's properties, each on its own line under `indent` - a long
