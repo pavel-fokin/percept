@@ -17,7 +17,7 @@ mod map;
 mod render;
 mod schemas;
 
-pub(crate) use blocks::{block_header, capped_lines, changed_line, last_session, last_session_at, line_id, LIMIT};
+pub(crate) use blocks::{capped_lines, changed_line, last_session, last_session_at, line_id, LIMIT};
 pub use describe::describe;
 pub use map::{
     commit, commit_batch, encode_fragment, encode_lines, encode_map, encode_schema, fold_map, fold_map_at,

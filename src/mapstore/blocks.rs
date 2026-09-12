@@ -23,16 +23,6 @@ pub(crate) fn capped_lines(mut lines: Vec<String>) -> Vec<String> {
     lines
 }
 
-/// The header of a capped block: `label (total)`, or `label (total,
-/// showing LIMIT)` when `capped_lines` folds the rest into a count.
-pub(crate) fn block_header(label: &str, total: usize) -> String {
-    if total > LIMIT {
-        format!("{label} ({total}, showing {LIMIT})")
-    } else {
-        format!("{label} ({total})")
-    }
-}
-
 /// The short id `node` has on `map`, or a `kind:name` fallback for the
 /// unexpected case a headline node carries none.
 pub(crate) fn line_id(map: &Map, node: &Node) -> String {

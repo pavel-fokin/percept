@@ -36,9 +36,14 @@ struct Client {
     allow: &'static [&'static str],
 }
 
-/// The two `Bash` patterns `percept init claude-code` allows without
-/// asking, so a session can read the log and its maps on its own.
-const CLAUDE_ALLOW: [&str; 2] = ["Bash(percept maps *)", "Bash(percept events *)"];
+/// The three `Bash` patterns `percept init claude-code` allows without
+/// asking, so a session can read the log and its maps, and print
+/// `percept start`'s render, on its own.
+const CLAUDE_ALLOW: [&str; 3] = [
+    "Bash(percept maps *)",
+    "Bash(percept events *)",
+    "Bash(percept start*)",
+];
 
 const CLIENTS: [Client; 2] = [
     Client {

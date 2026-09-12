@@ -122,9 +122,8 @@ Both are serde-free.
   default, every path in turn with `--all-paths`. A map is read live, never
   rendered to a file a session commits: one log holds every branch, so
   a committed render would carry whichever branch's fold wrote it
-  last. `percept maps show <map>` from the shell,
-  `read_map` mid-turn, or the bounded fragment a session-start hook
-  prints give the same Markdown a render once did. A render lists a
+  last. `percept maps show <map>` from the shell, or `read_map`
+  mid-turn, give the same Markdown a render once did. A render lists a
   map's headline nodes in the order they were raised, each with its
   properties, its last change, and its edges by name; a node of
   another kind is one hop away, under the edge that reaches it, or
@@ -154,8 +153,8 @@ never move or merge it without the user's say.
 ## Decisions
 
 The decisions map for this repo, folded live from percept's own log:
-`percept maps show decisions`, or the bounded fragment a
-session start prints. Every node cites the event it was drawn from. It
+`percept maps show decisions`, or the start block a session prints.
+Every node cites the event it was drawn from. It
 is the record of why; where it disagrees with a rule above, the rule
 wins and the map says what the rule cost.
 

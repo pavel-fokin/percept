@@ -5,9 +5,8 @@
 //! reports, but a plain `start` is a look, not a checkpoint.
 //!
 //! `render` is pure - it takes whatever `start` already folded and
-//! read - so `hook`'s `SessionStart` can share its citation-checking
-//! and "gained since" logic without sharing its own output shape,
-//! which stays exactly what it was before this module existed.
+//! read - so `hook`'s `SessionStart` can print exactly this output as
+//! its `additionalContext`, after recording its own `session.started`.
 
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
@@ -43,18 +42,15 @@ pub(crate) fn project_name(root: &Path) -> String {
 }
 
 /// The headline nodes of `map` whose last change happened at or after
-/// `since` - what a session gained since it last looked. Shared by the
-/// hook's `gained_block` and this module's Attention block, so
-/// "gained" means the same thing in both.
-pub(crate) fn gained_nodes(map: &Map, since: Timestamp) -> Vec<&Node> {
+/// `since` - what a session gained since it last looked.
+fn gained_nodes(map: &Map, since: Timestamp) -> Vec<&Node> {
     map.headlines().filter(|node| node.changed().at >= since).collect()
 }
 
 /// What every current headline node cites that no longer matches the
 /// working tree - one `(map, node, findings)` per node with at least one
 /// stale citation, `findings` each `"<label> changed"` or `"<label>
-/// gone"`. The hook's `changed since recorded` block and this module's
-/// Attention block both build their lines from this.
+/// gone"`. This module's Attention block builds its lines from this.
 ///
 /// Builds two indexes over `events` once, both over `file.cited`
 /// events only - id to event, and causation id to the events it
@@ -64,7 +60,7 @@ pub(crate) fn gained_nodes(map: &Map, since: Timestamp) -> Vec<&Node> {
 /// it is checked against the tree. `cache` memoises each cited path's
 /// normalised tree text - `None` for one that is gone - for the rest
 /// of this call, so a path cited by more than one node is read once.
-pub(crate) fn citation_findings<'a>(
+fn citation_findings<'a>(
     maps: &'a [Map],
     events: &[Event],
     checkout: &Path,

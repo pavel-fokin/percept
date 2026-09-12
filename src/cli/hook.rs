@@ -17,6 +17,9 @@
 //! or reply can name it as its cause. Opening it also takes its lock,
 //! held exclusively for the length of one hook call, so two hook calls
 //! for the same turn never race.
+//!
+//! `SessionStart`'s `additionalContext` is exactly `start::render`'s
+//! output - the same text `percept start` prints from the shell.
 
 use std::fs::File;
 use std::io::{BufRead, Read};
@@ -25,9 +28,8 @@ use std::path::Path;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::core::{Actor, Event, EventId, EventLog, Map, Node, Schemas, Source};
-use crate::mapstore::{block_header, capped_lines, changed_line, last_session, line_id, of_path};
-use crate::shared::Timestamp;
+use crate::core::{Actor, Event, EventId, EventLog, Schemas, Source};
+use crate::mapstore::of_path;
 use crate::store::TurnState;
 
 use super::start;
@@ -164,14 +166,12 @@ pub fn run(
     }
 }
 
-/// `SessionStart`: finds the previous `session.started` event this
-/// source recorded against this project, if any - what a fragment cuts
-/// the log to since - records a fresh one for the next call to find,
-/// and folds every log-backed schema to report what each map gained
-/// since then and where to read the rest. What "gained" means is read
-/// off `Schema::headline_kinds`, never off a map's name, so a
-/// project's own schema (an `ideas` map, say) reports without any
-/// code naming it.
+/// `SessionStart`: folds every log-backed schema from the events
+/// recorded before this call, so `start::render`'s own since-cut finds
+/// the previous session and not this one, then records a fresh
+/// `session.started` for the next call to find. The
+/// `additionalContext` is exactly what `percept start` prints from the
+/// shell.
 fn start_session(
     source: &Source,
     log: &dyn EventLog,
@@ -179,127 +179,17 @@ fn start_session(
     checkout: &Path,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let events = log.load()?;
-    let since = last_session(&events, source);
+    let maps = schemas.fold_all(of_path(&events, &source.path))?;
+    let rendered = start::render(&maps, &events, &source.path, checkout);
 
     log.append(&Event::session_started(source.clone()))?;
-
-    let project = start::project_name(&source.path);
-    let header = match since {
-        Some(at) => format!("percept · project {project}\nsince your last session here ({at})"),
-        None => format!("percept · project {project}\nfirst session here"),
-    };
-
-    let maps = schemas.fold_all(of_path(&events, &source.path))?;
-
-    let mut sections = vec![header];
-    if let Some(at) = since {
-        sections.push(gained_block(&maps, at));
-    }
-    if let Some(block) = changed_since_recorded_block(&maps, &events, checkout) {
-        sections.push(block);
-    }
-    sections.extend(map_pointers(&maps));
-    sections.push(RULES.to_string());
 
     Ok(json!({
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
-            "additionalContext": sections.join("\n\n"),
+            "additionalContext": rendered,
         }
     }))
-}
-
-/// The recording rules, printed after the fragment on every session
-/// start. A stranger's project has no AGENTS.md or skill naming them,
-/// so this block is the one place the model meets them, and the
-/// recipe is complete enough to run as printed.
-const RULES: &str = "\
-recording
-- Before proposing a design, look: percept maps show decisions --around <id>, or the whole map with no filter.
-- When the user says yes to a proposal, record it at once, citing the prompt id the hook printed:
-    percept maps record decisions --actor agent --source <prompt id> <<'EOF'
-    question \"what was asked\"
-    decision \"what was chosen\"
-      why \"the grounds\"
-      resolves question
-    option \"an alternative that lost\"
-      why \"why it lost\"
-      answers question
-    EOF
-- A claim that rests on a file cites the text it read: an indented line, cites src/path.rs:10-20, under the node.
-- A decision that changes an earlier one adds a supersedes <id> line under it; never remove a node.
-- A decision that no longer seems to fit is not yours to rewrite: raise a question with a reopens <id> line under it, and let the user settle it.
-- A node whose last change is the user's carries their why: never propose it again, and never rewrite or remove it - the map refuses; a correction the user agrees is a new decision with a supersedes line.
-- A task is added with its why and state \"open\": task \"what to do\", then why \"what it costs undone\" and state \"open\" indented under it; the map refuses one without both.
-- Close a task by changing it, not by adding a node: t4 on its own line, then state \"done\" and why \"<commit>: what happened\" indented under it - under an existing node, why is the change's why, not a property (state \"dropped\" and why for one dropped, state \"open\" to reopen one). A task the user wrote takes only state from you; its name and why are theirs.
-- Close the session with one line naming what was recorded: Recorded to decisions: q1, d1, o1.";
-
-/// What each folded map gained since `since`: a counts line for every
-/// map, in fold order, then up to `mapstore::LIMIT` lines per map that
-/// gained anything - a node's last change is compared directly, not
-/// `Map::since`, which would also surface an older node a fresh edge
-/// only touched. Each line carries who last changed the node, and why,
-/// when its last change is not its addition.
-fn gained_block(maps: &[Map], since: Timestamp) -> String {
-    let per_map: Vec<Vec<&Node>> = maps.iter().map(|map| start::gained_nodes(map, since)).collect();
-
-    let counts = maps
-        .iter()
-        .zip(&per_map)
-        .map(|(map, gained)| format!("{} +{}", map.schema().name, gained.len()))
-        .collect::<Vec<_>>()
-        .join("   ");
-
-    let mut lines = vec![counts];
-    for (map, gained) in maps.iter().zip(&per_map) {
-        if gained.is_empty() {
-            continue;
-        }
-        lines.extend(capped_lines(
-            gained
-                .iter()
-                .map(|node| {
-                    let mut line = format!("{} {} {:?}", line_id(map, node), node.kind, node.name);
-                    if let Some(changed) = changed_line(node) {
-                        line.push_str(&format!(" \u{b7} {changed}"));
-                    }
-                    line
-                })
-                .collect(),
-        ));
-    }
-    lines.join("\n")
-}
-
-/// What every current headline node cites that no longer matches the
-/// working tree - a citation whose file moved on since it was
-/// seen. `None` when nothing changed, so `start_session` omits
-/// the block entirely rather than printing an empty one. The line
-/// building itself is `start::citation_findings`, shared with
-/// `percept start`'s own Attention block.
-fn changed_since_recorded_block(maps: &[Map], events: &[Event], checkout: &Path) -> Option<String> {
-    let lines: Vec<String> = start::citation_findings(maps, events, checkout)
-        .into_iter()
-        .map(|(map, node, findings)| format!("{} cites {}", line_id(map, node), findings.join(", ")))
-        .collect();
-
-    if lines.is_empty() {
-        return None;
-    }
-
-    let mut block = vec![block_header("changed since recorded", lines.len())];
-    block.extend(capped_lines(lines));
-    Some(block.join("\n"))
-}
-
-/// One pointer line per map that has a headline node, so a session
-/// start names every map worth opening without listing what is in it -
-/// the render behind `percept maps show` is what says that.
-fn map_pointers(maps: &[Map]) -> Vec<String> {
-    maps.iter()
-        .filter(|map| map.headlines().next().is_some())
-        .map(|map| format!("percept maps show {}", map.schema().name))
-        .collect()
 }
 
 /// `UserPromptSubmit`: clears the turn's previous cause before doing
