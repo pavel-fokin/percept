@@ -102,20 +102,21 @@ fn push_record(out: &mut String, schema: &Schema) {
         "  percept maps record {} --actor <human|agent> --source <event id> <<'EOF'",
         schema.name
     );
-    out.push_str("  <document>\n  EOF\n\n");
+    out.push_str("  <document>\n  EOF\n");
     out.push_str(GRAMMAR);
 }
 
 /// The record document's grammar, the same for every map.
-const GRAMMAR: &str = "\
+const GRAMMAR: &str = "
   A line at the margin is a node, kind \"name\". An indented line under it is a
   property, why \"...\"; an edge to a short id or to the latest node of that kind
   above it, resolves question; or cites src/path.rs:10-20, which records the
-  text as seen and adds it to the node's sources. A margin line naming a short
-  id, t4, changes that node: state \"done\" under it sets a property, name \"...\"
-  renames it, and why \"...\" is the change's own reason, not a property. A node
-  is refused without its required properties; a node the user last changed
-  takes only state from an agent.
+  text as seen and adds it to the node's sources. A claim that rests on code
+  cites it, so a later session is told when that code has changed. A margin
+  line naming a short id, t4, changes that node: state \"done\" under it sets a
+  property, name \"...\" renames it, and why \"...\" is the change's own reason,
+  not a property. A node is refused without its required properties; a node
+  the user last changed takes only state from an agent.
 ";
 
 /// One node per node kind, in schema order, its name always `"..."`,
@@ -123,11 +124,14 @@ const GRAMMAR: &str = "\
 /// declared state when it has any, and one indented edge line per kind
 /// already listed above it that an edge from this kind may reach - the
 /// first such edge kind, so a node is not shown both supporting and
-/// contradicting the same neighbour. Every line is one the map accepts,
-/// so the document would actually run.
+/// contradicting the same neighbour. The last kind carries the `cites`
+/// line, being the one a claim resting on code would be written as;
+/// its path is a placeholder, so the example shows the shape rather
+/// than running as it stands.
 fn push_example(out: &mut String, schema: &Schema) {
     let mut listed: Vec<&str> = Vec::new();
-    for kind in &schema.node_kinds {
+    let last = schema.node_kinds.len().saturating_sub(1);
+    for (index, kind) in schema.node_kinds.iter().enumerate() {
         let _ = writeln!(out, "  {} \"...\"", kind.kind);
         for property in &kind.requires {
             let _ = writeln!(out, "    {property} \"...\"");
@@ -148,6 +152,9 @@ fn push_example(out: &mut String, schema: &Schema) {
                 let _ = writeln!(out, "    {} {}", edge.kind, to);
                 reached.push(to);
             }
+        }
+        if index == last {
+            out.push_str("    cites src/path.rs:10-20\n");
         }
         listed.push(&kind.kind);
     }

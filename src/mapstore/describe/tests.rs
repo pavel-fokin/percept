@@ -50,6 +50,21 @@ fn the_add_example_sets_the_first_state_on_a_kind_that_declares_states() {
 }
 
 #[test]
+fn the_grammar_is_indented_under_the_record_command() {
+    let text = describe(&debates());
+    assert!(text.contains("\n  A line at the margin"), "{text}");
+}
+
+#[test]
+fn the_add_example_cites_a_file_under_its_last_node() {
+    let text = describe(&debates());
+    assert!(
+        text.contains("  verdict \"...\"\n    settles topic\n    cites src/path.rs:10-20\n"),
+        "{text}"
+    );
+}
+
+#[test]
 fn the_change_example_is_present_for_a_schema_with_states() {
     let text = describe(&chores());
     assert!(text.contains("example: change"));
