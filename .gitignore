@@ -1,11 +1,5 @@
 .env
-/docs/*
-!/docs/harness.md
-!/docs/architecture.md
-!/docs/clients.md
-!/docs/review-sketch.html
-!/docs/review-sketch-mvp.html
-!/docs/mvp.md
+.DS_Store
 /target
 /percept.jsonl
 /.percept/percept.jsonl

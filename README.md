@@ -14,7 +14,6 @@ It serves Claude Code and Codex through hooks and exposes the log and
 maps on the command line.
 
 - [AGENTS.md](AGENTS.md) - the design, the domain, and the architecture.
-- [docs](docs) - proposals and related work.
 
 ## Contents
 
