@@ -177,7 +177,7 @@ pub fn node_added(kind: &str, name: &str) -> Event {
 /// `node_added`, committed as `actor` - for a test about who wrote a
 /// node.
 pub fn node_added_by(actor: Actor, kind: &str, name: &str) -> Event {
-    Event::new(actor, source("test"), None, node_added_payload(kind, name))
+    node_added_citing(actor, kind, name, vec![EventId::new()])
 }
 
 /// `node_added`, from a path other than `/test` - for a test that
@@ -187,21 +187,25 @@ pub fn node_added_at(path: &str, kind: &str, name: &str) -> Event {
         Actor::Human(human()),
         source_at("test", path),
         None,
-        node_added_payload(kind, name),
+        node_added_payload("decisions", kind, name, BTreeMap::new(), vec![EventId::new()]),
     )
 }
 
-fn node_added_payload(kind: &str, name: &str) -> Payload {
-    node_added_payload_citing(kind, name, vec![EventId::new()])
-}
-
-fn node_added_payload_citing(kind: &str, name: &str, sources: Vec<EventId>) -> Payload {
+/// The `NodeAdded` payload every `node_added*` builder composes: `map`,
+/// `kind`, `name`, `properties`, and the `sources` it cites.
+pub fn node_added_payload(
+    map: &str,
+    kind: &str,
+    name: &str,
+    properties: BTreeMap<String, String>,
+    sources: Vec<EventId>,
+) -> Payload {
     Payload::NodeAdded {
-        map: "decisions".to_string(),
+        map: map.to_string(),
         node: NodeId::new(),
         kind: kind.to_string(),
         name: name.to_string(),
-        properties: BTreeMap::new(),
+        properties,
         sources,
         // Left at the sentinel: nothing here has more than one node of
         // a kind, so a positional fallback and a minted one agree.
@@ -217,7 +221,51 @@ pub fn node_added_citing(actor: Actor, kind: &str, name: &str, sources: Vec<Even
         actor,
         source("test"),
         None,
-        node_added_payload_citing(kind, name, sources),
+        node_added_payload("decisions", kind, name, BTreeMap::new(), sources),
+    )
+}
+
+/// A `node.added` event on `map`, of `kind` and `name`, with
+/// `properties` and citing `sources`, written by a human at the test
+/// project root - for a test that needs a node outside the decisions
+/// map, which `node_added_citing` always writes to.
+pub fn node_added_on(
+    map: &str,
+    kind: &str,
+    name: &str,
+    properties: BTreeMap<String, String>,
+    sources: Vec<EventId>,
+) -> Event {
+    Event::new(
+        Actor::Human(human()),
+        source("test"),
+        None,
+        node_added_payload(map, kind, name, properties, sources),
+    )
+}
+
+/// A `node.changed` event for `node` on `map`, renaming to `name`
+/// (kept when `None`), setting `properties`, and saying `why` - a
+/// human's correction, for a test that compares against it.
+pub fn node_changed(
+    map: &str,
+    node: NodeId,
+    name: Option<&str>,
+    properties: BTreeMap<String, String>,
+    why: Option<&str>,
+) -> Event {
+    Event::new(
+        Actor::Human(human()),
+        source("test"),
+        None,
+        Payload::NodeChanged {
+            map: map.to_string(),
+            node,
+            name: name.map(str::to_string),
+            properties,
+            sources: Vec::new(),
+            why: why.map(str::to_string),
+        },
     )
 }
 
@@ -257,6 +305,40 @@ pub fn edge_added(kind: &str, from: &Event, to: &Event) -> Event {
             to: node_id(to),
             sources: Vec::new(),
         },
+    )
+}
+
+/// The `FileCited` payload every `file_cited*` builder composes:
+/// `path` (repo-relative) with `excerpt` as its text, `lines` the
+/// ranged read or `None` for the whole file.
+pub fn file_cited_payload(path: &str, lines: Option<(u32, u32)>, excerpt: &str) -> Payload {
+    Payload::FileCited {
+        path: PathBuf::from(path),
+        lines,
+        excerpt: excerpt.to_string(),
+    }
+}
+
+/// A `file.cited` event, agent-authored from the default test source,
+/// citing `path` (repo-relative) with `excerpt` as its text - `lines`
+/// the ranged read or `None` for the whole file.
+pub fn file_cited(path: &str, lines: Option<(u32, u32)>, excerpt: &str) -> Event {
+    file_cited_citing(path, lines, excerpt, None)
+}
+
+/// `file_cited`, caused by `causation` - a re-citation of an earlier
+/// `file.cited` event.
+pub fn file_cited_citing(
+    path: &str,
+    lines: Option<(u32, u32)>,
+    excerpt: &str,
+    causation: Option<EventId>,
+) -> Event {
+    Event::new(
+        Actor::Agent,
+        source("test"),
+        causation,
+        file_cited_payload(path, lines, excerpt),
     )
 }
 

@@ -5,7 +5,7 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::*;
-use crate::core::testing::{content, human, FakeLog};
+use crate::core::testing::{content, file_cited_payload, human, node_added_payload, FakeLog};
 use crate::core::{HumanId, Payload};
 use crate::shared::Timestamp;
 
@@ -214,11 +214,7 @@ impl Fixture {
             self.source(),
             causation,
             at,
-            Payload::FileCited {
-                path: PathBuf::from(path),
-                lines,
-                excerpt: excerpt.to_string(),
-            },
+            file_cited_payload(path, lines, excerpt),
         );
         self.log.append(&event).unwrap();
         event
@@ -253,15 +249,7 @@ impl Fixture {
             self.source(),
             None,
             at,
-            Payload::NodeAdded {
-                map: map.to_string(),
-                node: crate::core::NodeId::new(),
-                kind: kind.to_string(),
-                name: name.to_string(),
-                properties: std::collections::BTreeMap::new(),
-                sources,
-                seq: 0,
-            },
+            node_added_payload(map, kind, name, std::collections::BTreeMap::new(), sources),
         );
         self.log.append(&event).unwrap();
         event
