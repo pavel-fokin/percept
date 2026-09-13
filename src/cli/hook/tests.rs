@@ -199,6 +199,23 @@ impl Fixture {
         self.call(client, body)
     }
 
+    fn subagent_stop(
+        &self,
+        client: &str,
+        session: &str,
+        turn: &str,
+        fields: Value,
+    ) -> Result<Value, Box<dyn std::error::Error>> {
+        let mut body = json!({
+            "hook_event_name": "SubagentStop",
+            "cwd": self.root.to_str().unwrap(),
+            "session_id": session,
+            "turn_id": turn,
+        });
+        merge(&mut body, fields);
+        self.call(client, body)
+    }
+
     fn events(&self) -> Vec<crate::core::Event> {
         self.log.load().unwrap()
     }
@@ -319,6 +336,14 @@ fn every_hook_event_names_itself_after_deserializing() {
                 "tool_name": "Bash",
                 "tool_input": {},
                 "tool_response": {},
+            }),
+        ),
+        (
+            "SubagentStop",
+            json!({
+                "hook_event_name": "SubagentStop",
+                "last_assistant_message": null,
+                "agent_transcript_path": null,
             }),
         ),
         (
@@ -529,6 +554,80 @@ fn stop_uses_last_assistant_message_and_the_prompts_cause() {
         .unwrap();
     assert_eq!(reply.causation_id().unwrap().as_uuid().to_string(), prompt);
     assert_eq!(content(&reply), "reply");
+}
+
+#[test]
+fn subagent_stop_records_an_agent_reply_caused_by_the_parent_prompt() {
+    let fixture = Fixture::new();
+    let prompt = fixture.prompt("codex", "session", "turn", "hello");
+
+    let output = fixture
+        .subagent_stop(
+            "codex",
+            "session",
+            "turn",
+            json!({"last_assistant_message": "subagent reply"}),
+        )
+        .unwrap();
+
+    assert_eq!(output, json!({}));
+    let reply = fixture
+        .events()
+        .into_iter()
+        .find(|event| event.actor() == Actor::Agent)
+        .unwrap();
+    assert_eq!(reply.causation_id().unwrap().as_uuid().to_string(), prompt);
+    assert_eq!(content(&reply), "subagent reply");
+}
+
+#[test]
+fn subagent_stop_keeps_the_parent_turns_state() {
+    let fixture = Fixture::new();
+    fixture.prompt("codex", "session", "turn", "hello");
+
+    fixture
+        .subagent_stop(
+            "codex",
+            "session",
+            "turn",
+            json!({"last_assistant_message": "subagent reply"}),
+        )
+        .unwrap();
+
+    assert_eq!(fixture.state_file_count(), 1);
+}
+
+#[test]
+fn subagent_stop_falls_back_to_the_agent_transcript() {
+    let fixture = Fixture::new();
+    let transcript = fixture._temp.path().join("subagent transcript.jsonl");
+    let entries = [
+        json!({"type": "user", "message": {"content": "task"}}),
+        json!({"type": "assistant", "message": {"content": [{"type": "text", "text": "subagent reply"}]}}),
+    ];
+    let text = entries
+        .iter()
+        .map(|entry| entry.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&transcript, text).unwrap();
+
+    fixture
+        .subagent_stop(
+            "claude-code",
+            "session",
+            "turn",
+            json!({
+                "last_assistant_message": null,
+                "agent_transcript_path": transcript.to_str().unwrap(),
+            }),
+        )
+        .unwrap();
+
+    let events = fixture.events();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].actor(), Actor::Agent);
+    assert_eq!(content(&events[0]), "subagent reply");
 }
 
 #[test]
