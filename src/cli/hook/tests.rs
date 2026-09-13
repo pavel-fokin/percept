@@ -165,6 +165,9 @@ impl Fixture {
         output["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap()
+            .lines()
+            .next()
+            .unwrap()
             .strip_prefix("percept event ")
             .unwrap()
             .to_string()
@@ -384,6 +387,29 @@ fn a_returning_session_still_prints_starts_render() {
 
     assert!(context.contains("nothing recorded yet"), "{context:?}");
     assert_eq!(fixture.events().len(), 2);
+}
+
+#[test]
+fn every_prompt_carries_the_events_id_then_the_one_rule() {
+    let fixture = Fixture::new();
+
+    let output = fixture
+        .call(
+            "codex",
+            json!({
+                "hook_event_name": "UserPromptSubmit",
+                "cwd": fixture.root.to_str().unwrap(),
+                "session_id": "session",
+                "prompt": "hello",
+            }),
+        )
+        .unwrap();
+
+    let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
+    let lines: Vec<&str> = context.lines().collect();
+    assert_eq!(lines.len(), 2, "{context:?}");
+    assert!(lines[0].starts_with("percept event "), "{context:?}");
+    assert_eq!(lines[1], TURN_RULE);
 }
 
 #[test]

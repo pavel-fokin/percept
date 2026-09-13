@@ -192,11 +192,21 @@ fn start_session(
     }))
 }
 
+/// The one rule every turn carries after the prompt's id. A proposal
+/// meets the map only when it is written into it, so this asks for the
+/// writing first: to record an option the agent opens its question, and
+/// the options already weighed there stand in a column above the new
+/// one. Constant, whatever the map holds, so a turn's cost never grows
+/// with it.
+const TURN_RULE: &str =
+    "propose by recording: an option under its question, state \"open\", before arguing for it";
+
 /// `UserPromptSubmit`: clears the turn's previous cause before doing
 /// anything else, so a prompt that then fails to commit never leaves a
 /// later event citing the wrong one. Records the prompt as
 /// `message.received` from `human`, stores its id as the turn's cause,
-/// and returns the client's expected `additionalContext`.
+/// and returns the client's expected `additionalContext`: the event's
+/// id on the first line, `TURN_RULE` on the second.
 fn submit_prompt(
     prompt: String,
     source: &Source,
@@ -214,7 +224,7 @@ fn submit_prompt(
     Ok(json!({
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",
-            "additionalContext": format!("percept event {}", id.as_uuid()),
+            "additionalContext": format!("percept event {}\n{TURN_RULE}", id.as_uuid()),
         }
     }))
 }
