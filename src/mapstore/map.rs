@@ -3,7 +3,7 @@
 //! does, and revising it - a writer's `Mutation` checked against a
 //! `Snapshot` of the log and turned into the payload that records it.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -15,6 +15,43 @@ use crate::core::{
     Node, NodeId, Payload, Schemas, Written,
 };
 use crate::store::{ids, parse_event_id};
+
+/// Events named by a selected map fragment's `sources`, indexed once
+/// for rendering. The map domain keeps only ids; this infrastructure
+/// view supplies the experience behind them at the output boundary.
+pub struct SourcePreviews<'a> {
+    events: HashMap<Uuid, &'a Event>,
+}
+
+impl<'a> SourcePreviews<'a> {
+    pub fn new(events: &'a [Event]) -> Self {
+        Self {
+            events: events
+                .iter()
+                .map(|event| (event.id().as_uuid(), event))
+                .collect(),
+        }
+    }
+
+    pub(crate) fn event(&self, id: EventId) -> Option<&'a Event> {
+        self.events.get(&id.as_uuid()).copied()
+    }
+
+    fn values(&self, sources: &[EventId]) -> Vec<serde_json::Value> {
+        sources
+            .iter()
+            .filter_map(|id| self.event(*id))
+            .map(|event| {
+                serde_json::from_str(&crate::store::summarize(
+                    event,
+                    None,
+                    crate::store::PREVIEW_CHARS,
+                ))
+                .expect("store::summarize always returns JSON")
+            })
+            .collect()
+    }
+}
 
 /// `events`, cut to those whose source ran at `path` - where a reader
 /// cuts the log to one path before `Map::fold`, which takes what it is
@@ -294,6 +331,8 @@ struct NodeLine<'a> {
     name: &'a str,
     properties: &'a BTreeMap<String, String>,
     sources: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_previews: Option<Vec<serde_json::Value>>,
     #[serde(flatten)]
     stamp: Option<NodeStamp<'a>>,
 }
@@ -304,6 +343,8 @@ struct EdgeLine<'a> {
     from: String,
     to: String,
     sources: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_previews: Option<Vec<serde_json::Value>>,
     #[serde(flatten)]
     stamp: Option<Stamp>,
 }
@@ -411,8 +452,25 @@ pub fn encode_fragment(fragment: &Fragment) -> String {
 /// prints and `read_map` returns. `stamped` is `false` only for
 /// `read_code`'s tree walk - see `Stamp::of`.
 pub fn encode_lines(map: &Map, stamped: bool) -> impl Iterator<Item = String> + '_ {
-    let nodes = map.nodes().iter().map(move |node| encode_node(map, node, stamped));
-    let edges = map.edges().iter().map(move |edge| encode_edge(map, edge, stamped));
+    encode_lines_with_sources(map, stamped, None)
+}
+
+/// `encode_lines` with constant-size event previews beside the source
+/// ids. Used only for a selected cognitive-map fragment; whole-map
+/// overviews retain their compact wire shape.
+pub fn encode_lines_with_sources<'a>(
+    map: &'a Map,
+    stamped: bool,
+    previews: Option<&'a SourcePreviews<'a>>,
+) -> impl Iterator<Item = String> + 'a {
+    let nodes = map
+        .nodes()
+        .iter()
+        .map(move |node| encode_node_with_sources(map, node, stamped, previews));
+    let edges = map
+        .edges()
+        .iter()
+        .map(move |edge| encode_edge_with_sources(map, edge, stamped, previews));
     nodes.chain(edges)
 }
 
@@ -442,6 +500,15 @@ impl NodeRefArgs {
 }
 
 pub fn encode_node(map: &Map, node: &Node, stamped: bool) -> String {
+    encode_node_with_sources(map, node, stamped, None)
+}
+
+fn encode_node_with_sources(
+    map: &Map,
+    node: &Node,
+    stamped: bool,
+    previews: Option<&SourcePreviews<'_>>,
+) -> String {
     serde_json::to_string(&NodeLine {
         node: node.id.as_uuid().to_string(),
         id: map.short_id(node.id).unwrap_or_default(),
@@ -449,6 +516,7 @@ pub fn encode_node(map: &Map, node: &Node, stamped: bool) -> String {
         name: &node.name,
         properties: &node.properties,
         sources: ids(&node.sources),
+        source_previews: previews.map(|previews| previews.values(&node.sources)),
         stamp: NodeStamp::of(node, stamped),
     })
     .expect("NodeLine always serializes")
@@ -458,11 +526,21 @@ pub fn encode_node(map: &Map, node: &Node, stamped: bool) -> String {
 /// and `--from` take a node - so the line reads on its own instead of
 /// through a join on the node lines above it.
 pub fn encode_edge(map: &Map, edge: &Edge, stamped: bool) -> String {
+    encode_edge_with_sources(map, edge, stamped, None)
+}
+
+fn encode_edge_with_sources(
+    map: &Map,
+    edge: &Edge,
+    stamped: bool,
+    previews: Option<&SourcePreviews<'_>>,
+) -> String {
     serde_json::to_string(&EdgeLine {
         edge: &edge.kind,
         from: node_ref(map, edge.from),
         to: node_ref(map, edge.to),
         sources: ids(&edge.sources),
+        source_previews: previews.map(|previews| previews.values(&edge.sources)),
         stamp: Stamp::of(edge.added(), stamped),
     })
     .expect("EdgeLine always serializes")

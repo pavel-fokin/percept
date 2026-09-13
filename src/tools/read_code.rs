@@ -87,7 +87,7 @@ impl Tool for ReadCode {
         // No stamp: a `read_code` node was stamped by the walk that
         // built it, not by who wrote the code or when, and showing one
         // would mislead a reader into taking it for that.
-        read_selection(map, args.around, args.depth, None, &args.kinds, false)
+        read_selection(map, args.around, args.depth, None, &args.kinds, false, None)
     }
 }
 

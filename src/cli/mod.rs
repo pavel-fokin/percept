@@ -687,7 +687,11 @@ pub fn maps_show(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let events = log.load()?;
     per_path(args.all_paths, args.json, root, &events, |path| {
-        print_map(mapstore::fold_map_at(schemas, &args.map, &events, path)?, &args)
+        print_map(
+            mapstore::fold_map_at(schemas, &args.map, &events, path)?,
+            &args,
+            &events,
+        )
     })
 }
 
@@ -717,7 +721,11 @@ pub fn maps_describe(args: DescribeMapArgs, schemas: &Schemas) -> Result<(), Box
 /// `maps_show`'s tail: cut `map` to `args`'s filters, then print it
 /// nodes-then-edges. `--since` runs after `--around`, so it reads as
 /// "what changed near this node".
-fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
+fn print_map(
+    map: Map,
+    args: &ShowMapArgs,
+    events: &[crate::core::Event],
+) -> Result<(), Box<dyn std::error::Error>> {
     // An empty map has nothing to resolve `--around` against - `select`'s
     // own empty-map case skips it anyway, so a node named on one is not
     // an error to report over "nothing recorded yet".
@@ -735,11 +743,18 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
         kinds: &args.kind,
     };
     let fragment = map.select(&selection)?;
+    let previews = (!selection.is_whole()).then(|| mapstore::SourcePreviews::new(events));
     if !selection.is_whole() {
         eprintln!("{}", mapstore::encode_fragment(&fragment));
     }
     if args.json {
-        print_lines(mapstore::encode_lines(fragment.map(), true))
+        print_lines(mapstore::encode_lines_with_sources(
+            fragment.map(),
+            true,
+            previews.as_ref(),
+        ))
+    } else if let Some(previews) = previews.as_ref() {
+        print_text(&mapstore::markdown_with_sources(fragment.map(), previews))
     } else {
         print_text(&mapstore::markdown(fragment.map()))
     }

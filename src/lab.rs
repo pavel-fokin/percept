@@ -300,7 +300,7 @@ fn build_app(
         Arc::new(SearchEvents::new(log.clone(), me)),
         Arc::new(ReadEvent::new(log.clone())),
         Arc::new(ReviseMap::new(log.clone(), schemas.clone(), path)),
-        Arc::new(ReadMap::new(Arc::new(maps))),
+        Arc::new(ReadMap::new(Arc::new(maps), log.clone())),
     ];
     match build_toolset(&source, checkout)? {
         Toolset::Maps => App::new(

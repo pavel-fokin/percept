@@ -45,7 +45,10 @@ use std::path::Path;
 
 use crate::core::{Map, MapError, NodeRef, Selection};
 use crate::harness::ToolOutput;
-use crate::mapstore::{encode_fragment, encode_lines, encode_schema, NodeRefArgs};
+use crate::mapstore::{
+    encode_fragment, encode_lines, encode_lines_with_sources, encode_schema, NodeRefArgs,
+    SourcePreviews,
+};
 use crate::shared::Timestamp;
 
 /// The files under `from`, as `find_files` and `grep_files` walk
@@ -75,6 +78,7 @@ pub(crate) fn read_selection(
     since: Option<Timestamp>,
     kinds: &[String],
     stamped: bool,
+    source_events: Option<&[crate::core::Event]>,
 ) -> Result<ToolOutput, Box<dyn std::error::Error>> {
     // An empty map has nothing to resolve `around` against - `select`'s
     // own empty-map case would skip it anyway, so a node named on one is
@@ -99,13 +103,23 @@ pub(crate) fn read_selection(
         kinds,
     };
     let fragment = map.select(&selection)?;
-    let lines = [
+    let mut lines = vec![
         encode_schema(fragment.map().schema()),
         encode_fragment(&fragment),
-    ]
-    .into_iter()
-    .chain(encode_lines(fragment.map(), stamped));
-    Ok(ToolOutput::text(lines.collect::<Vec<_>>().join("\n")))
+    ];
+    if selection.is_whole() {
+        lines.extend(encode_lines(fragment.map(), stamped));
+    } else if let Some(events) = source_events {
+        let previews = SourcePreviews::new(events);
+        lines.extend(encode_lines_with_sources(
+            fragment.map(),
+            stamped,
+            Some(&previews),
+        ));
+    } else {
+        lines.extend(encode_lines(fragment.map(), stamped));
+    }
+    Ok(ToolOutput::text(lines.join("\n")))
 }
 
 /// `lines` joined, at most `cap` of them, with `trailer` on its own

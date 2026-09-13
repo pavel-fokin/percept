@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::core::testing::{chores, debates, files, human, node_ref};
-use crate::core::{Actor, EventId, Mutation};
+use crate::core::testing::{chores, debates, files, human, node_ref, source};
+use crate::core::{Actor, Event, EventId, Mutation};
 
 /// Adds a node with one `why` property when `why` is given, and one
 /// `state` when `state` is given - `Map::apply` requires one for any
@@ -74,6 +74,32 @@ fn link(map: &mut Map, kind: &str, from: (&str, &str), to: (&str, &str)) {
 fn an_empty_map_renders_its_title_and_the_empty_notice() {
     let map = Map::empty(debates());
     assert_eq!(markdown(&map), "# debates\n\n(empty: nothing has been recorded here yet.)\n");
+}
+
+#[test]
+fn a_selected_markdown_render_puts_each_source_preview_beside_its_node() {
+    let source_event = Event::message_received(
+        Actor::Human(human()),
+        "record this because the browser may disconnect".to_string(),
+        source("test"),
+        None,
+    );
+    let mut map = Map::empty(debates());
+    add(
+        &mut map,
+        "topic",
+        "Who owns generation?",
+        None,
+        None,
+        &[source_event.id()],
+        Actor::Agent,
+    );
+    let events = [source_event];
+    let text = markdown_with_sources(&map, &SourcePreviews::new(&events));
+
+    assert!(text.contains("## sources"), "{text}");
+    assert!(text.contains("human message.received"), "{text}");
+    assert!(text.contains("browser may disconnect"), "{text}");
 }
 
 #[test]
