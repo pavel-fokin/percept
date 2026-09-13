@@ -1,8 +1,9 @@
 # The decisions map: what was asked, what was weighed, what was chosen
-# and on what grounds. An option answers its question and says why it
-# lost, a decision resolves the question, a later decision supersedes
-# an earlier one, and a question reopens a decision it puts in doubt,
-# so --around a question reaches everything weighed for it.
+# and on what grounds. An option answers a question - or the decision
+# itself, when none was raised - and says whether it still stands and
+# why; a decision resolves the question, a later decision supersedes an
+# earlier one, and a question reopens a decision it puts in doubt, so
+# --around a question reaches everything weighed for it.
 
 name = "decisions"
 purpose = "what was asked, what was chosen, and why, so a settled question is not reopened"
@@ -13,8 +14,9 @@ kind = "question"
 
 [[node]]
 kind = "option"
-gloss = "an alternative that was weighed and lost, saying why in its `why` property"
+gloss = "an answer weighed for a question: open while it still stands, dead once it lost, saying which in `state` and why in `why`"
 requires = ["why"]
+state = ["open", "dead"]
 
 [[node]]
 kind = "decision"
@@ -26,8 +28,9 @@ to = "question"
 
 [[edge]]
 kind = "answers"
+gloss = "from an option to the question it answers, or to the decision it was weighed against when no question was raised"
 from = "option"
-to = "question"
+to = ["question", "decision"]
 
 [[edge]]
 kind = "supersedes"
