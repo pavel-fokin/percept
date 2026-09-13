@@ -146,7 +146,10 @@ pub fn change(
         schemas,
         map,
         source,
-        &[],
+        mapstore::CommitProvenance {
+            sources: &[],
+            causation: None,
+        },
         crate::core::Actor::Human(me),
         move |sources| crate::core::Mutation::ChangeNode {
             node: node_ref,

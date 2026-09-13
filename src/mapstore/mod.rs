@@ -27,8 +27,8 @@ mod start;
 pub(crate) use blocks::{changed_line, last_session};
 pub use describe::describe;
 pub use map::{
-    commit, commit_batch, encode_fragment, encode_lines, encode_map, encode_schema, fold_map, fold_map_at,
-    of_path, paths, LogMaps, NodeRefArgs, Snapshot,
+    commit, commit_batch, encode_fragment, encode_lines, encode_map, encode_schema, fold_map,
+    fold_map_at, of_path, paths, CommitProvenance, LogMaps, NodeRefArgs, Snapshot,
 };
 pub use render::{catalogue, markdown};
 pub use schemas::{load as load_schemas, SCHEMAS_DIR, TEMPLATES};

@@ -23,7 +23,10 @@ fn a_claim_without_a_why_is_refused_as_a_new_write() {
         &schemas(),
         "debates",
         &source,
-        &[],
+        CommitProvenance {
+            sources: &[],
+            causation: None,
+        },
         Actor::Human(human()),
         add_node("claim", "SQLite"),
     )
@@ -45,7 +48,10 @@ fn a_chore_without_a_why_is_refused_as_a_new_write() {
         &schemas(),
         "chores",
         &source,
-        &[],
+        CommitProvenance {
+            sources: &[],
+            causation: None,
+        },
         Actor::Human(human()),
         add_node("chore", "cancel a turn without quitting"),
     )
@@ -73,7 +79,10 @@ fn a_claim_with_a_why_is_recorded() {
         &schemas(),
         "debates",
         &source,
-        &[],
+        CommitProvenance {
+            sources: &[],
+            causation: None,
+        },
         Actor::Human(human()),
         mutation,
     )
@@ -92,7 +101,10 @@ fn commit_appends_the_event_that_records_the_mutation() {
         &schemas(),
         "debates",
         &source,
-        &[],
+        CommitProvenance {
+            sources: &[],
+            causation: None,
+        },
         Actor::Human(human()),
         add_node("verdict", "Rust"),
     )
@@ -106,6 +118,60 @@ fn commit_appends_the_event_that_records_the_mutation() {
 }
 
 #[test]
+fn commit_records_a_known_causation_event() {
+    let cause = Event::message_received(
+        Actor::Human(human()),
+        "record Rust".to_string(),
+        source("cli"),
+        None,
+    );
+    let cause_id = cause.id();
+    let log = FakeLog::seeded(vec![cause]);
+    let source = source("cli");
+
+    let event = commit(
+        &log,
+        &schemas(),
+        "debates",
+        &source,
+        CommitProvenance {
+            sources: &[],
+            causation: Some(&cause_id.as_uuid().to_string()),
+        },
+        Actor::Human(human()),
+        add_node("verdict", "Rust"),
+    )
+    .unwrap();
+
+    assert_eq!(event.causation_id(), Some(cause_id));
+}
+
+#[test]
+fn commit_refuses_a_causation_event_the_log_lacks() {
+    let log = FakeLog::default();
+    let source = source("cli");
+    let unknown = EventId::new().as_uuid().to_string();
+
+    let err = commit(
+        &log,
+        &schemas(),
+        "debates",
+        &source,
+        CommitProvenance {
+            sources: &[],
+            causation: Some(&unknown),
+        },
+        Actor::Human(human()),
+        add_node("verdict", "Rust"),
+    )
+    .err()
+    .unwrap();
+
+    assert!(err.to_string().contains("no event with id"), "{err}");
+    assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
 fn commit_loads_the_log_so_a_second_call_sees_the_first() {
     let log = FakeLog::default();
     let source = source("cli");
@@ -114,7 +180,10 @@ fn commit_loads_the_log_so_a_second_call_sees_the_first() {
         &schemas(),
         "debates",
         &source,
-        &[],
+        CommitProvenance {
+            sources: &[],
+            causation: None,
+        },
         Actor::Human(human()),
         add_node("verdict", "Rust"),
     )
@@ -125,7 +194,10 @@ fn commit_loads_the_log_so_a_second_call_sees_the_first() {
         &schemas(),
         "debates",
         &source,
-        &[],
+        CommitProvenance {
+            sources: &[],
+            causation: None,
+        },
         Actor::Human(human()),
         add_node("verdict", "Rust"),
     )
@@ -146,7 +218,10 @@ fn commit_allows_the_same_name_under_a_different_path() {
         &schemas(),
         "debates",
         &here,
-        &[],
+        CommitProvenance {
+            sources: &[],
+            causation: None,
+        },
         Actor::Human(human()),
         add_node("verdict", "Rust"),
     )
@@ -156,7 +231,10 @@ fn commit_allows_the_same_name_under_a_different_path() {
         &schemas(),
         "debates",
         &there,
-        &[],
+        CommitProvenance {
+            sources: &[],
+            causation: None,
+        },
         Actor::Human(human()),
         add_node("verdict", "Rust"),
     )
@@ -212,7 +290,10 @@ fn committing_to_a_map_no_schema_declares_is_an_error() {
         &schemas(),
         "code",
         &source,
-        &[],
+        CommitProvenance {
+            sources: &[],
+            causation: None,
+        },
         Actor::Human(human()),
         add_node("file", "src/main.rs"),
     )
@@ -248,7 +329,10 @@ fn a_source_is_checked_against_the_loaded_log() {
         &schemas(),
         "debates",
         &source,
-        &[known],
+        CommitProvenance {
+            sources: &[known],
+            causation: None,
+        },
         Actor::Human(human()),
         add_node("verdict", "Rust"),
     )
@@ -258,7 +342,10 @@ fn a_source_is_checked_against_the_loaded_log() {
         &schemas(),
         "debates",
         &source,
-        std::slice::from_ref(&unknown),
+        CommitProvenance {
+            sources: std::slice::from_ref(&unknown),
+            causation: None,
+        },
         Actor::Human(human()),
         add_node("verdict", "Go"),
     )
@@ -269,7 +356,10 @@ fn a_source_is_checked_against_the_loaded_log() {
         &schemas(),
         "debates",
         &source,
-        &["user".to_string()],
+        CommitProvenance {
+            sources: &["user".to_string()],
+            causation: None,
+        },
         Actor::Human(human()),
         add_node("verdict", "Go"),
     )

@@ -1,7 +1,7 @@
 use super::*;
 use crate::core::testing::{
-    human, node_added, node_added_at, node_added_by, node_id, schemas, source, FakeLog, Fixture,
-    ROOT,
+    file_cited, human, node_added, node_added_at, node_added_by, node_id, schemas, source, FakeLog,
+    Fixture, ROOT,
 };
 use crate::core::{Actor, Payload};
 use std::path::{Path, PathBuf};
@@ -602,6 +602,7 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
     let target = || MapArgs {
         map: "code".to_string(),
         source: Vec::new(),
+        causation: None,
         actor: "human".to_string(),
     };
 
@@ -702,11 +703,51 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_human() {
     assert_eq!(args.target.actor, "human");
 }
 
+#[test]
+fn a_map_write_accepts_a_cause_separate_from_its_sources() {
+    let cause = Event::message_received(
+        Actor::Human(human()),
+        "record this".to_string(),
+        source("cli"),
+        None,
+    );
+    let cause_id = cause.id();
+    let log = FakeLog::seeded(vec![cause]);
+    let cli = Cli::try_parse_from([
+        "percept",
+        "maps",
+        "add-node",
+        "debates",
+        "--causation",
+        &cause_id.as_uuid().to_string(),
+        "--kind",
+        "topic",
+        "--name",
+        "Which?",
+    ])
+    .unwrap();
+    let Some(Command::Maps {
+        command: MapsCommand::AddNode(args),
+    }) = cli.command
+    else {
+        panic!("expected maps add-node")
+    };
+
+    maps_add_node(args, &log, &schemas(), &source("cli"), human()).unwrap();
+
+    let events = log.load().unwrap();
+    assert_eq!(events[1].causation_id(), Some(cause_id));
+    assert!(
+        matches!(events[1].payload(), Payload::NodeAdded { sources, .. } if sources.is_empty())
+    );
+}
+
 fn change_node_args(node: &str, why: Option<&str>) -> ChangeNodeArgs {
     ChangeNodeArgs {
         target: MapArgs {
             map: "debates".to_string(),
             source: Vec::new(),
+            causation: None,
             actor: "human".to_string(),
         },
         node: node.to_string(),
@@ -780,7 +821,32 @@ fn record_args(map: &str) -> RecordArgs {
         source: Vec::new(),
         actor: "human".to_string(),
         causation: None,
+        commit_causation: None,
     }
+}
+
+#[test]
+fn record_parses_separate_citation_and_commit_causes() {
+    let cli = Cli::try_parse_from([
+        "percept",
+        "maps",
+        "record",
+        "debates",
+        "--causation",
+        "citation",
+        "--commit-causation",
+        "request",
+    ])
+    .unwrap();
+    let Some(Command::Maps {
+        command: MapsCommand::Record(args),
+    }) = cli.command
+    else {
+        panic!("expected maps record")
+    };
+
+    assert_eq!(args.causation.as_deref(), Some("citation"));
+    assert_eq!(args.commit_causation.as_deref(), Some("request"));
 }
 
 #[test]
@@ -814,6 +880,38 @@ fn a_document_writes_its_nodes_and_edges_in_order() {
 }
 
 #[test]
+fn a_document_gives_every_map_commit_its_cause() {
+    let cause = Event::message_received(
+        Actor::Human(human()),
+        "record these".to_string(),
+        source("cli"),
+        None,
+    );
+    let cause_id = cause.id();
+    let log = FakeLog::seeded(vec![cause]);
+    let mut args = record_args("debates");
+    args.commit_causation = Some(cause_id.as_uuid().to_string());
+    let document = "topic \"Does record work?\"\n\
+                     verdict \"yes\"\n  why \"it ran\"\n  settles topic\n";
+
+    record_document(
+        document,
+        args,
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    assert!(events[1..]
+        .iter()
+        .all(|event| event.causation_id() == Some(cause_id)));
+}
+
+#[test]
 fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
     let fixture = Fixture::new();
     fixture.write("src/cli/mod.rs", "one\ntwo\nthree\n");
@@ -841,6 +939,101 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
     let map = Map::fold(crate::core::testing::debates(), &events).unwrap();
     let verdict = map.find("verdict", "yes").unwrap();
     assert!(verdict.sources.contains(&cite_id));
+}
+
+#[test]
+fn record_keeps_citation_and_map_commit_causes_separate() {
+    let citation = file_cited("src/cli/mod.rs", Some((1, 1)), "old");
+    let request = Event::message_received(
+        Actor::Human(human()),
+        "record this".to_string(),
+        source("cli"),
+        None,
+    );
+    let (citation_id, request_id) = (citation.id(), request.id());
+    let log = FakeLog::seeded(vec![citation, request]);
+    let fixture = Fixture::new();
+    fixture.write("src/cli/mod.rs", "new\n");
+    let mut args = record_args("debates");
+    args.causation = Some(citation_id.as_uuid().to_string());
+    args.commit_causation = Some(request_id.as_uuid().to_string());
+
+    record_document(
+        "claim \"the code changed\"\n  why \"new text\"\n  cites src/cli/mod.rs:1-1\n",
+        args,
+        &log,
+        &schemas(),
+        &source("cli"),
+        fixture.path(),
+        human(),
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    assert!(matches!(events[2].payload(), Payload::FileCited { .. }));
+    assert_eq!(events[2].causation_id(), Some(citation_id));
+    assert!(matches!(events[3].payload(), Payload::NodeAdded { .. }));
+    assert_eq!(events[3].causation_id(), Some(request_id));
+}
+
+#[test]
+fn record_refuses_an_unknown_citation_cause_before_writing() {
+    let known = Event::message_received(
+        Actor::Human(human()),
+        "record this".to_string(),
+        source("cli"),
+        None,
+    );
+    let known_id = known.id().as_uuid().to_string();
+    let unknown_id = EventId::new().as_uuid().to_string();
+    let document = "topic \"Does record work?\"\n";
+
+    let citation_log = FakeLog::seeded(vec![known]);
+    let mut args = record_args("debates");
+    args.causation = Some(unknown_id.clone());
+    args.commit_causation = Some(known_id.clone());
+    let err = record_document(
+        document,
+        args,
+        &citation_log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+    )
+    .err()
+    .unwrap();
+    assert!(err.to_string().contains("no event with id"), "{err}");
+    assert_eq!(citation_log.load().unwrap().len(), 1);
+}
+
+#[test]
+fn record_refuses_an_unknown_commit_cause_before_writing() {
+    let known = Event::message_received(
+        Actor::Human(human()),
+        "record this".to_string(),
+        source("cli"),
+        None,
+    );
+    let known_id = known.id().as_uuid().to_string();
+    let commit_log = FakeLog::seeded(vec![known]);
+    let mut args = record_args("debates");
+    args.causation = Some(known_id);
+    args.commit_causation = Some(EventId::new().as_uuid().to_string());
+    let document = "topic \"Does record work?\"\n";
+    let err = record_document(
+        document,
+        args,
+        &commit_log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+    )
+    .err()
+    .unwrap();
+    assert!(err.to_string().contains("no event with id"), "{err}");
+    assert_eq!(commit_log.load().unwrap().len(), 1);
 }
 
 #[test]

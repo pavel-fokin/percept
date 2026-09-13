@@ -56,6 +56,14 @@ fn the_grammar_is_indented_under_the_record_command() {
 }
 
 #[test]
+fn record_help_separates_citation_and_commit_causes() {
+    let text = describe(&debates());
+    assert!(text.contains("[--causation <citation event id>]"), "{text}");
+    assert!(text.contains("[--commit-causation <request event id>]"), "{text}");
+    assert!(text.contains("links a refreshed file citation to its predecessor"), "{text}");
+}
+
+#[test]
 fn the_add_example_cites_a_file_under_its_last_node() {
     let text = describe(&debates());
     assert!(

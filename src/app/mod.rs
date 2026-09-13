@@ -444,11 +444,10 @@ impl App {
             .is_some_and(|turn| turn.tool_calls >= self.harness.tool_cap)
     }
 
-    /// Commits each of `output.commits`, caused by the open call and
-    /// attributed to the model - what the tool judged, before the
-    /// result that reports it - then `tool.resulted` for the call
-    /// itself, also caused by it, and advances the chain past it. No
-    /// open call is a no-op.
+    /// Commits each of `output.commits`, caused by the event the tool
+    /// resolved or by the open call when it gave none, and attributed
+    /// to the model. Then commits `tool.resulted`, caused by the call,
+    /// and advances the chain past it. No open call is a no-op.
     fn commit_tool_result(
         &mut self,
         output: crate::harness::ToolOutput,
@@ -457,10 +456,11 @@ impl App {
         else {
             return Ok(());
         };
+        let cause = output.causation_id.unwrap_or(called_id);
         let commits: Vec<Event> = output
             .commits
             .into_iter()
-            .map(|payload| Event::new(Actor::Agent, self.source.clone(), Some(called_id), payload))
+            .map(|payload| Event::new(Actor::Agent, self.source.clone(), Some(cause), payload))
             .collect();
         // A tool checked its commits against the log file, and this
         // transcript can be behind it - another writer since startup.

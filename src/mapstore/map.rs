@@ -109,16 +109,16 @@ impl Snapshot {
     /// Each cited id as an `EventId` the log carries. An id the log
     /// lacks is an error: a typo in provenance is worse than none.
     pub fn resolve(&self, ids: &[String]) -> Result<Vec<EventId>, Box<dyn std::error::Error>> {
-        ids.iter()
-            .map(|id| {
-                let parsed =
-                    parse_event_id(id).map_err(|_| format!("{id:?} is not an event id"))?;
-                if !self.ids.contains(&parsed.as_uuid()) {
-                    return Err(format!("no event with id {id}").into());
-                }
-                Ok(parsed)
-            })
-            .collect()
+        ids.iter().map(|id| self.resolve_one(id)).collect()
+    }
+
+    /// One event id the log carries.
+    pub fn resolve_one(&self, id: &str) -> Result<EventId, Box<dyn std::error::Error>> {
+        let parsed = parse_event_id(id).map_err(|_| format!("{id:?} is not an event id"))?;
+        if !self.ids.contains(&parsed.as_uuid()) {
+            return Err(format!("no event with id {id}").into());
+        }
+        Ok(parsed)
     }
 
     pub fn apply(&mut self, mutation: Mutation, actor: Actor) -> Result<Payload, MapError> {
@@ -132,23 +132,34 @@ impl Snapshot {
     }
 }
 
+/// The experience a cognitive commit came from and the event that
+/// caused it to be written.
+pub struct CommitProvenance<'a> {
+    pub sources: &'a [String],
+    pub causation: Option<&'a str>,
+}
+
 /// `commit`'s check-and-apply, given the events its closure was handed
 /// by `EventLog::append_computed` under the log's lock: `sources`
-/// resolved against them, the `Mutation` built from them checked and
-/// applied to their fold.
+/// and `causation` resolved against them, the `Mutation` built from the
+/// sources checked and applied to their fold.
 fn revised(
     schemas: &Schemas,
     name: &str,
     path: &Path,
     events: Vec<crate::core::Event>,
-    sources: &[String],
+    provenance: CommitProvenance<'_>,
     actor: Actor,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
-) -> Result<Payload, Box<dyn std::error::Error>> {
+) -> Result<(Payload, Option<EventId>), Box<dyn std::error::Error>> {
     let mut snapshot = Snapshot::from_events(schemas, name, path, events)?;
-    let sources = snapshot.resolve(sources)?;
+    let sources = snapshot.resolve(provenance.sources)?;
+    let causation_id = provenance
+        .causation
+        .map(|id| snapshot.resolve_one(id))
+        .transpose()?;
     let mutation = mutation(sources);
-    Ok(snapshot.apply(mutation, actor)?)
+    Ok((snapshot.apply(mutation, actor)?, causation_id))
 }
 
 /// One change to the map `name` names, folded at `source`'s path and
@@ -159,20 +170,34 @@ fn revised(
 /// returns is appended before any other writer's own `append_computed`
 /// call can run. Two writers each loading the log on their own could
 /// both count the same kind's existing nodes and mint the same short
-/// id; this is the seam that stops them.
+/// id; this is the seam that stops them. `causation`, when present,
+/// names the event that caused the cognitive commit.
 pub fn commit(
     log: &dyn EventLog,
     schemas: &Schemas,
     name: &str,
     source: &crate::core::Source,
-    sources: &[String],
+    provenance: CommitProvenance<'_>,
     actor: Actor,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<crate::core::Event, Box<dyn std::error::Error>> {
     let (name, source) = (name.to_string(), source.clone());
     log.append_computed(Box::new(move |events| {
-        let payload = revised(schemas, &name, &source.path, events, sources, actor, mutation)?;
-        Ok(crate::core::Event::new(actor, source, None, payload))
+        let (payload, causation_id) = revised(
+            schemas,
+            &name,
+            &source.path,
+            events,
+            provenance,
+            actor,
+            mutation,
+        )?;
+        Ok(crate::core::Event::new(
+            actor,
+            source,
+            causation_id,
+            payload,
+        ))
     }))
 }
 

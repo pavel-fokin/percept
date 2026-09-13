@@ -1,4 +1,4 @@
-use crate::core::Payload;
+use crate::core::{EventId, Payload};
 
 /// A capability the model invokes by name during a turn. The domain
 /// owns the shape; the implementation lives in `store`, the way
@@ -18,11 +18,15 @@ pub trait Tool: Send + Sync {
 }
 
 /// What a tool hands back: the text fed to the model as the result,
-/// and any events the call produced, which `App` commits caused by the
-/// call. Most tools commit nothing.
+/// and any events the call produced. A tool may name an earlier event
+/// as their cause; otherwise `App` uses the call. Most tools commit
+/// nothing.
 pub struct ToolOutput {
     pub content: String,
     pub commits: Vec<Payload>,
+    /// A cause the tool resolved from the log for every commit. When
+    /// absent, `App` uses the tool call itself.
+    pub causation_id: Option<EventId>,
 }
 
 impl ToolOutput {
@@ -31,6 +35,7 @@ impl ToolOutput {
         Self {
             content: content.into(),
             commits: Vec::new(),
+            causation_id: None,
         }
     }
 }
