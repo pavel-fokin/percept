@@ -94,8 +94,8 @@ struct Row {
 /// resolves a node's `sources` entries, `later_citations` walks a
 /// citation forward to the newest re-citation of the same file before
 /// it is checked against the tree. `cache` memoises each cited path's
-/// normalised tree text - `None` for one that is gone - for the rest
-/// of this call, so a path cited by more than one node is read once.
+/// tree text - `None` for one that is gone - for the rest of this
+/// call, so a path cited by more than one node is read once.
 fn citation_rows(maps: &[Map], events: &[Event], checkout: &Path) -> Vec<Row> {
     let file_cited: Vec<&Event> = events
         .iter()

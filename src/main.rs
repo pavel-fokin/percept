@@ -298,7 +298,14 @@ async fn main() {
             });
             match opened {
                 Ok((log, schemas, me)) => {
-                    server::run(std::sync::Arc::new(log), schemas, cli_source.clone(), me).await
+                    server::run(
+                        std::sync::Arc::new(log),
+                        schemas,
+                        cli_source.clone(),
+                        me,
+                        checkout.clone(),
+                    )
+                    .await
                 }
                 Err(err) => Err(err),
             }
