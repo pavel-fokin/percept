@@ -27,7 +27,7 @@ async fn spawn_over(events: Vec<crate::core::Event>) -> (std::sync::Arc<FakeLog>
         log: log.clone() as std::sync::Arc<dyn crate::core::EventLog>,
         schemas: schemas(),
         source: source("test"),
-        checkout: std::path::PathBuf::from("/test"),
+        checkout: std::path::PathBuf::from(crate::core::testing::ROOT),
         me: human(),
         since: None,
     });

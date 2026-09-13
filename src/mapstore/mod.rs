@@ -18,7 +18,6 @@
 #![cfg_attr(not(feature = "lab"), allow(dead_code, unused_imports))]
 
 mod blocks;
-pub mod citation;
 mod describe;
 mod map;
 mod render;

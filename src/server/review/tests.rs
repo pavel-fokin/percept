@@ -3,7 +3,7 @@ use serde_json::Value;
 use super::*;
 use crate::core::testing::{
     created_at, edge_added, file_cited, human, node_added_by, node_added_citing, schemas, source,
-    source_at, FakeLog, Fixture,
+    source_at, FakeLog, Fixture, ROOT,
 };
 use crate::core::{Actor, Event, EventId, Payload};
 use crate::shared::Timestamp;
@@ -17,36 +17,33 @@ fn message_received_at(source: Source, actor: Actor, content: &str) -> Event {
 }
 
 fn cut_body_since(events: Vec<Event>, since: Option<Timestamp>) -> Value {
+    cut_body_at(Path::new(ROOT), events, since)
+}
+
+/// The cut with its files read from a checkout at `checkout` - the
+/// fixed test root for every test but one that cites a file on disk.
+/// The events carry the test path either way: which project the cut
+/// reads and where its files are are two different arguments.
+fn cut_body_at(checkout: &Path, events: Vec<Event>, since: Option<Timestamp>) -> Value {
     let log = FakeLog::seeded(events);
     let schemas = schemas();
     let src = source("test");
-    serde_json::to_value(cut(&log, &schemas, &src, Path::new("/test"), since).unwrap()).unwrap()
+    serde_json::to_value(cut(&log, &schemas, &src, checkout, since).unwrap()).unwrap()
 }
 
 fn cut_debates(events: Vec<Event>) -> Value {
     cut_debates_since(events, None)
 }
 
-/// `cut_debates`, reading cited files from a real checkout at `root` -
-/// what a test that cites a file on disk needs. The events still carry
-/// the fixed test path: which project the cut reads and where its files
-/// are are two different arguments.
-fn cut_debates_at(root: &std::path::Path, events: Vec<Event>) -> Value {
-    let log = FakeLog::seeded(events);
-    let schemas = schemas();
-    let src = source("test");
-    let body = serde_json::to_value(cut(&log, &schemas, &src, root, None).unwrap()).unwrap();
-    body["maps"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|map| map["name"] == "debates")
-        .unwrap()
-        .clone()
+fn cut_debates_at(checkout: &Path, events: Vec<Event>) -> Value {
+    debates_of(cut_body_at(checkout, events, None))
 }
 
 fn cut_debates_since(events: Vec<Event>, since: Option<Timestamp>) -> Value {
-    let body = cut_body_since(events, since);
+    debates_of(cut_body_since(events, since))
+}
+
+fn debates_of(body: Value) -> Value {
     body["maps"]
         .as_array()
         .unwrap()
