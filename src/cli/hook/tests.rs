@@ -558,10 +558,13 @@ fn stop_uses_last_assistant_message_and_the_prompts_cause() {
 }
 
 #[test]
-fn stop_clears_the_turns_state() {
+fn a_prompt_opens_the_checkouts_turn_and_stop_closes_it() {
     let fixture = Fixture::new();
-    fixture.prompt("codex", "session", "", "hello");
-    assert_eq!(fixture.state_file_count(), 1);
+    let dir = turn_dir(&fixture.sessions, &fixture.root);
+
+    let prompt = fixture.prompt("codex", "session", "", "hello");
+    let open = TurnState::latest_cause(&dir).unwrap().unwrap();
+    assert_eq!(open.as_uuid().to_string(), prompt);
 
     fixture
         .stop(
@@ -572,7 +575,34 @@ fn stop_clears_the_turns_state() {
         )
         .unwrap();
 
+    assert_eq!(TurnState::latest_cause(&dir).unwrap(), None);
     assert_eq!(fixture.state_file_count(), 0);
+}
+
+#[test]
+fn a_stop_leaves_a_later_prompts_turn_open() {
+    let fixture = Fixture::new();
+    let dir = turn_dir(&fixture.sessions, &fixture.root);
+    fixture.prompt("codex", "first", "", "hello");
+    let later = fixture.prompt("claude-code", "second", "", "hello");
+
+    fixture
+        .stop("codex", "first", "", json!({"last_assistant_message": "reply"}))
+        .unwrap();
+
+    let open = TurnState::latest_cause(&dir).unwrap().unwrap();
+    assert_eq!(open.as_uuid().to_string(), later);
+}
+
+#[test]
+fn a_session_start_closes_a_turn_a_killed_session_left_open() {
+    let fixture = Fixture::new();
+    let dir = turn_dir(&fixture.sessions, &fixture.root);
+    fixture.prompt("codex", "killed", "", "hello");
+
+    fixture.session_start("codex");
+
+    assert_eq!(TurnState::latest_cause(&dir).unwrap(), None);
 }
 
 #[test]

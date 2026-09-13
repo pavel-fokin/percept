@@ -30,7 +30,7 @@ use serde_json::{json, Value};
 
 use crate::core::{Actor, Event, EventId, EventLog, Schemas, Source};
 use crate::mapstore::{self, last_session, of_path};
-use crate::store::TurnState;
+use crate::store::{turn_dir, TurnState};
 
 
 /// `percept hook <client>` - `client` names the writer whose turn this
@@ -135,16 +135,20 @@ pub fn run(
     checkout: &Path,
     me: Option<crate::core::HumanId>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
-    let dir = sessions_dir.join(state_dir_name(&source.path));
+    let dir = turn_dir(sessions_dir, &source.path);
     let name = state_file_name(&source.name, &input.session_id, &input.turn_id);
     let mut state = TurnState::open(&dir, &name)?;
 
     match input.event {
         HookEvent::SessionStart {} => {
+            // A session opens with no turn, whatever a killed one left.
+            TurnState::unpoint(&dir)?;
             let schemas = crate::mapstore::load_schemas(checkout)?;
             start_session(source, log, &schemas, checkout)
         }
-        HookEvent::UserPromptSubmit { prompt } => submit_prompt(prompt, source, log, &mut state, me),
+        HookEvent::UserPromptSubmit { prompt } => {
+            submit_prompt(prompt, source, log, &mut state, &dir, me)
+        }
         HookEvent::PostToolUse {
             tool_name,
             tool_input,
@@ -159,6 +163,10 @@ pub fn run(
         } => {
             let cause = state.cause()?;
             let output = record_stop(last_assistant_message, transcript_path, source, log, cause);
+            // Another client's later prompt may own the pointer by now.
+            if TurnState::latest_cause(&dir)? == cause {
+                TurnState::unpoint(&dir)?;
+            }
             let _ = state.remove();
             output
         }
@@ -204,14 +212,16 @@ const TURN_RULE: &str =
 /// `UserPromptSubmit`: clears the turn's previous cause before doing
 /// anything else, so a prompt that then fails to commit never leaves a
 /// later event citing the wrong one. Records the prompt as
-/// `message.received` from `human`, stores its id as the turn's cause,
-/// and returns the client's expected `additionalContext`: the event's
-/// id on the first line, `TURN_RULE` on the second.
+/// `message.received` from `human`, stores its id as the turn's cause
+/// and as the checkout's open turn under `dir`, and returns the
+/// client's expected `additionalContext`: the event's id on the first
+/// line, `TURN_RULE` on the second.
 fn submit_prompt(
     prompt: String,
     source: &Source,
     log: &dyn EventLog,
     state: &mut TurnState,
+    dir: &Path,
     me: Option<crate::core::HumanId>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     state.clear()?;
@@ -220,6 +230,7 @@ fn submit_prompt(
     let id = committed.id();
     log.append(&committed)?;
     state.set(id)?;
+    TurnState::point(dir, id)?;
 
     Ok(json!({
         "hookSpecificOutput": {
@@ -330,14 +341,6 @@ fn claude_reply(path: &Path) -> Result<String, Box<dyn std::error::Error>> {
     }
 
     Ok(reply.join("\n"))
-}
-
-/// Names the directory a checkout root's turns live under, so two
-/// projects sharing one `hook-sessions` directory never collide: `root`
-/// with every `/` replaced by `%`, the one character neither path ever
-/// carries itself.
-fn state_dir_name(root: &Path) -> String {
-    root.to_string_lossy().replace('/', "%")
 }
 
 /// Names a turn's state file within its checkout's directory - stable

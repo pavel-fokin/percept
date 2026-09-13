@@ -21,7 +21,7 @@ pub use event::{
     parse_event_id, parse_kind, parse_lines, read_event, summarize, Cursor, Event, PREVIEW_CHARS,
 };
 pub use jsonl::Jsonl;
-pub use turn_state::TurnState;
+pub use turn_state::{turn_dir, TurnState};
 
 /// A moment as a reader types it, on the CLI or in a tool call: ISO-8601,
 /// or `<N>d`, `<N>h`, `<N>m` measured back from now. One parser, so

@@ -25,6 +25,7 @@ fn a_claim_without_a_why_is_refused_as_a_new_write() {
         &source,
         &[],
         Actor::Human(human()),
+        None,
         add_node("claim", "SQLite"),
     )
     .err()
@@ -47,6 +48,7 @@ fn a_chore_without_a_why_is_refused_as_a_new_write() {
         &source,
         &[],
         Actor::Human(human()),
+        None,
         add_node("chore", "cancel a turn without quitting"),
     )
     .err()
@@ -75,6 +77,7 @@ fn a_claim_with_a_why_is_recorded() {
         &source,
         &[],
         Actor::Human(human()),
+        None,
         mutation,
     )
     .unwrap();
@@ -94,6 +97,7 @@ fn commit_appends_the_event_that_records_the_mutation() {
         &source,
         &[],
         Actor::Human(human()),
+        None,
         add_node("verdict", "Rust"),
     )
     .unwrap();
@@ -116,6 +120,7 @@ fn commit_loads_the_log_so_a_second_call_sees_the_first() {
         &source,
         &[],
         Actor::Human(human()),
+        None,
         add_node("verdict", "Rust"),
     )
     .unwrap();
@@ -127,6 +132,7 @@ fn commit_loads_the_log_so_a_second_call_sees_the_first() {
         &source,
         &[],
         Actor::Human(human()),
+        None,
         add_node("verdict", "Rust"),
     )
     .err()
@@ -148,6 +154,7 @@ fn commit_allows_the_same_name_under_a_different_path() {
         &here,
         &[],
         Actor::Human(human()),
+        None,
         add_node("verdict", "Rust"),
     )
     .unwrap();
@@ -158,6 +165,7 @@ fn commit_allows_the_same_name_under_a_different_path() {
         &there,
         &[],
         Actor::Human(human()),
+        None,
         add_node("verdict", "Rust"),
     )
     .unwrap();
@@ -214,6 +222,7 @@ fn committing_to_a_map_no_schema_declares_is_an_error() {
         &source,
         &[],
         Actor::Human(human()),
+        None,
         add_node("file", "src/main.rs"),
     )
     .err()
@@ -250,6 +259,7 @@ fn a_source_is_checked_against_the_loaded_log() {
         &source,
         &[known],
         Actor::Human(human()),
+        None,
         add_node("verdict", "Rust"),
     )
     .unwrap();
@@ -260,6 +270,7 @@ fn a_source_is_checked_against_the_loaded_log() {
         &source,
         std::slice::from_ref(&unknown),
         Actor::Human(human()),
+        None,
         add_node("verdict", "Go"),
     )
     .err()
@@ -271,6 +282,7 @@ fn a_source_is_checked_against_the_loaded_log() {
         &source,
         &["user".to_string()],
         Actor::Human(human()),
+        None,
         add_node("verdict", "Go"),
     )
     .err()

@@ -148,6 +148,7 @@ pub fn change(
         source,
         &[],
         crate::core::Actor::Human(me),
+        None,
         move |sources| crate::core::Mutation::ChangeNode {
             node: node_ref,
             name: None,
