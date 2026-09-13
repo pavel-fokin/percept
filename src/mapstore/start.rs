@@ -6,12 +6,12 @@
 //! a map, folded by the caller and rendered here.
 
 use std::collections::{HashMap, HashSet};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use super::blocks::{capped_lines, changed_line, line_id, LIMIT};
-use crate::core::{cited_label, Event, EventId, Map, Node, Payload, Written};
+use crate::core::{Event, EventId, Map, Node, Payload, Written};
 use crate::shared::Timestamp;
-use crate::workspace;
+use crate::workspace::{Cited, Citations};
 
 /// `maps`, `events`, `root`, and `checkout` as the three blocks
 /// `start` prints: State, what each map holds; Attention, what moved
@@ -92,9 +92,8 @@ struct Row {
 /// caused - so no node's check re-reads the log: `id_to_event`
 /// resolves a node's `sources` entries, `later_citations` walks a
 /// citation forward to the newest re-citation of the same file before
-/// it is checked against the tree. `cache` memoises each cited path's
-/// normalised tree text - `None` for one that is gone - for the rest
-/// of this call, so a path cited by more than one node is read once.
+/// it is checked against the tree. One `Citations` serves the whole
+/// call, so a path cited by more than one node is read once.
 fn citation_rows(maps: &[Map], events: &[Event], checkout: &Path) -> Vec<Row> {
     let file_cited: Vec<&Event> = events
         .iter()
@@ -109,11 +108,11 @@ fn citation_rows(maps: &[Map], events: &[Event], checkout: &Path) -> Vec<Row> {
         }
     }
 
-    let mut cache: HashMap<PathBuf, Option<String>> = HashMap::new();
+    let citations = Citations::new(checkout);
     let mut rows = Vec::new();
     for map in maps {
         for node in map.headlines() {
-            let findings = node_changes(node, &id_to_event, &later_citations, checkout, &mut cache);
+            let findings = node_changes(node, &id_to_event, &later_citations, &citations);
             if !findings.is_empty() {
                 let id = line_id(map, node);
                 let line = format!("{id} cites {}", findings.join(", "));
@@ -130,19 +129,22 @@ fn node_changes(
     node: &Node,
     id_to_event: &HashMap<EventId, &Event>,
     later_citations: &HashMap<EventId, Vec<&Event>>,
-    checkout: &Path,
-    cache: &mut HashMap<PathBuf, Option<String>>,
+    citations: &Citations,
 ) -> Vec<String> {
     node.sources
         .iter()
         .filter_map(|source_id| {
             let event = id_to_event.get(source_id)?;
             let newest = newest_citation(event, later_citations);
-            let Payload::FileCited { path, lines, excerpt } = newest.payload() else {
+            let Payload::FileCited { path, excerpt, .. } = newest.payload() else {
                 return None;
             };
-            citation_status(cache, checkout, path, excerpt)
-                .map(|status| format!("{} {status}", cited_label(path, *lines)))
+            let status = match citations.locate(path, excerpt) {
+                Cited::At(..) => return None,
+                Cited::Changed => "changed",
+                Cited::Gone => "gone",
+            };
+            Some(format!("{} {status}", path.display()))
         })
         .collect()
 }
@@ -174,42 +176,6 @@ fn newest_citation<'a>(
         current = next;
     }
     current
-}
-
-/// `gone` when `path` under `checkout` is missing or binary; `changed`
-/// when it no longer contains `excerpt` as a substring, or `excerpt`
-/// normalises to nothing to compare against; `None` when it still
-/// reads. Both sides go through `normalize`; the tree's side is read
-/// through `cache`, so a path more than one citation names is read and
-/// normalised once.
-fn citation_status(
-    cache: &mut HashMap<PathBuf, Option<String>>,
-    checkout: &Path,
-    path: &Path,
-    excerpt: &str,
-) -> Option<&'static str> {
-    let excerpt = normalize(excerpt);
-    if excerpt.is_empty() {
-        return Some("changed");
-    }
-    let text = cache
-        .entry(path.to_path_buf())
-        .or_insert_with(|| workspace::read_text_lossy(&checkout.join(path)).ok().map(|t| normalize(&t)));
-    match text {
-        Some(text) if text.contains(&excerpt) => None,
-        _ => Some(if text.is_some() { "changed" } else { "gone" }),
-    }
-}
-
-/// Each line's trailing whitespace stripped, then leading and trailing
-/// blank lines trimmed - the one normalisation both sides of a
-/// `changed since recorded` comparison go through, so a citation whose
-/// stored excerpt padded its range with context still matches.
-fn normalize(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().map(|line| line.trim_end()).collect();
-    let start = lines.iter().position(|line| !line.is_empty()).unwrap_or(lines.len());
-    let end = lines.iter().rposition(|line| !line.is_empty()).map_or(start, |i| i + 1);
-    lines[start..end].join("\n")
 }
 
 /// A block's rows, indented and padded so every right-hand value

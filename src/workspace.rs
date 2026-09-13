@@ -14,6 +14,9 @@ use std::sync::Mutex;
 
 use crate::shared::to_slash;
 
+mod citation;
+pub use citation::{Cited, Citations};
+
 /// A working tree rooted at an absolute, canonical path, plus the set
 /// of files a tool has actually read - the record a later edit tool
 /// checks before writing, so an edit of a file the model has not read

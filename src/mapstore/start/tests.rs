@@ -147,8 +147,7 @@ fn attention_marks_a_stale_citation_as_changed() {
 
     let text = rendered(&events, checkout.path());
 
-    assert!(text.contains("cites a.rs:1-1"), "{text:?}");
-    assert!(text.contains("changed"), "{text:?}");
+    assert!(text.contains("cites a.rs changed"), "{text:?}");
 }
 
 #[test]

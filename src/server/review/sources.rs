@@ -6,11 +6,12 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
 use crate::core::{cited_label, Actor, Event, EventId, Payload};
+use crate::workspace::{Cited, Citations};
 
 /// A source entry's `content` or `excerpt` is sent whole up to this
 /// many characters; beyond it the entry is cut at a character boundary
@@ -79,10 +80,11 @@ pub struct EventIndex<'a> {
     by_id: HashMap<EventId, &'a Event>,
     agent_replies: HashMap<(String, PathBuf), Vec<&'a Event>>,
     cache: RefCell<HashMap<EventId, SourceEntry>>,
+    citations: Citations,
 }
 
 impl<'a> EventIndex<'a> {
-    pub fn new(events: &'a [Event]) -> Self {
+    pub fn new(events: &'a [Event], checkout: &Path) -> Self {
         let mut by_id = HashMap::new();
         let mut agent_replies: HashMap<(String, PathBuf), Vec<&Event>> = HashMap::new();
         for event in events {
@@ -98,6 +100,7 @@ impl<'a> EventIndex<'a> {
             by_id,
             agent_replies,
             cache: RefCell::new(HashMap::new()),
+            citations: Citations::new(checkout),
         }
     }
 
@@ -153,14 +156,18 @@ impl<'a> EventIndex<'a> {
                     proposal,
                 }
             }
-            Payload::FileCited { path, lines, excerpt } => {
+            Payload::FileCited { path, excerpt, .. } => {
+                let lines = match self.citations.locate(path, excerpt) {
+                    Cited::At(from, to) => Some((from, to)),
+                    Cited::Changed | Cited::Gone => None,
+                };
                 let (excerpt, truncated) = truncate(excerpt);
                 SourceEntry::File {
                     id: entry_id,
                     at,
                     path: path.to_string_lossy().into_owned(),
-                    lines: *lines,
-                    label: cited_label(path, *lines),
+                    lines,
+                    label: cited_label(path, lines),
                     excerpt,
                     truncated,
                 }
