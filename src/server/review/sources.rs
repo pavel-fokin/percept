@@ -6,11 +6,13 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
 use crate::core::{cited_label, Actor, Event, EventId, Payload};
+use crate::mapstore::citation::locate;
+use crate::workspace;
 
 /// A source entry's `content` or `excerpt` is sent whole up to this
 /// many characters; beyond it the entry is cut at a character boundary
@@ -76,13 +78,15 @@ fn truncate(text: &str) -> (String, bool) {
 /// the log is large and a request lists many rows. `entry` memoises
 /// what it builds, since two nodes can cite the same event.
 pub struct EventIndex<'a> {
+    root: &'a Path,
     by_id: HashMap<EventId, &'a Event>,
     agent_replies: HashMap<(String, PathBuf), Vec<&'a Event>>,
     cache: RefCell<HashMap<EventId, SourceEntry>>,
+    text_cache: RefCell<HashMap<PathBuf, Option<String>>>,
 }
 
 impl<'a> EventIndex<'a> {
-    pub fn new(events: &'a [Event]) -> Self {
+    pub fn new(events: &'a [Event], root: &'a Path) -> Self {
         let mut by_id = HashMap::new();
         let mut agent_replies: HashMap<(String, PathBuf), Vec<&Event>> = HashMap::new();
         for event in events {
@@ -95,10 +99,24 @@ impl<'a> EventIndex<'a> {
             }
         }
         Self {
+            root,
             by_id,
             agent_replies,
             cache: RefCell::new(HashMap::new()),
+            text_cache: RefCell::new(HashMap::new()),
         }
+    }
+
+    /// `path`'s text under `root` now, read once per path and memoised
+    /// for the rest of this index's life - `None` when it is missing or
+    /// binary.
+    fn tree_text(&self, path: &Path) -> Option<String> {
+        if let Some(cached) = self.text_cache.borrow().get(path) {
+            return cached.clone();
+        }
+        let text = workspace::read_text_lossy(&self.root.join(path)).ok();
+        self.text_cache.borrow_mut().insert(path.to_path_buf(), text.clone());
+        text
     }
 
     /// The latest agent reply in the same source as `message` and
@@ -153,14 +171,15 @@ impl<'a> EventIndex<'a> {
                     proposal,
                 }
             }
-            Payload::FileCited { path, lines, excerpt } => {
+            Payload::FileCited { path, excerpt, .. } => {
+                let lines = self.tree_text(path).and_then(|text| locate(excerpt, &text));
                 let (excerpt, truncated) = truncate(excerpt);
                 SourceEntry::File {
                     id: entry_id,
                     at,
                     path: path.to_string_lossy().into_owned(),
-                    lines: *lines,
-                    label: cited_label(path, *lines),
+                    lines,
+                    label: cited_label(path, lines),
                     excerpt,
                     truncated,
                 }

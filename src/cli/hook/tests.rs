@@ -434,7 +434,7 @@ fn a_changed_cited_file_reaches_the_hook_context() {
 
     let context = fixture.session_start("codex");
 
-    assert!(context.contains("cites src/a.rs:1-1 changed"), "{context:?}");
+    assert!(context.contains("cites src/a.rs changed"), "{context:?}");
 }
 
 #[test]

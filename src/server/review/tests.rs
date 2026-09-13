@@ -1,9 +1,12 @@
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+
 use serde_json::Value;
 
 use super::*;
 use crate::core::testing::{
-    created_at, edge_added, file_cited, human, node_added_by, node_added_citing, schemas, source,
-    source_at, FakeLog,
+    created_at, edge_added, human, node_added_by, node_added_citing, node_added_payload, node_id,
+    schemas, source, source_at, FakeLog, Fixture,
 };
 use crate::core::{Actor, Event, EventId, Payload};
 use crate::shared::Timestamp;
@@ -25,6 +28,22 @@ fn cut_body_since(events: Vec<Event>, since: Option<Timestamp>) -> Value {
 
 fn cut_debates(events: Vec<Event>) -> Value {
     cut_debates_since(events, None)
+}
+
+/// `cut_debates`, over a checkout at `root` instead of the fixed test
+/// path - what a test that cites a real file on disk needs.
+fn cut_debates_at(root: &std::path::Path, events: Vec<Event>) -> Value {
+    let log = FakeLog::seeded(events);
+    let schemas = schemas();
+    let src = source_at("test", &root.to_string_lossy());
+    let body = serde_json::to_value(cut(&log, &schemas, &src, None).unwrap()).unwrap();
+    body["maps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|map| map["name"] == "debates")
+        .unwrap()
+        .clone()
 }
 
 fn cut_debates_since(events: Vec<Event>, since: Option<Timestamp>) -> Value {
@@ -237,22 +256,84 @@ fn a_reply_from_another_source_is_not_taken_as_the_proposal() {
     assert!(sources[0]["proposal"].is_null(), "{sources:?}");
 }
 
-#[test]
-fn a_file_cited_source_carries_its_path_lines_and_excerpt() {
-    let topic = node_added_by(Actor::Human(None), "topic", "Which language?");
-    let cite = file_cited("src/main.rs", Some((10, 20)), "fn main() {}");
-    let verdict = node_added_citing(Actor::Agent, "verdict", "Rust", vec![cite.id()]);
-    let settles = edge_added("settles", &verdict, &topic);
+/// An event set matching `cut_debates_at`'s helpers, at `root`, so a
+/// test can cite a real file rather than the fixed `/test` path.
+fn node_added_citing_at(root: &std::path::Path, actor: Actor, kind: &str, name: &str, sources: Vec<EventId>) -> Event {
+    Event::new(
+        actor,
+        source_at("test", &root.to_string_lossy()),
+        None,
+        node_added_payload("debates", kind, name, BTreeMap::new(), sources),
+    )
+}
 
-    let map = cut_debates(vec![topic, cite, verdict, settles]);
+fn edge_added_at(root: &std::path::Path, kind: &str, from: &Event, to: &Event) -> Event {
+    Event::new(
+        Actor::Human(human()),
+        source_at("test", &root.to_string_lossy()),
+        None,
+        Payload::EdgeAdded {
+            map: "debates".to_string(),
+            kind: kind.to_string(),
+            from: node_id(from),
+            to: node_id(to),
+            sources: Vec::new(),
+        },
+    )
+}
+
+fn file_cited_at(root: &std::path::Path, path: &str, excerpt: &str) -> Event {
+    Event::new(
+        Actor::Agent,
+        source_at("test", &root.to_string_lossy()),
+        None,
+        Payload::FileCited { path: PathBuf::from(path), lines: Some((10, 20)), excerpt: excerpt.to_string() },
+    )
+}
+
+#[test]
+fn a_file_cited_source_carries_its_path_lines_and_excerpt_from_the_tree_now() {
+    let checkout = Fixture::new();
+    checkout.write("src/main.rs", "fn other() {}\nfn main() {}\n");
+
+    let topic = node_added_citing_at(checkout.path(), Actor::Human(None), "topic", "Which language?", vec![
+        EventId::new()
+    ]);
+    // The stored range is a stale (10, 20): the live line is 2, proving
+    // the label is recomputed from the tree, not read back from the
+    // event.
+    let cite = file_cited_at(checkout.path(), "src/main.rs", "fn main() {}");
+    let verdict = node_added_citing_at(checkout.path(), Actor::Agent, "verdict", "Rust", vec![cite.id()]);
+    let settles = edge_added_at(checkout.path(), "settles", &verdict, &topic);
+
+    let map = cut_debates_at(checkout.path(), vec![topic, cite, verdict, settles]);
 
     let sources = first_sources(&map);
     assert_eq!(sources[0]["kind"], "file");
     assert_eq!(sources[0]["path"], "src/main.rs");
-    assert_eq!(sources[0]["lines"][0], 10);
-    assert_eq!(sources[0]["lines"][1], 20);
-    assert_eq!(sources[0]["label"], "src/main.rs:10-20");
+    assert_eq!(sources[0]["lines"][0], 2);
+    assert_eq!(sources[0]["lines"][1], 2);
+    assert_eq!(sources[0]["label"], "src/main.rs:2-2");
     assert_eq!(sources[0]["excerpt"], "fn main() {}");
+}
+
+#[test]
+fn a_file_cited_source_omits_lines_when_the_excerpt_no_longer_matches() {
+    let checkout = Fixture::new();
+    checkout.write("src/main.rs", "fn main() { changed }\n");
+
+    let topic = node_added_citing_at(checkout.path(), Actor::Human(None), "topic", "Which language?", vec![
+        EventId::new()
+    ]);
+    let cite = file_cited_at(checkout.path(), "src/main.rs", "fn main() {}");
+    let verdict = node_added_citing_at(checkout.path(), Actor::Agent, "verdict", "Rust", vec![cite.id()]);
+    let settles = edge_added_at(checkout.path(), "settles", &verdict, &topic);
+
+    let map = cut_debates_at(checkout.path(), vec![topic, cite, verdict, settles]);
+
+    let sources = first_sources(&map);
+    assert!(sources[0]["lines"].is_null(), "{sources:?}");
+    assert_eq!(sources[0]["label"], "src/main.rs");
 }
 
 #[test]
