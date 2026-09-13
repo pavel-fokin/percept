@@ -64,6 +64,20 @@ pub enum MapError {
         kind: String,
         states: Vec<String>,
     },
+    /// A property outside `requires`, `properties`, and `state` when
+    /// the kind declares states - the write path's schema for what a
+    /// kind may carry. Write-only, like `UnknownState`: checked by
+    /// `Map::apply` on `AddNode` and `ChangeNode`, never by `replay`,
+    /// so a node recorded before its kind's properties were declared
+    /// still folds.
+    UnknownProperty {
+        kind: String,
+        property: String,
+        /// `requires`, then `properties`, then `state` when the kind
+        /// declares states - in that order, the union `apply` checks
+        /// against.
+        allowed: Vec<String>,
+    },
     /// A rename, a property other than `state`, or a removal that W6's
     /// rank rule refuses: the actor neither owns nor outranks the
     /// writer, or is outranked by whoever touched it since.
@@ -144,6 +158,17 @@ impl fmt::Display for MapError {
             }
             Self::MissingState { kind, states } => {
                 write!(f, "{kind} needs a state; states are {}", states.join(", "))
+            }
+            Self::UnknownProperty {
+                kind,
+                property,
+                allowed,
+            } => {
+                if allowed.is_empty() {
+                    write!(f, "{kind} has no property {property:?}; this kind carries none")
+                } else {
+                    write!(f, "{kind} has no property {property:?}; properties are {}", allowed.join(", "))
+                }
             }
             Self::UnknownState { kind, value, states } => write!(
                 f,

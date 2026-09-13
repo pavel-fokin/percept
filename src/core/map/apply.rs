@@ -93,6 +93,7 @@ impl Map {
                         });
                     }
                     check_state(node_kind, &properties)?;
+                    check_properties(node_kind, &properties)?;
                 }
                 Payload::NodeAdded {
                     map,
@@ -115,6 +116,7 @@ impl Map {
                 let existing = self.node(node_id).expect("resolve returns a live node's id");
                 if let Some(node_kind) = self.schema.node_kind(&existing.kind) {
                     check_state(node_kind, &properties)?;
+                    check_properties(node_kind, &properties)?;
                 }
                 blank_why(why.as_deref())?;
                 let needs_rank = name.is_some() || properties.keys().any(|key| key != "state");
@@ -521,4 +523,18 @@ fn check_state(kind: &NodeKind, properties: &BTreeMap<String, String>) -> Result
         }
     }
     Ok(())
+}
+
+/// Refuses a property in `properties` that `kind` does not allow.
+/// Runs after `check_state`, which has already refused `state` on a
+/// kind with none, so a `state` reaching here is allowed.
+fn check_properties(kind: &NodeKind, properties: &BTreeMap<String, String>) -> Result<(), MapError> {
+    match properties.keys().find(|key| !kind.allows(key)) {
+        Some(key) => Err(MapError::UnknownProperty {
+            kind: kind.kind.clone(),
+            property: key.clone(),
+            allowed: kind.allowed_properties().map(str::to_string).collect(),
+        }),
+        None => Ok(()),
+    }
 }

@@ -11,6 +11,7 @@ headlines = ["question", "decision"]
 
 [[node]]
 kind = "question"
+properties = ["why"]
 
 [[node]]
 kind = "option"
@@ -20,6 +21,7 @@ state = ["open", "dead"]
 
 [[node]]
 kind = "decision"
+properties = ["why"]
 
 [[edge]]
 kind = "resolves"

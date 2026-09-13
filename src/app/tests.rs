@@ -978,7 +978,8 @@ fn assert_debates_header(message: &str) {
         crate::core::testing::debates().purpose
     )));
     assert!(message.contains(
-        ". Node kinds: `topic`, `claim` (requires `why`), `fact`, `verdict`. Edge \
+        ". Node kinds: `topic`, `claim` (requires `why`, may carry `summary`), `fact` \
+         (may carry `summary`, `when`), `verdict` (may carry `why`). Edge \
          kinds: `about` (claim -> topic), `backs` (fact -> claim), `settles` \
          (verdict -> topic), `replaces` (verdict -> verdict), `doubts` (topic -> \
          verdict).\n"
@@ -995,7 +996,8 @@ fn an_empty_map_is_still_sent_with_its_kinds() {
     // One message per map, the prompt, the time.
     assert_eq!(sent.len(), 2 + schemas().folded().count());
     assert!(sent[0].contains(
-        "Node kinds: `topic`, `claim` (requires `why`), `fact`, `verdict`."
+        "Node kinds: `topic`, `claim` (requires `why`, may carry `summary`), `fact` \
+         (may carry `summary`, `when`), `verdict` (may carry `why`)."
     ));
     assert!(sent[0].contains("\n(empty:"), "{}", sent[0]);
 }
