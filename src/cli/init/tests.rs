@@ -15,10 +15,9 @@ fn codex(existing: Value, command: &str) -> Value {
     merge(as_map(existing), command, &EVENTS, &[]).unwrap()
 }
 
-fn init(client: &str, capture: bool) -> InitArgs {
+fn init(client: &str) -> InitArgs {
     InitArgs {
         client: client.to_string(),
-        capture,
     }
 }
 
@@ -156,7 +155,7 @@ fn unknown_client_is_refused() {
     let temp = tempfile::tempdir().unwrap();
 
     let err = run(
-        init("cursor", true),
+        init("cursor"),
         temp.path(),
     )
     .unwrap_err();
@@ -172,7 +171,7 @@ fn a_non_object_file_is_an_error() {
     std::fs::write(temp.path().join(".claude/settings.json"), "[1, 2]").unwrap();
 
     let err = run(
-        init("claude-code", true),
+        init("claude-code"),
         temp.path(),
     )
     .unwrap_err();
@@ -189,7 +188,7 @@ fn an_empty_file_is_treated_as_no_config() {
     std::fs::write(temp.path().join(".claude/settings.json"), "  \n").unwrap();
 
     run(
-        init("claude-code", true),
+        init("claude-code"),
         temp.path(),
     )
     .unwrap();
@@ -207,7 +206,7 @@ fn writes_events_and_entry_fields_in_declared_order() {
     let temp = tempfile::tempdir().unwrap();
 
     run(
-        init("codex", true),
+        init("codex"),
         temp.path(),
     )
     .unwrap();
@@ -225,28 +224,16 @@ fn writes_events_and_entry_fields_in_declared_order() {
 }
 
 #[test]
-fn without_capture_init_writes_no_tool_use_hook() {
+fn init_writes_every_hook_event_the_tool_use_one_included() {
     let temp = tempfile::tempdir().unwrap();
 
-    run(init("codex", false), temp.path()).unwrap();
+    run(init("codex"), temp.path()).unwrap();
 
     let text = std::fs::read_to_string(temp.path().join(".codex/hooks.json")).unwrap();
     let value: Value = serde_json::from_str(&text).unwrap();
     let hooks = value["hooks"].as_object().unwrap();
     let written: Vec<&str> = hooks.keys().map(String::as_str).collect();
-    assert_eq!(written, ["SessionStart", "UserPromptSubmit", "Stop"]);
-}
-
-#[test]
-fn a_later_init_without_capture_keeps_the_tool_use_hook() {
-    let temp = tempfile::tempdir().unwrap();
-
-    run(init("codex", true), temp.path()).unwrap();
-    let with = std::fs::read_to_string(temp.path().join(".codex/hooks.json")).unwrap();
-    run(init("codex", false), temp.path()).unwrap();
-    let after = std::fs::read_to_string(temp.path().join(".codex/hooks.json")).unwrap();
-
-    assert_eq!(with, after);
+    assert_eq!(written, EVENTS);
 }
 
 #[test]
@@ -254,7 +241,7 @@ fn writes_claude_code_settings_to_disk() {
     let temp = tempfile::tempdir().unwrap();
 
     run(
-        init("claude-code", true),
+        init("claude-code"),
         temp.path(),
     )
     .unwrap();
@@ -272,7 +259,7 @@ fn writes_claude_code_settings_to_disk() {
 fn init_writes_the_shipped_schemas() {
     let fixture = Fixture::new();
 
-    run(init("claude-code", true), fixture.path()).unwrap();
+    run(init("claude-code"), fixture.path()).unwrap();
 
     let schemas = mapstore::load_schemas(fixture.path()).unwrap();
     let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
@@ -285,7 +272,7 @@ fn init_keeps_an_existing_schema_file() {
     let other = "name = \"decisions\"\npurpose = \"p\"\n\n[[node]]\nkind = \"decision\"\n";
     fixture.write(".percept/schemas/decisions.toml", other);
 
-    run(init("claude-code", true), fixture.path()).unwrap();
+    run(init("claude-code"), fixture.path()).unwrap();
 
     let text = std::fs::read_to_string(fixture.path().join(".percept/schemas/decisions.toml")).unwrap();
     assert_eq!(text, other);
@@ -296,14 +283,14 @@ fn running_init_twice_leaves_the_file_unchanged() {
     let temp = tempfile::tempdir().unwrap();
 
     run(
-        init("codex", true),
+        init("codex"),
         temp.path(),
     )
     .unwrap();
     let first = std::fs::read_to_string(temp.path().join(".codex/hooks.json")).unwrap();
 
     run(
-        init("codex", true),
+        init("codex"),
         temp.path(),
     )
     .unwrap();

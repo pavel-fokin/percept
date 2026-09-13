@@ -174,10 +174,9 @@ the checkout and trust the repository; in Codex, `/hooks` reviews the
 capture hooks. Restart a running session to load the configuration.
 
 The hooks call `percept hook <client>` on session start, each prompt,
-and each reply. `percept init <client> --capture` adds each completed
-tool call and its result, which fills the log with every file the
-agent read; this repo's own configs carry it, a project that only
-wants its decisions does not. Session start prints what `percept
+each completed tool call with its result, and each reply, so the log
+holds what the agent read and ran beside what was said: a map that
+cites only the conversation cites no experience. Session start prints what `percept
 start` prints from the shell: what each map holds, what moved since
 the last session and which cited files changed, and the commands to
 go next. The other hooks append events under the client's name. A
