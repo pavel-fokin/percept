@@ -102,7 +102,7 @@ pub fn cut(
 ) -> Result<ReviewResponse, Box<dyn std::error::Error>> {
     let events = log.load()?;
     let maps = schemas.fold_all(mapstore::of_path(&events, &source.path))?;
-    let index = EventIndex::new(&events);
+    let index = EventIndex::new(&events, &source.path);
     let map_queues: Vec<MapQueue> = maps
         .iter()
         .filter(|map| !map.schema().headline_kinds.is_empty())

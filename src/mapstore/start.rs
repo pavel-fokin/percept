@@ -9,7 +9,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use super::blocks::{capped_lines, changed_line, line_id, LIMIT};
-use crate::core::{cited_label, Event, EventId, Map, Node, Payload, Written};
+use super::citation::locate;
+use crate::core::{Event, EventId, Map, Node, Payload, Written};
 use crate::shared::Timestamp;
 use crate::workspace;
 
@@ -138,11 +139,11 @@ fn node_changes(
         .filter_map(|source_id| {
             let event = id_to_event.get(source_id)?;
             let newest = newest_citation(event, later_citations);
-            let Payload::FileCited { path, lines, excerpt } = newest.payload() else {
+            let Payload::FileCited { path, excerpt, .. } = newest.payload() else {
                 return None;
             };
             citation_status(cache, checkout, path, excerpt)
-                .map(|status| format!("{} {status}", cited_label(path, *lines)))
+                .map(|status| format!("{} {status}", path.display()))
         })
         .collect()
 }
@@ -177,39 +178,23 @@ fn newest_citation<'a>(
 }
 
 /// `gone` when `path` under `checkout` is missing or binary; `changed`
-/// when it no longer contains `excerpt` as a substring, or `excerpt`
-/// normalises to nothing to compare against; `None` when it still
-/// reads. Both sides go through `normalize`; the tree's side is read
-/// through `cache`, so a path more than one citation names is read and
-/// normalised once.
+/// when `excerpt` no longer `locate`s in it, or normalises to nothing
+/// to compare against; `None` when it still does. The tree's side is
+/// read through `cache`, so a path more than one citation names is
+/// read once.
 fn citation_status(
     cache: &mut HashMap<PathBuf, Option<String>>,
     checkout: &Path,
     path: &Path,
     excerpt: &str,
 ) -> Option<&'static str> {
-    let excerpt = normalize(excerpt);
-    if excerpt.is_empty() {
-        return Some("changed");
-    }
     let text = cache
         .entry(path.to_path_buf())
-        .or_insert_with(|| workspace::read_text_lossy(&checkout.join(path)).ok().map(|t| normalize(&t)));
+        .or_insert_with(|| workspace::read_text_lossy(&checkout.join(path)).ok());
     match text {
-        Some(text) if text.contains(&excerpt) => None,
+        Some(text) if locate(excerpt, text).is_some() => None,
         _ => Some(if text.is_some() { "changed" } else { "gone" }),
     }
-}
-
-/// Each line's trailing whitespace stripped, then leading and trailing
-/// blank lines trimmed - the one normalisation both sides of a
-/// `changed since recorded` comparison go through, so a citation whose
-/// stored excerpt padded its range with context still matches.
-fn normalize(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().map(|line| line.trim_end()).collect();
-    let start = lines.iter().position(|line| !line.is_empty()).unwrap_or(lines.len());
-    let end = lines.iter().rposition(|line| !line.is_empty()).map_or(start, |i| i + 1);
-    lines[start..end].join("\n")
 }
 
 /// A block's rows, indented and padded so every right-hand value
