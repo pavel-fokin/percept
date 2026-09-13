@@ -94,15 +94,17 @@ impl Tool for ReadMap {
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
         let map = self.maps.read(&args.map)?;
-        let events = self.log.load()?;
+        let since = optional_time(args.since.as_deref())?;
+        let selected = args.around.is_some() || since.is_some() || !args.kinds.is_empty();
+        let events = selected.then(|| self.log.load()).transpose()?;
         read_selection(
             map,
             args.around,
             args.depth,
-            optional_time(args.since.as_deref())?,
+            since,
             &args.kinds,
             true,
-            Some(&events),
+            events.as_deref(),
         )
     }
 }
