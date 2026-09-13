@@ -6,6 +6,7 @@
 //! it nests mirror `web/src/types.ts` one to one, so the page reads the
 //! same shape this module writes.
 
+use std::path::Path;
 
 use serde::Serialize;
 
@@ -94,15 +95,19 @@ pub struct NodeRef {
 
 /// The queue as of now: every headline node whose `changed_at` is at or
 /// after `since`, of any actor - every node when `since` is `None`.
+/// `source`'s path says which project's events the cut reads;
+/// `checkout` is where a citation's file is read from, the two
+/// differing in a linked worktree.
 pub fn cut(
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &Source,
+    checkout: &Path,
     since: Option<Timestamp>,
 ) -> Result<ReviewResponse, Box<dyn std::error::Error>> {
     let events = log.load()?;
     let maps = schemas.fold_all(mapstore::of_path(&events, &source.path))?;
-    let index = EventIndex::new(&events, &source.path);
+    let index = EventIndex::new(&events, checkout);
     let map_queues: Vec<MapQueue> = maps
         .iter()
         .filter(|map| !map.schema().headline_kinds.is_empty())

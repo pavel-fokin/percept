@@ -13,6 +13,7 @@
 
 use std::error::Error;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::extract::State;
@@ -48,6 +49,7 @@ struct AppState {
     log: Arc<dyn EventLog>,
     schemas: Schemas,
     source: Source,
+    checkout: PathBuf,
     me: Option<HumanId>,
     since: Option<Timestamp>,
 }
@@ -57,7 +59,9 @@ struct AppState {
 /// `log` and `schemas` are read fresh on every `GET /api/review`;
 /// `source`'s path says which project's events that cut reads, its own
 /// name replaced by `percept-review`; `me` is the human every write the
-/// page makes is attributed to. Appends one `session.started` for that
+/// page makes is attributed to; `checkout` is where the files a
+/// citation names are read from, which is not `source.path` in a
+/// linked worktree. Appends one `session.started` for that
 /// source before serving, so the queue's `since` is the latest earlier
 /// one this server recorded for this project.
 pub async fn run(
@@ -65,6 +69,7 @@ pub async fn run(
     schemas: Schemas,
     source: Source,
     me: Option<HumanId>,
+    checkout: PathBuf,
 ) -> Result<(), Box<dyn Error>> {
     let source = Source {
         name: SOURCE_NAME.to_string(),
@@ -83,7 +88,7 @@ pub async fn run(
     let url = format!("http://{addr}");
     println!("percept review at {url}");
     open_browser(&url);
-    let state = Arc::new(AppState { log, schemas, source, me, since });
+    let state = Arc::new(AppState { log, schemas, source, checkout, me, since });
     serve(listener, state).await;
     Ok(())
 }
@@ -133,7 +138,7 @@ async fn index() -> Html<&'static str> {
 
 async fn api_review(State(state): State<Arc<AppState>>) -> Response {
     let result = tokio::task::spawn_blocking(move || {
-        review::cut(&*state.log, &state.schemas, &state.source, state.since).map_err(|err| err.to_string())
+        review::cut(&*state.log, &state.schemas, &state.source, &state.checkout, state.since).map_err(|err| err.to_string())
     })
     .await
     .expect("api_review's blocking fold never panics");

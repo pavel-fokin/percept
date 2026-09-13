@@ -108,13 +108,18 @@ impl<'a> EventIndex<'a> {
     }
 
     /// `path`'s text under `root` now, read once per path and memoised
-    /// for the rest of this index's life - `None` when it is missing or
-    /// binary.
+    /// for the rest of this index's life - `None` when it is missing,
+    /// binary, or outside the checkout. The path comes off a log line
+    /// another writer may have appended, so it becomes a real path the
+    /// one way every other path does, through `Workspace`.
     fn tree_text(&self, path: &Path) -> Option<String> {
         if let Some(cached) = self.text_cache.borrow().get(path) {
             return cached.clone();
         }
-        let text = workspace::read_text_lossy(&self.root.join(path)).ok();
+        let text = workspace::Workspace::new(self.root)
+            .ok()
+            .and_then(|workspace| workspace.resolve(&path.to_string_lossy()).ok())
+            .and_then(|resolved| workspace::read_text_lossy(&resolved).ok());
         self.text_cache.borrow_mut().insert(path.to_path_buf(), text.clone());
         text
     }
