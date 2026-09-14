@@ -292,12 +292,12 @@ fn a_blank_requires_entry_is_refused() {
 }
 
 #[test]
-fn a_state_list_loads_onto_the_node_kind() {
+fn a_states_list_loads_onto_the_node_kind() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
         "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\nstate = [\"open\", \"done\"]\n",
+         [[node]]\nkind = \"term\"\ngloss = \"g\"\nstates = [\"open\", \"done\"]\n",
     );
 
     let schemas = load(fixture.path()).unwrap();
@@ -307,12 +307,29 @@ fn a_state_list_loads_onto_the_node_kind() {
 }
 
 #[test]
-fn a_state_list_of_one_entry_is_refused() {
+fn the_old_state_key_is_refused_with_the_rename() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
         "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\nstate = [\"open\"]\n",
+         [[node]]\nkind = \"term\"\ngloss = \"g\"\nstate = [\"open\", \"done\"]\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert!(
+        err.contains("schema key `state` was renamed to `states`"),
+        "{err}"
+    );
+}
+
+#[test]
+fn a_states_list_of_one_entry_is_refused() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[node]]\nkind = \"term\"\ngloss = \"g\"\nstates = [\"open\"]\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
@@ -321,12 +338,12 @@ fn a_state_list_of_one_entry_is_refused() {
 }
 
 #[test]
-fn a_blank_state_entry_is_refused() {
+fn a_blank_states_entry_is_refused() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
         "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\nstate = [\"open\", \"\"]\n",
+         [[node]]\nkind = \"term\"\ngloss = \"g\"\nstates = [\"open\", \"\"]\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
@@ -335,12 +352,12 @@ fn a_blank_state_entry_is_refused() {
 }
 
 #[test]
-fn a_repeated_state_entry_is_refused() {
+fn a_repeated_states_entry_is_refused() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
         "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\nstate = [\"open\", \"open\"]\n",
+         [[node]]\nkind = \"term\"\ngloss = \"g\"\nstates = [\"open\", \"open\"]\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
@@ -448,7 +465,7 @@ fn state_under_properties_is_refused() {
 
     let err = load(fixture.path()).err().unwrap().to_string();
 
-    assert!(err.contains("state = [...] only"), "{err}");
+    assert!(err.contains("states = [...] only"), "{err}");
 }
 
 #[test]
@@ -462,5 +479,5 @@ fn state_under_requires_is_refused() {
 
     let err = load(fixture.path()).err().unwrap().to_string();
 
-    assert!(err.contains("state = [...] only"), "{err}");
+    assert!(err.contains("states = [...] only"), "{err}");
 }

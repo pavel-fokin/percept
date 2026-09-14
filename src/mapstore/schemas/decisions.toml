@@ -17,7 +17,7 @@ properties = ["why"]
 kind = "option"
 gloss = "an answer weighed for a question: open while it still stands, dead once it lost, saying which in `state` and why in `why`"
 requires = ["why"]
-state = ["open", "dead"]
+states = ["open", "dead"]
 
 [[node]]
 kind = "decision"
