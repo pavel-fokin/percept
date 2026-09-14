@@ -49,17 +49,28 @@ struct NodeFile {
     requires: Vec<String>,
     /// The properties a node of this kind may carry beyond `requires` -
     /// `properties = ["note", "summary"]`. `state` is declared through
-    /// `state = [...]` only, never listed here or in `requires`.
+    /// `states = [...]` only, never listed here or in `requires`.
     #[serde(default)]
     properties: Vec<String>,
     /// A node kind's short id prefix, `d` for `decision` - optional,
     /// since `default_prefix` covers the common case.
     prefix: Option<String>,
     /// The values a `state` property on a node of this kind may hold -
-    /// `state = ["open", "done", "dropped"]`, a set with no value open
+    /// `states = ["open", "done", "dropped"]`, a set with no value open
     /// by position. Empty when the kind carries no state.
-    #[serde(default, rename = "state")]
+    #[serde(default)]
     states: Vec<String>,
+    #[serde(default, rename = "state", deserialize_with = "state_was_renamed")]
+    _renamed_state: (),
+}
+
+fn state_was_renamed<'de, D>(_: D) -> Result<(), D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Err(serde::de::Error::custom(
+        "schema key `state` was renamed to `states`",
+    ))
 }
 
 #[derive(Deserialize)]
@@ -163,7 +174,7 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
         if declared().any(|property| property == "state") {
             return Err(format!(
                 "{stem}.toml: node kind {:?} declares \"state\" as a property; state is declared \
-                 through state = [...] only",
+                 through states = [...] only",
                 node.kind
             )
             .into());

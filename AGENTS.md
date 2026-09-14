@@ -94,8 +94,10 @@ Both are serde-free.
   says so. A kind may list the
   properties a node must carry - `why` on an option - and
   the values its `state` may hold, a set with no value open by
-  position; the write path refuses a node without them. Every change
-  goes through `Map::apply`, so the rules live once. The core is
+  position. The schema declares that set as `states = [...]`, while a
+  node keeps its current value in `state`. The write path refuses a
+  node that omits a required value. Every change goes through
+  `Map::apply`, so the rules live once. The core is
   specified in `docs/architecture.md`: five events, four invariants,
   six write rules, and no kind name.
 - A node and an edge keep their history of changes, from which who
