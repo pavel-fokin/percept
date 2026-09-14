@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::core::MapReader;
+use crate::core::{EventLog, MapReader};
 use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::mapstore::NodeRefArgs;
 use crate::store::optional_time;
@@ -14,11 +14,12 @@ use crate::tools::read_selection;
 /// instead of reading every map every turn.
 pub struct ReadMap {
     maps: Arc<dyn MapReader>,
+    log: Arc<dyn EventLog>,
 }
 
 impl ReadMap {
-    pub fn new(maps: Arc<dyn MapReader>) -> Self {
-        Self { maps }
+    pub fn new(maps: Arc<dyn MapReader>, log: Arc<dyn EventLog>) -> Self {
+        Self { maps, log }
     }
 }
 
@@ -32,6 +33,8 @@ const DESCRIPTION: &str = "Read one cognitive map by name, whole or cut to \
     `around` selector. Then a line counting what \
     was shown of the whole and how many edges cross the cut, then \
     every node, then every edge, each with the event ids it cites. A \
+    selected fragment also previews each cited event's actor, type, and \
+    payload, so evidence can be checked before opening the full event. A \
     crossing edge is where to widen when an exception or a \
     contradiction could change the answer. Open a map before answering \
     from it or revising it; what the conversation shows of a map may \
@@ -91,13 +94,17 @@ impl Tool for ReadMap {
     fn run(&self, arguments: &str) -> Result<ToolOutput, Box<dyn std::error::Error>> {
         let args: Args = serde_json::from_str(arguments)?;
         let map = self.maps.read(&args.map)?;
+        let since = optional_time(args.since.as_deref())?;
+        let selected = args.around.is_some() || since.is_some() || !args.kinds.is_empty();
+        let events = selected.then(|| self.log.load()).transpose()?;
         read_selection(
             map,
             args.around,
             args.depth,
-            optional_time(args.since.as_deref())?,
+            since,
             &args.kinds,
             true,
+            events.as_deref(),
         )
     }
 }

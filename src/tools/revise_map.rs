@@ -33,7 +33,8 @@ const DESCRIPTION: &str = "Record into a named map what you have judged \
     committed only if every change passes - a later change may refer to \
     a node an earlier one in the same batch just added. Cite the event \
     ids the judgement came from in `sources`, as search_events returns \
-    them; nothing else is an id. A node with no sources is refused: a \
+    them. When a command or request caused the batch, name its event \
+    id in `causation`. Nothing else is an id. A node with no sources is refused: a \
     map records what the log shows, so search for the events first, \
     even when what you are recording is in front of you. Read the map \
     first, from the conversation or with read_map, and do not add a \
@@ -52,6 +53,7 @@ const PARAMETERS: &str = r#"{
   "type": "object",
   "properties": {
     "map": {"type": "string", "description": "the map's name, e.g. decisions"},
+    "causation": {"type": "string", "description": "event id of the command or request that caused these cognitive commits"},
     "changes": {
       "type": "array",
       "minItems": 1,
@@ -244,6 +246,7 @@ enum ChangeArgs {
 #[serde(deny_unknown_fields)]
 struct Args {
     map: String,
+    causation: Option<String>,
     changes: Vec<ChangeArgs>,
 }
 
@@ -271,6 +274,11 @@ impl Tool for ReviseMap {
             return Err("changes must not be empty".into());
         }
         let mut snapshot = Snapshot::load(self.log.as_ref(), &self.schemas, &args.map, &self.path)?;
+        let causation_id = args
+            .causation
+            .as_deref()
+            .map(|id| snapshot.resolve_one(id))
+            .transpose()?;
         let mut lines = Vec::with_capacity(args.changes.len());
         let mut commits = Vec::with_capacity(args.changes.len());
 
@@ -284,6 +292,7 @@ impl Tool for ReviseMap {
         Ok(ToolOutput {
             content: lines.join("\n"),
             commits,
+            causation_id,
         })
     }
 }

@@ -27,10 +27,11 @@ mod start;
 pub(crate) use blocks::{changed_line, last_session};
 pub use describe::describe;
 pub use map::{
-    commit, commit_batch, encode_fragment, encode_lines, encode_map, encode_schema, fold_map, fold_map_at,
-    of_path, paths, LogMaps, NodeRefArgs, Snapshot,
+    commit, commit_batch, encode_fragment, encode_lines, encode_lines_with_sources, encode_map,
+    encode_schema, fold_map, fold_map_at, of_path, paths, CommitProvenance, LogMaps, NodeRefArgs,
+    Snapshot, SourcePreviews,
 };
-pub use render::{catalogue, markdown};
+pub use render::{catalogue, markdown, markdown_with_sources};
 pub use schemas::{load as load_schemas, SCHEMAS_DIR, TEMPLATES};
 pub use start::start;
 

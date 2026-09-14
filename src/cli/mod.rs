@@ -188,6 +188,9 @@ pub struct MapArgs {
     /// Repeatable. An event this fact was drawn from.
     #[arg(long)]
     source: Vec<String>,
+    /// The event that caused this cognitive commit.
+    #[arg(long)]
+    causation: Option<String>,
     /// Who is writing: `human` for a person at the terminal, `agent`
     /// for a model recording on their behalf. The map shows the
     /// difference.
@@ -268,10 +271,12 @@ pub struct RecordArgs {
     /// for a model recording on their behalf.
     #[arg(long, default_value = "human", value_parser = parse_actor_word)]
     actor: String,
-    /// The id of the event a `cites` line's `file.cited` event follows
-    /// from.
+    /// The event a `cites` line's `file.cited` event follows from.
     #[arg(long)]
     causation: Option<String>,
+    /// The event that caused every map commit in the document.
+    #[arg(long)]
+    commit_causation: Option<String>,
 }
 
 #[derive(Args)]
@@ -682,7 +687,11 @@ pub fn maps_show(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let events = log.load()?;
     per_path(args.all_paths, args.json, root, &events, |path| {
-        print_map(mapstore::fold_map_at(schemas, &args.map, &events, path)?, &args)
+        print_map(
+            mapstore::fold_map_at(schemas, &args.map, &events, path)?,
+            &args,
+            &events,
+        )
     })
 }
 
@@ -712,7 +721,11 @@ pub fn maps_describe(args: DescribeMapArgs, schemas: &Schemas) -> Result<(), Box
 /// `maps_show`'s tail: cut `map` to `args`'s filters, then print it
 /// nodes-then-edges. `--since` runs after `--around`, so it reads as
 /// "what changed near this node".
-fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
+fn print_map(
+    map: Map,
+    args: &ShowMapArgs,
+    events: &[crate::core::Event],
+) -> Result<(), Box<dyn std::error::Error>> {
     // An empty map has nothing to resolve `--around` against - `select`'s
     // own empty-map case skips it anyway, so a node named on one is not
     // an error to report over "nothing recorded yet".
@@ -730,11 +743,18 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
         kinds: &args.kind,
     };
     let fragment = map.select(&selection)?;
+    let previews = (!selection.is_whole()).then(|| mapstore::SourcePreviews::new(events));
     if !selection.is_whole() {
         eprintln!("{}", mapstore::encode_fragment(&fragment));
     }
     if args.json {
-        print_lines(mapstore::encode_lines(fragment.map(), true))
+        print_lines(mapstore::encode_lines_with_sources(
+            fragment.map(),
+            true,
+            previews.as_ref(),
+        ))
+    } else if let Some(previews) = previews.as_ref() {
+        print_text(&mapstore::markdown_with_sources(fragment.map(), previews))
     } else {
         print_text(&mapstore::markdown(fragment.map()))
     }
@@ -742,7 +762,7 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
 
 /// One map change from the shell: `target`'s cited events resolved and
 /// `mutation` checked, applied, and committed as `target.actor`
-/// (`human` by default) with no cause, all under `mapstore::commit`'s
+/// (`human` by default), all under `mapstore::commit`'s
 /// one lock. `me` resolves `human`/`user` to this log's own `HumanId`.
 /// Returns the payload, for `add-node` to print the minted id.
 fn write(
@@ -756,10 +776,22 @@ fn write(
     let MapArgs {
         map,
         source: cited,
+        causation,
         actor,
     } = target;
     let actor = store::parse_actor(&actor, me)?;
-    let event = mapstore::commit(log, schemas, &map, source, &cited, actor, mutation)?;
+    let event = mapstore::commit(
+        log,
+        schemas,
+        &map,
+        source,
+        mapstore::CommitProvenance {
+            sources: &cited,
+            causation: causation.as_deref(),
+        },
+        actor,
+        mutation,
+    )?;
     Ok(event.payload().clone())
 }
 
@@ -1056,9 +1088,10 @@ fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>
 
 /// Adds every node and edge a document on stdin declares to `args.map`,
 /// publishing a `file.cited` event for each `cites` line and folding its
-/// id into that node's sources. Reads the document, then hands it to
-/// `record_document`, which does the work `maps record`'s tests reach
-/// directly, without stdin between them.
+/// id into that node's sources. `causation` belongs to those citation
+/// events; `commit_causation` belongs to the map events. Reads the
+/// document, then hands it to `record_document`, which the tests reach
+/// directly without stdin between them.
 pub fn maps_record(
     args: RecordArgs,
     log: &dyn EventLog,
@@ -1081,8 +1114,9 @@ pub fn maps_record(
 /// document declared above it, anything else through
 /// `Map::resolve_str`. Nothing is appended until every node and edge
 /// has passed, in one batch under the log's lock, so a failure midway,
-/// whether a duplicate name, a missing `--source`, or a bad ref, leaves
-/// nothing written; the error names the node or line it reached.
+/// whether a duplicate name, a missing event id, or a bad ref, leaves
+/// nothing written. Sources and both causes resolve from the same
+/// locked snapshot before the document is applied.
 fn record_document(
     document: &str,
     args: RecordArgs,
@@ -1095,16 +1129,6 @@ fn record_document(
     let nodes = parse_document(document)?;
     let total = nodes.len();
 
-    let node_sources: Vec<EventId> = args
-        .source
-        .iter()
-        .map(|id| known_event_id(id, log))
-        .collect::<Result<_, _>>()?;
-    let causation_id = args
-        .causation
-        .as_deref()
-        .map(|id| known_event_id(id, log))
-        .transpose()?;
     // Only opened when the document has a `cites` line to resolve - a
     // document with none should still record against a `checkout` that
     // does not exist, the way it always could.
@@ -1114,11 +1138,26 @@ fn record_document(
         None
     };
 
-    let RecordArgs { map, actor, .. } = args;
+    let RecordArgs {
+        map,
+        source: source_ids,
+        actor,
+        causation,
+        commit_causation,
+    } = args;
     let actor = store::parse_actor(&actor, me)?;
     let batch_source = source.clone();
 
     let events = mapstore::commit_batch(log, schemas, &map, source, move |snapshot| {
+        let node_sources = snapshot.resolve(&source_ids)?;
+        let citation_causation = causation
+            .as_deref()
+            .map(|id| snapshot.resolve_one(id))
+            .transpose()?;
+        let commit_causation = commit_causation
+            .as_deref()
+            .map(|id| snapshot.resolve_one(id))
+            .transpose()?;
         let mut batch: Vec<Event> = Vec::new();
         let mut last_of_kind: HashMap<String, NodeId> = HashMap::new();
 
@@ -1145,7 +1184,7 @@ fn record_document(
                     .expect("a cite here means the document had one, so it was opened above");
                 let payload =
                     build_file_cited(workspace, &cite.path, cite.lines, None).map_err(context)?;
-                let event = Event::new(actor, batch_source.clone(), causation_id, payload);
+                let event = Event::new(actor, batch_source.clone(), citation_causation, payload);
                 sources.push(event.id());
                 batch.push(event);
             }
@@ -1184,7 +1223,12 @@ fn record_document(
                 Payload::NodeAdded { node, .. } | Payload::NodeChanged { node, .. } => *node,
                 _ => unreachable!("AddNode and ChangeNode yield a node payload"),
             };
-            batch.push(Event::new(actor, batch_source.clone(), None, payload));
+            batch.push(Event::new(
+                actor,
+                batch_source.clone(),
+                commit_causation,
+                payload,
+            ));
             last_of_kind.insert(kind.clone(), node_id);
             let from_ref = NodeRef { kind, name };
 
@@ -1217,7 +1261,12 @@ fn record_document(
                     sources: node_sources.clone(),
                 };
                 let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
-                batch.push(Event::new(actor, batch_source.clone(), None, payload));
+                batch.push(Event::new(
+                    actor,
+                    batch_source.clone(),
+                    commit_causation,
+                    payload,
+                ));
             }
         }
 

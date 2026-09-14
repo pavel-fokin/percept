@@ -5,6 +5,7 @@
 use std::collections::HashSet;
 use std::fmt::Write as _;
 
+use super::SourcePreviews;
 use crate::core::{Actor, EdgeEnd, Map, Node, NodeId, Schema, Written};
 use crate::store::ids;
 
@@ -38,6 +39,57 @@ pub fn markdown(map: &Map) -> String {
     }
 
     out
+}
+
+/// `markdown` with the selected fragment's cited experience appended.
+/// Each source stays attached to its node or edge, while its event is
+/// short enough to inspect without another log lookup.
+pub fn markdown_with_sources(map: &Map, previews: &SourcePreviews<'_>) -> String {
+    let mut out = markdown(map);
+    let has_sources = map.nodes().iter().any(|node| !node.sources.is_empty())
+        || map.edges().iter().any(|edge| !edge.sources.is_empty());
+    if !has_sources {
+        return out;
+    }
+
+    out.push_str("\n## sources\n");
+    for node in map.nodes().iter().filter(|node| !node.sources.is_empty()) {
+        let _ = writeln!(out, "- node {}", marked_name(map, node, false));
+        push_source_previews(&mut out, &node.sources, previews);
+    }
+    for edge in map.edges().iter().filter(|edge| !edge.sources.is_empty()) {
+        let _ = writeln!(out, "- edge {}", map.edge_line(edge));
+        push_source_previews(&mut out, &edge.sources, previews);
+    }
+    out
+}
+
+fn push_source_previews(
+    out: &mut String,
+    sources: &[crate::core::EventId],
+    previews: &SourcePreviews<'_>,
+) {
+    for id in sources {
+        let Some(event) = previews.event(*id) else {
+            let _ = writeln!(out, "  - {} (event unavailable)", id.as_uuid());
+            continue;
+        };
+        let summary: serde_json::Value = serde_json::from_str(&crate::store::summarize(
+            event,
+            None,
+            crate::store::PREVIEW_CHARS,
+        ))
+        .expect("store::summarize always returns JSON");
+        let payload =
+            serde_json::to_string(&summary["payload"]).expect("an event payload always serializes");
+        let _ = writeln!(
+            out,
+            "  - {} {} {} {payload}",
+            id.as_uuid(),
+            event.actor().name(),
+            event.kind().name()
+        );
+    }
 }
 
 /// Whether `map` holds nodes by the agent and by someone else both -

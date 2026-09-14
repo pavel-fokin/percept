@@ -17,6 +17,7 @@ fn spec_names_the_tool_and_carries_valid_schema_json() {
     assert_eq!(spec.name, "revise_map");
     let schema: serde_json::Value = serde_json::from_str(spec.parameters).unwrap();
     assert_eq!(schema["type"], "object");
+    assert_eq!(schema["properties"]["causation"]["type"], "string");
 }
 
 #[test]
@@ -55,6 +56,51 @@ fn a_valid_batch_returns_the_payloads_and_content() {
         output.content,
         format!("added claim \"Rust\" as {}", node_id.as_uuid())
     );
+}
+
+#[test]
+fn a_batch_returns_its_known_cause_separate_from_sources() {
+    let cause = Event::message_received(
+        Actor::Human(human()),
+        "record this".to_string(),
+        source("tui"),
+        None,
+    );
+    let evidence = Event::message_received(
+        Actor::Agent,
+        "Rust is fast".to_string(),
+        source("tui"),
+        None,
+    );
+    let (cause_id, evidence_id) = (cause.id(), evidence.id());
+    let revise = tool(vec![cause, evidence]);
+    let args = format!(
+        r#"{{"map":"debates","causation":"{}","changes":[{{"op":"add_node","kind":"claim","name":"Rust","properties":{{"why":"fast"}},"sources":["{}"]}}]}}"#,
+        cause_id.as_uuid(),
+        evidence_id.as_uuid()
+    );
+
+    let output = revise.run(&args).unwrap();
+
+    assert_eq!(output.causation_id, Some(cause_id));
+    assert!(
+        matches!(&output.commits[0], Payload::NodeAdded { sources, .. } if sources == &vec![evidence_id])
+    );
+}
+
+#[test]
+fn a_batch_refuses_a_cause_the_log_lacks() {
+    let unknown = EventId::new().as_uuid().to_string();
+    let revise = tool(Vec::new());
+
+    let err = revise
+        .run(&format!(
+            r#"{{"map":"debates","causation":"{unknown}","changes":[{{"op":"remove_node","node":"c1","why":"wrong"}}]}}"#
+        ))
+        .err()
+        .unwrap();
+
+    assert!(err.to_string().contains("no event with id"), "{err}");
 }
 
 #[test]

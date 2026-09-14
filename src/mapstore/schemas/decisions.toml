@@ -42,3 +42,9 @@ kind = "reopens"
 gloss = "from a question to a decision it puts in doubt; the decision stands until a new one supersedes it"
 from = "question"
 to = "decision"
+
+[[edge]]
+kind = "depends_on"
+gloss = "from a claim to another claim whose change requires it to be reviewed"
+from = ["question", "option", "decision"]
+to = ["question", "option", "decision"]

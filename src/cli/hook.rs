@@ -64,7 +64,7 @@ impl HookInput {
     }
 }
 
-/// The four hook events percept understands, tagged by
+/// The five hook events percept understands, tagged by
 /// `hook_event_name`, each carrying only the fields `run` needs from
 /// it.
 #[derive(Deserialize)]
@@ -79,6 +79,10 @@ enum HookEvent {
         tool_input: Value,
         tool_response: Value,
     },
+    SubagentStop {
+        last_assistant_message: Option<String>,
+        agent_transcript_path: Option<String>,
+    },
     Stop {
         last_assistant_message: Option<String>,
         transcript_path: Option<String>,
@@ -88,7 +92,13 @@ enum HookEvent {
 /// Every event name `HookEvent` deserialises, in the order `init`
 /// writes their config entries. `hook::tests` proves this list and
 /// `HookEvent::name` cannot drift apart.
-pub const EVENTS: [&str; 4] = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"];
+pub const EVENTS: [&str; 5] = [
+    "SessionStart",
+    "UserPromptSubmit",
+    "PostToolUse",
+    "SubagentStop",
+    "Stop",
+];
 
 impl HookEvent {
     /// Used only by `hook::tests`, to prove `EVENTS` and this match
@@ -99,6 +109,7 @@ impl HookEvent {
             HookEvent::SessionStart { .. } => "SessionStart",
             HookEvent::UserPromptSubmit { .. } => "UserPromptSubmit",
             HookEvent::PostToolUse { .. } => "PostToolUse",
+            HookEvent::SubagentStop { .. } => "SubagentStop",
             HookEvent::Stop { .. } => "Stop",
         }
     }
@@ -126,7 +137,7 @@ pub fn read(input: &mut dyn Read) -> Result<HookInput, Box<dyn std::error::Error
 /// directory per checkout root, created if missing. `checkout` is only
 /// read - as schemas, from `.percept/schemas/*.toml` - for
 /// `SessionStart`; a project schema that fails to load must not also
-/// break the other three events, which need no schema at all.
+/// break the other four events, which need no schema at all.
 pub fn run(
     input: HookInput,
     source: &Source,
@@ -153,12 +164,25 @@ pub fn run(
             let cause = state.cause()?;
             record_tool_use(tool_name, tool_input, tool_response, source, log, cause)
         }
+        HookEvent::SubagentStop {
+            last_assistant_message,
+            agent_transcript_path,
+        } => {
+            let cause = state.cause()?;
+            record_reply(
+                last_assistant_message,
+                agent_transcript_path,
+                source,
+                log,
+                cause,
+            )
+        }
         HookEvent::Stop {
             last_assistant_message,
             transcript_path,
         } => {
             let cause = state.cause()?;
-            let output = record_stop(last_assistant_message, transcript_path, source, log, cause);
+            let output = record_reply(last_assistant_message, transcript_path, source, log, cause);
             let _ = state.remove();
             output
         }
@@ -243,11 +267,11 @@ fn record_tool_use(
     Ok(json!({}))
 }
 
-/// `Stop`: the turn's reply, `last_assistant_message` when given, else
+/// An agent's reply, `last_assistant_message` when given, else
 /// read from the Claude transcript at `transcript_path`. A non-empty
 /// reply is recorded as `message.received` from `agent`, caused by the
 /// turn's prompt.
-fn record_stop(
+fn record_reply(
     last_assistant_message: Option<String>,
     transcript_path: Option<String>,
     source: &Source,

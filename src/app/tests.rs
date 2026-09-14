@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::testing::{content, human, node_added, schemas, source, usage, FakeLog};
-use crate::core::{Actor, Payload};
+use crate::core::{Actor, EventId, Payload};
 use crate::harness::testing::{FakeCatalog, FakeSnapshot, FakeTool, FixedPolicy, Scripted};
 use crate::harness::{Chunk, Verdict};
 
@@ -734,7 +734,7 @@ fn an_unknown_tool_name_becomes_the_result_content() {
 
 /// A tool whose output carries commits of its own, the way
 /// `revise_map` records what it judged from the log.
-struct Committing(Vec<Payload>);
+struct Committing(Vec<Payload>, Option<EventId>);
 
 impl crate::harness::Tool for Committing {
     fn spec(&self) -> crate::harness::ToolSpec {
@@ -752,6 +752,7 @@ impl crate::harness::Tool for Committing {
         Ok(crate::harness::ToolOutput {
             content: "recorded".to_string(),
             commits: self.0.clone(),
+            causation_id: self.1,
         })
     }
 }
@@ -764,14 +765,17 @@ fn a_tool_s_commits_land_between_the_call_and_the_result_caused_by_it() {
         Arc::new(FakeLog::default()),
         Arc::new(schemas()),
         Harness::new(
-            vec![Arc::new(Committing(vec![
-                Payload::MessageReceived {
-                    content: "one".to_string(),
-                },
-                Payload::MessageReceived {
-                    content: "two".to_string(),
-                },
-            ]))],
+            vec![Arc::new(Committing(
+                vec![
+                    Payload::MessageReceived {
+                        content: "one".to_string(),
+                    },
+                    Payload::MessageReceived {
+                        content: "two".to_string(),
+                    },
+                ],
+                None,
+            ))],
             MapShape::Prompt,
         ),
         source(SOURCE),
@@ -797,6 +801,44 @@ fn a_tool_s_commits_land_between_the_call_and_the_result_caused_by_it() {
         Payload::ToolResulted { content } if content == "recorded"
     ));
     assert!(events[4].causation_id() == Some(called_id));
+}
+
+#[test]
+fn a_tool_can_give_its_commits_an_earlier_cause() {
+    let cause = Event::message_received(
+        Actor::Human(human()),
+        "record this".to_string(),
+        source(SOURCE),
+        None,
+    );
+    let cause_id = cause.id();
+    let log = Arc::new(FakeLog::seeded(vec![cause]));
+    let mut app = App::new(
+        Arc::new(Scripted::new(vec![], true)),
+        Arc::new(FakeCatalog::default()),
+        log,
+        Arc::new(schemas()),
+        Harness::new(
+            vec![Arc::new(Committing(
+                vec![Payload::MessageReceived {
+                    content: "one".to_string(),
+                }],
+                Some(cause_id),
+            ))],
+            MapShape::Prompt,
+        ),
+        source(SOURCE),
+        human(),
+    )
+    .unwrap();
+
+    let _ = app.submit("go".to_string()).unwrap();
+    run_one_tool(&mut app, "search_events", "{}");
+
+    let events = app.events();
+    let called_id = events[2].id();
+    assert_eq!(events[3].causation_id(), Some(cause_id));
+    assert_eq!(events[4].causation_id(), Some(called_id));
 }
 
 #[test]
@@ -1109,7 +1151,7 @@ fn a_tool_commit_the_transcript_cannot_fold_becomes_the_result_not_a_crash() {
         to: crate::core::NodeId::new(),
         sources: Vec::new(),
     };
-    let (_, mut app) = seeded_app(Vec::new(), vec![Arc::new(Committing(vec![dangling]))]);
+    let (_, mut app) = seeded_app(Vec::new(), vec![Arc::new(Committing(vec![dangling], None))]);
 
     let _ = app.submit("go".to_string()).unwrap();
     run_one_tool(&mut app, "search_events", "{}");

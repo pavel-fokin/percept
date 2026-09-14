@@ -3,7 +3,7 @@
 //! does, and revising it - a writer's `Mutation` checked against a
 //! `Snapshot` of the log and turned into the payload that records it.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -15,6 +15,43 @@ use crate::core::{
     Node, NodeId, Payload, Schemas, Written,
 };
 use crate::store::{ids, parse_event_id};
+
+/// Events named by a selected map fragment's `sources`, indexed once
+/// for rendering. The map domain keeps only ids; this infrastructure
+/// view supplies the experience behind them at the output boundary.
+pub struct SourcePreviews<'a> {
+    events: HashMap<Uuid, &'a Event>,
+}
+
+impl<'a> SourcePreviews<'a> {
+    pub fn new(events: &'a [Event]) -> Self {
+        Self {
+            events: events
+                .iter()
+                .map(|event| (event.id().as_uuid(), event))
+                .collect(),
+        }
+    }
+
+    pub(crate) fn event(&self, id: EventId) -> Option<&'a Event> {
+        self.events.get(&id.as_uuid()).copied()
+    }
+
+    fn values(&self, sources: &[EventId]) -> Vec<serde_json::Value> {
+        sources
+            .iter()
+            .filter_map(|id| self.event(*id))
+            .map(|event| {
+                serde_json::from_str(&crate::store::summarize(
+                    event,
+                    None,
+                    crate::store::PREVIEW_CHARS,
+                ))
+                .expect("store::summarize always returns JSON")
+            })
+            .collect()
+    }
+}
 
 /// `events`, cut to those whose source ran at `path` - where a reader
 /// cuts the log to one path before `Map::fold`, which takes what it is
@@ -109,16 +146,16 @@ impl Snapshot {
     /// Each cited id as an `EventId` the log carries. An id the log
     /// lacks is an error: a typo in provenance is worse than none.
     pub fn resolve(&self, ids: &[String]) -> Result<Vec<EventId>, Box<dyn std::error::Error>> {
-        ids.iter()
-            .map(|id| {
-                let parsed =
-                    parse_event_id(id).map_err(|_| format!("{id:?} is not an event id"))?;
-                if !self.ids.contains(&parsed.as_uuid()) {
-                    return Err(format!("no event with id {id}").into());
-                }
-                Ok(parsed)
-            })
-            .collect()
+        ids.iter().map(|id| self.resolve_one(id)).collect()
+    }
+
+    /// One event id the log carries.
+    pub fn resolve_one(&self, id: &str) -> Result<EventId, Box<dyn std::error::Error>> {
+        let parsed = parse_event_id(id).map_err(|_| format!("{id:?} is not an event id"))?;
+        if !self.ids.contains(&parsed.as_uuid()) {
+            return Err(format!("no event with id {id}").into());
+        }
+        Ok(parsed)
     }
 
     pub fn apply(&mut self, mutation: Mutation, actor: Actor) -> Result<Payload, MapError> {
@@ -132,23 +169,34 @@ impl Snapshot {
     }
 }
 
+/// The experience a cognitive commit came from and the event that
+/// caused it to be written.
+pub struct CommitProvenance<'a> {
+    pub sources: &'a [String],
+    pub causation: Option<&'a str>,
+}
+
 /// `commit`'s check-and-apply, given the events its closure was handed
 /// by `EventLog::append_computed` under the log's lock: `sources`
-/// resolved against them, the `Mutation` built from them checked and
-/// applied to their fold.
+/// and `causation` resolved against them, the `Mutation` built from the
+/// sources checked and applied to their fold.
 fn revised(
     schemas: &Schemas,
     name: &str,
     path: &Path,
     events: Vec<crate::core::Event>,
-    sources: &[String],
+    provenance: CommitProvenance<'_>,
     actor: Actor,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
-) -> Result<Payload, Box<dyn std::error::Error>> {
+) -> Result<(Payload, Option<EventId>), Box<dyn std::error::Error>> {
     let mut snapshot = Snapshot::from_events(schemas, name, path, events)?;
-    let sources = snapshot.resolve(sources)?;
+    let sources = snapshot.resolve(provenance.sources)?;
+    let causation_id = provenance
+        .causation
+        .map(|id| snapshot.resolve_one(id))
+        .transpose()?;
     let mutation = mutation(sources);
-    Ok(snapshot.apply(mutation, actor)?)
+    Ok((snapshot.apply(mutation, actor)?, causation_id))
 }
 
 /// One change to the map `name` names, folded at `source`'s path and
@@ -159,20 +207,34 @@ fn revised(
 /// returns is appended before any other writer's own `append_computed`
 /// call can run. Two writers each loading the log on their own could
 /// both count the same kind's existing nodes and mint the same short
-/// id; this is the seam that stops them.
+/// id; this is the seam that stops them. `causation`, when present,
+/// names the event that caused the cognitive commit.
 pub fn commit(
     log: &dyn EventLog,
     schemas: &Schemas,
     name: &str,
     source: &crate::core::Source,
-    sources: &[String],
+    provenance: CommitProvenance<'_>,
     actor: Actor,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<crate::core::Event, Box<dyn std::error::Error>> {
     let (name, source) = (name.to_string(), source.clone());
     log.append_computed(Box::new(move |events| {
-        let payload = revised(schemas, &name, &source.path, events, sources, actor, mutation)?;
-        Ok(crate::core::Event::new(actor, source, None, payload))
+        let (payload, causation_id) = revised(
+            schemas,
+            &name,
+            &source.path,
+            events,
+            provenance,
+            actor,
+            mutation,
+        )?;
+        Ok(crate::core::Event::new(
+            actor,
+            source,
+            causation_id,
+            payload,
+        ))
     }))
 }
 
@@ -269,6 +331,8 @@ struct NodeLine<'a> {
     name: &'a str,
     properties: &'a BTreeMap<String, String>,
     sources: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_previews: Option<Vec<serde_json::Value>>,
     #[serde(flatten)]
     stamp: Option<NodeStamp<'a>>,
 }
@@ -279,6 +343,8 @@ struct EdgeLine<'a> {
     from: String,
     to: String,
     sources: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_previews: Option<Vec<serde_json::Value>>,
     #[serde(flatten)]
     stamp: Option<Stamp>,
 }
@@ -386,8 +452,25 @@ pub fn encode_fragment(fragment: &Fragment) -> String {
 /// prints and `read_map` returns. `stamped` is `false` only for
 /// `read_code`'s tree walk - see `Stamp::of`.
 pub fn encode_lines(map: &Map, stamped: bool) -> impl Iterator<Item = String> + '_ {
-    let nodes = map.nodes().iter().map(move |node| encode_node(map, node, stamped));
-    let edges = map.edges().iter().map(move |edge| encode_edge(map, edge, stamped));
+    encode_lines_with_sources(map, stamped, None)
+}
+
+/// `encode_lines` with constant-size event previews beside the source
+/// ids. Used only for a selected cognitive-map fragment; whole-map
+/// overviews retain their compact wire shape.
+pub fn encode_lines_with_sources<'a>(
+    map: &'a Map,
+    stamped: bool,
+    previews: Option<&'a SourcePreviews<'a>>,
+) -> impl Iterator<Item = String> + 'a {
+    let nodes = map
+        .nodes()
+        .iter()
+        .map(move |node| encode_node_with_sources(map, node, stamped, previews));
+    let edges = map
+        .edges()
+        .iter()
+        .map(move |edge| encode_edge_with_sources(map, edge, stamped, previews));
     nodes.chain(edges)
 }
 
@@ -417,6 +500,15 @@ impl NodeRefArgs {
 }
 
 pub fn encode_node(map: &Map, node: &Node, stamped: bool) -> String {
+    encode_node_with_sources(map, node, stamped, None)
+}
+
+fn encode_node_with_sources(
+    map: &Map,
+    node: &Node,
+    stamped: bool,
+    previews: Option<&SourcePreviews<'_>>,
+) -> String {
     serde_json::to_string(&NodeLine {
         node: node.id.as_uuid().to_string(),
         id: map.short_id(node.id).unwrap_or_default(),
@@ -424,6 +516,7 @@ pub fn encode_node(map: &Map, node: &Node, stamped: bool) -> String {
         name: &node.name,
         properties: &node.properties,
         sources: ids(&node.sources),
+        source_previews: previews.map(|previews| previews.values(&node.sources)),
         stamp: NodeStamp::of(node, stamped),
     })
     .expect("NodeLine always serializes")
@@ -433,11 +526,21 @@ pub fn encode_node(map: &Map, node: &Node, stamped: bool) -> String {
 /// and `--from` take a node - so the line reads on its own instead of
 /// through a join on the node lines above it.
 pub fn encode_edge(map: &Map, edge: &Edge, stamped: bool) -> String {
+    encode_edge_with_sources(map, edge, stamped, None)
+}
+
+fn encode_edge_with_sources(
+    map: &Map,
+    edge: &Edge,
+    stamped: bool,
+    previews: Option<&SourcePreviews<'_>>,
+) -> String {
     serde_json::to_string(&EdgeLine {
         edge: &edge.kind,
         from: node_ref(map, edge.from),
         to: node_ref(map, edge.to),
         sources: ids(&edge.sources),
+        source_previews: previews.map(|previews| previews.values(&edge.sources)),
         stamp: Stamp::of(edge.added(), stamped),
     })
     .expect("EdgeLine always serializes")

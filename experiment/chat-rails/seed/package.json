@@ -1,0 +1,8 @@
+{
+  "name": "browser-chat-fixture",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test --test-reporter=tap test/*.test.js"
+  }
+}

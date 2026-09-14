@@ -1,17 +1,24 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::core::testing::{edge_added, node_added, node_added_at, schemas, FakeLog, ROOT};
-use crate::core::Event;
+use crate::core::testing::{
+    edge_added, human, node_added, node_added_at, node_added_citing, node_id, schemas, source,
+    FakeLog, ROOT,
+};
+use crate::core::{Actor, Event, Payload};
 use crate::mapstore::LogMaps;
 
 /// A `read_map` over the log-folded maps, the way `main` wires it.
 fn tool(log: FakeLog) -> ReadMap {
-    ReadMap::new(Arc::new(LogMaps::new(
-        Arc::new(log),
-        Arc::new(schemas()),
-        PathBuf::from(ROOT),
-    )))
+    let log = Arc::new(log);
+    ReadMap::new(
+        Arc::new(LogMaps::new(
+            log.clone(),
+            Arc::new(schemas()),
+            PathBuf::from(ROOT),
+        )),
+        log,
+    )
 }
 
 #[test]
@@ -29,6 +36,106 @@ fn a_map_reads_as_its_nodes_and_edges() {
     assert!(out.content.contains("verdict"));
     assert!(out.content.contains("JSONL for the log"));
     assert!(out.commits.is_empty());
+}
+
+#[test]
+fn a_selected_node_previews_what_each_source_event_said() {
+    let instruction = Event::message_received(
+        Actor::Human(human()),
+        "record this".to_string(),
+        source("test"),
+        None,
+    );
+    let evidence = Event::message_received(
+        Actor::Agent,
+        "generation belongs to the server because the browser can disconnect ".repeat(4),
+        source("test"),
+        None,
+    );
+    let node = node_added_citing(
+        Actor::Agent,
+        "verdict",
+        "server-owned generation",
+        vec![instruction.id(), evidence.id()],
+    );
+    let out = tool(FakeLog::seeded(vec![instruction, evidence, node]))
+        .run(r#"{"map":"debates","around":"v1"}"#)
+        .unwrap();
+    let row: serde_json::Value = serde_json::from_str(out.content.lines().nth(2).unwrap()).unwrap();
+
+    assert_eq!(row["sources"].as_array().unwrap().len(), 2);
+    assert_eq!(row["source_previews"][0]["actor"]["kind"], "human");
+    assert_eq!(row["source_previews"][0]["type"], "message.received");
+    assert_eq!(row["source_previews"][0]["payload"]["content"], "record this");
+    assert_eq!(row["source_previews"][1]["actor"]["kind"], "agent");
+    assert!(
+        row["source_previews"][1]["preview"]["len"]
+            .as_u64()
+            .unwrap()
+            > crate::store::PREVIEW_CHARS as u64
+    );
+}
+
+#[test]
+fn a_whole_map_keeps_only_source_ids() {
+    let evidence = Event::message_received(
+        Actor::Human(human()),
+        "the reason".to_string(),
+        source("test"),
+        None,
+    );
+    let node = node_added_citing(
+        Actor::Human(human()),
+        "verdict",
+        "keep the overview compact",
+        vec![evidence.id()],
+    );
+    let out = tool(FakeLog::seeded(vec![evidence, node]))
+        .run(r#"{"map":"debates"}"#)
+        .unwrap();
+    let row: serde_json::Value = serde_json::from_str(out.content.lines().nth(2).unwrap()).unwrap();
+
+    assert_eq!(row["sources"].as_array().unwrap().len(), 1);
+    assert!(row.get("source_previews").is_none());
+}
+
+#[test]
+fn a_selected_edge_previews_its_source_event() {
+    let topic = node_added("topic", "Who owns generation?");
+    let verdict = node_added("verdict", "the server");
+    let evidence = Event::message_received(
+        Actor::Human(human()),
+        "closing the tab must not cancel generation".to_string(),
+        source("test"),
+        None,
+    );
+    let edge = Event::new(
+        Actor::Agent,
+        source("test"),
+        None,
+        Payload::EdgeAdded {
+            map: "debates".to_string(),
+            kind: "settles".to_string(),
+            from: node_id(&verdict),
+            to: node_id(&topic),
+            sources: vec![evidence.id()],
+        },
+    );
+    let out = tool(FakeLog::seeded(vec![topic, verdict, evidence, edge]))
+        .run(r#"{"map":"debates","around":"t1"}"#)
+        .unwrap();
+    let row: serde_json::Value = out
+        .content
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .find(|row: &serde_json::Value| row["edge"] == "settles")
+        .unwrap();
+
+    assert_eq!(row["sources"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        row["source_previews"][0]["payload"]["content"],
+        "closing the tab must not cancel generation"
+    );
 }
 
 #[test]

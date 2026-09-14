@@ -99,7 +99,7 @@ fn kind_suffix(kind: &NodeKind) -> String {
 fn push_record(out: &mut String, schema: &Schema) {
     let _ = writeln!(
         out,
-        "  percept maps record {} --actor <human|agent> --source <event id> <<'EOF'",
+        "  percept maps record {} --actor <human|agent> --source <event id> [--causation <citation event id>] [--commit-causation <request event id>] <<'EOF'",
         schema.name
     );
     out.push_str("  <document>\n  EOF\n");
@@ -112,8 +112,10 @@ const GRAMMAR: &str = "
   property, why \"...\"; an edge to a short id or to the latest node of that kind
   above it, resolves question; or cites src/path.rs:10-20, which records the
   text as seen and adds it to the node's sources. A claim that rests on code
-  cites it, so a later session is told when that code has changed. A margin
-  line naming a short id, t4, changes that node: state \"done\" under it sets a
+  cites it, so a later session is told when that code has changed. --causation
+  links a refreshed file citation to its predecessor. --commit-causation names
+  the command or request that caused the map commits. A margin line naming a
+  short id, t4, changes that node: state \"done\" under it sets a
   property, name \"...\" renames it, and why \"...\" is the change's own reason,
   not a property. A node is refused without its required properties; a node
   the user last changed takes only state from an agent.
