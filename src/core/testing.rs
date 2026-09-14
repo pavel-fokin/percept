@@ -354,9 +354,10 @@ pub fn debates() -> Schema {
                 "claim",
                 "a side taken on a topic, saying why in its `why` property",
             )
-            .requiring("why"),
-            NodeKind::new("fact", "a fact that backs a claim"),
-            NodeKind::new("verdict", ""),
+            .requiring("why")
+            .with_properties(&["summary"]),
+            NodeKind::new("fact", "a fact that backs a claim").with_properties(&["summary", "when"]),
+            NodeKind::new("verdict", "").with_properties(&["why"]),
         ],
         edge_kinds: vec![
             EdgeKind::new("about", "", &["claim"], &["topic"]),
@@ -384,6 +385,7 @@ pub fn chores() -> Schema {
         node_kinds: vec![
             NodeKind::new("chore", "one piece of work, saying why it matters in its `why` property")
                 .requiring("why")
+                .with_properties(&["outcome"])
                 .with_states(&["open", "done", "dropped"]),
         ],
         edge_kinds: vec![EdgeKind::new("blocks", "", &["chore"], &["chore"])],
@@ -411,6 +413,7 @@ pub fn files() -> Schema {
             // both avoids that and reads as the keyword it names.
             NodeKind {
                 prefix: "fn".to_string(),
+                properties: vec!["returns".to_string()],
                 ..NodeKind::new("function", "a function or method")
             },
             NodeKind::new(

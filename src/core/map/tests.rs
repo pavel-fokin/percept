@@ -136,15 +136,25 @@ fn since_includes_a_node_changed_after_at() {
 }
 
 fn node_added(map: &str, node: NodeId, kind: &str, name: &str) -> Event {
-    // `seq` at its sentinel: these fixtures build a few nodes at most,
-    // so `Map::replay`'s positional fallback mints the same numbers a
-    // fresh `apply` would, and every test here is about something else.
+    node_added_with_properties(map, node, kind, name, BTreeMap::new())
+}
+
+/// `seq` at its sentinel: these fixtures build a few nodes at most,
+/// so `Map::replay`'s positional fallback mints the same numbers a
+/// fresh `apply` would, and every test here is about something else.
+fn node_added_with_properties(
+    map: &str,
+    node: NodeId,
+    kind: &str,
+    name: &str,
+    properties: BTreeMap<String, String>,
+) -> Event {
     committed(Payload::NodeAdded {
         map: map.to_string(),
         node,
         kind: kind.to_string(),
         name: name.to_string(),
-        properties: BTreeMap::new(),
+        properties,
         sources: Vec::new(),
         seq: 0,
     })
@@ -391,7 +401,8 @@ fn an_unknown_kind_fails_the_fold() {
         }
         .to_string(),
         "no node kind \"goal\" in map \"debates\"; kinds are `topic`, `claim` \
-         (requires `why`), `fact`, `verdict`"
+         (requires `why`, may carry `summary`), `fact` (may carry `summary`, `when`), \
+         `verdict` (may carry `why`)"
     );
 }
 
@@ -741,6 +752,133 @@ fn a_state_on_a_kind_with_no_states_is_refused() {
             states: Vec::new(),
         }
     );
+}
+
+#[test]
+fn an_undeclared_property_is_refused_on_add() {
+    let mut map = Map::empty(debates());
+
+    let err = map
+        .apply(
+            Mutation::AddNode {
+                kind: "claim".to_string(),
+                name: "Rust".to_string(),
+                properties: BTreeMap::from([
+                    ("why".to_string(), "because".to_string()),
+                    ("notes".to_string(), "a stray property".to_string()),
+                ]),
+                sources: Vec::new(),
+            },
+            Actor::Human(human()),
+        )
+        .err()
+        .unwrap();
+
+    assert_eq!(
+        err,
+        MapError::UnknownProperty {
+            kind: "claim".to_string(),
+            property: "notes".to_string(),
+            allowed: vec!["why".to_string(), "summary".to_string()],
+        }
+    );
+    assert_eq!(
+        err.to_string(),
+        "claim has no property \"notes\"; properties are why, summary"
+    );
+}
+
+#[test]
+fn an_undeclared_property_is_refused_on_change() {
+    let mut map = Map::empty(debates());
+    map.apply(add_claim("Rust"), Actor::Human(human())).unwrap();
+
+    let err = map
+        .apply(
+            change_node(
+                "claim",
+                "Rust",
+                None,
+                BTreeMap::from([("notes".to_string(), "a stray property".to_string())]),
+            ),
+            Actor::Human(human()),
+        )
+        .err()
+        .unwrap();
+
+    assert_eq!(
+        err,
+        MapError::UnknownProperty {
+            kind: "claim".to_string(),
+            property: "notes".to_string(),
+            allowed: vec!["why".to_string(), "summary".to_string()],
+        }
+    );
+}
+
+#[test]
+fn a_required_property_and_a_declared_one_are_accepted() {
+    let mut map = Map::empty(debates());
+
+    map.apply(
+        Mutation::AddNode {
+            kind: "claim".to_string(),
+            name: "Rust".to_string(),
+            properties: BTreeMap::from([
+                ("why".to_string(), "because".to_string()),
+                ("summary".to_string(), "fast".to_string()),
+            ]),
+            sources: Vec::new(),
+        },
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    let node = map.find("claim", "Rust").unwrap();
+    assert_eq!(node.properties.get("summary").unwrap(), "fast");
+}
+
+#[test]
+fn a_state_on_a_kind_without_states_is_unknown_state_not_unknown_property() {
+    let mut debates_map = Map::empty(debates());
+    let err = debates_map
+        .apply(
+            Mutation::AddNode {
+                kind: "claim".to_string(),
+                name: "Rust".to_string(),
+                properties: BTreeMap::from([
+                    ("why".to_string(), "because".to_string()),
+                    ("state".to_string(), "open".to_string()),
+                ]),
+                sources: Vec::new(),
+            },
+            Actor::Human(human()),
+        )
+        .err()
+        .unwrap();
+
+    // A kind with no states refuses `state` as `UnknownState`, never
+    // `UnknownProperty` - the two rules stay distinct.
+    assert!(matches!(err, MapError::UnknownState { .. }), "{err}");
+}
+
+#[test]
+fn a_stored_node_carrying_an_undeclared_property_still_folds() {
+    let event = node_added_with_properties(
+        "debates",
+        NodeId::new(),
+        "claim",
+        "Rust",
+        BTreeMap::from([
+            ("why".to_string(), "because".to_string()),
+            ("candidate".to_string(), "a paragraph nobody may write anymore".to_string()),
+        ]),
+    );
+
+    let map = Map::fold(debates(), &[event]).unwrap();
+
+    let node = map.find("claim", "Rust").unwrap();
+    assert_eq!(node.properties.get("candidate").unwrap(), "a paragraph nobody may write anymore");
 }
 
 #[test]

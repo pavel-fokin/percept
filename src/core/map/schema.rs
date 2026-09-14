@@ -37,6 +37,12 @@ pub struct NodeKind {
     /// option or a task. Checked on a write, never on a fold, so what
     /// was recorded before the rule still folds.
     pub requires: Vec<String>,
+    /// The properties a node of this kind may carry beyond `requires` -
+    /// `note` on a `fact`. A write refuses any property outside
+    /// `requires`, `properties`, and `state` when `states` is
+    /// non-empty; checked on a write, never on a fold, so what was
+    /// recorded before the rule still folds.
+    pub properties: Vec<String>,
     /// This node kind's short id prefix - `d` for `decision`, so a
     /// node reads as `d41` rather than its full id.
     pub prefix: String,
@@ -65,6 +71,7 @@ impl NodeKind {
             kind: kind.to_string(),
             gloss: gloss.to_string(),
             requires: Vec::new(),
+            properties: Vec::new(),
             states: Vec::new(),
         }
     }
@@ -78,6 +85,15 @@ impl NodeKind {
         self
     }
 
+    /// `self`, with `properties` as the optional properties beyond
+    /// `requires` a node of this kind may carry. Used only by
+    /// `core::testing`'s fixture schemas today, so `cfg(test)` too.
+    #[cfg(test)]
+    pub(crate) fn with_properties(mut self, properties: &[&str]) -> Self {
+        self.properties = properties.iter().map(|p| p.to_string()).collect();
+        self
+    }
+
     /// `self`, with `states` as the values a `state` property on a node
     /// of this kind may hold. Used only by `core::testing`'s fixture
     /// schemas, so `cfg(test)` too.
@@ -88,16 +104,42 @@ impl NodeKind {
     }
 
     /// This kind's name, backticked, alone or with the properties it
-    /// requires - `` `option` (requires `why`) `` - for a csv or a
-    /// rendered list, so the one shape is built once and read
-    /// everywhere a kind is named.
+    /// requires and may carry - `` `option` (requires `why`, may carry
+    /// `note`) `` - for a csv or a rendered list, so the one shape is
+    /// built once and read everywhere a kind is named.
     pub fn label(&self) -> String {
-        if self.requires.is_empty() {
+        let ticked = |names: &[String]| {
+            let ticked: Vec<String> = names.iter().map(|p| format!("`{p}`")).collect();
+            ticked.join(", ")
+        };
+        let mut parts: Vec<String> = Vec::new();
+        if !self.requires.is_empty() {
+            parts.push(format!("requires {}", ticked(&self.requires)));
+        }
+        if !self.properties.is_empty() {
+            parts.push(format!("may carry {}", ticked(&self.properties)));
+        }
+        if parts.is_empty() {
             format!("`{}`", self.kind)
         } else {
-            let requires: Vec<String> = self.requires.iter().map(|p| format!("`{p}`")).collect();
-            format!("`{}` (requires {})", self.kind, requires.join(", "))
+            format!("`{}` ({})", self.kind, parts.join(", "))
         }
+    }
+
+    /// Every property a write may put on a node of this kind, in the
+    /// order an error lists them: `requires`, `properties`, then
+    /// `state` when the kind declares states. The one place that rule
+    /// lives; `allows` and `Map::apply` read through it.
+    pub fn allowed_properties(&self) -> impl Iterator<Item = &str> {
+        self.requires
+            .iter()
+            .chain(&self.properties)
+            .map(String::as_str)
+            .chain((!self.states.is_empty()).then_some("state"))
+    }
+
+    pub fn allows(&self, property: &str) -> bool {
+        self.allowed_properties().any(|allowed| allowed == property)
     }
 }
 

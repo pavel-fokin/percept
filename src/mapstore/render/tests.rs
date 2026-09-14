@@ -334,7 +334,7 @@ fn a_kind_with_no_gloss_renders_without_a_trailing_dash() {
     let text = catalogue(&[Map::empty(debates())]);
 
     assert!(
-        text.contains("\n- `verdict`\n"),
+        text.contains("\n- `verdict` (may carry `why`)\n"),
         "{text}"
     );
 }
@@ -345,7 +345,7 @@ fn the_catalogue_names_a_kinds_required_properties() {
 
     assert!(
         text.contains(
-            "- `claim` (requires `why`) - a side taken on a topic, saying \
+            "- `claim` (requires `why`, may carry `summary`) - a side taken on a topic, saying \
              why in its `why` property"
         ),
         "{text}"

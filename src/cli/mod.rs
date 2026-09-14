@@ -268,8 +268,9 @@ pub struct RecordArgs {
     /// for a model recording on their behalf.
     #[arg(long, default_value = "human", value_parser = parse_actor_word)]
     actor: String,
-    /// The id of the event a `cites` line's `file.cited` event follows
-    /// from.
+    /// The id of the event this record follows from - every event it
+    /// writes names it. Defaults to the prompt of the coding client's
+    /// turn this command runs in, when there is one.
     #[arg(long)]
     causation: Option<String>,
 }
@@ -742,7 +743,7 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
 
 /// One map change from the shell: `target`'s cited events resolved and
 /// `mutation` checked, applied, and committed as `target.actor`
-/// (`human` by default) with no cause, all under `mapstore::commit`'s
+/// (`human` by default), caused by `cause`, all under `mapstore::commit`'s
 /// one lock. `me` resolves `human`/`user` to this log's own `HumanId`.
 /// Returns the payload, for `add-node` to print the minted id.
 fn write(
@@ -751,6 +752,7 @@ fn write(
     schemas: &Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
+    cause: Option<EventId>,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<Payload, Box<dyn std::error::Error>> {
     let MapArgs {
@@ -759,7 +761,7 @@ fn write(
         actor,
     } = target;
     let actor = store::parse_actor(&actor, me)?;
-    let event = mapstore::commit(log, schemas, &map, source, &cited, actor, mutation)?;
+    let event = mapstore::commit(log, schemas, &map, source, &cited, actor, cause, mutation)?;
     Ok(event.payload().clone())
 }
 
@@ -771,8 +773,9 @@ pub fn maps_add_node(
     schemas: &Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
+    cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let payload = write(args.target, log, schemas, source, me, |sources| {
+    let payload = write(args.target, log, schemas, source, me, cause, |sources| {
         Mutation::AddNode {
             kind: args.kind,
             name: args.name,
@@ -795,11 +798,12 @@ pub fn maps_add_edge(
     schemas: &Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
+    cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let map = mapstore::fold_map(log, schemas, &args.target.map, &source.path)?;
     let from = resolve_ref(&map, &args.from)?;
     let to = resolve_ref(&map, &args.to)?;
-    write(args.target, log, schemas, source, me, |sources| {
+    write(args.target, log, schemas, source, me, cause, |sources| {
         Mutation::AddEdge {
             kind: args.kind,
             from,
@@ -817,10 +821,11 @@ pub fn maps_remove_node(
     schemas: &Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
+    cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let map = mapstore::fold_map(log, schemas, &args.target.map, &source.path)?;
     let node = resolve_ref(&map, &args.node)?;
-    write(args.target, log, schemas, source, me, |sources| {
+    write(args.target, log, schemas, source, me, cause, |sources| {
         Mutation::RemoveNode {
             node,
             why: args.why,
@@ -837,12 +842,13 @@ pub fn maps_remove_edge(
     schemas: &Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
+    cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let RemoveEdgeArgs { edge, why } = args;
     let map = mapstore::fold_map(log, schemas, &edge.target.map, &source.path)?;
     let from = resolve_ref(&map, &edge.from)?;
     let to = resolve_ref(&map, &edge.to)?;
-    write(edge.target, log, schemas, source, me, |sources| {
+    write(edge.target, log, schemas, source, me, cause, |sources| {
         Mutation::RemoveEdge {
             kind: edge.kind,
             from,
@@ -863,6 +869,7 @@ pub fn maps_change_node(
     schemas: &Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
+    cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ChangeNodeArgs {
         target,
@@ -873,7 +880,7 @@ pub fn maps_change_node(
     } = args;
     let map = mapstore::fold_map(log, schemas, &target.map, &source.path)?;
     let node = resolve_ref(&map, &node)?;
-    let payload = write(target, log, schemas, source, me, |sources| {
+    let payload = write(target, log, schemas, source, me, cause, |sources| {
         Mutation::ChangeNode {
             node,
             name,
@@ -1066,10 +1073,11 @@ pub fn maps_record(
     source: &crate::core::Source,
     checkout: &Path,
     me: Option<crate::core::HumanId>,
+    cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut document = String::new();
     io::stdin().read_to_string(&mut document)?;
-    record_document(&document, args, log, schemas, source, checkout, me)
+    record_document(&document, args, log, schemas, source, checkout, me, cause)
 }
 
 /// `maps_record`'s work, given the document text rather than reading it
@@ -1083,6 +1091,7 @@ pub fn maps_record(
 /// has passed, in one batch under the log's lock, so a failure midway,
 /// whether a duplicate name, a missing `--source`, or a bad ref, leaves
 /// nothing written; the error names the node or line it reached.
+#[allow(clippy::too_many_arguments)]
 fn record_document(
     document: &str,
     args: RecordArgs,
@@ -1091,6 +1100,7 @@ fn record_document(
     source: &crate::core::Source,
     checkout: &Path,
     me: Option<crate::core::HumanId>,
+    cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let nodes = parse_document(document)?;
     let total = nodes.len();
@@ -1104,7 +1114,8 @@ fn record_document(
         .causation
         .as_deref()
         .map(|id| known_event_id(id, log))
-        .transpose()?;
+        .transpose()?
+        .or(cause);
     // Only opened when the document has a `cites` line to resolve - a
     // document with none should still record against a `checkout` that
     // does not exist, the way it always could.
@@ -1184,7 +1195,7 @@ fn record_document(
                 Payload::NodeAdded { node, .. } | Payload::NodeChanged { node, .. } => *node,
                 _ => unreachable!("AddNode and ChangeNode yield a node payload"),
             };
-            batch.push(Event::new(actor, batch_source.clone(), None, payload));
+            batch.push(Event::new(actor, batch_source.clone(), causation_id, payload));
             last_of_kind.insert(kind.clone(), node_id);
             let from_ref = NodeRef { kind, name };
 
@@ -1217,7 +1228,7 @@ fn record_document(
                     sources: node_sources.clone(),
                 };
                 let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
-                batch.push(Event::new(actor, batch_source.clone(), None, payload));
+                batch.push(Event::new(actor, batch_source.clone(), causation_id, payload));
             }
         }
 

@@ -47,6 +47,11 @@ struct NodeFile {
     gloss: String,
     #[serde(default)]
     requires: Vec<String>,
+    /// The properties a node of this kind may carry beyond `requires` -
+    /// `properties = ["note", "summary"]`. `state` is declared through
+    /// `state = [...]` only, never listed here or in `requires`.
+    #[serde(default)]
+    properties: Vec<String>,
     /// A node kind's short id prefix, `d` for `decision` - optional,
     /// since `default_prefix` covers the common case.
     prefix: Option<String>,
@@ -147,9 +152,29 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
     check_kinds(stem, "node", file.nodes.iter().map(|n| n.kind.as_str()))?;
     check_kinds(stem, "edge", file.edges.iter().map(|e| e.kind.as_str()))?;
     for node in &file.nodes {
-        if node.requires.iter().any(|property| property.trim().is_empty()) {
+        let declared = || node.requires.iter().chain(&node.properties);
+        if declared().any(|property| property.trim().is_empty()) {
             return Err(format!(
-                "{stem}.toml: node kind {:?} requires a blank property",
+                "{stem}.toml: node kind {:?} declares a blank property",
+                node.kind
+            )
+            .into());
+        }
+        if declared().any(|property| property == "state") {
+            return Err(format!(
+                "{stem}.toml: node kind {:?} declares \"state\" as a property; state is declared \
+                 through state = [...] only",
+                node.kind
+            )
+            .into());
+        }
+        if let Some(property) = node
+            .properties
+            .iter()
+            .find(|property| node.requires.contains(property))
+        {
+            return Err(format!(
+                "{stem}.toml: node kind {:?} declares {property:?} in both requires and properties",
                 node.kind
             )
             .into());
@@ -189,6 +214,7 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
                 kind: node.kind,
                 gloss: node.gloss.trim().to_string(),
                 requires: node.requires,
+                properties: node.properties,
                 states: node.states,
             }
         })

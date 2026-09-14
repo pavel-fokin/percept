@@ -400,3 +400,67 @@ fn an_edge_end_naming_a_list_loads_both_kinds() {
     let relates = glossary.edge_kind("relates").unwrap();
     assert_eq!(relates.to, ["term".to_string(), "acronym".to_string()]);
 }
+
+#[test]
+fn a_properties_list_loads_onto_the_node_kind() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[node]]\nkind = \"term\"\ngloss = \"g\"\nproperties = [\"note\", \"summary\"]\n",
+    );
+
+    let schemas = load(fixture.path()).unwrap();
+
+    let glossary = schemas.find("glossary").unwrap();
+    assert_eq!(
+        glossary.node_kind("term").unwrap().properties,
+        ["note", "summary"]
+    );
+}
+
+#[test]
+fn a_property_listed_in_both_requires_and_properties_is_refused() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[node]]\nkind = \"term\"\ngloss = \"g\"\nrequires = [\"meaning\"]\n\
+         properties = [\"meaning\"]\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert_eq!(
+        err,
+        "glossary.toml: node kind \"term\" declares \"meaning\" in both requires and properties"
+    );
+}
+
+#[test]
+fn state_under_properties_is_refused() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[node]]\nkind = \"term\"\ngloss = \"g\"\nproperties = [\"state\"]\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert!(err.contains("state = [...] only"), "{err}");
+}
+
+#[test]
+fn state_under_requires_is_refused() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[node]]\nkind = \"term\"\ngloss = \"g\"\nrequires = [\"state\"]\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert!(err.contains("state = [...] only"), "{err}");
+}

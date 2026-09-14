@@ -23,15 +23,13 @@ use crate::cli::hook::EVENTS;
 use crate::mapstore;
 
 /// `percept init <client>` - `client` names the coding client whose
-/// project config to write - `claude-code` or `codex`. `--capture`
-/// adds the tool-use hook, so every tool call and its result land in
-/// the log beside the prompts and replies; without it the log holds
-/// what a claim can cite and none of the files the agent read.
+/// project config to write - `claude-code` or `codex`. Every hook in
+/// `EVENTS` is written, the tool-use one included: a log of prompts
+/// and replies alone holds nothing a map can cite but the
+/// conversation, so what the agent read and ran is recorded too.
 #[derive(clap::Args)]
 pub struct InitArgs {
     pub client: String,
-    #[arg(long)]
-    pub capture: bool,
 }
 
 /// One client's config: its file relative to the checkout root, and
@@ -81,9 +79,8 @@ pub fn run(args: InitArgs, checkout: &Path) -> Result<(), Box<dyn std::error::Er
         write_schema(checkout, name, text)?;
     }
     let command = format!("percept hook {}", client.name);
-    let events = hook_events(args.capture);
     write_config(checkout, client.path, |root| {
-        merge(root, &command, &events, client.allow)
+        merge(root, &command, &EVENTS, client.allow)
     })
 }
 
@@ -111,16 +108,6 @@ fn write_new(checkout: &Path, rel: &str, text: &str) -> Result<(), Box<dyn std::
     fs::write(&path, text)?;
     println!("wrote {rel}");
     Ok(())
-}
-
-/// The hook events `init` writes: every one in `EVENTS` with
-/// `capture`, and all but `PostToolUse` without it.
-fn hook_events(capture: bool) -> Vec<&'static str> {
-    EVENTS
-        .iter()
-        .copied()
-        .filter(|event| capture || *event != "PostToolUse")
-        .collect()
 }
 
 /// Reads `checkout/rel` - an empty object when it doesn't exist -

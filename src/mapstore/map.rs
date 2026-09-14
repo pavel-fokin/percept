@@ -160,6 +160,7 @@ fn revised(
 /// call can run. Two writers each loading the log on their own could
 /// both count the same kind's existing nodes and mint the same short
 /// id; this is the seam that stops them.
+#[allow(clippy::too_many_arguments)]
 pub fn commit(
     log: &dyn EventLog,
     schemas: &Schemas,
@@ -167,12 +168,13 @@ pub fn commit(
     source: &crate::core::Source,
     sources: &[String],
     actor: Actor,
+    causation: Option<EventId>,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<crate::core::Event, Box<dyn std::error::Error>> {
     let (name, source) = (name.to_string(), source.clone());
     log.append_computed(Box::new(move |events| {
         let payload = revised(schemas, &name, &source.path, events, sources, actor, mutation)?;
-        Ok(crate::core::Event::new(actor, source, None, payload))
+        Ok(crate::core::Event::new(actor, source, causation, payload))
     }))
 }
 

@@ -27,7 +27,7 @@ mod tui;
 mod workspace;
 
 use cli::{Cli, Command, EventsCommand, MapsCommand};
-use store::Jsonl;
+use store::{turn_dir, Jsonl, TurnState};
 
 /// Names the directory percept keeps its state in - the event log, and
 /// the installed binary. Defaults to `~/.percept`.
@@ -129,8 +129,19 @@ fn hook_run(args: cli::hook::HookArgs) -> Result<serde_json::Value, Box<dyn std:
     };
     let log = open_log(&checkout)?;
     let me = log.me();
-    let sessions = data_dir(&checkout)?.join(HOOK_SESSIONS_DIR);
-    cli::hook::run(input, &source, &log, &sessions, &checkout, me)
+    cli::hook::run(input, &source, &log, &sessions_dir(&checkout)?, &checkout, me)
+}
+
+/// Where `percept hook` keeps every checkout's turns, beside the log.
+fn sessions_dir(checkout: &Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    Ok(data_dir(checkout)?.join(HOOK_SESSIONS_DIR))
+}
+
+/// The id of the coding client's turn this map write runs in, when
+/// there is one - what `percept hook`'s `UserPromptSubmit` pointed at
+/// under `root`'s turn directory.
+fn turn_cause(checkout: &Path, root: &Path) -> Result<Option<crate::core::EventId>, Box<dyn std::error::Error>> {
+    Ok(TurnState::latest_cause(&turn_dir(&sessions_dir(checkout)?, root))?)
 }
 
 /// The checkout `cwd` is in: the first ancestor of it
@@ -257,27 +268,30 @@ async fn main() {
             }
             let log = open_log(&checkout)?;
             let me = log.me();
+            // Read by the write commands only: a read never opens the
+            // turn directory.
+            let cause = || turn_cause(&checkout, &root);
             match command {
                 MapsCommand::Describe(_) => unreachable!(),
                 MapsCommand::List(args) => cli::maps_list(args, &log, &schemas, &root),
                 MapsCommand::Show(args) => cli::maps_show(args, &log, &schemas, &root),
                 MapsCommand::AddNode(args) => {
-                    cli::maps_add_node(args, &log, &schemas, &cli_source, me)
+                    cli::maps_add_node(args, &log, &schemas, &cli_source, me, cause()?)
                 }
                 MapsCommand::AddEdge(args) => {
-                    cli::maps_add_edge(args, &log, &schemas, &cli_source, me)
+                    cli::maps_add_edge(args, &log, &schemas, &cli_source, me, cause()?)
                 }
                 MapsCommand::RemoveNode(args) => {
-                    cli::maps_remove_node(args, &log, &schemas, &cli_source, me)
+                    cli::maps_remove_node(args, &log, &schemas, &cli_source, me, cause()?)
                 }
                 MapsCommand::RemoveEdge(args) => {
-                    cli::maps_remove_edge(args, &log, &schemas, &cli_source, me)
+                    cli::maps_remove_edge(args, &log, &schemas, &cli_source, me, cause()?)
                 }
                 MapsCommand::Record(args) => {
-                    cli::maps_record(args, &log, &schemas, &cli_source, &checkout, me)
+                    cli::maps_record(args, &log, &schemas, &cli_source, &checkout, me, cause()?)
                 }
                 MapsCommand::ChangeNode(args) => {
-                    cli::maps_change_node(args, &log, &schemas, &cli_source, me)
+                    cli::maps_change_node(args, &log, &schemas, &cli_source, me, cause()?)
                 }
             }
         }),

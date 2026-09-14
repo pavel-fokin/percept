@@ -165,6 +165,9 @@ impl Fixture {
         output["hookSpecificOutput"]["additionalContext"]
             .as_str()
             .unwrap()
+            .lines()
+            .next()
+            .unwrap()
             .strip_prefix("percept event ")
             .unwrap()
             .to_string()
@@ -387,6 +390,29 @@ fn a_returning_session_still_prints_starts_render() {
 }
 
 #[test]
+fn every_prompt_carries_the_events_id_then_the_one_rule() {
+    let fixture = Fixture::new();
+
+    let output = fixture
+        .call(
+            "codex",
+            json!({
+                "hook_event_name": "UserPromptSubmit",
+                "cwd": fixture.root.to_str().unwrap(),
+                "session_id": "session",
+                "prompt": "hello",
+            }),
+        )
+        .unwrap();
+
+    let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
+    let lines: Vec<&str> = context.lines().collect();
+    assert_eq!(lines.len(), 2, "{context:?}");
+    assert!(lines[0].starts_with("percept event "), "{context:?}");
+    assert_eq!(lines[1], TURN_RULE);
+}
+
+#[test]
 fn the_context_carries_no_recording_section() {
     let fixture = Fixture::new();
     let context = fixture.session_start("codex");
@@ -532,10 +558,13 @@ fn stop_uses_last_assistant_message_and_the_prompts_cause() {
 }
 
 #[test]
-fn stop_clears_the_turns_state() {
+fn a_prompt_opens_the_checkouts_turn_and_stop_closes_it() {
     let fixture = Fixture::new();
-    fixture.prompt("codex", "session", "", "hello");
-    assert_eq!(fixture.state_file_count(), 1);
+    let dir = turn_dir(&fixture.sessions, &fixture.root);
+
+    let prompt = fixture.prompt("codex", "session", "", "hello");
+    let open = TurnState::latest_cause(&dir).unwrap().unwrap();
+    assert_eq!(open.as_uuid().to_string(), prompt);
 
     fixture
         .stop(
@@ -546,7 +575,34 @@ fn stop_clears_the_turns_state() {
         )
         .unwrap();
 
+    assert_eq!(TurnState::latest_cause(&dir).unwrap(), None);
     assert_eq!(fixture.state_file_count(), 0);
+}
+
+#[test]
+fn a_stop_leaves_a_later_prompts_turn_open() {
+    let fixture = Fixture::new();
+    let dir = turn_dir(&fixture.sessions, &fixture.root);
+    fixture.prompt("codex", "first", "", "hello");
+    let later = fixture.prompt("claude-code", "second", "", "hello");
+
+    fixture
+        .stop("codex", "first", "", json!({"last_assistant_message": "reply"}))
+        .unwrap();
+
+    let open = TurnState::latest_cause(&dir).unwrap().unwrap();
+    assert_eq!(open.as_uuid().to_string(), later);
+}
+
+#[test]
+fn a_session_start_closes_a_turn_a_killed_session_left_open() {
+    let fixture = Fixture::new();
+    let dir = turn_dir(&fixture.sessions, &fixture.root);
+    fixture.prompt("codex", "killed", "", "hello");
+
+    fixture.session_start("codex");
+
+    assert_eq!(TurnState::latest_cause(&dir).unwrap(), None);
 }
 
 #[test]

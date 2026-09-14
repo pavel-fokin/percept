@@ -617,6 +617,7 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
         &schemas(),
         &cli_source,
         human(),
+        None,
     );
     let remove_node = maps_remove_node(
         RemoveNodeArgs {
@@ -628,6 +629,7 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
         &schemas(),
         &cli_source,
         human(),
+        None,
     );
     let edge_args = || EdgeArgs {
         target: target(),
@@ -635,7 +637,7 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
         from: "file:src/main.rs".to_string(),
         to: "file:src/app/mod.rs".to_string(),
     };
-    let add_edge = maps_add_edge(edge_args(), &log, &schemas(), &cli_source, human());
+    let add_edge = maps_add_edge(edge_args(), &log, &schemas(), &cli_source, human(), None);
     let remove_edge = maps_remove_edge(
         RemoveEdgeArgs {
             edge: edge_args(),
@@ -645,6 +647,7 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
         &schemas(),
         &cli_source,
         human(),
+        None,
     );
 
     for result in [add_node, remove_node, add_edge, remove_edge] {
@@ -678,7 +681,7 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_human() {
     };
     assert_eq!(args.target.actor, "model");
 
-    maps_add_node(args, &log, &schemas(), &source("cli"), human()).unwrap();
+    maps_add_node(args, &log, &schemas(), &source("cli"), human(), None).unwrap();
 
     let events = log.load().unwrap();
     assert!(events[0].actor() == Actor::Agent);
@@ -700,6 +703,27 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_human() {
         panic!("expected maps add-node")
     };
     assert_eq!(args.target.actor, "human");
+}
+
+#[test]
+fn maps_add_node_carries_the_cause_it_is_given() {
+    let log = FakeLog::default();
+    let cause = crate::core::EventId::new();
+    let args = AddNodeArgs {
+        target: MapArgs {
+            map: "debates".to_string(),
+            source: Vec::new(),
+            actor: "human".to_string(),
+        },
+        kind: "topic".to_string(),
+        name: "Which?".to_string(),
+        prop: Vec::new(),
+    };
+
+    maps_add_node(args, &log, &schemas(), &source("cli"), human(), Some(cause)).unwrap();
+
+    let events = log.load().unwrap();
+    assert_eq!(events[0].causation_id(), Some(cause));
 }
 
 fn change_node_args(node: &str, why: Option<&str>) -> ChangeNodeArgs {
@@ -728,6 +752,7 @@ fn maps_change_node_with_why_appends_a_node_changed_whose_why_is_set() {
         &schemas(),
         &source("cli"),
         human(),
+        None,
     )
     .unwrap();
 
@@ -752,6 +777,7 @@ fn maps_change_node_refuses_a_node_the_map_does_not_hold() {
         &schemas(),
         &source("cli"),
         human(),
+        None,
     )
     .err()
     .unwrap();
@@ -768,7 +794,7 @@ fn maps_change_node_refuses_an_agent_s_property_change_of_a_node_a_human_wrote()
     let mut args = change_node_args("claim:wasm render", None);
     args.target.actor = "agent".to_string();
     args.prop = vec![("why".to_string(), "faster paint".to_string())];
-    let err = maps_change_node(args, &log, &schemas(), &source("cli"), None).err().unwrap();
+    let err = maps_change_node(args, &log, &schemas(), &source("cli"), None, None).err().unwrap();
 
     assert!(err.to_string().contains("was written by"), "{err}");
     assert_eq!(log.load().unwrap().len(), 1);
@@ -796,6 +822,7 @@ fn a_document_writes_its_nodes_and_edges_in_order() {
         &source("cli"),
         no_checkout(),
         human(),
+        None,
     )
     .unwrap();
 
@@ -814,6 +841,61 @@ fn a_document_writes_its_nodes_and_edges_in_order() {
 }
 
 #[test]
+fn a_record_takes_the_turns_cause_when_none_is_given() {
+    let log = FakeLog::default();
+    let cause = crate::core::EventId::new();
+    let fixture = Fixture::new();
+    fixture.write("src/cli/mod.rs", "one\ntwo\nthree\n");
+    let document = "topic \"Does record work?\"\n  cites src/cli/mod.rs:1-3\n";
+
+    record_document(
+        document,
+        record_args("debates"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        fixture.path(),
+        human(),
+        Some(cause),
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    assert!(!events.is_empty());
+    for event in &events {
+        assert_eq!(event.causation_id(), Some(cause));
+    }
+}
+
+#[test]
+fn an_explicit_causation_wins_over_the_turns() {
+    let log = FakeLog::default();
+    let turns_cause = crate::core::EventId::new();
+    let seed = Event::message_received(Actor::Human(human()), "hi".to_string(), source("cli"), None);
+    let explicit = seed.id();
+    log.append(&seed).unwrap();
+    let mut args = record_args("debates");
+    args.causation = Some(explicit.as_uuid().to_string());
+    let document = "topic \"Does record work?\"\n";
+
+    record_document(
+        document,
+        args,
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+        Some(turns_cause),
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    let recorded = events.last().unwrap();
+    assert_eq!(recorded.causation_id(), Some(explicit));
+}
+
+#[test]
 fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
     let fixture = Fixture::new();
     fixture.write("src/cli/mod.rs", "one\ntwo\nthree\n");
@@ -829,6 +911,7 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
         &source("cli"),
         fixture.path(),
         human(),
+        None,
     )
     .unwrap();
 
@@ -856,6 +939,7 @@ fn a_ref_to_an_existing_short_id_resolves() {
         &source("cli"),
         no_checkout(),
         human(),
+        None,
     )
     .unwrap();
 
@@ -877,6 +961,7 @@ fn an_unknown_node_kind_fails_before_anything_is_written() {
         &source("cli"),
         no_checkout(),
         human(),
+        None,
     )
     .unwrap_err();
     assert!(err.to_string().contains("riddle"), "{err}");
@@ -896,6 +981,7 @@ fn a_missing_required_property_fails_before_anything_is_written() {
         &source("cli"),
         no_checkout(),
         human(),
+        None,
     )
     .unwrap_err();
     assert!(err.to_string().contains("why"), "{err}");
@@ -915,6 +1001,7 @@ fn a_bad_ref_names_its_line_number() {
         &source("cli"),
         no_checkout(),
         human(),
+        None,
     )
     .unwrap_err();
     assert!(err.to_string().starts_with("line 4:"), "{err}");
@@ -934,6 +1021,7 @@ fn a_duplicate_name_in_a_later_node_writes_nothing() {
         &source("cli"),
         no_checkout(),
         human(),
+        None,
     )
     .unwrap_err();
     assert!(err.to_string().contains("already in the map"), "{err}");
@@ -954,6 +1042,7 @@ fn a_source_id_the_log_lacks_writes_nothing() {
         &source("cli"),
         no_checkout(),
         human(),
+        None,
     )
     .unwrap_err();
     assert!(err.to_string().contains("no event with id"), "{err}");
@@ -971,6 +1060,7 @@ fn a_short_id_document_changes_the_node_and_records_node_changed() {
         &source("cli"),
         no_checkout(),
         human(),
+        None,
     )
     .unwrap();
 
@@ -982,6 +1072,7 @@ fn a_short_id_document_changes_the_node_and_records_node_changed() {
         &source("cli"),
         no_checkout(),
         human(),
+        None,
     )
     .unwrap();
 
@@ -1008,6 +1099,7 @@ fn a_short_id_line_with_a_quoted_name_is_an_error() {
         &source("cli"),
         no_checkout(),
         human(),
+        None,
     )
     .unwrap_err();
     assert!(err.to_string().starts_with("line 1:"), "{err}");
@@ -1024,6 +1116,7 @@ fn a_change_to_an_unknown_short_id_is_an_error() {
         &source("cli"),
         no_checkout(),
         human(),
+        None,
     )
     .unwrap_err();
     assert!(err.to_string().contains("c9"), "{err}");
@@ -1041,6 +1134,7 @@ fn a_record_why_line_under_an_existing_node_sets_the_changes_why_not_a_property(
         &source("cli"),
         no_checkout(),
         human(),
+        None,
     )
     .unwrap();
 
@@ -1052,6 +1146,7 @@ fn a_record_why_line_under_an_existing_node_sets_the_changes_why_not_a_property(
         &source("cli"),
         no_checkout(),
         human(),
+        None,
     )
     .unwrap();
 
