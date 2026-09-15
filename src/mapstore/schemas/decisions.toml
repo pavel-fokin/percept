@@ -58,3 +58,10 @@ kind = "reopens"
 gloss = "from a question to a decision it puts in doubt; the decision stands until a new one supersedes it"
 from = "question"
 to = "decision"
+
+# The lines a turn carries, after the prompt's event id.
+[rules]
+turn = [
+  "propose by recording: an option under its question, state \"open\", before arguing for it",
+  "before stopping, record each thing you reasoned with as a concept whose definition is the rule that held",
+]

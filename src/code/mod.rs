@@ -15,7 +15,7 @@ use std::path::Path;
 
 use ignore::WalkBuilder;
 
-use crate::core::{Actor, EdgeKind, Map, MapError, Mutation, NodeKind, NodeRef, Schema};
+use crate::core::{Actor, EdgeKind, Map, MapError, Mutation, NodeKind, NodeRef, Rules, Schema};
 use crate::shared::to_slash;
 
 /// The code map's schema: a codebase's files, the symbols they define,
@@ -66,6 +66,7 @@ pub fn schema() -> Schema {
             ),
         ],
         headline_kinds: vec!["file".to_string()],
+        rules: Rules::default(),
     }
 }
 

@@ -147,8 +147,8 @@ pub fn run(
             start_session(source, log, &schemas, checkout)
         }
         HookEvent::UserPromptSubmit { prompt } => {
-            // A schema file that fails to load costs the concept rule,
-            // never the prompt's capture.
+            // A schema file that fails to load costs its rules, never
+            // the prompt's capture.
             let schemas = crate::mapstore::load_schemas(checkout).ok();
             submit_prompt(prompt, source, log, schemas.as_ref(), &mut state, &dir, me)
         }
@@ -203,34 +203,17 @@ fn start_session(
     }))
 }
 
-/// The first rule every turn carries after the prompt's id. A proposal
-/// meets the map only when it is written into it, so this asks for the
-/// writing first: to record an option the agent opens its question, and
-/// the options already weighed there stand in a column above the new
-/// one.
-const PROPOSE_RULE: &str =
-    "propose by recording: an option under its question, state \"open\", before arguing for it";
-
-/// The second rule, carried only where a map declares a `concept`
-/// kind, so a project on a schema from before the kind is not asked
-/// each turn for a write it refuses. It gives concepts their write
-/// moment, the end of the turn, when the agent still holds what it
-/// reasoned with; a definition is the rule that held, so a later
-/// decision can break it.
-const CONCEPT_RULE: &str =
-    "before stopping, record each thing you reasoned with as a concept whose definition is the rule that held";
-
-/// The rules a turn carries, one line each. Constant in size whatever
-/// the maps hold, so a turn's cost never grows with them.
-fn turn_rules(schemas: Option<&Schemas>) -> Vec<&'static str> {
-    let mut rules = vec![PROPOSE_RULE];
-    let concepts = schemas.is_some_and(|schemas| {
-        schemas.folded().any(|schema| schema.node_kind("concept").is_some())
-    });
-    if concepts {
-        rules.push(CONCEPT_RULE);
-    }
-    rules
+/// The rules a turn carries, one line each, in schema order - every
+/// loaded schema's own `rules.turn` lines, with no rule text and no
+/// gate held here: a schema that declares none costs the turn
+/// nothing, and a schema that failed to load (`None`) gives none.
+fn turn_rules(schemas: Option<&Schemas>) -> Vec<&str> {
+    schemas
+        .into_iter()
+        .flat_map(Schemas::folded)
+        .flat_map(|schema| schema.rules.turn.iter())
+        .map(String::as_str)
+        .collect()
 }
 
 /// `UserPromptSubmit`: clears the turn's previous cause before doing

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::core::{
-    Actor, EdgeKind, Event, EventId, EventLog, HumanId, NodeId, NodeKind, NodeRef, Payload,
+    Actor, EdgeKind, Event, EventId, EventLog, HumanId, NodeId, NodeKind, NodeRef, Payload, Rules,
     Schema, Schemas, Source, Usage,
 };
 use crate::shared::Timestamp;
@@ -373,6 +373,7 @@ pub fn debates() -> Schema {
             ),
         ],
         headline_kinds: vec!["topic".to_string(), "verdict".to_string()],
+        rules: Rules::default(),
     }
 }
 
@@ -390,6 +391,7 @@ pub fn chores() -> Schema {
         ],
         edge_kinds: vec![EdgeKind::new("blocks", "", &["chore"], &["chore"])],
         headline_kinds: vec!["chore".to_string()],
+        rules: Rules::default(),
     }
 }
 
@@ -437,5 +439,6 @@ pub fn files() -> Schema {
             ),
         ],
         headline_kinds: vec!["file".to_string()],
+        rules: Rules::default(),
     }
 }

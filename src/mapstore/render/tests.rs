@@ -320,6 +320,7 @@ fn court() -> Map {
             crate::core::EdgeKind::new("settles", "", &["verdict"], &["topic"]),
         ],
         headline_kinds: vec!["area".to_string(), "topic".to_string(), "verdict".to_string()],
+        rules: crate::core::Rules::default(),
     };
     let mut map = Map::empty(schema);
     add(&mut map, "area", "parsing", None, None, &[], Actor::Human(human()));
@@ -365,6 +366,7 @@ fn a_schema_with_no_headline_kind_falls_back_to_a_section_per_kind() {
         node_kinds: vec![crate::core::NodeKind::new("term", "a word")],
         edge_kinds: Vec::new(),
         headline_kinds: Vec::new(),
+        rules: crate::core::Rules::default(),
     };
     let mut map = Map::empty(schema);
     add(&mut map, "term", "harness", None, None, &[], Actor::Human(human()));

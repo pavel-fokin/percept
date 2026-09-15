@@ -33,6 +33,7 @@ fn a_relation_carries_its_edge_kinds_gloss() {
             &["topic"],
         )],
         headline_kinds: vec!["topic".to_string()],
+        rules: crate::core::Rules::default(),
     };
 
     let text = describe(&schema);
@@ -97,4 +98,25 @@ fn the_change_example_is_present_for_a_schema_with_states() {
 fn the_change_example_is_absent_for_a_schema_with_no_states() {
     let text = describe(&debates());
     assert!(!text.contains("example: change"));
+}
+
+#[test]
+fn a_schema_with_turn_rules_prints_them_in_a_rules_section() {
+    let mut schema = debates();
+    schema.rules = crate::core::Rules {
+        turn: vec!["first rule".to_string(), "second rule".to_string()],
+    };
+
+    let text = describe(&schema);
+
+    assert!(
+        text.contains("\nrules\n  turn   first rule\n         second rule\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_schema_with_no_turn_rules_prints_no_rules_section() {
+    let text = describe(&debates());
+    assert!(!text.contains("\nrules\n"), "{text}");
 }

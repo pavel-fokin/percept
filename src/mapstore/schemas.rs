@@ -10,7 +10,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Deserializer};
 
-use crate::core::{default_prefix, EdgeKind, NodeKind, Schema, Schemas};
+use crate::core::{default_prefix, EdgeKind, NodeKind, Rules, Schema, Schemas};
 
 /// The schema template `percept init <client>` copies into a fresh
 /// checkout's `SCHEMAS_DIR`, as `(<name>, <text>)`. Nothing else reads
@@ -33,6 +33,17 @@ struct SchemaFile {
     nodes: Vec<NodeFile>,
     #[serde(default, rename = "edge")]
     edges: Vec<EdgeFile>,
+    #[serde(default)]
+    rules: RulesFile,
+}
+
+/// The lines a schema injects into an agent's context, by moment - a
+/// missing `[rules]` table means no rules at all.
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct RulesFile {
+    #[serde(default)]
+    turn: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -158,6 +169,9 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
 
     check_kinds(stem, "node", file.nodes.iter().map(|n| n.kind.as_str()))?;
     check_kinds(stem, "edge", file.edges.iter().map(|e| e.kind.as_str()))?;
+    if file.rules.turn.iter().any(|line| line.trim().is_empty()) {
+        return Err(format!("{stem}.toml: rules declares a blank turn entry").into());
+    }
     for node in &file.nodes {
         let declared = || node.requires.iter().chain(&node.properties);
         if declared().any(|property| property.trim().is_empty()) {
@@ -249,6 +263,9 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
         node_kinds,
         edge_kinds,
         headline_kinds: file.headlines.clone(),
+        rules: Rules {
+            turn: file.rules.turn,
+        },
     };
 
     for headline in &file.headlines {

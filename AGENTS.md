@@ -85,7 +85,9 @@ Both are serde-free.
   `edge.added`, and `edge.removed` events in the same log. A `Schema` names a map and
   the node and edge kinds it allows, and one line of purpose - what
   the map makes cheap - that the prompt carries in place of the map
-  itself. A schema is a TOML file at `.percept/schemas/<name>.toml`,
+  itself. A schema also carries the rules a turn injects, under
+  `[rules]`, so the binary holds no rule text. A schema is a TOML file
+  at `.percept/schemas/<name>.toml`,
   and those files are the only schemas a project has, so a session
   adds a map without a Rust change and edits a shipped one in place.
   `percept init <client>` writes `decisions` there from the template

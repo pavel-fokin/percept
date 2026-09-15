@@ -390,7 +390,7 @@ fn a_returning_session_still_prints_starts_render() {
 }
 
 #[test]
-fn every_prompt_carries_the_events_id_then_the_propose_rule() {
+fn a_prompts_context_is_the_event_id_alone_when_no_schema_declares_rules() {
     let fixture = Fixture::new();
 
     let output = fixture
@@ -408,15 +408,16 @@ fn every_prompt_carries_the_events_id_then_the_propose_rule() {
     let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
     let lines: Vec<&str> = context.lines().collect();
     assert!(lines[0].starts_with("percept event "), "{context:?}");
-    assert_eq!(lines[1..], [PROPOSE_RULE]);
+    assert_eq!(lines.len(), 1, "{context:?}");
 }
 
 #[test]
-fn a_prompt_carries_the_concept_rule_only_where_a_map_declares_a_concept_kind() {
+fn a_prompt_carries_a_schemas_own_turn_rules_after_the_id() {
     let fixture = Fixture::new().with_extra_schema(
         "glossary",
         "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"concept\"]\n\n\
-         [[node]]\nkind = \"concept\"\nrequires = [\"definition\"]\n",
+         [[node]]\nkind = \"concept\"\nrequires = [\"definition\"]\n\n\
+         [rules]\nturn = [\"a\", \"b\"]\n",
     );
 
     let output = fixture
@@ -433,7 +434,7 @@ fn a_prompt_carries_the_concept_rule_only_where_a_map_declares_a_concept_kind() 
 
     let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
     let lines: Vec<&str> = context.lines().collect();
-    assert_eq!(lines[1..], [PROPOSE_RULE, CONCEPT_RULE]);
+    assert_eq!(lines[1..], ["a", "b"]);
 }
 
 #[test]

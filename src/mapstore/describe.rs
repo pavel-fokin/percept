@@ -24,6 +24,11 @@ pub fn describe(schema: &Schema) -> String {
         push_edge_kinds(&mut out, schema);
     }
 
+    if !schema.rules.turn.is_empty() {
+        out.push_str("\nrules\n");
+        push_rules(&mut out, schema);
+    }
+
     out.push_str("\nrecord\n");
     push_record(&mut out, schema);
 
@@ -105,6 +110,16 @@ fn kind_suffix(kind: &NodeKind) -> String {
         let _ = write!(suffix, "state {}", kind.states.join(" | "));
     }
     suffix
+}
+
+/// The `turn` rules, one per line: the moment name before the first
+/// line, later lines aligned under it.
+fn push_rules(out: &mut String, schema: &Schema) {
+    let indent = " ".repeat("turn".len());
+    for (index, line) in schema.rules.turn.iter().enumerate() {
+        let prefix = if index == 0 { "turn" } else { &indent };
+        let _ = writeln!(out, "  {prefix}   {line}");
+    }
 }
 
 fn push_record(out: &mut String, schema: &Schema) {
