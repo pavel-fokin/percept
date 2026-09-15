@@ -30,6 +30,7 @@ pub use map::{
     commit, commit_batch, encode_fragment, encode_lines, encode_map, encode_schema, fold_map, fold_map_at,
     of_path, paths, LogMaps, NodeRefArgs, Snapshot,
 };
+pub(crate) use render::kind_rank;
 pub use render::{catalogue, markdown};
 pub use schemas::{load as load_schemas, SCHEMAS_DIR, TEMPLATES};
 pub use start::start;

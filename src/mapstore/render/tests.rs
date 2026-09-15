@@ -93,6 +93,18 @@ fn sections_order_headlines_by_state_then_by_when_they_were_added() {
 }
 
 #[test]
+fn sections_order_headlines_by_their_kinds_place_in_headlines() {
+    let mut map = Map::empty(debates());
+    add(&mut map, "verdict", "ship it", None, None, &[], Actor::Human(human()));
+    add(&mut map, "topic", "Which parser?", None, None, &[], Actor::Human(human()));
+
+    let text = markdown(&map);
+
+    let at = |name: &str| text.find(&format!("\n## {name}\n")).unwrap();
+    assert!(at("t1 \"Which parser?\"") < at("v1 \"ship it\""), "{text}");
+}
+
+#[test]
 fn a_claim_is_printed_under_its_topic_with_its_why() {
     let mut map = Map::empty(debates());
     add(&mut map, "topic", "Which parser?", None, None, &[], Actor::Human(human()));
@@ -290,6 +302,57 @@ fn a_non_headline_neighbour_prints_its_own_properties_indented() {
         ),
         "{text}"
     );
+}
+
+/// Three headline kinds, coarse to fine, with an edge from the finest
+/// to each of the other two - the coarser one listed first.
+fn court() -> Map {
+    let schema = crate::core::Schema {
+        name: "court".to_string(),
+        purpose: "test fixture".to_string(),
+        node_kinds: vec![
+            crate::core::NodeKind::new("area", ""),
+            crate::core::NodeKind::new("topic", ""),
+            crate::core::NodeKind::new("verdict", ""),
+        ],
+        edge_kinds: vec![
+            crate::core::EdgeKind::new("within", "", &["verdict"], &["area"]),
+            crate::core::EdgeKind::new("settles", "", &["verdict"], &["topic"]),
+        ],
+        headline_kinds: vec!["area".to_string(), "topic".to_string(), "verdict".to_string()],
+    };
+    let mut map = Map::empty(schema);
+    add(&mut map, "area", "parsing", None, None, &[], Actor::Human(human()));
+    add(&mut map, "topic", "Which parser?", None, None, &[], Actor::Human(human()));
+    add(&mut map, "verdict", "ship it", None, None, &[], Actor::Human(human()));
+    link(&mut map, "within", ("verdict", "ship it"), ("area", "parsing"));
+    link(&mut map, "settles", ("verdict", "ship it"), ("topic", "Which parser?"));
+    map
+}
+
+/// `headlines` order is nesting order: a node pointing at two headline
+/// kinds files under the one listed later, whatever the schema's edge
+/// order says.
+#[test]
+fn a_node_pointing_at_two_headline_kinds_files_under_the_later_one() {
+    let text = markdown(&court());
+
+    assert!(text.contains("## t1 \"Which parser?\"\n\n- v1 \"ship it\" settles\n"), "{text}");
+    assert!(!text.contains("\n## v1 "), "{text}");
+}
+
+#[test]
+fn a_headline_that_nests_elsewhere_is_still_named_where_an_edge_reaches_it() {
+    let text = markdown(&court());
+
+    assert!(text.contains("## a1 \"parsing\"\n\n- v1 \"ship it\" within\n"), "{text}");
+}
+
+#[test]
+fn a_node_does_not_name_the_headline_it_nests_under() {
+    let text = markdown(&court());
+
+    assert!(!text.contains("- settles t1"), "{text}");
 }
 
 /// A schema with no headline kind at all falls back to `push_by_kind`:
