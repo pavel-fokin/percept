@@ -134,30 +134,6 @@ Both are serde-free.
   left out and how many edges cross it. `maps show` and `read_map` both
   cut through it, so the order of the cuts lives once.
 
-## Maps
-
-Start with `percept maps list`: one section per map
-saying what it is for, its size, and its kinds.
-
-A map is judged by what it costs its reader, on three budgets:
-
-| Budget | What to keep small |
-|---|---|
-| Overview | Concepts held at once to understand one decision. |
-| Change | New meaning to absorb after an update, and landmarks moved. |
-| Verification | Work to check a conclusion and see what a correction touches. |
-
-The change budget weighs most. Add beside what a reader has seen;
-never move or merge it without the user's say.
-
-## Decisions
-
-The decisions map for this repo, folded live from percept's own log:
-`percept maps show decisions`, or the start block a session prints.
-Every node cites the event it was drawn from. It
-is the record of why; where it disagrees with a rule above, the rule
-wins and the map says what the rule cost.
-
 ## Architecture
 
 Layer by dependency direction - each layer depends only on the one below
@@ -214,17 +190,10 @@ skips it.
   assumed. Where a function or a rule sits inside the code is not one
   of those: the builder proposes it, and review challenges it. The user
   agrees the set before any code; an explicit instruction to implement
-  a proposal already discussed supplies that agreement. Each settled
-  decision is then recorded in the decisions map as `model`, citing
-  the prompt that settled it, so the next session does not reopen it.
-  An option is recorded only for an alternative that lost, with the
-  reason it lost; the pick is the decision itself. A decision that
-  changes an earlier one is added with a `supersedes` edge to it; the
-  old node is never removed. A candidate worth doing that nobody has
-  committed to is an open `question` in the decisions map, never an
-  approved issue: it is built only after the user has discussed it and
-  agreed it into the set, and an agent that finds one while building
-  leaves it there and says so.
+  a proposal already discussed supplies that agreement. A candidate
+  worth doing that nobody has committed to is never an approved issue:
+  it is built only after the user has discussed it and agreed it into
+  the set, and an agent that finds one while building says so.
 - **Build.** An issue with no design left in it, touching one or two
   files, the main agent builds itself. Anything larger goes to the
   `software-developer` subagent, which follows this file, writes the
@@ -245,11 +214,7 @@ skips it.
   but only when a step strained or missed something. A session where
   the process fit the work needs no reflection. Cutting a step counts
   for more than adding one. Aim for the smallest process that still
-  catches mistakes. An approach the session tried and abandoned goes
-  into the decisions map as an option with why it lost, so no later
-  session tries it again. Work the session found and left undone goes into the
-  decisions map as an open question with its why, so the next session
-  starts from the list and not from a re-read.
+  catches mistakes.
 
 The TUI builds under `--features lab` and only runs on a real
 terminal. `scripts/drive.py` forks a pty,
