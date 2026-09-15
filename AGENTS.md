@@ -9,6 +9,35 @@ How the log, the maps, and the rules between them work is in the
 module docs of `core`, `store`, and `mapstore`, and in what the binary
 prints: `percept start`, `percept maps describe <map>`.
 
+## Domain
+
+The names a builder uses, and what each is not. Two modules: `core`
+holds experience and the maps folded from it; `harness` holds what a
+loop needs to drive a model over `core`, and depends on it. Both are
+serde-free.
+
+- `Event`: one append-only log entry - id, actor, source, optional
+  causation, created_at, typed payload. Never changed once committed.
+- `Source`: the writer that produced an event and the project root it
+  ran in. Its name is open, where `Actor` is closed.
+- `Actor`: `Human`, `Agent`, `System` - the one vocabulary for who an
+  event or message is attributed to.
+- `Message`: a value with no identity, the shape a `Model` needs.
+  Derived from the log at the boundary, never stored.
+- `Model`: "a reply given messages", domain-owned. Never the mechanism
+  behind it.
+- `Map`: nodes and edges folded from the map events in the log. Every
+  change goes through `Map::apply`, so the rules live once.
+- `Schema`: a map kind - purpose, node and edge kinds, headlines,
+  rules - loaded from `.percept/schemas/<name>.toml`, the only place a
+  kind is declared. The Rust names no kind.
+- `Selection` and `Fragment`: a cut of a map, and what the cut left
+  out.
+- `Usage`: token counts for one round trip, the core's, not the
+  harness's.
+- `Tool`, `Policy`, `Snapshot`: what a loop calls, whether a call runs
+  or asks, and the working tree saved under a prompt.
+
 ## Architecture
 
 Layer by dependency direction - each layer depends only on the one below
