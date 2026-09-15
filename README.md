@@ -5,7 +5,7 @@ percept keeps project decisions alive across AI coding sessions.
 It records what happens across your tools - prompts, replies,
 tool calls, files read - as an append-only log of events. A model
 searches that log and writes what it concludes into maps: a decisions
-map, a concepts map, or one you define. Every change to a
+map, or one you define. Every change to a
 map is itself an event in the same log, citing the experience it was
 drawn from. A map can be rebuilt from its history, and every claim in
 it can be checked against what was actually seen.
@@ -101,7 +101,6 @@ percept maps list
 percept maps show decisions
 percept maps show decisions --around 'question:Where does the event log live?'
 percept maps show decisions --since 1d
-percept maps show concepts
 ```
 
 The Markdown render of the decisions map lists each question with the
@@ -146,8 +145,8 @@ since a user-written node carries no standing to judge.
 
 A map's schema is a TOML file at `.percept/schemas/<name>.toml` naming
 its node and edge kinds and one line of purpose. `percept init`
-writes `decisions` and `concepts` there; a project with no schema
-files has no maps. The rules for a map -
+writes `decisions` there; a project with no schema files has no maps.
+The rules for a map -
 who may remove what, how a decision is corrected - are in
 [AGENTS.md](AGENTS.md).
 

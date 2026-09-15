@@ -6,9 +6,9 @@
 //! `catalogue`, `describe`, and `start` render it to text for `maps
 //! show`, `maps list`, `maps describe`, and `percept start`. The tools
 //! that call these live in `src/tools`. `load_schemas` reads a
-//! project's schemas from `SCHEMAS_DIR` alone; `TEMPLATES` are the
-//! `decisions` and `concepts` TOML `percept init <client>` copies there
-//! for a project that has none yet. A project with no
+//! project's schemas from `SCHEMAS_DIR` alone; `TEMPLATES` is the
+//! `decisions` TOML `percept init <client>` copies there for a project
+//! that has none yet. A project with no
 //! schemas has no maps: `catalogue` and `start` print `NO_SCHEMAS_HINT`
 //! in place of their usual body.
 

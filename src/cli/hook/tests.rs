@@ -57,7 +57,7 @@ impl Fixture {
 
     /// Writes `<root>/.percept/schemas/<name>.toml`, so the next
     /// `session_start` folds a project schema alongside the shipped
-    /// decisions and concepts templates.
+    /// decisions template.
     fn with_extra_schema(self, name: &str, toml: &str) -> Self {
         let dir = self.root.join(".percept/schemas");
         std::fs::create_dir_all(&dir).unwrap();

@@ -88,10 +88,10 @@ Both are serde-free.
   itself. A schema is a TOML file at `.percept/schemas/<name>.toml`,
   and those files are the only schemas a project has, so a session
   adds a map without a Rust change and edits a shipped one in place.
-  `percept init <client>` writes `decisions` and `concepts` there from
-  the templates in the binary, leaving a file that already exists
-  alone; with no schema files, a project has no maps and every render
-  says so. A kind may list the
+  `percept init <client>` writes `decisions` there from the template
+  in the binary, leaving a file that already exists alone; with no
+  schema files, a project has no maps and every render says so. A kind
+  may list the
   properties a node must carry - `why` on an option - and
   the values its `state` may hold, a set with no value open by
   position. The schema declares that set as `states = [...]`, while a
