@@ -1,8 +1,7 @@
 //! `percept init <client>` - writes a coding client's project config so
 //! its hooks call `percept hook <client>`, and, first, the project's
-//! schema files - `.percept/schemas/decisions.toml` and
-//! `.percept/schemas/concepts.toml` - from the templates
-//! `mapstore::templates` embeds, so a fresh checkout has maps to fold
+//! schema file - `.percept/schemas/decisions.toml` - from the template
+//! `mapstore::templates` embeds, so a fresh checkout has a map to fold
 //! before its first session opens. Run from anywhere inside a
 //! checkout; the files land at the checkout root `main` resolves.
 //!

@@ -263,7 +263,7 @@ fn init_writes_the_shipped_schemas() {
 
     let schemas = mapstore::load_schemas(fixture.path()).unwrap();
     let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, ["concepts", "decisions"]);
+    assert_eq!(names, ["decisions"]);
 }
 
 #[test]

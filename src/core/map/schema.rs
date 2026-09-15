@@ -23,6 +23,17 @@ pub struct Schema {
     /// The node kinds worth a reader's attention without opening the
     /// whole map - what `MapShape::Headlines` sends.
     pub headline_kinds: Vec<String>,
+    /// The lines this schema injects into an agent's context, by
+    /// moment.
+    pub rules: Rules,
+}
+
+/// The moments percept injects a schema's own lines at, and the lines
+/// for each. `turn` is every prompt: what a turn hook adds after the
+/// prompt's event id, so the binary itself carries no rule text.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Rules {
+    pub turn: Vec<String>,
 }
 
 /// A node kind and, when its name does not say it all, one line saying

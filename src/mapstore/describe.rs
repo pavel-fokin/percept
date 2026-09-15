@@ -21,15 +21,12 @@ pub fn describe(schema: &Schema) -> String {
 
     if !schema.edge_kinds.is_empty() {
         out.push_str("\nrelations\n");
-        for edge in &schema.edge_kinds {
-            let _ = writeln!(
-                out,
-                "  {} --{}--> {}",
-                edge.from.join(" | "),
-                edge.kind,
-                edge.to.join(" | ")
-            );
-        }
+        push_edge_kinds(&mut out, schema);
+    }
+
+    if !schema.rules.turn.is_empty() {
+        out.push_str("\nrules\n");
+        push_rules(&mut out, schema);
     }
 
     out.push_str("\nrecord\n");
@@ -81,6 +78,25 @@ fn push_node_kinds(out: &mut String, schema: &Schema) {
     }
 }
 
+/// One aligned line per edge kind, `<from> --<kind>--> <to>`, its
+/// gloss after it when it has one, padded to the widest relation so
+/// the glosses line up.
+fn push_edge_kinds(out: &mut String, schema: &Schema) {
+    let relations: Vec<String> = schema
+        .edge_kinds
+        .iter()
+        .map(|edge| format!("{} --{}--> {}", edge.from.join(" | "), edge.kind, edge.to.join(" | ")))
+        .collect();
+    let width = relations.iter().map(|line| line.chars().count()).max().unwrap_or(0);
+    for (edge, relation) in schema.edge_kinds.iter().zip(relations) {
+        let _ = if edge.gloss.is_empty() {
+            writeln!(out, "  {relation}")
+        } else {
+            writeln!(out, "  {relation:<width$}   {}", edge.gloss)
+        };
+    }
+}
+
 /// `requires <prop> <prop>`, ` · state <a> | <b>`, both, or neither.
 fn kind_suffix(kind: &NodeKind) -> String {
     let mut suffix = String::new();
@@ -94,6 +110,16 @@ fn kind_suffix(kind: &NodeKind) -> String {
         let _ = write!(suffix, "state {}", kind.states.join(" | "));
     }
     suffix
+}
+
+/// The `turn` rules, one per line: the moment name before the first
+/// line, later lines aligned under it.
+fn push_rules(out: &mut String, schema: &Schema) {
+    let indent = " ".repeat("turn".len());
+    for (index, line) in schema.rules.turn.iter().enumerate() {
+        let prefix = if index == 0 { "turn" } else { &indent };
+        let _ = writeln!(out, "  {prefix}   {line}");
+    }
 }
 
 fn push_record(out: &mut String, schema: &Schema) {

@@ -200,17 +200,25 @@ struct RawGroup<'a> {
     rows: Vec<&'a Node>,
 }
 
-/// The first headline node an outgoing edge of `claim` reaches,
-/// checking the schema's edge kinds in order - the core names no kind,
-/// so this is the one rule the review draws from the schema's own
-/// order.
+/// Of the headline nodes an outgoing edge of `claim` reaches, the one
+/// whose kind sits latest in `headlines` - the question a decision
+/// resolves over the concept it is about - the rule the render nests
+/// by, so the queue and `maps show` file a node under the same
+/// heading. The core names no kind; between two of the same kind the
+/// schema's edge order decides, first edge first.
 fn heading_of<'a>(map: &'a Map, claim: &Node) -> Option<&'a Node> {
     let headline_kinds = &map.schema().headline_kinds;
-    map.schema().edge_kinds.iter().find_map(|edge_kind| {
-        map.linked(claim.id, &edge_kind.kind, EdgeEnd::From)
-            .into_iter()
-            .find(|node| headline_kinds.contains(&node.kind))
-    })
+    let mut heading: Option<&Node> = None;
+    for edge_kind in &map.schema().edge_kinds {
+        for to in map.linked(claim.id, &edge_kind.kind, EdgeEnd::From) {
+            let nearer =
+                heading.is_none_or(|held| mapstore::kind_rank(map, to) > mapstore::kind_rank(map, held));
+            if nearer && headline_kinds.contains(&to.kind) {
+                heading = Some(to);
+            }
+        }
+    }
+    heading
 }
 
 /// The non-headline nodes with an edge into `heading` - the

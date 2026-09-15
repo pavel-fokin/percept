@@ -21,6 +21,27 @@ fn a_kind_with_requires_and_states_lists_both() {
 }
 
 #[test]
+fn a_relation_carries_its_edge_kinds_gloss() {
+    let schema = crate::core::Schema {
+        name: "court".to_string(),
+        purpose: "test fixture".to_string(),
+        node_kinds: vec![crate::core::NodeKind::new("topic", ""), crate::core::NodeKind::new("verdict", "")],
+        edge_kinds: vec![crate::core::EdgeKind::new(
+            "settles",
+            "from a verdict to the topic it closes",
+            &["verdict"],
+            &["topic"],
+        )],
+        headline_kinds: vec!["topic".to_string()],
+        rules: crate::core::Rules::default(),
+    };
+
+    let text = describe(&schema);
+
+    assert!(text.contains("verdict --settles--> topic   from a verdict to the topic it closes\n"), "{text}");
+}
+
+#[test]
 fn relations_name_each_edge_kinds_ends() {
     let text = describe(&debates());
     assert!(text.contains("claim --about--> topic"));
@@ -77,4 +98,25 @@ fn the_change_example_is_present_for_a_schema_with_states() {
 fn the_change_example_is_absent_for_a_schema_with_no_states() {
     let text = describe(&debates());
     assert!(!text.contains("example: change"));
+}
+
+#[test]
+fn a_schema_with_turn_rules_prints_them_in_a_rules_section() {
+    let mut schema = debates();
+    schema.rules = crate::core::Rules {
+        turn: vec!["first rule".to_string(), "second rule".to_string()],
+    };
+
+    let text = describe(&schema);
+
+    assert!(
+        text.contains("\nrules\n  turn   first rule\n         second rule\n"),
+        "{text}"
+    );
+}
+
+#[test]
+fn a_schema_with_no_turn_rules_prints_no_rules_section() {
+    let text = describe(&debates());
+    assert!(!text.contains("\nrules\n"), "{text}");
 }

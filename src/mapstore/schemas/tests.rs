@@ -18,6 +18,14 @@ fn each_shipped_template_parses_under_its_own_name() {
 }
 
 #[test]
+fn the_decisions_template_lists_concept_first_among_headlines() {
+    let (name, text) = TEMPLATES.iter().find(|(name, _)| *name == "decisions").unwrap();
+    let schema = parse(name, text).unwrap();
+
+    assert_eq!(schema.headline_kinds, ["concept", "question", "decision"]);
+}
+
+#[test]
 fn a_project_schema_of_a_new_name_is_added() {
     let fixture = Fixture::new();
     fixture.write(
@@ -480,4 +488,59 @@ fn state_under_requires_is_refused() {
     let err = load(fixture.path()).err().unwrap().to_string();
 
     assert!(err.contains("states = [...] only"), "{err}");
+}
+
+#[test]
+fn a_rules_table_loads_its_turn_lines_onto_the_schema() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
+         [rules]\nturn = [\"a\", \"b\"]\n",
+    );
+
+    let schemas = load(fixture.path()).unwrap();
+
+    let glossary = schemas.find("glossary").unwrap();
+    assert_eq!(glossary.rules.turn, ["a", "b"]);
+}
+
+#[test]
+fn a_blank_turn_line_is_refused() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
+         [rules]\nturn = [\"\"]\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert!(err.contains("glossary.toml"), "{err}");
+    assert!(err.contains("blank turn entry"), "{err}");
+}
+
+#[test]
+fn a_key_other_than_turn_under_rules_is_refused() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
+         [rules]\nstop = [\"a\"]\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert!(err.contains("glossary.toml"), "{err}");
+}
+
+#[test]
+fn the_decisions_template_carries_two_turn_rules() {
+    let (name, text) = TEMPLATES.iter().find(|(name, _)| *name == "decisions").unwrap();
+    let schema = parse(name, text).unwrap();
+
+    assert_eq!(schema.rules.turn.len(), 2);
 }

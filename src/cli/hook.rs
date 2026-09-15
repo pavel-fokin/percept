@@ -147,7 +147,10 @@ pub fn run(
             start_session(source, log, &schemas, checkout)
         }
         HookEvent::UserPromptSubmit { prompt } => {
-            submit_prompt(prompt, source, log, &mut state, &dir, me)
+            // A schema file that fails to load costs its rules, never
+            // the prompt's capture.
+            let schemas = crate::mapstore::load_schemas(checkout).ok();
+            submit_prompt(prompt, source, log, schemas.as_ref(), &mut state, &dir, me)
         }
         HookEvent::PostToolUse {
             tool_name,
@@ -200,14 +203,18 @@ fn start_session(
     }))
 }
 
-/// The one rule every turn carries after the prompt's id. A proposal
-/// meets the map only when it is written into it, so this asks for the
-/// writing first: to record an option the agent opens its question, and
-/// the options already weighed there stand in a column above the new
-/// one. Constant, whatever the map holds, so a turn's cost never grows
-/// with it.
-const TURN_RULE: &str =
-    "propose by recording: an option under its question, state \"open\", before arguing for it";
+/// The rules a turn carries, one line each, in schema order - every
+/// loaded schema's own `rules.turn` lines, with no rule text and no
+/// gate held here: a schema that declares none costs the turn
+/// nothing, and a schema that failed to load (`None`) gives none.
+fn turn_rules(schemas: Option<&Schemas>) -> Vec<&str> {
+    schemas
+        .into_iter()
+        .flat_map(Schemas::folded)
+        .flat_map(|schema| schema.rules.turn.iter())
+        .map(String::as_str)
+        .collect()
+}
 
 /// `UserPromptSubmit`: clears the turn's previous cause before doing
 /// anything else, so a prompt that then fails to commit never leaves a
@@ -215,11 +222,12 @@ const TURN_RULE: &str =
 /// `message.received` from `human`, stores its id as the turn's cause
 /// and as the checkout's open turn under `dir`, and returns the
 /// client's expected `additionalContext`: the event's id on the first
-/// line, `TURN_RULE` on the second.
+/// line, `turn_rules` on the lines after it.
 fn submit_prompt(
     prompt: String,
     source: &Source,
     log: &dyn EventLog,
+    schemas: Option<&Schemas>,
     state: &mut TurnState,
     dir: &Path,
     me: Option<crate::core::HumanId>,
@@ -235,7 +243,7 @@ fn submit_prompt(
     Ok(json!({
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",
-            "additionalContext": format!("percept event {}\n{TURN_RULE}", id.as_uuid()),
+            "additionalContext": format!("percept event {}\n{}", id.as_uuid(), turn_rules(schemas).join("\n")),
         }
     }))
 }

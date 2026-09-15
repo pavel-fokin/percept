@@ -154,11 +154,10 @@ fn an_open_topic_with_no_verdict_is_its_own_group_with_a_null_heading() {
 
 #[test]
 fn a_verdict_that_replaces_another_groups_under_that_one_not_its_topic() {
-    // The heading search is one hop, checking edge kinds in schema
-    // order: `correction` has no `settles` edge of its own, so it
-    // groups under `old_verdict`, the node its `replaces` edge
-    // reaches - the core keeps no supersession chain for the review to
-    // follow further.
+    // The heading search is one hop: `correction` has no `settles`
+    // edge of its own, so it groups under `old_verdict`, the node its
+    // `replaces` edge reaches - the core keeps no supersession chain
+    // for the review to follow further.
     let topic = node_added_by(Actor::Agent, "topic", "Which language?");
     let old_verdict = node_added_by(Actor::Agent, "verdict", "Rust");
     let settles = edge_added("settles", &old_verdict, &topic);
@@ -173,6 +172,24 @@ fn a_verdict_that_replaces_another_groups_under_that_one_not_its_topic() {
     assert_eq!(claims_of(&map, 0)[1]["name"], "Rust");
     assert_eq!(groups[1]["heading"]["title"], "Rust");
     assert_eq!(claims_of(&map, 1)[0]["name"], "Go");
+}
+
+#[test]
+fn a_verdict_reaching_a_topic_and_a_verdict_groups_under_the_verdict() {
+    // `settles` is listed before `replaces` in the schema, but a
+    // verdict sits later than a topic in `headlines`, so the nearer
+    // kind wins over edge order - as it does in the render.
+    let topic = node_added_by(Actor::Agent, "topic", "Which language?");
+    let old_verdict = node_added_by(Actor::Agent, "verdict", "Rust");
+    let correction = node_added_by(Actor::Agent, "verdict", "Go");
+    let settles = edge_added("settles", &correction, &topic);
+    let replaces = edge_added("replaces", &correction, &old_verdict);
+
+    let map = cut_debates(vec![topic, old_verdict, correction, settles, replaces]);
+
+    let groups = groups_of(&map);
+    assert_eq!(groups[1]["heading"]["title"], "Rust");
+    assert_eq!(claims_of(&map, 1)[1]["name"], "Go");
 }
 
 #[test]

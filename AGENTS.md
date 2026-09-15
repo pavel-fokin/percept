@@ -2,161 +2,41 @@
 
 ## Purpose
 
-`percept` is an experimental harness on cognitive rails. The rails
-constrain what an agent may write to its record and read from it.
-They prescribe no thinking loop and filter nothing the model says. On
-them an agent keeps an immutable history of experience and a mutable
-set of maps built from it. A map is an explicit external representation - a
-decision map, a concept map - and each kind makes a different
-reasoning operation cheap. The shape comes from Recursive Language
-Models (arxiv.org/abs/2512.24601), where a model holds a corpus as an
-environment and writes programs over it instead of reading it as
-prompt text.
-
-    Experience Log
-           │
-           │ search
-           ▼
-          LLM
-           │
-           │ constructs / revises
-           ▼
-    ┌────────────────────┐
-    │ Maps               │
-    │   decisions        │
-    │   concepts         │
-    │   ...              │
-    └────────────────────┘
-           │
-           │ commits
-           ▼
-    Cognitive History
-
-The experience log is percept's event log. It never ranks, summarises,
-or answers: the model judges relevance, and percept's job is to make
-looking cheap, so output is constant-size per event by default. A map
-is where the model's own summaries live. Every change to a map is a
-cognitive commit - one event in the same log, citing the experience it
-was derived from. A map is folded from those commits, so the cognitive
-history rebuilds it deterministically; the experience alone does not,
-because a second pass through the model gives a different map. The
-model builds maps today; the user co-owns them. Human and agent each
-keep their own understanding. A shared map is where the two are
-compared and corrected, and a recorded claim is not the human's
-agreement.
+`percept` is an experimental harness on cognitive rails: an agent keeps
+an immutable log of experience and a set of maps folded from it, and
+the rails constrain what it may write to the record and read from it.
+How the log, the maps, and the rules between them work is in the
+module docs of `core`, `store`, and `mapstore`, and in what the binary
+prints: `percept start`, `percept maps describe <map>`.
 
 ## Domain
 
-Two modules. `core` holds experience and the maps folded from it -
-`Event`, `Source`, `Actor`, `Map`, `Schema`, `Selection`, `Usage`, and
-the ports to append, load, search, and render. `harness` holds what a
-loop needs to drive a model over `core` - `Message`, `Model`, `Tool`,
-`Snapshot`, and the tool-approval `Policy` - and depends on `core`.
-Both are serde-free.
+The names a builder uses, and what each is not. Two modules: `core`
+holds experience and the maps folded from it; `harness` holds what a
+loop needs to drive a model over `core`, and depends on it. Both are
+serde-free.
 
-- `Event` is an append-only log entry: `id`, an `actor`, a `source`, an
-  optional `causation_id`, a `created_at`, and a typed `payload`. Once
-  committed it never changes. `file.cited` is the payload for a
-  file, or a range of it, as it was seen at that moment; a node that
-  lists its id in `sources` cites that text, and the session-start
-  block reports the node when the text is no longer in the tree. On
-  the wire a line also carries a `LogCursor`: the id of the log that
-  wrote it, minted once into the `log-id` file beside the log, and its
-  `seq` in that log, so two logs can be merged later without a
-  migration. A line written before that reads as this log with `seq`
-  equal to its line number. The store writes and reads the cursor;
-  the domain does not carry it yet.
-- `Source` names the writer that produced an event - `percept-code`,
-  `percept-cli`, `claude-code`, `codex` - and the project root it ran in. The
-  name is open by design, where `Actor` is closed. One log at
-  `$PERCEPT_HOME/percept.jsonl`, `~/.percept` by default, holds every
-  project; the path is how a fold picks one project out of it.
-- `Message` is a value object (no identity) - the shape `Model` needs to
-  talk to an LLM. Derived from the log at the boundary, never stored.
-- `Actor` (`Human`, `Agent`, `System`) is the one vocabulary for who a
-  message or event is attributed to; a human carries an id once a
-  server has registered them, kept in the `me` file beside the log, so
-  a change says by whom. Until then they have
-  none, and the log they wrote is who they are.
-- `Model` is domain-owned, not infrastructure: `percept` needs "a reply
-  given messages," never the mechanism behind it.
-- `Map` is a cognitive map: nodes and edges the model builds from the
-  log, folded from `node.added`, `node.changed`, `node.removed`,
-  `edge.added`, and `edge.removed` events in the same log. A `Schema` names a map and
-  the node and edge kinds it allows, and one line of purpose - what
-  the map makes cheap - that the prompt carries in place of the map
-  itself. A schema is a TOML file at `.percept/schemas/<name>.toml`,
-  and those files are the only schemas a project has, so a session
-  adds a map without a Rust change and edits a shipped one in place.
-  `percept init <client>` writes `decisions` and `concepts` there from
-  the templates in the binary, leaving a file that already exists
-  alone; with no schema files, a project has no maps and every render
-  says so. A kind may list the
-  properties a node must carry - `why` on an option - and
-  the values its `state` may hold, a set with no value open by
-  position. The schema declares that set as `states = [...]`, while a
-  node keeps its current value in `state`. The write path refuses a
-  node that omits a required value. Every change goes through
-  `Map::apply`, so the rules live once. The core is
-  specified in `docs/architecture.md`: five events, four invariants,
-  six write rules, and no kind name.
-- A node and an edge keep their history of changes, from which who
-  added, who last changed and why, and the lock are read. One rank
-  rule says who may change what: a human is above an agent; renaming
-  or removing another's node needs rank; `state` is anyone's; and a
-  change from above locks the node against everyone below, so after
-  the user's why on an agent's decision the agent can only add beside
-  it. A user-written node is
-  the human's landmark in a shared map: the model may attach edges to
-  it and set its state, nothing else. A decision is corrected by
-  adding the new one with a `supersedes` edge to the old, never by
-  rewording, so the old landmark stays one hop away. A model that finds a decision no longer fits does not
-  supersede it: it raises a question with a `reopens` edge to the
-  decision, which stands until the user settles the question.
-  Stability of the representation is a value beside accuracy
-  and compactness: a map may grow, but what a reader has seen does not
-  move. The core keeps no standing and no read receipt: the user's
-  correction is the node's last change, printed wherever the node is.
-- A fold reads whatever events it is given; `mapstore::of_path` cuts
-  the log to one `Source.path` before it - the current checkout by
-  default, every path in turn with `--all-paths`. A map is read live, never
-  rendered to a file a session commits: one log holds every branch, so
-  a committed render would carry whichever branch's fold wrote it
-  last. `percept maps show <map>` from the shell, or `read_map`
-  mid-turn, give the same Markdown a render once did. A render lists a
-  map's headline nodes in the order they were raised, each with its
-  properties, its last change, and its edges by name; a node of
-  another kind is one hop away, under the edge that reaches it, or
-  with `percept maps show decisions --around question:<name>`.
-  `--since <time>` on `maps show` lists what a map gained since a
-  reader last looked. A `Selection` - around a node, since an instant,
-  of some kinds - cuts a map to a `Fragment`, which counts what the cut
-  left out and how many edges cross it. `maps show` and `read_map` both
-  cut through it, so the order of the cuts lives once.
-
-## Maps
-
-Start with `percept maps list`: one section per map
-saying what it is for, its size, and its kinds.
-
-A map is judged by what it costs its reader, on three budgets:
-
-| Budget | What to keep small |
-|---|---|
-| Overview | Concepts held at once to understand one decision. |
-| Change | New meaning to absorb after an update, and landmarks moved. |
-| Verification | Work to check a conclusion and see what a correction touches. |
-
-The change budget weighs most. Add beside what a reader has seen;
-never move or merge it without the user's say.
-
-## Decisions
-
-The decisions map for this repo, folded live from percept's own log:
-`percept maps show decisions`, or the start block a session prints.
-Every node cites the event it was drawn from. It
-is the record of why; where it disagrees with a rule above, the rule
-wins and the map says what the rule cost.
+- `Event`: one append-only log entry - id, actor, source, optional
+  causation, created_at, typed payload. Never changed once committed.
+- `Source`: the writer that produced an event and the project root it
+  ran in. Its name is open, where `Actor` is closed.
+- `Actor`: `Human`, `Agent`, `System` - the one vocabulary for who an
+  event or message is attributed to.
+- `Message`: a value with no identity, the shape a `Model` needs.
+  Derived from the log at the boundary, never stored.
+- `Model`: "a reply given messages", domain-owned. Never the mechanism
+  behind it.
+- `Map`: nodes and edges folded from the map events in the log. Every
+  change goes through `Map::apply`, so the rules live once.
+- `Schema`: a map kind - purpose, node and edge kinds, headlines,
+  rules - loaded from `.percept/schemas/<name>.toml`, the only place a
+  kind is declared. The Rust names no kind.
+- `Selection` and `Fragment`: a cut of a map, and what the cut left
+  out.
+- `Usage`: token counts for one round trip, the core's, not the
+  harness's.
+- `Tool`, `Policy`, `Snapshot`: what a loop calls, whether a call runs
+  or asks, and the working tree saved under a prompt.
 
 ## Architecture
 
@@ -214,17 +94,10 @@ skips it.
   assumed. Where a function or a rule sits inside the code is not one
   of those: the builder proposes it, and review challenges it. The user
   agrees the set before any code; an explicit instruction to implement
-  a proposal already discussed supplies that agreement. Each settled
-  decision is then recorded in the decisions map as `model`, citing
-  the prompt that settled it, so the next session does not reopen it.
-  An option is recorded only for an alternative that lost, with the
-  reason it lost; the pick is the decision itself. A decision that
-  changes an earlier one is added with a `supersedes` edge to it; the
-  old node is never removed. A candidate worth doing that nobody has
-  committed to is an open `question` in the decisions map, never an
-  approved issue: it is built only after the user has discussed it and
-  agreed it into the set, and an agent that finds one while building
-  leaves it there and says so.
+  a proposal already discussed supplies that agreement. A candidate
+  worth doing that nobody has committed to is never an approved issue:
+  it is built only after the user has discussed it and agreed it into
+  the set, and an agent that finds one while building says so.
 - **Build.** An issue with no design left in it, touching one or two
   files, the main agent builds itself. Anything larger goes to the
   `software-developer` subagent, which follows this file, writes the
@@ -245,11 +118,7 @@ skips it.
   but only when a step strained or missed something. A session where
   the process fit the work needs no reflection. Cutting a step counts
   for more than adding one. Aim for the smallest process that still
-  catches mistakes. An approach the session tried and abandoned goes
-  into the decisions map as an option with why it lost, so no later
-  session tries it again. Work the session found and left undone goes into the
-  decisions map as an open question with its why, so the next session
-  starts from the list and not from a re-read.
+  catches mistakes.
 
 The TUI builds under `--features lab` and only runs on a real
 terminal. `scripts/drive.py` forks a pty,
