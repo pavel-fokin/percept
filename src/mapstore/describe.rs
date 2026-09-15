@@ -21,15 +21,7 @@ pub fn describe(schema: &Schema) -> String {
 
     if !schema.edge_kinds.is_empty() {
         out.push_str("\nrelations\n");
-        for edge in &schema.edge_kinds {
-            let _ = writeln!(
-                out,
-                "  {} --{}--> {}",
-                edge.from.join(" | "),
-                edge.kind,
-                edge.to.join(" | ")
-            );
-        }
+        push_edge_kinds(&mut out, schema);
     }
 
     out.push_str("\nrecord\n");
@@ -78,6 +70,25 @@ fn push_node_kinds(out: &mut String, schema: &Schema) {
             )
         };
         let _ = writeln!(out, "{}", line.trim_end());
+    }
+}
+
+/// One aligned line per edge kind, `<from> --<kind>--> <to>`, its
+/// gloss after it when it has one, padded to the widest relation so
+/// the glosses line up.
+fn push_edge_kinds(out: &mut String, schema: &Schema) {
+    let relations: Vec<String> = schema
+        .edge_kinds
+        .iter()
+        .map(|edge| format!("{} --{}--> {}", edge.from.join(" | "), edge.kind, edge.to.join(" | ")))
+        .collect();
+    let width = relations.iter().map(|line| line.chars().count()).max().unwrap_or(0);
+    for (edge, relation) in schema.edge_kinds.iter().zip(relations) {
+        let _ = if edge.gloss.is_empty() {
+            writeln!(out, "  {relation}")
+        } else {
+            writeln!(out, "  {relation:<width$}   {}", edge.gloss)
+        };
     }
 }
 

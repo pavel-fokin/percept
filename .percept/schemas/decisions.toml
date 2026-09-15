@@ -1,13 +1,21 @@
-# The decisions map: what was asked, what was weighed, what was chosen
-# and on what grounds. An option answers a question - or the decision
-# itself, when none was raised - and says whether it still stands and
-# why; a decision resolves the question, a later decision supersedes an
-# earlier one, and a question reopens a decision it puts in doubt, so
-# --around a question reaches everything weighed for it.
+# The decisions map: the concepts a reader reasons with, and under each
+# what was asked, what was weighed, what was chosen and on what
+# grounds. A concept's definition is the rule that holds here, so a
+# decision can break it. A question or decision is about a concept. An
+# option answers a question - or the decision itself, when none was
+# raised - and says whether it still stands and why. A decision
+# resolves the question, and a later decision supersedes an earlier
+# one. A question reopens a decision it puts in doubt, so --around a
+# question reaches everything weighed for it.
 
 name = "decisions"
 purpose = "what was asked, what was chosen, and why, so a settled question is not reopened"
-headlines = ["question", "decision"]
+headlines = ["concept", "question", "decision"]
+
+[[node]]
+kind = "concept"
+gloss = "one thing a reader reasons with; its definition is the rule that holds here, not a gloss"
+requires = ["definition"]
 
 [[node]]
 kind = "question"
@@ -22,6 +30,12 @@ states = ["open", "dead"]
 [[node]]
 kind = "decision"
 properties = ["why"]
+
+[[edge]]
+kind = "about"
+gloss = "from a question or decision to the concept it belongs under; a decision that resolves a question inherits its place"
+from = ["question", "decision"]
+to = "concept"
 
 [[edge]]
 kind = "resolves"

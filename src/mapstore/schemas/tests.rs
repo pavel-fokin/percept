@@ -18,6 +18,14 @@ fn each_shipped_template_parses_under_its_own_name() {
 }
 
 #[test]
+fn the_decisions_template_lists_concept_first_among_headlines() {
+    let (name, text) = TEMPLATES.iter().find(|(name, _)| *name == "decisions").unwrap();
+    let schema = parse(name, text).unwrap();
+
+    assert_eq!(schema.headline_kinds, ["concept", "question", "decision"]);
+}
+
+#[test]
 fn a_project_schema_of_a_new_name_is_added() {
     let fixture = Fixture::new();
     fixture.write(

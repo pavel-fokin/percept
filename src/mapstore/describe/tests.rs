@@ -21,6 +21,26 @@ fn a_kind_with_requires_and_states_lists_both() {
 }
 
 #[test]
+fn a_relation_carries_its_edge_kinds_gloss() {
+    let schema = crate::core::Schema {
+        name: "court".to_string(),
+        purpose: "test fixture".to_string(),
+        node_kinds: vec![crate::core::NodeKind::new("topic", ""), crate::core::NodeKind::new("verdict", "")],
+        edge_kinds: vec![crate::core::EdgeKind::new(
+            "settles",
+            "from a verdict to the topic it closes",
+            &["verdict"],
+            &["topic"],
+        )],
+        headline_kinds: vec!["topic".to_string()],
+    };
+
+    let text = describe(&schema);
+
+    assert!(text.contains("verdict --settles--> topic   from a verdict to the topic it closes\n"), "{text}");
+}
+
+#[test]
 fn relations_name_each_edge_kinds_ends() {
     let text = describe(&debates());
     assert!(text.contains("claim --about--> topic"));
