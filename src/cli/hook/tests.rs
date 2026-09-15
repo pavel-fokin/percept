@@ -390,7 +390,7 @@ fn a_returning_session_still_prints_starts_render() {
 }
 
 #[test]
-fn every_prompt_carries_the_events_id_then_the_one_rule() {
+fn every_prompt_carries_the_events_id_then_the_propose_rule() {
     let fixture = Fixture::new();
 
     let output = fixture
@@ -407,9 +407,33 @@ fn every_prompt_carries_the_events_id_then_the_one_rule() {
 
     let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
     let lines: Vec<&str> = context.lines().collect();
-    assert_eq!(lines.len(), 2, "{context:?}");
     assert!(lines[0].starts_with("percept event "), "{context:?}");
-    assert_eq!(lines[1], TURN_RULE);
+    assert_eq!(lines[1..], [PROPOSE_RULE]);
+}
+
+#[test]
+fn a_prompt_carries_the_concept_rule_only_where_a_map_declares_a_concept_kind() {
+    let fixture = Fixture::new().with_extra_schema(
+        "glossary",
+        "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"concept\"]\n\n\
+         [[node]]\nkind = \"concept\"\nrequires = [\"definition\"]\n",
+    );
+
+    let output = fixture
+        .call(
+            "codex",
+            json!({
+                "hook_event_name": "UserPromptSubmit",
+                "cwd": fixture.root.to_str().unwrap(),
+                "session_id": "session",
+                "prompt": "hello",
+            }),
+        )
+        .unwrap();
+
+    let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
+    let lines: Vec<&str> = context.lines().collect();
+    assert_eq!(lines[1..], [PROPOSE_RULE, CONCEPT_RULE]);
 }
 
 #[test]

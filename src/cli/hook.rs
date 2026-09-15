@@ -147,7 +147,10 @@ pub fn run(
             start_session(source, log, &schemas, checkout)
         }
         HookEvent::UserPromptSubmit { prompt } => {
-            submit_prompt(prompt, source, log, &mut state, &dir, me)
+            // A schema file that fails to load costs the concept rule,
+            // never the prompt's capture.
+            let schemas = crate::mapstore::load_schemas(checkout).ok();
+            submit_prompt(prompt, source, log, schemas.as_ref(), &mut state, &dir, me)
         }
         HookEvent::PostToolUse {
             tool_name,
@@ -200,14 +203,35 @@ fn start_session(
     }))
 }
 
-/// The one rule every turn carries after the prompt's id. A proposal
+/// The first rule every turn carries after the prompt's id. A proposal
 /// meets the map only when it is written into it, so this asks for the
 /// writing first: to record an option the agent opens its question, and
 /// the options already weighed there stand in a column above the new
-/// one. Constant, whatever the map holds, so a turn's cost never grows
-/// with it.
-const TURN_RULE: &str =
+/// one.
+const PROPOSE_RULE: &str =
     "propose by recording: an option under its question, state \"open\", before arguing for it";
+
+/// The second rule, carried only where a map declares a `concept`
+/// kind, so a project on a schema from before the kind is not asked
+/// each turn for a write it refuses. It gives concepts their write
+/// moment, the end of the turn, when the agent still holds what it
+/// reasoned with; a definition is the rule that held, so a later
+/// decision can break it.
+const CONCEPT_RULE: &str =
+    "before stopping, record each thing you reasoned with as a concept whose definition is the rule that held";
+
+/// The rules a turn carries, one line each. Constant in size whatever
+/// the maps hold, so a turn's cost never grows with them.
+fn turn_rules(schemas: Option<&Schemas>) -> Vec<&'static str> {
+    let mut rules = vec![PROPOSE_RULE];
+    let concepts = schemas.is_some_and(|schemas| {
+        schemas.folded().any(|schema| schema.node_kind("concept").is_some())
+    });
+    if concepts {
+        rules.push(CONCEPT_RULE);
+    }
+    rules
+}
 
 /// `UserPromptSubmit`: clears the turn's previous cause before doing
 /// anything else, so a prompt that then fails to commit never leaves a
@@ -215,11 +239,12 @@ const TURN_RULE: &str =
 /// `message.received` from `human`, stores its id as the turn's cause
 /// and as the checkout's open turn under `dir`, and returns the
 /// client's expected `additionalContext`: the event's id on the first
-/// line, `TURN_RULE` on the second.
+/// line, `turn_rules` on the lines after it.
 fn submit_prompt(
     prompt: String,
     source: &Source,
     log: &dyn EventLog,
+    schemas: Option<&Schemas>,
     state: &mut TurnState,
     dir: &Path,
     me: Option<crate::core::HumanId>,
@@ -235,7 +260,7 @@ fn submit_prompt(
     Ok(json!({
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",
-            "additionalContext": format!("percept event {}\n{TURN_RULE}", id.as_uuid()),
+            "additionalContext": format!("percept event {}\n{}", id.as_uuid(), turn_rules(schemas).join("\n")),
         }
     }))
 }
