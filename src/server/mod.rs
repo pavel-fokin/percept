@@ -17,15 +17,15 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use tokio::net::TcpListener;
 
 use crate::core::{Event, EventLog, Source};
-use crate::shared::Timestamp;
 use crate::server::events::Error as EventsError;
+use crate::shared::Timestamp;
 
 mod events;
 mod projects;
@@ -92,10 +92,12 @@ async fn bind() -> Result<(TcpListener, SocketAddr), Box<dyn Error>> {
     Ok((listener, addr))
 }
 
-/// Serves requests on `listener` until the process is killed: `GET /`
-/// and `GET /index.html` return the embedded page, `GET /api/events`
-/// and `GET /api/events/{id}` the project's own log, `GET /api/projects`
-/// every project the log holds, everything else 404s.
+/// Serves requests on `listener` until the process is killed: `GET
+/// /api/events` and `GET /api/events/{id}` return the project's own
+/// log, `GET /api/projects` every project the log holds, and every
+/// other path the page, which routes itself. An unknown path under
+/// `/api` is a 404, never the page: a request for data that answers
+/// with HTML is harder to read than one that says it found nothing.
 async fn serve(listener: TcpListener, state: Arc<AppState>) {
     let app = router(state);
     axum::serve(listener, app).await.expect("the web server never returns an error");
@@ -105,16 +107,24 @@ async fn serve(listener: TcpListener, state: Arc<AppState>) {
 /// and the tests that spawn it over a bound listener.
 fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/", get(index))
-        .route("/index.html", get(index))
         .route("/api/events", get(api_events))
         .route("/api/events/{id}", get(api_event))
         .route("/api/projects", get(api_projects))
+        .fallback(page)
         .with_state(state)
 }
 
-async fn index() -> Html<&'static str> {
-    Html(PAGE)
+/// Every path the API does not own. The page carries its own routes -
+/// `/` is the projects index, `/log` the event log - so a reader who
+/// reloads on one of them, or follows a link to one, must be served
+/// the page rather than a 404 from a server that has never heard of
+/// it.
+async fn page(uri: Uri) -> Response {
+    let path = uri.path();
+    if path == "/api" || path.starts_with("/api/") {
+        return (StatusCode::NOT_FOUND, format!("no endpoint at {path}")).into_response();
+    }
+    Html(PAGE).into_response()
 }
 
 /// `GET /api/events`: the project's log, filtered by the query string

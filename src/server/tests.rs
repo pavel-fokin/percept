@@ -79,10 +79,19 @@ async fn root_with_a_query_string_still_returns_the_embedded_page() {
 }
 
 #[tokio::test]
-async fn unknown_path_returns_404() {
+async fn a_path_the_page_routes_itself_is_served_the_page() {
     let addr = spawn().await;
-    let response = get(addr, "/nope").await;
+    let response = get(addr, "/log?q=drift").await;
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    assert!(response.contains("<title>percept</title>"), "{response}");
+}
+
+#[tokio::test]
+async fn an_unknown_endpoint_under_api_is_not_served_the_page() {
+    let addr = spawn().await;
+    let response = get(addr, "/api/nope").await;
     assert!(response.starts_with("HTTP/1.1 404"), "{response}");
+    assert!(!response.contains("<title>percept</title>"), "{response}");
 }
 
 /// A `message.received` from `/test`, for a query that has to tell one
