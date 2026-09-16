@@ -59,10 +59,12 @@ export function answerSize(answer: Event): string {
   return length === 0 ? "no output" : `${length.toLocaleString(LOCALE)} characters`;
 }
 
-/** The key consecutive events share a header under. A source change
- * starts a new run even when both events have the same actor label. */
-function speakerKey(event: Event): string {
-  return JSON.stringify([event.actor.kind, event.source.name, event.source.path]);
+function sameSpeaker(left: Event, right: Event): boolean {
+  return (
+    left.actor.kind === right.actor.kind &&
+    left.source.name === right.source.name &&
+    left.source.path === right.source.path
+  );
 }
 
 const RUN_GAP_MS = 30 * 60 * 1000;
@@ -82,16 +84,16 @@ export interface Run {
  * their source matches. */
 export function groupRuns(rows: Row[]): Run[] {
   const runs: Run[] = [];
-  let key: string | null = null;
   for (const row of rows) {
-    const nextKey = speakerKey(row.event);
     const last = runs[runs.length - 1];
-    if (last && key === nextKey && withinRunGap(last.rows[last.rows.length - 1].event, row.event)) {
-      last.rows.push(row);
-    } else {
-      runs.push({ speaker: speakerOf(row.event), rows: [row] });
+    if (last) {
+      const previous = last.rows[last.rows.length - 1].event;
+      if (sameSpeaker(previous, row.event) && withinRunGap(previous, row.event)) {
+        last.rows.push(row);
+        continue;
+      }
     }
-    key = nextKey;
+    runs.push({ speaker: speakerOf(row.event), rows: [row] });
   }
   return runs;
 }

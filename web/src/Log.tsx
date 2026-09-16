@@ -191,7 +191,7 @@ export default function Log({
                       <span className="text-faint"> · {basename(run.rows[0].event.source.path)}</span>
                     )}
                   </p>
-                  <div className={run.rows.length > 1 ? "mt-1.5 space-y-3" : "mt-1.5"}>
+                  <div className="mt-1.5 space-y-3">
                     {run.rows.map((row) => (
                       <EventRow key={row.event.id} row={row} />
                     ))}
