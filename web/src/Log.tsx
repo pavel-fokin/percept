@@ -182,7 +182,7 @@ export default function Log({
                   key={runIndex}
                   data-speaker={run.speaker.label}
                   data-day={day.key}
-                  className={"border-t border-rule py-5" + (runIndex === runs.length - 1 ? " border-b" : "")}
+                  className={"border-t border-rule py-4" + (runIndex === runs.length - 1 ? " border-b" : "")}
                 >
                   <p className={`text-[0.6875rem] font-medium uppercase tracking-[0.1em] ${run.speaker.toneClass}`}>
                     {run.speaker.label}
@@ -191,7 +191,7 @@ export default function Log({
                       <span className="text-faint"> · {basename(run.rows[0].event.source.path)}</span>
                     )}
                   </p>
-                  <div className={run.rows.length > 1 ? "mt-2 space-y-5" : "mt-2"}>
+                  <div className={run.rows.length > 1 ? "mt-1.5 space-y-3" : "mt-1.5"}>
                     {run.rows.map((row) => (
                       <EventRow key={row.event.id} row={row} />
                     ))}

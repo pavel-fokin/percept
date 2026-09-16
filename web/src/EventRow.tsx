@@ -25,7 +25,7 @@ export default function EventRow({ row }: { row: Row }) {
     >
       <summary className="block min-h-11">
         <Content text={content.text} variant={content.variant} />
-        <span className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-faint">
+        <span className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-faint">
           {kind && (
             <span>{kind}</span>
           )}
@@ -38,9 +38,9 @@ export default function EventRow({ row }: { row: Row }) {
           </span>
         </span>
       </summary>
-      <div className="mt-3 rounded-sm border border-rule bg-panel px-3.5 py-3">
+      <div className="mt-2 rounded-sm border border-rule bg-panel px-3 py-2.5">
         <FetchStatus label="Complete details" whole={wholeEvent} />
-        <dl className="grid grid-cols-[5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+        <dl className="grid grid-cols-[5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
           <Detail label="writer" value={shownEvent.source.name} />
           <Detail label="project path" value={shownEvent.source.path} />
           <Detail label="timestamp" value={shownEvent.created_at} />
