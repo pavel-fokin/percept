@@ -1,29 +1,26 @@
 import { useState } from "react";
-import { fetchEvent } from "./api";
+import { fetchEvent, messageOf } from "./api";
 import { answerSize, contentOf, contentText, kindWords, timeOf } from "./eventRows";
 import type { ContentVariant, Row } from "./eventRows";
 import { Chevron } from "./icons";
 import type { Event } from "./types";
 
-/** One row, as a `<details>`: its content at full weight, a faint
- * details line, and behind the chevron the exact type, id and
- * causation - plus the tool's answer, when this row is a call that
- * got one. */
 export default function EventRow({ row }: { row: Row }) {
   const { event, answer } = row;
   const content = contentOf(event);
   const kind = kindWords(event);
-  const answerText = useWholeContent(answer);
-  // The summary shows a shortened copy of a long message; without this
-  // the whole of it is reachable nowhere in the app, though the row's
-  // own details line says how many characters there are.
-  const wholeContent = useWholeContent(contentText(event).cut ? event : undefined);
+  const wholeEvent = useWholeEvent(event, true);
+  const wholeAnswer = useWholeEvent(answer, answer?.preview !== undefined);
+  const shownEvent = wholeEvent.event ?? event;
+  const shownAnswer = wholeAnswer.event;
+  const details = payloadDetails(shownEvent);
 
   return (
     <details
-      onToggle={(e) => {
-        answerText.load(e);
-        wholeContent.load(e);
+      onToggle={(toggle) => {
+        if (!toggle.currentTarget.open) return;
+        wholeEvent.load();
+        wholeAnswer.load();
       }}
     >
       <summary className="block min-h-11">
@@ -48,22 +45,31 @@ export default function EventRow({ row }: { row: Row }) {
         </span>
       </summary>
       <div className="mt-3 rounded-sm border border-rule bg-panel px-3.5 py-3">
+        <FetchStatus label="Complete details" whole={wholeEvent} />
         <dl className="grid grid-cols-[5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
-          {contentText(event).cut && (
+          {event.preview !== undefined && (
             <>
               <dt className="text-faint">in full</dt>
-              <dd className="break-words whitespace-pre-wrap text-muted">{wholeContent.text}</dd>
+              <dd className="break-words whitespace-pre-wrap text-[0.9375rem] leading-relaxed text-muted">
+                {contentText(shownEvent).text}
+              </dd>
             </>
           )}
-          {answer && (
+          {answer && shownAnswer && (
             <>
               <dt className="text-faint">answer</dt>
-              <dd className="font-mono break-words whitespace-pre-wrap text-muted">{answerText.text}</dd>
+              <dd className="font-mono break-words whitespace-pre-wrap text-[0.8125rem] leading-relaxed text-muted">
+                {contentText(shownAnswer).text}
+                <FetchStatus label="Full answer" whole={wholeAnswer} />
+              </dd>
             </>
           )}
+          {details.map(([label, value]) => (
+            <Detail key={label} label={label} value={value} />
+          ))}
           <dt className="text-faint">type</dt>
           <dd className="font-mono break-words text-muted">{event.type}</dd>
-          <dt className="text-faint">id</dt>
+          <dt className="text-faint">event id</dt>
           <dd className="font-mono break-words text-muted">{event.id}</dd>
           <dt className="text-faint">caused by</dt>
           <dd className="font-mono break-words text-muted">{event.causation_id ?? "—"}</dd>
@@ -79,30 +85,108 @@ export default function EventRow({ row }: { row: Row }) {
   );
 }
 
-/** `event`'s content, whole. The list shortens a long one to keep the
- * page's first request small, so a row that was opened asks for the
- * rest - once, and only when the list's copy was cut. A failed fetch
- * leaves the shortened text in place: a row that opens on less is
- * better than one that opens on an error. */
-function useWholeContent(event: Event | undefined) {
-  const shortened = event ? contentText(event) : { text: "", cut: false };
-  const [whole, setWhole] = useState<string | null>(null);
-  const [asked, setAsked] = useState(false);
+type WholeEvent = ReturnType<typeof useWholeEvent>;
 
-  function load(e: React.SyntheticEvent<HTMLDetailsElement>) {
-    if (!event || !shortened.cut || asked || !e.currentTarget.open) return;
-    setAsked(true);
-    fetchEvent(event.id)
-      .then((whole) => setWhole(contentText(whole).text))
-      .catch(() => {});
+function FetchStatus({ label, whole }: { label: string; whole: WholeEvent }) {
+  if (whole.state === "loading") {
+    return <p role="status" className="mb-3 text-xs text-faint">{label} loading…</p>;
   }
-
-  return { text: whole ?? shortened.text, load };
+  if (whole.state === "failed") {
+    return (
+      <p className="mb-3 text-xs text-ink">
+        {label} could not be read: {whole.message}.{" "}
+        <button type="button" onClick={whole.retry} className="text-accent underline decoration-rule underline-offset-4">
+          Try again
+        </button>
+      </p>
+    );
+  }
+  return null;
 }
 
-/** A row's full-weight line, set per `content.variant` - quoted serif
- * for a thing said, mono for what a machine emitted, plain sans for
- * everything else recorded. */
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <>
+      <dt className="text-faint">{label}</dt>
+      <dd className="font-mono break-words whitespace-pre-wrap text-muted">{value}</dd>
+    </>
+  );
+}
+
+type WholeState =
+  | { state: "idle" | "loading" | "ready"; event: Event | undefined }
+  | { state: "failed"; event: Event | undefined; message: string };
+
+function useWholeEvent(event: Event | undefined, shouldFetch: boolean) {
+  const [whole, setWhole] = useState<WholeState>({ state: shouldFetch ? "idle" : "ready", event });
+
+  function request() {
+    if (!event || !shouldFetch) return;
+    setWhole({ state: "loading", event: whole.event });
+    fetchEvent(event.id)
+      .then((loaded) => setWhole({ state: "ready", event: loaded }))
+      .catch((error: unknown) => setWhole({ state: "failed", event: whole.event, message: messageOf(error) }));
+  }
+
+  function load() {
+    if (whole.state === "idle") request();
+  }
+
+  return { ...whole, load, retry: request };
+}
+
+function payloadDetails(event: Event): [string, string][] {
+  const payload = event.payload;
+  switch (event.type) {
+    case "tool.called":
+      return details([
+        ["tool", payload.tool],
+        ["arguments", payload.arguments],
+      ]);
+    case "node.added":
+    case "node.changed":
+    case "node.removed":
+      return details([
+        ["map", payload.map],
+        ["kind", payload.kind],
+        ["properties", payload.properties],
+        ["reason", payload.why],
+        ["node", payload.node],
+      ]);
+    case "edge.added":
+    case "edge.removed":
+      return details([
+        ["map", payload.map],
+        ["relationship", payload.kind],
+        ["from", payload.from],
+        ["to", payload.to],
+        ["reason", payload.why],
+      ]);
+    case "model.called":
+      return details([
+        ["model", payload.model],
+        ["input tokens", payload.input_tokens],
+        ["output tokens", payload.output_tokens],
+        ["cached tokens", payload.cached_tokens],
+      ]);
+    case "file.cited":
+      return details([
+        ["path", payload.path],
+        ["lines", payload.lines],
+      ]);
+    default:
+      return [];
+  }
+}
+
+function details(entries: [string, unknown][]): [string, string][] {
+  return entries.flatMap(([label, value]) => {
+    if (value === undefined || value === null || value === "") return [];
+    if (typeof value === "object" && Object.keys(value).length === 0) return [];
+    return [[label, typeof value === "string" ? value : JSON.stringify(value, null, 2)]];
+  });
+}
+
 function Content({ text, variant }: { text: string; variant: ContentVariant }) {
   if (variant === "quote") {
     return <span className="block font-serif text-[1.0625rem] leading-relaxed">&#8220;{text}&#8221;</span>;

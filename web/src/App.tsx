@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchEvents, messageOf } from "./api";
 import { basename } from "./eventRows";
 import { filterFromSearch, resolveSince, searchFromFilter } from "./filters";
@@ -7,19 +7,21 @@ import Header from "./Header";
 import Log from "./Log";
 import type { Event } from "./types";
 
-/** What the page has. The events, what they carry and how many matched
- * are only ever written together, so they live in the arm that has
- * them rather than beside it - "ready with nothing loaded" is then not
- * a state anything has to guard against. */
+interface Results {
+  events: Event[];
+  carried: Event[];
+  total: number;
+  query: string;
+  updatedAt: number;
+}
+
 type Load =
-  | { state: "loading" }
-  | { state: "failed"; message: string }
-  | { state: "ready"; events: Event[]; carried: Event[]; total: number };
+  | { state: "loading"; results: null }
+  | { state: "ready" | "updating"; results: Results }
+  | { state: "failed"; results: Results | null; message: string };
 
 const SEARCH_DEBOUNCE_MS = 250;
 
-/** `value`, `delay` ms after it stops changing - the only debounce this
- * app needs, so it isn't worth a dependency. */
 function useDebouncedValue<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -30,69 +32,93 @@ function useDebouncedValue<T>(value: T, delay: number): T {
 }
 
 export default function App() {
-  const [load, setLoad] = useState<Load>({ state: "loading" });
+  const [load, setLoad] = useState<Load>({ state: "loading", results: null });
   const [project, setProject] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [pagingFailed, setPagingFailed] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
   const [filter, setFilter] = useState<Filter>(() => filterFromSearch(window.location.search));
 
-  // Only the search box is debounced; a kind, actor, or time pick
-  // refetches at once, since none of them fires once per keystroke.
   const debouncedQ = useDebouncedValue(filter.q, SEARCH_DEBOUNCE_MS);
-  // The identity of the request, as a string: React compares the
-  // dependency list by value, and `kinds` and `actors` are new arrays
-  // on every keystroke. It doubles as the guard a slow page's answer
-  // is checked against, so an answer for a filter nobody is looking at
-  // any more is dropped rather than prepended.
   const asked = searchFromFilter({ ...filter, q: debouncedQ });
+  const currentQuery = useRef(asked);
+  const pagingRequest = useRef(0);
+  currentQuery.current = asked;
 
   useEffect(() => {
     window.history.replaceState(null, "", `${window.location.pathname}${asked}`);
   }, [asked]);
 
   useEffect(() => {
-    const wanted = { ...filterFromSearch(asked), since: resolveSince(filterFromSearch(asked).since) };
+    const parsed = filterFromSearch(asked);
+    const wanted = { ...parsed, since: resolveSince(parsed.since) };
     let cancelled = false;
+    pagingRequest.current += 1;
+    setLoadingMore(false);
     setPagingFailed(null);
+    setLoad((held) => (held.results ? { state: "updating", results: held.results } : { state: "loading", results: null }));
     fetchEvents(wanted)
       .then((response) => {
-        if (cancelled) return;
-        setLoad({ state: "ready", events: response.events, carried: response.carried, total: response.total });
+        if (cancelled || currentQuery.current !== asked) return;
+        setLoad({
+          state: "ready",
+          results: {
+            events: response.events,
+            carried: response.carried,
+            total: response.total,
+            query: asked,
+            updatedAt: Date.now(),
+          },
+        });
         setProject(basename(response.project));
       })
       .catch((error: unknown) => {
-        if (!cancelled) setLoad({ state: "failed", message: messageOf(error) });
+        if (cancelled || currentQuery.current !== asked) return;
+        setLoad((held) => ({ state: "failed", results: held.results, message: messageOf(error) }));
       });
     return () => {
       cancelled = true;
     };
-  }, [asked]);
+  }, [asked, retry]);
 
   function showEarlier() {
-    if (load.state !== "ready" || loadingMore) return;
-    const oldest = load.events[0];
+    const results = load.results;
+    if (!results || load.state !== "ready" || results.query !== asked || filter.q !== debouncedQ || loadingMore) return;
+    const oldest = results.events[0];
     if (!oldest) return;
-    const requested = asked;
+    const requestedQuery = asked;
+    const request = ++pagingRequest.current;
+    const parsed = filterFromSearch(asked);
     setLoadingMore(true);
     setPagingFailed(null);
-    fetchEvents({ ...filterFromSearch(asked), since: resolveSince(filterFromSearch(asked).since) }, oldest.created_at)
+    fetchEvents({ ...parsed, since: resolveSince(parsed.since) }, oldest.created_at)
       .then((response) => {
-        // A filter changed while this was in flight, so its rows belong
-        // to a page nobody is reading - prepending them would put rows
-        // the filter excludes at the top of the list.
-        if (requested !== asked) return;
-        setLoad((held) =>
-          held.state === "ready"
-            ? { ...held, events: [...response.events, ...held.events], carried: [...response.carried, ...held.carried] }
-            : held,
-        );
+        if (request !== pagingRequest.current || currentQuery.current !== requestedQuery) return;
+        setLoad((held) => {
+          if (!held.results || held.state !== "ready" || held.results.query !== requestedQuery) return held;
+          return {
+            state: "ready",
+            results: {
+              ...held.results,
+              events: [...response.events, ...held.results.events],
+              carried: [...response.carried, ...held.results.carried],
+            },
+          };
+        });
       })
-      // An earlier page failing says nothing about the rows already
-      // read, so the page keeps them and says so on the line the
-      // request came from.
-      .catch((error: unknown) => setPagingFailed(messageOf(error)))
-      .finally(() => setLoadingMore(false));
+      .catch((error: unknown) => {
+        if (request === pagingRequest.current && currentQuery.current === requestedQuery) {
+          setPagingFailed(messageOf(error));
+        }
+      })
+      .finally(() => {
+        if (request === pagingRequest.current) setLoadingMore(false);
+      });
   }
+
+  const results = load.results;
+  const visibleQuery = searchFromFilter(filter);
+  const visibleLoadState = load.state === "ready" && results?.query !== visibleQuery ? "updating" : load.state;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -103,22 +129,21 @@ export default function App() {
         Skip to the log
       </a>
       <Header project={project} />
-      <p role="status" className="mx-auto w-full max-w-3xl px-4 pt-10 sm:px-8 empty:hidden">
-        {load.state === "loading" && "Reading the log."}
-        {load.state === "failed" && `The log could not be read: ${load.message}. Reload to try again.`}
-      </p>
-      {load.state === "ready" && (
-        <Log
-          events={load.events}
-          carried={load.carried}
-          total={load.total}
-          loadingMore={loadingMore}
-          pagingFailed={pagingFailed}
-          onShowEarlier={showEarlier}
-          filter={filter}
-          onFilterChange={setFilter}
-        />
-      )}
+      <Log
+        events={results?.events ?? []}
+        carried={results?.carried ?? []}
+        total={results?.total ?? 0}
+        resultsQuery={results?.query ?? null}
+        updatedAt={results?.updatedAt ?? null}
+        loadState={visibleLoadState}
+        loadError={load.state === "failed" ? load.message : null}
+        loadingMore={loadingMore}
+        pagingFailed={pagingFailed}
+        onRetry={() => setRetry((attempt) => attempt + 1)}
+        onShowEarlier={showEarlier}
+        filter={filter}
+        onFilterChange={setFilter}
+      />
     </div>
   );
 }

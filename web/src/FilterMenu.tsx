@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import { Chevron } from "./icons";
 
 export interface FilterMenuOption<T extends string | null> {
@@ -32,6 +32,7 @@ export default function FilterMenu<T extends string | null>({
   onOpenChange: (open: boolean) => void;
 }) {
   const ref = useRef<HTMLDetailsElement>(null);
+  const groupName = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -39,7 +40,10 @@ export default function FilterMenu<T extends string | null>({
       if (ref.current && !ref.current.contains(event.target as Node)) onOpenChange(false);
     }
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onOpenChange(false);
+      if (event.key === "Escape") {
+        ref.current?.querySelector<HTMLElement>("summary")?.focus();
+        onOpenChange(false);
+      }
     }
     document.addEventListener("pointerdown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -70,21 +74,24 @@ export default function FilterMenu<T extends string | null>({
       </summary>
       {/* `min-w-max` so the panel is as wide as its longest label: sized
           to the chip instead, every two-word kind wrapped. */}
-      <div className="absolute top-full z-30 mt-1 max-h-[70vh] min-w-max overflow-y-auto rounded-sm border border-rule bg-panel py-1.5 shadow-lg">
+      <fieldset className="absolute top-full z-30 mt-1 max-h-[70vh] min-w-max overflow-y-auto rounded-sm border border-rule bg-panel py-1.5 shadow-lg">
+        <legend className="sr-only">{chipLabel}</legend>
         {options.map((option) => (
-          <button
+          <label
             key={String(option.value)}
-            type="button"
-            aria-selected={isSelected(option.value)}
-            onClick={() => handleSelect(option.value)}
-            className={`flex min-h-11 w-full items-center px-4 text-left text-sm whitespace-nowrap ${
-              isSelected(option.value) ? "text-accent" : "text-ink"
-            }`}
+            className="flex min-h-11 w-full cursor-pointer items-center gap-3 px-4 text-left text-sm whitespace-nowrap text-ink"
           >
-            {option.label}
-          </button>
+            <input
+              type={multi ? "checkbox" : "radio"}
+              name={multi ? undefined : groupName}
+              checked={isSelected(option.value)}
+              onChange={() => handleSelect(option.value)}
+              className="size-4 accent-accent"
+            />
+            <span>{option.label}</span>
+          </label>
         ))}
-      </div>
+      </fieldset>
     </details>
   );
 }

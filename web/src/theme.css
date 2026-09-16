@@ -49,7 +49,7 @@
   --ink: light-dark(#111110, #e8e5df);
   --muted: light-dark(#5d5952, #bcb8b0);
   --faint: light-dark(#6d685f, #86827b);
-  --accent: light-dark(#966425, #d4a05a);
+  --accent: light-dark(#87581f, #d4a05a);
   --rule: light-dark(#d6d3cc, #2a2928);
   --button: light-dark(#f5f4f0, #111110);
 }

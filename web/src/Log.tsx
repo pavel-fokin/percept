@@ -11,6 +11,7 @@ import {
   EMPTY_FILTER,
   isFilterActive,
   kindsLabel,
+  searchFromFilter,
   timeLabel,
   toggleActor,
   toggleKind,
@@ -31,8 +32,13 @@ export default function Log({
   events,
   carried,
   total,
+  resultsQuery,
+  updatedAt,
+  loadState,
+  loadError,
   loadingMore,
   pagingFailed,
+  onRetry,
   onShowEarlier,
   filter,
   onFilterChange,
@@ -40,8 +46,13 @@ export default function Log({
   events: Event[];
   carried: Event[];
   total: number;
+  resultsQuery: string | null;
+  updatedAt: number | null;
+  loadState: "loading" | "ready" | "updating" | "failed";
+  loadError: string | null;
   loadingMore: boolean;
   pagingFailed: string | null;
+  onRetry: () => void;
   onShowEarlier: () => void;
   filter: Filter;
   onFilterChange: (filter: Filter) => void;
@@ -52,9 +63,10 @@ export default function Log({
   // whole log each time is the one thing here that costs anything.
   const days = useMemo(() => groupByDay(foldResults(events, carried)), [events, carried]);
   const speaking = useActiveSpeaker(events);
-  const earlier = events.length < total;
+  const resultsCurrent = resultsQuery === searchFromFilter(filter);
+  const earlier = resultsCurrent && loadState === "ready" && events.length < total;
   const filtered = isFilterActive(filter);
-  const noMatches = filtered && total === 0;
+  const noMatches = resultsCurrent && loadState === "ready" && filtered && total === 0;
 
   return (
     <main id="log" className="mx-auto w-full max-w-3xl flex-1 px-4 pb-14 sm:px-8">
@@ -111,6 +123,36 @@ export default function Log({
         )}
       </div>
 
+      <div aria-live="polite" className="mt-2 flex min-h-6 flex-wrap items-center gap-x-3 text-[0.8125rem] text-faint">
+        {loadState === "loading" && <span>Reading the log…</span>}
+        {loadState === "updating" && (
+          <span>{events.length > 0 ? `Updating… Showing ${events.length.toLocaleString("en-GB")} previous events.` : "Updating…"}</span>
+        )}
+        {loadState === "failed" && (
+          <>
+            <span className="text-ink">
+              The log could not be updated{loadError ? `: ${loadError}` : ""}.
+              {events.length > 0 && " Previous results remain below."}
+            </span>
+            <button
+              type="button"
+              onClick={onRetry}
+              className="inline-flex min-h-11 items-center text-accent underline decoration-rule underline-offset-4 hover:decoration-faint"
+            >
+              Try again
+            </button>
+          </>
+        )}
+        {loadState === "ready" && (
+          <>
+            <span className={noMatches ? "text-[0.9375rem] text-muted" : undefined}>
+              {noMatches ? "Nothing in the log matches that filter." : eventsCountLabel(events.length, total)}
+            </span>
+            {updatedAt !== null && <span>Updated {updatedTime(updatedAt)}.</span>}
+          </>
+        )}
+      </div>
+
       {days.map((day, i) => (
           <section key={day.key}>
             <h2
@@ -148,22 +190,27 @@ export default function Log({
           </section>
       ))}
 
-      <p aria-live="polite" className="flex flex-wrap items-center gap-x-3 pt-4 text-[0.8125rem] text-faint">
-        <span className={noMatches ? "mt-4 text-[0.9375rem] text-muted" : undefined}>
-          {noMatches ? "Nothing in the log matches that filter." : eventsCountLabel(events.length, total)}
-        </span>
-        {pagingFailed && <span className="text-ink">Earlier events could not be read: {pagingFailed}.</span>}
-        {earlier && (
-          <button
-            type="button"
-            onClick={onShowEarlier}
-            disabled={loadingMore}
-            className="inline-flex min-h-11 items-center text-accent underline decoration-rule underline-offset-4 hover:decoration-faint"
-          >
-            {loadingMore ? "Reading…" : "Show earlier"}
-          </button>
-        )}
-      </p>
+      {(pagingFailed || earlier) && (
+        <p aria-live="polite" className="flex flex-wrap items-center gap-x-3 pt-4 text-[0.8125rem] text-faint">
+          {pagingFailed && <span className="text-ink">Earlier events could not be read: {pagingFailed}.</span>}
+          {earlier && (
+            <button
+              type="button"
+              onClick={onShowEarlier}
+              disabled={loadingMore}
+              className="inline-flex min-h-11 items-center text-accent underline decoration-rule underline-offset-4 hover:decoration-faint"
+            >
+              {loadingMore ? "Reading…" : "Show earlier"}
+            </button>
+          )}
+        </p>
+      )}
     </main>
   );
+}
+
+const UPDATED_TIME = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+
+function updatedTime(updatedAt: number): string {
+  return UPDATED_TIME.format(new Date(updatedAt));
 }

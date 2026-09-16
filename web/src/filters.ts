@@ -80,14 +80,12 @@ export function toggleActor(actors: string[], actor: string): string[] {
   return actors.includes(actor) ? actors.filter((a) => a !== actor) : [...actors, actor];
 }
 
-/** The kind chip's label - its own state, not a fixed word: none
- * picked reads as "all", one picked names it, several count. */
+/** The kind chip's label names every active choice, so the closed menu
+ * still says which cut of the log is on screen. */
 export function kindsLabel(kinds: string[]): string {
   if (kinds.length === 0) return "All kinds";
-  if (kinds.length === 1) {
-    return KIND_OPTIONS.find((option) => option.value === kinds[0])?.label ?? kinds[0];
-  }
-  return `${kinds.length} kinds`;
+  const labels = kinds.map((kind) => KIND_OPTIONS.find((option) => option.value === kind)?.label ?? kind);
+  return `Kinds: ${labels.join(", ")}`;
 }
 
 /** The time chip's label - the picked option's own words. */
@@ -95,14 +93,11 @@ export function timeLabel(since: string | null): string {
   return TIME_OPTIONS.find((option) => option.value === since)?.label ?? "All time";
 }
 
-/** The actor chip's label - the same none/one/several rule as
- * `kindsLabel`. */
+/** The actor chip's label follows the kind chip's rule. */
 export function actorsLabel(actors: string[]): string {
   if (actors.length === 0) return "All actors";
-  if (actors.length === 1) {
-    return ACTOR_OPTIONS.find((option) => option.value === actors[0])?.label ?? actors[0];
-  }
-  return `${actors.length} actors`;
+  const labels = actors.map((actor) => ACTOR_OPTIONS.find((option) => option.value === actor)?.label ?? actor);
+  return `Actors: ${labels.join(", ")}`;
 }
 
 /** `since` as an absolute instant, measured once. The server resolves a

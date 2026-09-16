@@ -47,7 +47,8 @@ export function foldResults(events: Event[], carried: Event[]): Row[] {
  * is present only when the server cut, and its `len` is the whole
  * length - so a row knows both what it has and what it is missing. */
 export function contentText(event: Event): { text: string; cut: boolean } {
-  return { text: stringField(event.payload, "content"), cut: event.preview !== undefined };
+  const key = event.type === "file.cited" ? "excerpt" : "content";
+  return { text: stringField(event.payload, key), cut: event.preview !== undefined };
 }
 
 /** How much a tool answered with, for the details line. The whole
