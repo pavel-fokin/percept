@@ -1,13 +1,9 @@
 import { Chevron } from "./icons";
 import ThemeToggle from "./ThemeToggle";
 
-/** The three lenses over one log - only `Everything` is a real screen
- * yet, so the other two render as inactive labels rather than dead
- * links. */
-const LENSES = ["Attention", "Conversation", "Everything"] as const;
-
 /** The page's header: the wordmark, the project scope (not yet a
- * menu), and the lens bar with `Everything` current. */
+ * menu), and the theme switch. There is one screen, so there is no
+ * lens bar to choose between. */
 export default function Header() {
   return (
     <header className="sticky top-0 z-20 border-b border-rule bg-page">
@@ -22,22 +18,6 @@ export default function Header() {
         </span>
         <span className="flex-1" />
         <ThemeToggle />
-      </div>
-      <div className="mx-auto -mb-px max-w-3xl overflow-x-auto px-4 sm:px-8">
-        <nav aria-label="Lenses" className="flex min-w-max items-center gap-6 text-[0.8125rem]">
-          {LENSES.map((lens) => (
-            <span
-              key={lens}
-              aria-current={lens === "Everything" ? "page" : undefined}
-              className={
-                "flex min-h-11 items-center border-b-2 " +
-                (lens === "Everything" ? "border-accent text-ink" : "border-transparent text-muted")
-              }
-            >
-              {lens}
-            </span>
-          ))}
-        </nav>
       </div>
     </header>
   );
