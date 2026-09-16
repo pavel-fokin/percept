@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
 import { fetchEvents, messageOf } from "./api";
 import { filterFromSearch, resolveSince, searchFromFilter } from "./filters";
 import type { Filter } from "./filters";
@@ -36,6 +37,7 @@ export default function LogPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [pagingFailed, setPagingFailed] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
+  const navigate = useNavigate();
   const [filter, setFilter] = useState<Filter>(() => filterFromSearch(window.location.search));
   // The header's magnifier asks for the log with its field focused,
   // and says so in the URL. Read during the first render, before the
@@ -48,9 +50,12 @@ export default function LogPage() {
   const pagingRequest = useRef(0);
   currentQuery.current = asked;
 
+  // Through the router, not `history.replaceState`: react-router holds
+  // its own copy of the location, and an address written behind its
+  // back leaves every `Link` on the page computing from a stale one.
   useEffect(() => {
-    window.history.replaceState(null, "", `${window.location.pathname}${asked}`);
-  }, [asked]);
+    navigate({ search: asked }, { replace: true });
+  }, [asked, navigate]);
 
   useEffect(() => {
     if (focusSearch) document.getElementById(SEARCH_FIELD_ID)?.focus();
