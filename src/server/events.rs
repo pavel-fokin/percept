@@ -57,12 +57,25 @@ pub enum Error {
 /// event never appears among the matches themselves, whatever the
 /// filter asks for.
 pub fn list(log: &dyn EventLog, params: Params, root: PathBuf) -> Result<Value, Error> {
-    let (query, preview, size) = parse(params, root.clone()).map_err(Error::Bad)?;
+    let (query, text_query, preview, size) = parse(params, root.clone()).map_err(Error::Bad)?;
     let events = log.load().map_err(|err| Error::Internal(err.to_string()))?;
+
+    // A result is presented inside the call that caused it. Searching
+    // that result therefore finds the visible call, while the other
+    // filters still describe the call itself.
+    let matching_answers: std::collections::HashSet<_> = events
+        .iter()
+        .filter(|event| FOLDED_KINDS.contains(&event.kind()) && text_query.matches(event))
+        .filter_map(Event::causation_id)
+        .collect();
 
     let mut matched: Vec<&Event> = events
         .iter()
-        .filter(|event| !FOLDED_KINDS.contains(&event.kind()) && query.matches(event))
+        .filter(|event| {
+            !FOLDED_KINDS.contains(&event.kind())
+                && query.matches(event)
+                && (text_query.text.is_empty() || text_query.matches(event) || matching_answers.contains(&event.id()))
+        })
         .collect();
     let total = matched.len();
     matched.drain(..total.saturating_sub(size));
@@ -76,8 +89,11 @@ pub fn list(log: &dyn EventLog, params: Params, root: PathBuf) -> Result<Value, 
         })
         .collect();
 
-    let items: Vec<Value> = kept.iter().map(|event| store::summary(event, query.hit(event), preview)).collect();
-    let carried_items: Vec<Value> = carried.iter().map(|event| store::summary(event, None, preview)).collect();
+    let items: Vec<Value> = kept.iter().map(|event| store::summary(event, text_query.hit(event), preview)).collect();
+    let carried_items: Vec<Value> = carried
+        .iter()
+        .map(|event| store::summary(event, text_query.hit(event), preview))
+        .collect();
     Ok(json!({
         "events": items,
         "carried": carried_items,
@@ -103,7 +119,7 @@ pub fn get(log: &dyn EventLog, id: &str, root: &std::path::Path) -> Result<Value
 /// a row's `content` is cut to - the same parsing `cli::parse_query`
 /// does over `SearchArgs`, since both build the query `percept events
 /// search` already defines.
-fn parse(params: Params, root: PathBuf) -> Result<(EventQuery, usize, usize), String> {
+fn parse(params: Params, root: PathBuf) -> Result<(EventQuery, EventQuery, usize, usize), String> {
     let kinds = match params.kind.as_deref() {
         Some(s) if !s.is_empty() => s
             .split(',')
@@ -140,6 +156,11 @@ fn parse(params: Params, root: PathBuf) -> Result<(EventQuery, usize, usize), St
         Some(size) => size,
         None => DEFAULT_SIZE,
     };
+    let text_query = EventQuery {
+        roots: vec![root.clone()],
+        text,
+        ..Default::default()
+    };
     Ok((
         EventQuery {
             since,
@@ -147,9 +168,9 @@ fn parse(params: Params, root: PathBuf) -> Result<(EventQuery, usize, usize), St
             actors,
             roots: vec![root],
             kinds,
-            text,
             ..Default::default()
         },
+        text_query,
         store::PREVIEW_CHARS,
         size,
     ))

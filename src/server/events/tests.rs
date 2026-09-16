@@ -92,8 +92,7 @@ fn list_rejects_a_blank_contains_value() {
         },
         PathBuf::from("/project"),
     )
-    .err()
-    .expect("blank contains is refused");
+    .expect_err("blank contains is refused");
     assert!(matches!(err, Error::Bad(_)));
 }
 
@@ -109,8 +108,7 @@ fn list_rejects_an_inverted_window() {
         },
         PathBuf::from("/project"),
     )
-    .err()
-    .expect("since after until is refused");
+    .expect_err("since after until is refused");
     assert!(matches!(err, Error::Bad(_)));
 }
 
@@ -126,6 +124,66 @@ fn a_kept_calls_answer_is_carried() {
     let carried = body["carried"].as_array().unwrap();
     assert_eq!(carried.len(), 1);
     assert_eq!(carried[0]["id"], result.id().as_uuid().to_string());
+}
+
+#[test]
+fn text_in_a_tool_result_finds_the_call_that_carries_it() {
+    let call = called_at("/project");
+    let result = Event::new(
+        Actor::System,
+        source_at("test", "/project"),
+        Some(call.id()),
+        Payload::ToolResulted {
+            content: format!("{}needle", "x".repeat(200)),
+        },
+    );
+    let log = FakeLog::seeded(vec![call.clone(), result]);
+
+    let body = list(
+        &log,
+        Params {
+            contains: Some("needle".to_string()),
+            ..params()
+        },
+        PathBuf::from("/project"),
+    )
+    .unwrap();
+
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["id"], call.id().as_uuid().to_string());
+    assert_eq!(body["carried"][0]["preview"]["match"], 200);
+    assert!(body["carried"][0]["payload"]["content"]
+        .as_str()
+        .unwrap()
+        .contains("needle"));
+}
+
+#[test]
+fn folded_result_text_does_not_override_filters_on_its_call() {
+    let call = called_at("/project");
+    let result = Event::new(
+        Actor::System,
+        source_at("test", "/project"),
+        Some(call.id()),
+        Payload::ToolResulted {
+            content: "needle".to_string(),
+        },
+    );
+    let log = FakeLog::seeded(vec![call, result]);
+
+    let body = list(
+        &log,
+        Params {
+            actor: Some("human".to_string()),
+            contains: Some("needle".to_string()),
+            ..params()
+        },
+        PathBuf::from("/project"),
+    )
+    .unwrap();
+
+    assert_eq!(body["total"], 0);
 }
 
 #[test]
@@ -189,8 +247,7 @@ fn get_is_not_found_for_an_id_from_another_project() {
     let log = FakeLog::seeded(vec![event]);
 
     let err = get(&log, &id.as_uuid().to_string(), std::path::Path::new("/project"))
-        .err()
-        .expect("an id from another project is not found");
+        .expect_err("an id from another project is not found");
     assert!(matches!(err, Error::NotFound(_)));
 }
 
@@ -198,7 +255,6 @@ fn get_is_not_found_for_an_id_from_another_project() {
 fn get_is_bad_for_an_unparseable_id() {
     let log = FakeLog::default();
     let err = get(&log, "not-a-uuid", std::path::Path::new("/project"))
-        .err()
-        .expect("an unparseable id is bad");
+        .expect_err("an unparseable id is bad");
     assert!(matches!(err, Error::Bad(_)));
 }
