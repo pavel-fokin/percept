@@ -1,13 +1,14 @@
 import EventRow from "./EventRow";
-import { groupByDay, groupRuns } from "./eventRows";
+import { foldResults, groupByDay, groupRuns } from "./eventRows";
 import { Chevron, SearchIcon } from "./icons";
 import type { Event } from "./types";
 
-/** The Everything screen's body: the (inert) search and filters, then
- * the log grouped by day and, within a day, by the run of consecutive
- * events one speaker produced. */
+/** The screen's body: the (inert) search and filters, then the log
+ * grouped by day and, within a day, by the run of consecutive rows one
+ * speaker produced. A tool's answer is not a row of its own - it sits
+ * inside the call that caused it. */
 export default function Log({ events, total }: { events: Event[]; total: number }) {
-  const days = groupByDay(events);
+  const days = groupByDay(foldResults(events));
 
   return (
     <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-14 sm:px-8">
@@ -44,7 +45,7 @@ export default function Log({ events, total }: { events: Event[]; total: number 
         <section key={day.key}>
           <h2 className={`${i === 0 ? "mt-7" : "mt-8"} text-xs font-medium uppercase tracking-[0.09em] text-muted`}>{day.label}</h2>
           <ul className="mt-2">
-            {groupRuns(day.events).map((run, runIndex, runs) => (
+            {groupRuns(day.rows).map((run, runIndex, runs) => (
               <li
                 key={runIndex}
                 className={"border-t border-rule py-5" + (runIndex === runs.length - 1 ? " border-b" : "")}
@@ -52,9 +53,9 @@ export default function Log({ events, total }: { events: Event[]; total: number 
                 <p className={`text-[0.6875rem] font-medium uppercase tracking-[0.1em] ${run.speaker.toneClass}`}>
                   {run.speaker.label}
                 </p>
-                <div className={run.events.length > 1 ? "mt-2 space-y-5" : "mt-2"}>
-                  {run.events.map((event) => (
-                    <EventRow key={event.id} event={event} />
+                <div className={run.rows.length > 1 ? "mt-2 space-y-5" : "mt-2"}>
+                  {run.rows.map((row) => (
+                    <EventRow key={row.event.id} row={row} />
                   ))}
                 </div>
               </li>

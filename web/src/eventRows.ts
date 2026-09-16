@@ -1,5 +1,11 @@
 import type { Event } from "./types";
 
+/** The interface is written in English, so its numbers and dates are
+ * formatted in English too - an open locale would read `September 16`
+ * on one machine and `16 September` on the next, in a row whose every
+ * other word is fixed. */
+const LOCALE = "en-GB";
+
 /** Who a row's header names, and the tier its label is set in - `You`
  * in `accent`, everyone else in `muted`. */
 export interface Speaker {
@@ -21,6 +27,52 @@ export function speakerOf(event: Event): Speaker {
   }
 }
 
+/** One row of the log: an event, and the tool result the log records
+ * as caused by it, when there is one. A call and its answer are one
+ * act - the answer is not a second thing that happened. */
+export interface Row {
+  event: Event;
+  answer?: Event;
+}
+
+/** `events` with every tool result folded into the call that caused
+ * it. Every `tool.resulted` carries a `causation_id` naming its call,
+ * so the link is the log's own and not a guess about adjacency. A
+ * result whose call fell outside the fetched window has nothing to
+ * fold into and stays a row of its own. */
+export function foldResults(events: Event[]): Row[] {
+  const rows: Row[] = [];
+  const callRow = new Map<string, Row>();
+  for (const event of events) {
+    const call = event.type === "tool.resulted" && event.causation_id ? callRow.get(event.causation_id) : undefined;
+    if (call && !call.answer) {
+      call.answer = event;
+      continue;
+    }
+    const row: Row = { event };
+    rows.push(row);
+    if (event.type === "tool.called") callRow.set(event.id, row);
+  }
+  return rows;
+}
+
+/** `event`'s `content`, and whether the list shortened it. `preview`
+ * is present only when the server cut, and its `len` is the whole
+ * length - so a row knows both what it has and what it is missing. */
+export function contentText(event: Event): { text: string; cut: boolean } {
+  const text = typeof event.payload.content === "string" ? event.payload.content : "";
+  return { text, cut: event.preview !== undefined };
+}
+
+/** How much a tool answered with, for the details line. The whole
+ * length, not the preview's: `preview.len` is what the server cut
+ * from, and is absent when nothing was cut. */
+export function answerSize(answer: Event): string {
+  const content = typeof answer.payload.content === "string" ? answer.payload.content : "";
+  const length = answer.preview?.len ?? content.length;
+  return length === 0 ? "no output" : `${length.toLocaleString(LOCALE)} characters`;
+}
+
 /** The key consecutive events share a header under - the speaker's
  * kind, plus the writing client's name for an agent, since two agents
  * writing to the same project are two speakers. */
@@ -28,26 +80,25 @@ function speakerKey(event: Event): string {
   return event.actor.kind === "agent" ? `agent:${event.source.name}` : event.actor.kind;
 }
 
-/** One run of consecutive events by the same speaker - what shares one
+/** One run of consecutive rows by the same speaker - what shares one
  * header down the page. */
 export interface Run {
   speaker: Speaker;
-  events: Event[];
+  rows: Row[];
 }
 
-/** `events`, folded into runs of consecutive events by the same
- * speaker - the header each row carries is the run's, not the
- * event's. */
-export function groupRuns(events: Event[]): Run[] {
+/** `rows`, folded into runs by the same speaker - the header each row
+ * carries is the run's, not the event's. */
+export function groupRuns(rows: Row[]): Run[] {
   const runs: Run[] = [];
   let key: string | null = null;
-  for (const event of events) {
-    const nextKey = speakerKey(event);
+  for (const row of rows) {
+    const nextKey = speakerKey(row.event);
     const last = runs[runs.length - 1];
     if (last && key === nextKey) {
-      last.events.push(event);
+      last.rows.push(row);
     } else {
-      runs.push({ speaker: speakerOf(event), events: [event] });
+      runs.push({ speaker: speakerOf(row.event), rows: [row] });
     }
     key = nextKey;
   }
@@ -172,12 +223,6 @@ export function projectOf(event: Event): string {
   return parts[parts.length - 1] || trimmed;
 }
 
-/** The interface is written in English, so its dates are formatted in
- * English too - an open locale would read `September 16` on one machine
- * and `16 September` on the next, in a row whose every other word is
- * fixed. */
-const LOCALE = "en-GB";
-
 const TIME = new Intl.DateTimeFormat(LOCALE, { hour: "2-digit", minute: "2-digit", hour12: false });
 
 /** `event.created_at` as `HH:MM`, 24-hour, in the browser's local
@@ -195,28 +240,28 @@ function localDayKey(iso: string): string {
   return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
 }
 
-/** One day's events, newest first, with the heading the day reads
+/** One day's rows, newest first, with the heading the day reads
  * under. */
 export interface DayGroup {
   key: string;
   label: string;
-  events: Event[];
+  rows: Row[];
 }
 
-/** `events` - oldest first, as `GET /api/events` returns them - folded
- * into days newest first, each day's own events newest first. `now`
- * is the moment "Today" is measured against, a parameter so a test
- * does not depend on the clock. */
-export function groupByDay(events: Event[], now: Date = new Date()): DayGroup[] {
+/** `rows` - oldest first, as `GET /api/events` returns them - folded
+ * into days newest first, each day's own rows newest first. `now` is
+ * the moment "Today" is measured against, a parameter so a test does
+ * not depend on the clock. */
+export function groupByDay(rows: Row[], now: Date = new Date()): DayGroup[] {
   const groups: DayGroup[] = [];
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i];
-    const key = localDayKey(event.created_at);
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+    const key = localDayKey(row.event.created_at);
     const last = groups[groups.length - 1];
     if (last && last.key === key) {
-      last.events.push(event);
+      last.rows.push(row);
     } else {
-      groups.push({ key, label: dayLabel(event.created_at, now), events: [event] });
+      groups.push({ key, label: dayLabel(row.event.created_at, now), rows: [row] });
     }
   }
   return groups;
