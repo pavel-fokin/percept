@@ -72,16 +72,14 @@ export default function Log({
 
   return (
     <main id="log" className="mx-auto w-full max-w-3xl flex-1 px-4 pb-14 sm:px-8">
-      <div className="mt-6">
-        <h1 className="text-xl font-medium tracking-tight text-ink">Event log</h1>
-        <p className="mt-1 min-h-5 text-[0.8125rem] text-faint">
-          {project && <>Reading from {basename(project)}</>}
-        </p>
+      <div className="mt-4 flex min-h-6 items-baseline gap-x-2">
+        <h1 className="text-base font-medium tracking-tight text-ink">Event log</h1>
+        {project && <p className="text-[0.8125rem] text-faint">· from {basename(project)}</p>}
       </div>
       <label htmlFor="q" className="sr-only">
         Search every event
       </label>
-      <div className="relative mt-4">
+      <div className="relative mt-3">
         <SearchIcon className="pointer-events-none absolute top-1/2 left-0 size-4 -translate-y-1/2 text-faint" />
         <input
           id="q"
