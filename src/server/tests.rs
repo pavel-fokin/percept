@@ -145,6 +145,25 @@ async fn api_events_filters_by_the_type_parameter() {
 }
 
 #[tokio::test]
+async fn api_events_filters_by_the_actor_parameter() {
+    let human_message = crate::core::Event::new(
+        Actor::Human(crate::core::testing::human()),
+        source("test"),
+        None,
+        Payload::MessageReceived {
+            content: "said".to_string(),
+        },
+    );
+    let events = vec![human_message, node_added_by(Actor::Agent, "claim", "recorded")];
+    let (_log, addr) = spawn_over(events).await;
+    let (status, body) = get_json(addr, "/api/events?actor=human").await;
+    assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["actor"]["kind"], "human");
+}
+
+#[tokio::test]
 async fn api_events_refuses_a_blank_contains_and_says_why() {
     let addr = spawn().await;
     let (status, body) = get_parts(addr, "/api/events?contains=").await;

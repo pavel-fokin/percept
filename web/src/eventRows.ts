@@ -35,25 +35,12 @@ export interface Row {
   answer?: Event;
 }
 
-/** `events` with every tool result folded into the call that caused
- * it. Every `tool.resulted` carries a `causation_id` naming its call,
- * so the link is the log's own and not a guess about adjacency. A
- * result whose call fell outside the fetched window has nothing to
- * fold into and stays a row of its own. */
-export function foldResults(events: Event[]): Row[] {
-  const rows: Row[] = [];
-  const callRow = new Map<string, Row>();
-  for (const event of events) {
-    const call = event.type === "tool.resulted" && event.causation_id ? callRow.get(event.causation_id) : undefined;
-    if (call && !call.answer) {
-      call.answer = event;
-      continue;
-    }
-    const row: Row = { event };
-    rows.push(row);
-    if (event.type === "tool.called") callRow.set(event.id, row);
-  }
-  return rows;
+/** `events` as rows, one per event - `GET /api/events` never returns a
+ * folded event (a `tool.resulted`, today) among them - with `carried`
+ * matched onto the row whose id its `causation_id` names. */
+export function foldResults(events: Event[], carried: Event[]): Row[] {
+  const answerByCause = new Map(carried.map((event) => [event.causation_id, event]));
+  return events.map((event) => ({ event, answer: answerByCause.get(event.id) }));
 }
 
 /** `event`'s `content`, and whether the list shortened it. `preview`
@@ -117,8 +104,6 @@ export function kindWords(event: Event): string | null {
       return "thought";
     case "tool.called":
       return "ran a tool";
-    case "tool.resulted":
-      return "a tool answered";
     case "node.added": {
       const kind = stringField(event.payload, "kind") || "node";
       return `${kind} created`;
@@ -163,12 +148,6 @@ export function contentOf(event: Event): Content {
       return { text: stringField(payload, "content"), variant: "quote" };
     case "thought.recorded":
       return { text: stringField(payload, "content"), variant: "plain" };
-    // A tool's output is not prose. Set as one it is the loudest thing
-    // on a page it makes up most of, and the envelope it arrives in
-    // belongs to the tool, so unwrapping it would be right for one tool
-    // and wrong for the rest.
-    case "tool.resulted":
-      return { text: stringField(payload, "content"), variant: "mono" };
     case "tool.called": {
       const tool = stringField(payload, "tool");
       const argument = firstArgument(payload);

@@ -25,9 +25,13 @@ export interface Event {
   preview?: { len: number; match?: number };
 }
 
-/** `GET /api/events`'s body: the matches, oldest first, and how many
- * matched in total before `size` cut them. */
+/** `GET /api/events`'s body: the matches, oldest first, how many
+ * matched in total before `size` cut them, and `carried` - the folded
+ * events (a `tool.resulted`, today) whose `causation_id` names one of
+ * `events`. `carried` is never counted in `total` and never a row of
+ * its own. */
 export interface EventsResponse {
   events: Event[];
+  carried: Event[];
   total: number;
 }

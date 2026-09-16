@@ -1,5 +1,4 @@
 import type { Filter } from "./filters";
-import { wireKinds } from "./filters";
 import type { Event, EventsResponse } from "./types";
 
 /** `GET /api/events` - the log's most recent window matching `filter`.
@@ -8,8 +7,8 @@ import type { Event, EventsResponse } from "./types";
 export async function fetchEvents(filter: Filter, until?: string): Promise<EventsResponse> {
   const params = new URLSearchParams();
   if (filter.q) params.set("contains", filter.q);
-  const kinds = wireKinds(filter.kinds);
-  if (kinds.length > 0) params.set("type", kinds.join(","));
+  if (filter.kinds.length > 0) params.set("type", filter.kinds.join(","));
+  if (filter.actors.length > 0) params.set("actor", filter.actors.join(","));
   if (filter.since) params.set("since", filter.since);
   if (until) params.set("until", until);
   const query = params.toString();

@@ -25,14 +25,16 @@ function useDebouncedValue<T>(value: T, delay: number): T {
 export default function App() {
   const [load, setLoad] = useState<Load>({ state: "loading" });
   const [events, setEvents] = useState<Event[]>([]);
+  const [carried, setCarried] = useState<Event[]>([]);
   const [total, setTotal] = useState(0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [filter, setFilter] = useState<Filter>(() => filterFromSearch(window.location.search));
 
-  // Only the search box is debounced (250ms); a kind or time pick
-  // refetches at once, since neither fires once per keystroke.
+  // Only the search box is debounced (250ms); a kind, actor, or time
+  // pick refetches at once, since none fires once per keystroke.
   const debouncedQ = useDebouncedValue(filter.q, SEARCH_DEBOUNCE_MS);
   const kindsKey = filter.kinds.join(",");
+  const actorsKey = filter.actors.join(",");
 
   useEffect(() => {
     window.history.replaceState(null, "", `${window.location.pathname}${searchFromFilter(filter)}`);
@@ -40,10 +42,11 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchEvents({ q: debouncedQ, kinds: filter.kinds, since: filter.since })
+    fetchEvents({ q: debouncedQ, kinds: filter.kinds, actors: filter.actors, since: filter.since })
       .then((response) => {
         if (cancelled) return;
         setEvents(response.events);
+        setCarried(response.carried);
         // The first answer for a filter is the only one that counts the
         // whole match: every later request is bounded by `until`, so
         // its own total counts what is left behind that bound, not
@@ -58,14 +61,17 @@ export default function App() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedQ, kindsKey, filter.since]);
+  }, [debouncedQ, kindsKey, actorsKey, filter.since]);
 
   function showEarlier() {
     const oldest = events[0];
     if (!oldest || loadingMore) return;
     setLoadingMore(true);
-    fetchEvents({ q: debouncedQ, kinds: filter.kinds, since: filter.since }, oldest.created_at)
-      .then((response) => setEvents((held) => [...response.events, ...held]))
+    fetchEvents({ q: debouncedQ, kinds: filter.kinds, actors: filter.actors, since: filter.since }, oldest.created_at)
+      .then((response) => {
+        setEvents((held) => [...response.events, ...held]);
+        setCarried((held) => [...response.carried, ...held]);
+      })
       .catch((error: unknown) => setLoad({ state: "failed", message: messageOf(error) }))
       .finally(() => setLoadingMore(false));
   }
@@ -86,6 +92,7 @@ export default function App() {
       {load.state === "ready" && (
         <Log
           events={events}
+          carried={carried}
           total={total}
           loadingMore={loadingMore}
           onShowEarlier={showEarlier}

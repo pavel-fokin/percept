@@ -1,16 +1,24 @@
-//! `GET /api/events` and `GET /api/events/{id}` - the project's log,
-//! filtered by the same query the CLI's `percept events search`
-//! builds, and one event by id. Scoped to `AppState.source.path`
-//! always: `roots` is set by the handler, never by a caller.
+//! `GET /api/events` and `GET /api/events/{id}` - the web view's own cut
+//! of the log, not a general query: it folds a `tool.resulted` into the
+//! `tool.called` that caused it, so it is never a row, whatever the
+//! filter asks for. `percept events search` is the general query over
+//! the same log; a caller here asking for `type=tool.resulted` gets no
+//! rows, and that is this route's rule, not a bug. Scoped to
+//! `AppState.source.path` always: `roots` is set by the handler, never
+//! by a caller.
 
 use std::path::PathBuf;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::core::{EventLog, EventQuery};
+use crate::core::{Event, EventKind, EventLog, EventQuery};
 use crate::shared::parse_time;
 use crate::store;
+
+/// Event kinds this view folds into another row rather than showing as
+/// one of its own. Adding a second folded kind is one line here.
+const FOLDED_KINDS: &[EventKind] = &[EventKind::ToolResulted];
 
 /// `GET /api/events`'s query string, before it becomes an `EventQuery`.
 /// Every field is optional; `kind` and `contains` are single values, not
@@ -22,6 +30,7 @@ pub struct Params {
     until: Option<String>,
     #[serde(rename = "type")]
     kind: Option<String>,
+    actor: Option<String>,
     contains: Option<String>,
     size: Option<usize>,
     preview: Option<usize>,
@@ -43,18 +52,34 @@ pub enum Error {
     Internal(String),
 }
 
-/// `GET /api/events`'s body: the matches in log order, and how many
-/// matched before `size` cut them, so a page can say "eight of 1,240".
+/// `GET /api/events`'s body: the matches in log order, how many matched
+/// before `size` cut them, and each match's `carried` answer - the
+/// `FOLDED_KINDS` event, if any, that names it as its cause. A folded
+/// event never appears among the matches themselves, whatever the
+/// filter asks for.
 pub fn list(log: &dyn EventLog, params: Params, root: PathBuf) -> Result<Value, Error> {
     let (query, preview) = parse(params, root).map_err(Error::Bad)?;
     let events = log.load().map_err(|err| Error::Internal(err.to_string()))?;
 
-    let matched: Vec<_> = events.into_iter().filter(|event| query.matches(event)).collect();
+    let matched: Vec<_> = events
+        .iter()
+        .filter(|event| !FOLDED_KINDS.contains(&event.kind()) && query.matches(event))
+        .cloned()
+        .collect();
     let total = matched.len();
     let kept = take_recent(matched, query.size);
 
+    let kept_ids: std::collections::HashSet<_> = kept.iter().map(Event::id).collect();
+    let carried: Vec<_> = events
+        .iter()
+        .filter(|event| {
+            FOLDED_KINDS.contains(&event.kind()) && event.causation_id().is_some_and(|cause| kept_ids.contains(&cause))
+        })
+        .collect();
+
     let items: Vec<Value> = kept.iter().map(|event| store::summary(event, query.hit(event), preview)).collect();
-    Ok(json!({ "events": items, "total": total }))
+    let carried_items: Vec<Value> = carried.iter().map(|event| store::summary(event, None, preview)).collect();
+    Ok(json!({ "events": items, "carried": carried_items, "total": total }))
 }
 
 /// `GET /api/events/{id}`'s body: the whole wire event, no preview cut.
@@ -79,6 +104,16 @@ fn parse(params: Params, root: PathBuf) -> Result<(EventQuery, usize), String> {
         Some(s) if !s.is_empty() => s
             .split(',')
             .map(|kind| store::parse_kind(kind).map_err(|err| err.to_string()))
+            .collect::<Result<Vec<_>, _>>()?,
+        _ => Vec::new(),
+    };
+
+    // `None` for `me`: `EventQuery::matches` compares actors by name, so
+    // `Actor::Human(None)` already matches every human, whoever they are.
+    let actors = match params.actor.as_deref() {
+        Some(s) if !s.is_empty() => s
+            .split(',')
+            .map(|actor| store::parse_actor(actor, None).map_err(|err| err.to_string()))
             .collect::<Result<Vec<_>, _>>()?,
         _ => Vec::new(),
     };
@@ -115,6 +150,7 @@ fn parse(params: Params, root: PathBuf) -> Result<(EventQuery, usize), String> {
         EventQuery {
             since,
             until,
+            actors,
             roots: vec![root],
             kinds,
             text,

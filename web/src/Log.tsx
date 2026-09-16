@@ -3,14 +3,24 @@ import EventRow from "./EventRow";
 import { eventsCountLabel, foldResults, groupByDay, groupRuns } from "./eventRows";
 import FilterMenu from "./FilterMenu";
 import type { Filter } from "./filters";
-import { KIND_OPTIONS, TIME_OPTIONS, isFilterActive, kindsLabel, timeLabel, toggleKind } from "./filters";
+import {
+  ACTOR_OPTIONS,
+  KIND_OPTIONS,
+  TIME_OPTIONS,
+  actorsLabel,
+  isFilterActive,
+  kindsLabel,
+  timeLabel,
+  toggleActor,
+  toggleKind,
+} from "./filters";
 import { SearchIcon } from "./icons";
 import { useActiveSpeaker } from "./useActiveSpeaker";
 import type { Event } from "./types";
 
-/** Which of the two filter menus is open - never both, so opening one
- * closes the other for free. */
-type OpenMenu = "kind" | "time" | null;
+/** Which of the three filter menus is open - never more than one, so
+ * opening one closes the others for free. */
+type OpenMenu = "kind" | "actor" | "time" | null;
 
 /** The screen's body: search and filters over the log, grouped by day
  * and, within a day, by the run of consecutive rows one speaker
@@ -18,6 +28,7 @@ type OpenMenu = "kind" | "time" | null;
  * the call that caused it. */
 export default function Log({
   events,
+  carried,
   total,
   loadingMore,
   onShowEarlier,
@@ -26,6 +37,7 @@ export default function Log({
   onClear,
 }: {
   events: Event[];
+  carried: Event[];
   total: number;
   loadingMore: boolean;
   onShowEarlier: () => void;
@@ -34,7 +46,7 @@ export default function Log({
   onClear: () => void;
 }) {
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
-  const days = groupByDay(foldResults(events));
+  const days = groupByDay(foldResults(events, carried));
   const speaking = useActiveSpeaker(events);
   const earlier = events.length < total;
   const filtered = isFilterActive(filter);
@@ -65,6 +77,15 @@ export default function Log({
           multi
           open={openMenu === "kind"}
           onOpenChange={(open) => setOpenMenu(open ? "kind" : null)}
+        />
+        <FilterMenu
+          chipLabel={actorsLabel(filter.actors)}
+          options={ACTOR_OPTIONS}
+          isSelected={(value) => filter.actors.includes(value)}
+          onSelect={(value) => onFilterChange({ ...filter, actors: toggleActor(filter.actors, value) })}
+          multi
+          open={openMenu === "actor"}
+          onOpenChange={(open) => setOpenMenu(open ? "actor" : null)}
         />
         <FilterMenu
           chipLabel={timeLabel(filter.since)}

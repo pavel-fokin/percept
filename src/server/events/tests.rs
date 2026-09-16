@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::core::testing::{human, source_at, FakeLog};
-use crate::core::{Actor, Event, Payload};
+use crate::core::{Actor, Event, EventId, Payload};
 
 fn message_at(path: &str, content: &str) -> Event {
     Event::new(
@@ -15,11 +15,35 @@ fn message_at(path: &str, content: &str) -> Event {
     )
 }
 
+fn called_at(path: &str) -> Event {
+    Event::new(
+        Actor::Agent,
+        source_at("test", path),
+        None,
+        Payload::ToolCalled {
+            tool: "read_file".to_string(),
+            arguments: "{}".to_string(),
+        },
+    )
+}
+
+fn resulted_by(path: &str, cause: EventId) -> Event {
+    Event::new(
+        Actor::System,
+        source_at("test", path),
+        Some(cause),
+        Payload::ToolResulted {
+            content: "ok".to_string(),
+        },
+    )
+}
+
 fn params() -> Params {
     Params {
         since: None,
         until: None,
         kind: None,
+        actor: None,
         contains: None,
         size: None,
         preview: None,
@@ -89,6 +113,64 @@ fn list_rejects_an_inverted_window() {
     .err()
     .expect("since after until is refused");
     assert!(matches!(err, Error::Bad(_)));
+}
+
+#[test]
+fn a_kept_calls_answer_is_carried() {
+    let call = called_at("/project");
+    let result = resulted_by("/project", call.id());
+    let log = FakeLog::seeded(vec![call.clone(), result.clone()]);
+
+    let body = list(&log, params(), PathBuf::from("/project")).unwrap();
+
+    assert_eq!(body["events"].as_array().unwrap().len(), 1);
+    let carried = body["carried"].as_array().unwrap();
+    assert_eq!(carried.len(), 1);
+    assert_eq!(carried[0]["id"], result.id().as_uuid().to_string());
+}
+
+#[test]
+fn an_answer_whose_call_fell_outside_size_is_not_carried() {
+    let call = called_at("/project");
+    let result = resulted_by("/project", call.id());
+    let later = message_at("/project", "after");
+    let log = FakeLog::seeded(vec![call, result, later]);
+
+    let body = list(
+        &log,
+        Params {
+            size: Some(1),
+            ..params()
+        },
+        PathBuf::from("/project"),
+    )
+    .unwrap();
+
+    assert_eq!(body["events"].as_array().unwrap().len(), 1);
+    assert_eq!(body["carried"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn a_tool_resulted_event_never_appears_among_the_events_with_no_filter_at_all() {
+    let call = called_at("/project");
+    let result = resulted_by("/project", call.id());
+    let log = FakeLog::seeded(vec![call, result]);
+
+    let body = list(&log, params(), PathBuf::from("/project")).unwrap();
+
+    let kinds: Vec<_> = body["events"].as_array().unwrap().iter().map(|e| e["type"].as_str().unwrap()).collect();
+    assert!(!kinds.contains(&"tool.resulted"));
+}
+
+#[test]
+fn total_does_not_count_carried_events() {
+    let call = called_at("/project");
+    let result = resulted_by("/project", call.id());
+    let log = FakeLog::seeded(vec![call, result]);
+
+    let body = list(&log, params(), PathBuf::from("/project")).unwrap();
+
+    assert_eq!(body["total"], 1);
 }
 
 #[test]
