@@ -5,6 +5,7 @@ import FilterMenu from "./FilterMenu";
 import type { Filter } from "./filters";
 import { KIND_OPTIONS, TIME_OPTIONS, isFilterActive, kindsLabel, timeLabel, toggleKind } from "./filters";
 import { SearchIcon } from "./icons";
+import { useActiveSpeaker } from "./useActiveSpeaker";
 import type { Event } from "./types";
 
 /** Which of the two filter menus is open - never both, so opening one
@@ -34,6 +35,7 @@ export default function Log({
 }) {
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
   const days = groupByDay(foldResults(events));
+  const speaking = useActiveSpeaker(events);
   const earlier = events.length < total;
   const filtered = isFilterActive(filter);
   const noMatches = filtered && total === 0;
@@ -86,11 +88,24 @@ export default function Log({
 
       {days.map((day, i) => (
           <section key={day.key}>
-            <h2 className={`${i === 0 ? "mt-7" : "mt-8"} text-xs font-medium uppercase tracking-[0.09em] text-muted`}>{day.label}</h2>
+            <h2
+            className={`${
+              i === 0 ? "mt-7" : "mt-8"
+            } sticky top-14 z-10 flex flex-wrap items-center gap-x-2 bg-page py-2 text-xs font-medium uppercase tracking-[0.09em] text-muted sm:top-16`}
+          >
+            <span>{day.label}</span>
+            {speaking && (
+              <>
+                <span className="text-rule">&#183;</span>
+                <span className="text-faint">{speaking}</span>
+              </>
+            )}
+          </h2>
             <ul className="mt-2">
               {groupRuns(day.rows).map((run, runIndex, runs) => (
                 <li
                   key={runIndex}
+                  data-speaker={run.speaker.label}
                   className={"border-t border-rule py-5" + (runIndex === runs.length - 1 ? " border-b" : "")}
                 >
                   <p className={`text-[0.6875rem] font-medium uppercase tracking-[0.1em] ${run.speaker.toneClass}`}>
