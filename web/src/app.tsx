@@ -1,6 +1,7 @@
 import { Outlet, Route, Routes } from "react-router";
 import Header from "./header";
 import LogPage from "./log-page";
+import MapView from "./map";
 import Projects from "./projects";
 import { PATHS } from "./routes";
 
@@ -18,6 +19,7 @@ export default function App() {
       <Route element={<Shell />}>
         <Route path={PATHS.index} element={<Projects />} />
         <Route path={PATHS.log} element={<LogPage />} />
+        <Route path={PATHS.map} element={<MapView />} />
         <Route path="*" element={<Projects />} />
       </Route>
     </Routes>

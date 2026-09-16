@@ -1,5 +1,5 @@
 import type { Filter } from "./filters";
-import type { Event, EventsResponse, ProjectsResponse } from "./types";
+import type { Event, EventsResponse, MapResponse, ProjectsResponse } from "./types";
 
 /** `GET /api/events` - the log's most recent window matching `filter`.
  * `until` is exclusive, so passing the oldest event already held asks
@@ -40,6 +40,22 @@ export async function fetchProjects(): Promise<ProjectsResponse> {
     throw new Error(`${response.status} ${response.statusText}`);
   }
   return response.json() as Promise<ProjectsResponse>;
+}
+
+/** `GET /api/maps/{name}` - one project's map, cut to `around` and
+ * `depth`. No `around` asks for the overview: the map's headline nodes
+ * and nothing else. */
+export async function fetchMap(name: string, root: string, around: string | null, depth: number): Promise<MapResponse> {
+  const params = new URLSearchParams({ root });
+  if (around) {
+    params.set("around", around);
+    params.set("depth", String(depth));
+  }
+  const response = await fetch(`/api/maps/${encodeURIComponent(name)}?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`);
+  }
+  return response.json() as Promise<MapResponse>;
 }
 
 /** `error`'s message, or its string form when it isn't an `Error` - the
