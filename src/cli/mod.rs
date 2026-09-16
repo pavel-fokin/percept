@@ -31,13 +31,13 @@ use crate::core::{
 };
 use crate::mapstore;
 use crate::shared::{parse_time, Timestamp};
+use crate::store;
+use crate::workspace;
 
 /// A `--since`/`--until` value, refused by the flag a reader typed.
 fn moment(flag: &str, s: &str) -> Result<Timestamp, String> {
     parse_time(s).ok_or_else(|| format!("invalid --{flag} value {s}"))
 }
-use crate::store;
-use crate::workspace;
 
 #[cfg(feature = "lab")]
 mod turn;
@@ -1313,26 +1313,20 @@ fn parse_query(args: &SearchArgs, me: Option<crate::core::HumanId>) -> Result<Ev
         .map(|s| moment("until", s))
         .transpose()?;
 
-    // An inverted window can never match, whatever the log holds -
-    // `--since 1h --until 2h` is how "between one and two hours ago"
-    // is mistyped. Rejecting it keeps an empty result meaning the log
-    // has nothing, the same guarantee the filters above give.
-    if let (Some(since), Some(until)) = (since, until) {
-        if since >= until {
-            return Err(format!("--since {since} is not before --until {until}"));
-        }
-    }
-
-    Ok(EventQuery {
+    let query = EventQuery {
         since,
         until,
         actors,
         sources: args.source.clone(),
-        roots: Vec::new(),
         kinds,
         text: args.contains.clone(),
         size: args.size,
-    })
+        ..Default::default()
+    };
+    if let Some((since, until)) = query.inverted_window() {
+        return Err(format!("--since {since} is not before --until {until}"));
+    }
+    Ok(query)
 }
 
 /// Prints the one event `args.id` names. An id the log doesn't carry

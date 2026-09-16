@@ -26,7 +26,7 @@ pub use turn_state::{turn_dir, TurnState};
 
 /// A moment in a tool call, refused in the vocabulary a tool schema uses.
 /// The grammar is `shared::parse_time`'s; only the wording is here.
-pub fn parse_time(s: &str) -> Result<crate::shared::Timestamp, Box<dyn std::error::Error>> {
+fn parse_time(s: &str) -> Result<crate::shared::Timestamp, Box<dyn std::error::Error>> {
     crate::shared::parse_time(s)
         .ok_or_else(|| format!("invalid timestamp {s:?}: ISO-8601 or <N>d, <N>h, <N>m").into())
 }

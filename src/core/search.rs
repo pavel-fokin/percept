@@ -39,6 +39,19 @@ pub struct EventQuery {
 }
 
 impl EventQuery {
+    /// The bounds of a window that can never match, when this query sets
+    /// one: `--since 1h --until 2h` is how "between one and two hours
+    /// ago" is mistyped. A caller words its own refusal from the pair.
+    /// The rule lives here because an empty result has to keep meaning
+    /// "the log holds nothing", which is the guarantee every other
+    /// filter gives.
+    pub fn inverted_window(&self) -> Option<(Timestamp, Timestamp)> {
+        match (self.since, self.until) {
+            (Some(since), Some(until)) if since >= until => Some((since, until)),
+            _ => None,
+        }
+    }
+
     /// Whether `event` passes every filter this query sets.
     pub fn matches(&self, event: &Event) -> bool {
         self.since.is_none_or(|since| event.created_at() >= since)

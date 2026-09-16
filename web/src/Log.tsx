@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import EventRow from "./EventRow";
 import { eventsCountLabel, foldResults, groupByDay, groupRuns } from "./eventRows";
 import FilterMenu from "./FilterMenu";
@@ -8,6 +8,7 @@ import {
   KIND_OPTIONS,
   TIME_OPTIONS,
   actorsLabel,
+  EMPTY_FILTER,
   isFilterActive,
   kindsLabel,
   timeLabel,
@@ -31,22 +32,25 @@ export default function Log({
   carried,
   total,
   loadingMore,
+  pagingFailed,
   onShowEarlier,
   filter,
   onFilterChange,
-  onClear,
 }: {
   events: Event[];
   carried: Event[];
   total: number;
   loadingMore: boolean;
+  pagingFailed: string | null;
   onShowEarlier: () => void;
   filter: Filter;
   onFilterChange: (filter: Filter) => void;
-  onClear: () => void;
 }) {
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
-  const days = groupByDay(foldResults(events, carried));
+  // Held across a re-render: the speaker under the pinned strip changes
+  // at every run boundary on the way down the page, and regrouping the
+  // whole log each time is the one thing here that costs anything.
+  const days = useMemo(() => groupByDay(foldResults(events, carried)), [events, carried]);
   const speaking = useActiveSpeaker(events);
   const earlier = events.length < total;
   const filtered = isFilterActive(filter);
@@ -99,7 +103,7 @@ export default function Log({
         {filtered && (
           <button
             type="button"
-            onClick={onClear}
+            onClick={() => onFilterChange(EMPTY_FILTER)}
             className="inline-flex min-h-11 items-center text-[0.8125rem] text-accent underline decoration-rule underline-offset-4 hover:decoration-faint"
           >
             Clear
@@ -115,10 +119,10 @@ export default function Log({
             } sticky top-14 z-10 flex flex-wrap items-center gap-x-2 bg-page py-2 text-xs font-medium uppercase tracking-[0.09em] text-muted sm:top-16`}
           >
             <span>{day.label}</span>
-            {speaking && (
+            {speaking?.day === day.key && (
               <>
                 <span className="text-rule">&#183;</span>
-                <span className="text-faint">{speaking}</span>
+                <span className="text-faint">{speaking.speaker}</span>
               </>
             )}
           </h2>
@@ -127,6 +131,7 @@ export default function Log({
                 <li
                   key={runIndex}
                   data-speaker={run.speaker.label}
+                  data-day={day.key}
                   className={"border-t border-rule py-5" + (runIndex === runs.length - 1 ? " border-b" : "")}
                 >
                   <p className={`text-[0.6875rem] font-medium uppercase tracking-[0.1em] ${run.speaker.toneClass}`}>
@@ -147,6 +152,7 @@ export default function Log({
         <span className={noMatches ? "mt-4 text-[0.9375rem] text-muted" : undefined}>
           {noMatches ? "Nothing in the log matches that filter." : eventsCountLabel(events.length, total)}
         </span>
+        {pagingFailed && <span className="text-ink">Earlier events could not be read: {pagingFailed}.</span>}
         {earlier && (
           <button
             type="button"

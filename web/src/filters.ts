@@ -105,6 +105,20 @@ export function actorsLabel(actors: string[]): string {
   return `${actors.length} actors`;
 }
 
+/** `since` as an absolute instant, measured once. The server resolves a
+ * shorthand against its own clock on every request, so re-sending `7d`
+ * while paging backwards slides the window: events between the first
+ * request's bound and the next one's can never be reached, and once the
+ * bound passes the oldest row held the request inverts and is refused.
+ * Resolving here pins the window to the moment the filter was chosen. */
+export function resolveSince(since: string | null, now: Date = new Date()): string | null {
+  if (since === null) return null;
+  const match = /^(\d+)([hdm])$/.exec(since);
+  if (!match) return since;
+  const minutes = Number(match[1]) * { m: 1, h: 60, d: 24 * 60 }[match[2] as "m" | "h" | "d"];
+  return new Date(now.getTime() - minutes * 60_000).toISOString();
+}
+
 /** `filter`, read from the page's URL - so a filtered view is a link
  * that still shows the same filter after a reload. */
 export function filterFromSearch(search: string): Filter {

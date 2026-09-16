@@ -46,7 +46,6 @@ fn params() -> Params {
         actor: None,
         contains: None,
         size: None,
-        preview: None,
     }
 }
 

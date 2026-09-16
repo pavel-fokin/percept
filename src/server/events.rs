@@ -33,7 +33,6 @@ pub struct Params {
     actor: Option<String>,
     contains: Option<String>,
     size: Option<usize>,
-    preview: Option<usize>,
 }
 
 /// How many of the most recent matches `GET /api/events` returns when
@@ -58,18 +57,18 @@ pub enum Error {
 /// event never appears among the matches themselves, whatever the
 /// filter asks for.
 pub fn list(log: &dyn EventLog, params: Params, root: PathBuf) -> Result<Value, Error> {
-    let (query, preview) = parse(params, root).map_err(Error::Bad)?;
+    let (query, preview, size) = parse(params, root.clone()).map_err(Error::Bad)?;
     let events = log.load().map_err(|err| Error::Internal(err.to_string()))?;
 
-    let matched: Vec<_> = events
+    let mut matched: Vec<&Event> = events
         .iter()
         .filter(|event| !FOLDED_KINDS.contains(&event.kind()) && query.matches(event))
-        .cloned()
         .collect();
     let total = matched.len();
-    let kept = take_recent(matched, query.size);
+    matched.drain(..total.saturating_sub(size));
+    let kept = matched;
 
-    let kept_ids: std::collections::HashSet<_> = kept.iter().map(Event::id).collect();
+    let kept_ids: std::collections::HashSet<_> = kept.iter().map(|event| event.id()).collect();
     let carried: Vec<_> = events
         .iter()
         .filter(|event| {
@@ -79,7 +78,12 @@ pub fn list(log: &dyn EventLog, params: Params, root: PathBuf) -> Result<Value, 
 
     let items: Vec<Value> = kept.iter().map(|event| store::summary(event, query.hit(event), preview)).collect();
     let carried_items: Vec<Value> = carried.iter().map(|event| store::summary(event, None, preview)).collect();
-    Ok(json!({ "events": items, "carried": carried_items, "total": total }))
+    Ok(json!({
+        "events": items,
+        "carried": carried_items,
+        "total": total,
+        "project": root.to_string_lossy(),
+    }))
 }
 
 /// `GET /api/events/{id}`'s body: the whole wire event, no preview cut.
@@ -99,7 +103,7 @@ pub fn get(log: &dyn EventLog, id: &str, root: &std::path::Path) -> Result<Value
 /// a row's `content` is cut to - the same parsing `cli::parse_query`
 /// does over `SearchArgs`, since both build the query `percept events
 /// search` already defines.
-fn parse(params: Params, root: PathBuf) -> Result<(EventQuery, usize), String> {
+fn parse(params: Params, root: PathBuf) -> Result<(EventQuery, usize, usize), String> {
     let kinds = match params.kind.as_deref() {
         Some(s) if !s.is_empty() => s
             .split(',')
@@ -120,13 +124,9 @@ fn parse(params: Params, root: PathBuf) -> Result<(EventQuery, usize), String> {
 
     let since = params.since.as_deref().map(|s| moment("since", s)).transpose()?;
     let until = params.until.as_deref().map(|s| moment("until", s)).transpose()?;
-    // An inverted window can never match - `since=1h&until=2h` is how
-    // "between one and two hours ago" is mistyped, the same rule
-    // `cli::parse_query` enforces.
-    if let (Some(since), Some(until)) = (since, until) {
-        if since >= until {
-            return Err(format!("since {since} is not before until {until}"));
-        }
+    let window = EventQuery { since, until, ..Default::default() };
+    if let Some((since, until)) = window.inverted_window() {
+        return Err(format!("since {since} is not before until {until}"));
     }
 
     let text = match params.contains {
@@ -140,12 +140,6 @@ fn parse(params: Params, root: PathBuf) -> Result<(EventQuery, usize), String> {
         Some(size) => size,
         None => DEFAULT_SIZE,
     };
-    let preview = match params.preview {
-        Some(0) => return Err("preview must be at least 1".to_string()),
-        Some(preview) => preview,
-        None => store::PREVIEW_CHARS,
-    };
-
     Ok((
         EventQuery {
             since,
@@ -154,10 +148,10 @@ fn parse(params: Params, root: PathBuf) -> Result<(EventQuery, usize), String> {
             roots: vec![root],
             kinds,
             text,
-            size: Some(size),
             ..Default::default()
         },
-        preview,
+        store::PREVIEW_CHARS,
+        size,
     ))
 }
 
@@ -165,16 +159,6 @@ fn parse(params: Params, root: PathBuf) -> Result<(EventQuery, usize), String> {
 /// no `--`, since a request has no flags.
 fn moment(name: &str, s: &str) -> Result<crate::shared::Timestamp, String> {
     parse_time(s).ok_or_else(|| format!("invalid {name} value {s}"))
-}
-
-/// The `size` most recent of `matched`, kept in log order - the same
-/// truncation `EventQuery::apply` does, run separately here so `list`
-/// can still report `total` from before it.
-fn take_recent(mut matched: Vec<crate::core::Event>, size: Option<usize>) -> Vec<crate::core::Event> {
-    if let Some(size) = size {
-        matched.drain(..matched.len().saturating_sub(size));
-    }
-    matched
 }
 
 #[cfg(test)]

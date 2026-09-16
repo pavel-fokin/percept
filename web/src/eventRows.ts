@@ -47,16 +47,14 @@ export function foldResults(events: Event[], carried: Event[]): Row[] {
  * is present only when the server cut, and its `len` is the whole
  * length - so a row knows both what it has and what it is missing. */
 export function contentText(event: Event): { text: string; cut: boolean } {
-  const text = typeof event.payload.content === "string" ? event.payload.content : "";
-  return { text, cut: event.preview !== undefined };
+  return { text: stringField(event.payload, "content"), cut: event.preview !== undefined };
 }
 
 /** How much a tool answered with, for the details line. The whole
  * length, not the preview's: `preview.len` is what the server cut
  * from, and is absent when nothing was cut. */
 export function answerSize(answer: Event): string {
-  const content = typeof answer.payload.content === "string" ? answer.payload.content : "";
-  const length = answer.preview?.len ?? content.length;
+  const length = answer.preview?.len ?? stringField(answer.payload, "content").length;
   return length === 0 ? "no output" : `${length.toLocaleString(LOCALE)} characters`;
 }
 
@@ -201,10 +199,9 @@ export function eventsCountLabel(shown: number, total: number): string {
   return shown >= total ? `${loaded} events, newest first.` : `${loaded} of ${total.toLocaleString(LOCALE)} events, newest first.`;
 }
 
-/** The basename of `event.source.path` - the project the details line
- * names. */
-export function projectOf(event: Event): string {
-  const trimmed = event.source.path.replace(/\/+$/, "");
+/** The last segment of a path - how a project is named on screen. */
+export function basename(path: string): string {
+  const trimmed = path.replace(/\/+$/, "");
   const parts = trimmed.split("/");
   return parts[parts.length - 1] || trimmed;
 }

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { fetchEvent } from "./api";
 import { answerSize, contentOf, contentText, kindWords, timeOf } from "./eventRows";
-import type { Row } from "./eventRows";
+import type { ContentVariant, Row } from "./eventRows";
 import { Chevron } from "./icons";
 import type { Event } from "./types";
 
@@ -14,9 +14,18 @@ export default function EventRow({ row }: { row: Row }) {
   const content = contentOf(event);
   const kind = kindWords(event);
   const answerText = useWholeContent(answer);
+  // The summary shows a shortened copy of a long message; without this
+  // the whole of it is reachable nowhere in the app, though the row's
+  // own details line says how many characters there are.
+  const wholeContent = useWholeContent(contentText(event).cut ? event : undefined);
 
   return (
-    <details onToggle={answerText.load}>
+    <details
+      onToggle={(e) => {
+        answerText.load(e);
+        wholeContent.load(e);
+      }}
+    >
       <summary className="block min-h-11">
         <Content text={content.text} variant={content.variant} />
         <span className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-faint">
@@ -40,6 +49,12 @@ export default function EventRow({ row }: { row: Row }) {
       </summary>
       <div className="mt-3 rounded-sm border border-rule bg-panel px-3.5 py-3">
         <dl className="grid grid-cols-[5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+          {contentText(event).cut && (
+            <>
+              <dt className="text-faint">in full</dt>
+              <dd className="break-words whitespace-pre-wrap text-muted">{wholeContent.text}</dd>
+            </>
+          )}
           {answer && (
             <>
               <dt className="text-faint">answer</dt>
@@ -88,7 +103,7 @@ function useWholeContent(event: Event | undefined) {
 /** A row's full-weight line, set per `content.variant` - quoted serif
  * for a thing said, mono for what a machine emitted, plain sans for
  * everything else recorded. */
-function Content({ text, variant }: { text: string; variant: "quote" | "mono" | "plain" }) {
+function Content({ text, variant }: { text: string; variant: ContentVariant }) {
   if (variant === "quote") {
     return <span className="block font-serif text-[1.0625rem] leading-relaxed">&#8220;{text}&#8221;</span>;
   }

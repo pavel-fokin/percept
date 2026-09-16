@@ -1,13 +1,20 @@
 import { useEffect, useState } from "react";
 import { fetchEvents, messageOf } from "./api";
-import { projectOf } from "./eventRows";
-import { EMPTY_FILTER, filterFromSearch, searchFromFilter } from "./filters";
+import { basename } from "./eventRows";
+import { filterFromSearch, resolveSince, searchFromFilter } from "./filters";
 import type { Filter } from "./filters";
 import Header from "./Header";
 import Log from "./Log";
 import type { Event } from "./types";
 
-type Load = { state: "loading" } | { state: "failed"; message: string } | { state: "ready" };
+/** What the page has. The events, what they carry and how many matched
+ * are only ever written together, so they live in the arm that has
+ * them rather than beside it - "ready with nothing loaded" is then not
+ * a state anything has to guard against. */
+type Load =
+  | { state: "loading" }
+  | { state: "failed"; message: string }
+  | { state: "ready"; events: Event[]; carried: Event[]; total: number };
 
 const SEARCH_DEBOUNCE_MS = 250;
 
@@ -24,35 +31,34 @@ function useDebouncedValue<T>(value: T, delay: number): T {
 
 export default function App() {
   const [load, setLoad] = useState<Load>({ state: "loading" });
-  const [events, setEvents] = useState<Event[]>([]);
-  const [carried, setCarried] = useState<Event[]>([]);
-  const [total, setTotal] = useState(0);
+  const [project, setProject] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
+  const [pagingFailed, setPagingFailed] = useState<string | null>(null);
   const [filter, setFilter] = useState<Filter>(() => filterFromSearch(window.location.search));
 
-  // Only the search box is debounced (250ms); a kind, actor, or time
-  // pick refetches at once, since none fires once per keystroke.
+  // Only the search box is debounced; a kind, actor, or time pick
+  // refetches at once, since none of them fires once per keystroke.
   const debouncedQ = useDebouncedValue(filter.q, SEARCH_DEBOUNCE_MS);
-  const kindsKey = filter.kinds.join(",");
-  const actorsKey = filter.actors.join(",");
+  // The identity of the request, as a string: React compares the
+  // dependency list by value, and `kinds` and `actors` are new arrays
+  // on every keystroke. It doubles as the guard a slow page's answer
+  // is checked against, so an answer for a filter nobody is looking at
+  // any more is dropped rather than prepended.
+  const asked = searchFromFilter({ ...filter, q: debouncedQ });
 
   useEffect(() => {
-    window.history.replaceState(null, "", `${window.location.pathname}${searchFromFilter(filter)}`);
-  }, [filter]);
+    window.history.replaceState(null, "", `${window.location.pathname}${asked}`);
+  }, [asked]);
 
   useEffect(() => {
+    const wanted = { ...filterFromSearch(asked), since: resolveSince(filterFromSearch(asked).since) };
     let cancelled = false;
-    fetchEvents({ q: debouncedQ, kinds: filter.kinds, actors: filter.actors, since: filter.since })
+    setPagingFailed(null);
+    fetchEvents(wanted)
       .then((response) => {
         if (cancelled) return;
-        setEvents(response.events);
-        setCarried(response.carried);
-        // The first answer for a filter is the only one that counts the
-        // whole match: every later request is bounded by `until`, so
-        // its own total counts what is left behind that bound, not
-        // what there is.
-        setTotal(response.total);
-        setLoad({ state: "ready" });
+        setLoad({ state: "ready", events: response.events, carried: response.carried, total: response.total });
+        setProject(basename(response.project));
       })
       .catch((error: unknown) => {
         if (!cancelled) setLoad({ state: "failed", message: messageOf(error) });
@@ -60,19 +66,31 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [debouncedQ, kindsKey, actorsKey, filter.since]);
+  }, [asked]);
 
   function showEarlier() {
-    const oldest = events[0];
-    if (!oldest || loadingMore) return;
+    if (load.state !== "ready" || loadingMore) return;
+    const oldest = load.events[0];
+    if (!oldest) return;
+    const requested = asked;
     setLoadingMore(true);
-    fetchEvents({ q: debouncedQ, kinds: filter.kinds, actors: filter.actors, since: filter.since }, oldest.created_at)
+    setPagingFailed(null);
+    fetchEvents({ ...filterFromSearch(asked), since: resolveSince(filterFromSearch(asked).since) }, oldest.created_at)
       .then((response) => {
-        setEvents((held) => [...response.events, ...held]);
-        setCarried((held) => [...response.carried, ...held]);
+        // A filter changed while this was in flight, so its rows belong
+        // to a page nobody is reading - prepending them would put rows
+        // the filter excludes at the top of the list.
+        if (requested !== asked) return;
+        setLoad((held) =>
+          held.state === "ready"
+            ? { ...held, events: [...response.events, ...held.events], carried: [...response.carried, ...held.carried] }
+            : held,
+        );
       })
-      .catch((error: unknown) => setLoad({ state: "failed", message: messageOf(error) }))
+      // An earlier page failing says nothing about the rows already
+      // read, so the page keeps them and says so on the line the
+      // request came from.
+      .catch((error: unknown) => setPagingFailed(messageOf(error)))
       .finally(() => setLoadingMore(false));
   }
 
@@ -84,21 +102,21 @@ export default function App() {
       >
         Skip to the log
       </a>
-      <Header project={events.length > 0 ? projectOf(events[0]) : null} />
+      <Header project={project} />
       <p role="status" className="mx-auto w-full max-w-3xl px-4 pt-10 sm:px-8 empty:hidden">
         {load.state === "loading" && "Reading the log."}
         {load.state === "failed" && `The log could not be read: ${load.message}. Reload to try again.`}
       </p>
       {load.state === "ready" && (
         <Log
-          events={events}
-          carried={carried}
-          total={total}
+          events={load.events}
+          carried={load.carried}
+          total={load.total}
           loadingMore={loadingMore}
+          pagingFailed={pagingFailed}
           onShowEarlier={showEarlier}
           filter={filter}
           onFilterChange={setFilter}
-          onClear={() => setFilter(EMPTY_FILTER)}
         />
       )}
     </div>

@@ -420,3 +420,26 @@ fn a_blank_term_matches_everything_as_documented() {
 
     assert_eq!(kept.len(), 2);
 }
+
+#[test]
+fn a_since_at_or_after_its_until_names_a_window_that_can_never_match() {
+    let now = Timestamp::now();
+    let earlier = now.minus_minutes(60).unwrap();
+    let query = EventQuery { since: Some(now), until: Some(earlier), ..Default::default() };
+    assert_eq!(query.inverted_window(), Some((now, earlier)));
+}
+
+#[test]
+fn a_window_in_order_is_not_inverted() {
+    let now = Timestamp::now();
+    let earlier = now.minus_minutes(60).unwrap();
+    let query = EventQuery { since: Some(earlier), until: Some(now), ..Default::default() };
+    assert!(query.inverted_window().is_none());
+}
+
+#[test]
+fn one_bound_alone_is_never_an_inverted_window() {
+    let now = Timestamp::now();
+    assert!(EventQuery { since: Some(now), ..Default::default() }.inverted_window().is_none());
+    assert!(EventQuery { until: Some(now), ..Default::default() }.inverted_window().is_none());
+}

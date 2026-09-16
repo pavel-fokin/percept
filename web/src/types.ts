@@ -34,4 +34,8 @@ export interface EventsResponse {
   events: Event[];
   carried: Event[];
   total: number;
+  /** The project the server is scoped to - stated by the server rather
+   * than read off a row, so a filter that matches nothing does not take
+   * the page's heading with it. */
+  project: string;
 }
