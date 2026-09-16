@@ -1,15 +1,13 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
-use serde_json::json;
-
 use super::*;
-use crate::core::testing::{human, node_added_by, node_id, schemas, source, FakeLog};
+use crate::core::testing::{node_added_by, source, FakeLog};
 use crate::core::{Actor, Payload};
 
 /// Binds a server on a spare port, serves it on a spawned task over an
-/// empty in-memory log and the built-in schemas, and returns its
-/// address for a test to connect to.
+/// empty in-memory log, and returns its address for a test to connect
+/// to.
 async fn spawn() -> std::net::SocketAddr {
     spawn_over(Vec::new()).await.1
 }
@@ -25,11 +23,7 @@ async fn spawn_over(events: Vec<crate::core::Event>) -> (std::sync::Arc<FakeLog>
     let handed_back = log.clone();
     let state = std::sync::Arc::new(AppState {
         log: log.clone() as std::sync::Arc<dyn crate::core::EventLog>,
-        schemas: schemas(),
         source: source("test"),
-        checkout: std::path::PathBuf::from(crate::core::testing::ROOT),
-        me: human(),
-        since: None,
     });
     tokio::spawn(serve(listener, state));
     (handed_back, addr)
@@ -61,19 +55,6 @@ fn split(response: &str) -> (&str, &str) {
     (status, body)
 }
 
-/// Sends a raw HTTP/1.1 POST of `body` for `path` to `addr` and returns
-/// the status line and the response text past the headers.
-async fn post(addr: std::net::SocketAddr, path: &str, body: &serde_json::Value) -> (String, String) {
-    let text = body.to_string();
-    let request = format!(
-        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{text}",
-        text.len()
-    );
-    let response = send(addr, request).await;
-    let (status, body) = split(&response);
-    (status.to_string(), body.to_string())
-}
-
 /// Sends a raw HTTP/1.1 GET for `path` to `addr` and returns the
 /// response text.
 async fn get(addr: std::net::SocketAddr, path: &str) -> String {
@@ -97,84 +78,10 @@ async fn root_with_a_query_string_still_returns_the_embedded_page() {
 }
 
 #[tokio::test]
-async fn api_review_returns_json_with_a_maps_array() {
-    let addr = spawn().await;
-    let response = get(addr, "/api/review").await;
-    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
-    assert!(response.contains("application/json"), "{response}");
-    let (_, body) = split(&response);
-    let json: serde_json::Value = serde_json::from_str(body).expect("valid JSON");
-    assert!(json["maps"].is_array(), "{json}");
-}
-
-#[tokio::test]
 async fn unknown_path_returns_404() {
     let addr = spawn().await;
     let response = get(addr, "/nope").await;
     assert!(response.starts_with("HTTP/1.1 404"), "{response}");
-}
-
-#[tokio::test]
-async fn change_posted_with_a_why_appends_a_node_changed_naming_the_node_and_the_why() {
-    let node = node_added_by(Actor::Agent, "verdict", "ship it");
-    let (log, addr) = spawn_over(vec![node.clone()]).await;
-
-    let (status, body) =
-        post(addr, "/api/change", &json!({ "map": "debates", "node": "v1", "why": "not yet" })).await;
-    assert!(status.starts_with("HTTP/1.1 200"), "{status} {body}");
-
-    let events = log.load().unwrap();
-    let changed = events
-        .iter()
-        .find_map(|event| match event.payload() {
-            Payload::NodeChanged { node: changed, why, .. } => Some((*changed, why.clone())),
-            _ => None,
-        })
-        .expect("a node.changed event");
-    assert_eq!(changed, (node_id(&node), Some("not yet".to_string())));
-}
-
-#[tokio::test]
-async fn change_with_a_blank_why_is_refused_with_400_and_appends_nothing() {
-    let node = node_added_by(Actor::Agent, "verdict", "ship it");
-    let (log, addr) = spawn_over(vec![node]).await;
-
-    let (status, body) =
-        post(addr, "/api/change", &json!({ "map": "debates", "node": "v1", "why": "   " })).await;
-    assert!(status.starts_with("HTTP/1.1 400"), "{status} {body}");
-
-    assert_eq!(log.load().unwrap().len(), 1, "nothing beyond the seeded node.added");
-}
-
-#[tokio::test]
-async fn an_unknown_node_id_is_404() {
-    let addr = spawn().await;
-    let (status, body) =
-        post(addr, "/api/change", &json!({ "map": "debates", "node": "v99", "why": "not yet" })).await;
-    assert!(status.starts_with("HTTP/1.1 404"), "{status} {body}");
-}
-
-#[tokio::test]
-async fn a_change_takes_the_node_out_of_the_humans_review_queue() {
-    let node = node_added_by(Actor::Agent, "verdict", "ship it");
-    let (_, addr) = spawn_over(vec![node]).await;
-
-    let (status, _) =
-        post(addr, "/api/change", &json!({ "map": "debates", "node": "v1", "why": "not yet" })).await;
-    assert!(status.starts_with("HTTP/1.1 200"), "{status}");
-
-    let response = get(addr, "/api/review").await;
-    let (_, body) = split(&response);
-    let json: serde_json::Value = serde_json::from_str(body).expect("valid JSON");
-    let debates = json["maps"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|map| map["name"] == "debates")
-        .expect("a debates map");
-    // The human's own write is not theirs to review: the node's last
-    // change is the human's, so it leaves the queue.
-    assert!(debates["groups"].as_array().unwrap().is_empty(), "{debates}");
 }
 
 /// A `message.received` from `/test`, for a query that has to tell one

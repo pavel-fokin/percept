@@ -1,31 +1,17 @@
-import type { ReviewResponse } from "./types";
+import type { EventsResponse } from "./types";
 
-/** `GET /api/review`, throwing the status line on a failed fetch - the
- * one place the page reads the queue, so every write below refetches
- * through the same function. */
-export async function fetchReview(): Promise<ReviewResponse> {
-  const response = await fetch("/api/review");
+/** `GET /api/events`, throwing the status line on a failed fetch - the
+ * one place the page reads the log. */
+export async function fetchEvents(): Promise<EventsResponse> {
+  const response = await fetch("/api/events");
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`);
   }
-  return response.json() as Promise<ReviewResponse>;
+  return response.json() as Promise<EventsResponse>;
 }
 
-/** Posts `body` as JSON to `path`, throwing the server's plain-text
- * reason on a refused write - `change` below shares this, so a 400 or
- * 404 reads the same way at every call site. */
-async function post(path: string, body: unknown): Promise<void> {
-  const response = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    throw new Error(await response.text());
-  }
-}
-
-/** `POST /api/change`: changes `node` on `map`, carrying only `why`. */
-export function change(map: string, node: string, why: string): Promise<void> {
-  return post("/api/change", { map, node, why });
+/** `error`'s message, or its string form when it isn't an `Error` - the
+ * one place every `catch` reaches for one. */
+export function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
