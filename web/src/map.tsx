@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router";
 import { fetchMap, messageOf } from "./api";
+import FilterMenu from "./filter-menu";
+import type { FilterMenuOption } from "./filter-menu";
 import { basename, count } from "./format";
 import { mapPath } from "./routes";
 import type { MapEdge, MapNode, MapResponse } from "./types";
@@ -11,6 +13,16 @@ type Load =
   | { state: "ready"; cut: MapResponse };
 
 const DEFAULT_DEPTH = 1;
+
+/** How far out a cut reaches. Zero is the node alone, which is what a
+ * reader asks for when they want one node's own words with nothing
+ * around it. Past three the cut stops being a cut. */
+const DEPTH_OPTIONS: FilterMenuOption<string>[] = [
+  { value: "0", label: "This node alone" },
+  { value: "1", label: "One step out" },
+  { value: "2", label: "Two steps out" },
+  { value: "3", label: "Three steps out" },
+];
 
 /** One cognitive map, cut. It opens on the overview - the headline
  * nodes, the level a reader can hold - and every node id is a link
@@ -23,6 +35,8 @@ export default function MapView() {
   const around = params.get("around");
   const depth = readDepth(params.get("depth"));
   const [load, setLoad] = useState<Load>({ state: "loading" });
+  const [depthOpen, setDepthOpen] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     let cancelled = false;
@@ -48,6 +62,20 @@ export default function MapView() {
         {root && <p className="text-[0.8125rem] text-faint">&#183; from {basename(root)}</p>}
       </div>
       {cut && <p className="mt-1 font-serif text-[1.0625rem] leading-relaxed text-muted">{cut.map.purpose}</p>}
+
+      {around && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <FilterMenu
+            chipLabel={DEPTH_OPTIONS.find((option) => option.value === String(depth))?.label ?? `${depth} steps out`}
+            options={DEPTH_OPTIONS}
+            isSelected={(value) => value === String(depth)}
+            onSelect={(value) => navigate(`${mapPath(name, root)}&around=${encodeURIComponent(around)}&depth=${value}`)}
+            multi={false}
+            open={depthOpen}
+            onOpenChange={setDepthOpen}
+          />
+        </div>
+      )}
 
       <div aria-live="polite" className="mt-3 flex min-h-6 flex-wrap items-center gap-x-3 text-[0.8125rem] text-faint">
         {load.state === "loading" && <span>Reading the map&#8230;</span>}
