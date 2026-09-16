@@ -1,7 +1,10 @@
 //! What the session-start block, the web view, and the Markdown
 //! render share: the truncation rule, a node's line id, the wording of
-//! its last change, and the session rule both a hook and the review
-//! page cut their since by.
+//! its last change, the session rule both a hook and the review page
+//! cut their since by, a project's display name, and which headline
+//! nodes counted as gained since a cut.
+
+use std::path::Path;
 
 use crate::core::{Event, Map, Node, Payload, Written};
 use crate::shared::Timestamp;
@@ -53,4 +56,20 @@ pub(crate) fn changed_line(node: &Node) -> Option<String> {
         line.push_str(&format!(": {why:?}"));
     }
     Some(line)
+}
+
+/// `root`'s last path component, the name a reader knows the project
+/// by - falling back to the whole path on the rare root with none.
+pub(crate) fn project_name(root: &Path) -> String {
+    root.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| root.display().to_string())
+}
+
+/// The headline nodes of `map` whose last change happened at or after
+/// `since` - a node's last change is compared directly, not
+/// `Map::since`, which would also surface an older node a fresh edge
+/// only touched.
+pub(crate) fn gained(map: &Map, since: Timestamp) -> Vec<&Node> {
+    map.headlines().filter(|node| node.changed().at >= since).collect()
 }

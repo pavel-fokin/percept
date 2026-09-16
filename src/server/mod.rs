@@ -2,8 +2,9 @@
 //! `127.0.0.1`, on a port the OS picks, and opens it in the browser.
 //! A presentation-layer peer of `cli` and `tui`: it has no chat logic
 //! of its own. It serves the JSON the page reads (`GET /api/events`,
-//! `GET /api/events/{id}`) over the same log the CLI uses. Built on
-//! `axum`.
+//! `GET /api/events/{id}`) over the same log the CLI uses, and
+//! `GET /api/projects`, every project the log holds - not scoped to
+//! this server's own, unlike the other two. Built on `axum`.
 //!
 //! The page is built into the binary at compile time - `build.rs`
 //! copies `web/dist/index.html` into `OUT_DIR`, or writes a stub there
@@ -23,9 +24,11 @@ use axum::{Json, Router};
 use tokio::net::TcpListener;
 
 use crate::core::{Event, EventLog, Source};
+use crate::shared::Timestamp;
 use crate::server::events::Error as EventsError;
 
 mod events;
+mod projects;
 #[cfg(test)]
 mod tests;
 
@@ -39,10 +42,15 @@ const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 const SOURCE_NAME: &str = "percept-web";
 
 /// What every handler needs to read the log: read fresh on every
-/// request, never cached.
+/// request, never cached. `opened` is when this view started - the
+/// moment a "since last session" count is measured back from, held
+/// still for as long as the view is open. Opening records a
+/// `session.started` of its own, so a count read live would always
+/// measure against this server and come back zero.
 struct AppState {
     log: Arc<dyn EventLog>,
     source: Source,
+    opened: Timestamp,
 }
 
 /// `percept web` - binds a server on `127.0.0.1`, prints its URL,
@@ -59,17 +67,19 @@ pub async fn run(log: Arc<dyn EventLog>, source: Source) -> Result<(), Box<dyn E
     let (listener, addr) = bind().await?;
     // The event lands only once the page can be served, so a bind that
     // fails records nothing.
-    {
+    let opened = {
         let log = Arc::clone(&log);
-        let source = source.clone();
-        tokio::task::spawn_blocking(move || log.append(&Event::session_started(source)).map_err(|err| err.to_string()))
+        let marker = Event::session_started(source.clone());
+        let opened = marker.created_at();
+        tokio::task::spawn_blocking(move || log.append(&marker).map_err(|err| err.to_string()))
             .await
             .expect("appending session.started never panics")?;
-    }
+        opened
+    };
     let url = format!("http://{addr}");
     println!("percept web at {url}");
     open_browser(&url);
-    let state = Arc::new(AppState { log, source });
+    let state = Arc::new(AppState { log, source, opened });
     serve(listener, state).await;
     Ok(())
 }
@@ -84,8 +94,8 @@ async fn bind() -> Result<(TcpListener, SocketAddr), Box<dyn Error>> {
 
 /// Serves requests on `listener` until the process is killed: `GET /`
 /// and `GET /index.html` return the embedded page, `GET /api/events`
-/// and `GET /api/events/{id}` the project's own log, everything else
-/// 404s.
+/// and `GET /api/events/{id}` the project's own log, `GET /api/projects`
+/// every project the log holds, everything else 404s.
 async fn serve(listener: TcpListener, state: Arc<AppState>) {
     let app = router(state);
     axum::serve(listener, app).await.expect("the web server never returns an error");
@@ -99,6 +109,7 @@ fn router(state: Arc<AppState>) -> Router {
         .route("/index.html", get(index))
         .route("/api/events", get(api_events))
         .route("/api/events/{id}", get(api_event))
+        .route("/api/projects", get(api_projects))
         .with_state(state)
 }
 
@@ -125,6 +136,17 @@ async fn api_event(State(state): State<Arc<AppState>>, Path(id): Path<String>) -
     let result = tokio::task::spawn_blocking(move || events::get(&*state.log, &id, &state.source.path))
         .await
         .expect("api_event's blocking read never panics");
+    events_response(result)
+}
+
+/// `GET /api/projects`: every project the log holds, across the whole
+/// log under `PERCEPT_HOME` - not scoped to `state.source.path`, the
+/// one route on this server that answers for more than its own
+/// project.
+async fn api_projects(State(state): State<Arc<AppState>>) -> Response {
+    let result = tokio::task::spawn_blocking(move || projects::list(&*state.log, state.opened))
+        .await
+        .expect("api_projects's blocking read never panics");
     events_response(result)
 }
 

@@ -8,8 +8,8 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-use super::blocks::{capped_lines, changed_line, line_id, LIMIT};
-use crate::core::{Event, EventId, Map, Node, Payload, Written};
+use super::blocks::{capped_lines, changed_line, gained, line_id, project_name, LIMIT};
+use crate::core::{Event, EventId, Map, Node, Payload};
 use crate::shared::Timestamp;
 use crate::workspace::{Cited, Citations};
 
@@ -56,22 +56,6 @@ pub fn start(maps: &[Map], events: &[Event], root: &Path, checkout: &Path, since
     sections.push(next_block(maps, &printed));
 
     sections.join("\n\n")
-}
-
-/// `root`'s last path component, the name a reader knows the project
-/// by - falling back to the whole path on the rare root with none.
-fn project_name(root: &Path) -> String {
-    root.file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| root.display().to_string())
-}
-
-/// The headline nodes of `map` whose last change happened at or after
-/// `since` - a node's last change is compared directly, not
-/// `Map::since`, which would also surface an older node a fresh edge
-/// only touched.
-fn gained(map: &Map, since: Timestamp) -> Vec<&Node> {
-    map.headlines().filter(|node| node.changed().at >= since).collect()
 }
 
 /// One Attention row: the node's short id and the map it is on, which

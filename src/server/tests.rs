@@ -24,6 +24,7 @@ async fn spawn_over(events: Vec<crate::core::Event>) -> (std::sync::Arc<FakeLog>
     let state = std::sync::Arc::new(AppState {
         log: log.clone() as std::sync::Arc<dyn crate::core::EventLog>,
         source: source("test"),
+        opened: crate::shared::Timestamp::now(),
     });
     tokio::spawn(serve(listener, state));
     (handed_back, addr)
@@ -188,4 +189,28 @@ async fn api_event_is_not_found_for_an_event_in_another_project() {
     let (_log, addr) = spawn_over(vec![event]).await;
     let (status, _) = get_parts(addr, &format!("/api/events/{id}")).await;
     assert!(status.starts_with("HTTP/1.1 404"), "{status}");
+}
+
+/// Unlike `/api/events`, `/api/projects` is not scoped to the server's
+/// own source - a project this server never opened still shows up.
+#[tokio::test]
+async fn api_projects_serves_every_project_the_log_holds_not_only_this_ones() {
+    let events = vec![
+        message("in this project"),
+        crate::core::testing::node_added_at("/elsewhere", "claim", "in another"),
+    ];
+    let (_log, addr) = spawn_over(events).await;
+    let (status, body) = get_json(addr, "/api/projects").await;
+    assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+    let projects = body["projects"].as_array().unwrap();
+    assert_eq!(projects.len(), 2, "{body}");
+    let paths: Vec<&str> = projects.iter().map(|project| project["path"].as_str().unwrap()).collect();
+    assert!(paths.contains(&"/elsewhere"), "{body}");
+    assert!(paths.contains(&crate::core::testing::ROOT), "{body}");
+    for project in projects {
+        assert!(project["name"].is_string(), "{body}");
+        assert!(project["events"].is_number(), "{body}");
+        assert!(project["last_active"].is_string(), "{body}");
+        assert!(project["maps"].is_array(), "{body}");
+    }
 }
