@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 
 use super::*;
-use crate::core::testing::{node_added_by, source, FakeLog};
+use crate::core::testing::{node_added_by, source, Fixture, FakeLog};
 use crate::core::{Actor, Payload};
 
 /// Binds a server on a spare port, serves it on a spawned task over an
@@ -198,6 +198,46 @@ async fn api_event_is_not_found_for_an_event_in_another_project() {
     let (_log, addr) = spawn_over(vec![event]).await;
     let (status, _) = get_parts(addr, &format!("/api/events/{id}")).await;
     assert!(status.starts_with("HTTP/1.1 404"), "{status}");
+}
+
+/// `/api/maps/{name}` answers for the `root` the query names, not
+/// `state.source.path` - proving the path segment binds `name` and the
+/// query string binds `root`, `around`, and `depth` together.
+#[tokio::test]
+async fn api_maps_cuts_the_named_project_root_around_a_node() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/decisions.toml",
+        "name = \"decisions\"\npurpose = \"test\"\nheadlines = [\"concept\"]\n\n\
+         [[node]]\nkind = \"concept\"\n\n[[node]]\nkind = \"question\"\n\n\
+         [[edge]]\nkind = \"about\"\nfrom = \"question\"\nto = \"concept\"\n",
+    );
+    let concept = crate::core::Event::new(
+        Actor::Agent,
+        crate::core::Source {
+            name: "test".to_string(),
+            path: fixture.path().to_path_buf(),
+        },
+        None,
+        Payload::NodeAdded {
+            map: "decisions".to_string(),
+            node: crate::core::NodeId::new(),
+            kind: "concept".to_string(),
+            name: "the rule".to_string(),
+            properties: Default::default(),
+            sources: Vec::new(),
+            seq: 0,
+        },
+    );
+    let (_log, addr) = spawn_over(vec![concept]).await;
+
+    let path = format!("/api/maps/decisions?root={}", fixture.path().to_string_lossy());
+    let (status, body) = get_json(addr, &path).await;
+
+    assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+    assert_eq!(body["map"]["name"], "decisions");
+    assert_eq!(body["nodes"].as_array().unwrap().len(), 1, "{body}");
+    assert_eq!(body["nodes"][0]["kind"], "concept");
 }
 
 /// Unlike `/api/events`, `/api/projects` is not scoped to the server's
