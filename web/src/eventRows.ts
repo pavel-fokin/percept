@@ -69,7 +69,6 @@ function speakerKey(event: Event): string {
  * header down the page. */
 export interface Run {
   speaker: Speaker;
-  projectPath: string;
   rows: Row[];
 }
 
@@ -84,7 +83,7 @@ export function groupRuns(rows: Row[]): Run[] {
     if (last && key === nextKey) {
       last.rows.push(row);
     } else {
-      runs.push({ speaker: speakerOf(row.event), projectPath: row.event.source.path, rows: [row] });
+      runs.push({ speaker: speakerOf(row.event), rows: [row] });
     }
     key = nextKey;
   }
