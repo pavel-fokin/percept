@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { fetchEvents, messageOf } from "./api";
 import { filterFromSearch, resolveSince, searchFromFilter } from "./filters";
 import type { Filter } from "./filters";
-import Header from "./Header";
-import Log from "./Log";
+import Header from "./header";
+import Log from "./log";
 import type { Event } from "./types";
 
 interface Results {

@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import EventRow from "./EventRow";
-import { basename, eventsCountLabel, foldResults, groupByDay, groupRuns, timeOf } from "./eventRows";
-import FilterMenu from "./FilterMenu";
+import EventRow from "./event-row";
+import { basename, eventsCountLabel, foldResults, groupByDay, groupRuns, timeOf } from "./event-rows";
+import FilterMenu from "./filter-menu";
 import type { Filter } from "./filters";
 import {
   ACTOR_OPTIONS,
@@ -17,7 +17,7 @@ import {
   toggleKind,
 } from "./filters";
 import { SearchIcon } from "./icons";
-import { useActiveSpeaker } from "./useActiveSpeaker";
+import { useActiveSpeaker } from "./use-active-speaker";
 import type { Event } from "./types";
 
 /** Which of the three filter menus is open - never more than one, so

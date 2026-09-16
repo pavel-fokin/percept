@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { fetchEvent, messageOf } from "./api";
-import { answerSize, contentOf, contentText, kindWords } from "./eventRows";
-import type { ContentVariant, Row } from "./eventRows";
+import { answerSize, contentOf, contentText, kindWords } from "./event-rows";
+import type { ContentVariant, Row } from "./event-rows";
 import { Chevron } from "./icons";
 import type { Event } from "./types";
 

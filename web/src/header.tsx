@@ -1,4 +1,4 @@
-import ThemeToggle from "./ThemeToggle";
+import ThemeToggle from "./theme-toggle";
 
 /** The product header: the wordmark and controls shared by every view. */
 export default function Header() {
