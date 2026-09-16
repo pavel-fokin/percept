@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { fetchEvent, messageOf } from "./api";
-import { answerSize, contentOf, contentText, kindWords, timeOf } from "./eventRows";
+import { answerSize, contentOf, contentText, kindWords } from "./eventRows";
 import type { ContentVariant, Row } from "./eventRows";
 import { Chevron } from "./icons";
 import type { Event } from "./types";
@@ -27,18 +27,12 @@ export default function EventRow({ row }: { row: Row }) {
         <Content text={content.text} variant={content.variant} />
         <span className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-faint">
           {kind && (
-            <>
-              <span>{kind}</span>
-              <span className="text-rule">&#183;</span>
-            </>
+            <span>{kind}</span>
           )}
+          {kind && answer && <span className="text-rule">&#183;</span>}
           {answer && (
-            <>
-              <span>{answerSize(answer)}</span>
-              <span className="text-rule">&#183;</span>
-            </>
+            <span>{answerSize(answer)}</span>
           )}
-          <span className="font-mono">{timeOf(event)}</span>
           <span data-chev className="ml-auto flex size-4 shrink-0 items-center justify-center text-faint" aria-hidden="true">
             <Chevron className="size-3.5" />
           </span>

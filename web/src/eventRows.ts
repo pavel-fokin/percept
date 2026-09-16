@@ -65,22 +65,28 @@ function speakerKey(event: Event): string {
   return JSON.stringify([event.actor.kind, event.source.name, event.source.path]);
 }
 
-/** One run of consecutive rows by the same speaker - what shares one
- * header down the page. */
-export interface Run {
-  speaker: Speaker;
-  rows: Row[];
+const RUN_GAP_MS = 30 * 60 * 1000;
+
+function withinRunGap(previous: Event, next: Event): boolean {
+  return Math.abs(Date.parse(previous.created_at) - Date.parse(next.created_at)) <= RUN_GAP_MS;
 }
 
-/** `rows`, folded into runs by the same speaker - the header each row
- * carries is the run's, not the event's. */
+/** One run of nearby rows with the same attributed actor and source. */
+export interface Run {
+  speaker: Speaker;
+  rows: [Row, ...Row[]];
+}
+
+/** `rows`, in display order, folded into runs by the same source.
+ * Events more than 30 minutes apart start separate runs even when
+ * their source matches. */
 export function groupRuns(rows: Row[]): Run[] {
   const runs: Run[] = [];
   let key: string | null = null;
   for (const row of rows) {
     const nextKey = speakerKey(row.event);
     const last = runs[runs.length - 1];
-    if (last && key === nextKey) {
+    if (last && key === nextKey && withinRunGap(last.rows[last.rows.length - 1].event, row.event)) {
       last.rows.push(row);
     } else {
       runs.push({ speaker: speakerOf(row.event), rows: [row] });

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import EventRow from "./EventRow";
-import { basename, eventsCountLabel, foldResults, groupByDay, groupRuns } from "./eventRows";
+import { basename, eventsCountLabel, foldResults, groupByDay, groupRuns, timeOf } from "./eventRows";
 import FilterMenu from "./FilterMenu";
 import type { Filter } from "./filters";
 import {
@@ -186,6 +186,7 @@ export default function Log({
                 >
                   <p className={`text-[0.6875rem] font-medium uppercase tracking-[0.1em] ${run.speaker.toneClass}`}>
                     {run.speaker.label}
+                    <span className="font-mono font-normal text-faint"> · {timeOf(run.rows[0].event)}</span>
                     {project && differentPath(run.rows[0].event.source.path, project) && (
                       <span className="text-faint"> · {basename(run.rows[0].event.source.path)}</span>
                     )}
