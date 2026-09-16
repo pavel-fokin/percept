@@ -1,5 +1,5 @@
 import type { Filter } from "./filters";
-import type { Event, EventsResponse } from "./types";
+import type { Event, EventsResponse, ProjectsResponse } from "./types";
 
 /** `GET /api/events` - the log's most recent window matching `filter`.
  * `until` is exclusive, so passing the oldest event already held asks
@@ -29,6 +29,17 @@ export async function fetchEvent(id: string): Promise<Event> {
   }
   const body = (await response.json()) as { event: Event };
   return body.event;
+}
+
+/** `GET /api/projects` - every project the log holds, newest first.
+ * Unlike the events cut, this one is not scoped to the project the
+ * server was started in: crossing checkouts is the whole point of it. */
+export async function fetchProjects(): Promise<ProjectsResponse> {
+  const response = await fetch("/api/projects");
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`);
+  }
+  return response.json() as Promise<ProjectsResponse>;
 }
 
 /** `error`'s message, or its string form when it isn't an `Error` - the

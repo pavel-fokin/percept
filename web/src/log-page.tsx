@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { fetchEvents, messageOf } from "./api";
 import { filterFromSearch, resolveSince, searchFromFilter } from "./filters";
 import type { Filter } from "./filters";
-import Header from "./header";
 import Log from "./log";
+import { SEARCH_FIELD_ID, SEARCH_HASH } from "./routes";
 import type { Event } from "./types";
 
 interface Results {
@@ -30,13 +30,17 @@ function useDebouncedValue<T>(value: T, delay: number): T {
   return debounced;
 }
 
-export default function App() {
+export default function LogPage() {
   const [load, setLoad] = useState<Load>({ state: "loading", results: null });
   const [project, setProject] = useState<string | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [pagingFailed, setPagingFailed] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [filter, setFilter] = useState<Filter>(() => filterFromSearch(window.location.search));
+  // The header's magnifier asks for the log with its field focused,
+  // and says so in the URL. Read during the first render, before the
+  // effect below rewrites the address and drops the hash.
+  const [focusSearch] = useState(() => window.location.hash === SEARCH_HASH);
 
   const debouncedQ = useDebouncedValue(filter.q, SEARCH_DEBOUNCE_MS);
   const asked = searchFromFilter({ ...filter, q: debouncedQ });
@@ -47,6 +51,10 @@ export default function App() {
   useEffect(() => {
     window.history.replaceState(null, "", `${window.location.pathname}${asked}`);
   }, [asked]);
+
+  useEffect(() => {
+    if (focusSearch) document.getElementById(SEARCH_FIELD_ID)?.focus();
+  }, [focusSearch]);
 
   useEffect(() => {
     const parsed = filterFromSearch(asked);
@@ -120,14 +128,13 @@ export default function App() {
   const visibleLoadState = load.state === "ready" && results?.query !== visibleQuery ? "updating" : load.state;
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <>
       <a
         href="#log"
         className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-accent focus:p-4 focus:text-button"
       >
         Skip to the log
       </a>
-      <Header />
       <Log
         project={project}
         events={results?.events ?? []}
@@ -144,6 +151,6 @@ export default function App() {
         filter={filter}
         onFilterChange={setFilter}
       />
-    </div>
+    </>
   );
 }

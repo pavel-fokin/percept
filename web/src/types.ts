@@ -39,3 +39,30 @@ export interface EventsResponse {
    * the page's heading with it. */
   project: string;
 }
+
+/** One map a project keeps, as `GET /api/projects` reports it:
+ * `headlines` is how many of its nodes a reader sees before opening
+ * it, and `gained` how many of those changed since that project's last
+ * session. */
+export interface ProjectMap {
+  name: string;
+  headlines: number;
+  gained: number;
+}
+
+/** One project the log holds events for. `maps` is empty for a project
+ * whose root declares no schemas - a checkout deleted since, or one
+ * never initialised. */
+export interface Project {
+  name: string;
+  path: string;
+  events: number;
+  last_active: string;
+  maps: ProjectMap[];
+}
+
+/** `GET /api/projects`'s body: every project in the log, the most
+ * recently active first. */
+export interface ProjectsResponse {
+  projects: Project[];
+}

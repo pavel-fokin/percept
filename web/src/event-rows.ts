@@ -1,10 +1,5 @@
+import { LOCALE } from "./format";
 import type { Event } from "./types";
-
-/** The interface is written in English, so its numbers and dates are
- * formatted in English too - an open locale would read `September 16`
- * on one machine and `16 September` on the next, in a row whose every
- * other word is fixed. */
-const LOCALE = "en-GB";
 
 /** Who a row's header names, and the tier its label is set in - `You`
  * in `accent`, everyone else in `muted`. */
@@ -205,13 +200,6 @@ function firstArgument(payload: Record<string, unknown>): string {
 export function eventsCountLabel(shown: number, total: number): string {
   const loaded = shown.toLocaleString(LOCALE);
   return shown >= total ? `${loaded} events, newest first.` : `${loaded} of ${total.toLocaleString(LOCALE)} events, newest first.`;
-}
-
-/** The last segment of a path - how a project is named on screen. */
-export function basename(path: string): string {
-  const trimmed = path.replace(/\/+$/, "");
-  const parts = trimmed.split("/");
-  return parts[parts.length - 1] || trimmed;
 }
 
 const TIME = new Intl.DateTimeFormat(LOCALE, { hour: "2-digit", minute: "2-digit", hour12: false });
