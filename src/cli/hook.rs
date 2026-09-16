@@ -240,13 +240,43 @@ fn turn_rules(schemas: Option<&Schemas>) -> Vec<&str> {
         .collect()
 }
 
+/// Who a prompt is from. A client delivers more than the user's own
+/// words on this channel: a subagent's hand-back and the harness's own
+/// task notification arrive as prompts too, each wrapped in a frame
+/// that names itself. Attributing those to the human puts words in a
+/// person's mouth, so the frame decides the actor and the channel does
+/// not. A frame counts only when it is the whole message, open tag to
+/// close - a prompt that merely quotes one is still the user writing.
+fn prompt_actor(prompt: &str, me: Option<crate::core::HumanId>) -> Actor {
+    let text = prompt.trim();
+    if framed(text, "agent-message") {
+        Actor::Agent
+    } else if framed(text, "task-notification") {
+        Actor::System
+    } else {
+        Actor::Human(me)
+    }
+}
+
+/// Whether `text` is one whole `<tag …>…</tag>` element and nothing
+/// else. The opening tag may carry attributes, so it is matched up to
+/// the delimiter that ends a tag name rather than to `>`.
+fn framed(text: &str, tag: &str) -> bool {
+    let opens = text
+        .strip_prefix('<')
+        .and_then(|rest| rest.strip_prefix(tag))
+        .is_some_and(|rest| rest.starts_with(['>', ' ', '\t', '\n', '\r', '/']));
+    opens && text.ends_with(&format!("</{tag}>"))
+}
+
 /// `UserPromptSubmit`: clears the turn's previous cause before doing
 /// anything else, so a prompt that then fails to commit never leaves a
 /// later event citing the wrong one. Records the prompt as
-/// `message.received` from `human`, stores its id as the turn's cause
-/// and as the checkout's open turn under `dir`, and returns the
-/// client's expected `additionalContext`: the event's id on the first
-/// line, `turn_rules` on the lines after it.
+/// `message.received` from whoever `prompt_actor` says wrote it,
+/// stores its id as the turn's cause and as the checkout's open turn
+/// under `dir`, and returns the client's expected `additionalContext`:
+/// the event's id on the first line, `turn_rules` on the lines after
+/// it.
 fn submit_prompt(
     prompt: String,
     source: &Source,
@@ -258,7 +288,7 @@ fn submit_prompt(
 ) -> Result<Value, Box<dyn std::error::Error>> {
     state.clear()?;
 
-    let committed = Event::message_received(Actor::Human(me), prompt, source.clone(), None);
+    let committed = Event::message_received(prompt_actor(&prompt, me), prompt, source.clone(), None);
     let id = committed.id();
     log.append(&committed)?;
     state.set(id)?;

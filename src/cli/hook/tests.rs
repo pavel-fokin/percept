@@ -393,6 +393,61 @@ fn prompt_context_names_the_committed_event() {
 }
 
 #[test]
+fn a_subagent_hand_back_delivered_as_a_prompt_is_the_agents() {
+    let fixture = Fixture::new();
+    fixture.prompt(
+        "claude-code",
+        "session",
+        "",
+        "<agent-message from=\"a58cf0ad\">\n  the report\n</agent-message>",
+    );
+
+    assert_eq!(fixture.events()[0].actor(), Actor::Agent);
+}
+
+#[test]
+fn a_task_notification_delivered_as_a_prompt_is_the_systems() {
+    let fixture = Fixture::new();
+    fixture.prompt(
+        "claude-code",
+        "session",
+        "",
+        "<task-notification>\n<status>completed</status>\n</task-notification>",
+    );
+
+    assert_eq!(fixture.events()[0].actor(), Actor::System);
+}
+
+#[test]
+fn a_prompt_quoting_a_frame_is_still_the_humans() {
+    let fixture = Fixture::new();
+    fixture.prompt(
+        "claude-code",
+        "session",
+        "",
+        "why did <task-notification>\n</task-notification> say that?",
+    );
+
+    assert!(matches!(fixture.events()[0].actor(), Actor::Human(_)));
+}
+
+#[test]
+fn a_prompt_opening_a_frame_it_never_closes_is_still_the_humans() {
+    let fixture = Fixture::new();
+    fixture.prompt("claude-code", "session", "", "<agent-message from=\"x\"> and then I typed on");
+
+    assert!(matches!(fixture.events()[0].actor(), Actor::Human(_)));
+}
+
+#[test]
+fn a_prompt_whose_first_word_only_starts_like_a_frame_is_the_humans() {
+    let fixture = Fixture::new();
+    fixture.prompt("claude-code", "session", "", "<agent-messages-are-odd>\n</agent-message>");
+
+    assert!(matches!(fixture.events()[0].actor(), Actor::Human(_)));
+}
+
+#[test]
 fn a_first_session_here_prints_starts_render_and_records_the_marker() {
     let fixture = Fixture::new();
     let context = fixture.session_start("codex");
