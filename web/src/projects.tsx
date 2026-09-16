@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 import { fetchProjects, messageOf } from "./api";
 import { count, relativeTime } from "./format";
+import { mapPath } from "./routes";
 import type { Project } from "./types";
 
 type Load =
@@ -94,7 +96,12 @@ function ProjectRow({ project }: { project: Project }) {
         <ul className="mt-2 space-y-1">
           {project.maps.map((map) => (
             <li key={map.name} className="flex flex-wrap items-baseline gap-x-2 text-[0.8125rem]">
-              <span className="text-muted">{map.name}</span>
+              <Link
+                to={mapPath(map.name, project.path)}
+                className="inline-flex min-h-11 items-center text-accent underline decoration-rule underline-offset-4 hover:decoration-faint"
+              >
+                {map.name}
+              </Link>
               <span className="text-faint">
                 <span className="font-mono tabular-nums">{count(map.headlines)}</span> headlines
               </span>
