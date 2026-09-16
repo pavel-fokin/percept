@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { fetchEvent } from "./api";
-import { answerSize, contentOf, contentText, kindWords, projectOf, timeOf } from "./eventRows";
+import { answerSize, contentOf, contentText, kindWords, timeOf } from "./eventRows";
 import type { Row } from "./eventRows";
 import { Chevron } from "./icons";
 import type { Event } from "./types";
@@ -17,7 +17,7 @@ export default function EventRow({ row }: { row: Row }) {
 
   return (
     <details onToggle={answerText.load}>
-      <summary className="block">
+      <summary className="block min-h-11">
         <Content text={content.text} variant={content.variant} />
         <span className="mt-1.5 flex flex-wrap items-center gap-x-2 text-xs text-faint">
           {kind && (
@@ -32,8 +32,6 @@ export default function EventRow({ row }: { row: Row }) {
               <span className="text-rule">&#183;</span>
             </>
           )}
-          <span>{projectOf(event)}</span>
-          <span className="text-rule">&#183;</span>
           <span className="font-mono">{timeOf(event)}</span>
           <span data-chev className="ml-auto flex size-4 shrink-0 items-center justify-center text-faint" aria-hidden="true">
             <Chevron className="size-3.5" />

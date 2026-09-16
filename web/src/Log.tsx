@@ -7,11 +7,22 @@ import type { Event } from "./types";
  * grouped by day and, within a day, by the run of consecutive rows one
  * speaker produced. A tool's answer is not a row of its own - it sits
  * inside the call that caused it. */
-export default function Log({ events, total }: { events: Event[]; total: number }) {
+export default function Log({
+  events,
+  total,
+  loadingMore,
+  onShowEarlier,
+}: {
+  events: Event[];
+  total: number;
+  loadingMore: boolean;
+  onShowEarlier: () => void;
+}) {
   const days = groupByDay(foldResults(events));
+  const earlier = events.length < total;
 
   return (
-    <main className="mx-auto w-full max-w-3xl flex-1 px-4 pb-14 sm:px-8">
+    <main id="log" className="mx-auto w-full max-w-3xl flex-1 px-4 pb-14 sm:px-8">
       <label htmlFor="q" className="sr-only">
         Search every event
       </label>
@@ -64,8 +75,20 @@ export default function Log({ events, total }: { events: Event[]; total: number 
         </section>
       ))}
 
-      <p className="pt-4 text-[0.8125rem] text-faint">
-        {events.length} of {total} events, newest first.
+      <p aria-live="polite" className="flex flex-wrap items-center gap-x-3 pt-4 text-[0.8125rem] text-faint">
+        <span>
+          {events.length.toLocaleString("en-GB")} of {total.toLocaleString("en-GB")} events, newest first.
+        </span>
+        {earlier && (
+          <button
+            type="button"
+            onClick={onShowEarlier}
+            disabled={loadingMore}
+            className="inline-flex min-h-11 items-center text-accent underline decoration-rule underline-offset-4 hover:decoration-faint"
+          >
+            {loadingMore ? "Reading\u2026" : "Show earlier"}
+          </button>
+        )}
       </p>
     </main>
   );

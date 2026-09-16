@@ -1,9 +1,11 @@
 import type { Event, EventsResponse } from "./types";
 
-/** `GET /api/events`, throwing the status line on a failed fetch - the
- * one place the page reads the log. */
-export async function fetchEvents(): Promise<EventsResponse> {
-  const response = await fetch("/api/events");
+/** `GET /api/events` - the log's most recent window. `until` is
+ * exclusive, so passing the oldest event already held asks for the
+ * window before it, with no overlap and no gap. */
+export async function fetchEvents(until?: string): Promise<EventsResponse> {
+  const query = until ? `?until=${encodeURIComponent(until)}` : "";
+  const response = await fetch(`/api/events${query}`);
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`);
   }
