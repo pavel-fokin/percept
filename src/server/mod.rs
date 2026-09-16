@@ -1,4 +1,4 @@
-//! `percept review` - serves the embedded review page over HTTP on
+//! `percept web` - serves the embedded page over HTTP on
 //! `127.0.0.1`, on a port the OS picks, and opens it in the browser.
 //! A presentation-layer peer of `cli` and `tui`: it has no chat logic
 //! of its own. It serves the JSON the page reads (`GET /api/review`)
@@ -33,14 +33,14 @@ mod review;
 #[cfg(test)]
 mod tests;
 
-/// The review page this binary was built with: the real one if
+/// The page this binary was built with: the real one if
 /// `web/dist/index.html` existed at build time, a stub explaining how
 /// to build it otherwise.
 const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 
 /// The writer name every event the server appends carries, so a
 /// session it opens is never confused with the CLI's own.
-const SOURCE_NAME: &str = "percept-review";
+const SOURCE_NAME: &str = "percept-web";
 
 /// What every handler needs to fold or write the log: read fresh on
 /// every `GET /api/review` call, never cached. `since` is fixed for the
@@ -54,11 +54,11 @@ struct AppState {
     since: Option<Timestamp>,
 }
 
-/// `percept review` - binds a server on `127.0.0.1`, prints its URL,
+/// `percept web` - binds a server on `127.0.0.1`, prints its URL,
 /// opens it in the browser, and serves until the process is killed.
 /// `log` and `schemas` are read fresh on every `GET /api/review`;
 /// `source`'s path says which project's events that cut reads, its own
-/// name replaced by `percept-review`; `me` is the human every write the
+/// name replaced by `percept-web`; `me` is the human every write the
 /// page makes is attributed to; `checkout` is where the files a
 /// citation names are read from, which is not `source.path` in a
 /// linked worktree. Appends one `session.started` for that
@@ -86,7 +86,7 @@ pub async fn run(
             .expect("opening the review session never panics")?
     };
     let url = format!("http://{addr}");
-    println!("percept review at {url}");
+    println!("percept web at {url}");
     open_browser(&url);
     let state = Arc::new(AppState { log, schemas, source, checkout, me, since });
     serve(listener, state).await;

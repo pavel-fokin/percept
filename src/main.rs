@@ -304,7 +304,7 @@ async fn main() {
             let schemas = mapstore::load_schemas(&checkout)?;
             cli::start(&log, &schemas, &root, &checkout)
         }),
-        Some(Command::Review) => {
+        Some(Command::Web) => {
             let opened = open_log(&checkout).and_then(|log| {
                 let schemas = mapstore::load_schemas(&checkout)?;
                 let me = log.me();

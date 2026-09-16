@@ -88,9 +88,9 @@ pub enum Command {
     /// Write a coding client's project config so its hooks call
     /// `percept hook <client>`.
     Init(init::InitArgs),
-    /// Open the review page: an HTTP server on `127.0.0.1` serving the
-    /// embedded page, until the process is killed.
-    Review,
+    /// Open percept in a browser: an HTTP server on `127.0.0.1` serving
+    /// the embedded page, until the process is killed.
+    Web,
     /// What this project has recorded, what needs attention, and where
     /// to go next.
     Start,

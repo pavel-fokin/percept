@@ -85,7 +85,7 @@ async fn root_returns_the_embedded_page() {
     let addr = spawn().await;
     let response = get(addr, "/").await;
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
-    assert!(response.contains("<title>percept review</title>"), "{response}");
+    assert!(response.contains("<title>percept</title>"), "{response}");
 }
 
 #[tokio::test]
@@ -93,7 +93,7 @@ async fn root_with_a_query_string_still_returns_the_embedded_page() {
     let addr = spawn().await;
     let response = get(addr, "/?x=1").await;
     assert!(response.starts_with("HTTP/1.1 200"), "{response}");
-    assert!(response.contains("<title>percept review</title>"), "{response}");
+    assert!(response.contains("<title>percept</title>"), "{response}");
 }
 
 #[tokio::test]

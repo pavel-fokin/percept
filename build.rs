@@ -1,5 +1,5 @@
-//! Copies `web/dist/index.html` - the review page `web/`'s `npm run
-//! build` writes - into `OUT_DIR`, so `src/server` can embed it with
+//! Copies `web/dist/index.html` - the page `web/`'s `npm run build`
+//! writes - into `OUT_DIR`, so `src/server` can embed it with
 //! `include_str!` without Node ever running as part of `cargo build`.
 //! A checkout without a built page still compiles: a stub page lands
 //! at the same path instead, saying so itself.
@@ -13,10 +13,10 @@ const STUB: &str = "\
 <html lang=\"en\">
   <head>
     <meta charset=\"UTF-8\" />
-    <title>percept review</title>
+    <title>percept</title>
   </head>
   <body>
-    <p>The review page is not built. Run `cd web && npm install && \
+    <p>The page is not built. Run `cd web && npm install && \
 npm run build`, then `cargo build`.</p>
   </body>
 </html>
@@ -32,6 +32,6 @@ fn main() {
     if source.exists() {
         fs::copy(source, &dest).expect("copy web/dist/index.html to OUT_DIR");
     } else {
-        fs::write(&dest, STUB).expect("write stub review page to OUT_DIR");
+        fs::write(&dest, STUB).expect("write stub page to OUT_DIR");
     }
 }

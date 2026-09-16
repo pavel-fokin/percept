@@ -1,4 +1,4 @@
-//! What the session-start block, the review page, and the Markdown
+//! What the session-start block, the web view, and the Markdown
 //! render share: the truncation rule, a node's line id, the wording of
 //! its last change, and the session rule both a hook and the review
 //! page cut their since by.
@@ -29,7 +29,7 @@ pub(crate) fn line_id(map: &Map, node: &Node) -> String {
 }
 
 /// The latest `session.started` among `events`, already cut to whose
-/// sessions count: the hook and the review page pass their own exact
+/// sessions count: the hook and the web view pass their own exact
 /// source, and record a fresh one after; `percept start` from the
 /// shell records none, so it passes `of_path` - the last look by
 /// anyone here. `None` when no session has started.
