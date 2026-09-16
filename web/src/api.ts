@@ -1,11 +1,19 @@
+import type { Filter } from "./filters";
+import { wireKinds } from "./filters";
 import type { Event, EventsResponse } from "./types";
 
-/** `GET /api/events` - the log's most recent window. `until` is
- * exclusive, so passing the oldest event already held asks for the
- * window before it, with no overlap and no gap. */
-export async function fetchEvents(until?: string): Promise<EventsResponse> {
-  const query = until ? `?until=${encodeURIComponent(until)}` : "";
-  const response = await fetch(`/api/events${query}`);
+/** `GET /api/events` - the log's most recent window matching `filter`.
+ * `until` is exclusive, so passing the oldest event already held asks
+ * for the window before it, with no overlap and no gap. */
+export async function fetchEvents(filter: Filter, until?: string): Promise<EventsResponse> {
+  const params = new URLSearchParams();
+  if (filter.q) params.set("contains", filter.q);
+  const kinds = wireKinds(filter.kinds);
+  if (kinds.length > 0) params.set("type", kinds.join(","));
+  if (filter.since) params.set("since", filter.since);
+  if (until) params.set("until", until);
+  const query = params.toString();
+  const response = await fetch(`/api/events${query ? `?${query}` : ""}`);
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`);
   }

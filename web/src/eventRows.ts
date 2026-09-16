@@ -215,6 +215,13 @@ function firstArgument(payload: Record<string, unknown>): string {
   return first === undefined ? "" : JSON.stringify(first);
 }
 
+/** The count line's words: `shown` alone once everything matching has
+ * loaded, `shown` of `total` while more remains behind `Show earlier`. */
+export function eventsCountLabel(shown: number, total: number): string {
+  const loaded = shown.toLocaleString(LOCALE);
+  return shown >= total ? `${loaded} events, newest first.` : `${loaded} of ${total.toLocaleString(LOCALE)} events, newest first.`;
+}
+
 /** The basename of `event.source.path` - the project the details line
  * names. */
 export function projectOf(event: Event): string {
