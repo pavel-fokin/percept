@@ -17,6 +17,7 @@ export default function EventRow({ row }: { row: Row }) {
 
   return (
     <details
+      data-event-id={event.id}
       onToggle={(toggle) => {
         if (!toggle.currentTarget.open) return;
         wholeEvent.load();

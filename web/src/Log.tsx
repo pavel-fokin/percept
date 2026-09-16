@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import EventRow from "./EventRow";
 import { eventsCountLabel, foldResults, groupByDay, groupRuns } from "./eventRows";
 import FilterMenu from "./FilterMenu";
@@ -58,6 +58,7 @@ export default function Log({
   onFilterChange: (filter: Filter) => void;
 }) {
   const [openMenu, setOpenMenu] = useState<OpenMenu>(null);
+  const readingAnchor = useRef<{ id: string; top: number } | null>(null);
   // Held across a re-render: the speaker under the pinned strip changes
   // at every run boundary on the way down the page, and regrouping the
   // whole log each time is the one thing here that costs anything.
@@ -67,6 +68,24 @@ export default function Log({
   const earlier = resultsCurrent && loadState === "ready" && events.length < total;
   const filtered = isFilterActive(filter);
   const noMatches = resultsCurrent && loadState === "ready" && filtered && total === 0;
+
+  useLayoutEffect(() => {
+    const anchor = readingAnchor.current;
+    if (!anchor) return;
+    const event = document.querySelector<HTMLElement>(`[data-event-id="${CSS.escape(anchor.id)}"]`);
+    if (event) window.scrollBy(0, event.getBoundingClientRect().top - anchor.top);
+    readingAnchor.current = null;
+  }, [events]);
+
+  function showEarlier() {
+    const visible = [...document.querySelectorAll<HTMLElement>("[data-event-id]")].find(
+      (event) => event.getBoundingClientRect().bottom > 64,
+    );
+    if (visible) {
+      readingAnchor.current = { id: visible.dataset.eventId ?? "", top: visible.getBoundingClientRect().top };
+    }
+    onShowEarlier();
+  }
 
   return (
     <main id="log" className="mx-auto w-full max-w-3xl flex-1 px-4 pb-14 sm:px-8">
@@ -153,6 +172,22 @@ export default function Log({
         )}
       </div>
 
+      {(pagingFailed || earlier) && (
+        <p aria-live="polite" className="flex flex-wrap items-center gap-x-3 pt-4 text-[0.8125rem] text-faint">
+          {pagingFailed && <span className="text-ink">Earlier events could not be read: {pagingFailed}.</span>}
+          {earlier && (
+            <button
+              type="button"
+              onClick={showEarlier}
+              disabled={loadingMore}
+              className="inline-flex min-h-11 items-center text-accent underline decoration-rule underline-offset-4 hover:decoration-faint"
+            >
+              {loadingMore ? "Reading…" : "Show earlier"}
+            </button>
+          )}
+        </p>
+      )}
+
       {days.map((day, i) => (
           <section key={day.key}>
             <h2
@@ -190,21 +225,6 @@ export default function Log({
           </section>
       ))}
 
-      {(pagingFailed || earlier) && (
-        <p aria-live="polite" className="flex flex-wrap items-center gap-x-3 pt-4 text-[0.8125rem] text-faint">
-          {pagingFailed && <span className="text-ink">Earlier events could not be read: {pagingFailed}.</span>}
-          {earlier && (
-            <button
-              type="button"
-              onClick={onShowEarlier}
-              disabled={loadingMore}
-              className="inline-flex min-h-11 items-center text-accent underline decoration-rule underline-offset-4 hover:decoration-faint"
-            >
-              {loadingMore ? "Reading…" : "Show earlier"}
-            </button>
-          )}
-        </p>
-      )}
     </main>
   );
 }
