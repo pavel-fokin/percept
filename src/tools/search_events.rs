@@ -108,6 +108,7 @@ impl Tool for SearchEvents {
             until,
             actors,
             sources: args.sources,
+            roots: Vec::new(),
             kinds,
             text: args.contains,
             size: args.size.or(Some(DEFAULT_SIZE)),

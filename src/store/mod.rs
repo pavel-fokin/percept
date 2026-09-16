@@ -18,34 +18,17 @@ mod turn_state;
 pub use error::Error;
 pub use event::{
     actor_value, decode, encode, encode_at, find_event, from_wire, ids, parse_actor,
-    parse_event_id, parse_kind, parse_lines, read_event, summarize, Cursor, Event, PREVIEW_CHARS,
+    parse_event_id, parse_kind, parse_lines, read_event, summarize, summary, Cursor, Event,
+    PREVIEW_CHARS,
 };
 pub use jsonl::Jsonl;
 pub use turn_state::{turn_dir, TurnState};
 
-/// A moment as a reader types it, on the CLI or in a tool call: ISO-8601,
-/// or `<N>d`, `<N>h`, `<N>m` measured back from now. One parser, so
-/// `since` means the same wherever it is written.
+/// A moment in a tool call, refused in the vocabulary a tool schema uses.
+/// The grammar is `shared::parse_time`'s; only the wording is here.
 pub fn parse_time(s: &str) -> Result<crate::shared::Timestamp, Box<dyn std::error::Error>> {
-    let parsed = match relative_minutes(s) {
-        Some(minutes) => crate::shared::Timestamp::now().minus_minutes(minutes),
-        None => s.parse().ok(),
-    };
-    parsed.ok_or_else(|| format!("invalid timestamp {s:?}: ISO-8601 or <N>d, <N>h, <N>m").into())
-}
-
-/// `<N>d`, `<N>h`, or `<N>m` as a count of minutes. `None` for anything
-/// else - `parse_time` then tries it as ISO-8601.
-fn relative_minutes(s: &str) -> Option<i64> {
-    let (digits, unit) = s.split_at_checked(s.len().checked_sub(1)?)?;
-    let n: i64 = digits.parse().ok()?;
-
-    match unit {
-        "d" => n.checked_mul(24 * 60),
-        "h" => n.checked_mul(60),
-        "m" => Some(n),
-        _ => None,
-    }
+    crate::shared::parse_time(s)
+        .ok_or_else(|| format!("invalid timestamp {s:?}: ISO-8601 or <N>d, <N>h, <N>m").into())
 }
 
 /// A tool's optional time bound. Absent or empty is no bound: a model

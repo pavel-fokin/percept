@@ -1,7 +1,8 @@
 use super::*;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
-use crate::core::testing::{human, source};
+use crate::core::testing::{human, source, source_at};
 use crate::core::{EventId, NodeId, Payload};
 
 /// A message from `name`, timestamped `offset_minutes` back.
@@ -94,6 +95,38 @@ fn since_is_inclusive_and_until_is_exclusive() {
     .apply(vec![a, b, c]);
 
     assert_eq!(sources(&kept), vec!["b"]);
+}
+
+#[test]
+fn a_roots_filter_keeps_only_events_from_that_project() {
+    let here = Event::restore(
+        EventId::new(),
+        Actor::Human(human()),
+        source_at("a", "/here"),
+        None,
+        Timestamp::now(),
+        Payload::MessageReceived {
+            content: "hi".to_string(),
+        },
+    );
+    let elsewhere = Event::restore(
+        EventId::new(),
+        Actor::Human(human()),
+        source_at("a", "/elsewhere"),
+        None,
+        Timestamp::now(),
+        Payload::MessageReceived {
+            content: "hi".to_string(),
+        },
+    );
+
+    let query = EventQuery {
+        roots: vec![PathBuf::from("/here")],
+        ..Default::default()
+    };
+
+    assert!(query.matches(&here));
+    assert!(!query.matches(&elsewhere));
 }
 
 #[test]

@@ -1,9 +1,10 @@
 //! `percept web` - serves the embedded page over HTTP on
 //! `127.0.0.1`, on a port the OS picks, and opens it in the browser.
 //! A presentation-layer peer of `cli` and `tui`: it has no chat logic
-//! of its own. It serves the JSON the page reads (`GET /api/review`)
-//! and writes (`POST /api/change`) over the same log and maps the CLI
-//! uses. Built on `axum`.
+//! of its own. It serves the JSON the page reads (`GET /api/review`,
+//! `GET /api/events`, `GET /api/events/{id}`) and writes (`POST
+//! /api/change`) over the same log and maps the CLI uses. Built on
+//! `axum`.
 //!
 //! The page is built into the binary at compile time - `build.rs`
 //! copies `web/dist/index.html` into `OUT_DIR`, or writes a stub there
@@ -16,7 +17,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::{get, post};
@@ -26,9 +27,11 @@ use serde_json::json;
 use tokio::net::TcpListener;
 
 use crate::core::{Event, EventId, EventLog, HumanId, Schemas, Source};
+use crate::server::events::Error as EventsError;
 use crate::server::review::Refused;
 use crate::shared::Timestamp;
 
+mod events;
 mod review;
 #[cfg(test)]
 mod tests;
@@ -115,7 +118,8 @@ async fn bind() -> Result<(TcpListener, SocketAddr), Box<dyn Error>> {
 /// and `GET /index.html` return the embedded page, `GET /api/review`
 /// the queue `review::cut` folds fresh from the log, `POST /api/change`
 /// takes one JSON body and answers the appended event's id or a
-/// plain-text reason, everything else 404s.
+/// plain-text reason, `GET /api/events` and `GET /api/events/{id}` the
+/// project's own log, everything else 404s.
 async fn serve(listener: TcpListener, state: Arc<AppState>) {
     let app = router(state);
     axum::serve(listener, app).await.expect("the review server never returns an error");
@@ -129,6 +133,8 @@ fn router(state: Arc<AppState>) -> Router {
         .route("/index.html", get(index))
         .route("/api/review", get(api_review))
         .route("/api/change", post(api_change))
+        .route("/api/events", get(api_events))
+        .route("/api/events/{id}", get(api_event))
         .with_state(state)
 }
 
@@ -173,6 +179,40 @@ async fn write_response(
         Ok(id) => Json(json!({ "event": id.as_uuid().to_string() })).into_response(),
         Err(Refused::Bad(reason)) => (StatusCode::BAD_REQUEST, reason).into_response(),
         Err(Refused::NotFound(reason)) => (StatusCode::NOT_FOUND, reason).into_response(),
+    }
+}
+
+/// `GET /api/events`: the project's log, filtered by the query string
+/// `server::events::parse` reads the same way `cli::parse_query` reads
+/// `SearchArgs`, scoped always to `state.source.path`.
+async fn api_events(State(state): State<Arc<AppState>>, Query(params): Query<events::Params>) -> Response {
+    let result = tokio::task::spawn_blocking(move || {
+        let root = state.source.path.clone();
+        events::list(&*state.log, params, root)
+    })
+    .await
+    .expect("api_events's blocking read never panics");
+    events_response(result)
+}
+
+/// `GET /api/events/{id}`: the whole wire event `id` names, in this
+/// project, or a 404 when it names none.
+async fn api_event(State(state): State<Arc<AppState>>, Path(id): Path<String>) -> Response {
+    let result = tokio::task::spawn_blocking(move || events::get(&*state.log, &id, &state.source.path))
+        .await
+        .expect("api_event's blocking read never panics");
+    events_response(result)
+}
+
+/// Turns `server::events`' result into the response every route in this
+/// module shares: the body as JSON, or the error's reason as plain text
+/// with the status its variant earns.
+fn events_response(result: Result<serde_json::Value, EventsError>) -> Response {
+    match result {
+        Ok(body) => Json(body).into_response(),
+        Err(EventsError::Bad(reason)) => (StatusCode::BAD_REQUEST, reason).into_response(),
+        Err(EventsError::NotFound(reason)) => (StatusCode::NOT_FOUND, reason).into_response(),
+        Err(EventsError::Internal(reason)) => (StatusCode::INTERNAL_SERVER_ERROR, reason).into_response(),
     }
 }
 

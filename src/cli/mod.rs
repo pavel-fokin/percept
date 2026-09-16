@@ -30,7 +30,12 @@ use crate::core::{
     NodeRef, Payload, Schemas,
 };
 use crate::mapstore;
-use crate::shared::Timestamp;
+use crate::shared::{parse_time, Timestamp};
+
+/// A `--since`/`--until` value, refused by the flag a reader typed.
+fn moment(flag: &str, s: &str) -> Result<Timestamp, String> {
+    parse_time(s).ok_or_else(|| format!("invalid --{flag} value {s}"))
+}
 use crate::store;
 use crate::workspace;
 
@@ -158,7 +163,7 @@ pub struct ShowMapArgs {
     /// Keep only what the map gained since this instant - an ISO-8601
     /// timestamp, or `<N>d`, `<N>h`, `<N>m` back from now: the nodes
     /// added since, and the ends of the edges added since.
-    #[arg(long, value_parser = |s: &str| parse_time("since", s))]
+    #[arg(long, value_parser = |s: &str| moment("since", s))]
     since: Option<Timestamp>,
     /// Fold every path's events instead of only this one's, printing
     /// one map per path. A node named with `--around` lives in one
@@ -1300,12 +1305,12 @@ fn parse_query(args: &SearchArgs, me: Option<crate::core::HumanId>) -> Result<Ev
     let since = args
         .since
         .as_deref()
-        .map(|s| parse_time("since", s))
+        .map(|s| moment("since", s))
         .transpose()?;
     let until = args
         .until
         .as_deref()
-        .map(|s| parse_time("until", s))
+        .map(|s| moment("until", s))
         .transpose()?;
 
     // An inverted window can never match, whatever the log holds -
@@ -1323,6 +1328,7 @@ fn parse_query(args: &SearchArgs, me: Option<crate::core::HumanId>) -> Result<Ev
         until,
         actors,
         sources: args.source.clone(),
+        roots: Vec::new(),
         kinds,
         text: args.contains.clone(),
         size: args.size,
@@ -1337,14 +1343,6 @@ pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error
     let (start, end) = args.range.unwrap_or_default();
     println!("{}", store::read_event(log, &args.id, start, end)?);
     Ok(())
-}
-
-/// Parses a `--since`/`--until` value: an ISO-8601 timestamp, or a
-/// relative shorthand - `<N>d`, `<N>h`, `<N>m` - measured back from now.
-/// `flag` names the flag the value came from, so a rejected value's
-/// error says which one.
-fn parse_time(flag: &str, s: &str) -> Result<Timestamp, String> {
-    store::parse_time(s).map_err(|_| format!("invalid --{flag} value {s}"))
 }
 
 pub mod hook;

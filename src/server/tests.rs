@@ -176,3 +176,90 @@ async fn a_change_takes_the_node_out_of_the_humans_review_queue() {
     // change is the human's, so it leaves the queue.
     assert!(debates["groups"].as_array().unwrap().is_empty(), "{debates}");
 }
+
+/// A `message.received` from `/test`, for a query that has to tell one
+/// kind of event from another.
+fn message(content: &str) -> crate::core::Event {
+    crate::core::Event::new(
+        Actor::Agent,
+        source("test"),
+        None,
+        Payload::MessageReceived {
+            content: content.to_string(),
+        },
+    )
+}
+
+/// `get`, split into an owned status line and body - what a route test
+/// reads, since `split` borrows the response it was handed.
+async fn get_parts(addr: std::net::SocketAddr, path: &str) -> (String, String) {
+    let response = get(addr, path).await;
+    let (status, body) = split(&response);
+    (status.to_string(), body.to_string())
+}
+
+/// `get_parts`, with the body parsed - every route here answers JSON.
+async fn get_json(addr: std::net::SocketAddr, path: &str) -> (String, serde_json::Value) {
+    let (status, body) = get_parts(addr, path).await;
+    (status, serde_json::from_str(&body).expect("a JSON body"))
+}
+
+#[tokio::test]
+async fn api_events_serves_only_this_projects_events() {
+    let events = vec![
+        message("in this project"),
+        crate::core::testing::node_added_at("/elsewhere", "claim", "in another"),
+    ];
+    let (_log, addr) = spawn_over(events).await;
+    let (status, body) = get_json(addr, "/api/events").await;
+    assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+    assert_eq!(body["events"].as_array().unwrap().len(), 1);
+    assert_eq!(body["total"], 1);
+}
+
+#[tokio::test]
+async fn api_events_reports_the_total_from_before_size_cut_it() {
+    let events = vec![message("one"), message("two"), message("three")];
+    let (_log, addr) = spawn_over(events).await;
+    let (_, body) = get_json(addr, "/api/events?size=2").await;
+    assert_eq!(body["events"].as_array().unwrap().len(), 2);
+    assert_eq!(body["total"], 3);
+}
+
+#[tokio::test]
+async fn api_events_filters_by_the_type_parameter() {
+    let events = vec![message("said"), node_added_by(Actor::Agent, "claim", "recorded")];
+    let (_log, addr) = spawn_over(events).await;
+    let (status, body) = get_json(addr, "/api/events?type=message.received").await;
+    assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["type"], "message.received");
+}
+
+#[tokio::test]
+async fn api_events_refuses_a_blank_contains_and_says_why() {
+    let addr = spawn().await;
+    let (status, body) = get_parts(addr, "/api/events?contains=").await;
+    assert!(status.starts_with("HTTP/1.1 400"), "{status}");
+    assert!(body.contains("contains"), "{body}");
+}
+
+#[tokio::test]
+async fn api_event_returns_the_whole_event_by_id() {
+    let event = message("the one we ask for");
+    let id = event.id().as_uuid().to_string();
+    let (_log, addr) = spawn_over(vec![event]).await;
+    let (status, body) = get_json(addr, &format!("/api/events/{id}")).await;
+    assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+    assert_eq!(body["event"]["payload"]["content"], "the one we ask for");
+}
+
+#[tokio::test]
+async fn api_event_is_not_found_for_an_event_in_another_project() {
+    let event = crate::core::testing::node_added_at("/elsewhere", "claim", "in another");
+    let id = event.id().as_uuid().to_string();
+    let (_log, addr) = spawn_over(vec![event]).await;
+    let (status, _) = get_parts(addr, &format!("/api/events/{id}")).await;
+    assert!(status.starts_with("HTTP/1.1 404"), "{status}");
+}

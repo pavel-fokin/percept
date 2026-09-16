@@ -1,4 +1,5 @@
 use std::ops::Range;
+use std::path::PathBuf;
 
 use super::{Actor, Event, EventKind, Payload};
 use crate::shared::Timestamp;
@@ -17,6 +18,11 @@ pub struct EventQuery {
     pub until: Option<Timestamp>,
     pub actors: Vec<Actor>,
     pub sources: Vec<String>,
+    /// Restricts to events whose `source.path` is one of these - the
+    /// project a caller scopes the whole query to, as `percept web`
+    /// does to its own. Distinct from `sources`, which filters by the
+    /// writer's name.
+    pub roots: Vec<PathBuf>,
     pub kinds: Vec<EventKind>,
     /// A term matches when one of the event's payload strings carries
     /// it as a substring, case-insensitively; an event passes when any
@@ -39,6 +45,7 @@ impl EventQuery {
             && self.until.is_none_or(|until| event.created_at() < until)
             && (self.actors.is_empty() || self.actors.iter().any(|actor| actor.name() == event.actor().name()))
             && (self.sources.is_empty() || self.sources.iter().any(|s| s == &event.source().name))
+            && (self.roots.is_empty() || self.roots.iter().any(|root| root == &event.source().path))
             && (self.kinds.is_empty() || self.kinds.contains(&event.kind()))
             && (self.text.is_empty() || self.text.iter().any(|term| carries(event.payload(), term)))
     }

@@ -334,27 +334,6 @@ fn a_file_cited_publish_refuses_a_range_past_the_end() {
 }
 
 #[test]
-fn parse_time_parses_an_iso8601_timestamp() {
-    let parsed = parse_time("since", "2026-01-01T00:00:00Z").unwrap();
-    assert_eq!(parsed.to_string(), "2026-01-01T00:00:00Z");
-}
-
-#[test]
-fn parse_time_parses_relative_shorthand_as_a_time_in_the_past() {
-    let now = Timestamp::now();
-    for shorthand in ["1d", "2h", "30m"] {
-        let parsed = parse_time("until", shorthand).unwrap();
-        assert!(parsed < now, "{shorthand} should parse to before now");
-    }
-}
-
-#[test]
-fn parse_time_rejects_an_unparseable_value_and_names_its_flag() {
-    let err = parse_time("until", "3x").err().unwrap();
-    assert_eq!(err, "invalid --until value 3x");
-}
-
-#[test]
 fn an_unknown_type_filter_is_rejected_rather_than_matching_nothing() {
     let args = SearchArgs {
         kind: vec!["message.recieved".to_string()],
