@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { fetchEvents, messageOf } from "./api";
-import { basename } from "./eventRows";
 import { filterFromSearch, resolveSince, searchFromFilter } from "./filters";
 import type { Filter } from "./filters";
 import Header from "./Header";
@@ -70,7 +69,7 @@ export default function App() {
             updatedAt: Date.now(),
           },
         });
-        setProject(basename(response.project));
+        setProject(response.project);
       })
       .catch((error: unknown) => {
         if (cancelled || currentQuery.current !== asked) return;

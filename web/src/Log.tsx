@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import EventRow from "./EventRow";
-import { eventsCountLabel, foldResults, groupByDay, groupRuns } from "./eventRows";
+import { basename, eventsCountLabel, foldResults, groupByDay, groupRuns } from "./eventRows";
 import FilterMenu from "./FilterMenu";
 import type { Filter } from "./filters";
 import {
@@ -94,7 +94,7 @@ export default function Log({
       <div className="mt-6">
         <h1 className="text-xl font-medium tracking-tight text-ink">Event log</h1>
         <p className="mt-1 min-h-5 text-[0.8125rem] text-faint">
-          {project && <>Reading from {project}</>}
+          {project && <>Reading from {basename(project)}</>}
         </p>
       </div>
       <label htmlFor="q" className="sr-only">
@@ -221,6 +221,9 @@ export default function Log({
                 >
                   <p className={`text-[0.6875rem] font-medium uppercase tracking-[0.1em] ${run.speaker.toneClass}`}>
                     {run.speaker.label}
+                    {project && differentPath(run.projectPath, project) && (
+                      <span className="text-faint"> · {basename(run.projectPath)}</span>
+                    )}
                   </p>
                   <div className={run.rows.length > 1 ? "mt-2 space-y-5" : "mt-2"}>
                     {run.rows.map((row) => (
@@ -241,4 +244,8 @@ const UPDATED_TIME = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute:
 
 function updatedTime(updatedAt: number): string {
   return UPDATED_TIME.format(new Date(updatedAt));
+}
+
+function differentPath(left: string, right: string): boolean {
+  return left.replace(/\/+$/, "") !== right.replace(/\/+$/, "");
 }

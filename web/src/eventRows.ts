@@ -59,17 +59,17 @@ export function answerSize(answer: Event): string {
   return length === 0 ? "no output" : `${length.toLocaleString(LOCALE)} characters`;
 }
 
-/** The key consecutive events share a header under - the speaker's
- * kind, plus the writing client's name for an agent, since two agents
- * writing to the same project are two speakers. */
+/** The key consecutive events share a header under. A source change
+ * starts a new run even when both events have the same actor label. */
 function speakerKey(event: Event): string {
-  return event.actor.kind === "agent" ? `agent:${event.source.name}` : event.actor.kind;
+  return JSON.stringify([event.actor.kind, event.source.name, event.source.path]);
 }
 
 /** One run of consecutive rows by the same speaker - what shares one
  * header down the page. */
 export interface Run {
   speaker: Speaker;
+  projectPath: string;
   rows: Row[];
 }
 
@@ -84,7 +84,7 @@ export function groupRuns(rows: Row[]): Run[] {
     if (last && key === nextKey) {
       last.rows.push(row);
     } else {
-      runs.push({ speaker: speakerOf(row.event), rows: [row] });
+      runs.push({ speaker: speakerOf(row.event), projectPath: row.event.source.path, rows: [row] });
     }
     key = nextKey;
   }

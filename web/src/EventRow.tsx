@@ -48,6 +48,9 @@ export default function EventRow({ row }: { row: Row }) {
       <div className="mt-3 rounded-sm border border-rule bg-panel px-3.5 py-3">
         <FetchStatus label="Complete details" whole={wholeEvent} />
         <dl className="grid grid-cols-[5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
+          <Detail label="writer" value={shownEvent.source.name} />
+          <Detail label="project path" value={shownEvent.source.path} />
+          <Detail label="timestamp" value={shownEvent.created_at} />
           {event.preview !== undefined && (
             <>
               <dt className="text-faint">in full</dt>
