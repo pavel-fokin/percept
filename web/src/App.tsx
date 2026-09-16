@@ -128,8 +128,9 @@ export default function App() {
       >
         Skip to the log
       </a>
-      <Header project={project} />
+      <Header />
       <Log
+        project={project}
         events={results?.events ?? []}
         carried={results?.carried ?? []}
         total={results?.total ?? 0}

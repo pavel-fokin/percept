@@ -29,6 +29,7 @@ type OpenMenu = "kind" | "actor" | "time" | null;
  * produced. A tool's answer is not a row of its own - it sits inside
  * the call that caused it. */
 export default function Log({
+  project,
   events,
   carried,
   total,
@@ -43,6 +44,7 @@ export default function Log({
   filter,
   onFilterChange,
 }: {
+  project: string | null;
   events: Event[];
   carried: Event[];
   total: number;
@@ -89,6 +91,12 @@ export default function Log({
 
   return (
     <main id="log" className="mx-auto w-full max-w-3xl flex-1 px-4 pb-14 sm:px-8">
+      <div className="mt-6">
+        <h1 className="text-xl font-medium tracking-tight text-ink">Event log</h1>
+        <p className="mt-1 min-h-5 text-[0.8125rem] text-faint">
+          {project && <>Reading from {project}</>}
+        </p>
+      </div>
       <label htmlFor="q" className="sr-only">
         Search every event
       </label>
