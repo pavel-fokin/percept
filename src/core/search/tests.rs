@@ -1,7 +1,8 @@
 use super::*;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
-use crate::core::testing::{human, source};
+use crate::core::testing::{human, source, source_at};
 use crate::core::{EventId, NodeId, Payload};
 
 /// A message from `name`, timestamped `offset_minutes` back.
@@ -94,6 +95,38 @@ fn since_is_inclusive_and_until_is_exclusive() {
     .apply(vec![a, b, c]);
 
     assert_eq!(sources(&kept), vec!["b"]);
+}
+
+#[test]
+fn a_roots_filter_keeps_only_events_from_that_project() {
+    let here = Event::restore(
+        EventId::new(),
+        Actor::Human(human()),
+        source_at("a", "/here"),
+        None,
+        Timestamp::now(),
+        Payload::MessageReceived {
+            content: "hi".to_string(),
+        },
+    );
+    let elsewhere = Event::restore(
+        EventId::new(),
+        Actor::Human(human()),
+        source_at("a", "/elsewhere"),
+        None,
+        Timestamp::now(),
+        Payload::MessageReceived {
+            content: "hi".to_string(),
+        },
+    );
+
+    let query = EventQuery {
+        roots: vec![PathBuf::from("/here")],
+        ..Default::default()
+    };
+
+    assert!(query.matches(&here));
+    assert!(!query.matches(&elsewhere));
 }
 
 #[test]
@@ -386,4 +419,27 @@ fn a_blank_term_matches_everything_as_documented() {
     .apply(events);
 
     assert_eq!(kept.len(), 2);
+}
+
+#[test]
+fn a_since_at_or_after_its_until_names_a_window_that_can_never_match() {
+    let now = Timestamp::now();
+    let earlier = now.minus_minutes(60).unwrap();
+    let query = EventQuery { since: Some(now), until: Some(earlier), ..Default::default() };
+    assert_eq!(query.inverted_window(), Some((now, earlier)));
+}
+
+#[test]
+fn a_window_in_order_is_not_inverted() {
+    let now = Timestamp::now();
+    let earlier = now.minus_minutes(60).unwrap();
+    let query = EventQuery { since: Some(earlier), until: Some(now), ..Default::default() };
+    assert!(query.inverted_window().is_none());
+}
+
+#[test]
+fn one_bound_alone_is_never_an_inverted_window() {
+    let now = Timestamp::now();
+    assert!(EventQuery { since: Some(now), ..Default::default() }.inverted_window().is_none());
+    assert!(EventQuery { until: Some(now), ..Default::default() }.inverted_window().is_none());
 }

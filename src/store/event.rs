@@ -299,6 +299,13 @@ struct Summary {
 /// `content` are cut at `PREVIEW_CHARS` whatever it is, since they are
 /// the model's own short arguments, not the text a caller reads.
 pub fn summarize(event: &crate::core::Event, hit: Option<Range<usize>>, preview: usize) -> String {
+    serde_json::to_string(&summary(event, hit, preview)).expect("store::Event always serializes")
+}
+
+/// `summarize`'s body as a `Value` rather than a string - what a caller
+/// nests inside a larger JSON document, `percept web`'s `GET
+/// /api/events` among them, without parsing a string back into one.
+pub fn summary(event: &crate::core::Event, hit: Option<Range<usize>>, preview: usize) -> Value {
     let mut wire = Event::from(event);
     let key = content_key(event.kind());
     // `content` (or `excerpt`) leaves the payload before `shorten` runs
@@ -322,7 +329,7 @@ pub fn summarize(event: &crate::core::Event, hit: Option<Range<usize>>, preview:
         wire.payload[key] = Value::String(shown);
         preview
     });
-    serde_json::to_string(&Summary {
+    serde_json::to_value(Summary {
         event: wire,
         preview,
     })

@@ -214,8 +214,13 @@ fn writes_events_and_entry_fields_in_declared_order() {
     let text = std::fs::read_to_string(temp.path().join(".codex/hooks.json")).unwrap();
     let submit = text.find("UserPromptSubmit").unwrap();
     let post = text.find("PostToolUse").unwrap();
+    let subagent = text.find("SubagentStop").unwrap();
     let stop = text.find("\"Stop\"").unwrap();
-    assert!(submit < post && post < stop, "events must read {}", EVENTS.join(", "));
+    assert!(
+        submit < post && post < subagent && subagent < stop,
+        "events must read {}",
+        EVENTS.join(", ")
+    );
 
     let kind = text.find("\"type\"").unwrap();
     let command = text.find("\"command\"").unwrap();

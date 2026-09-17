@@ -304,26 +304,10 @@ async fn main() {
             let schemas = mapstore::load_schemas(&checkout)?;
             cli::start(&log, &schemas, &root, &checkout)
         }),
-        Some(Command::Review) => {
-            let opened = open_log(&checkout).and_then(|log| {
-                let schemas = mapstore::load_schemas(&checkout)?;
-                let me = log.me();
-                Ok((log, schemas, me))
-            });
-            match opened {
-                Ok((log, schemas, me)) => {
-                    server::run(
-                        std::sync::Arc::new(log),
-                        schemas,
-                        cli_source.clone(),
-                        me,
-                        checkout.clone(),
-                    )
-                    .await
-                }
-                Err(err) => Err(err),
-            }
-        }
+        Some(Command::Web) => match open_log(&checkout) {
+            Ok(log) => server::run(std::sync::Arc::new(log), cli_source.clone()).await,
+            Err(err) => Err(err),
+        },
         #[cfg(feature = "lab")]
         Some(Command::Reflect) => {
             lab::headless_turn(

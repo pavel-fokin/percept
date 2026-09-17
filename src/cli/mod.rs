@@ -30,9 +30,14 @@ use crate::core::{
     NodeRef, Payload, Schemas,
 };
 use crate::mapstore;
-use crate::shared::Timestamp;
+use crate::shared::{parse_time, Timestamp};
 use crate::store;
 use crate::workspace;
+
+/// A `--since`/`--until` value, refused by the flag a reader typed.
+fn moment(flag: &str, s: &str) -> Result<Timestamp, String> {
+    parse_time(s).ok_or_else(|| format!("invalid --{flag} value {s}"))
+}
 
 #[cfg(feature = "lab")]
 mod turn;
@@ -88,9 +93,9 @@ pub enum Command {
     /// Write a coding client's project config so its hooks call
     /// `percept hook <client>`.
     Init(init::InitArgs),
-    /// Open the review page: an HTTP server on `127.0.0.1` serving the
-    /// embedded page, until the process is killed.
-    Review,
+    /// Open percept in a browser: an HTTP server on `127.0.0.1` serving
+    /// the embedded page, until the process is killed.
+    Web,
     /// What this project has recorded, what needs attention, and where
     /// to go next.
     Start,
@@ -158,7 +163,7 @@ pub struct ShowMapArgs {
     /// Keep only what the map gained since this instant - an ISO-8601
     /// timestamp, or `<N>d`, `<N>h`, `<N>m` back from now: the nodes
     /// added since, and the ends of the edges added since.
-    #[arg(long, value_parser = |s: &str| parse_time("since", s))]
+    #[arg(long, value_parser = |s: &str| moment("since", s))]
     since: Option<Timestamp>,
     /// Fold every path's events instead of only this one's, printing
     /// one map per path. A node named with `--around` lives in one
@@ -1300,25 +1305,15 @@ fn parse_query(args: &SearchArgs, me: Option<crate::core::HumanId>) -> Result<Ev
     let since = args
         .since
         .as_deref()
-        .map(|s| parse_time("since", s))
+        .map(|s| moment("since", s))
         .transpose()?;
     let until = args
         .until
         .as_deref()
-        .map(|s| parse_time("until", s))
+        .map(|s| moment("until", s))
         .transpose()?;
 
-    // An inverted window can never match, whatever the log holds -
-    // `--since 1h --until 2h` is how "between one and two hours ago"
-    // is mistyped. Rejecting it keeps an empty result meaning the log
-    // has nothing, the same guarantee the filters above give.
-    if let (Some(since), Some(until)) = (since, until) {
-        if since >= until {
-            return Err(format!("--since {since} is not before --until {until}"));
-        }
-    }
-
-    Ok(EventQuery {
+    let query = EventQuery {
         since,
         until,
         actors,
@@ -1326,7 +1321,12 @@ fn parse_query(args: &SearchArgs, me: Option<crate::core::HumanId>) -> Result<Ev
         kinds,
         text: args.contains.clone(),
         size: args.size,
-    })
+        ..Default::default()
+    };
+    if let Some((since, until)) = query.inverted_window() {
+        return Err(format!("--since {since} is not before --until {until}"));
+    }
+    Ok(query)
 }
 
 /// Prints the one event `args.id` names. An id the log doesn't carry
@@ -1337,14 +1337,6 @@ pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error
     let (start, end) = args.range.unwrap_or_default();
     println!("{}", store::read_event(log, &args.id, start, end)?);
     Ok(())
-}
-
-/// Parses a `--since`/`--until` value: an ISO-8601 timestamp, or a
-/// relative shorthand - `<N>d`, `<N>h`, `<N>m` - measured back from now.
-/// `flag` names the flag the value came from, so a rejected value's
-/// error says which one.
-fn parse_time(flag: &str, s: &str) -> Result<Timestamp, String> {
-    store::parse_time(s).map_err(|_| format!("invalid --{flag} value {s}"))
 }
 
 pub mod hook;

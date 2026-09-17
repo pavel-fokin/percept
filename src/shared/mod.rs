@@ -7,4 +7,4 @@ mod time;
 
 pub use id::Id;
 pub use path::to_slash;
-pub use time::Timestamp;
+pub use time::{parse_time, Timestamp};

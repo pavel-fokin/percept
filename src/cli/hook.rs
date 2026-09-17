@@ -64,7 +64,7 @@ impl HookInput {
     }
 }
 
-/// The four hook events percept understands, tagged by
+/// The five hook events percept understands, tagged by
 /// `hook_event_name`, each carrying only the fields `run` needs from
 /// it.
 #[derive(Deserialize)]
@@ -79,6 +79,10 @@ enum HookEvent {
         tool_input: Value,
         tool_response: Value,
     },
+    SubagentStop {
+        last_assistant_message: Option<String>,
+        agent_transcript_path: Option<String>,
+    },
     Stop {
         last_assistant_message: Option<String>,
         transcript_path: Option<String>,
@@ -88,7 +92,13 @@ enum HookEvent {
 /// Every event name `HookEvent` deserialises, in the order `init`
 /// writes their config entries. `hook::tests` proves this list and
 /// `HookEvent::name` cannot drift apart.
-pub const EVENTS: [&str; 4] = ["SessionStart", "UserPromptSubmit", "PostToolUse", "Stop"];
+pub const EVENTS: [&str; 5] = [
+    "SessionStart",
+    "UserPromptSubmit",
+    "PostToolUse",
+    "SubagentStop",
+    "Stop",
+];
 
 impl HookEvent {
     /// Used only by `hook::tests`, to prove `EVENTS` and this match
@@ -99,6 +109,7 @@ impl HookEvent {
             HookEvent::SessionStart { .. } => "SessionStart",
             HookEvent::UserPromptSubmit { .. } => "UserPromptSubmit",
             HookEvent::PostToolUse { .. } => "PostToolUse",
+            HookEvent::SubagentStop { .. } => "SubagentStop",
             HookEvent::Stop { .. } => "Stop",
         }
     }
@@ -126,7 +137,7 @@ pub fn read(input: &mut dyn Read) -> Result<HookInput, Box<dyn std::error::Error
 /// directory per checkout root, created if missing. `checkout` is only
 /// read - as schemas, from `.percept/schemas/*.toml` - for
 /// `SessionStart`; a project schema that fails to load must not also
-/// break the other three events, which need no schema at all.
+/// break the other four events, which need no schema at all.
 pub fn run(
     input: HookInput,
     source: &Source,
@@ -160,12 +171,25 @@ pub fn run(
             let cause = state.cause()?;
             record_tool_use(tool_name, tool_input, tool_response, source, log, cause)
         }
+        HookEvent::SubagentStop {
+            last_assistant_message,
+            agent_transcript_path,
+        } => {
+            let cause = state.cause()?;
+            record_reply(
+                last_assistant_message,
+                agent_transcript_path,
+                source,
+                log,
+                cause,
+            )
+        }
         HookEvent::Stop {
             last_assistant_message,
             transcript_path,
         } => {
             let cause = state.cause()?;
-            let output = record_stop(last_assistant_message, transcript_path, source, log, cause);
+            let output = record_reply(last_assistant_message, transcript_path, source, log, cause);
             // Another client's later prompt may own the pointer by now.
             if TurnState::latest_cause(&dir)? == cause {
                 TurnState::unpoint(&dir)?;
@@ -216,13 +240,43 @@ fn turn_rules(schemas: Option<&Schemas>) -> Vec<&str> {
         .collect()
 }
 
+/// Who a prompt is from. A client delivers more than the user's own
+/// words on this channel: a subagent's hand-back and the harness's own
+/// task notification arrive as prompts too, each wrapped in a frame
+/// that names itself. Attributing those to the human puts words in a
+/// person's mouth, so the frame decides the actor and the channel does
+/// not. A frame counts only when it is the whole message, open tag to
+/// close - a prompt that merely quotes one is still the user writing.
+fn prompt_actor(prompt: &str, me: Option<crate::core::HumanId>) -> Actor {
+    let text = prompt.trim();
+    if framed(text, "agent-message") {
+        Actor::Agent
+    } else if framed(text, "task-notification") {
+        Actor::System
+    } else {
+        Actor::Human(me)
+    }
+}
+
+/// Whether `text` is one whole `<tag …>…</tag>` element and nothing
+/// else. The opening tag may carry attributes, so it is matched up to
+/// the delimiter that ends a tag name rather than to `>`.
+fn framed(text: &str, tag: &str) -> bool {
+    let opens = text
+        .strip_prefix('<')
+        .and_then(|rest| rest.strip_prefix(tag))
+        .is_some_and(|rest| rest.starts_with(['>', ' ', '\t', '\n', '\r', '/']));
+    opens && text.ends_with(&format!("</{tag}>"))
+}
+
 /// `UserPromptSubmit`: clears the turn's previous cause before doing
 /// anything else, so a prompt that then fails to commit never leaves a
 /// later event citing the wrong one. Records the prompt as
-/// `message.received` from `human`, stores its id as the turn's cause
-/// and as the checkout's open turn under `dir`, and returns the
-/// client's expected `additionalContext`: the event's id on the first
-/// line, `turn_rules` on the lines after it.
+/// `message.received` from whoever `prompt_actor` says wrote it,
+/// stores its id as the turn's cause and as the checkout's open turn
+/// under `dir`, and returns the client's expected `additionalContext`:
+/// the event's id on the first line, `turn_rules` on the lines after
+/// it.
 fn submit_prompt(
     prompt: String,
     source: &Source,
@@ -234,7 +288,7 @@ fn submit_prompt(
 ) -> Result<Value, Box<dyn std::error::Error>> {
     state.clear()?;
 
-    let committed = Event::message_received(Actor::Human(me), prompt, source.clone(), None);
+    let committed = Event::message_received(prompt_actor(&prompt, me), prompt, source.clone(), None);
     let id = committed.id();
     log.append(&committed)?;
     state.set(id)?;
@@ -272,11 +326,11 @@ fn record_tool_use(
     Ok(json!({}))
 }
 
-/// `Stop`: the turn's reply, `last_assistant_message` when given, else
+/// An agent's reply, `last_assistant_message` when given, else
 /// read from the Claude transcript at `transcript_path`. A non-empty
 /// reply is recorded as `message.received` from `agent`, caused by the
 /// turn's prompt.
-fn record_stop(
+fn record_reply(
     last_assistant_message: Option<String>,
     transcript_path: Option<String>,
     source: &Source,

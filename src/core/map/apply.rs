@@ -1,7 +1,7 @@
 //! The write path: `Map::apply` checks a `Mutation` against the schema
 //! and the map's current state, then returns the `Payload` that records
 //! it, and `replay` folds that payload back in. Every writer - the CLI,
-//! the model's tool, the review page - goes through `apply`, so the six
+//! the model's tool, the web view - goes through `apply`, so the six
 //! write rules and the rank lock live here and nowhere else.
 
 use std::collections::{BTreeMap, HashSet};

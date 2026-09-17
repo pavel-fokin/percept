@@ -34,3 +34,32 @@ impl FromStr for Timestamp {
         s.parse().map(Self)
     }
 }
+
+/// A moment as a reader types it: an ISO-8601 timestamp, or a relative
+/// shorthand - `<N>d`, `<N>h`, `<N>m` - measured back from now. `None`
+/// when it is neither. The grammar lives here, once; how a refusal reads
+/// belongs to the surface the value was typed into, since a CLI flag and
+/// a query parameter name the same value differently.
+pub fn parse_time(s: &str) -> Option<Timestamp> {
+    match relative_minutes(s) {
+        Some(minutes) => Timestamp::now().minus_minutes(minutes),
+        None => s.parse().ok(),
+    }
+}
+
+/// `<N>d`, `<N>h`, or `<N>m` as a count of minutes. `None` for anything
+/// else - `parse_time` then tries it as ISO-8601.
+fn relative_minutes(s: &str) -> Option<i64> {
+    let (digits, unit) = s.split_at_checked(s.len().checked_sub(1)?)?;
+    let n: i64 = digits.parse().ok()?;
+
+    match unit {
+        "d" => n.checked_mul(24 * 60),
+        "h" => n.checked_mul(60),
+        "m" => Some(n),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests;

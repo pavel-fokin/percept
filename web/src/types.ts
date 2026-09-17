@@ -1,98 +1,41 @@
-/** The proposal a human prompt's "yes" answered: the latest agent
- * reply in the same source before it, or `null` when there is none. */
-export interface Proposal {
-  id: string;
-  at: string;
-  content: string;
+/** Who an event is attributed to - the wire shape `GET /api/events`
+ * carries, `{"kind":"human","id":"<uuid>"}` or the bare `{"kind":...}`
+ * for `agent` and `system`. */
+export interface Actor {
+  kind: "human" | "agent" | "system";
+  id?: string;
 }
 
-/** One event a node's `sources` names, as `GET /api/review` resolves
- * it - what the source line folds open to. */
-export type Source =
-  | {
-      kind: "message";
-      actor: "human" | "agent";
-      id: string;
-      at: string;
-      client: string;
-      content: string;
-      truncated: boolean;
-      proposal: Proposal | null;
-    }
-  | {
-      kind: "file";
-      id: string;
-      at: string;
-      path: string;
-      lines: [number, number] | null;
-      label: string;
-      excerpt: string;
-      truncated: boolean;
-    }
-  | { kind: "event"; id: string; at: string; type: string }
-  | { kind: "missing"; id: string };
-
-/** A node an edge reaches - just enough to link back to it: its short
- * id and name. */
-export interface NodeRef {
-  id: string;
+/** The writer that produced an event and the project it ran in. */
+export interface Source {
   name: string;
+  path: string;
 }
 
-/** One edge touching a row, named by kind and direction, and the node
- * on its other end. */
-export interface EdgeRef {
-  kind: string;
-  dir: "from" | "to";
-  node: NodeRef;
-}
-
-/** An alternative weighed and lost, folded under the row that answers
- * the same question - or the shape a claim itself carries in common
- * with one. */
-export interface OptionRow {
+/** One log entry, the shape `percept events search` prints - what
+ * `GET /api/events` returns one of, per element of `events`. */
+export interface Event {
   id: string;
-  kind: string;
-  name: string;
-  why: string | null;
-  changed_by: string;
-  changed_why: string | null;
-  added_at: string;
-  changed_at: string;
-  sources: Source[];
+  actor: Actor;
+  source: Source;
+  type: string;
+  causation_id: string | null;
+  created_at: string;
+  payload: Record<string, unknown>;
+  preview?: { len: number; match?: number };
 }
 
-/** One claim in the queue: a headline node changed since the review
- * last opened. */
-export interface Row extends OptionRow {
-  edges: EdgeRef[];
-  related: OptionRow[];
-}
-
-/** The headline node a group's rows point at - absent for the orphan
- * group, and for a group whose only row is its own heading. */
-export interface Heading {
-  id: string;
-  title: string;
-  raised_at: string;
-}
-
-/** Claims that share a heading, or a row with none. */
-export interface Group {
-  heading: Heading | null;
-  claims: Row[];
-}
-
-/** One map's queue: its claims, grouped by the question or task each
- * answers. */
-export interface MapQueue {
-  name: string;
-  purpose: string;
-  since: string | null;
-  groups: Group[];
-}
-
-/** `GET /api/review`'s response. */
-export interface ReviewResponse {
-  maps: MapQueue[];
+/** `GET /api/events`'s body: the matches, oldest first, how many
+ * matched in total before `size` cut them, and `carried` - the folded
+ * events (a `tool.resulted`, today) whose `causation_id` names one of
+ * `events`. `carried` is never counted in `total` and never a row of
+ * its own. */
+export interface EventsResponse {
+  events: Event[];
+  carried: Event[];
+  total: number;
+  /** The project the server is scoped to - stated by the server rather
+   * than read off a row, so a filter that matches nothing does not take
+   * the page's heading with it. */
+  project: string;
 }

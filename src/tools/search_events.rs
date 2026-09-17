@@ -111,7 +111,11 @@ impl Tool for SearchEvents {
             kinds,
             text: args.contains,
             size: args.size.or(Some(DEFAULT_SIZE)),
+            ..Default::default()
         };
+        if let Some((since, until)) = query.inverted_window() {
+            return Err(format!("since {since} is not before until {until}").into());
+        }
 
         let events = self.log.search(&query)?;
         Ok(ToolOutput::text(

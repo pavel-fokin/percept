@@ -1,0 +1,84 @@
+/* The only file in this app that names a colour or a font. Everything
+   else writes `bg-page`, `text-faint`, `font-serif` - a tier, never a
+   value - so re-stepping the palette is an edit here and nowhere else.
+
+   Each tier is written once, as `light-dark(light, dark)`, and the theme
+   is nothing but which `color-scheme` the root carries.
+
+   Each tier has a job and a floor. Measure a new value against `panel`,
+   not `page`: the panel is the lighter background in dark mode and the
+   darker one in light, so a tier that clears its floor there clears it
+   everywhere.
+
+     page     the reading surface
+     panel    a surface raised off it - an expanded row, a menu
+     ink      what a row is about                       >= 4.5:1 on panel
+     muted    a second line still meant to be read      >= 4.5:1 on panel
+     faint    labels and metadata                       >= 4.5:1 on panel
+     accent   a thing you can follow: links, node ids   >= 4.5:1 on panel
+     rule     a hairline between rows - not text, no floor
+     button   text on a filled accent button
+
+   There is no second hue. A state - drifted, open, settled - is carried
+   by shape and weight, because two warm hues near enough to sit in one
+   list are one hue with two names. */
+
+@theme inline {
+  --color-page: var(--page);
+  --color-panel: var(--panel);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-rule: var(--rule);
+  --color-button: var(--button);
+
+  /* The brand faces, each with a stack that holds up offline: the page
+     is served from localhost and Google Fonts needs a network. Serif
+     against sans carries whether a row is a thing said or a thing
+     recorded, so that distinction has to survive the fallback. */
+  --font-sans: "DM Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-serif: "Newsreader", Georgia, "Iowan Old Style", serif;
+  --font-mono: "DM Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+:root {
+  color-scheme: dark;
+  --page: light-dark(#f5f4f0, #111110);
+  --panel: light-dark(#eae8e3, #1a1a18);
+  --ink: light-dark(#111110, #e8e5df);
+  --muted: light-dark(#5d5952, #bcb8b0);
+  --faint: light-dark(#6d685f, #86827b);
+  --accent: light-dark(#87581f, #d4a05a);
+  --rule: light-dark(#d6d3cc, #2a2928);
+  --button: light-dark(#f5f4f0, #111110);
+}
+
+/* The theme is one property. The head script resolves it once and writes
+   `data-theme`, and every rule below reads that attribute - never
+   `prefers-color-scheme` directly, because a host that nests this page
+   in its own document can set `color-scheme` on the real root, and that
+   is what the query resolves against. */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/* The no-script fallback, and nothing else: it stops applying the moment
+   the head script writes the attribute. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+  }
+}
+
+/* Element selectors, to beat a host's own `body { background }` on order
+   rather than on specificity: when this page is nested inside another
+   document, the class on its <body> tag may not survive the parse. */
+html,
+body {
+  background: var(--page);
+  color: var(--ink);
+}

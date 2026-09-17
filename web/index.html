@@ -3,9 +3,32 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>percept review</title>
+    <title>percept</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      /* Resolve the theme once, here, and write it to the root. Everything
+         else - the palette, the toggle's icon, the toggle itself - reads that
+         attribute and nothing else. A host that nests this page in its own
+         document can make `prefers-color-scheme` answer differently from
+         `matchMedia`, and a page that asks both ends up disagreeing with
+         itself. */
+      (function () {
+        var r = document.documentElement,
+          t = null;
+        try {
+          t = localStorage.getItem("percept-theme");
+        } catch (e) {}
+        if (t !== "light" && t !== "dark") t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        r.dataset.theme = t;
+      })();
+    </script>
   </head>
-  <body>
+  <body class="bg-page font-sans text-ink antialiased">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
