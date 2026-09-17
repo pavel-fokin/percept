@@ -5,7 +5,9 @@
 //! `encode_*` serialize a map or a fragment to JSON lines; `markdown`,
 //! `catalogue`, `describe`, and `start` render it to text for `maps
 //! show`, `maps list`, `maps describe`, and `percept start`, and
-//! `moment_rules` the lines a schema sends at one of `MOMENTS`. The
+//! `moment_rules` every loaded schema's lines at one of `MOMENTS`,
+//! `for_schema_moment` one schema's alone - what `maps reflect` sends
+//! for the one map it opened on. The
 //! tools that call these live in `src/tools`. `load_schemas` reads a
 //! project's schemas from `SCHEMAS_DIR` alone; `TEMPLATES` is the
 //! `decisions` TOML `percept init <client>` copies there for a project
@@ -34,7 +36,10 @@ pub use map::{
 };
 pub use render::{catalogue, markdown};
 pub use rules::for_moment as moment_rules;
-pub use schemas::{load as load_schemas, MESSAGE_RECEIVED, SCHEMAS_DIR, SESSION_STARTED, TEMPLATES};
+pub use rules::for_schema_moment;
+pub use schemas::{
+    load as load_schemas, MESSAGE_RECEIVED, REFLECTION_STARTED, SCHEMAS_DIR, SESSION_STARTED, TEMPLATES,
+};
 pub use start::start;
 
 /// Printed in place of `catalogue`'s and `start`'s usual body when a

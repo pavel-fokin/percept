@@ -1,10 +1,11 @@
 //! The command-line surface: `percept events publish` appends one event
 //! without opening the TUI, `percept events search` queries the log,
 //! `percept events show` dereferences one event by id, `percept maps`
-//! folds a cognitive map from the log and prints it, `percept ask`
-//! runs one full turn - including the tool loop - and prints the
-//! reply, `percept reflect` runs one asking the model to revise its
-//! maps, `percept hook <client>` records one coding client's turn from
+//! folds a cognitive map from the log and prints it - `maps reflect`
+//! opens a reflection on one, printing the event id an agent then
+//! cites for what it records - `percept ask` runs one full turn -
+//! including the tool loop - and prints the reply, `percept hook
+//! <client>` records one coding client's turn from
 //! the hook JSON it reads on stdin - see `hook` - and `percept init
 //! <client>` writes that client's project config so its hooks call
 //! `percept hook <client>` - see `init`. A
@@ -83,9 +84,6 @@ pub enum Command {
     /// Run one turn headlessly and print the reply.
     #[cfg(feature = "lab")]
     Ask(AskArgs),
-    /// Run one turn asking the model to revise its maps from the log.
-    #[cfg(feature = "lab")]
-    Reflect,
     /// Record one coding client's turn from the hook JSON it sends on
     /// stdin. Never fails the client's turn: an error prints to
     /// stderr and still exits with a JSON object on stdout.
@@ -132,6 +130,11 @@ pub enum MapsCommand {
     /// One map's kinds, relations, and how to record to it, from its
     /// schema.
     Describe(DescribeMapArgs),
+    /// Opens a reflection on a map: appends a `reflection.started`
+    /// event, prints its id to cite from every node the reflection then
+    /// records, that schema's own `"reflection.started"` lines, then
+    /// what `maps describe` prints.
+    Reflect(DescribeMapArgs),
 }
 
 #[derive(Args)]
@@ -712,6 +715,29 @@ pub fn start(
 /// so it works on an empty map.
 pub fn maps_describe(args: DescribeMapArgs, schemas: &Schemas) -> Result<(), Box<dyn std::error::Error>> {
     let schema = schemas.find(&args.map)?;
+    print_text(&mapstore::describe(&schema))
+}
+
+/// Opens a reflection on `args.map`: appends a `reflection.started`
+/// event and prints its id alone, for the caller to cite as `--source`
+/// on every node the reflection then records; then that schema's own
+/// `"reflection.started"` lines, when it declares any; then `maps
+/// describe`'s own output, unchanged.
+pub fn maps_reflect(
+    args: DescribeMapArgs,
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &crate::core::Source,
+    checkout: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let schema = schemas.find(&args.map)?;
+    let event = Event::reflection_started(args.map, source.clone());
+    log.append(&event)?;
+    print_lines(std::iter::once(event.id().as_uuid().to_string()))?;
+    if let Some(rules) = mapstore::for_schema_moment(&schema, checkout, mapstore::REFLECTION_STARTED) {
+        print_text(&rules)?;
+        print_text("\n")?;
+    }
     print_text(&mapstore::describe(&schema))
 }
 

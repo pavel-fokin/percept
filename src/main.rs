@@ -293,6 +293,9 @@ async fn main() {
                 MapsCommand::ChangeNode(args) => {
                     cli::maps_change_node(args, &log, &schemas, &cli_source, me, cause()?)
                 }
+                MapsCommand::Reflect(args) => {
+                    cli::maps_reflect(args, &log, &schemas, &cli_source, &checkout)
+                }
             }
         }),
         #[cfg(feature = "lab")]
@@ -308,17 +311,6 @@ async fn main() {
             Ok(log) => server::run(std::sync::Arc::new(log), cli_source.clone()).await,
             Err(err) => Err(err),
         },
-        #[cfg(feature = "lab")]
-        Some(Command::Reflect) => {
-            lab::headless_turn(
-                true,
-                lab::REFLECT_PROMPT.to_string(),
-                false,
-                cli_source,
-                &checkout,
-            )
-            .await
-        }
         #[cfg(feature = "lab")]
         None => {
             lab::try_main(

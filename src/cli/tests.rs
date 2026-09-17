@@ -524,6 +524,60 @@ fn maps_describe_parses_the_map_name() {
 }
 
 #[test]
+fn maps_reflect_parses_the_map_name() {
+    let cli = Cli::try_parse_from(["percept", "maps", "reflect", "debates"]).unwrap();
+    match cli.command {
+        Some(Command::Maps {
+            command: MapsCommand::Reflect(args),
+        }) => assert_eq!(args.map, "debates"),
+        _ => panic!("expected maps reflect"),
+    }
+}
+
+#[test]
+fn maps_reflect_appends_exactly_one_reflection_started_event_naming_the_map() {
+    let log = FakeLog::default();
+
+    maps_reflect(
+        DescribeMapArgs {
+            map: "debates".to_string(),
+        },
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    assert_eq!(events.len(), 1);
+    match events[0].payload() {
+        Payload::ReflectionStarted { map } => assert_eq!(map, "debates"),
+        _ => panic!("expected reflection.started"),
+    }
+}
+
+#[test]
+fn maps_reflect_fails_on_a_map_name_no_schema_declares() {
+    let log = FakeLog::default();
+
+    let err = maps_reflect(
+        DescribeMapArgs {
+            map: "code".to_string(),
+        },
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+    )
+    .err()
+    .unwrap();
+
+    assert!(err.to_string().starts_with("no map named \"code\""), "{err}");
+    assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
 fn all_paths_folds_every_distinct_path_while_the_default_folds_root() {
     let events = [
         node_added_at("/there", "verdict", "Go"),
