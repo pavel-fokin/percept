@@ -82,8 +82,8 @@ struct Row {
 /// events only - id to event, and causation id to the events it
 /// caused - so no node's check re-reads the log: `id_to_event`
 /// resolves a node's `sources` entries, `later_citations` walks a
-/// citation forward to the newest re-citation of the same file before
-/// it is checked against the tree. One `Citations` serves the whole
+/// citation forward to the newest citation replacing it before it is
+/// checked against the tree. One `Citations` serves the whole
 /// call, so a path cited by more than one node is read once.
 fn citation_rows(maps: &[Map], events: &[Event], checkout: &Path) -> Vec<Row> {
     let file_cited: Vec<&Event> = events
@@ -116,17 +116,23 @@ fn citation_rows(maps: &[Map], events: &[Event], checkout: &Path) -> Vec<Row> {
 
 /// `node`'s own `renamed`/`changed`/`gone` findings, one per source
 /// that names a `file.cited` event, checked at its newest re-citation.
+/// A source and the repoint that replaced it resolve to that same
+/// citation, so the node holding both reports it once.
 fn node_changes(
     node: &Node,
     id_to_event: &HashMap<EventId, &Event>,
     later_citations: &HashMap<EventId, Vec<&Event>>,
     citations: &Citations,
 ) -> Vec<String> {
+    let mut checked = HashSet::new();
     node.sources
         .iter()
         .filter_map(|source_id| {
             let event = id_to_event.get(source_id)?;
             let newest = newest_citation(event, later_citations);
+            if !checked.insert(newest.id()) {
+                return None;
+            }
             let Payload::FileCited { path, excerpt, .. } = newest.payload() else {
                 return None;
             };
@@ -144,29 +150,28 @@ fn node_changes(
 }
 
 /// Follows `event` forward through `later_citations`, each hop the
-/// latest re-citation of the same file caused by the one before it -
-/// a later citation of a different path is not a re-citation of this
-/// one, so it is ignored. A visited set stops a causation cycle a
-/// hand-edited log could hold from spinning forever.
+/// latest citation caused by the one before it. A citation names
+/// another as its cause only where a writer said so - a `cites` line
+/// takes the turn's prompt - so that edge is the claim that this
+/// reading replaces that one, whatever path it names, which is how a
+/// renamed file's citation is repointed. Only the hop taken is marked
+/// visited, which stops a causation cycle a hand-edited log could hold
+/// from spinning forever without burning a branch this walk passed
+/// over.
 fn newest_citation<'a>(
     event: &'a Event,
     later_citations: &HashMap<EventId, Vec<&'a Event>>,
 ) -> &'a Event {
-    let Payload::FileCited { path, .. } = event.payload() else {
-        return event;
-    };
     let mut current = event;
     let mut visited = HashSet::from([event.id()]);
     while let Some(next) = later_citations
         .get(&current.id())
         .into_iter()
         .flatten()
-        .filter(|candidate| {
-            matches!(candidate.payload(), Payload::FileCited { path: p, .. } if p == path)
-        })
-        .filter(|candidate| visited.insert(candidate.id()))
+        .filter(|candidate| !visited.contains(&candidate.id()))
         .max_by_key(|candidate| candidate.created_at())
     {
+        visited.insert(next.id());
         current = next;
     }
     current

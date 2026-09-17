@@ -277,20 +277,65 @@ fn a_re_citation_replaces_the_one_checked() {
 }
 
 #[test]
-fn a_later_citation_of_a_different_path_does_not_replace_the_one_checked() {
+fn a_re_citation_at_another_path_repoints_the_one_it_names() {
     let checkout = Fixture::new();
-    checkout.write("a.rs", "fn one() {}\n");
+    checkout.write("event-row.tsx", "export function EventRow() {}\n");
 
-    let first = file_cited("a.rs", None, "fn one() {}");
-    // Caused by `first`, but a different path - not a re-citation of
-    // `a.rs`, so it must not stand in for it.
-    let other = file_cited_citing("b.rs", None, "fn two() {}", Some(first.id()));
+    let excerpt = "export function EventRow() {}";
+    let first = file_cited("EventRow.tsx", None, excerpt);
+    let repoint = file_cited_citing("event-row.tsx", None, excerpt, Some(first.id()));
     let node = node_added_citing(Actor::Human(human()), "topic", "why a?", vec![first.id()]);
-    let events = vec![first, other, node];
+    let events = vec![first, repoint, node];
 
     let text = rendered(&events, checkout.path());
 
     assert!(!text.contains("Attention"), "{text:?}");
+}
+
+#[test]
+fn a_citation_naming_no_cause_leaves_the_stale_one_marking() {
+    let checkout = Fixture::new();
+    checkout.write("event-row.tsx", "export function EventRow() {}\n");
+
+    let excerpt = "export function EventRow() {}";
+    let stale = file_cited("EventRow.tsx", None, excerpt);
+    // The same text at the new path, but naming nothing as its cause:
+    // a second reading, not a claim that it replaces the first.
+    let beside = file_cited("event-row.tsx", None, excerpt);
+    let node = node_added_citing(
+        Actor::Human(human()),
+        "topic",
+        "why a?",
+        vec![stale.id(), beside.id()],
+    );
+    let events = vec![stale, beside, node];
+
+    let text = rendered(&events, checkout.path());
+
+    assert!(
+        text.contains("cites EventRow.tsx renamed to event-row.tsx"),
+        "{text:?}"
+    );
+}
+
+#[test]
+fn a_source_and_its_repoint_report_one_finding() {
+    let checkout = Fixture::new();
+    checkout.write("a.rs", "fn one() { edited }\n");
+
+    let first = file_cited("a.rs", Some((1, 1)), "fn one() {}");
+    let repoint = file_cited_citing("a.rs", Some((1, 1)), "fn one() {}", Some(first.id()));
+    let node = node_added_citing(
+        Actor::Human(human()),
+        "topic",
+        "why a?",
+        vec![first.id(), repoint.id()],
+    );
+    let events = vec![first, repoint, node];
+
+    let text = rendered(&events, checkout.path());
+
+    assert_eq!(text.matches("a.rs changed").count(), 1, "{text:?}");
 }
 
 #[test]
