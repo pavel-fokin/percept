@@ -73,5 +73,12 @@ to = "decision"
 [rules]
 "message.received" = [
   "propose by recording: an option under its question, state \"open\", before arguing for it",
-  "before stopping, record each thing you reasoned with as a concept whose definition is the rule that held",
+  "before stopping, record what you reasoned with. Sharpen a concept that already states it, or cover yours under it; add a peer only when neither fits",
+]
+"reflection.started" = [
+  "cite the event id printed above as --source for everything you record under this reflection",
+  "read `percept start` first: a claim whose cited code has moved is judged before any wording is",
+  "two concepts stating one rule leave one - change the survivor to carry the loser's sources, re-point what was about the loser, then remove it",
+  "a concept that is an instance of another is covered by it, never removed: `covers` points from the keeper down to what it holds",
+  "a concept the user last changed is theirs - record a question against it, never a change",
 ]

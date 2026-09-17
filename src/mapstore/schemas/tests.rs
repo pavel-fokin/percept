@@ -575,3 +575,11 @@ fn the_decisions_template_carries_message_received_rules() {
 
     assert_eq!(schema.rules.at("message.received").len(), 2);
 }
+
+#[test]
+fn the_decisions_template_carries_reflection_started_rules() {
+    let (name, text) = TEMPLATES.iter().find(|(name, _)| *name == "decisions").unwrap();
+    let schema = parse(name, text).unwrap();
+
+    assert_eq!(schema.rules.at("reflection.started").len(), 5);
+}
