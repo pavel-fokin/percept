@@ -47,6 +47,7 @@ pub use turn::{run_turn, AskArgs};
 
 #[derive(Parser)]
 #[command(name = "percept")]
+#[command(version = env!("PERCEPT_VERSION"))]
 #[command(about = "Record what happens across your tools, so a model can query it.")]
 #[command(long_about = "\
 Record what happens across your tools, so a model can query it.
