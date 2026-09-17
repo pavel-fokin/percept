@@ -24,7 +24,10 @@ use crate::workspace::{Cited, Citations};
 /// hook passes its own client's last session, so a review-page open
 /// never hides a client's gains from it, and `percept start` from the
 /// shell passes the last look by anyone, the running session's own
-/// start included. `checkout` is where cited files are read.
+/// start included. `checkout` is where cited files are read. The
+/// project line names the command, because a block that only reports
+/// what percept holds leaves a reader no reason to believe percept is
+/// theirs to run.
 pub fn start(maps: &[Map], events: &[Event], root: &Path, checkout: &Path, since: Option<Timestamp>) -> String {
     let header = format!("percept \u{b7} {}", project_name(root));
 
@@ -34,7 +37,7 @@ pub fn start(maps: &[Map], events: &[Event], root: &Path, checkout: &Path, since
 
     let names: Vec<&str> = maps.iter().map(|map| map.schema().name.as_str()).collect();
     let header = format!(
-        "{header}\nkeeps what this project settled: {}",
+        "{header} \u{b7} the `percept` command, set up in this project\nkeeps what this project settled: {}",
         names.join(", ")
     );
 
