@@ -164,6 +164,20 @@ fn attention_marks_a_stale_citation_as_changed() {
 }
 
 #[test]
+fn attention_marks_a_stale_citation_on_a_node_of_no_headline_kind() {
+    let checkout = Fixture::new();
+    checkout.write("a.rs", "fn one() { edited }\n");
+
+    let cited = file_cited("a.rs", Some((1, 1)), "fn one() {}");
+    let node = node_added_citing(Actor::Human(human()), "claim", "blue is calm", vec![cited.id()]);
+    let events = vec![cited, node];
+
+    let text = rendered(&events, checkout.path());
+
+    assert!(text.contains("cites a.rs changed"), "{text:?}");
+}
+
+#[test]
 fn next_offers_a_read_around_for_every_attention_id() {
     let checkout = Fixture::new();
     checkout.write("a.rs", "fn one() { edited }\n");

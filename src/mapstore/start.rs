@@ -69,8 +69,10 @@ struct Row {
     line: String,
 }
 
-/// What every current headline node cites that no longer matches the
-/// working tree - one Attention row per node with at least one stale
+/// What every current node cites that no longer matches the working
+/// tree - an option carries citations as readily as the decision it
+/// answers, so the walk is over every node rather than the headline
+/// kinds - one Attention row per node with at least one stale
 /// citation, `<id> cites <label> changed, <label> gone`, `findings`
 /// each `"<label> changed"`, `"<label> gone"`, or `"<label> renamed to
 /// <new label>"`. This module's Attention block builds its lines from
@@ -100,7 +102,7 @@ fn citation_rows(maps: &[Map], events: &[Event], checkout: &Path) -> Vec<Row> {
     let citations = Citations::new(checkout);
     let mut rows = Vec::new();
     for map in maps {
-        for node in map.headlines() {
+        for node in map.nodes() {
             let findings = node_changes(node, &id_to_event, &later_citations, &citations);
             if !findings.is_empty() {
                 let id = line_id(map, node);
