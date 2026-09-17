@@ -71,8 +71,10 @@ struct Row {
 
 /// What every current headline node cites that no longer matches the
 /// working tree - one Attention row per node with at least one stale
-/// citation, `<id> cites <label> changed, <label> gone`, `findings` each `"<label> changed"` or `"<label>
-/// gone"`. This module's Attention block builds its lines from this.
+/// citation, `<id> cites <label> changed, <label> gone`, `findings`
+/// each `"<label> changed"`, `"<label> gone"`, or `"<label> renamed to
+/// <new label>"`. This module's Attention block builds its lines from
+/// this.
 ///
 /// Builds two indexes over `events` once, both over `file.cited`
 /// events only - id to event, and causation id to the events it
@@ -110,8 +112,8 @@ fn citation_rows(maps: &[Map], events: &[Event], checkout: &Path) -> Vec<Row> {
     rows
 }
 
-/// `node`'s own `changed`/`gone` findings, one per source that names a
-/// `file.cited` event, checked at its newest re-citation.
+/// `node`'s own `renamed`/`changed`/`gone` findings, one per source
+/// that names a `file.cited` event, checked at its newest re-citation.
 fn node_changes(
     node: &Node,
     id_to_event: &HashMap<EventId, &Event>,
@@ -128,6 +130,9 @@ fn node_changes(
             };
             let status = match citations.locate(path, excerpt) {
                 Cited::At(..) => return None,
+                Cited::Moved(to) => {
+                    return Some(format!("{} renamed to {}", path.display(), to.display()))
+                }
                 Cited::Changed => "changed",
                 Cited::Gone => "gone",
             };

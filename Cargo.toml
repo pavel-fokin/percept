@@ -15,7 +15,6 @@ lab = [
     "dep:reqwest",
     "dep:tree-sitter",
     "dep:tree-sitter-rust",
-    "dep:ignore",
     "dep:regex",
     "dep:globset",
 ]
@@ -38,7 +37,7 @@ reqwest = { version = "0.12", default-features = false, features = ["stream", "j
 toml = "0.9"
 tree-sitter = { version = "0.27", optional = true }
 tree-sitter-rust = { version = "0.24.2", optional = true }
-ignore = { version = "0.4.33", optional = true }
+ignore = "0.4.33"
 regex = { version = "1.13.1", optional = true }
 globset = { version = "0.4.20", optional = true }
 

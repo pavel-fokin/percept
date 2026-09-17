@@ -203,6 +203,23 @@ fn an_unchanged_seen_file_reports_nothing() {
 }
 
 #[test]
+fn a_citation_found_at_exactly_one_other_path_reports_renamed() {
+    let checkout = Fixture::new();
+    checkout.write("event-row.tsx", "export function EventRow() {}\n");
+
+    let cited = file_cited("EventRow.tsx", None, "export function EventRow() {}");
+    let node = node_added_citing(Actor::Human(human()), "topic", "why a?", vec![cited.id()]);
+    let events = vec![cited, node];
+
+    let text = rendered(&events, checkout.path());
+
+    assert!(
+        text.contains("cites EventRow.tsx renamed to event-row.tsx"),
+        "{text:?}"
+    );
+}
+
+#[test]
 fn a_deleted_file_reports_gone() {
     let checkout = Fixture::new();
     let cited = file_cited("src/missing.rs", None, "fn gone() {}");
@@ -353,3 +370,4 @@ fn next_offers_read_around_only_for_the_ids_attention_printed() {
     let folded_id = format!("t{}", LIMIT + 1);
     assert!(!text.contains(&format!("read around {folded_id}")), "{text:?}");
 }
+
