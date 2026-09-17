@@ -61,7 +61,19 @@ fn the_state_line_shows_a_maps_headline_count() {
     let events = vec![node_added("topic", "why blue?")];
     let text = rendered(&events, Fixture::new().path());
 
-    assert!(text.contains("debates   1"), "{text:?}");
+    assert!(text.contains("debates   1 of 1"), "{text:?}");
+}
+
+#[test]
+fn the_state_line_counts_a_claimed_headline_out_of_the_roots() {
+    let topic = node_added("topic", "why blue?");
+    let verdict = node_added("verdict", "blue it is");
+    let settles = edge_added("settles", &verdict, &topic);
+    let events = vec![topic.clone(), verdict.clone(), settles];
+
+    let text = rendered(&events, Fixture::new().path());
+
+    assert!(text.contains("debates   1 of 2"), "{text:?}");
 }
 
 #[test]
