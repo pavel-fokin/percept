@@ -10,6 +10,14 @@ fn the_purpose_line_follows_the_map_name() {
 }
 
 #[test]
+fn the_record_grammar_names_the_commands_that_remove() {
+    let text = describe(&debates());
+
+    assert!(text.contains("remove-node"), "{text:?}");
+    assert!(text.contains("remove-edge"), "{text:?}");
+}
+
+#[test]
 fn a_kind_with_requires_and_states_lists_both() {
     let text = describe(&chores());
     let line = text

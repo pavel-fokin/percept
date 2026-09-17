@@ -148,7 +148,10 @@ const GRAMMAR: &str = "
   line naming a short id, t4, changes that node: state \"done\" under it sets a
   property, name \"...\" renames it, and why \"...\" is the change's own reason,
   not a property. A node is refused without its required properties; a node
-  the user last changed takes only state from an agent.
+  the user last changed takes only state from an agent. This document adds
+  and changes; it never removes. percept maps remove-node and remove-edge do
+  that, each taking the same --actor and --source, and remove-node drops the
+  edges that touch the node it takes.
 ";
 
 /// One node per node kind, in schema order, its name always `"..."`,
