@@ -1,13 +1,13 @@
 #!/bin/sh
-# Downloads the newest prebuilt percept binary from the 'latest'
-# GitHub Release and installs it, for a stranger without a Rust
+# Downloads the prebuilt percept binary from the newest release and
+# installs it, for a stranger without a Rust
 # toolchain. `scripts/install.sh` (via `make install`) builds from
 # source instead. See lib-install.sh for how the binary is placed and
 # kept on PATH.
 set -eu
 
 repo="pavel-fokin/percept"
-release_url="https://github.com/$repo/releases/download/latest"
+release_url="https://github.com/$repo/releases/latest/download"
 
 os=$(uname -s)
 arch=$(uname -m)

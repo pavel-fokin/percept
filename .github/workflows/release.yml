@@ -7,8 +7,28 @@ on:
 permissions:
   contents: write
 
+# Two merges landing together would otherwise read the same last
+# release and claim the same number.
+concurrency:
+  group: release
+
 jobs:
+  # The number the binary is stamped with, so it has to be settled
+  # before anything is built.
+  number:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+    steps:
+      - id: next
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name || echo r0)
+          echo "tag=r$(( ${last#r} + 1 ))" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: number
     strategy:
       matrix:
         include:
@@ -48,6 +68,8 @@ jobs:
           npm ci
           npm run build
       - run: cargo build --release --target ${{ matrix.target }}
+        env:
+          PERCEPT_RELEASE: ${{ needs.number.outputs.tag }}
       - name: package
         run: |
           out="percept-${{ matrix.target }}"
@@ -61,7 +83,7 @@ jobs:
           path: percept-${{ matrix.target }}.tar.gz
 
   release:
-    needs: build
+    needs: [number, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -74,9 +96,7 @@ jobs:
           sha256sum *.tar.gz > SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: latest
-          prerelease: true
-          make_latest: false
-          body: Built from ${{ github.sha }}. Rolling release, overwritten on every push to main.
+          tag_name: ${{ needs.number.outputs.tag }}
+          name: ${{ needs.number.outputs.tag }}
+          body: Built from ${{ github.sha }}.
           files: dist/*
