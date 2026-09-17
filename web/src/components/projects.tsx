@@ -90,7 +90,9 @@ function ProjectRow({ project }: { project: Project }) {
         <span className="shrink-0 text-xs text-faint">{relativeTime(project.last_active)}</span>
       </div>
 
-      {project.maps.length === 0 ? (
+      {project.maps_error ? (
+        <p className="mt-2 text-[0.8125rem] text-ink">The maps here could not be read: {project.maps_error}.</p>
+      ) : project.maps.length === 0 ? (
         <p className="mt-2 text-[0.8125rem] text-faint">No map declared here.</p>
       ) : (
         <ul className="mt-2 space-y-1">

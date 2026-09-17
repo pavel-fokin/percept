@@ -52,13 +52,15 @@ export interface ProjectMap {
 
 /** One project the log holds events for. `maps` is empty for a project
  * whose root declares no schemas - a checkout deleted since, or one
- * never initialised. */
+ * never initialised - and for one whose schemas could not be read, where
+ * `maps_error` says why. */
 export interface Project {
   name: string;
   path: string;
   events: number;
   last_active: string;
   maps: ProjectMap[];
+  maps_error: string | null;
 }
 
 /** `GET /api/projects`'s body: every project in the log, the most

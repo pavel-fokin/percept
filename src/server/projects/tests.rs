@@ -141,3 +141,23 @@ fn gained_is_zero_when_the_project_has_no_session_recorded() {
 
     assert_eq!(body["projects"][0]["maps"][0]["gained"], 0);
 }
+
+#[test]
+fn a_project_whose_schemas_cannot_be_read_says_why_and_leaves_the_others_listed() {
+    let broken = Fixture::new();
+    broken.write(".percept/schemas/decisions.toml", "name = \"decisions\"\n");
+    let sound = Fixture::new();
+    sound.write(".percept/schemas/decisions.toml", SCHEMA);
+    let events = vec![node_added(broken.path(), "a"), node_added(sound.path(), "b")];
+    let log = FakeLog::seeded(events);
+
+    let body = list(&log, after_everything()).unwrap();
+
+    let projects = body["projects"].as_array().unwrap();
+    let broken = projects.iter().find(|p| p["path"] == broken.path().to_string_lossy().to_string()).unwrap();
+    let sound = projects.iter().find(|p| p["path"] == sound.path().to_string_lossy().to_string()).unwrap();
+    assert!(broken["maps_error"].as_str().unwrap().contains("decisions.toml"));
+    assert_eq!(broken["maps"].as_array().unwrap().len(), 0);
+    assert_eq!(sound["maps_error"], serde_json::Value::Null);
+    assert_eq!(sound["maps"][0]["name"], "decisions");
+}
