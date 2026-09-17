@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { fetchEvents, messageOf } from "./api";
-import { filterFromSearch, resolveSince, searchFromFilter } from "./filters";
-import type { Filter } from "./filters";
+import { fetchEvents, messageOf } from "../lib/api";
+import { filterFromSearch, resolveSince, searchFromFilter } from "../lib/filters";
+import type { Filter } from "../lib/filters";
 import Log from "./log";
-import { SEARCH_FIELD_ID, SEARCH_HASH } from "./routes";
-import type { Event } from "./types";
+import { SEARCH_FIELD_ID, SEARCH_HASH } from "../lib/routes";
+import type { Event } from "../lib/types";
 
 interface Results {
   events: Event[];

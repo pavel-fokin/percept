@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { fetchEvent, messageOf } from "./api";
-import { answerSize, contentOf, contentText, kindWords } from "./event-rows";
-import type { ContentVariant, Row } from "./event-rows";
+import { fetchEvent, messageOf } from "../lib/api";
+import { answerSize, contentOf, contentText, kindWords } from "../lib/event-rows";
+import type { ContentVariant, Row } from "../lib/event-rows";
 import { Chevron } from "./icons";
-import type { Event } from "./types";
+import type { Event } from "../lib/types";
 
 export default function EventRow({ row }: { row: Row }) {
   const { event, answer } = row;

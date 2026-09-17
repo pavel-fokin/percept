@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router";
-import { fetchMap, messageOf } from "./api";
+import { fetchMap, messageOf } from "../lib/api";
 import FilterMenu from "./filter-menu";
 import type { FilterMenuOption } from "./filter-menu";
-import { basename, count } from "./format";
-import { mapPath } from "./routes";
-import type { MapEdge, MapNode, MapResponse } from "./types";
+import { basename, count } from "../lib/format";
+import { mapPath } from "../lib/routes";
+import type { MapEdge, MapNode, MapResponse } from "../lib/types";
 
 type Load =
   | { state: "loading" }
