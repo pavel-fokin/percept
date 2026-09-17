@@ -179,9 +179,12 @@ line only. One commit per issue.
 Work happens on a branch. Check which one is checked out before the
 first commit - a status snapshot from the start of a session can be
 stale - and switch to main before branching, never onto another feature
-branch, so a PR carries only its own commits. Merging into main is the
-user's call, not the agent's - hand back a reviewed branch and stop
-there. The same holds for pushing.
+branch, so a PR carries only its own commits. Name a branch
+`<type>/<branch-name>`, `type` one of `feat`, `fix`, `chore`, `docs`,
+matching the issue's own kind. Merging into main is the user's call,
+not the agent's - hand back a reviewed branch and stop there. The same
+holds for pushing: before it, propose a PR title for the user to
+confirm or change.
 
 ## Writing
 
