@@ -276,7 +276,11 @@ fn framed(text: &str, tag: &str) -> bool {
 /// stores its id as the turn's cause and as the checkout's open turn
 /// under `dir`, and returns the client's expected `additionalContext`:
 /// the event's id on the first line, `turn_rules` on the lines after
-/// it.
+/// it. The first line names where those rules came from, since text
+/// that tells a model how to work and names nobody is what an
+/// injection looks like; the directory is one the model can open. A
+/// schema set that declares no rule at all sends the id alone, which
+/// has no source to name.
 fn submit_prompt(
     prompt: String,
     source: &Source,
@@ -294,10 +298,21 @@ fn submit_prompt(
     state.set(id)?;
     TurnState::point(dir, id)?;
 
+    let rules = turn_rules(schemas);
+    let context = if rules.is_empty() {
+        format!("percept event {}", id.as_uuid())
+    } else {
+        format!(
+            "percept event {} \u{b7} rules from .percept/schemas\n{}",
+            id.as_uuid(),
+            rules.join("\n")
+        )
+    };
+
     Ok(json!({
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",
-            "additionalContext": format!("percept event {}\n{}", id.as_uuid(), turn_rules(schemas).join("\n")),
+            "additionalContext": context,
         }
     }))
 }

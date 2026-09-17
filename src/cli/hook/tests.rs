@@ -170,6 +170,9 @@ impl Fixture {
             .unwrap()
             .strip_prefix("percept event ")
             .unwrap()
+            .split(' ')
+            .next()
+            .unwrap()
             .to_string()
     }
 
@@ -515,6 +518,34 @@ fn a_prompt_carries_a_schemas_own_turn_rules_after_the_id() {
     let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
     let lines: Vec<&str> = context.lines().collect();
     assert_eq!(lines[1..], ["a", "b"]);
+}
+
+#[test]
+fn rule_lines_arrive_under_a_line_naming_where_they_came_from() {
+    let fixture = Fixture::new().with_extra_schema(
+        "glossary",
+        "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"concept\"]\n\n\
+         [[node]]\nkind = \"concept\"\nrequires = [\"definition\"]\n\n\
+         [rules]\nturn = [\"a\"]\n",
+    );
+
+    let output = fixture
+        .call(
+            "codex",
+            json!({
+                "hook_event_name": "UserPromptSubmit",
+                "cwd": fixture.root.to_str().unwrap(),
+                "session_id": "session",
+                "prompt": "hello",
+            }),
+        )
+        .unwrap();
+
+    let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
+    assert!(
+        context.lines().next().unwrap().ends_with(" \u{b7} rules from .percept/schemas"),
+        "{context:?}"
+    );
 }
 
 #[test]
