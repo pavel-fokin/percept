@@ -39,7 +39,9 @@ or `~/bin`, and otherwise prints the line to add.
 
 ### Building from source
 
-Requires a Rust toolchain.
+Requires a Rust toolchain and Node. The web page `percept web` serves
+is compiled into the binary and is not in the checkout, so the build
+needs `npm` to produce it.
 
 ```sh
 git clone https://github.com/pavel-fokin/percept
@@ -200,6 +202,7 @@ mix test events into the shared log. `PERCEPT_HOME` overrides both.
 ## Development
 
 ```sh
+cd web && npm ci && npm run build && cd ..   # the page build.rs embeds
 cargo build --offline
 cargo test --offline
 cargo clippy --offline --all-targets -- -D warnings
