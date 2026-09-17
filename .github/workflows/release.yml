@@ -8,7 +8,10 @@ permissions:
   contents: write
 
 # Two merges landing together would otherwise read the same last
-# release and claim the same number.
+# release and claim the same number. A run left pending while a third
+# queues behind it is cancelled and publishes nothing: its commit is
+# already in the release the newer run builds, so what is lost is one
+# number, not one merge.
 concurrency:
   group: release
 
@@ -24,8 +27,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          last=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name || echo r0)
-          echo "tag=r$(( ${last#r} + 1 ))" >> "$GITHUB_OUTPUT"
+          # The highest r-number published, not the newest release: a
+          # tag of another shape must not be counted, and a failed
+          # call must not restart the count at r1, which would replace
+          # a release someone already downloaded.
+          last=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '[.[].tag_name | select(test("^r[0-9]+$")) | ltrimstr("r") | tonumber] | max // 0')
+          echo "tag=r$(( last + 1 ))" >> "$GITHUB_OUTPUT"
 
   build:
     needs: number

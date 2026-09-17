@@ -47,10 +47,17 @@ fn stamp_version() {
     println!("cargo:rerun-if-env-changed=PERCEPT_RELEASE");
     println!("cargo:rerun-if-env-changed=GITHUB_SHA");
 
-    let release = env::var("PERCEPT_RELEASE").unwrap_or_else(|_| "dev".to_string());
-    let version = match env::var("GITHUB_SHA") {
-        Ok(sha) => format!("{release} ({})", sha.get(..7).unwrap_or(&sha)),
-        Err(_) => release,
+    let release = env_value("PERCEPT_RELEASE").unwrap_or_else(|| "dev".to_string());
+    let version = match env_value("GITHUB_SHA") {
+        Some(sha) => format!("{release} ({})", sha.get(..7).unwrap_or(&sha)),
+        None => release,
     };
     println!("cargo:rustc-env=PERCEPT_VERSION={version}");
+}
+
+/// A variable set to the empty string is as absent as an unset one. A
+/// CI output that never got written arrives that way, and would stamp
+/// a blank where the release number goes.
+fn env_value(name: &str) -> Option<String> {
+    env::var(name).ok().filter(|value| !value.is_empty())
 }

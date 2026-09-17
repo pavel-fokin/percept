@@ -7,7 +7,25 @@
 set -eu
 
 repo="pavel-fokin/percept"
-release_url="https://github.com/$repo/releases/latest/download"
+
+# Resolve the newest release to its own tag before downloading
+# anything: /releases/latest/download moves the moment a merge
+# publishes, and a tarball and a SHA256SUMS from either side of that
+# moment would fail the checksum as if the download had been tampered
+# with. A repo with no release redirects to the releases page and
+# answers 200 doing it, so where we landed is what says whether there
+# is anything to install.
+newest=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
+  "https://github.com/$repo/releases/latest")
+case "$newest" in
+  */releases/tag/*) tag=${newest##*/} ;;
+  *)
+    echo "no published release for $repo - build from source instead: https://github.com/$repo#install" >&2
+    exit 1
+    ;;
+esac
+
+release_url="https://github.com/$repo/releases/download/$tag"
 
 os=$(uname -s)
 arch=$(uname -m)
@@ -47,7 +65,7 @@ sha256() {
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-echo "downloading $asset..."
+echo "downloading $asset from $tag..."
 curl -fsSL "$release_url/$asset" -o "$work/$asset"
 curl -fsSL "$release_url/SHA256SUMS" -o "$work/SHA256SUMS"
 
