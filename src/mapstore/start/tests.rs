@@ -319,6 +319,26 @@ fn a_citation_naming_no_cause_leaves_the_stale_one_marking() {
 }
 
 #[test]
+fn a_source_and_its_repoint_report_one_finding() {
+    let checkout = Fixture::new();
+    checkout.write("a.rs", "fn one() { edited }\n");
+
+    let first = file_cited("a.rs", Some((1, 1)), "fn one() {}");
+    let repoint = file_cited_citing("a.rs", Some((1, 1)), "fn one() {}", Some(first.id()));
+    let node = node_added_citing(
+        Actor::Human(human()),
+        "topic",
+        "why a?",
+        vec![first.id(), repoint.id()],
+    );
+    let events = vec![first, repoint, node];
+
+    let text = rendered(&events, checkout.path());
+
+    assert_eq!(text.matches("a.rs changed").count(), 1, "{text:?}");
+}
+
+#[test]
 fn a_cited_file_with_one_invalid_utf8_byte_elsewhere_still_reads() {
     let checkout = Fixture::new();
     let mut bytes = b"fn one() {}\n// ".to_vec();

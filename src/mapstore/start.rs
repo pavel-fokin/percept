@@ -116,17 +116,23 @@ fn citation_rows(maps: &[Map], events: &[Event], checkout: &Path) -> Vec<Row> {
 
 /// `node`'s own `renamed`/`changed`/`gone` findings, one per source
 /// that names a `file.cited` event, checked at its newest re-citation.
+/// A source and the repoint that replaced it resolve to that same
+/// citation, so the node holding both reports it once.
 fn node_changes(
     node: &Node,
     id_to_event: &HashMap<EventId, &Event>,
     later_citations: &HashMap<EventId, Vec<&Event>>,
     citations: &Citations,
 ) -> Vec<String> {
+    let mut checked = HashSet::new();
     node.sources
         .iter()
         .filter_map(|source_id| {
             let event = id_to_event.get(source_id)?;
             let newest = newest_citation(event, later_citations);
+            if !checked.insert(newest.id()) {
+                return None;
+            }
             let Payload::FileCited { path, excerpt, .. } = newest.payload() else {
                 return None;
             };
@@ -148,9 +154,10 @@ fn node_changes(
 /// another as its cause only where a writer said so - a `cites` line
 /// takes the turn's prompt - so that edge is the claim that this
 /// reading replaces that one, whatever path it names, which is how a
-/// renamed file's citation is repointed. A visited set stops a
-/// causation cycle a hand-edited log could hold from spinning
-/// forever.
+/// renamed file's citation is repointed. Only the hop taken is marked
+/// visited, which stops a causation cycle a hand-edited log could hold
+/// from spinning forever without burning a branch this walk passed
+/// over.
 fn newest_citation<'a>(
     event: &'a Event,
     later_citations: &HashMap<EventId, Vec<&'a Event>>,
@@ -161,9 +168,10 @@ fn newest_citation<'a>(
         .get(&current.id())
         .into_iter()
         .flatten()
-        .filter(|candidate| visited.insert(candidate.id()))
+        .filter(|candidate| !visited.contains(&candidate.id()))
         .max_by_key(|candidate| candidate.created_at())
     {
+        visited.insert(next.id());
         current = next;
     }
     current
