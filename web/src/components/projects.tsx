@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { fetchProjects, messageOf } from "./api";
-import { count, relativeTime } from "./format";
-import { mapPath } from "./routes";
-import type { Project } from "./types";
+import { fetchProjects, messageOf } from "../lib/api";
+import { count, relativeTime } from "../lib/format";
+import { mapPath } from "../lib/routes";
+import type { Project } from "../lib/types";
 
 type Load =
   | { state: "loading" }

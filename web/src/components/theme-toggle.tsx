@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Moon, Sun } from "./icons";
+import Button from "./ui/button";
 
 type Theme = "light" | "dark";
 
@@ -27,13 +28,12 @@ export default function ThemeToggle() {
   }
 
   return (
-    <button
-      type="button"
+    <Button
       onClick={flip}
       aria-label={`Switch to the ${next} theme`}
       className="-mr-2 flex size-11 shrink-0 items-center justify-center text-muted hover:text-ink"
     >
       {next === "light" ? <Sun className="size-[1.15rem]" /> : <Moon className="size-[1.15rem]" />}
-    </button>
+    </Button>
   );
 }

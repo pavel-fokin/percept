@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import EventRow from "./event-row";
-import { eventsCountLabel, foldResults, groupByDay, groupRuns, timeOf } from "./event-rows";
+import { eventsCountLabel, foldResults, groupByDay, groupRuns, timeOf } from "../lib/event-rows";
 import FilterMenu from "./filter-menu";
-import type { Filter } from "./filters";
-import { basename } from "./format";
-import { SEARCH_FIELD_ID } from "./routes";
+import type { Filter } from "../lib/filters";
+import { basename } from "../lib/format";
+import { SEARCH_FIELD_ID } from "../lib/routes";
 import {
   ACTOR_OPTIONS,
   KIND_OPTIONS,
@@ -17,10 +17,10 @@ import {
   timeLabel,
   toggleActor,
   toggleKind,
-} from "./filters";
+} from "../lib/filters";
 import { SearchIcon } from "./icons";
-import { useActiveSpeaker } from "./use-active-speaker";
-import type { Event } from "./types";
+import { useActiveSpeaker } from "../hooks/use-active-speaker";
+import type { Event } from "../lib/types";
 
 /** Which of the three filter menus is open - never more than one, so
  * opening one closes the others for free. */

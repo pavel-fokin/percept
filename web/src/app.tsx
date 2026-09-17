@@ -1,9 +1,9 @@
 import { Outlet, Route, Routes } from "react-router";
-import Header from "./header";
-import LogPage from "./log-page";
-import MapView from "./map";
-import Projects from "./projects";
-import { PATHS } from "./routes";
+import Header from "./components/header";
+import LogPage from "./components/log-page";
+import MapView from "./components/map";
+import Projects from "./components/projects";
+import { PATHS } from "./lib/routes";
 
 /** The shell every page shares: the header, and the page the path
  * names. The header is drawn once, here, rather than by each page, so

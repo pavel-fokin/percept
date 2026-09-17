@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router";
 import { ArrowLeft, SearchIcon } from "./icons";
-import { PATHS, SEARCH_HASH } from "./routes";
+import { PATHS, SEARCH_HASH } from "../lib/routes";
 import ThemeToggle from "./theme-toggle";
 
 /** The product header. Its left side answers where this takes you, not
