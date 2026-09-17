@@ -469,15 +469,38 @@ fn a_returning_session_still_prints_starts_render() {
     assert_eq!(fixture.events().len(), 2);
 }
 
-/// A fixture whose second schema declares `turn` rules, `turn` being
-/// the TOML array's own contents.
+#[test]
+fn a_session_start_carries_a_schemas_own_session_started_rules() {
+    let fixture = with_session_started_rules("\"a\", \"b\"");
+
+    let context = fixture.session_start("codex");
+
+    assert!(context.contains("rules from"), "{context:?}");
+    assert!(context.ends_with("\na\nb"), "{context:?}");
+}
+
+/// A fixture whose second schema declares `message.received` rules,
+/// `turn` being the TOML array's own contents.
 fn with_turn_rules(turn: &str) -> Fixture {
     Fixture::new().with_extra_schema(
         "glossary",
         &format!(
             "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"concept\"]\n\n\
              [[node]]\nkind = \"concept\"\nrequires = [\"definition\"]\n\n\
-             [rules]\nturn = [{turn}]\n"
+             [rules]\n\"message.received\" = [{turn}]\n"
+        ),
+    )
+}
+
+/// A fixture whose second schema declares `session.started` rules,
+/// `started` being the TOML array's own contents.
+fn with_session_started_rules(started: &str) -> Fixture {
+    Fixture::new().with_extra_schema(
+        "glossary",
+        &format!(
+            "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"concept\"]\n\n\
+             [[node]]\nkind = \"concept\"\nrequires = [\"definition\"]\n\n\
+             [rules]\n\"session.started\" = [{started}]\n"
         ),
     )
 }

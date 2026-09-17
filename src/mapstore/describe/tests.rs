@@ -101,22 +101,39 @@ fn the_change_example_is_absent_for_a_schema_with_no_states() {
 }
 
 #[test]
-fn a_schema_with_turn_rules_prints_them_in_a_rules_section() {
+fn a_schema_with_rules_prints_them_in_a_rules_section() {
     let mut schema = debates();
-    schema.rules = crate::core::Rules {
-        turn: vec!["first rule".to_string(), "second rule".to_string()],
-    };
+    schema.rules = crate::core::Rules::new(std::collections::BTreeMap::from([(
+        "message.received".to_string(),
+        vec!["first rule".to_string(), "second rule".to_string()],
+    )]));
 
     let text = describe(&schema);
 
     assert!(
-        text.contains("\nrules\n  turn   first rule\n         second rule\n"),
+        text.contains(
+            "\nrules\n  message.received   first rule\n                     second rule\n"
+        ),
         "{text}"
     );
 }
 
 #[test]
-fn a_schema_with_no_turn_rules_prints_no_rules_section() {
+fn a_schema_with_rules_at_two_moments_lists_both() {
+    let mut schema = debates();
+    schema.rules = crate::core::Rules::new(std::collections::BTreeMap::from([
+        ("session.started".to_string(), vec!["s".to_string()]),
+        ("message.received".to_string(), vec!["m".to_string()]),
+    ]));
+
+    let text = describe(&schema);
+
+    assert!(text.contains("session.started"), "{text}");
+    assert!(text.contains("message.received"), "{text}");
+}
+
+#[test]
+fn a_schema_with_no_rules_prints_no_rules_section() {
     let text = describe(&debates());
     assert!(!text.contains("\nrules\n"), "{text}");
 }

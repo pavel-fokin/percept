@@ -161,7 +161,8 @@ pub fn run(
             // A schema file that fails to load costs its rules, never
             // the prompt's capture.
             let schemas = crate::mapstore::load_schemas(checkout).ok();
-            let rules = schemas.and_then(|schemas| mapstore::turn_rules(&schemas, checkout));
+            let rules = schemas
+                .and_then(|schemas| mapstore::moment_rules(&schemas, checkout, mapstore::MESSAGE_RECEIVED));
             submit_prompt(prompt, source, log, rules, &mut state, &dir, me)
         }
         HookEvent::PostToolUse {
@@ -205,8 +206,9 @@ pub fn run(
 /// recorded before this call, so `mapstore::start`'s own since-cut finds
 /// the previous session and not this one, then records a fresh
 /// `session.started` for the next call to find. The
-/// `additionalContext` is exactly what `percept start` prints from the
-/// shell.
+/// `additionalContext` is `mapstore::start`'s own block, exactly what
+/// `percept start` prints from the shell, with any schema's
+/// `session.started` rules appended after it.
 fn start_session(
     source: &Source,
     log: &dyn EventLog,
@@ -216,7 +218,11 @@ fn start_session(
     let events = log.load()?;
     let maps = schemas.fold_all(of_path(&events, &source.path))?;
     let since = last_session(events.iter().filter(|event| event.source() == source));
-    let rendered = mapstore::start(&maps, &events, &source.path, checkout, since);
+    let mut rendered = mapstore::start(&maps, &events, &source.path, checkout, since);
+    if let Some(rules) = mapstore::moment_rules(schemas, checkout, mapstore::SESSION_STARTED) {
+        rendered.push('\n');
+        rendered.push_str(&rules);
+    }
 
     log.append(&Event::session_started(source.clone()))?;
 

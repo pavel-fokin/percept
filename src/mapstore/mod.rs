@@ -5,8 +5,8 @@
 //! `encode_*` serialize a map or a fragment to JSON lines; `markdown`,
 //! `catalogue`, `describe`, and `start` render it to text for `maps
 //! show`, `maps list`, `maps describe`, and `percept start`, and
-//! `turn_rules` the lines a schema sends into a client's turn. The tools
-//! that call these live in `src/tools`. `load_schemas` reads a
+//! `moment_rules` the lines a schema sends at one of `MOMENTS`. The
+//! tools that call these live in `src/tools`. `load_schemas` reads a
 //! project's schemas from `SCHEMAS_DIR` alone; `TEMPLATES` is the
 //! `decisions` TOML `percept init <client>` copies there for a project
 //! that has none yet. A project with no
@@ -33,8 +33,8 @@ pub use map::{
     of_path, paths, LogMaps, NodeRefArgs, Snapshot,
 };
 pub use render::{catalogue, markdown};
-pub use rules::turn as turn_rules;
-pub use schemas::{load as load_schemas, SCHEMAS_DIR, TEMPLATES};
+pub use rules::for_moment as moment_rules;
+pub use schemas::{load as load_schemas, MESSAGE_RECEIVED, SCHEMAS_DIR, SESSION_STARTED, TEMPLATES};
 pub use start::start;
 
 /// Printed in place of `catalogue`'s and `start`'s usual body when a

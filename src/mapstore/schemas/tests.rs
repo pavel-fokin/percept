@@ -501,56 +501,77 @@ fn state_under_requires_is_refused() {
 }
 
 #[test]
-fn a_rules_table_loads_its_turn_lines_onto_the_schema() {
+fn a_rules_table_loads_lines_for_each_declared_moment() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
         "name = \"glossary\"\npurpose = \"p\"\n\n\
          [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
-         [rules]\nturn = [\"a\", \"b\"]\n",
+         [rules]\n\"session.started\" = [\"s\"]\n\"message.received\" = [\"a\", \"b\"]\n",
     );
 
     let schemas = load(fixture.path()).unwrap();
 
     let glossary = schemas.find("glossary").unwrap();
-    assert_eq!(glossary.rules.turn, ["a", "b"]);
+    assert_eq!(glossary.rules.at("session.started"), ["s"]);
+    assert_eq!(glossary.rules.at("message.received"), ["a", "b"]);
 }
 
 #[test]
-fn a_blank_turn_line_is_refused() {
+fn reflection_started_lines_load_onto_the_schema() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
         "name = \"glossary\"\npurpose = \"p\"\n\n\
          [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
-         [rules]\nturn = [\"\"]\n",
+         [rules]\n\"reflection.started\" = [\"r\"]\n",
     );
 
-    let err = load(fixture.path()).err().unwrap().to_string();
+    let schemas = load(fixture.path()).unwrap();
 
-    assert!(err.contains("glossary.toml"), "{err}");
-    assert!(err.contains("blank turn entry"), "{err}");
+    let glossary = schemas.find("glossary").unwrap();
+    assert_eq!(glossary.rules.at("reflection.started"), ["r"]);
 }
 
 #[test]
-fn a_key_other_than_turn_under_rules_is_refused() {
+fn a_blank_line_under_any_moment_is_refused() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
         "name = \"glossary\"\npurpose = \"p\"\n\n\
          [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
-         [rules]\nstop = [\"a\"]\n",
+         [rules]\n\"message.received\" = [\"\"]\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
 
     assert!(err.contains("glossary.toml"), "{err}");
+    assert!(err.contains("blank \"message.received\" entry"), "{err}");
 }
 
 #[test]
-fn the_decisions_template_carries_two_turn_rules() {
+fn a_key_outside_the_three_moments_is_refused_naming_them() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "name = \"glossary\"\npurpose = \"p\"\n\n\
+         [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
+         [rules]\nturn = [\"a\"]\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert!(err.contains("glossary.toml"), "{err}");
+    assert!(err.contains("\"turn\""), "{err}");
+    assert!(err.contains("session.started"), "{err}");
+    assert!(err.contains("message.received"), "{err}");
+    assert!(err.contains("reflection.started"), "{err}");
+}
+
+#[test]
+fn the_decisions_template_carries_message_received_rules() {
     let (name, text) = TEMPLATES.iter().find(|(name, _)| *name == "decisions").unwrap();
     let schema = parse(name, text).unwrap();
 
-    assert_eq!(schema.rules.turn.len(), 2);
+    assert_eq!(schema.rules.at("message.received").len(), 2);
 }
