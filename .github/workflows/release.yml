@@ -7,8 +7,47 @@ on:
 permissions:
   contents: write
 
+# Two merges landing together would otherwise read the same last
+# release and claim the same number. A run left pending while a third
+# queues behind it is cancelled and publishes nothing: its commit is
+# already in the release the newer run builds, so what is lost is one
+# number, not one merge.
+concurrency:
+  group: release
+
 jobs:
+  # The number the binary is stamped with, so it has to be settled
+  # before anything is built.
+  number:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+    steps:
+      - id: next
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The highest r-number published, not the newest release: a
+          # tag of another shape must not be counted, and a failed
+          # call must not restart the count at r1, which would replace
+          # a release someone already downloaded.
+          last=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+            --jq '[.[].tag_name | select(test("^r[0-9]+$")) | ltrimstr("r") | tonumber] | max // 0')
+          tag="r$(( last + 1 ))"
+
+          # Deleting a release through the UI leaves its tag behind,
+          # which would free the number while the tag still points at
+          # the old commit - and the publisher would then hang new
+          # binaries off it. Stop rather than publish that.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "$tag is already a tag - a release was deleted without it" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: number
     strategy:
       matrix:
         include:
@@ -48,6 +87,8 @@ jobs:
           npm ci
           npm run build
       - run: cargo build --release --target ${{ matrix.target }}
+        env:
+          PERCEPT_RELEASE: ${{ needs.number.outputs.tag }}
       - name: package
         run: |
           out="percept-${{ matrix.target }}"
@@ -61,7 +102,7 @@ jobs:
           path: percept-${{ matrix.target }}.tar.gz
 
   release:
-    needs: build
+    needs: [number, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -74,9 +115,6 @@ jobs:
           sha256sum *.tar.gz > SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: latest
-          prerelease: true
-          make_latest: false
-          body: Built from ${{ github.sha }}. Rolling release, overwritten on every push to main.
+          tag_name: ${{ needs.number.outputs.tag }}
+          body: Built from ${{ github.sha }}.
           files: dist/*

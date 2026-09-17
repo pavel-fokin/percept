@@ -3,6 +3,8 @@
 //! `include_str!` without Node ever running as part of `cargo build`.
 //! A checkout without a built page still compiles: a stub page lands
 //! at the same path instead, saying so itself.
+//!
+//! Also stamps in the release number `percept --version` prints.
 
 use std::env;
 use std::fs;
@@ -23,6 +25,8 @@ npm run build`, then `cargo build`.</p>
 ";
 
 fn main() {
+    stamp_version();
+
     let source = Path::new("web/dist/index.html");
     println!("cargo:rerun-if-changed=web/dist");
 
@@ -34,4 +38,26 @@ fn main() {
     } else {
         fs::write(&dest, STUB).expect("write stub page to OUT_DIR");
     }
+}
+
+/// Emits `PERCEPT_VERSION` for `percept --version`: the release number
+/// CI is publishing under and the commit it built, or `dev` in a
+/// checkout, where no number has been published to name.
+fn stamp_version() {
+    println!("cargo:rerun-if-env-changed=PERCEPT_RELEASE");
+    println!("cargo:rerun-if-env-changed=GITHUB_SHA");
+
+    let release = env_value("PERCEPT_RELEASE").unwrap_or_else(|| "dev".to_string());
+    let version = match env_value("GITHUB_SHA") {
+        Some(sha) => format!("{release} ({})", sha.get(..7).unwrap_or(&sha)),
+        None => release,
+    };
+    println!("cargo:rustc-env=PERCEPT_VERSION={version}");
+}
+
+/// A variable set to the empty string is as absent as an unset one.
+/// `PERCEPT_RELEASE` arrives that way if the job output it comes from
+/// never got written, and would stamp a blank where the number goes.
+fn env_value(name: &str) -> Option<String> {
+    env::var(name).ok().filter(|value| !value.is_empty())
 }
