@@ -33,7 +33,18 @@ jobs:
           # a release someone already downloaded.
           last=$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
             --jq '[.[].tag_name | select(test("^r[0-9]+$")) | ltrimstr("r") | tonumber] | max // 0')
-          echo "tag=r$(( last + 1 ))" >> "$GITHUB_OUTPUT"
+          tag="r$(( last + 1 ))"
+
+          # Deleting a release through the UI leaves its tag behind,
+          # which would free the number while the tag still points at
+          # the old commit - and the publisher would then hang new
+          # binaries off it. Stop rather than publish that.
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "$tag is already a tag - a release was deleted without it" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   build:
     needs: number
@@ -105,6 +116,5 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.number.outputs.tag }}
-          name: ${{ needs.number.outputs.tag }}
           body: Built from ${{ github.sha }}.
           files: dist/*

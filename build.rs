@@ -55,9 +55,9 @@ fn stamp_version() {
     println!("cargo:rustc-env=PERCEPT_VERSION={version}");
 }
 
-/// A variable set to the empty string is as absent as an unset one. A
-/// CI output that never got written arrives that way, and would stamp
-/// a blank where the release number goes.
+/// A variable set to the empty string is as absent as an unset one.
+/// `PERCEPT_RELEASE` arrives that way if the job output it comes from
+/// never got written, and would stamp a blank where the number goes.
 fn env_value(name: &str) -> Option<String> {
     env::var(name).ok().filter(|value| !value.is_empty())
 }

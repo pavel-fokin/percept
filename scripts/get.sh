@@ -1,9 +1,9 @@
 #!/bin/sh
 # Downloads the prebuilt percept binary from the newest release and
-# installs it, for a stranger without a Rust
-# toolchain. `scripts/install.sh` (via `make install`) builds from
-# source instead. See lib-install.sh for how the binary is placed and
-# kept on PATH.
+# installs it, for a stranger without a Rust toolchain.
+# `scripts/install.sh` (via `make install`) builds from source
+# instead. See lib-install.sh for how the binary is placed and kept on
+# PATH.
 set -eu
 
 repo="pavel-fokin/percept"
@@ -15,7 +15,7 @@ repo="pavel-fokin/percept"
 # with. A repo with no release redirects to the releases page and
 # answers 200 doing it, so where we landed is what says whether there
 # is anything to install.
-newest=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
+newest=$(curl -fsSLI -o /dev/null -w '%{url_effective}' \
   "https://github.com/$repo/releases/latest")
 case "$newest" in
   */releases/tag/*) tag=${newest##*/} ;;
