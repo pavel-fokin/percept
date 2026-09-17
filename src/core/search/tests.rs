@@ -352,6 +352,25 @@ fn a_text_term_matches_every_payload_kind() {
 }
 
 #[test]
+fn a_reflection_started_matches_on_its_map_name() {
+    let event = Event::restore(
+        EventId::new(),
+        Actor::Agent,
+        source("tui"),
+        None,
+        Timestamp::now(),
+        Payload::ReflectionStarted {
+            map: "deploys".to_string(),
+        },
+    );
+    let query = EventQuery {
+        text: vec!["deploy".to_string()],
+        ..Default::default()
+    };
+    assert!(query.matches(&event));
+}
+
+#[test]
 fn a_tool_call_matches_by_tool_name_or_by_arguments() {
     let call = Event::restore(
         EventId::new(),

@@ -88,3 +88,57 @@ fn a_cited_file_whose_excerpt_is_gone_reads_as_changed() {
 
     assert_eq!(citations.locate(Path::new("src/a.rs"), "fn one() {}"), Cited::Changed);
 }
+
+#[test]
+fn a_missing_file_whose_excerpt_is_nowhere_else_reads_as_gone() {
+    let checkout = crate::core::testing::Fixture::new();
+    checkout.write("src/b.rs", "fn other() {}\n");
+    let citations = Citations::new(checkout.path());
+
+    assert_eq!(citations.locate(Path::new("src/a.rs"), "fn one() {}"), Cited::Gone);
+}
+
+#[test]
+fn a_renamed_file_is_found_by_a_text_search_of_the_checkout() {
+    let checkout = crate::core::testing::Fixture::new();
+    checkout.write("src/renamed.rs", "fn one() {}\n");
+    let citations = Citations::new(checkout.path());
+
+    assert_eq!(
+        citations.locate(Path::new("src/a.rs"), "fn one() {}"),
+        Cited::Moved(PathBuf::from("src/renamed.rs"))
+    );
+}
+
+#[test]
+fn a_file_that_still_exists_reads_as_changed_even_when_its_text_sits_elsewhere() {
+    let checkout = crate::core::testing::Fixture::new();
+    checkout.write("web/src/theme.css", "body { color: red; }\n");
+    checkout.write("docs/copy.css", "a { color: blue; }\n");
+    let citations = Citations::new(checkout.path());
+
+    assert_eq!(
+        citations.locate(Path::new("web/src/theme.css"), "a { color: blue; }"),
+        Cited::Changed,
+        "a copy under a file that still exists is not a rename"
+    );
+}
+
+#[test]
+fn an_excerpt_found_at_more_than_one_other_path_is_not_a_move() {
+    let checkout = crate::core::testing::Fixture::new();
+    checkout.write("src/b.rs", "fn one() {}\n");
+    checkout.write("src/c.rs", "fn one() {}\n");
+    let citations = Citations::new(checkout.path());
+
+    assert_eq!(citations.locate(Path::new("src/a.rs"), "fn one() {}"), Cited::Gone);
+}
+
+#[test]
+fn an_excerpt_still_at_its_own_path_is_not_reported_as_moved() {
+    let checkout = crate::core::testing::Fixture::new();
+    checkout.write("src/a.rs", "fn other() {}\nfn one() {}\n");
+    let citations = Citations::new(checkout.path());
+
+    assert_eq!(citations.locate(Path::new("src/a.rs"), "fn one() {}"), Cited::At(2, 2));
+}

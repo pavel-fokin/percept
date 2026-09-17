@@ -69,10 +69,14 @@ struct Row {
     line: String,
 }
 
-/// What every current headline node cites that no longer matches the
-/// working tree - one Attention row per node with at least one stale
-/// citation, `<id> cites <label> changed, <label> gone`, `findings` each `"<label> changed"` or `"<label>
-/// gone"`. This module's Attention block builds its lines from this.
+/// What every current node cites that no longer matches the working
+/// tree - an option carries citations as readily as the decision it
+/// answers, so the walk is over every node rather than the headline
+/// kinds - one Attention row per node with at least one stale
+/// citation, `<id> cites <label> changed, <label> gone`, `findings`
+/// each `"<label> changed"`, `"<label> gone"`, or `"<label> renamed to
+/// <new label>"`. This module's Attention block builds its lines from
+/// this.
 ///
 /// Builds two indexes over `events` once, both over `file.cited`
 /// events only - id to event, and causation id to the events it
@@ -98,7 +102,7 @@ fn citation_rows(maps: &[Map], events: &[Event], checkout: &Path) -> Vec<Row> {
     let citations = Citations::new(checkout);
     let mut rows = Vec::new();
     for map in maps {
-        for node in map.headlines() {
+        for node in map.nodes() {
             let findings = node_changes(node, &id_to_event, &later_citations, &citations);
             if !findings.is_empty() {
                 let id = line_id(map, node);
@@ -110,8 +114,8 @@ fn citation_rows(maps: &[Map], events: &[Event], checkout: &Path) -> Vec<Row> {
     rows
 }
 
-/// `node`'s own `changed`/`gone` findings, one per source that names a
-/// `file.cited` event, checked at its newest re-citation.
+/// `node`'s own `renamed`/`changed`/`gone` findings, one per source
+/// that names a `file.cited` event, checked at its newest re-citation.
 fn node_changes(
     node: &Node,
     id_to_event: &HashMap<EventId, &Event>,
@@ -128,6 +132,9 @@ fn node_changes(
             };
             let status = match citations.locate(path, excerpt) {
                 Cited::At(..) => return None,
+                Cited::Moved(to) => {
+                    return Some(format!("{} renamed to {}", path.display(), to.display()))
+                }
                 Cited::Changed => "changed",
                 Cited::Gone => "gone",
             };
@@ -198,15 +205,18 @@ fn state_counts(map: &Map) -> Vec<String> {
         .collect()
 }
 
-/// The State block: one line per map in fold order - its headline
-/// count, `+N since last session` when that map's `moved` list is not
-/// empty, then any state counts `state_counts` finds.
+/// The State block: one line per map in fold order - how many of its
+/// headline nodes head it against how many it holds, `+N since last
+/// session` when that map's `moved` list is not empty, then any state
+/// counts `state_counts` finds. The pair is the pressure to fold: a
+/// map whose roots trail its headlines far enough is one to reflect
+/// on.
 fn state_block(maps: &[Map], moved: &[Vec<&Node>]) -> String {
     let rows: Vec<(String, String)> = maps
         .iter()
         .zip(moved)
         .map(|(map, moved)| {
-            let mut parts = vec![map.headlines().count().to_string()];
+            let mut parts = vec![format!("{} of {}", map.roots().count(), map.headlines().count())];
             if !moved.is_empty() {
                 parts.push(format!("+{} since last session", moved.len()));
             }

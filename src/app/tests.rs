@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::testing::{content, human, node_added, schemas, source, usage, FakeLog};
+use crate::core::testing::{content, edge_added, human, node_added, schemas, source, usage, FakeLog};
 use crate::core::{Actor, Payload};
 use crate::harness::testing::{FakeCatalog, FakeSnapshot, FakeTool, FixedPolicy, Scripted};
 use crate::harness::{Chunk, Verdict};
@@ -1017,11 +1017,27 @@ fn a_headlines_map_sends_only_its_headline_nodes() {
     assert_debates_header(&sent[0]);
     assert!(
         sent[0].contains(
-            "Its topic and verdict nodes follow; read_map opens the rest, whole or around one node.\n"
+            "The topic and verdict nodes that head it follow; read_map opens the rest, whole or around one node.\n"
         )
     );
     assert!(sent[0].contains("- verdict \"Rust over Go\""));
     assert!(!sent[0].contains("benchmarks"));
+}
+
+#[test]
+fn a_headlines_map_omits_a_headline_another_headline_claims() {
+    let old = node_added("verdict", "Go");
+    let new = node_added("verdict", "Rust");
+    let replaces = edge_added("replaces", &new, &old);
+    let mut events = vec![old, new, replaces];
+    events.extend(filler(25));
+    let (model, mut app) = seeded_app_with_shape(events, Vec::new(), MapShape::Headlines);
+
+    let _ = app.submit("now".to_string()).unwrap();
+
+    let sent = model.last_request();
+    assert!(sent[0].contains("- verdict \"Rust\""));
+    assert!(!sent[0].contains("- verdict \"Go\""));
 }
 
 #[test]

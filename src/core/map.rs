@@ -333,6 +333,53 @@ impl Map {
             .filter(move |node| headline_kinds.contains(&node.kind))
     }
 
+    /// The headline nodes nobody claims - what heads a map, one
+    /// section per root, in `headlines` order.
+    pub fn roots(&self) -> impl Iterator<Item = &Node> {
+        self.headlines().filter(move |node| self.claimant(node).is_none())
+    }
+
+    /// The headline node `node` prints under, if any: the first
+    /// headline of its own kind pointing at it - the decision that
+    /// supersedes it - else, of the headlines of other kinds it points
+    /// at, the one whose kind sits latest in `headlines` - the question
+    /// a decision resolves over the concept it is about, so `headlines`
+    /// order is nesting order and the schema's edge order decides only
+    /// between two of the same kind, first edge first. A node nobody
+    /// claims heads a section of its own. The rule names no kind, so it
+    /// holds for any schema: a `blocks` chore claims the one it blocks
+    /// the way `supersedes` claims the old decision.
+    pub fn claimant(&self, node: &Node) -> Option<&Node> {
+        let headline_kinds = &self.schema.headline_kinds;
+        let mut same_kind = None;
+        let mut other_kind: Option<&Node> = None;
+        for edge_kind in &self.schema.edge_kinds {
+            for from in self.linked(node.id, &edge_kind.kind, EdgeEnd::To) {
+                if same_kind.is_none() && from.kind == node.kind && headline_kinds.contains(&from.kind) {
+                    same_kind = Some(from);
+                }
+            }
+            for to in self.linked(node.id, &edge_kind.kind, EdgeEnd::From) {
+                let nearer = other_kind.is_none_or(|held| self.kind_rank(to) > self.kind_rank(held));
+                if nearer && to.kind != node.kind && headline_kinds.contains(&to.kind) {
+                    other_kind = Some(to);
+                }
+            }
+        }
+        same_kind.or(other_kind)
+    }
+
+    /// A headline node's position by kind: the index of its kind in the
+    /// schema's `headlines`, so the kind listed first heads the render
+    /// and a node nests under the latest kind it points at.
+    pub fn kind_rank(&self, node: &Node) -> usize {
+        self.schema
+            .headline_kinds
+            .iter()
+            .position(|kind| *kind == node.kind)
+            .unwrap_or(usize::MAX)
+    }
+
     pub fn edges(&self) -> &[Edge] {
         &self.edges
     }

@@ -18,14 +18,14 @@ fn catalogue_line(map: &Map) -> String {
     }
 }
 
-/// `MapShape::Headlines`'s body: the headline nodes as `Map`'s
-/// `Display` formats a node line, without properties - a reader
-/// deciding whether to open the map with `read_map` doesn't need them
-/// yet.
+/// `MapShape::Headlines`'s body: the map's root nodes - the headlines
+/// nobody claims, what heads it - as `Map`'s `Display` formats a node
+/// line, without properties - a reader deciding whether to open the
+/// map with `read_map` doesn't need them yet.
 fn headlines_body(map: &Map) -> String {
-    let lines: Vec<String> = map.headlines().map(|node| format!("- {node}")).collect();
+    let lines: Vec<String> = map.roots().map(|node| format!("- {node}")).collect();
     format!(
-        "Its {} nodes follow; read_map opens the rest, whole or around one node.\n{}",
+        "The {} nodes that head it follow; read_map opens the rest, whole or around one node.\n{}",
         map.schema().headline_kinds.join(" and "),
         lines.join("\n")
     )

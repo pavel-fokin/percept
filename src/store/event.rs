@@ -147,6 +147,12 @@ struct ModelCalledBody {
     cached_tokens: Option<u64>,
 }
 
+/// `Payload::ReflectionStarted` on the wire - the map name alone.
+#[derive(Serialize, Deserialize)]
+struct ReflectionStartedBody {
+    map: String,
+}
+
 /// `lines` on the wire - `"40-58"`, or absent for the whole file.
 #[derive(Serialize, Deserialize)]
 struct FileCitedBody {
@@ -189,11 +195,12 @@ const EDGE_ADDED: &str = "edge.added";
 const EDGE_REMOVED: &str = "edge.removed";
 const MODEL_CALLED: &str = "model.called";
 const SESSION_STARTED: &str = "session.started";
+const REFLECTION_STARTED: &str = "reflection.started";
 const FILE_CITED: &str = "file.cited";
 
 /// Every `type` the log records, for the error that lists them when a
 /// caller names one that isn't here.
-pub const KINDS: [&str; 12] = [
+pub const KINDS: [&str; 13] = [
     MESSAGE_RECEIVED,
     THOUGHT_RECORDED,
     TOOL_CALLED,
@@ -205,6 +212,7 @@ pub const KINDS: [&str; 12] = [
     EDGE_REMOVED,
     MODEL_CALLED,
     SESSION_STARTED,
+    REFLECTION_STARTED,
     FILE_CITED,
 ];
 
@@ -223,6 +231,7 @@ pub fn parse_kind(s: &str) -> Result<EventKind, Error> {
         EDGE_REMOVED => Ok(EventKind::EdgeRemoved),
         MODEL_CALLED => Ok(EventKind::ModelCalled),
         SESSION_STARTED => Ok(EventKind::SessionStarted),
+        REFLECTION_STARTED => Ok(EventKind::ReflectionStarted),
         FILE_CITED => Ok(EventKind::FileCited),
         other => Err(Error::UnknownEventType(other.to_string())),
     }
@@ -562,6 +571,10 @@ impl From<&crate::core::Event> for Event {
             })
             .expect("ModelCalledBody always serializes"),
             Payload::SessionStarted => Value::Object(serde_json::Map::new()),
+            Payload::ReflectionStarted { map } => serde_json::to_value(ReflectionStartedBody {
+                map: map.clone(),
+            })
+            .expect("ReflectionStartedBody always serializes"),
             Payload::FileCited {
                 path,
                 lines,
@@ -747,6 +760,11 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
             }))
         }
         EventKind::SessionStarted => Ok(Payload::SessionStarted),
+        EventKind::ReflectionStarted => {
+            let body: ReflectionStartedBody =
+                serde_json::from_value(payload).map_err(Error::BadPayload)?;
+            Ok(Payload::ReflectionStarted { map: body.map })
+        }
         EventKind::FileCited => {
             let body: FileCitedBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
             Ok(Payload::FileCited {

@@ -255,6 +255,11 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
         Payload::ModelCalled(..) => Vec::new(),
         // Bookkeeping about a session opening, not something to show.
         Payload::SessionStarted => Vec::new(),
+        // A reflection starting shows dimmed too - it's context the
+        // model built, not dialogue.
+        Payload::ReflectionStarted { map } => {
+            tool_lines(chat, &format!("{map}: reflection started"), width)
+        }
         // A map change shows dimmed too - it's context the model built,
         // not dialogue.
         Payload::NodeAdded {

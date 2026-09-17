@@ -6,7 +6,9 @@
 # raised - and says whether it still stands and why. A decision
 # resolves the question, and a later decision supersedes an earlier
 # one. A question reopens a decision it puts in doubt, so --around a
-# question reaches everything weighed for it.
+# question reaches everything weighed for it. A concept covers another
+# it absorbs, so the covered one nests under it and leaves the
+# overview.
 
 name = "decisions"
 purpose = "what was asked, what was chosen, and why, so a settled question is not reopened"
@@ -38,6 +40,12 @@ from = ["question", "decision"]
 to = "concept"
 
 [[edge]]
+kind = "covers"
+gloss = "from a concept to one it absorbs - a narrower rule, or a worse wording of the same one; the covered concept nests under it and leaves the overview"
+from = "concept"
+to = "concept"
+
+[[edge]]
 kind = "resolves"
 from = "decision"
 to = "question"
@@ -59,9 +67,18 @@ gloss = "from a question to a decision it puts in doubt; the decision stands unt
 from = "question"
 to = "decision"
 
-# The lines a turn carries, after the prompt's event id.
+# The lines percept sends at each moment it has a channel to speak on:
+# a session's start, a prompt reaching the log, and a reflection's own
+# opening.
 [rules]
-turn = [
+"message.received" = [
   "propose by recording: an option under its question, state \"open\", before arguing for it",
-  "before stopping, record each thing you reasoned with as a concept whose definition is the rule that held",
+  "before stopping, record what you reasoned with. Sharpen a concept that already states it, or cover yours under it; add a peer only when neither fits",
+]
+"reflection.started" = [
+  "cite the event id printed above as --source for everything you record here, and stop at what you can defend in one pass - a map is folded over many reflections, not one",
+  "read `percept start` first: repoint a citation it calls renamed, reread the claim behind one it calls changed, and leave what it calls gone as history",
+  "two concepts stating one rule leave one - change the survivor to carry the loser's sources, re-point what was about the loser, then remove it",
+  "a concept that is an instance of another is covered by it, never removed: `covers` points from the keeper down to what it holds",
+  "a concept the user last changed is theirs - record a question against it, never a change",
 ]

@@ -4,6 +4,7 @@
 //! `mapstore` loads these values from it. `Map` checks every write
 //! against the schema it was folded with.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use super::{Map, MapError};
@@ -28,12 +29,40 @@ pub struct Schema {
     pub rules: Rules,
 }
 
-/// The moments percept injects a schema's own lines at, and the lines
-/// for each. `turn` is every prompt: what a turn hook adds after the
-/// prompt's event id, so the binary itself carries no rule text.
+/// The lines a schema injects into an agent's context, by moment - a
+/// map from moment name to lines, so a fourth moment costs no new
+/// field. Which moments have a channel to speak on is `mapstore`'s to
+/// know, not this type's; `Rules` only holds what a schema declared.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Rules {
-    pub turn: Vec<String>,
+pub struct Rules(BTreeMap<String, Vec<String>>);
+
+impl Rules {
+    /// `moments`, each moment's lines as declared - the constructor
+    /// every loader builds from.
+    pub fn new(moments: BTreeMap<String, Vec<String>>) -> Self {
+        Self(moments)
+    }
+
+    /// The lines declared for `moment`, empty when the schema declared
+    /// none for it.
+    pub fn at(&self, moment: &str) -> &[String] {
+        self.0.get(moment).map(Vec::as_slice).unwrap_or(&[])
+    }
+
+    /// Every moment this schema declares at least one line for, moment
+    /// name paired with its lines, in moment-name order.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &[String])> {
+        self.0
+            .iter()
+            .map(|(moment, lines)| (moment.as_str(), lines.as_slice()))
+            .filter(|(_, lines)| !lines.is_empty())
+    }
+
+    /// Whether every moment's list is empty - no lines to send at any
+    /// moment, so a caller carries no attribution for none sent.
+    pub fn is_empty(&self) -> bool {
+        self.iter().next().is_none()
+    }
 }
 
 /// A node kind and, when its name does not say it all, one line saying

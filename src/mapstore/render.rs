@@ -188,7 +188,7 @@ fn push_node(out: &mut String, map: &Map, node: &Node, mark: bool) {
 /// end, so nothing a map holds goes unseen.
 fn push_headlines(out: &mut String, map: &Map, mark: bool) {
     let mut headlines: Vec<&Node> = map.headlines().collect();
-    headlines.sort_by_key(|node| (kind_rank(map, node), state_rank(map, node), node.added().at));
+    headlines.sort_by_key(|node| (map.kind_rank(node), state_rank(map, node), node.added().at));
     if headlines.is_empty() {
         let _ = writeln!(
             out,
@@ -201,7 +201,7 @@ fn push_headlines(out: &mut String, map: &Map, mark: bool) {
     let roots: Vec<&Node> = headlines
         .iter()
         .copied()
-        .filter(|node| claimant(map, node).is_none())
+        .filter(|node| map.claimant(node).is_none())
         .collect();
     let mut printed: HashSet<NodeId> = HashSet::new();
     for node in roots.iter().chain(headlines.iter()) {
@@ -212,36 +212,6 @@ fn push_headlines(out: &mut String, map: &Map, mark: bool) {
         push_props(out, node, "");
         push_tree(out, map, node, "", &mut printed, mark);
     }
-}
-
-/// The headline node `node` prints under, if any: the first headline
-/// of its own kind pointing at it - the decision that supersedes it -
-/// else, of the headlines of other kinds it points at, the one whose
-/// kind sits latest in `headlines` - the question a decision resolves
-/// over the concept it is about, so `headlines` order is nesting order
-/// and the schema's edge order decides only between two of the same
-/// kind, first edge first. A node nobody claims
-/// heads a section of its own. The rule names no kind, so it holds for
-/// any schema: a `blocks` chore claims the one it blocks the way
-/// `supersedes` claims the old decision.
-fn claimant<'a>(map: &'a Map, node: &Node) -> Option<&'a Node> {
-    let headline_kinds = &map.schema().headline_kinds;
-    let mut same_kind = None;
-    let mut other_kind: Option<&Node> = None;
-    for edge_kind in &map.schema().edge_kinds {
-        for from in map.linked(node.id, &edge_kind.kind, EdgeEnd::To) {
-            if same_kind.is_none() && from.kind == node.kind && headline_kinds.contains(&from.kind) {
-                same_kind = Some(from);
-            }
-        }
-        for to in map.linked(node.id, &edge_kind.kind, EdgeEnd::From) {
-            let nearer = other_kind.is_none_or(|held| kind_rank(map, to) > kind_rank(map, held));
-            if nearer && to.kind != node.kind && headline_kinds.contains(&to.kind) {
-                other_kind = Some(to);
-            }
-        }
-    }
-    same_kind.or(other_kind)
 }
 
 /// `node`'s neighbours, one line per edge, under `indent`: an outgoing
@@ -267,7 +237,7 @@ fn push_tree(out: &mut String, map: &Map, node: &Node, indent: &str, printed: &m
             .chain(incoming.into_iter().map(|neighbour| (EdgeEnd::To, neighbour)));
         for (end, neighbour) in ends {
             let headline = headline_kinds.contains(&neighbour.kind);
-            let nests_here = claimant(map, neighbour).is_some_and(|claimant| claimant.id == node.id);
+            let nests_here = map.claimant(neighbour).is_some_and(|claimant| claimant.id == node.id);
             if headline && !nests_here {
                 if nests_within(map, neighbour, node) || nests_within(map, node, neighbour) {
                     continue;
@@ -293,7 +263,7 @@ fn push_tree(out: &mut String, map: &Map, node: &Node, indent: &str, printed: &m
 fn nests_within(map: &Map, inner: &Node, outer: &Node) -> bool {
     let mut seen = HashSet::new();
     let mut node = inner;
-    while let Some(above) = claimant(map, node) {
+    while let Some(above) = map.claimant(node) {
         if above.id == outer.id {
             return true;
         }
@@ -321,17 +291,6 @@ fn push_edge_line(
         EdgeEnd::From => writeln!(out, "{indent}- {edge_kind} {name}"),
         EdgeEnd::To => writeln!(out, "{indent}- {name} {edge_kind}"),
     };
-}
-
-/// A headline node's position by kind: the index of its kind in the
-/// schema's `headlines`, so the kind listed first heads the render and
-/// a node nests under the latest kind it points at.
-pub(crate) fn kind_rank(map: &Map, node: &Node) -> usize {
-    map.schema()
-        .headline_kinds
-        .iter()
-        .position(|kind| *kind == node.kind)
-        .unwrap_or(usize::MAX)
 }
 
 /// `node`'s position among its kind's declared states - unknown,

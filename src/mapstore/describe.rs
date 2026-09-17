@@ -24,7 +24,7 @@ pub fn describe(schema: &Schema) -> String {
         push_edge_kinds(&mut out, schema);
     }
 
-    if !schema.rules.turn.is_empty() {
+    if !schema.rules.is_empty() {
         out.push_str("\nrules\n");
         push_rules(&mut out, schema);
     }
@@ -112,13 +112,19 @@ fn kind_suffix(kind: &NodeKind) -> String {
     suffix
 }
 
-/// The `turn` rules, one per line: the moment name before the first
-/// line, later lines aligned under it.
+/// Every moment's rules, one line per entry: the moment name before its
+/// first line, later lines of the same moment aligned under it. Moment
+/// names are padded to the widest, so every line's rule starts at the
+/// same column.
 fn push_rules(out: &mut String, schema: &Schema) {
-    let indent = " ".repeat("turn".len());
-    for (index, line) in schema.rules.turn.iter().enumerate() {
-        let prefix = if index == 0 { "turn" } else { &indent };
-        let _ = writeln!(out, "  {prefix}   {line}");
+    let moments: Vec<(&str, &[String])> = schema.rules.iter().collect();
+    let width = moments.iter().map(|(moment, _)| moment.len()).max().unwrap_or(0);
+    let indent = " ".repeat(width);
+    for (moment, lines) in moments {
+        for (index, line) in lines.iter().enumerate() {
+            let prefix = if index == 0 { moment } else { indent.as_str() };
+            let _ = writeln!(out, "  {prefix:<width$}   {line}");
+        }
     }
 }
 
@@ -142,7 +148,10 @@ const GRAMMAR: &str = "
   line naming a short id, t4, changes that node: state \"done\" under it sets a
   property, name \"...\" renames it, and why \"...\" is the change's own reason,
   not a property. A node is refused without its required properties; a node
-  the user last changed takes only state from an agent.
+  the user last changed takes only state from an agent. This document adds
+  and changes; it never removes. percept maps remove-node and remove-edge do
+  that, each taking the same --actor and --source, and remove-node drops the
+  edges that touch the node it takes.
 ";
 
 /// One node per node kind, in schema order, its name always `"..."`,

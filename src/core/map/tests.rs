@@ -35,6 +35,41 @@ fn a_replaced_verdict_still_shows_in_the_headlines() {
 }
 
 #[test]
+fn a_headline_nobody_claims_is_a_root() {
+    let events = [node_added("debates", NodeId::new(), "topic", "Which language?")];
+    let map = Map::fold(debates(), &events).unwrap();
+    let names: Vec<&str> = map.roots().map(|node| node.name.as_str()).collect();
+    assert_eq!(names, ["Which language?"]);
+}
+
+#[test]
+fn a_claimed_headline_is_not_a_root() {
+    let (old, new) = (NodeId::new(), NodeId::new());
+    let events = [
+        node_added("debates", old, "verdict", "Go"),
+        node_added("debates", new, "verdict", "Rust"),
+        edge_added("debates", "replaces", new, old),
+    ];
+    let map = Map::fold(debates(), &events).unwrap();
+    let names: Vec<&str> = map.roots().map(|node| node.name.as_str()).collect();
+    assert_eq!(names, ["Rust"]);
+}
+
+#[test]
+fn a_claim_cycle_still_yields_roots_without_hanging() {
+    let (a, b) = (NodeId::new(), NodeId::new());
+    let events = [
+        node_added("chores", a, "chore", "A"),
+        node_added("chores", b, "chore", "B"),
+        edge_added("chores", "blocks", a, b),
+        edge_added("chores", "blocks", b, a),
+    ];
+    let map = Map::fold(chores(), &events).unwrap();
+    let names: Vec<&str> = map.roots().map(|node| node.name.as_str()).collect();
+    assert!(names.is_empty());
+}
+
+#[test]
 fn linked_follows_an_edge_kind_the_core_names_no_meaning_for() {
     let (a, b, c) = (NodeId::new(), NodeId::new(), NodeId::new());
     let events = [

@@ -61,7 +61,19 @@ fn the_state_line_shows_a_maps_headline_count() {
     let events = vec![node_added("topic", "why blue?")];
     let text = rendered(&events, Fixture::new().path());
 
-    assert!(text.contains("debates   1"), "{text:?}");
+    assert!(text.contains("debates   1 of 1"), "{text:?}");
+}
+
+#[test]
+fn the_state_line_counts_a_claimed_headline_out_of_the_roots() {
+    let topic = node_added("topic", "why blue?");
+    let verdict = node_added("verdict", "blue it is");
+    let settles = edge_added("settles", &verdict, &topic);
+    let events = vec![topic.clone(), verdict.clone(), settles];
+
+    let text = rendered(&events, Fixture::new().path());
+
+    assert!(text.contains("debates   1 of 2"), "{text:?}");
 }
 
 #[test]
@@ -152,6 +164,20 @@ fn attention_marks_a_stale_citation_as_changed() {
 }
 
 #[test]
+fn attention_marks_a_stale_citation_on_a_node_of_no_headline_kind() {
+    let checkout = Fixture::new();
+    checkout.write("a.rs", "fn one() { edited }\n");
+
+    let cited = file_cited("a.rs", Some((1, 1)), "fn one() {}");
+    let node = node_added_citing(Actor::Human(human()), "claim", "blue is calm", vec![cited.id()]);
+    let events = vec![cited, node];
+
+    let text = rendered(&events, checkout.path());
+
+    assert!(text.contains("cites a.rs changed"), "{text:?}");
+}
+
+#[test]
 fn next_offers_a_read_around_for_every_attention_id() {
     let checkout = Fixture::new();
     checkout.write("a.rs", "fn one() { edited }\n");
@@ -188,6 +214,23 @@ fn an_unchanged_seen_file_reports_nothing() {
     let text = rendered(&events, checkout.path());
 
     assert!(!text.contains("Attention"), "{text:?}");
+}
+
+#[test]
+fn a_citation_found_at_exactly_one_other_path_reports_renamed() {
+    let checkout = Fixture::new();
+    checkout.write("event-row.tsx", "export function EventRow() {}\n");
+
+    let cited = file_cited("EventRow.tsx", None, "export function EventRow() {}");
+    let node = node_added_citing(Actor::Human(human()), "topic", "why a?", vec![cited.id()]);
+    let events = vec![cited, node];
+
+    let text = rendered(&events, checkout.path());
+
+    assert!(
+        text.contains("cites EventRow.tsx renamed to event-row.tsx"),
+        "{text:?}"
+    );
 }
 
 #[test]
@@ -341,3 +384,4 @@ fn next_offers_read_around_only_for_the_ids_attention_printed() {
     let folded_id = format!("t{}", LIMIT + 1);
     assert!(!text.contains(&format!("read around {folded_id}")), "{text:?}");
 }
+
