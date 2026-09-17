@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 
 use super::*;
-use crate::core::testing::{node_added_by, source, FakeLog};
+use crate::core::testing::{node_added_by, source, Fixture, FakeLog};
 use crate::core::{Actor, Payload};
 
 /// Binds a server on a spare port, serves it on a spawned task over an
@@ -24,6 +24,7 @@ async fn spawn_over(events: Vec<crate::core::Event>) -> (std::sync::Arc<FakeLog>
     let state = std::sync::Arc::new(AppState {
         log: log.clone() as std::sync::Arc<dyn crate::core::EventLog>,
         source: source("test"),
+        opened: crate::shared::Timestamp::now(),
     });
     tokio::spawn(serve(listener, state));
     (handed_back, addr)
@@ -78,10 +79,19 @@ async fn root_with_a_query_string_still_returns_the_embedded_page() {
 }
 
 #[tokio::test]
-async fn unknown_path_returns_404() {
+async fn a_path_the_page_routes_itself_is_served_the_page() {
     let addr = spawn().await;
-    let response = get(addr, "/nope").await;
+    let response = get(addr, "/log?q=drift").await;
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    assert!(response.contains("<title>percept</title>"), "{response}");
+}
+
+#[tokio::test]
+async fn an_unknown_endpoint_under_api_is_not_served_the_page() {
+    let addr = spawn().await;
+    let response = get(addr, "/api/nope").await;
     assert!(response.starts_with("HTTP/1.1 404"), "{response}");
+    assert!(!response.contains("<title>percept</title>"), "{response}");
 }
 
 /// A `message.received` from `/test`, for a query that has to tell one
@@ -188,4 +198,68 @@ async fn api_event_is_not_found_for_an_event_in_another_project() {
     let (_log, addr) = spawn_over(vec![event]).await;
     let (status, _) = get_parts(addr, &format!("/api/events/{id}")).await;
     assert!(status.starts_with("HTTP/1.1 404"), "{status}");
+}
+
+/// `/api/maps/{name}` answers for the `root` the query names, not
+/// `state.source.path` - proving the path segment binds `name` and the
+/// query string binds `root`, `around`, and `depth` together.
+#[tokio::test]
+async fn api_maps_cuts_the_named_project_root_around_a_node() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/decisions.toml",
+        "name = \"decisions\"\npurpose = \"test\"\nheadlines = [\"concept\"]\n\n\
+         [[node]]\nkind = \"concept\"\n\n[[node]]\nkind = \"question\"\n\n\
+         [[edge]]\nkind = \"about\"\nfrom = \"question\"\nto = \"concept\"\n",
+    );
+    let concept = crate::core::Event::new(
+        Actor::Agent,
+        crate::core::Source {
+            name: "test".to_string(),
+            path: fixture.path().to_path_buf(),
+        },
+        None,
+        Payload::NodeAdded {
+            map: "decisions".to_string(),
+            node: crate::core::NodeId::new(),
+            kind: "concept".to_string(),
+            name: "the rule".to_string(),
+            properties: Default::default(),
+            sources: Vec::new(),
+            seq: 0,
+        },
+    );
+    let (_log, addr) = spawn_over(vec![concept]).await;
+
+    let path = format!("/api/maps/decisions?root={}", fixture.path().to_string_lossy());
+    let (status, body) = get_json(addr, &path).await;
+
+    assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+    assert_eq!(body["map"]["name"], "decisions");
+    assert_eq!(body["nodes"].as_array().unwrap().len(), 1, "{body}");
+    assert_eq!(body["nodes"][0]["kind"], "concept");
+}
+
+/// Unlike `/api/events`, `/api/projects` is not scoped to the server's
+/// own source - a project this server never opened still shows up.
+#[tokio::test]
+async fn api_projects_serves_every_project_the_log_holds_not_only_this_ones() {
+    let events = vec![
+        message("in this project"),
+        crate::core::testing::node_added_at("/elsewhere", "claim", "in another"),
+    ];
+    let (_log, addr) = spawn_over(events).await;
+    let (status, body) = get_json(addr, "/api/projects").await;
+    assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+    let projects = body["projects"].as_array().unwrap();
+    assert_eq!(projects.len(), 2, "{body}");
+    let paths: Vec<&str> = projects.iter().map(|project| project["path"].as_str().unwrap()).collect();
+    assert!(paths.contains(&"/elsewhere"), "{body}");
+    assert!(paths.contains(&crate::core::testing::ROOT), "{body}");
+    for project in projects {
+        assert!(project["name"].is_string(), "{body}");
+        assert!(project["events"].is_number(), "{body}");
+        assert!(project["last_active"].is_string(), "{body}");
+        assert!(project["maps"].is_array(), "{body}");
+    }
 }

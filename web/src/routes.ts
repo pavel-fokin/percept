@@ -1,0 +1,25 @@
+/** Where each page lives, and how a link to one is written. Paths
+ * rather than hashes: the log's filters and a map's cut both live in
+ * the query string, so `/log?q=drift` and `/maps/decisions?root=…` are
+ * links the server and the page read the same way, where a hash would
+ * have to carry a query string of its own. */
+
+export const PATHS = {
+  index: "/",
+  log: "/log",
+  map: "/maps/:name",
+} as const;
+
+/** One project's map, with the root it belongs to. The root is a
+ * filesystem path and the only unambiguous name a project has - two
+ * checkouts can share a basename - so it rides the query string
+ * beside the cut. */
+export function mapPath(name: string, root: string): string {
+  return `/maps/${encodeURIComponent(name)}?root=${encodeURIComponent(root)}`;
+}
+
+/** The log's search field, named once: the field wears it as its `id`,
+ * the label points at it, and a link that means "search the log"
+ * carries it as a fragment. */
+export const SEARCH_FIELD_ID = "q";
+export const SEARCH_HASH = `#${SEARCH_FIELD_ID}`;

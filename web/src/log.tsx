@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import EventRow from "./event-row";
-import { basename, eventsCountLabel, foldResults, groupByDay, groupRuns, timeOf } from "./event-rows";
+import { eventsCountLabel, foldResults, groupByDay, groupRuns, timeOf } from "./event-rows";
 import FilterMenu from "./filter-menu";
 import type { Filter } from "./filters";
+import { basename } from "./format";
+import { SEARCH_FIELD_ID } from "./routes";
 import {
   ACTOR_OPTIONS,
   KIND_OPTIONS,
@@ -76,13 +78,13 @@ export default function Log({
         <h1 className="text-base font-medium tracking-tight text-ink">Event log</h1>
         {project && <p className="text-[0.8125rem] text-faint">· from {basename(project)}</p>}
       </div>
-      <label htmlFor="q" className="sr-only">
+      <label htmlFor={SEARCH_FIELD_ID} className="sr-only">
         Search every event
       </label>
       <div className="relative mt-3">
         <SearchIcon className="pointer-events-none absolute top-1/2 left-0 size-4 -translate-y-1/2 text-faint" />
         <input
-          id="q"
+          id={SEARCH_FIELD_ID}
           type="search"
           value={filter.q}
           onChange={(event) => onFilterChange({ ...filter, q: event.target.value })}

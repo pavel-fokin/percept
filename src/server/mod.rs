@@ -2,21 +2,26 @@
 //! `127.0.0.1`, on a port the OS picks, and opens it in the browser.
 //! A presentation-layer peer of `cli` and `tui`: it has no chat logic
 //! of its own. It serves the JSON the page reads (`GET /api/events`,
-//! `GET /api/events/{id}`) over the same log the CLI uses. Built on
-//! `axum`.
+//! `GET /api/events/{id}`) over the same log the CLI uses, and
+//! `GET /api/projects`, every project the log holds - not scoped to
+//! this server's own, unlike the other two. Built on `axum`.
 //!
 //! The page is built into the binary at compile time - `build.rs`
 //! copies `web/dist/index.html` into `OUT_DIR`, or writes a stub there
 //! when the checkout has never run `npm run build` - so `cargo build`
 //! never needs Node, and a checkout without the built page still
 //! serves something explaining how to build it.
+//!
+//! `GET /api/maps/{name}` is a third route unscoped to this server's
+//! own project, like `GET /api/projects`: `root` names the project
+//! whose own schemas and events the map is folded from.
 
 use std::error::Error;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -24,8 +29,11 @@ use tokio::net::TcpListener;
 
 use crate::core::{Event, EventLog, Source};
 use crate::server::events::Error as EventsError;
+use crate::shared::Timestamp;
 
 mod events;
+mod maps;
+mod projects;
 #[cfg(test)]
 mod tests;
 
@@ -39,10 +47,15 @@ const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 const SOURCE_NAME: &str = "percept-web";
 
 /// What every handler needs to read the log: read fresh on every
-/// request, never cached.
+/// request, never cached. `opened` is when this view started - the
+/// moment a "since last session" count is measured back from, held
+/// still for as long as the view is open. Opening records a
+/// `session.started` of its own, so a count read live would always
+/// measure against this server and come back zero.
 struct AppState {
     log: Arc<dyn EventLog>,
     source: Source,
+    opened: Timestamp,
 }
 
 /// `percept web` - binds a server on `127.0.0.1`, prints its URL,
@@ -59,17 +72,19 @@ pub async fn run(log: Arc<dyn EventLog>, source: Source) -> Result<(), Box<dyn E
     let (listener, addr) = bind().await?;
     // The event lands only once the page can be served, so a bind that
     // fails records nothing.
-    {
+    let opened = {
         let log = Arc::clone(&log);
-        let source = source.clone();
-        tokio::task::spawn_blocking(move || log.append(&Event::session_started(source)).map_err(|err| err.to_string()))
+        let marker = Event::session_started(source.clone());
+        let opened = marker.created_at();
+        tokio::task::spawn_blocking(move || log.append(&marker).map_err(|err| err.to_string()))
             .await
             .expect("appending session.started never panics")?;
-    }
+        opened
+    };
     let url = format!("http://{addr}");
     println!("percept web at {url}");
     open_browser(&url);
-    let state = Arc::new(AppState { log, source });
+    let state = Arc::new(AppState { log, source, opened });
     serve(listener, state).await;
     Ok(())
 }
@@ -82,10 +97,14 @@ async fn bind() -> Result<(TcpListener, SocketAddr), Box<dyn Error>> {
     Ok((listener, addr))
 }
 
-/// Serves requests on `listener` until the process is killed: `GET /`
-/// and `GET /index.html` return the embedded page, `GET /api/events`
-/// and `GET /api/events/{id}` the project's own log, everything else
-/// 404s.
+/// Serves requests on `listener` until the process is killed: `GET
+/// /api/events` and `GET /api/events/{id}` return the project's own
+/// log, `GET /api/projects` every project the log holds, `GET
+/// /api/maps/{name}` one project's map cut to a reader's ask, and
+/// every other path the page, which routes itself. An unknown path
+/// under `/api` is a 404, never the page: a request for data that
+/// answers with HTML is harder to read than one that says it found
+/// nothing.
 async fn serve(listener: TcpListener, state: Arc<AppState>) {
     let app = router(state);
     axum::serve(listener, app).await.expect("the web server never returns an error");
@@ -95,15 +114,25 @@ async fn serve(listener: TcpListener, state: Arc<AppState>) {
 /// and the tests that spawn it over a bound listener.
 fn router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/", get(index))
-        .route("/index.html", get(index))
         .route("/api/events", get(api_events))
         .route("/api/events/{id}", get(api_event))
+        .route("/api/projects", get(api_projects))
+        .route("/api/maps/{name}", get(api_maps))
+        .fallback(page)
         .with_state(state)
 }
 
-async fn index() -> Html<&'static str> {
-    Html(PAGE)
+/// Every path the API does not own. The page carries its own routes -
+/// `/` is the projects index, `/log` the event log - so a reader who
+/// reloads on one of them, or follows a link to one, must be served
+/// the page rather than a 404 from a server that has never heard of
+/// it.
+async fn page(uri: Uri) -> Response {
+    let path = uri.path();
+    if path == "/api" || path.starts_with("/api/") {
+        return (StatusCode::NOT_FOUND, format!("no endpoint at {path}")).into_response();
+    }
+    Html(PAGE).into_response()
 }
 
 /// `GET /api/events`: the project's log, filtered by the query string
@@ -125,6 +154,31 @@ async fn api_event(State(state): State<Arc<AppState>>, Path(id): Path<String>) -
     let result = tokio::task::spawn_blocking(move || events::get(&*state.log, &id, &state.source.path))
         .await
         .expect("api_event's blocking read never panics");
+    events_response(result)
+}
+
+/// `GET /api/projects`: every project the log holds, across the whole
+/// log under `PERCEPT_HOME` - not scoped to `state.source.path`, the
+/// one route on this server that answers for more than its own
+/// project.
+async fn api_projects(State(state): State<Arc<AppState>>) -> Response {
+    let result = tokio::task::spawn_blocking(move || projects::list(&*state.log, state.opened))
+        .await
+        .expect("api_projects's blocking read never panics");
+    events_response(result)
+}
+
+/// `GET /api/maps/{name}`: `name`'s map, cut to `params`'s `root`,
+/// `around`, and `depth` - `root` names the project, any this log
+/// holds, not only `state.source.path`.
+async fn api_maps(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Query(params): Query<maps::Params>,
+) -> Response {
+    let result = tokio::task::spawn_blocking(move || maps::get(&*state.log, &name, params))
+        .await
+        .expect("api_maps's blocking read never panics");
     events_response(result)
 }
 

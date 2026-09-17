@@ -1,0 +1,161 @@
+import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router";
+import { fetchEvents, messageOf } from "./api";
+import { filterFromSearch, resolveSince, searchFromFilter } from "./filters";
+import type { Filter } from "./filters";
+import Log from "./log";
+import { SEARCH_FIELD_ID, SEARCH_HASH } from "./routes";
+import type { Event } from "./types";
+
+interface Results {
+  events: Event[];
+  carried: Event[];
+  total: number;
+  query: string;
+  updatedAt: number;
+}
+
+type Load =
+  | { state: "loading"; results: null }
+  | { state: "ready" | "updating"; results: Results }
+  | { state: "failed"; results: Results | null; message: string };
+
+const SEARCH_DEBOUNCE_MS = 250;
+
+function useDebouncedValue<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
+
+export default function LogPage() {
+  const [load, setLoad] = useState<Load>({ state: "loading", results: null });
+  const [project, setProject] = useState<string | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [pagingFailed, setPagingFailed] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const navigate = useNavigate();
+  const [filter, setFilter] = useState<Filter>(() => filterFromSearch(window.location.search));
+  // The header's magnifier asks for the log with its field focused,
+  // and says so in the URL. Read during the first render, before the
+  // effect below rewrites the address and drops the hash.
+  const [focusSearch] = useState(() => window.location.hash === SEARCH_HASH);
+
+  const debouncedQ = useDebouncedValue(filter.q, SEARCH_DEBOUNCE_MS);
+  const asked = searchFromFilter({ ...filter, q: debouncedQ });
+  const currentQuery = useRef(asked);
+  const pagingRequest = useRef(0);
+  currentQuery.current = asked;
+
+  // Through the router, not `history.replaceState`: react-router holds
+  // its own copy of the location, and an address written behind its
+  // back leaves every `Link` on the page computing from a stale one.
+  useEffect(() => {
+    navigate({ search: asked }, { replace: true });
+  }, [asked, navigate]);
+
+  useEffect(() => {
+    if (focusSearch) document.getElementById(SEARCH_FIELD_ID)?.focus();
+  }, [focusSearch]);
+
+  useEffect(() => {
+    const parsed = filterFromSearch(asked);
+    const wanted = { ...parsed, since: resolveSince(parsed.since) };
+    let cancelled = false;
+    pagingRequest.current += 1;
+    setLoadingMore(false);
+    setPagingFailed(null);
+    setLoad((held) => (held.results ? { state: "updating", results: held.results } : { state: "loading", results: null }));
+    fetchEvents(wanted)
+      .then((response) => {
+        if (cancelled || currentQuery.current !== asked) return;
+        setLoad({
+          state: "ready",
+          results: {
+            events: response.events,
+            carried: response.carried,
+            total: response.total,
+            query: asked,
+            updatedAt: Date.now(),
+          },
+        });
+        setProject(response.project);
+      })
+      .catch((error: unknown) => {
+        if (cancelled || currentQuery.current !== asked) return;
+        setLoad((held) => ({ state: "failed", results: held.results, message: messageOf(error) }));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [asked, retry]);
+
+  function showEarlier() {
+    const results = load.results;
+    if (!results || load.state !== "ready" || results.query !== asked || filter.q !== debouncedQ || loadingMore) return;
+    const oldest = results.events[0];
+    if (!oldest) return;
+    const requestedQuery = asked;
+    const request = ++pagingRequest.current;
+    const parsed = filterFromSearch(asked);
+    setLoadingMore(true);
+    setPagingFailed(null);
+    fetchEvents({ ...parsed, since: resolveSince(parsed.since) }, oldest.created_at)
+      .then((response) => {
+        if (request !== pagingRequest.current || currentQuery.current !== requestedQuery) return;
+        setLoad((held) => {
+          if (!held.results || held.state !== "ready" || held.results.query !== requestedQuery) return held;
+          return {
+            state: "ready",
+            results: {
+              ...held.results,
+              events: [...response.events, ...held.results.events],
+              carried: [...response.carried, ...held.results.carried],
+            },
+          };
+        });
+      })
+      .catch((error: unknown) => {
+        if (request === pagingRequest.current && currentQuery.current === requestedQuery) {
+          setPagingFailed(messageOf(error));
+        }
+      })
+      .finally(() => {
+        if (request === pagingRequest.current) setLoadingMore(false);
+      });
+  }
+
+  const results = load.results;
+  const visibleQuery = searchFromFilter(filter);
+  const visibleLoadState = load.state === "ready" && results?.query !== visibleQuery ? "updating" : load.state;
+
+  return (
+    <>
+      <a
+        href="#log"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-accent focus:p-4 focus:text-button"
+      >
+        Skip to the log
+      </a>
+      <Log
+        project={project}
+        events={results?.events ?? []}
+        carried={results?.carried ?? []}
+        total={results?.total ?? 0}
+        resultsQuery={results?.query ?? null}
+        updatedAt={results?.updatedAt ?? null}
+        loadState={visibleLoadState}
+        loadError={load.state === "failed" ? load.message : null}
+        loadingMore={loadingMore}
+        pagingFailed={pagingFailed}
+        onRetry={() => setRetry((attempt) => attempt + 1)}
+        onShowEarlier={showEarlier}
+        filter={filter}
+        onFilterChange={setFilter}
+      />
+    </>
+  );
+}
