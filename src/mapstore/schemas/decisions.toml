@@ -6,7 +6,9 @@
 # raised - and says whether it still stands and why. A decision
 # resolves the question, and a later decision supersedes an earlier
 # one. A question reopens a decision it puts in doubt, so --around a
-# question reaches everything weighed for it.
+# question reaches everything weighed for it. A concept covers another
+# it absorbs, so the covered one nests under it and leaves the
+# overview.
 
 name = "decisions"
 purpose = "what was asked, what was chosen, and why, so a settled question is not reopened"
@@ -35,6 +37,12 @@ properties = ["why"]
 kind = "about"
 gloss = "from a question or decision to the concept it belongs under; a decision that resolves a question inherits its place"
 from = ["question", "decision"]
+to = "concept"
+
+[[edge]]
+kind = "covers"
+gloss = "from a concept to one it absorbs - a narrower rule, or a worse wording of the same one; the covered concept nests under it and leaves the overview"
+from = "concept"
 to = "concept"
 
 [[edge]]

@@ -26,6 +26,16 @@ fn the_decisions_template_lists_concept_first_among_headlines() {
 }
 
 #[test]
+fn the_decisions_template_lets_a_concept_cover_a_concept() {
+    let (name, text) = TEMPLATES.iter().find(|(name, _)| *name == "decisions").unwrap();
+    let schema = parse(name, text).unwrap();
+    let covers = schema.edge_kind("covers").unwrap();
+
+    assert_eq!(covers.from, ["concept"]);
+    assert_eq!(covers.to, ["concept"]);
+}
+
+#[test]
 fn a_project_schema_of_a_new_name_is_added() {
     let fixture = Fixture::new();
     fixture.write(
