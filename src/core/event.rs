@@ -181,10 +181,10 @@ pub enum Payload {
     /// learn when this source last opened the project here, so it can
     /// cut the log to what changed since then.
     SessionStarted,
-    /// An agent asked to revise a map recorded that it started -
-    /// always `Agent`. The revisions it then makes name this event as
-    /// their cause, so a reader can tell which changes came from which
-    /// reflection.
+    /// percept's own record that a reflection of a map opened. The
+    /// revisions made under it name this event as their cause, so a
+    /// reader can tell which changes came from which reflection, and
+    /// each of those carries the actor who made it.
     ReflectionStarted {
         map: String,
     },
@@ -393,13 +393,14 @@ impl Event {
         Self::new(Actor::System, source, None, Payload::SessionStarted)
     }
 
-    /// A `reflection.started` event - whoever was asked to revise
-    /// `map` recording that they started; the revisions they then make
-    /// name this event as their cause. The actor is the caller's, not
-    /// this constructor's: a human runs the command as readily as an
-    /// agent, and c119 says the channel is not the speaker.
-    pub fn reflection_started(map: String, actor: Actor, source: Source) -> Self {
-        Self::new(actor, source, None, Payload::ReflectionStarted { map })
+    /// A `reflection.started` event - percept's own record that a
+    /// reflection of `map` opened, so it is `System` like
+    /// `session_started`: the command is run by a human as readily as
+    /// by an agent, and who judged is carried by the revisions that
+    /// follow, each with its own actor, not by the event that opens
+    /// them.
+    pub fn reflection_started(map: String, source: Source) -> Self {
+        Self::new(Actor::System, source, None, Payload::ReflectionStarted { map })
     }
 
     /// Rebuilds an Event from stored fields - the persistence boundary,
