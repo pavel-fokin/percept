@@ -161,7 +161,8 @@ pub fn run(
             // A schema file that fails to load costs its rules, never
             // the prompt's capture.
             let schemas = crate::mapstore::load_schemas(checkout).ok();
-            submit_prompt(prompt, source, log, schemas.as_ref(), &mut state, &dir, me)
+            let rules = schemas.and_then(|schemas| mapstore::turn_rules(&schemas, checkout));
+            submit_prompt(prompt, source, log, rules, &mut state, &dir, me)
         }
         HookEvent::PostToolUse {
             tool_name,
@@ -227,19 +228,6 @@ fn start_session(
     }))
 }
 
-/// The rules a turn carries, one line each, in schema order - every
-/// loaded schema's own `rules.turn` lines, with no rule text and no
-/// gate held here: a schema that declares none costs the turn
-/// nothing, and a schema that failed to load (`None`) gives none.
-fn turn_rules(schemas: Option<&Schemas>) -> Vec<&str> {
-    schemas
-        .into_iter()
-        .flat_map(Schemas::folded)
-        .flat_map(|schema| schema.rules.turn.iter())
-        .map(String::as_str)
-        .collect()
-}
-
 /// Who a prompt is from. A client delivers more than the user's own
 /// words on this channel: a subagent's hand-back and the harness's own
 /// task notification arrive as prompts too, each wrapped in a frame
@@ -275,13 +263,14 @@ fn framed(text: &str, tag: &str) -> bool {
 /// `message.received` from whoever `prompt_actor` says wrote it,
 /// stores its id as the turn's cause and as the checkout's open turn
 /// under `dir`, and returns the client's expected `additionalContext`:
-/// the event's id on the first line, `turn_rules` on the lines after
-/// it.
+/// the event's id alone on the first line, since a model reads it off
+/// that line to pass as `--source`, and `rules` under it when a
+/// schema declared any.
 fn submit_prompt(
     prompt: String,
     source: &Source,
     log: &dyn EventLog,
-    schemas: Option<&Schemas>,
+    rules: Option<String>,
     state: &mut TurnState,
     dir: &Path,
     me: Option<crate::core::HumanId>,
@@ -294,10 +283,16 @@ fn submit_prompt(
     state.set(id)?;
     TurnState::point(dir, id)?;
 
+    let mut context = format!("percept event {}", id.as_uuid());
+    if let Some(rules) = rules {
+        context.push('\n');
+        context.push_str(&rules);
+    }
+
     Ok(json!({
         "hookSpecificOutput": {
             "hookEventName": "UserPromptSubmit",
-            "additionalContext": format!("percept event {}\n{}", id.as_uuid(), turn_rules(schemas).join("\n")),
+            "additionalContext": context,
         }
     }))
 }

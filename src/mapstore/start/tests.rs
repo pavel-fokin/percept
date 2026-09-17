@@ -38,7 +38,8 @@ fn nothing_recorded_names_every_map_and_how_to_record_to_each() {
 
     assert_eq!(
         text,
-        "percept \u{b7} test\nkeeps what this project settled: debates, chores\n\
+        "percept \u{b7} test \u{b7} the `percept` command, set up in this project\n\
+         keeps what this project settled: debates, chores\n\
          nothing recorded yet\n\n\
          Next\n  how to record debates   percept maps describe debates\n\
          \x20 how to record chores    percept maps describe chores"

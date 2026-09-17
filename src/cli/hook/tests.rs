@@ -469,6 +469,19 @@ fn a_returning_session_still_prints_starts_render() {
     assert_eq!(fixture.events().len(), 2);
 }
 
+/// A fixture whose second schema declares `turn` rules, `turn` being
+/// the TOML array's own contents.
+fn with_turn_rules(turn: &str) -> Fixture {
+    Fixture::new().with_extra_schema(
+        "glossary",
+        &format!(
+            "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"concept\"]\n\n\
+             [[node]]\nkind = \"concept\"\nrequires = [\"definition\"]\n\n\
+             [rules]\nturn = [{turn}]\n"
+        ),
+    )
+}
+
 #[test]
 fn a_prompts_context_is_the_event_id_alone_when_no_schema_declares_rules() {
     let fixture = Fixture::new();
@@ -486,19 +499,13 @@ fn a_prompts_context_is_the_event_id_alone_when_no_schema_declares_rules() {
         .unwrap();
 
     let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
-    let lines: Vec<&str> = context.lines().collect();
-    assert!(lines[0].starts_with("percept event "), "{context:?}");
-    assert_eq!(lines.len(), 1, "{context:?}");
+    let prompt = fixture.events().pop().unwrap();
+    assert_eq!(context, format!("percept event {}", prompt.id().as_uuid()));
 }
 
 #[test]
 fn a_prompt_carries_a_schemas_own_turn_rules_after_the_id() {
-    let fixture = Fixture::new().with_extra_schema(
-        "glossary",
-        "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"concept\"]\n\n\
-         [[node]]\nkind = \"concept\"\nrequires = [\"definition\"]\n\n\
-         [rules]\nturn = [\"a\", \"b\"]\n",
-    );
+    let fixture = with_turn_rules("\"a\", \"b\"");
 
     let output = fixture
         .call(
@@ -514,7 +521,31 @@ fn a_prompt_carries_a_schemas_own_turn_rules_after_the_id() {
 
     let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
     let lines: Vec<&str> = context.lines().collect();
-    assert_eq!(lines[1..], ["a", "b"]);
+    assert_eq!(lines[2..], ["a", "b"]);
+}
+
+#[test]
+fn rule_lines_arrive_under_a_line_naming_where_they_came_from() {
+    let fixture = with_turn_rules("\"a\"");
+
+    let output = fixture
+        .call(
+            "codex",
+            json!({
+                "hook_event_name": "UserPromptSubmit",
+                "cwd": fixture.root.to_str().unwrap(),
+                "session_id": "session",
+                "prompt": "hello",
+            }),
+        )
+        .unwrap();
+
+    let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
+    let lines: Vec<&str> = context.lines().collect();
+    assert_eq!(
+        lines[1],
+        format!("rules from {}", fixture.root.join(".percept/schemas").display())
+    );
 }
 
 #[test]
