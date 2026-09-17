@@ -161,7 +161,7 @@ pub fn run(
             // A schema file that fails to load costs its rules, never
             // the prompt's capture.
             let schemas = crate::mapstore::load_schemas(checkout).ok();
-            let rules = turn_rules(schemas.as_ref(), checkout);
+            let rules = schemas.and_then(|schemas| mapstore::turn_rules(&schemas, checkout));
             submit_prompt(prompt, source, log, rules, &mut state, &dir, me)
         }
         HookEvent::PostToolUse {
@@ -228,33 +228,6 @@ fn start_session(
     }))
 }
 
-/// The rules a turn carries, one line each, in schema order - every
-/// loaded schema's own `rules.turn` lines, with no rule text and no
-/// gate held here: a schema that declares none costs the turn
-/// nothing, and a schema that failed to load (`None`) gives none.
-/// They arrive under a line naming the directory they loaded from,
-/// absolute because a client's `cwd` may be any subdirectory of the
-/// checkout, and `None` when there are none, so the turn never names
-/// a source for lines it did not send.
-fn turn_rules(schemas: Option<&Schemas>, checkout: &Path) -> Option<String> {
-    let lines: Vec<&str> = schemas
-        .into_iter()
-        .flat_map(Schemas::folded)
-        .flat_map(|schema| schema.rules.turn.iter())
-        .map(String::as_str)
-        .collect();
-
-    if lines.is_empty() {
-        return None;
-    }
-
-    Some(format!(
-        "rules from {}\n{}",
-        checkout.join(crate::mapstore::SCHEMAS_DIR).display(),
-        lines.join("\n")
-    ))
-}
-
 /// Who a prompt is from. A client delivers more than the user's own
 /// words on this channel: a subagent's hand-back and the harness's own
 /// task notification arrive as prompts too, each wrapped in a frame
@@ -310,10 +283,11 @@ fn submit_prompt(
     state.set(id)?;
     TurnState::point(dir, id)?;
 
-    let context = match rules {
-        Some(rules) => format!("percept event {}\n{}", id.as_uuid(), rules),
-        None => format!("percept event {}", id.as_uuid()),
-    };
+    let mut context = format!("percept event {}", id.as_uuid());
+    if let Some(rules) = rules {
+        context.push('\n');
+        context.push_str(&rules);
+    }
 
     Ok(json!({
         "hookSpecificOutput": {

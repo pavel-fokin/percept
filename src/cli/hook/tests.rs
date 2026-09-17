@@ -170,9 +170,6 @@ impl Fixture {
             .unwrap()
             .strip_prefix("percept event ")
             .unwrap()
-            .split(' ')
-            .next()
-            .unwrap()
             .to_string()
     }
 
@@ -472,6 +469,19 @@ fn a_returning_session_still_prints_starts_render() {
     assert_eq!(fixture.events().len(), 2);
 }
 
+/// A fixture whose second schema declares `turn` rules, `turn` being
+/// the TOML array's own contents.
+fn with_turn_rules(turn: &str) -> Fixture {
+    Fixture::new().with_extra_schema(
+        "glossary",
+        &format!(
+            "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"concept\"]\n\n\
+             [[node]]\nkind = \"concept\"\nrequires = [\"definition\"]\n\n\
+             [rules]\nturn = [{turn}]\n"
+        ),
+    )
+}
+
 #[test]
 fn a_prompts_context_is_the_event_id_alone_when_no_schema_declares_rules() {
     let fixture = Fixture::new();
@@ -495,12 +505,7 @@ fn a_prompts_context_is_the_event_id_alone_when_no_schema_declares_rules() {
 
 #[test]
 fn a_prompt_carries_a_schemas_own_turn_rules_after_the_id() {
-    let fixture = Fixture::new().with_extra_schema(
-        "glossary",
-        "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"concept\"]\n\n\
-         [[node]]\nkind = \"concept\"\nrequires = [\"definition\"]\n\n\
-         [rules]\nturn = [\"a\", \"b\"]\n",
-    );
+    let fixture = with_turn_rules("\"a\", \"b\"");
 
     let output = fixture
         .call(
@@ -521,12 +526,7 @@ fn a_prompt_carries_a_schemas_own_turn_rules_after_the_id() {
 
 #[test]
 fn rule_lines_arrive_under_a_line_naming_where_they_came_from() {
-    let fixture = Fixture::new().with_extra_schema(
-        "glossary",
-        "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"concept\"]\n\n\
-         [[node]]\nkind = \"concept\"\nrequires = [\"definition\"]\n\n\
-         [rules]\nturn = [\"a\"]\n",
-    );
+    let fixture = with_turn_rules("\"a\"");
 
     let output = fixture
         .call(
