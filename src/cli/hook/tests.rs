@@ -489,9 +489,8 @@ fn a_prompts_context_is_the_event_id_alone_when_no_schema_declares_rules() {
         .unwrap();
 
     let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
-    let lines: Vec<&str> = context.lines().collect();
-    assert!(lines[0].starts_with("percept event "), "{context:?}");
-    assert_eq!(lines.len(), 1, "{context:?}");
+    let prompt = fixture.events().pop().unwrap();
+    assert_eq!(context, format!("percept event {}", prompt.id().as_uuid()));
 }
 
 #[test]
@@ -517,7 +516,7 @@ fn a_prompt_carries_a_schemas_own_turn_rules_after_the_id() {
 
     let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
     let lines: Vec<&str> = context.lines().collect();
-    assert_eq!(lines[1..], ["a", "b"]);
+    assert_eq!(lines[2..], ["a", "b"]);
 }
 
 #[test]
@@ -542,9 +541,10 @@ fn rule_lines_arrive_under_a_line_naming_where_they_came_from() {
         .unwrap();
 
     let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
-    assert!(
-        context.lines().next().unwrap().ends_with(" \u{b7} rules from .percept/schemas"),
-        "{context:?}"
+    let lines: Vec<&str> = context.lines().collect();
+    assert_eq!(
+        lines[1],
+        format!("rules from {}", fixture.root.join(".percept/schemas").display())
     );
 }
 

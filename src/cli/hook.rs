@@ -161,7 +161,8 @@ pub fn run(
             // A schema file that fails to load costs its rules, never
             // the prompt's capture.
             let schemas = crate::mapstore::load_schemas(checkout).ok();
-            submit_prompt(prompt, source, log, schemas.as_ref(), &mut state, &dir, me)
+            let rules = turn_rules(schemas.as_ref(), checkout);
+            submit_prompt(prompt, source, log, rules, &mut state, &dir, me)
         }
         HookEvent::PostToolUse {
             tool_name,
@@ -231,13 +232,27 @@ fn start_session(
 /// loaded schema's own `rules.turn` lines, with no rule text and no
 /// gate held here: a schema that declares none costs the turn
 /// nothing, and a schema that failed to load (`None`) gives none.
-fn turn_rules(schemas: Option<&Schemas>) -> Vec<&str> {
-    schemas
+/// They arrive under a line naming the directory they loaded from,
+/// absolute because a client's `cwd` may be any subdirectory of the
+/// checkout, and `None` when there are none, so the turn never names
+/// a source for lines it did not send.
+fn turn_rules(schemas: Option<&Schemas>, checkout: &Path) -> Option<String> {
+    let lines: Vec<&str> = schemas
         .into_iter()
         .flat_map(Schemas::folded)
         .flat_map(|schema| schema.rules.turn.iter())
         .map(String::as_str)
-        .collect()
+        .collect();
+
+    if lines.is_empty() {
+        return None;
+    }
+
+    Some(format!(
+        "rules from {}\n{}",
+        checkout.join(crate::mapstore::SCHEMAS_DIR).display(),
+        lines.join("\n")
+    ))
 }
 
 /// Who a prompt is from. A client delivers more than the user's own
@@ -275,17 +290,14 @@ fn framed(text: &str, tag: &str) -> bool {
 /// `message.received` from whoever `prompt_actor` says wrote it,
 /// stores its id as the turn's cause and as the checkout's open turn
 /// under `dir`, and returns the client's expected `additionalContext`:
-/// the event's id on the first line, `turn_rules` on the lines after
-/// it. The first line names where those rules came from, since text
-/// that tells a model how to work and names nobody is what an
-/// injection looks like; the directory is one the model can open. A
-/// schema set that declares no rule at all sends the id alone, which
-/// has no source to name.
+/// the event's id alone on the first line, since a model reads it off
+/// that line to pass as `--source`, and `rules` under it when a
+/// schema declared any.
 fn submit_prompt(
     prompt: String,
     source: &Source,
     log: &dyn EventLog,
-    schemas: Option<&Schemas>,
+    rules: Option<String>,
     state: &mut TurnState,
     dir: &Path,
     me: Option<crate::core::HumanId>,
@@ -298,15 +310,9 @@ fn submit_prompt(
     state.set(id)?;
     TurnState::point(dir, id)?;
 
-    let rules = turn_rules(schemas);
-    let context = if rules.is_empty() {
-        format!("percept event {}", id.as_uuid())
-    } else {
-        format!(
-            "percept event {} \u{b7} rules from .percept/schemas\n{}",
-            id.as_uuid(),
-            rules.join("\n")
-        )
+    let context = match rules {
+        Some(rules) => format!("percept event {}\n{}", id.as_uuid(), rules),
+        None => format!("percept event {}", id.as_uuid()),
     };
 
     Ok(json!({
