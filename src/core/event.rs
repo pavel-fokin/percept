@@ -181,6 +181,13 @@ pub enum Payload {
     /// learn when this source last opened the project here, so it can
     /// cut the log to what changed since then.
     SessionStarted,
+    /// An agent asked to revise a map recorded that it started -
+    /// always `Agent`. The revisions it then makes name this event as
+    /// their cause, so a reader can tell which changes came from which
+    /// reflection.
+    ReflectionStarted {
+        map: String,
+    },
     /// A file, or a range of it, as it was when a node cited it -
     /// experience, not judgment: this event says nothing about why the
     /// file was read or what it shows. `path` is repo-relative,
@@ -227,7 +234,8 @@ impl Payload {
             | Self::EdgeAdded { .. }
             | Self::EdgeRemoved { .. }
             | Self::ModelCalled(..)
-            | Self::SessionStarted => None,
+            | Self::SessionStarted
+            | Self::ReflectionStarted { .. } => None,
         }
     }
 }
@@ -249,6 +257,7 @@ pub enum EventKind {
     EdgeRemoved,
     ModelCalled,
     SessionStarted,
+    ReflectionStarted,
     FileCited,
 }
 
@@ -268,6 +277,7 @@ impl EventKind {
             Self::EdgeRemoved => "edge.removed",
             Self::ModelCalled => "model.called",
             Self::SessionStarted => "session.started",
+            Self::ReflectionStarted => "reflection.started",
             Self::FileCited => "file.cited",
         }
     }
@@ -383,6 +393,15 @@ impl Event {
         Self::new(Actor::System, source, None, Payload::SessionStarted)
     }
 
+    /// A `reflection.started` event - whoever was asked to revise
+    /// `map` recording that they started; the revisions they then make
+    /// name this event as their cause. The actor is the caller's, not
+    /// this constructor's: a human runs the command as readily as an
+    /// agent, and c119 says the channel is not the speaker.
+    pub fn reflection_started(map: String, actor: Actor, source: Source) -> Self {
+        Self::new(actor, source, None, Payload::ReflectionStarted { map })
+    }
+
     /// Rebuilds an Event from stored fields - the persistence boundary,
     /// where `id` and `created_at` come from storage rather than being
     /// minted fresh.
@@ -441,6 +460,7 @@ impl Event {
             Payload::EdgeRemoved { .. } => EventKind::EdgeRemoved,
             Payload::ModelCalled(..) => EventKind::ModelCalled,
             Payload::SessionStarted => EventKind::SessionStarted,
+            Payload::ReflectionStarted { .. } => EventKind::ReflectionStarted,
             Payload::FileCited { .. } => EventKind::FileCited,
         }
     }

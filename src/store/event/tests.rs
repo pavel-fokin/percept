@@ -408,6 +408,32 @@ fn session_started_round_trips_through_json() {
 }
 
 #[test]
+fn reflection_started_round_trips_through_json() {
+    let original = crate::core::Event::restore(
+        EventId::new(),
+        Actor::Agent,
+        source("percept-code"),
+        None,
+        Timestamp::now(),
+        Payload::ReflectionStarted {
+            map: "decisions".to_string(),
+        },
+    );
+
+    let json = serde_json::to_string(&Event::from(&original)).unwrap();
+    let wire: Event = serde_json::from_str(&json).unwrap();
+    assert_eq!(wire.kind, "reflection.started");
+    assert_eq!(wire.actor["kind"], "agent");
+    let restored = crate::store::from_wire(wire).unwrap();
+
+    assert!(restored.actor() == Actor::Agent);
+    match restored.payload() {
+        Payload::ReflectionStarted { map } => assert_eq!(map, "decisions"),
+        _ => panic!("expected ReflectionStarted"),
+    }
+}
+
+#[test]
 fn node_added_round_trips_through_json() {
     let cited = EventId::new();
     let node = NodeId::new();
@@ -1026,6 +1052,7 @@ fn every_kind_names_round_trip_through_the_store_parser() {
         EventKind::EdgeRemoved,
         EventKind::ModelCalled,
         EventKind::SessionStarted,
+        EventKind::ReflectionStarted,
         EventKind::FileCited,
     ];
 
