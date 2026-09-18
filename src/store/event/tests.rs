@@ -346,7 +346,7 @@ fn tool_resulted_round_trips_through_json() {
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "tool.resulted");
-    assert_eq!(wire.actor["kind"], "system");
+    assert!(matches!(wire.actor, WireActor::System));
     let restored = crate::store::from_wire(wire).unwrap();
 
     assert!(restored.actor() == Actor::System);
@@ -366,7 +366,7 @@ fn map_created_round_trips_through_json() {
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "map.created");
-    assert_eq!(wire.actor["kind"], "system");
+    assert!(matches!(wire.actor, WireActor::System));
     assert_eq!(wire.payload["map"], map.as_uuid().to_string());
     assert_eq!(wire.payload["schema"], "decisions");
     let restored = crate::store::from_wire(wire).unwrap();
@@ -400,7 +400,7 @@ fn model_called_round_trips_through_json() {
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "model.called");
-    assert_eq!(wire.actor["kind"], "system");
+    assert!(matches!(wire.actor, WireActor::System));
     // Unreported cached tokens are left off the wire, not written
     // as null.
     assert!(wire.payload.get("cached_tokens").is_none());
@@ -428,7 +428,7 @@ fn session_started_round_trips_through_json() {
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "session.started");
-    assert_eq!(wire.actor["kind"], "system");
+    assert!(matches!(wire.actor, WireActor::System));
     let restored = crate::store::from_wire(wire).unwrap();
 
     assert!(restored.actor() == Actor::System);
@@ -451,7 +451,7 @@ fn reflection_started_round_trips_through_json() {
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "reflection.started");
-    assert_eq!(wire.actor["kind"], "agent");
+    assert!(matches!(wire.actor, WireActor::Agent));
     let restored = crate::store::from_wire(wire).unwrap();
 
     assert!(restored.actor() == Actor::Agent);
@@ -774,7 +774,7 @@ fn unknown_type_deserializes_but_has_no_domain_form() {
     let json = r#"{
         "id": "0192d1f0-1111-7000-8000-000000000000",
         "seq": 1,
-        "actor": "user",
+        "actor": {"kind": "human"},
         "source": {"name": "tui", "path": "/test"},
         "type": "file.moved",
         "causation_id": null,
@@ -924,7 +924,7 @@ fn a_ranged_read_on_a_citation_returns_those_lines() {
 fn a_bare_string_source_fails_to_deserialize() {
     let json = r#"{
         "id": "0192d1f0-1111-7000-8000-000000000000",
-        "actor": "user",
+        "actor": {"kind": "human"},
         "source": "tui",
         "type": "message.received",
         "causation_id": null,
@@ -983,7 +983,7 @@ fn a_human_without_an_id_round_trips_as_a_kind_alone() {
 }
 
 #[test]
-fn a_legacy_user_string_reads_as_a_human_without_an_id() {
+fn a_bare_actor_string_is_a_bad_line() {
     let json = r#"{
         "id": "0192d1f0-1111-7000-8000-000000000000",
         "actor": "user",
@@ -994,8 +994,7 @@ fn a_legacy_user_string_reads_as_a_human_without_an_id() {
         "payload": { "content": "hi" }
     }"#;
 
-    let restored = crate::store::from_wire(serde_json::from_str::<Event>(json).unwrap()).unwrap();
-    assert_eq!(restored.actor(), Actor::Human(None));
+    assert!(serde_json::from_str::<Event>(json).is_err());
 }
 
 #[test]
