@@ -23,6 +23,9 @@ use apply::highest;
 pub use error::MapError;
 pub use schema::{default_prefix, EdgeKind, NodeKind, Rules, Schema, Schemas};
 
+/// Identifies a cognitive map.
+pub type MapId = Id<Map>;
+
 /// Identifies a node in a cognitive map.
 pub type NodeId = Id<Node>;
 

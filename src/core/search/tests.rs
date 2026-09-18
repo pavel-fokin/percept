@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::core::testing::{human, source, source_at};
-use crate::core::{EventId, NodeId, Payload};
+use crate::core::{EventId, MapId, NodeId, Payload};
 
 /// A message from `name`, timestamped `offset_minutes` back.
 fn event_at(name: &str, offset_minutes: i64) -> Event {
@@ -368,6 +368,24 @@ fn a_reflection_started_matches_on_its_map_name() {
         ..Default::default()
     };
     assert!(query.matches(&event));
+}
+
+#[test]
+fn a_map_created_matches_on_its_id_and_schema() {
+    let map = MapId::new();
+    let event = Event::map_created(map, "decisions".to_string(), source("cli"));
+
+    let by_id = EventQuery {
+        text: vec![map.as_uuid().to_string()],
+        ..Default::default()
+    };
+    let by_schema = EventQuery {
+        text: vec!["decision".to_string()],
+        ..Default::default()
+    };
+
+    assert!(by_id.matches(&event));
+    assert!(by_schema.matches(&event));
 }
 
 #[test]

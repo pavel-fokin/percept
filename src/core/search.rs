@@ -27,8 +27,9 @@ pub struct EventQuery {
     /// A term matches when one of the event's payload strings carries
     /// it as a substring, case-insensitively; an event passes when any
     /// term does. Payload strings are `content`, `tool`, and
-    /// `arguments`, on a map change `map`, `kind`, `name`, `reason`, and
-    /// property values, and on a `model.called` event its `model` name.
+    /// `arguments`, on map creation its id and schema, on a map change
+    /// `map`, `kind`, `name`, `reason`, and property values, and on a
+    /// `model.called` event its `model` name.
     /// The envelope is not searched, since `actor` and `source` already
     /// have filters. A blank term is contained by everything, so a
     /// boundary that can receive one rejects it before building a
@@ -121,6 +122,7 @@ fn carries(payload: &Payload, term: &str) -> bool {
         | Payload::ThoughtRecorded { content }
         | Payload::ToolResulted { content } => has(content),
         Payload::ToolCalled { tool, arguments } => has(tool) || has(arguments),
+        Payload::MapCreated { map, schema } => has(&map.as_uuid().to_string()) || has(schema),
         Payload::NodeAdded {
             map,
             kind,

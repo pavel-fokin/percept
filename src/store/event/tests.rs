@@ -358,6 +358,34 @@ fn tool_resulted_round_trips_through_json() {
 }
 
 #[test]
+fn map_created_round_trips_through_json() {
+    let map = crate::core::MapId::new();
+    let original =
+        crate::core::Event::map_created(map, "decisions".to_string(), source("percept-cli"));
+
+    let json = serde_json::to_string(&Event::from(&original)).unwrap();
+    let wire: Event = serde_json::from_str(&json).unwrap();
+    assert_eq!(wire.kind, "map.created");
+    assert_eq!(wire.actor["kind"], "system");
+    assert_eq!(wire.payload["map"], map.as_uuid().to_string());
+    assert_eq!(wire.payload["schema"], "decisions");
+    let restored = crate::store::from_wire(wire).unwrap();
+
+    assert!(restored.actor() == Actor::System);
+    assert!(restored.causation_id().is_none());
+    match restored.payload() {
+        Payload::MapCreated {
+            map: restored_map,
+            schema,
+        } => {
+            assert!(*restored_map == map);
+            assert_eq!(schema, "decisions");
+        }
+        _ => panic!("expected MapCreated"),
+    }
+}
+
+#[test]
 fn model_called_round_trips_through_json() {
     let cause = EventId::new();
     let original = crate::core::Event::restore(
@@ -1046,6 +1074,7 @@ fn every_kind_names_round_trip_through_the_store_parser() {
         EventKind::ThoughtRecorded,
         EventKind::ToolCalled,
         EventKind::ToolResulted,
+        EventKind::MapCreated,
         EventKind::NodeAdded,
         EventKind::NodeRemoved,
         EventKind::EdgeAdded,

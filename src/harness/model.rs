@@ -206,6 +206,7 @@ pub fn message_of(event: &Event) -> Option<Message> {
             content: content.clone(),
         }),
         Payload::ThoughtRecorded { .. }
+        | Payload::MapCreated { .. }
         | Payload::NodeAdded { .. }
         | Payload::NodeChanged { .. }
         | Payload::NodeRemoved { .. }

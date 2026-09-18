@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use super::NodeId;
+use super::{MapId, NodeId};
 use crate::shared::{Id, Timestamp};
 
 /// Identifies an Event.
@@ -110,6 +110,11 @@ pub enum Payload {
     /// error text. `causation_id` points at the call.
     ToolResulted {
         content: String,
+    },
+    /// A cognitive map was created with a stable identity and a schema.
+    MapCreated {
+        map: MapId,
+        schema: String,
     },
     /// A node added to a cognitive map. `sources` names the events the
     /// node was folded from. `seq` is the node's short id number within
@@ -228,6 +233,7 @@ impl Payload {
             | Self::ToolResulted { content } => Some(content),
             Self::FileCited { excerpt, .. } => Some(excerpt),
             Self::ToolCalled { .. }
+            | Self::MapCreated { .. }
             | Self::NodeAdded { .. }
             | Self::NodeChanged { .. }
             | Self::NodeRemoved { .. }
@@ -250,6 +256,7 @@ pub enum EventKind {
     ThoughtRecorded,
     ToolCalled,
     ToolResulted,
+    MapCreated,
     NodeAdded,
     NodeChanged,
     NodeRemoved,
@@ -270,6 +277,7 @@ impl EventKind {
             Self::ThoughtRecorded => "thought.recorded",
             Self::ToolCalled => "tool.called",
             Self::ToolResulted => "tool.resulted",
+            Self::MapCreated => "map.created",
             Self::NodeAdded => "node.added",
             Self::NodeChanged => "node.changed",
             Self::NodeRemoved => "node.removed",
@@ -375,6 +383,18 @@ impl Event {
         )
     }
 
+    /// A `map.created` event - always percept establishing a map's
+    /// identity, never a model's action.
+    #[allow(dead_code)]
+    pub fn map_created(map: MapId, schema: String, source: Source) -> Self {
+        Self::new(
+            Actor::System,
+            source,
+            None,
+            Payload::MapCreated { map, schema },
+        )
+    }
+
     /// A `model.called` event - always percept recording what one round
     /// trip to the model cost, never the model's own words.
     pub fn model_called(usage: Usage, source: Source, causation_id: Option<EventId>) -> Self {
@@ -454,6 +474,7 @@ impl Event {
             Payload::ThoughtRecorded { .. } => EventKind::ThoughtRecorded,
             Payload::ToolCalled { .. } => EventKind::ToolCalled,
             Payload::ToolResulted { .. } => EventKind::ToolResulted,
+            Payload::MapCreated { .. } => EventKind::MapCreated,
             Payload::NodeAdded { .. } => EventKind::NodeAdded,
             Payload::NodeChanged { .. } => EventKind::NodeChanged,
             Payload::NodeRemoved { .. } => EventKind::NodeRemoved,

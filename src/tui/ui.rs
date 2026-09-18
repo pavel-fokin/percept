@@ -251,6 +251,8 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
             };
             lines(content, chat.thought_style, chat.thought_style, width)
         }
+        // Map creation is bookkeeping, not something to show.
+        Payload::MapCreated { .. } => Vec::new(),
         // Bookkeeping about a round trip, not something to show.
         Payload::ModelCalled(..) => Vec::new(),
         // Bookkeeping about a session opening, not something to show.
