@@ -1206,6 +1206,39 @@ fn a_change_becomes_the_nodes_last_change() {
 }
 
 #[test]
+fn a_change_naming_nothing_is_refused() {
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
+    map.apply(add_node("verdict", "Rust"), Actor::Agent).unwrap();
+
+    let err = map
+        .apply(change_node("verdict", "Rust", None, BTreeMap::new()), Actor::Agent)
+        .err()
+        .unwrap();
+
+    assert!(matches!(err, MapError::EmptyChange), "{err}");
+}
+
+#[test]
+fn a_change_carrying_only_sources_joins_them_to_the_node() {
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
+    map.apply(add_node("verdict", "Rust"), Actor::Agent).unwrap();
+    let drawn_from = EventId::new();
+
+    map.apply(
+        Mutation::ChangeNode {
+            node: node_ref("verdict", "Rust"),
+            name: None,
+            properties: BTreeMap::new(),
+            sources: vec![drawn_from],
+        },
+        Actor::Agent,
+    )
+    .unwrap();
+
+    assert!(map.find("verdict", "Rust").unwrap().sources.contains(&drawn_from));
+}
+
+#[test]
 fn an_added_nodes_only_change_is_its_addition() {
     let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     map.apply(add_node("verdict", "Rust"), Actor::Agent).unwrap();

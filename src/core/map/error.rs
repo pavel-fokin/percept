@@ -39,6 +39,9 @@ pub enum MapError {
     },
     /// A name that is blank would be a node nobody can point at.
     BlankName,
+    /// A change naming no rename, no property and no source says
+    /// nothing, and would still stamp the node. Write-only.
+    EmptyChange,
     /// A new node of a kind that `requires` a property the caller did
     /// not supply. A rule for new writes only, so a node recorded
     /// before its kind gained the requirement still folds; checked by
@@ -152,6 +155,7 @@ impl fmt::Display for MapError {
                 "no edge kind {kind:?} in map {map:?}; kinds are {kinds}"
             ),
             Self::BlankName => write!(f, "a node's name must not be blank"),
+            Self::EmptyChange => write!(f, "a change must name a rename, a property, or a source"),
             Self::MissingProperty {
                 kind,
                 name,
