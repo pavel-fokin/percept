@@ -300,7 +300,6 @@ fn node_removed(map: &str, node: NodeId) -> Event {
     committed(Payload::NodeRemoved {
         map: crate::core::testing::map_id(map),
         node,
-        why: "gone".to_string(),
         sources: Vec::new(),
     })
 }
@@ -466,7 +465,6 @@ fn removing_an_edge_leaves_its_nodes() {
         from: ids[2],
         to: ids[0],
         sources: Vec::new(),
-        why: "answered".to_string(),
     }));
 
     let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &events).unwrap();
@@ -583,7 +581,6 @@ fn removing_an_edge_that_is_not_there_fails_the_fold() {
         from: ids[1],
         to: ids[0],
         sources: Vec::new(),
-        why: "gone".to_string(),
     });
     let stray_id = stray.id();
     events.push(stray);
@@ -687,7 +684,6 @@ fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
                 from: node_ref("claim", "Rust"),
                 to: node_ref("claim", "Rust"),
                 sources: Vec::new(),
-                why: "gone".to_string(),
             },
             Actor::Human(human()),
         )
@@ -1005,7 +1001,6 @@ fn agent_removing_the_humans_node_is_refused() {
         .apply(
             Mutation::RemoveNode {
                 node: node_ref("chore", "cancel a turn"),
-                why: "not needed".to_string(),
                 sources: Vec::new(),
             },
             Actor::Agent,
@@ -1082,7 +1077,6 @@ fn agent_removing_the_humans_edge_is_refused() {
                 from: node_ref("chore", "cancellable streams"),
                 to: node_ref("chore", "cancel a turn"),
                 sources: Vec::new(),
-                why: "not needed".to_string(),
             },
             Actor::Agent,
         )
@@ -1113,7 +1107,6 @@ fn human_may_rename_change_and_remove_the_agents_node() {
     map.apply(
         Mutation::RemoveNode {
             node: node_ref("chore", "cancel a turn cleanly"),
-            why: "not needed".to_string(),
             sources: Vec::new(),
         },
         Actor::Human(human()),
@@ -1150,7 +1143,6 @@ fn after_the_humans_why_the_agent_may_not_rename_or_remove_the_node() {
         .apply(
             Mutation::RemoveNode {
                 node: node_ref("chore", "cancel a turn"),
-                why: "not needed".to_string(),
                 sources: Vec::new(),
             },
             Actor::Agent,
@@ -1391,7 +1383,6 @@ fn apply_removes_a_node_by_name_and_its_edges_with_it() {
         .apply(
             Mutation::RemoveNode {
                 node: node_ref("topic", "Which language?"),
-                why: "answered".to_string(),
                 sources: Vec::new(),
             },
             Actor::Human(human()),
@@ -1767,7 +1758,6 @@ fn a_removed_node_s_number_is_never_reused() {
     map.apply(
         Mutation::RemoveNode {
             node: node_ref("verdict", "Go"),
-            why: "reconsidered".to_string(),
             sources: Vec::new(),
         },
         Actor::Human(human()),
@@ -1876,7 +1866,6 @@ fn removing_a_node_a_humans_edge_touches_is_refused_to_the_agent() {
         .apply(
             Mutation::RemoveNode {
                 node: node_ref("claim", "Rust"),
-                why: "wrong".to_string(),
                 sources: Vec::new(),
             },
             Actor::Agent,
@@ -1916,7 +1905,6 @@ fn removing_the_agents_own_edge_off_a_node_the_human_touched_is_refused() {
                 from: node_ref("verdict", "Rust"),
                 to: node_ref("topic", "Which language?"),
                 sources: Vec::new(),
-                why: "re-pointing".to_string(),
             },
             Actor::Agent,
         )
@@ -1948,7 +1936,6 @@ fn removing_the_agents_own_node_is_refused_while_its_edge_hangs_on_a_node_the_hu
             Mutation::RemoveNode {
                 node: node_ref("verdict", "Rust"),
                 sources: Vec::new(),
-                why: "retracting".to_string(),
             },
             Actor::Agent,
         )
@@ -1958,51 +1945,3 @@ fn removing_the_agents_own_node_is_refused_while_its_edge_hangs_on_a_node_the_hu
     assert!(matches!(err, MapError::NotYours { .. }), "{err}");
 }
 
-#[test]
-fn a_blank_why_is_refused_on_a_node_removal() {
-    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
-    map.apply(add_node("verdict", "Rust"), Actor::Agent).unwrap();
-
-    let err = map
-        .apply(
-            Mutation::RemoveNode {
-                node: node_ref("verdict", "Rust"),
-                why: String::new(),
-                sources: Vec::new(),
-            },
-            Actor::Agent,
-        )
-        .err()
-        .unwrap();
-
-    assert!(matches!(err, MapError::BlankWhy), "{err}");
-}
-
-#[test]
-fn a_blank_why_is_refused_on_an_edge_removal() {
-    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
-    map.apply(add_node("verdict", "Rust"), Actor::Agent).unwrap();
-    map.apply(add_topic("Which language?"), Actor::Agent)
-        .unwrap();
-    map.apply(
-        add_edge("settles", node_ref("verdict", "Rust"), node_ref("topic", "Which language?")),
-        Actor::Agent,
-    )
-    .unwrap();
-
-    let err = map
-        .apply(
-            Mutation::RemoveEdge {
-                kind: "settles".to_string(),
-                from: node_ref("verdict", "Rust"),
-                to: node_ref("topic", "Which language?"),
-                sources: Vec::new(),
-                why: " ".to_string(),
-            },
-            Actor::Agent,
-        )
-        .err()
-        .unwrap();
-
-    assert!(matches!(err, MapError::BlankWhy), "{err}");
-}

@@ -142,11 +142,9 @@ fn carries(payload: &Payload, term: &str) -> bool {
                 || name.as_deref().is_some_and(has)
                 || properties.values().any(|v| has(v))
         }
-        Payload::NodeRemoved { map, why, .. } => has(&map.as_uuid().to_string()) || has(why),
+        Payload::NodeRemoved { map, .. } => has(&map.as_uuid().to_string()),
         Payload::EdgeAdded { map, kind, .. } => has(&map.as_uuid().to_string()) || has(kind),
-        Payload::EdgeRemoved { map, kind, why, .. } => {
-            has(&map.as_uuid().to_string()) || has(kind) || has(why)
-        }
+        Payload::EdgeRemoved { map, kind, .. } => has(&map.as_uuid().to_string()) || has(kind),
         Payload::ModelCalled(usage) => has(&usage.model),
         Payload::SessionStarted => false,
         Payload::ReflectionStarted { map } => has(&map.as_uuid().to_string()),

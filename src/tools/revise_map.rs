@@ -107,10 +107,9 @@ const PARAMETERS: &str = r#"{
                   {"type": "string"}
                 ]
               },
-              "why": {"type": "string"},
               "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"}
             },
-            "required": ["op", "node", "why"],
+            "required": ["op", "node"],
             "additionalProperties": false
           },
           {
@@ -176,10 +175,9 @@ const PARAMETERS: &str = r#"{
                   {"type": "string"}
                 ]
               },
-              "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"},
-              "why": {"type": "string"}
+              "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"}
             },
-            "required": ["op", "kind", "from", "to", "why"],
+            "required": ["op", "kind", "from", "to"],
             "additionalProperties": false
           }
         ]
@@ -214,7 +212,6 @@ enum ChangeArgs {
     },
     RemoveNode {
         node: NodeRefArgs,
-        why: String,
         #[serde(default)]
         sources: Vec<String>,
     },
@@ -231,7 +228,6 @@ enum ChangeArgs {
         to: NodeRefArgs,
         #[serde(default)]
         sources: Vec<String>,
-        why: String,
     },
 }
 
@@ -336,12 +332,11 @@ fn apply(
             };
             (mutation, line)
         }
-        ChangeArgs::RemoveNode { node, why, sources } => {
+        ChangeArgs::RemoveNode { node, sources } => {
             let node = node_ref(snapshot.map(), node)?;
             let line = format!("removed {node}");
             let mutation = Mutation::RemoveNode {
                 node,
-                why,
                 sources: snapshot.resolve(&sources)?,
             };
             (mutation, line)
@@ -369,7 +364,6 @@ fn apply(
             from,
             to,
             sources,
-            why,
         } => {
             let from = node_ref(snapshot.map(), from)?;
             let to = node_ref(snapshot.map(), to)?;
@@ -380,7 +374,6 @@ fn apply(
                 from,
                 to,
                 sources,
-                why,
             };
             (mutation, line)
         }

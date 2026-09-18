@@ -92,9 +92,6 @@ pub enum MapError {
         owner: Actor,
         touched_by: Actor,
     },
-    /// A `why` that is given but blank - on a change, a removal, or an
-    /// edge removal. Write-only.
-    BlankWhy,
     NoSuchNode {
         node: NodeRef,
         /// Nodes of the same kind whose name overlaps `node.name`, as
@@ -155,7 +152,6 @@ impl fmt::Display for MapError {
                 "no edge kind {kind:?} in map {map:?}; kinds are {kinds}"
             ),
             Self::BlankName => write!(f, "a node's name must not be blank"),
-            Self::BlankWhy => write!(f, "a why must not be blank"),
             Self::MissingProperty {
                 kind,
                 name,

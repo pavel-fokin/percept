@@ -116,7 +116,6 @@ struct NodeChangedBody {
 struct NodeRemovedBody {
     map: String,
     node: String,
-    why: String,
     sources: Vec<String>,
 }
 
@@ -131,7 +130,7 @@ struct EdgeAddedBody {
     sources: Vec<String>,
 }
 
-/// `Payload::EdgeRemoved` on the wire - `EdgeAddedBody` plus `why`.
+/// `Payload::EdgeRemoved` on the wire - the same shape as `EdgeAddedBody`.
 #[derive(Serialize, Deserialize)]
 struct EdgeRemovedBody {
     map: String,
@@ -139,7 +138,6 @@ struct EdgeRemovedBody {
     from: String,
     to: String,
     sources: Vec<String>,
-    why: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -531,15 +529,9 @@ impl From<&crate::core::Event> for Event {
                 sources: ids(sources),
             })
             .expect("NodeChangedBody always serializes"),
-            Payload::NodeRemoved {
-                map,
-                node,
-                why,
-                sources,
-            } => serde_json::to_value(NodeRemovedBody {
+            Payload::NodeRemoved { map, node, sources } => serde_json::to_value(NodeRemovedBody {
                 map: map.as_uuid().to_string(),
                 node: node.as_uuid().to_string(),
-                why: why.clone(),
                 sources: ids(sources),
             })
             .expect("NodeRemovedBody always serializes"),
@@ -563,14 +555,12 @@ impl From<&crate::core::Event> for Event {
                 from,
                 to,
                 sources,
-                why,
             } => serde_json::to_value(EdgeRemovedBody {
                 map: map.as_uuid().to_string(),
                 kind: kind.clone(),
                 from: from.as_uuid().to_string(),
                 to: to.as_uuid().to_string(),
                 sources: ids(sources),
-                why: why.clone(),
             })
             .expect("EdgeRemovedBody always serializes"),
             Payload::ModelCalled(usage) => serde_json::to_value(ModelCalledBody {
@@ -740,7 +730,6 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
             Ok(Payload::NodeRemoved {
                 map: parse_map_id(&body.map)?,
                 node: parse_node_id(&body.node)?,
-                why: body.why,
                 sources: parse_event_ids(body.sources)?,
             })
         }
@@ -763,7 +752,6 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 from: parse_node_id(&body.from)?,
                 to: parse_node_id(&body.to)?,
                 sources: parse_event_ids(body.sources)?,
-                why: body.why,
             })
         }
         EventKind::ModelCalled => {

@@ -223,7 +223,6 @@ pub enum Mutation {
     },
     RemoveNode {
         node: NodeRef,
-        why: String,
         sources: Vec<EventId>,
     },
     AddEdge {
@@ -237,7 +236,6 @@ pub enum Mutation {
         from: NodeRef,
         to: NodeRef,
         sources: Vec<EventId>,
-        why: String,
     },
 }
 

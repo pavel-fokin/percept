@@ -115,7 +115,7 @@ pub enum MapsCommand {
     /// Remove a node from a map, dropping the edges that touch it.
     RemoveNode(RemoveNodeArgs),
     /// Remove an edge from a map.
-    RemoveEdge(RemoveEdgeArgs),
+    RemoveEdge(EdgeArgs),
     /// Add several nodes and edges from a document on stdin, or change
     /// one already in the map - a margin line naming a short id, `t4`,
     /// starts a change block: `state "done"` under it sets a property,
@@ -234,8 +234,6 @@ pub struct RemoveNodeArgs {
     /// shows it as, `d41`.
     #[arg(long, value_parser = non_blank)]
     node: String,
-    #[arg(long, value_parser = non_blank)]
-    why: String,
 }
 
 /// An edge to add or remove - the same three things name it either way.
@@ -252,16 +250,6 @@ pub struct EdgeArgs {
     /// `kind:name` of the node the edge points to, or its short id.
     #[arg(long, value_parser = non_blank)]
     to: String,
-}
-
-/// `maps remove-edge`'s arguments: `EdgeArgs` plus why, required only
-/// on removal - `maps add-edge` needs none.
-#[derive(Args)]
-pub struct RemoveEdgeArgs {
-    #[command(flatten)]
-    edge: EdgeArgs,
-    #[arg(long, value_parser = non_blank)]
-    why: String,
 }
 
 #[derive(Args)]
@@ -866,35 +854,29 @@ pub fn maps_remove_node(
     let snapshot = map_for(schemas, &args.target.map, source, log)?;
     let node = resolve_ref(snapshot.map(), &args.node)?;
     write(args.target, log, schemas, source, me, cause, |sources| {
-        Mutation::RemoveNode {
-            node,
-            why: args.why,
-            sources,
-        }
+        Mutation::RemoveNode { node, sources }
     })
     .map(drop)
 }
 
 /// Removes an edge from a map.
 pub fn maps_remove_edge(
-    args: RemoveEdgeArgs,
+    args: EdgeArgs,
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
     cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let RemoveEdgeArgs { edge, why } = args;
-    let snapshot = map_for(schemas, &edge.target.map, source, log)?;
-    let from = resolve_ref(snapshot.map(), &edge.from)?;
-    let to = resolve_ref(snapshot.map(), &edge.to)?;
-    write(edge.target, log, schemas, source, me, cause, |sources| {
+    let snapshot = map_for(schemas, &args.target.map, source, log)?;
+    let from = resolve_ref(snapshot.map(), &args.from)?;
+    let to = resolve_ref(snapshot.map(), &args.to)?;
+    write(args.target, log, schemas, source, me, cause, |sources| {
         Mutation::RemoveEdge {
-            kind: edge.kind,
+            kind: args.kind,
             from,
             to,
             sources,
-            why,
         }
     })
     .map(drop)

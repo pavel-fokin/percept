@@ -1,8 +1,8 @@
 //! The write path: `Map::apply` checks a `Mutation` against the schema
 //! and the map's current state, then returns the `Payload` that records
 //! it, and `replay` folds that payload back in. Every writer - the CLI,
-//! the model's tool, the web view - goes through `apply`, so the six
-//! write rules and the rank lock live here and nowhere else.
+//! the model's tool, the web view - goes through `apply`, so the write
+//! rules and the rank lock live here and nowhere else.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -49,14 +49,6 @@ fn may(actor: Actor, owner: Actor, touched_by: Actor) -> bool {
 /// The highest-ranked of `actors`; `None` when there are none.
 pub(super) fn highest(actors: impl Iterator<Item = Actor>) -> Option<Actor> {
     actors.max_by_key(|actor| rank(*actor))
-}
-
-/// Whether `why`, when given, is blank - W2's `BlankWhy`.
-fn blank_why(why: Option<&str>) -> Result<(), MapError> {
-    match why {
-        Some(why) if why.trim().is_empty() => Err(MapError::BlankWhy),
-        _ => Ok(()),
-    }
 }
 
 impl Map {
@@ -129,9 +121,8 @@ impl Map {
                     sources,
                 }
             }
-            Mutation::RemoveNode { node, why, sources } => {
+            Mutation::RemoveNode { node, sources } => {
                 let node_id = self.resolve(node)?;
-                blank_why(Some(&why))?;
                 let existing = self.node(node_id).expect("resolve returns a live node's id");
                 self.check_may_of(actor, self.label(node_id), existing)?;
                 // Removing a node drops every edge on it, so each one is
@@ -142,7 +133,6 @@ impl Map {
                 Payload::NodeRemoved {
                     map,
                     node: node_id,
-                    why,
                     sources,
                 }
             }
@@ -168,11 +158,9 @@ impl Map {
                 from,
                 to,
                 sources,
-                why,
             } => {
                 let from_id = self.resolve(from)?;
                 let to_id = self.resolve(to)?;
-                blank_why(Some(&why))?;
                 if let Some(edge) = self.find_edge(&kind, from_id, to_id) {
                     self.check_may_remove_edge(actor, edge)?;
                 }
@@ -182,7 +170,6 @@ impl Map {
                     from: from_id,
                     to: to_id,
                     sources,
-                    why,
                 }
             }
         };

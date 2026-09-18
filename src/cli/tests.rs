@@ -667,7 +667,6 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
         RemoveNodeArgs {
             target: target(),
             node: "file:src/main.rs".to_string(),
-            why: "gone".to_string(),
         },
         &log,
         &schemas(),
@@ -682,17 +681,7 @@ fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
         to: "file:src/app/mod.rs".to_string(),
     };
     let add_edge = maps_add_edge(edge_args(), &log, &schemas(), &cli_source, human(), None);
-    let remove_edge = maps_remove_edge(
-        RemoveEdgeArgs {
-            edge: edge_args(),
-            why: "gone".to_string(),
-        },
-        &log,
-        &schemas(),
-        &cli_source,
-        human(),
-        None,
-    );
+    let remove_edge = maps_remove_edge(edge_args(), &log, &schemas(), &cli_source, human(), None);
 
     for result in [add_node, remove_node, add_edge, remove_edge] {
         let err = result.err().unwrap();

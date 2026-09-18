@@ -318,13 +318,9 @@ fn event_lines(
             ),
             width,
         ),
-        Payload::NodeRemoved { map, node, why, .. } => tool_lines(
+        Payload::NodeRemoved { map, node, .. } => tool_lines(
             chat,
-            &format!(
-                "{}: removed node {} - {why}",
-                map_label(map_names, map),
-                node.as_uuid()
-            ),
+            &format!("{}: removed node {}", map_label(map_names, map), node.as_uuid()),
             width,
         ),
         Payload::EdgeAdded {

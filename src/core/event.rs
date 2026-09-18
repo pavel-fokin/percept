@@ -148,11 +148,10 @@ pub enum Payload {
         properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
     },
-    /// A node removed from a cognitive map, with why.
+    /// A node removed from a cognitive map.
     NodeRemoved {
         map: MapId,
         node: NodeId,
-        why: String,
         sources: Vec<EventId>,
     },
     /// An edge added to a cognitive map. Carries no id of its own -
@@ -164,14 +163,13 @@ pub enum Payload {
         to: NodeId,
         sources: Vec<EventId>,
     },
-    /// An edge removed from a cognitive map, with why.
+    /// An edge removed from a cognitive map.
     EdgeRemoved {
         map: MapId,
         kind: String,
         from: NodeId,
         to: NodeId,
         sources: Vec<EventId>,
-        why: String,
     },
     /// One round trip to the model - always `System`, never replayed as
     /// dialogue. Caused by the turn's anchor, the same event a thought
