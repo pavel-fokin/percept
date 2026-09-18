@@ -1,8 +1,8 @@
 //! The write path: `Map::apply` checks a `Mutation` against the schema
 //! and the map's current state, then returns the `Payload` that records
 //! it, and `replay` folds that payload back in. Every writer - the CLI,
-//! the model's tool, the web view - goes through `apply`, so the six
-//! write rules and the rank lock live here and nowhere else.
+//! the model's tool, the web view - goes through `apply`, so the write
+//! rules and the rank lock live here and nowhere else.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -49,14 +49,6 @@ fn may(actor: Actor, owner: Actor, touched_by: Actor) -> bool {
 /// The highest-ranked of `actors`; `None` when there are none.
 pub(super) fn highest(actors: impl Iterator<Item = Actor>) -> Option<Actor> {
     actors.max_by_key(|actor| rank(*actor))
-}
-
-/// Whether `why`, when given, is blank - W2's `BlankWhy`.
-fn blank_why(why: Option<&str>) -> Result<(), MapError> {
-    match why {
-        Some(why) if why.trim().is_empty() => Err(MapError::BlankWhy),
-        _ => Ok(()),
-    }
 }
 
 impl Map {
@@ -110,15 +102,19 @@ impl Map {
                 name,
                 properties,
                 sources,
-                why,
             } => {
                 let node_id = self.resolve(node)?;
                 let existing = self.node(node_id).expect("resolve returns a live node's id");
+                if name.is_none()
+                    && properties.is_empty()
+                    && sources.iter().all(|source| existing.sources.contains(source))
+                {
+                    return Err(MapError::EmptyChange);
+                }
                 if let Some(node_kind) = self.schema.node_kind(&existing.kind) {
                     check_state(node_kind, &properties)?;
                     check_properties(node_kind, &properties)?;
                 }
-                blank_why(why.as_deref())?;
                 let needs_rank = name.is_some() || properties.keys().any(|key| key != "state");
                 if needs_rank {
                     self.check_may_of(actor, self.label(node_id), existing)?;
@@ -129,12 +125,10 @@ impl Map {
                     name,
                     properties,
                     sources,
-                    why,
                 }
             }
-            Mutation::RemoveNode { node, why, sources } => {
+            Mutation::RemoveNode { node, sources } => {
                 let node_id = self.resolve(node)?;
-                blank_why(Some(&why))?;
                 let existing = self.node(node_id).expect("resolve returns a live node's id");
                 self.check_may_of(actor, self.label(node_id), existing)?;
                 // Removing a node drops every edge on it, so each one is
@@ -145,7 +139,6 @@ impl Map {
                 Payload::NodeRemoved {
                     map,
                     node: node_id,
-                    why,
                     sources,
                 }
             }
@@ -171,11 +164,9 @@ impl Map {
                 from,
                 to,
                 sources,
-                why,
             } => {
                 let from_id = self.resolve(from)?;
                 let to_id = self.resolve(to)?;
-                blank_why(Some(&why))?;
                 if let Some(edge) = self.find_edge(&kind, from_id, to_id) {
                     self.check_may_remove_edge(actor, edge)?;
                 }
@@ -185,7 +176,6 @@ impl Map {
                     from: from_id,
                     to: to_id,
                     sources,
-                    why,
                 }
             }
         };
@@ -211,11 +201,7 @@ impl Map {
             } => {
                 self.check_node_kind(kind)?;
                 self.check_name(kind, name, None)?;
-                // `0` is an event from before short ids existed - the
-                // same count `apply` would have minted for it, taken
-                // here from its position among nodes of its kind, since
-                // nothing recorded one at the time.
-                let seq = if *seq == 0 { self.next_seq(kind) } else { *seq };
+                let seq = *seq;
                 let next = self.next_seq_by_kind.entry(kind.clone()).or_insert(1);
                 *next = (*next).max(seq + 1);
                 self.by_id.insert(*node, self.nodes.len());
@@ -227,7 +213,7 @@ impl Map {
                     name: name.clone(),
                     properties: properties.clone(),
                     sources: sources.clone(),
-                    history: vec![Change { actor, at, why: None }],
+                    history: vec![Change { actor, at }],
                     seq,
                 });
             }
@@ -236,7 +222,6 @@ impl Map {
                 name,
                 properties,
                 sources,
-                why,
                 ..
             } => {
                 let index = *self.by_id.get(node).ok_or(MapError::NoSuchNodeId(*node))?;
@@ -256,11 +241,7 @@ impl Map {
                         self.nodes[index].sources.push(*source);
                     }
                 }
-                self.nodes[index].history.push(Change {
-                    actor,
-                    at,
-                    why: why.clone(),
-                });
+                self.nodes[index].history.push(Change { actor, at });
             }
             Payload::NodeRemoved { node, .. } => {
                 let removed = self.node(*node).ok_or(MapError::NoSuchNodeId(*node))?;
@@ -301,7 +282,7 @@ impl Map {
                     from: *from,
                     to: *to,
                     sources: sources.clone(),
-                    history: vec![Change { actor, at, why: None }],
+                    history: vec![Change { actor, at }],
                 });
             }
             Payload::EdgeRemoved { kind, from, to, .. } => {

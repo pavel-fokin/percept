@@ -346,7 +346,7 @@ fn tool_resulted_round_trips_through_json() {
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "tool.resulted");
-    assert_eq!(wire.actor["kind"], "system");
+    assert!(matches!(wire.actor, WireActor::System));
     let restored = crate::store::from_wire(wire).unwrap();
 
     assert!(restored.actor() == Actor::System);
@@ -366,7 +366,7 @@ fn map_created_round_trips_through_json() {
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "map.created");
-    assert_eq!(wire.actor["kind"], "system");
+    assert!(matches!(wire.actor, WireActor::System));
     assert_eq!(wire.payload["map"], map.as_uuid().to_string());
     assert_eq!(wire.payload["schema"], "decisions");
     let restored = crate::store::from_wire(wire).unwrap();
@@ -400,7 +400,7 @@ fn model_called_round_trips_through_json() {
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "model.called");
-    assert_eq!(wire.actor["kind"], "system");
+    assert!(matches!(wire.actor, WireActor::System));
     // Unreported cached tokens are left off the wire, not written
     // as null.
     assert!(wire.payload.get("cached_tokens").is_none());
@@ -428,7 +428,7 @@ fn session_started_round_trips_through_json() {
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "session.started");
-    assert_eq!(wire.actor["kind"], "system");
+    assert!(matches!(wire.actor, WireActor::System));
     let restored = crate::store::from_wire(wire).unwrap();
 
     assert!(restored.actor() == Actor::System);
@@ -451,7 +451,7 @@ fn reflection_started_round_trips_through_json() {
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "reflection.started");
-    assert_eq!(wire.actor["kind"], "agent");
+    assert!(matches!(wire.actor, WireActor::Agent));
     let restored = crate::store::from_wire(wire).unwrap();
 
     assert!(restored.actor() == Actor::Agent);
@@ -516,7 +516,7 @@ fn node_added_round_trips_through_json() {
 }
 
 #[test]
-fn a_node_added_line_with_no_seq_decodes_to_the_sentinel() {
+fn a_node_added_line_with_no_seq_is_a_bad_line() {
     let node = NodeId::new();
     let json = serde_json::json!({
         "map": crate::core::testing::map_id("decisions").as_uuid().to_string(),
@@ -527,9 +527,12 @@ fn a_node_added_line_with_no_seq_decodes_to_the_sentinel() {
         "sources": [],
     });
 
-    let event = decode("user", source("cli"), "node.added", None, json, human()).unwrap();
+    let err = match decode("user", source("cli"), "node.added", None, json, human()) {
+        Err(e) => e,
+        Ok(_) => panic!("expected a missing seq to be rejected"),
+    };
 
-    assert!(matches!(event.payload(), Payload::NodeAdded { seq: 0, .. }));
+    assert!(matches!(err, Error::BadPayload(_)), "{err}");
 }
 
 #[test]
@@ -549,7 +552,6 @@ fn node_changed_round_trips_through_json() {
             name: Some("cancel a turn cleanly".to_string()),
             properties: properties.clone(),
             sources: Vec::new(),
-            why: Some("clearer".to_string()),
         },
     );
 
@@ -557,7 +559,6 @@ fn node_changed_round_trips_through_json() {
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "node.changed");
     assert_eq!(wire.payload["name"], "cancel a turn cleanly");
-    assert_eq!(wire.payload["why"], "clearer");
     let restored = crate::store::from_wire(wire).unwrap();
 
     match restored.payload() {
@@ -567,44 +568,15 @@ fn node_changed_round_trips_through_json() {
             name,
             properties: restored_properties,
             sources,
-            why,
         } => {
             assert_eq!(*map, crate::core::testing::map_id("tasks"));
             assert!(*restored_node == node);
             assert_eq!(name.as_deref(), Some("cancel a turn cleanly"));
             assert_eq!(*restored_properties, properties);
             assert!(sources.is_empty());
-            assert_eq!(why.as_deref(), Some("clearer"));
         }
         _ => panic!("expected NodeChanged"),
     }
-}
-
-#[test]
-fn a_node_changed_with_no_why_omits_it_on_the_wire() {
-    let node = NodeId::new();
-    let original = crate::core::Event::restore(
-        EventId::new(),
-        Actor::Agent,
-        source("cli"),
-        None,
-        Timestamp::now(),
-        Payload::NodeChanged {
-            map: crate::core::testing::map_id("tasks"),
-            node,
-            name: None,
-            properties: BTreeMap::new(),
-            sources: Vec::new(),
-            why: None,
-        },
-    );
-
-    let json = serde_json::to_string(&Event::from(&original)).unwrap();
-    let wire: Event = serde_json::from_str(&json).unwrap();
-    assert!(wire.payload.get("why").is_none());
-
-    let restored = crate::store::from_wire(wire).unwrap();
-    assert!(matches!(restored.payload(), Payload::NodeChanged { why: None, .. }));
 }
 
 #[test]
@@ -634,7 +606,6 @@ fn node_removed_round_trips_through_json() {
         Payload::NodeRemoved {
             map: crate::core::testing::map_id("decisions"),
             node,
-            why: "superseded".to_string(),
             sources: Vec::new(),
         },
     );
@@ -650,12 +621,10 @@ fn node_removed_round_trips_through_json() {
         Payload::NodeRemoved {
             map,
             node: restored_node,
-            why,
             sources,
         } => {
             assert_eq!(*map, crate::core::testing::map_id("decisions"));
             assert!(*restored_node == node);
-            assert_eq!(why, "superseded");
             assert!(sources.is_empty());
         }
         _ => panic!("expected NodeRemoved"),
@@ -719,14 +688,12 @@ fn edge_removed_round_trips_through_json() {
             from,
             to,
             sources: Vec::new(),
-            why: "no longer relevant".to_string(),
         },
     );
 
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "edge.removed");
-    assert_eq!(wire.payload["why"], "no longer relevant");
     let restored = crate::store::from_wire(wire).unwrap();
 
     match restored.payload() {
@@ -735,14 +702,12 @@ fn edge_removed_round_trips_through_json() {
             kind,
             from: restored_from,
             to: restored_to,
-            why,
             ..
         } => {
             assert_eq!(*map, crate::core::testing::map_id("decisions"));
             assert_eq!(kind, "supports");
             assert!(*restored_from == from);
             assert!(*restored_to == to);
-            assert_eq!(why, "no longer relevant");
         }
         _ => panic!("expected EdgeRemoved"),
     }
@@ -757,6 +722,7 @@ fn a_malformed_source_in_a_node_added_payload_is_an_error() {
         "name": "x",
         "properties": {},
         "sources": ["not-a-uuid"],
+        "seq": 1,
     });
 
     let err = match decode("user", source("cli"), "node.added", None, payload, human()) {
@@ -812,7 +778,7 @@ fn unknown_type_deserializes_but_has_no_domain_form() {
     let json = r#"{
         "id": "0192d1f0-1111-7000-8000-000000000000",
         "seq": 1,
-        "actor": "user",
+        "actor": {"kind": "human"},
         "source": {"name": "tui", "path": "/test"},
         "type": "file.moved",
         "causation_id": null,
@@ -962,7 +928,7 @@ fn a_ranged_read_on_a_citation_returns_those_lines() {
 fn a_bare_string_source_fails_to_deserialize() {
     let json = r#"{
         "id": "0192d1f0-1111-7000-8000-000000000000",
-        "actor": "user",
+        "actor": {"kind": "human"},
         "source": "tui",
         "type": "message.received",
         "causation_id": null,
@@ -1021,7 +987,7 @@ fn a_human_without_an_id_round_trips_as_a_kind_alone() {
 }
 
 #[test]
-fn a_legacy_user_string_reads_as_a_human_without_an_id() {
+fn a_bare_actor_string_is_a_bad_line() {
     let json = r#"{
         "id": "0192d1f0-1111-7000-8000-000000000000",
         "actor": "user",
@@ -1032,8 +998,7 @@ fn a_legacy_user_string_reads_as_a_human_without_an_id() {
         "payload": { "content": "hi" }
     }"#;
 
-    let restored = crate::store::from_wire(serde_json::from_str::<Event>(json).unwrap()).unwrap();
-    assert_eq!(restored.actor(), Actor::Human(None));
+    assert!(serde_json::from_str::<Event>(json).is_err());
 }
 
 #[test]

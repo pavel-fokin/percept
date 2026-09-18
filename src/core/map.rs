@@ -97,14 +97,11 @@ pub struct Edge {
     pub history: Vec<Change>,
 }
 
-/// One write that reached a node or an edge: who, when, and on what
-/// grounds. `why` is `None` on an addition - a node's own why is a
-/// property - and on a plain edit that gave none.
+/// One write that reached a node or an edge: who and when.
 #[derive(Clone, Debug)]
 pub struct Change {
     pub actor: Actor,
     pub at: Timestamp,
-    pub why: Option<String>,
 }
 
 /// A node or an edge that keeps every write that reached it. Default
@@ -223,11 +220,9 @@ pub enum Mutation {
         name: Option<String>,
         properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
-        why: Option<String>,
     },
     RemoveNode {
         node: NodeRef,
-        why: String,
         sources: Vec<EventId>,
     },
     AddEdge {
@@ -241,7 +236,6 @@ pub enum Mutation {
         from: NodeRef,
         to: NodeRef,
         sources: Vec<EventId>,
-        why: String,
     },
 }
 
@@ -458,11 +452,9 @@ impl Map {
     }
 
     /// The next short id number for a fresh `kind` node. `apply` mints
-    /// with this; `replay` falls back to it only for a `NodeAdded`
-    /// whose event carried no `seq` of its own. Tracked in
-    /// `next_seq_by_kind`, never by counting live nodes: a `NodeRemoved`
-    /// must not free a number for reuse, or an old citation of it would
-    /// point at whatever node minted it next.
+    /// with this. Tracked in `next_seq_by_kind`, never by counting live
+    /// nodes: a `NodeRemoved` must not free a number for reuse, or an
+    /// old citation of it would point at whatever node minted it next.
     fn next_seq(&self, kind: &str) -> u32 {
         self.next_seq_by_kind.get(kind).copied().unwrap_or(1)
     }

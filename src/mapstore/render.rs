@@ -320,9 +320,8 @@ fn push_props(out: &mut String, node: &Node, indent: &str) {
     push_changed(out, node, indent);
 }
 
-/// One `changed by <actor>` line under `indent`, with `: "<why>"`
-/// appended when the change carried one - printed only when `node`'s
-/// last change is not its addition.
+/// One `changed by <actor>` line under `indent`, printed only when
+/// `node`'s last change is not its addition.
 fn push_changed(out: &mut String, node: &Node, indent: &str) {
     if let Some(changed) = super::changed_line(node) {
         let _ = writeln!(out, "{indent}{changed}");

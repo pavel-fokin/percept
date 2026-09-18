@@ -121,10 +121,7 @@ pub enum Payload {
     /// its kind - `d41` is `d` plus this - minted once by `Map::apply`
     /// and carried here so a later fold reads back the same number
     /// rather than recomputing it from its own position, which a
-    /// filter by path can change. `0` on the wire means an event recorded
-    /// before short ids existed; `Map::replay` falls back to counting
-    /// its position among nodes of its kind for those, so an old log
-    /// still folds without a migration.
+    /// filter by path can change.
     NodeAdded {
         map: MapId,
         node: NodeId,
@@ -140,23 +137,18 @@ pub enum Payload {
     /// `supersedes` edge. `name` is `Some` only on a rename;
     /// `properties` are merged into the node's own, last write wins, a
     /// key present here replacing that key alone; `sources` join the
-    /// node's. `why` is the writer's reason, when they gave one - the
-    /// fold carries it in the node's last `Change`. A change naming
-    /// neither `name` nor a property, only `why`, is a comment: legal,
-    /// and it still becomes the node's last change.
+    /// node's.
     NodeChanged {
         map: MapId,
         node: NodeId,
         name: Option<String>,
         properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
-        why: Option<String>,
     },
-    /// A node removed from a cognitive map, with why.
+    /// A node removed from a cognitive map.
     NodeRemoved {
         map: MapId,
         node: NodeId,
-        why: String,
         sources: Vec<EventId>,
     },
     /// An edge added to a cognitive map. Carries no id of its own -
@@ -168,14 +160,13 @@ pub enum Payload {
         to: NodeId,
         sources: Vec<EventId>,
     },
-    /// An edge removed from a cognitive map, with why.
+    /// An edge removed from a cognitive map.
     EdgeRemoved {
         map: MapId,
         kind: String,
         from: NodeId,
         to: NodeId,
         sources: Vec<EventId>,
-        why: String,
     },
     /// One round trip to the model - always `System`, never replayed as
     /// dialogue. Caused by the turn's anchor, the same event a thought

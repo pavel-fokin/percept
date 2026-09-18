@@ -115,18 +115,17 @@ pub enum MapsCommand {
     /// Remove a node from a map, dropping the edges that touch it.
     RemoveNode(RemoveNodeArgs),
     /// Remove an edge from a map.
-    RemoveEdge(RemoveEdgeArgs),
+    RemoveEdge(EdgeArgs),
     /// Add several nodes and edges from a document on stdin, or change
     /// one already in the map - a margin line naming a short id, `t4`,
     /// starts a change block: `state "done"` under it sets a property,
-    /// `name "..."` renames it, and an indented `why "..."` line under
-    /// it sets the change's own why rather than a property. Prints one
-    /// line per node or change, then one per edge, then one per `cites`
-    /// line.
+    /// `name "..."` renames it. Prints one line per node or change, then
+    /// one per edge, then one per `cites` line.
     Record(RecordArgs),
-    /// Change a node already in a map - a rename, a property, or a
-    /// `why`-only comment - subject to the same rank rule a rename or
-    /// removal always has. Prints the node's id.
+    /// Change a node already in a map - a rename, a property, or both.
+    /// A rename, or any property but `state`, is subject to the rank
+    /// rule a removal always has; `state` alone an agent may set on
+    /// anyone's node. Prints the node's id.
     ChangeNode(ChangeNodeArgs),
     /// One map's kinds, relations, and how to record to it, from its
     /// schema.
@@ -235,8 +234,6 @@ pub struct RemoveNodeArgs {
     /// shows it as, `d41`.
     #[arg(long, value_parser = non_blank)]
     node: String,
-    #[arg(long, value_parser = non_blank)]
-    why: String,
 }
 
 /// An edge to add or remove - the same three things name it either way.
@@ -253,16 +250,6 @@ pub struct EdgeArgs {
     /// `kind:name` of the node the edge points to, or its short id.
     #[arg(long, value_parser = non_blank)]
     to: String,
-}
-
-/// `maps remove-edge`'s arguments: `EdgeArgs` plus why, required only
-/// on removal - `maps add-edge` needs none.
-#[derive(Args)]
-pub struct RemoveEdgeArgs {
-    #[command(flatten)]
-    edge: EdgeArgs,
-    #[arg(long, value_parser = non_blank)]
-    why: String,
 }
 
 #[derive(Args)]
@@ -298,9 +285,6 @@ pub struct ChangeNodeArgs {
     /// Repeatable `key=value`.
     #[arg(long = "prop", value_parser = parse_prop)]
     prop: Vec<(String, String)>,
-    /// Why this change was made.
-    #[arg(long)]
-    why: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -870,43 +854,37 @@ pub fn maps_remove_node(
     let snapshot = map_for(schemas, &args.target.map, source, log)?;
     let node = resolve_ref(snapshot.map(), &args.node)?;
     write(args.target, log, schemas, source, me, cause, |sources| {
-        Mutation::RemoveNode {
-            node,
-            why: args.why,
-            sources,
-        }
+        Mutation::RemoveNode { node, sources }
     })
     .map(drop)
 }
 
 /// Removes an edge from a map.
 pub fn maps_remove_edge(
-    args: RemoveEdgeArgs,
+    args: EdgeArgs,
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
     cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let RemoveEdgeArgs { edge, why } = args;
-    let snapshot = map_for(schemas, &edge.target.map, source, log)?;
-    let from = resolve_ref(snapshot.map(), &edge.from)?;
-    let to = resolve_ref(snapshot.map(), &edge.to)?;
-    write(edge.target, log, schemas, source, me, cause, |sources| {
+    let snapshot = map_for(schemas, &args.target.map, source, log)?;
+    let from = resolve_ref(snapshot.map(), &args.from)?;
+    let to = resolve_ref(snapshot.map(), &args.to)?;
+    write(args.target, log, schemas, source, me, cause, |sources| {
         Mutation::RemoveEdge {
-            kind: edge.kind,
+            kind: args.kind,
             from,
             to,
             sources,
-            why,
         }
     })
     .map(drop)
 }
 
-/// Changes a node already in a map - a rename, a property, or a
-/// `why`-only comment - and prints the event id, the way `maps
-/// add-node` prints the node it minted.
+/// Changes a node already in a map - a rename, a property, or both -
+/// and prints the event id, the way `maps add-node` prints the node it
+/// minted.
 pub fn maps_change_node(
     args: ChangeNodeArgs,
     log: &dyn EventLog,
@@ -920,7 +898,6 @@ pub fn maps_change_node(
         node,
         name,
         prop,
-        why,
     } = args;
     let snapshot = map_for(schemas, &target.map, source, log)?;
     let node = resolve_ref(snapshot.map(), &node)?;
@@ -930,7 +907,6 @@ pub fn maps_change_node(
             name,
             properties: prop.into_iter().collect::<BTreeMap<_, _>>(),
             sources,
-            why,
         }
     })?;
     if let Payload::NodeChanged { node, .. } = &payload {
@@ -1044,12 +1020,10 @@ fn split_cite_range(s: &str) -> Result<CiteRange, Box<dyn std::error::Error>> {
 /// either `<kind> "<name>"`, which adds a node, or a bare short id,
 /// `t4`, which starts a change to the node it names - each owns every
 /// indented line under it - a `<key> "<value>"` property (`name
-/// "<value>"` is a rename, only meaningful under a change; `why
-/// "<value>"` under a change is the change's own why rather than a
-/// property, but stays a property under a fresh node), an `<edge kind>
-/// <ref>`, or a `cites <path>[:<from>-<to>]` - until the next node line
-/// or the document's end. A blank line is ignored; anything else names
-/// its line number.
+/// "<value>"` is a rename, only meaningful under a change), an `<edge
+/// kind> <ref>`, or a `cites <path>[:<from>-<to>]` - until the next
+/// node line or the document's end. A blank line is ignored; anything
+/// else names its line number.
 fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>> {
     let mut nodes: Vec<DocNode> = Vec::new();
     for (i, raw) in text.lines().enumerate() {
@@ -1212,7 +1186,6 @@ fn record_document(
                 let (kind, old_name) = (target.kind.clone(), target.name.clone());
                 let mut properties = node.properties;
                 let rename = properties.remove("name");
-                let why = properties.remove("why");
                 let name = rename.clone().unwrap_or_else(|| old_name.clone());
                 let mutation = Mutation::ChangeNode {
                     node: NodeRef {
@@ -1222,7 +1195,6 @@ fn record_document(
                     name: rename,
                     properties,
                     sources,
-                    why,
                 };
                 (mutation, kind, name)
             } else {

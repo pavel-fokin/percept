@@ -29,19 +29,29 @@ pub struct Cursor {
     pub seq: u64,
 }
 
+/// `core::Actor` on the wire: `{"kind":"human","id":"<uuid>"}`,
+/// `{"kind":"agent"}`, or `{"kind":"system"}`. A human with no `id` is
+/// one the log cannot name - whose it was is the log's to say. Shared
+/// with `mapstore::Stamp`, whose `actor` field a map's JSON render
+/// carries in the same shape.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum WireActor {
+    Human {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+    },
+    Agent,
+    System,
+}
+
 /// A `core::Event` as it travels over the wire. Flat JSON:
 /// `{ id, actor, source, type, causation_id, created_at, payload }`.
 /// `payload` shape depends on `type`.
 #[derive(Serialize, Deserialize)]
 pub struct Event {
     pub id: String,
-    /// `{"kind":"human","id":"<uuid>"}`, `{"kind":"agent"}`, or
-    /// `{"kind":"system"}` on a line this build wrote. A line written
-    /// before actors carried an object holds the bare legacy string
-    /// instead - `"user"`, `"model"`, or `"system"` - which `Value`
-    /// reads the same as the object form; `parse_actor_value` tells
-    /// them apart.
-    pub actor: Value,
+    pub actor: WireActor,
     pub source: Source,
     #[serde(rename = "type")]
     pub kind: String,
@@ -88,20 +98,11 @@ struct NodeAddedBody {
     name: String,
     properties: BTreeMap<String, String>,
     sources: Vec<String>,
-    /// Missing on a line written before short ids existed - `default`
-    /// reads that as `0`, `Map::replay`'s sentinel for "not recorded".
-    /// Omitted on encode at that same sentinel, so a payload a caller
-    /// built with no `seq` at all still round-trips through `decode`.
-    #[serde(default, skip_serializing_if = "is_zero")]
     seq: u32,
 }
 
-fn is_zero(seq: &u32) -> bool {
-    *seq == 0
-}
-
 /// `Payload::NodeChanged` on the wire. `name` is present only on a
-/// rename; `why` only when the writer gave one.
+/// rename.
 #[derive(Serialize, Deserialize)]
 struct NodeChangedBody {
     map: String,
@@ -110,15 +111,12 @@ struct NodeChangedBody {
     name: Option<String>,
     properties: BTreeMap<String, String>,
     sources: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    why: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
 struct NodeRemovedBody {
     map: String,
     node: String,
-    why: String,
     sources: Vec<String>,
 }
 
@@ -133,7 +131,7 @@ struct EdgeAddedBody {
     sources: Vec<String>,
 }
 
-/// `Payload::EdgeRemoved` on the wire - `EdgeAddedBody` plus `why`.
+/// `Payload::EdgeRemoved` on the wire - the same shape as `EdgeAddedBody`.
 #[derive(Serialize, Deserialize)]
 struct EdgeRemovedBody {
     map: String,
@@ -141,7 +139,6 @@ struct EdgeRemovedBody {
     from: String,
     to: String,
     sources: Vec<String>,
-    why: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -525,25 +522,17 @@ impl From<&crate::core::Event> for Event {
                 name,
                 properties,
                 sources,
-                why,
             } => serde_json::to_value(NodeChangedBody {
                 map: map.as_uuid().to_string(),
                 node: node.as_uuid().to_string(),
                 name: name.clone(),
                 properties: properties.clone(),
                 sources: ids(sources),
-                why: why.clone(),
             })
             .expect("NodeChangedBody always serializes"),
-            Payload::NodeRemoved {
-                map,
-                node,
-                why,
-                sources,
-            } => serde_json::to_value(NodeRemovedBody {
+            Payload::NodeRemoved { map, node, sources } => serde_json::to_value(NodeRemovedBody {
                 map: map.as_uuid().to_string(),
                 node: node.as_uuid().to_string(),
-                why: why.clone(),
                 sources: ids(sources),
             })
             .expect("NodeRemovedBody always serializes"),
@@ -567,14 +556,12 @@ impl From<&crate::core::Event> for Event {
                 from,
                 to,
                 sources,
-                why,
             } => serde_json::to_value(EdgeRemovedBody {
                 map: map.as_uuid().to_string(),
                 kind: kind.clone(),
                 from: from.as_uuid().to_string(),
                 to: to.as_uuid().to_string(),
                 sources: ids(sources),
-                why: why.clone(),
             })
             .expect("EdgeRemovedBody always serializes"),
             Payload::ModelCalled(usage) => serde_json::to_value(ModelCalledBody {
@@ -603,7 +590,7 @@ impl From<&crate::core::Event> for Event {
 
         Self {
             id: event.id().as_uuid().to_string(),
-            actor: actor_value(event.actor()),
+            actor: wire_actor(event.actor()),
             source: Source {
                 name: event.source().name.clone(),
                 path: event.source().path.clone(),
@@ -618,8 +605,7 @@ impl From<&crate::core::Event> for Event {
 }
 
 /// `event` off the wire - the counterpart to `Event::from(&core::Event)`
-/// above. A legacy `"user"` actor string, like a `human` object with no
-/// `id`, reads as a human with none: whose it was is the log's to say.
+/// above.
 pub fn from_wire(event: Event) -> Result<crate::core::Event, Error> {
     let payload = decode_payload(&event.kind, event.payload)?;
 
@@ -632,7 +618,7 @@ pub fn from_wire(event: Event) -> Result<crate::core::Event, Error> {
         .created_at
         .parse::<Timestamp>()
         .map_err(|_| Error::BadTimestamp(event.created_at.clone()))?;
-    let actor = parse_actor_value(&event.actor)?;
+    let actor = actor_from_wire(event.actor)?;
 
     Ok(crate::core::Event::restore(
         id,
@@ -736,7 +722,6 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 name: body.name,
                 properties: body.properties,
                 sources: parse_event_ids(body.sources)?,
-                why: body.why,
             })
         }
         EventKind::NodeRemoved => {
@@ -745,7 +730,6 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
             Ok(Payload::NodeRemoved {
                 map: parse_map_id(&body.map)?,
                 node: parse_node_id(&body.node)?,
-                why: body.why,
                 sources: parse_event_ids(body.sources)?,
             })
         }
@@ -768,7 +752,6 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 from: parse_node_id(&body.from)?,
                 to: parse_node_id(&body.to)?,
                 sources: parse_event_ids(body.sources)?,
-                why: body.why,
             })
         }
         EventKind::ModelCalled => {
@@ -821,49 +804,26 @@ pub fn parse_actor(s: &str, me: Option<HumanId>) -> Result<Actor, Error> {
     }
 }
 
-/// `Actor` as it travels on the wire: `{"kind":"human","id":"<uuid>"}`,
-/// `{"kind":"agent"}`, or `{"kind":"system"}`. Shared with
-/// `mapstore::Stamp`, whose `actor` field a map's JSON render carries
-/// in the same shape.
-pub fn actor_value(actor: Actor) -> Value {
+/// `Actor` as it travels on the wire.
+pub fn wire_actor(actor: Actor) -> WireActor {
     match actor {
-        Actor::Human(Some(id)) => {
-            serde_json::json!({"kind": "human", "id": id.as_uuid().to_string()})
-        }
-        Actor::Human(None) => serde_json::json!({"kind": "human"}),
-        Actor::Agent => serde_json::json!({"kind": "agent"}),
-        Actor::System => serde_json::json!({"kind": "system"}),
+        Actor::Human(id) => WireActor::Human {
+            id: id.map(|id| id.as_uuid().to_string()),
+        },
+        Actor::Agent => WireActor::Agent,
+        Actor::System => WireActor::System,
     }
 }
 
-/// `value` as an `Actor`: the object form `actor_value` writes, or a
-/// log line written before actors carried one - a bare legacy string,
-/// read the same way `parse_actor` reads a CLI word.
-fn parse_actor_value(value: &Value) -> Result<Actor, Error> {
-    match value {
-        // A line from before the object form: a human with no id, the
-        // way every line of an unregistered home reads.
-        Value::String(s) => parse_actor(s, None),
-        Value::Object(fields) => {
-            let kind = fields
-                .get("kind")
-                .and_then(Value::as_str)
-                .ok_or_else(|| Error::UnknownActor(value.to_string()))?;
-            match kind {
-                "human" => {
-                    let id = match fields.get("id").and_then(Value::as_str) {
-                        Some(id) => Some(HumanId::from_uuid(parse_uuid(id)?)),
-                        None => None,
-                    };
-                    Ok(Actor::Human(id))
-                }
-                "agent" => Ok(Actor::Agent),
-                "system" => Ok(Actor::System),
-                other => Err(Error::UnknownActor(other.to_string())),
-            }
-        }
-        other => Err(Error::UnknownActor(other.to_string())),
-    }
+/// A wire actor as an `Actor`. A `human` with no `id` is a human the
+/// log cannot name, the way every line of an unregistered home reads.
+fn actor_from_wire(actor: WireActor) -> Result<Actor, Error> {
+    Ok(match actor {
+        WireActor::Human { id: Some(id) } => Actor::Human(Some(HumanId::from_uuid(parse_uuid(&id)?))),
+        WireActor::Human { id: None } => Actor::Human(None),
+        WireActor::Agent => Actor::Agent,
+        WireActor::System => Actor::System,
+    })
 }
 
 /// An `EventId` from its wire spelling - so a caller comparing ids

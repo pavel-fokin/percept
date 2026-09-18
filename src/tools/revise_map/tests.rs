@@ -230,7 +230,7 @@ fn removing_a_user_written_node_is_refused_by_the_map_s_own_rank_rule() {
     let revise = tool(vec![node_added("topic", "Which language?")]);
 
     let err = revise
-        .run(r#"{"map":"debates","changes":[{"op":"remove_node","node":{"kind":"topic","name":"Which language?"},"why":"wrong"}]}"#)
+        .run(r#"{"map":"debates","changes":[{"op":"remove_node","node":{"kind":"topic","name":"Which language?"}}]}"#)
         .err()
         .unwrap()
         .to_string();
@@ -246,7 +246,7 @@ fn removing_a_user_written_edge_is_refused() {
     let revise = tool(vec![verdict, topic, edge]);
 
     let err = revise
-        .run(r#"{"map":"debates","changes":[{"op":"remove_edge","kind":"settles","from":{"kind":"verdict","name":"Rust"},"to":{"kind":"topic","name":"Which language?"},"why":"wrong"}]}"#)
+        .run(r#"{"map":"debates","changes":[{"op":"remove_edge","kind":"settles","from":{"kind":"verdict","name":"Rust"},"to":{"kind":"topic","name":"Which language?"}}]}"#)
         .err()
         .unwrap()
         .to_string();
@@ -265,7 +265,7 @@ fn removing_a_model_node_that_a_user_edge_touches_is_refused() {
     let revise = tool(vec![model_node, topic, user_edge]);
 
     let err = match revise
-        .run(r#"{"map":"debates","changes":[{"op":"remove_node","node":{"kind":"claim","name":"Rust"},"why":"wrong"}]}"#)
+        .run(r#"{"map":"debates","changes":[{"op":"remove_node","node":{"kind":"claim","name":"Rust"}}]}"#)
     {
         Ok(_) => panic!("the removal went through"),
         Err(err) => err.to_string(),
@@ -279,7 +279,7 @@ fn removing_a_model_written_node_is_allowed() {
     let revise = tool(vec![node_added_by(Actor::Agent, "claim", "Go")]);
 
     let output = revise
-        .run(r#"{"map":"debates","changes":[{"op":"remove_node","node":{"kind":"claim","name":"Go"},"why":"wrong"}]}"#)
+        .run(r#"{"map":"debates","changes":[{"op":"remove_node","node":{"kind":"claim","name":"Go"}}]}"#)
         .unwrap();
 
     assert!(matches!(output.commits[0], Payload::NodeRemoved { .. }));
@@ -292,7 +292,7 @@ fn removing_a_model_written_verdict_is_allowed() {
     let revise = tool(vec![node_added_by(Actor::Agent, "verdict", "Go")]);
 
     let output = revise
-        .run(r#"{"map":"debates","changes":[{"op":"remove_node","node":{"kind":"verdict","name":"Go"},"why":"wrong"}]}"#)
+        .run(r#"{"map":"debates","changes":[{"op":"remove_node","node":{"kind":"verdict","name":"Go"}}]}"#)
         .unwrap();
 
     assert!(matches!(output.commits[0], Payload::NodeRemoved { .. }));

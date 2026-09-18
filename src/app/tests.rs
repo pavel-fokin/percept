@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::testing::{
-    content, edge_added, human, node_added, schemas, source, usage, FakeLog,
+    content, edge_added, human, node_added, node_added_seq, schemas, source, usage, FakeLog,
 };
 use crate::core::{Actor, Payload};
 use crate::harness::testing::{FakeCatalog, FakeSnapshot, FakeTool, FixedPolicy, Scripted};
@@ -1060,8 +1060,8 @@ fn a_headlines_map_sends_only_its_headline_nodes() {
 
 #[test]
 fn a_headlines_map_omits_a_headline_another_headline_claims() {
-    let old = node_added("verdict", "Go");
-    let new = node_added("verdict", "Rust");
+    let old = node_added_seq("verdict", "Go", 1);
+    let new = node_added_seq("verdict", "Rust", 2);
     let replaces = edge_added("replaces", &new, &old);
     let mut events = vec![old, new, replaces];
     events.extend(filler(25));

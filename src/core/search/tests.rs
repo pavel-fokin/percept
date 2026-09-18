@@ -311,12 +311,6 @@ fn a_text_term_matches_every_payload_kind() {
             sources: Vec::new(),
             seq: 2,
         },
-        Payload::NodeRemoved {
-            map: crate::core::testing::map_id("tasks"),
-            node: NodeId::new(),
-            why: "deployed already".to_string(),
-            sources: Vec::new(),
-        },
         Payload::EdgeAdded {
             map: crate::core::testing::map_id("deploys"),
             kind: "deploy_blocks".to_string(),
@@ -330,7 +324,6 @@ fn a_text_term_matches_every_payload_kind() {
             from: NodeId::new(),
             to: NodeId::new(),
             sources: Vec::new(),
-            why: "deployed already".to_string(),
         },
     ];
     let query = EventQuery {
