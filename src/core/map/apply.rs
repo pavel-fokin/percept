@@ -103,11 +103,14 @@ impl Map {
                 properties,
                 sources,
             } => {
-                if name.is_none() && properties.is_empty() && sources.is_empty() {
-                    return Err(MapError::EmptyChange);
-                }
                 let node_id = self.resolve(node)?;
                 let existing = self.node(node_id).expect("resolve returns a live node's id");
+                if name.is_none()
+                    && properties.is_empty()
+                    && sources.iter().all(|source| existing.sources.contains(source))
+                {
+                    return Err(MapError::EmptyChange);
+                }
                 if let Some(node_kind) = self.schema.node_kind(&existing.kind) {
                     check_state(node_kind, &properties)?;
                     check_properties(node_kind, &properties)?;

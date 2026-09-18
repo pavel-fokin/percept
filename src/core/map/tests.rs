@@ -1228,6 +1228,38 @@ fn a_change_naming_nothing_is_refused() {
 }
 
 #[test]
+fn a_change_citing_only_a_source_the_node_already_has_is_refused() {
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
+    map.apply(add_node("verdict", "Rust"), Actor::Agent).unwrap();
+    let drawn_from = EventId::new();
+    map.apply(
+        Mutation::ChangeNode {
+            node: node_ref("verdict", "Rust"),
+            name: None,
+            properties: BTreeMap::new(),
+            sources: vec![drawn_from],
+        },
+        Actor::Agent,
+    )
+    .unwrap();
+
+    let err = map
+        .apply(
+            Mutation::ChangeNode {
+                node: node_ref("verdict", "Rust"),
+                name: None,
+                properties: BTreeMap::new(),
+                sources: vec![drawn_from],
+            },
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
+
+    assert!(matches!(err, MapError::EmptyChange), "{err}");
+}
+
+#[test]
 fn a_change_carrying_only_sources_joins_them_to_the_node() {
     let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     map.apply(add_node("verdict", "Rust"), Actor::Agent).unwrap();
