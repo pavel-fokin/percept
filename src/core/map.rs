@@ -29,6 +29,36 @@ pub type MapId = Id<Map>;
 /// Identifies a node in a cognitive map.
 pub type NodeId = Id<Node>;
 
+/// Resolves one schema name to the identity established by
+/// `map.created` in `events`. Two different identities for the same
+/// schema are a corrupt path-scoped map, never a choice for a reader.
+pub fn map_id_for<'a>(
+    schema: &str,
+    events: impl IntoIterator<Item = &'a Event>,
+) -> Result<Option<MapId>, MapError> {
+    let mut found = None;
+    for event in events {
+        let Payload::MapCreated { map, schema: name } = event.payload() else {
+            continue;
+        };
+        if name != schema {
+            continue;
+        }
+        match found {
+            Some(first) if first != *map => {
+                return Err(MapError::DuplicateMapIdentity {
+                    name: schema.to_string(),
+                    first,
+                    second: *map,
+                });
+            }
+            Some(_) => {}
+            None => found = Some(*map),
+        }
+    }
+    Ok(found)
+}
+
 /// One node of a map. `name` is unique within its map and kind, so a
 /// writer can point at a node by what it is called; `id` is what
 /// history keeps.
@@ -235,6 +265,7 @@ impl fmt::Display for EdgeEnd {
 /// A map folded from the log. Holds every node and edge still present;
 /// what was removed lives only in the events.
 pub struct Map {
+    id: MapId,
     schema: Arc<Schema>,
     nodes: Vec<Node>,
     edges: Vec<Edge>,
@@ -258,11 +289,11 @@ pub struct Map {
 }
 
 impl Map {
-    pub fn empty(schema: impl Into<Arc<Schema>>) -> Self {
-        Self::from_parts(schema.into(), Vec::new(), Vec::new())
+    pub fn empty(id: MapId, schema: impl Into<Arc<Schema>>) -> Self {
+        Self::from_parts(id, schema.into(), Vec::new(), Vec::new())
     }
 
-    fn from_parts(schema: Arc<Schema>, nodes: Vec<Node>, edges: Vec<Edge>) -> Self {
+    fn from_parts(id: MapId, schema: Arc<Schema>, nodes: Vec<Node>, edges: Vec<Edge>) -> Self {
         let by_id = nodes.iter().enumerate().map(|(i, n)| (n.id, i)).collect();
         let by_name = nodes
             .iter()
@@ -282,6 +313,7 @@ impl Map {
             .map(|e| (e.kind.clone(), e.from, e.to))
             .collect();
         Self {
+            id,
             schema,
             nodes,
             edges,
@@ -301,13 +333,13 @@ impl Map {
     /// not skipped: silently dropping it would hide that something
     /// went wrong at write time.
     pub fn fold<'a>(
+        id: MapId,
         schema: impl Into<Arc<Schema>>,
         events: impl IntoIterator<Item = &'a Event>,
     ) -> Result<Self, MapError> {
-        let schema = schema.into();
-        let mut map = Self::empty(schema.clone());
+        let mut map = Self::empty(id, schema);
         for event in events {
-            if map_of(event.payload()) != Some(schema.name.as_str()) {
+            if map_of(event.payload()) != Some(id) {
                 continue;
             }
             map.replay(event.payload(), event.actor(), event.created_at())
@@ -317,6 +349,10 @@ impl Map {
                 })?;
         }
         Ok(map)
+    }
+
+    pub fn id(&self) -> MapId {
+        self.id
     }
 
     pub fn schema(&self) -> &Schema {
@@ -539,7 +575,7 @@ impl Map {
             .cloned()
             .collect();
         let edges = fresh.into_iter().cloned().collect();
-        Self::from_parts(self.schema.clone(), nodes, edges)
+        Self::from_parts(self.id, self.schema.clone(), nodes, edges)
     }
 
     /// The map cut to `selection`, in its fixed order, counting what
@@ -591,7 +627,7 @@ impl Map {
             .filter(|edge| kept.contains(&edge.from) && kept.contains(&edge.to))
             .cloned()
             .collect();
-        Self::from_parts(self.schema.clone(), nodes, edges)
+        Self::from_parts(self.id, self.schema.clone(), nodes, edges)
     }
 }
 
@@ -655,13 +691,15 @@ fn is_path_like(name: &str) -> bool {
 }
 
 /// Which map a payload changes, if it changes one.
-pub fn map_of(payload: &Payload) -> Option<&str> {
+pub fn map_of(payload: &Payload) -> Option<MapId> {
     match payload {
-        Payload::NodeAdded { map, .. }
+        Payload::MapCreated { map, .. }
+        | Payload::NodeAdded { map, .. }
         | Payload::NodeChanged { map, .. }
         | Payload::NodeRemoved { map, .. }
         | Payload::EdgeAdded { map, .. }
-        | Payload::EdgeRemoved { map, .. } => Some(map),
+        | Payload::EdgeRemoved { map, .. }
+        | Payload::ReflectionStarted { map } => Some(*map),
         _ => None,
     }
 }

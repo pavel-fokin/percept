@@ -174,37 +174,8 @@ impl EventLog for Jsonl {
         Ok(None)
     }
 
-    /// `load`'s read and `append`'s write, joined under one hold of the
-    /// exclusive lock: `compute` sees exactly the events another
-    /// `append_computed` call could not have raced ahead of, since
-    /// nothing between this read and this write releases the lock.
-    fn append_computed(
-        &self,
-        compute: crate::core::ComputeEvent<'_>,
-    ) -> Result<crate::core::Event, Box<dyn std::error::Error>> {
-        self.with_exclusive(|file| {
-            truncate_torn_tail(file)?;
-            let bytes = read_all(file)?;
-            let mut events = Vec::new();
-            let mut last_line = None;
-            for (line, raw) in lines(complete_text(&bytes)?) {
-                events.push(parse_line(raw).map_err(|source| at_line(line, source))?);
-                last_line = Some(raw);
-            }
-            let seq = next_seq(last_line, || Ok(events.len() as u64))?;
-            let event = compute(events).map_err(Error::Compute)?;
-            let mut text = crate::store::encode_at(&event, self.at(seq));
-            text.push('\n');
-            let mut file = file;
-            file.write_all(text.as_bytes()).map_err(Error::Io)?;
-            Ok(event)
-        })
-        .map_err(Into::into)
-    }
-
-    /// `append_computed`, but `compute` returns a batch: every line is
-    /// built and written together, one `write_all`, before the lock
-    /// this read was taken under is released.
+    /// Every line is built and written together, one `write_all`,
+    /// before the lock this read was taken under is released.
     fn append_batch_computed(
         &self,
         compute: crate::core::ComputeEvents<'_>,
@@ -266,8 +237,8 @@ struct WireCursor {
 /// line's own `seq` plus one. A tail with none - a legacy line, or one
 /// that isn't JSON, which `load` rejects but `append` has never had
 /// reason to - reads as its position among the log's non-empty lines,
-/// so `count` is asked for that number. `append_computed` already holds that
-/// count; `append` pays one full read for it, once per log, on the
+/// so `count` is asked for that number. A computed append already holds
+/// that count; `append` pays one full read for it, once per log, on the
 /// first append after the upgrade that added cursors.
 fn next_seq(last: Option<&str>, count: impl FnOnce() -> Result<u64, Error>) -> Result<u64, Error> {
     let Some(raw) = last else {

@@ -19,6 +19,7 @@ use std::path::Path;
 use serde_json::{json, Map as JsonMap, Value};
 
 use crate::cli::hook::EVENTS;
+use crate::core::EventLog;
 use crate::mapstore;
 
 /// `percept init <client>` - `client` names the coding client whose
@@ -64,7 +65,12 @@ const CLIENTS: [Client; 2] = [
 
 /// Writes the shipped schema files and `args.client`'s config under
 /// `checkout`, printing one line naming what each did.
-pub fn run(args: InitArgs, checkout: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(
+    args: InitArgs,
+    checkout: &Path,
+    log: &dyn EventLog,
+    source: &crate::core::Source,
+) -> Result<(), Box<dyn std::error::Error>> {
     let client = CLIENTS
         .iter()
         .find(|client| client.name == args.client)
@@ -77,6 +83,8 @@ pub fn run(args: InitArgs, checkout: &Path) -> Result<(), Box<dyn std::error::Er
     for (name, text) in mapstore::TEMPLATES {
         write_schema(checkout, name, text)?;
     }
+    let schemas = mapstore::load_schemas(checkout)?;
+    mapstore::ensure_maps(log, &schemas, source)?;
     let command = format!("percept hook {}", client.name);
     write_config(checkout, client.path, |root| {
         merge(root, &command, &EVENTS, client.allow)

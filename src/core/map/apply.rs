@@ -65,7 +65,7 @@ impl Map {
     /// The caller commits that payload; the map is already updated, so
     /// a batch can check each step against the ones before it.
     pub fn apply(&mut self, mutation: Mutation, actor: Actor) -> Result<Payload, MapError> {
-        let map = self.schema.name.to_string();
+        let map = self.id;
         let payload = match mutation {
             Mutation::AddNode {
                 kind,

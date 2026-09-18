@@ -283,11 +283,11 @@ fn build_app(
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
     let path = source.path.clone();
-    let maps = LogMaps::new(log.clone(), schemas.clone(), path.clone());
+    let maps = LogMaps::new(log.clone(), schemas.clone(), path);
     let mut tools: Vec<Arc<dyn crate::harness::Tool>> = vec![
         Arc::new(SearchEvents::new(log.clone(), me)),
         Arc::new(ReadEvent::new(log.clone())),
-        Arc::new(ReviseMap::new(log.clone(), schemas.clone(), path)),
+        Arc::new(ReviseMap::new(log.clone(), schemas.clone(), source.clone())),
         Arc::new(ReadMap::new(Arc::new(maps))),
     ];
     match build_toolset(&source, checkout)? {

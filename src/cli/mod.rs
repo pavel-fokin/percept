@@ -732,8 +732,7 @@ pub fn maps_reflect(
     checkout: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let schema = schemas.find(&args.map)?;
-    let event = Event::reflection_started(args.map, source.clone());
-    log.append(&event)?;
+    let event = mapstore::start_reflection(log, schemas, &args.map, source)?;
     print_lines(std::iter::once(event.id().as_uuid().to_string()))?;
     if let Some(rules) = mapstore::for_schema_moment(&schema, checkout, mapstore::REFLECTION_STARTED) {
         print_text(&rules)?;
@@ -832,9 +831,14 @@ pub fn maps_add_edge(
     me: Option<crate::core::HumanId>,
     cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let map = mapstore::fold_map(log, schemas, &args.target.map, &source.path)?;
-    let from = resolve_ref(&map, &args.from)?;
-    let to = resolve_ref(&map, &args.to)?;
+    let (_, snapshot) = mapstore::Snapshot::for_write(
+        schemas,
+        &args.target.map,
+        source,
+        log.load()?,
+    )?;
+    let from = resolve_ref(snapshot.map(), &args.from)?;
+    let to = resolve_ref(snapshot.map(), &args.to)?;
     write(args.target, log, schemas, source, me, cause, |sources| {
         Mutation::AddEdge {
             kind: args.kind,
@@ -855,8 +859,13 @@ pub fn maps_remove_node(
     me: Option<crate::core::HumanId>,
     cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let map = mapstore::fold_map(log, schemas, &args.target.map, &source.path)?;
-    let node = resolve_ref(&map, &args.node)?;
+    let (_, snapshot) = mapstore::Snapshot::for_write(
+        schemas,
+        &args.target.map,
+        source,
+        log.load()?,
+    )?;
+    let node = resolve_ref(snapshot.map(), &args.node)?;
     write(args.target, log, schemas, source, me, cause, |sources| {
         Mutation::RemoveNode {
             node,
@@ -877,9 +886,14 @@ pub fn maps_remove_edge(
     cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let RemoveEdgeArgs { edge, why } = args;
-    let map = mapstore::fold_map(log, schemas, &edge.target.map, &source.path)?;
-    let from = resolve_ref(&map, &edge.from)?;
-    let to = resolve_ref(&map, &edge.to)?;
+    let (_, snapshot) = mapstore::Snapshot::for_write(
+        schemas,
+        &edge.target.map,
+        source,
+        log.load()?,
+    )?;
+    let from = resolve_ref(snapshot.map(), &edge.from)?;
+    let to = resolve_ref(snapshot.map(), &edge.to)?;
     write(edge.target, log, schemas, source, me, cause, |sources| {
         Mutation::RemoveEdge {
             kind: edge.kind,
@@ -910,8 +924,8 @@ pub fn maps_change_node(
         prop,
         why,
     } = args;
-    let map = mapstore::fold_map(log, schemas, &target.map, &source.path)?;
-    let node = resolve_ref(&map, &node)?;
+    let (_, snapshot) = mapstore::Snapshot::for_write(schemas, &target.map, source, log.load()?)?;
+    let node = resolve_ref(snapshot.map(), &node)?;
     let payload = write(target, log, schemas, source, me, cause, |sources| {
         Mutation::ChangeNode {
             node,

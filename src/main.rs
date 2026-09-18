@@ -302,7 +302,8 @@ async fn main() {
         Some(Command::Ask(args)) => {
             lab::headless_turn(false, args.prompt, args.yes, cli_source, &checkout).await
         }
-        Some(Command::Init(args)) => cli::init::run(args, &checkout),
+        Some(Command::Init(args)) => open_log(&checkout)
+            .and_then(|log| cli::init::run(args, &checkout, &log, &cli_source)),
         Some(Command::Start) => open_log(&checkout).and_then(|log| {
             let schemas = mapstore::load_schemas(&checkout)?;
             cli::start(&log, &schemas, &root, &checkout)

@@ -1,10 +1,5 @@
 use super::{Event, EventId};
 
-/// `compute` for `append_computed`: builds one event from the events
-/// loaded under the same lock the append takes.
-pub(crate) type ComputeEvent<'a> =
-    Box<dyn FnOnce(Vec<Event>) -> Result<Event, Box<dyn std::error::Error>> + 'a>;
-
 /// `compute` for `append_batch_computed`: builds a whole batch of
 /// events from the events loaded under the same lock the append takes.
 pub(crate) type ComputeEvents<'a> =
@@ -28,24 +23,9 @@ pub trait EventLog: Send + Sync {
     fn get(&self, id: EventId) -> Result<Option<Event>, Box<dyn std::error::Error>>;
 
     /// Loads every event, hands them to `compute`, and appends the
-    /// event it builds - all under the same lock `append` takes, so a
-    /// second writer's own `compute` can never run between this one's
-    /// load and its append. The seam a mint that must stay unique
-    /// closes through: a `NodeAdded` payload's `seq` is counted from
-    /// the events `compute` is given, so two writers racing to mint the
-    /// next number for one kind can never agree - the second always
-    /// sees the first's event already committed.
-    fn append_computed(
-        &self,
-        compute: ComputeEvent<'_>,
-    ) -> Result<Event, Box<dyn std::error::Error>>;
-
-    /// As `append_computed`, but `compute` builds a whole batch: every
-    /// event it returns is appended in order, under the one lock hold
-    /// that also covers the load `compute` was handed - so a writer
-    /// that must check and mint several events together, a document's
-    /// worth of nodes and edges, sees them all committed or none, and
-    /// no other writer's own append can land in between.
+    /// batch it builds in order. The load, computation, and append use
+    /// one lock hold, so the batch commits whole or not at all and no
+    /// other computed append can land between its events.
     fn append_batch_computed(
         &self,
         compute: ComputeEvents<'_>,

@@ -31,8 +31,8 @@ mod start;
 pub(crate) use blocks::{changed_line, gained, last_session, project_name};
 pub use describe::describe;
 pub use map::{
-    commit, commit_batch, encode_fragment, encode_lines, encode_map, encode_schema, fold_map, fold_map_at,
-    of_path, paths, LogMaps, NodeRefArgs, Snapshot,
+    commit, commit_batch, encode_fragment, encode_lines, encode_map, encode_schema, ensure_maps,
+    fold_map, fold_map_at, of_path, paths, start_reflection, LogMaps, NodeRefArgs, Snapshot,
 };
 pub use render::{catalogue, markdown};
 pub use rules::for_moment as moment_rules;

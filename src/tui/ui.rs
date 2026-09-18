@@ -260,19 +260,20 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
         // A reflection starting shows dimmed too - it's context the
         // model built, not dialogue.
         Payload::ReflectionStarted { map } => {
-            tool_lines(chat, &format!("{map}: reflection started"), width)
+            tool_lines(chat, &format!("{}: reflection started", map.as_uuid()), width)
         }
         // A map change shows dimmed too - it's context the model built,
         // not dialogue.
         Payload::NodeAdded {
             map, kind, name, ..
-        } => tool_lines(chat, &format!("{map}: added {kind} {name:?}"), width),
+        } => tool_lines(chat, &format!("{}: added {kind} {name:?}", map.as_uuid()), width),
         Payload::NodeChanged {
             map, node, name, ..
         } => tool_lines(
             chat,
             &format!(
-                "{map}: changed node {}{}",
+                "{}: changed node {}{}",
+                map.as_uuid(),
                 node.as_uuid(),
                 name.as_deref()
                     .map(|name| format!(" -> {name:?}"))
@@ -282,7 +283,7 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
         ),
         Payload::NodeRemoved { map, node, why, .. } => tool_lines(
             chat,
-            &format!("{map}: removed node {} - {why}", node.as_uuid()),
+            &format!("{}: removed node {} - {why}", map.as_uuid(), node.as_uuid()),
             width,
         ),
         Payload::EdgeAdded {
@@ -306,7 +307,8 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
             tool_lines(
                 chat,
                 &format!(
-                    "{map}: {verb} edge {kind} {} \u{2192} {}",
+                    "{}: {verb} edge {kind} {} \u{2192} {}",
+                    map.as_uuid(),
                     from.as_uuid(),
                     to.as_uuid()
                 ),

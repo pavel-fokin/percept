@@ -126,7 +126,7 @@ pub enum Payload {
     /// its position among nodes of its kind for those, so an old log
     /// still folds without a migration.
     NodeAdded {
-        map: String,
+        map: MapId,
         node: NodeId,
         kind: String,
         name: String,
@@ -145,7 +145,7 @@ pub enum Payload {
     /// neither `name` nor a property, only `why`, is a comment: legal,
     /// and it still becomes the node's last change.
     NodeChanged {
-        map: String,
+        map: MapId,
         node: NodeId,
         name: Option<String>,
         properties: BTreeMap<String, String>,
@@ -154,7 +154,7 @@ pub enum Payload {
     },
     /// A node removed from a cognitive map, with why.
     NodeRemoved {
-        map: String,
+        map: MapId,
         node: NodeId,
         why: String,
         sources: Vec<EventId>,
@@ -162,7 +162,7 @@ pub enum Payload {
     /// An edge added to a cognitive map. Carries no id of its own -
     /// `kind`, `from`, and `to` identify one.
     EdgeAdded {
-        map: String,
+        map: MapId,
         kind: String,
         from: NodeId,
         to: NodeId,
@@ -170,7 +170,7 @@ pub enum Payload {
     },
     /// An edge removed from a cognitive map, with why.
     EdgeRemoved {
-        map: String,
+        map: MapId,
         kind: String,
         from: NodeId,
         to: NodeId,
@@ -191,7 +191,7 @@ pub enum Payload {
     /// reader can tell which changes came from which reflection, and
     /// each of those carries the actor who made it.
     ReflectionStarted {
-        map: String,
+        map: MapId,
     },
     /// A file, or a range of it, as it was when a node cited it -
     /// experience, not judgment: this event says nothing about why the
@@ -385,7 +385,6 @@ impl Event {
 
     /// A `map.created` event - always percept establishing a map's
     /// identity, never a model's action.
-    #[allow(dead_code)]
     pub fn map_created(map: MapId, schema: String, source: Source) -> Self {
         Self::new(
             Actor::System,
@@ -419,7 +418,7 @@ impl Event {
     /// by an agent, and who judged is carried by the revisions that
     /// follow, each with its own actor, not by the event that opens
     /// them.
-    pub fn reflection_started(map: String, source: Source) -> Self {
+    pub fn reflection_started(map: MapId, source: Source) -> Self {
         Self::new(Actor::System, source, None, Payload::ReflectionStarted { map })
     }
 

@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use context::{Context, Section, View, Window};
 
-use crate::core::{Actor, Event, EventId, EventKind, HumanId, MapError, Schemas, Source};
+use crate::core::{
+    Actor, Event, EventId, EventKind, HumanId, MapError, MapId, Payload, Schemas, Source,
+};
 
 mod context;
 
@@ -262,6 +264,55 @@ pub fn run_tool(tool: &dyn crate::harness::Tool, arguments: &str) -> crate::harn
         .unwrap_or_else(|err| crate::harness::ToolOutput::text(err.to_string()))
 }
 
+/// Reuses a map another writer created after a tool read the log but
+/// before its commits acquired the append lock. The tool's mutations
+/// are retargeted to that identity and its redundant creation drops;
+/// the fold under the same lock still decides whether those mutations
+/// fit the now-current map.
+fn normalize_created_maps(
+    payloads: &mut Vec<Payload>,
+    events: &[Event],
+    source: &Source,
+) -> Result<(), MapError> {
+    let proposed: Vec<(MapId, String)> = payloads
+        .iter()
+        .filter_map(|payload| match payload {
+            Payload::MapCreated { map, schema } => Some((*map, schema.clone())),
+            _ => None,
+        })
+        .collect();
+    for (map, schema) in proposed {
+        let own = events
+            .iter()
+            .filter(|event| event.source().path == source.path);
+        let Some(existing) = crate::core::map_id_for(&schema, own)? else {
+            continue;
+        };
+        for payload in payloads.iter_mut() {
+            retarget_map(payload, map, existing);
+        }
+        payloads.retain(|payload| {
+            !matches!(payload, Payload::MapCreated { map: created, schema: name } if *created == map && name == &schema)
+        });
+    }
+    Ok(())
+}
+
+fn retarget_map(payload: &mut Payload, from: MapId, to: MapId) {
+    let map = match payload {
+        Payload::NodeAdded { map, .. }
+        | Payload::NodeChanged { map, .. }
+        | Payload::NodeRemoved { map, .. }
+        | Payload::EdgeAdded { map, .. }
+        | Payload::EdgeRemoved { map, .. }
+        | Payload::ReflectionStarted { map } => map,
+        _ => return,
+    };
+    if *map == from {
+        *map = to;
+    }
+}
+
 /// Whether `event` belongs in `App`'s own transcript cache: either it
 /// is `source`'s own conversation - a message, a thought, a tool call -
 /// or it changes a map at `source`'s path, which stays that path's
@@ -457,43 +508,46 @@ impl App {
         else {
             return Ok(());
         };
-        let commits: Vec<Event> = output
-            .commits
-            .into_iter()
-            .map(|payload| Event::new(Actor::Agent, self.source.clone(), Some(called_id), payload))
-            .collect();
-        // A tool checked its commits against the log file, and this
-        // transcript can be behind it - another writer since startup.
-        // Checked again here, against what the next request will fold,
-        // so a mismatch reaches the model as the call's result instead
-        // of ending the run at the next `build_request`.
-        let content = match self.fits_maps(&commits) {
-            Ok(()) => {
-                for event in commits {
-                    self.commit(event)?;
-                }
-                output.content
-            }
-            Err(err) => err.to_string(),
-        };
-        let resulted = Event::tool_resulted(content, self.source.clone(), Some(called_id));
-        let resulted_id = resulted.id();
-        self.commit(resulted)?;
+        let schemas = self.schemas.clone();
+        let source = self.source.clone();
+        let mut payloads = output.commits;
+        let content = output.content;
+        let batch = self.log.append_batch_computed(Box::new(move |events| {
+            normalize_created_maps(&mut payloads, &events, &source)?;
+            let commits: Vec<Event> = payloads
+                .into_iter()
+                .map(|payload| match payload {
+                    Payload::MapCreated { map, schema } => {
+                        Event::map_created(map, schema, source.clone())
+                    }
+                    payload => Event::new(Actor::Agent, source.clone(), Some(called_id), payload),
+                })
+                .collect();
+            let own = events
+                .iter()
+                .filter(|event| event.source().path == source.path)
+                .chain(commits.iter());
+            let (mut accepted, content) = match schemas.fold_all(own) {
+                Ok(_) => (commits, content),
+                Err(err) => (Vec::new(), err.to_string()),
+            };
+            accepted.push(Event::tool_resulted(
+                content,
+                source.clone(),
+                Some(called_id),
+            ));
+            Ok(accepted)
+        }))?;
+        let resulted_id = batch
+            .last()
+            .expect("tool result batch always ends in tool.resulted")
+            .id();
+        self.events.extend(batch);
         self.with_pending(|turn| {
             turn.anchor = resulted_id;
             turn.tool_calls += 1;
         });
         Ok(())
-    }
-
-    /// Whether every map still folds once `new` follows the transcript.
-    fn fits_maps(&self, new: &[Event]) -> Result<(), MapError> {
-        if new.is_empty() {
-            return Ok(());
-        }
-        self.schemas
-            .fold_all(self.events.iter().chain(new))
-            .map(drop)
     }
 
     /// Commits the thought then the reply buffered so far, then the

@@ -129,21 +129,28 @@ fn carries(payload: &Payload, term: &str) -> bool {
             name,
             properties,
             ..
-        } => has(map) || has(kind) || has(name) || properties.values().any(|v| has(v)),
+        } => {
+            has(&map.as_uuid().to_string())
+                || has(kind)
+                || has(name)
+                || properties.values().any(|v| has(v))
+        }
         Payload::NodeChanged {
             map, name, properties, why, ..
         } => {
-            has(map)
+            has(&map.as_uuid().to_string())
                 || name.as_deref().is_some_and(has)
                 || properties.values().any(|v| has(v))
                 || why.as_deref().is_some_and(has)
         }
-        Payload::NodeRemoved { map, why, .. } => has(map) || has(why),
-        Payload::EdgeAdded { map, kind, .. } => has(map) || has(kind),
-        Payload::EdgeRemoved { map, kind, why, .. } => has(map) || has(kind) || has(why),
+        Payload::NodeRemoved { map, why, .. } => has(&map.as_uuid().to_string()) || has(why),
+        Payload::EdgeAdded { map, kind, .. } => has(&map.as_uuid().to_string()) || has(kind),
+        Payload::EdgeRemoved { map, kind, why, .. } => {
+            has(&map.as_uuid().to_string()) || has(kind) || has(why)
+        }
         Payload::ModelCalled(usage) => has(&usage.model),
         Payload::SessionStarted => false,
-        Payload::ReflectionStarted { map } => has(map),
+        Payload::ReflectionStarted { map } => has(&map.as_uuid().to_string()),
         Payload::FileCited { path, excerpt, .. } => has(&path.to_string_lossy()) || has(excerpt),
     }
 }

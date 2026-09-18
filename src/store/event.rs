@@ -510,7 +510,7 @@ impl From<&crate::core::Event> for Event {
                 sources,
                 seq,
             } => serde_json::to_value(NodeAddedBody {
-                map: map.clone(),
+                map: map.as_uuid().to_string(),
                 node: node.as_uuid().to_string(),
                 kind: kind.clone(),
                 name: name.clone(),
@@ -527,7 +527,7 @@ impl From<&crate::core::Event> for Event {
                 sources,
                 why,
             } => serde_json::to_value(NodeChangedBody {
-                map: map.clone(),
+                map: map.as_uuid().to_string(),
                 node: node.as_uuid().to_string(),
                 name: name.clone(),
                 properties: properties.clone(),
@@ -541,7 +541,7 @@ impl From<&crate::core::Event> for Event {
                 why,
                 sources,
             } => serde_json::to_value(NodeRemovedBody {
-                map: map.clone(),
+                map: map.as_uuid().to_string(),
                 node: node.as_uuid().to_string(),
                 why: why.clone(),
                 sources: ids(sources),
@@ -554,7 +554,7 @@ impl From<&crate::core::Event> for Event {
                 to,
                 sources,
             } => serde_json::to_value(EdgeAddedBody {
-                map: map.clone(),
+                map: map.as_uuid().to_string(),
                 kind: kind.clone(),
                 from: from.as_uuid().to_string(),
                 to: to.as_uuid().to_string(),
@@ -569,7 +569,7 @@ impl From<&crate::core::Event> for Event {
                 sources,
                 why,
             } => serde_json::to_value(EdgeRemovedBody {
-                map: map.clone(),
+                map: map.as_uuid().to_string(),
                 kind: kind.clone(),
                 from: from.as_uuid().to_string(),
                 to: to.as_uuid().to_string(),
@@ -586,7 +586,7 @@ impl From<&crate::core::Event> for Event {
             .expect("ModelCalledBody always serializes"),
             Payload::SessionStarted => Value::Object(serde_json::Map::new()),
             Payload::ReflectionStarted { map } => serde_json::to_value(ReflectionStartedBody {
-                map: map.clone(),
+                map: map.as_uuid().to_string(),
             })
             .expect("ReflectionStartedBody always serializes"),
             Payload::FileCited {
@@ -718,7 +718,7 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
         EventKind::NodeAdded => {
             let body: NodeAddedBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
             Ok(Payload::NodeAdded {
-                map: body.map,
+                map: parse_map_id(&body.map)?,
                 node: parse_node_id(&body.node)?,
                 kind: body.kind,
                 name: body.name,
@@ -731,7 +731,7 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
             let body: NodeChangedBody =
                 serde_json::from_value(payload).map_err(Error::BadPayload)?;
             Ok(Payload::NodeChanged {
-                map: body.map,
+                map: parse_map_id(&body.map)?,
                 node: parse_node_id(&body.node)?,
                 name: body.name,
                 properties: body.properties,
@@ -743,7 +743,7 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
             let body: NodeRemovedBody =
                 serde_json::from_value(payload).map_err(Error::BadPayload)?;
             Ok(Payload::NodeRemoved {
-                map: body.map,
+                map: parse_map_id(&body.map)?,
                 node: parse_node_id(&body.node)?,
                 why: body.why,
                 sources: parse_event_ids(body.sources)?,
@@ -752,7 +752,7 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
         EventKind::EdgeAdded => {
             let body: EdgeAddedBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;
             Ok(Payload::EdgeAdded {
-                map: body.map,
+                map: parse_map_id(&body.map)?,
                 kind: body.kind,
                 from: parse_node_id(&body.from)?,
                 to: parse_node_id(&body.to)?,
@@ -763,7 +763,7 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
             let body: EdgeRemovedBody =
                 serde_json::from_value(payload).map_err(Error::BadPayload)?;
             Ok(Payload::EdgeRemoved {
-                map: body.map,
+                map: parse_map_id(&body.map)?,
                 kind: body.kind,
                 from: parse_node_id(&body.from)?,
                 to: parse_node_id(&body.to)?,
@@ -785,7 +785,9 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
         EventKind::ReflectionStarted => {
             let body: ReflectionStartedBody =
                 serde_json::from_value(payload).map_err(Error::BadPayload)?;
-            Ok(Payload::ReflectionStarted { map: body.map })
+            Ok(Payload::ReflectionStarted {
+                map: parse_map_id(&body.map)?,
+            })
         }
         EventKind::FileCited => {
             let body: FileCitedBody = serde_json::from_value(payload).map_err(Error::BadPayload)?;

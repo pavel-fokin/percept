@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use super::*;
 use crate::core::testing::{
     created_at, edge_added, file_cited, file_cited_citing, human, node_added, node_added_citing,
-    node_added_on, node_changed, node_id, schemas, source_at, Fixture, ROOT,
+    map_id, node_added_on, node_changed, node_id, schemas, source_at, Fixture, ROOT,
 };
 use crate::core::{Actor, Event};
 use crate::mapstore::{last_session, of_path};
@@ -16,7 +16,12 @@ fn root() -> PathBuf {
 /// `events`, folded exactly as `cli::start` folds them: every schema,
 /// cut to `root`'s own path.
 fn fold(events: &[Event]) -> Vec<Map> {
-    schemas().fold_all(of_path(events, &root())).unwrap()
+    let mut initialized = vec![
+        Event::map_created(map_id("debates"), "debates".to_string(), source_at("percept", ROOT)),
+        Event::map_created(map_id("chores"), "chores".to_string(), source_at("percept", ROOT)),
+    ];
+    initialized.extend_from_slice(events);
+    schemas().fold_all(of_path(&initialized, &root())).unwrap()
 }
 
 /// `start`, over `events` folded and cut exactly as `cli::start` does,
@@ -429,4 +434,3 @@ fn next_offers_read_around_only_for_the_ids_attention_printed() {
     let folded_id = format!("t{}", LIMIT + 1);
     assert!(!text.contains(&format!("read around {folded_id}")), "{text:?}");
 }
-

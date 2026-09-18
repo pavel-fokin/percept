@@ -252,14 +252,20 @@ impl Schemas {
         self.schemas.iter()
     }
 
-    /// Every map `Map::fold` gives for `events` - one per schema.
+    /// Every created map `Map::fold` gives for `events`, in schema
+    /// order. A schema with no `map.created` event is not a map yet.
     pub fn fold_all<'a>(
         &self,
         events: impl IntoIterator<Item = &'a Event> + Clone,
     ) -> Result<Vec<Map>, MapError> {
-        self.folded()
-            .map(|schema| Map::fold(schema.clone(), events.clone()))
-            .collect()
+        let mut maps = Vec::new();
+        for schema in self.folded() {
+            let Some(id) = super::map_id_for(&schema.name, events.clone())? else {
+                continue;
+            };
+            maps.push(Map::fold(id, schema.clone(), events.clone())?);
+        }
+        Ok(maps)
     }
 
     /// Every schema's name, in stored order, for an "expected one of"

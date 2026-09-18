@@ -444,7 +444,7 @@ fn reflection_started_round_trips_through_json() {
         None,
         Timestamp::now(),
         Payload::ReflectionStarted {
-            map: "decisions".to_string(),
+            map: crate::core::testing::map_id("decisions"),
         },
     );
 
@@ -456,7 +456,7 @@ fn reflection_started_round_trips_through_json() {
 
     assert!(restored.actor() == Actor::Agent);
     match restored.payload() {
-        Payload::ReflectionStarted { map } => assert_eq!(map, "decisions"),
+        Payload::ReflectionStarted { map } => assert_eq!(*map, crate::core::testing::map_id("decisions")),
         _ => panic!("expected ReflectionStarted"),
     }
 }
@@ -477,7 +477,7 @@ fn node_added_round_trips_through_json() {
         None,
         Timestamp::now(),
         Payload::NodeAdded {
-            map: "decisions".to_string(),
+            map: crate::core::testing::map_id("decisions"),
             node,
             kind: "evidence".to_string(),
             name: "Both built in parallel".to_string(),
@@ -503,7 +503,7 @@ fn node_added_round_trips_through_json() {
             sources,
             seq,
         } => {
-            assert_eq!(map, "decisions");
+            assert_eq!(*map, crate::core::testing::map_id("decisions"));
             assert!(*restored_node == node);
             assert_eq!(kind, "evidence");
             assert_eq!(name, "Both built in parallel");
@@ -519,7 +519,7 @@ fn node_added_round_trips_through_json() {
 fn a_node_added_line_with_no_seq_decodes_to_the_sentinel() {
     let node = NodeId::new();
     let json = serde_json::json!({
-        "map": "decisions",
+        "map": crate::core::testing::map_id("decisions").as_uuid().to_string(),
         "node": node.as_uuid().to_string(),
         "kind": "evidence",
         "name": "x",
@@ -544,7 +544,7 @@ fn node_changed_round_trips_through_json() {
         None,
         Timestamp::now(),
         Payload::NodeChanged {
-            map: "tasks".to_string(),
+            map: crate::core::testing::map_id("tasks"),
             node,
             name: Some("cancel a turn cleanly".to_string()),
             properties: properties.clone(),
@@ -569,7 +569,7 @@ fn node_changed_round_trips_through_json() {
             sources,
             why,
         } => {
-            assert_eq!(map, "tasks");
+            assert_eq!(*map, crate::core::testing::map_id("tasks"));
             assert!(*restored_node == node);
             assert_eq!(name.as_deref(), Some("cancel a turn cleanly"));
             assert_eq!(*restored_properties, properties);
@@ -590,7 +590,7 @@ fn a_node_changed_with_no_why_omits_it_on_the_wire() {
         None,
         Timestamp::now(),
         Payload::NodeChanged {
-            map: "tasks".to_string(),
+            map: crate::core::testing::map_id("tasks"),
             node,
             name: None,
             properties: BTreeMap::new(),
@@ -611,7 +611,7 @@ fn a_node_changed_with_no_why_omits_it_on_the_wire() {
 fn a_node_changed_line_with_no_name_decodes_to_none() {
     let node = NodeId::new();
     let json = serde_json::json!({
-        "map": "tasks",
+        "map": crate::core::testing::map_id("tasks").as_uuid().to_string(),
         "node": node.as_uuid().to_string(),
         "properties": {"state": "done"},
         "sources": [],
@@ -632,7 +632,7 @@ fn node_removed_round_trips_through_json() {
         None,
         Timestamp::now(),
         Payload::NodeRemoved {
-            map: "decisions".to_string(),
+            map: crate::core::testing::map_id("decisions"),
             node,
             why: "superseded".to_string(),
             sources: Vec::new(),
@@ -653,7 +653,7 @@ fn node_removed_round_trips_through_json() {
             why,
             sources,
         } => {
-            assert_eq!(map, "decisions");
+            assert_eq!(*map, crate::core::testing::map_id("decisions"));
             assert!(*restored_node == node);
             assert_eq!(why, "superseded");
             assert!(sources.is_empty());
@@ -673,7 +673,7 @@ fn edge_added_round_trips_through_json() {
         None,
         Timestamp::now(),
         Payload::EdgeAdded {
-            map: "decisions".to_string(),
+            map: crate::core::testing::map_id("decisions"),
             kind: "supports".to_string(),
             from,
             to,
@@ -694,7 +694,7 @@ fn edge_added_round_trips_through_json() {
             to: restored_to,
             ..
         } => {
-            assert_eq!(map, "decisions");
+            assert_eq!(*map, crate::core::testing::map_id("decisions"));
             assert_eq!(kind, "supports");
             assert!(*restored_from == from);
             assert!(*restored_to == to);
@@ -714,7 +714,7 @@ fn edge_removed_round_trips_through_json() {
         None,
         Timestamp::now(),
         Payload::EdgeRemoved {
-            map: "decisions".to_string(),
+            map: crate::core::testing::map_id("decisions"),
             kind: "supports".to_string(),
             from,
             to,
@@ -738,7 +738,7 @@ fn edge_removed_round_trips_through_json() {
             why,
             ..
         } => {
-            assert_eq!(map, "decisions");
+            assert_eq!(*map, crate::core::testing::map_id("decisions"));
             assert_eq!(kind, "supports");
             assert!(*restored_from == from);
             assert!(*restored_to == to);
@@ -751,7 +751,7 @@ fn edge_removed_round_trips_through_json() {
 #[test]
 fn a_malformed_source_in_a_node_added_payload_is_an_error() {
     let payload = serde_json::json!({
-        "map": "decisions",
+        "map": crate::core::testing::map_id("decisions").as_uuid().to_string(),
         "node": NodeId::new().as_uuid().to_string(),
         "kind": "evidence",
         "name": "x",
@@ -775,7 +775,7 @@ fn a_map_events_summary_carries_no_preview() {
         None,
         Timestamp::now(),
         Payload::NodeAdded {
-            map: "decisions".to_string(),
+            map: crate::core::testing::map_id("decisions"),
             node: NodeId::new(),
             kind: "evidence".to_string(),
             name: "Both built in parallel".to_string(),

@@ -21,7 +21,7 @@ fn node_added(path: &Path, name: &str) -> Event {
         source_at("agent", path),
         None,
         Payload::NodeAdded {
-            map: "decisions".to_string(),
+            map: crate::core::testing::map_id("decisions"),
             node: NodeId::new(),
             kind: "concept".to_string(),
             name: name.to_string(),
@@ -34,6 +34,14 @@ fn node_added(path: &Path, name: &str) -> Event {
 
 fn session_started(path: &Path) -> Event {
     Event::session_started(source_at("agent", path))
+}
+
+fn map_created(path: &Path) -> Event {
+    Event::map_created(
+        crate::core::testing::map_id("decisions"),
+        "decisions".to_string(),
+        source_at("percept", path),
+    )
 }
 
 /// A view opened after everything the test seeded, so every session in
@@ -87,12 +95,18 @@ fn projects_are_ordered_newest_last_active_first() {
 fn a_map_reports_its_name_and_headline_count() {
     let fixture = Fixture::new();
     fixture.write(".percept/schemas/decisions.toml", SCHEMA);
-    let log = FakeLog::seeded(vec![node_added(fixture.path(), "why blue?")]);
+    let log = FakeLog::seeded(vec![map_created(fixture.path()), node_added(fixture.path(), "why blue?")]);
 
     let body = list(&log, after_everything()).unwrap();
 
     let maps = body["projects"][0]["maps"].as_array().unwrap();
     assert_eq!(maps.len(), 1);
+    assert_eq!(
+        maps[0]["id"],
+        crate::core::testing::map_id("decisions")
+            .as_uuid()
+            .to_string()
+    );
     assert_eq!(maps[0]["name"], "decisions");
     assert_eq!(maps[0]["headlines"], 1);
 }
@@ -105,7 +119,7 @@ fn gained_counts_only_nodes_changed_at_or_after_the_last_session() {
     let since = session.created_at();
     let before = created_at(node_added(fixture.path(), "before the session"), since.minus_minutes(60).unwrap());
     let after = created_at(node_added(fixture.path(), "after the session"), since.minus_minutes(-10).unwrap());
-    let log = FakeLog::seeded(vec![before, session, after]);
+    let log = FakeLog::seeded(vec![map_created(fixture.path()), before, session, after]);
 
     let body = list(&log, after_everything()).unwrap();
 
@@ -124,7 +138,7 @@ fn a_session_started_after_this_view_opened_is_not_the_baseline() {
     // What `percept web` itself records by opening: a session newer
     // than every node, which read live would leave nothing gained.
     let own = created_at(session_started(fixture.path()), opened);
-    let log = FakeLog::seeded(vec![earlier, node, own]);
+    let log = FakeLog::seeded(vec![map_created(fixture.path()), earlier, node, own]);
 
     let body = list(&log, opened).unwrap();
 
@@ -135,7 +149,7 @@ fn a_session_started_after_this_view_opened_is_not_the_baseline() {
 fn gained_is_zero_when_the_project_has_no_session_recorded() {
     let fixture = Fixture::new();
     fixture.write(".percept/schemas/decisions.toml", SCHEMA);
-    let log = FakeLog::seeded(vec![node_added(fixture.path(), "no session yet")]);
+    let log = FakeLog::seeded(vec![map_created(fixture.path()), node_added(fixture.path(), "no session yet")]);
 
     let body = list(&log, after_everything()).unwrap();
 
@@ -148,7 +162,12 @@ fn a_project_whose_schemas_cannot_be_read_says_why_and_leaves_the_others_listed(
     broken.write(".percept/schemas/decisions.toml", "name = \"decisions\"\n");
     let sound = Fixture::new();
     sound.write(".percept/schemas/decisions.toml", SCHEMA);
-    let events = vec![node_added(broken.path(), "a"), node_added(sound.path(), "b")];
+    let events = vec![
+        map_created(broken.path()),
+        node_added(broken.path(), "a"),
+        map_created(sound.path()),
+        node_added(sound.path(), "b"),
+    ];
     let log = FakeLog::seeded(events);
 
     let body = list(&log, after_everything()).unwrap();

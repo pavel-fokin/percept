@@ -233,7 +233,7 @@ fn open_creates_missing_parent_directory() {
 /// Counts the `node.added` events of `kind` already in `events` and
 /// builds one more, minted with the next number - the same count
 /// `Map::apply` would take, done here without a `Map` so the test
-/// stays a seam-level check on `append_computed` alone.
+/// stays a seam-level check on the computed append alone.
 fn mint(events: Vec<crate::core::Event>, kind: &str) -> Result<crate::core::Event, Box<dyn std::error::Error>> {
     let seq = events
         .iter()
@@ -245,7 +245,7 @@ fn mint(events: Vec<crate::core::Event>, kind: &str) -> Result<crate::core::Even
         source("cli"),
         None,
         Payload::NodeAdded {
-            map: "decisions".to_string(),
+            map: crate::core::testing::map_id("decisions"),
             node: NodeId::new(),
             kind: kind.to_string(),
             name: format!("mint {seq}"),
@@ -266,8 +266,10 @@ fn concurrent_mints_of_the_same_kind_never_agree_on_a_number() {
         .map(|_| {
             let log = Arc::clone(&log);
             std::thread::spawn(move || {
-                log.append_computed(Box::new(|events| mint(events, "decision")))
-                    .unwrap();
+                log.append_batch_computed(Box::new(|events| {
+                    Ok(vec![mint(events, "decision")?])
+                }))
+                .unwrap();
             })
         })
         .collect();

@@ -47,7 +47,7 @@ fn node_added(path: &Path, kind: &str, name: &str) -> (Event, NodeId) {
         source_at(path),
         None,
         Payload::NodeAdded {
-            map: "decisions".to_string(),
+            map: crate::core::testing::map_id("decisions"),
             node,
             kind: kind.to_string(),
             name: name.to_string(),
@@ -65,7 +65,7 @@ fn edge_added(path: &Path, kind: &str, from: NodeId, to: NodeId) -> Event {
         source_at(path),
         None,
         Payload::EdgeAdded {
-            map: "decisions".to_string(),
+            map: crate::core::testing::map_id("decisions"),
             kind: kind.to_string(),
             from,
             to,
@@ -94,7 +94,12 @@ fn chain() -> (Fixture, FakeLog) {
     let (fact, fact_id) = node_added(fixture.path(), "fact", "precedent");
     let about = edge_added(fixture.path(), "about", question_id, concept_id);
     let backs = edge_added(fixture.path(), "backs", fact_id, question_id);
-    let log = FakeLog::seeded(vec![concept, question, fact, about, backs]);
+    let created = Event::map_created(
+        crate::core::testing::map_id("decisions"),
+        "decisions".to_string(),
+        source_at(fixture.path()),
+    );
+    let log = FakeLog::seeded(vec![created, concept, question, fact, about, backs]);
     (fixture, log)
 }
 
@@ -105,6 +110,12 @@ fn the_overview_carries_headline_nodes_only() {
     let body = get(&log, "decisions", params(fixture.path(), None, None)).unwrap();
 
     let nodes = body["nodes"].as_array().unwrap();
+    assert_eq!(
+        body["map"]["id"],
+        crate::core::testing::map_id("decisions")
+            .as_uuid()
+            .to_string()
+    );
     assert_eq!(nodes.len(), 1, "{body}");
     assert_eq!(nodes[0]["kind"], "concept");
 }

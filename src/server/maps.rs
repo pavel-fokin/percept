@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::core::{EventLog, Map, Node, NodeRef, Schema, Selection};
+use crate::core::{EventLog, Map, Node, NodeRef, Selection};
 use crate::mapstore;
 use crate::server::events::Error;
 
@@ -45,8 +45,9 @@ pub fn get(log: &dyn EventLog, name: &str, params: Params) -> Result<Value, Erro
     }
 
     let schemas = mapstore::load_schemas(&root).map_err(|err| Error::Internal(err.to_string()))?;
-    let schema = schemas.find(name).map_err(|err| Error::NotFound(err.to_string()))?;
-    let map = Map::fold(schema.clone(), own).map_err(|err| Error::Internal(err.to_string()))?;
+    let map = mapstore::fold_map_at(&schemas, name, &events, &root)
+        .map_err(|err| Error::NotFound(err.to_string()))?;
+    let headline_kinds = map.schema().headline_kinds.clone();
 
     let node_ref;
     let selection = match params.around.as_deref() {
@@ -65,16 +66,17 @@ pub fn get(log: &dyn EventLog, name: &str, params: Params) -> Result<Value, Erro
         // whole map behind it, so no new arm on `Selection` earns its
         // place for this one caller.
         None => Selection {
-            kinds: &schema.headline_kinds,
+            kinds: &headline_kinds,
             ..Selection::default()
         },
     };
     let fragment = map.select(&selection).map_err(|err| Error::Internal(err.to_string()))?;
 
-    Ok(body(&schema, fragment.map(), &fragment, &root))
+    Ok(body(fragment.map(), &fragment, &root))
 }
 
-fn body(schema: &Schema, map: &Map, fragment: &crate::core::Fragment, root: &std::path::Path) -> Value {
+fn body(map: &Map, fragment: &crate::core::Fragment, root: &std::path::Path) -> Value {
+    let schema = map.schema();
     let kinds: Vec<Value> = schema
         .node_kinds
         .iter()
@@ -104,6 +106,7 @@ fn body(schema: &Schema, map: &Map, fragment: &crate::core::Fragment, root: &std
         .collect();
     json!({
         "map": {
+            "id": map.id().as_uuid().to_string(),
             "name": schema.name,
             "purpose": schema.purpose,
             "headline_kinds": schema.headline_kinds,

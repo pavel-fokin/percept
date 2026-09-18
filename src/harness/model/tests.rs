@@ -57,7 +57,7 @@ fn a_map_change_is_filtered_out_while_a_neighbouring_message_survives() {
             source("tui"),
             None,
             Payload::NodeAdded {
-                map: "decisions".to_string(),
+                map: crate::core::testing::map_id("decisions"),
                 node,
                 kind: "evidence".to_string(),
                 name: "Both built in parallel".to_string(),
@@ -71,7 +71,7 @@ fn a_map_change_is_filtered_out_while_a_neighbouring_message_survives() {
             source("tui"),
             None,
             Payload::EdgeAdded {
-                map: "decisions".to_string(),
+                map: crate::core::testing::map_id("decisions"),
                 kind: "supports".to_string(),
                 from: node,
                 to: node,

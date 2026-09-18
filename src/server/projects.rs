@@ -76,6 +76,7 @@ fn maps(path: &Path, own: &[&Event], since: Option<Timestamp>) -> Result<Vec<Val
         .map(|map| {
             let gained = since.map_or(0, |since| gained(map, since).len());
             json!({
+                "id": map.id().as_uuid().to_string(),
                 "name": map.schema().name,
                 "headlines": map.headlines().count(),
                 "gained": gained,
