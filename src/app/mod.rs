@@ -282,10 +282,7 @@ fn normalize_created_maps(
         })
         .collect();
     for (map, schema) in proposed {
-        let own = events
-            .iter()
-            .filter(|event| event.source().path == source.path);
-        let Some(existing) = crate::core::map_id_for(&schema, own)? else {
+        let Some(existing) = crate::core::map_id_for(&schema, own_events(events, source))? else {
             continue;
         };
         for payload in payloads.iter_mut() {
@@ -298,15 +295,22 @@ fn normalize_created_maps(
     Ok(())
 }
 
+/// `events` written by `source`'s own path, regardless of actor -
+/// the slice `map_id_for` and `fold_all` fold over when checking
+/// whether a tool's commits fit the map they target.
+fn own_events<'a>(events: &'a [Event], source: &Source) -> Vec<&'a Event> {
+    events
+        .iter()
+        .filter(|event| event.source().path == source.path)
+        .collect()
+}
+
 fn retarget_map(payload: &mut Payload, from: MapId, to: MapId) {
-    let map = match payload {
-        Payload::NodeAdded { map, .. }
-        | Payload::NodeChanged { map, .. }
-        | Payload::NodeRemoved { map, .. }
-        | Payload::EdgeAdded { map, .. }
-        | Payload::EdgeRemoved { map, .. }
-        | Payload::ReflectionStarted { map } => map,
-        _ => return,
+    if matches!(payload, Payload::MapCreated { .. }) {
+        return;
+    }
+    let Some(map) = crate::core::map_of_mut(payload) else {
+        return;
     };
     if *map == from {
         *map = to;
@@ -523,11 +527,21 @@ impl App {
                     payload => Event::new(Actor::Agent, source.clone(), Some(called_id), payload),
                 })
                 .collect();
-            let own = events
-                .iter()
-                .filter(|event| event.source().path == source.path)
+            let own = own_events(&events, &source)
+                .into_iter()
                 .chain(commits.iter());
-            let (mut accepted, content) = match schemas.fold_all(own) {
+            let touched: HashSet<MapId> =
+                commits.iter().filter_map(|event| crate::core::map_of(event.payload())).collect();
+            let names: HashSet<String> = own
+                .clone()
+                .filter_map(|event| match event.payload() {
+                    Payload::MapCreated { map, schema } if touched.contains(map) => {
+                        Some(schema.clone())
+                    }
+                    _ => None,
+                })
+                .collect();
+            let (mut accepted, content) = match schemas.fold_named(&names, own) {
                 Ok(_) => (commits, content),
                 Err(err) => (Vec::new(), err.to_string()),
             };

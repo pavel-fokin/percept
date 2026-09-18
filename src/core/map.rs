@@ -692,6 +692,13 @@ fn is_path_like(name: &str) -> bool {
 
 /// Which map a payload changes, if it changes one.
 pub fn map_of(payload: &Payload) -> Option<MapId> {
+    map_of_mut(&mut payload.clone()).map(|map| *map)
+}
+
+/// A mutable handle to the `MapId` a payload changes, if it changes
+/// one - the same variants as `map_of`, so a caller that needs to
+/// retarget a payload's map never drifts out of sync with it.
+pub fn map_of_mut(payload: &mut Payload) -> Option<&mut MapId> {
     match payload {
         Payload::MapCreated { map, .. }
         | Payload::NodeAdded { map, .. }
@@ -699,7 +706,7 @@ pub fn map_of(payload: &Payload) -> Option<MapId> {
         | Payload::NodeRemoved { map, .. }
         | Payload::EdgeAdded { map, .. }
         | Payload::EdgeRemoved { map, .. }
-        | Payload::ReflectionStarted { map } => Some(*map),
+        | Payload::ReflectionStarted { map } => Some(map),
         _ => None,
     }
 }

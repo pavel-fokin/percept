@@ -22,9 +22,6 @@ pub enum MapError {
         /// offers in place of a global registry.
         maps: String,
     },
-    MapNotCreated {
-        name: String,
-    },
     DuplicateMapIdentity {
         name: String,
         first: MapId,
@@ -139,7 +136,6 @@ impl fmt::Display for MapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownMap { name, maps } => write!(f, "no map named {name:?}; maps are {maps}"),
-            Self::MapNotCreated { name } => write!(f, "map {name:?} has not been created"),
             Self::DuplicateMapIdentity {
                 name,
                 first,

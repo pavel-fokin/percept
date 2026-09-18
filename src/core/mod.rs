@@ -23,8 +23,9 @@ pub use event::{
 pub(crate) use event_log::ComputeEvents;
 pub use event_log::EventLog;
 pub use map::{
-    default_prefix, map_id_for, map_of, Change, Edge, EdgeEnd, EdgeKind, Fragment, Map, MapError,
-    MapId, Mutation, Node, NodeId, NodeKind, NodeRef, Rules, Schema, Schemas, Selection, Written,
+    default_prefix, map_id_for, map_of, map_of_mut, Change, Edge, EdgeEnd, EdgeKind, Fragment,
+    Map, MapError, MapId, Mutation, Node, NodeId, NodeKind, NodeRef, Rules, Schema, Schemas,
+    Selection, Written,
 };
 pub use map_reader::MapReader;
 pub use search::{EventQuery, EventSearch};

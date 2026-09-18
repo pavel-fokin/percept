@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::{
-    map_id_for, Actor, Change, Edge, Event, EventId, EventLog, Fragment, Map, MapError, MapReader,
-    Mutation, Node, NodeId, Payload, Schemas, Written,
+    map_id_for, Actor, Change, Edge, Event, EventId, EventLog, Fragment, Map, MapError, MapId,
+    MapReader, Mutation, Node, NodeId, Payload, Schemas, Written,
 };
 use crate::store::{ids, parse_event_id};
 
@@ -32,6 +32,11 @@ pub fn paths(events: &[Event]) -> Vec<PathBuf> {
 
 /// The map `name` names, folded from those of `events` whose source
 /// ran at `path`.
+/// A schema with no `map.created` event yet folds empty, under a
+/// placeholder identity nothing else refers to - the same "not a map
+/// yet" reading `Schemas::fold_all` gives a schema it skips, so a
+/// reader that asks for one map by name sees an empty map rather than
+/// an error mid-session.
 pub fn fold_map_at(
     schemas: &Schemas,
     name: &str,
@@ -40,8 +45,7 @@ pub fn fold_map_at(
 ) -> Result<Map, Box<dyn std::error::Error>> {
     let schema = schemas.find(name)?;
     let own = of_path(events, path);
-    let id = map_id_for(name, own.clone())?
-        .ok_or_else(|| MapError::MapNotCreated { name: name.to_string() })?;
+    let id = map_id_for(name, own.clone())?.unwrap_or_else(MapId::new);
     Ok(Map::fold(id, schema, own)?)
 }
 
