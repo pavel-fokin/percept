@@ -16,6 +16,13 @@ fn source_at(name: &str, path: &Path) -> Source {
 }
 
 fn node_added(path: &Path, name: &str) -> Event {
+    node_added_seq(path, name, 1)
+}
+
+/// `node_added`, numbered `seq` - for a test that adds more than one
+/// `concept` node under the same path, where each needs the number
+/// `apply` would have minted for it.
+fn node_added_seq(path: &Path, name: &str, seq: u32) -> Event {
     Event::new(
         Actor::Human(human()),
         source_at("agent", path),
@@ -27,7 +34,7 @@ fn node_added(path: &Path, name: &str) -> Event {
             name: name.to_string(),
             properties: BTreeMap::new(),
             sources: Vec::new(),
-            seq: 0,
+            seq,
         },
     )
 }
@@ -65,7 +72,7 @@ fn a_project_with_no_schemas_still_appears_with_no_maps() {
 #[test]
 fn a_project_reports_its_own_event_count_and_root_name() {
     let fixture = Fixture::new();
-    let events = vec![node_added(fixture.path(), "a"), node_added(fixture.path(), "b")];
+    let events = vec![node_added_seq(fixture.path(), "a", 1), node_added_seq(fixture.path(), "b", 2)];
     let log = FakeLog::seeded(events);
 
     let body = list(&log, after_everything()).unwrap();
@@ -117,8 +124,14 @@ fn gained_counts_only_nodes_changed_at_or_after_the_last_session() {
     fixture.write(".percept/schemas/decisions.toml", SCHEMA);
     let session = session_started(fixture.path());
     let since = session.created_at();
-    let before = created_at(node_added(fixture.path(), "before the session"), since.minus_minutes(60).unwrap());
-    let after = created_at(node_added(fixture.path(), "after the session"), since.minus_minutes(-10).unwrap());
+    let before = created_at(
+        node_added_seq(fixture.path(), "before the session", 1),
+        since.minus_minutes(60).unwrap(),
+    );
+    let after = created_at(
+        node_added_seq(fixture.path(), "after the session", 2),
+        since.minus_minutes(-10).unwrap(),
+    );
     let log = FakeLog::seeded(vec![map_created(fixture.path()), before, session, after]);
 
     let body = list(&log, after_everything()).unwrap();

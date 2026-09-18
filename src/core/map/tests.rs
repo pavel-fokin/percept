@@ -101,8 +101,8 @@ fn a_replaced_verdict_still_shows_in_the_headlines() {
     // the `replaces` edge itself, not by one dropping out.
     let (old, new) = (NodeId::new(), NodeId::new());
     let events = [
-        node_added("debates", old, "verdict", "Go"),
-        node_added("debates", new, "verdict", "Rust"),
+        node_added_seq("debates", old, "verdict", "Go", 1),
+        node_added_seq("debates", new, "verdict", "Rust", 2),
         edge_added("debates", "replaces", new, old),
     ];
     let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &events).unwrap();
@@ -122,8 +122,8 @@ fn a_headline_nobody_claims_is_a_root() {
 fn a_claimed_headline_is_not_a_root() {
     let (old, new) = (NodeId::new(), NodeId::new());
     let events = [
-        node_added("debates", old, "verdict", "Go"),
-        node_added("debates", new, "verdict", "Rust"),
+        node_added_seq("debates", old, "verdict", "Go", 1),
+        node_added_seq("debates", new, "verdict", "Rust", 2),
         edge_added("debates", "replaces", new, old),
     ];
     let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &events).unwrap();
@@ -135,8 +135,8 @@ fn a_claimed_headline_is_not_a_root() {
 fn a_claim_cycle_still_yields_roots_without_hanging() {
     let (a, b) = (NodeId::new(), NodeId::new());
     let events = [
-        node_added("chores", a, "chore", "A"),
-        node_added("chores", b, "chore", "B"),
+        node_added_seq("chores", a, "chore", "A", 1),
+        node_added_seq("chores", b, "chore", "B", 2),
         edge_added("chores", "blocks", a, b),
         edge_added("chores", "blocks", b, a),
     ];
@@ -149,9 +149,9 @@ fn a_claim_cycle_still_yields_roots_without_hanging() {
 fn linked_follows_an_edge_kind_the_core_names_no_meaning_for() {
     let (a, b, c) = (NodeId::new(), NodeId::new(), NodeId::new());
     let events = [
-        node_added("debates", a, "verdict", "A"),
-        node_added("debates", b, "verdict", "B"),
-        node_added("debates", c, "verdict", "C"),
+        node_added_seq("debates", a, "verdict", "A", 1),
+        node_added_seq("debates", b, "verdict", "B", 2),
+        node_added_seq("debates", c, "verdict", "C", 3),
         edge_added("debates", "replaces", b, a),
         edge_added("debates", "replaces", c, b),
     ];
@@ -246,19 +246,27 @@ fn since_includes_a_node_changed_after_at() {
     assert_eq!(cut.nodes().len(), 1);
 }
 
+/// A `node.added` event, numbered `1` - every call site here adds at
+/// most one node of its kind to its map, so the mint order `apply`
+/// would use collapses to that one number.
 fn node_added(map: &str, node: NodeId, kind: &str, name: &str) -> Event {
-    node_added_with_properties(map, node, kind, name, BTreeMap::new())
+    node_added_seq(map, node, kind, name, 1)
 }
 
-/// `seq` at its sentinel: these fixtures build a few nodes at most,
-/// so `Map::replay`'s positional fallback mints the same numbers a
-/// fresh `apply` would, and every test here is about something else.
+/// `node_added`, numbered `seq` - for a test whose map holds more than
+/// one node of a kind, where each needs the number `apply` would have
+/// minted for it: `1`, then `2`, and so on.
+fn node_added_seq(map: &str, node: NodeId, kind: &str, name: &str, seq: u32) -> Event {
+    node_added_with_properties(map, node, kind, name, BTreeMap::new(), seq)
+}
+
 fn node_added_with_properties(
     map: &str,
     node: NodeId,
     kind: &str,
     name: &str,
     properties: BTreeMap<String, String>,
+    seq: u32,
 ) -> Event {
     committed(Payload::NodeAdded {
         map: crate::core::testing::map_id(map),
@@ -267,7 +275,7 @@ fn node_added_with_properties(
         name: name.to_string(),
         properties,
         sources: Vec::new(),
-        seq: 0,
+        seq,
     })
 }
 
@@ -407,7 +415,7 @@ fn fold_stamps_a_node_with_its_events_actor_and_time() {
             name: "Rust".to_string(),
             properties: BTreeMap::new(),
             sources: Vec::new(),
-            seq: 0,
+            seq: 1,
         },
     );
     let created_at = event.created_at();
@@ -966,6 +974,7 @@ fn a_stored_node_carrying_an_undeclared_property_still_folds() {
             ("why".to_string(), "because".to_string()),
             ("candidate".to_string(), "a paragraph nobody may write anymore".to_string()),
         ]),
+        1,
     );
 
     let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &[event]).unwrap();
@@ -1830,18 +1839,18 @@ fn resolve_str_rejects_an_unknown_prefix_or_number() {
 }
 
 #[test]
-fn a_node_added_event_with_no_seq_falls_back_to_its_position() {
+fn fold_keeps_the_seq_the_event_recorded_rather_than_the_nodes_position() {
     let events = [
-        node_added("debates", NodeId::new(), "verdict", "A"),
-        node_added("debates", NodeId::new(), "verdict", "B"),
+        node_added_seq("debates", NodeId::new(), "verdict", "A", 5),
+        node_added_seq("debates", NodeId::new(), "verdict", "B", 9),
     ];
 
     let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &events).unwrap();
 
     let a = map.find("verdict", "A").unwrap().id;
     let b = map.find("verdict", "B").unwrap().id;
-    assert_eq!(map.short_id(a), Some("v1".to_string()));
-    assert_eq!(map.short_id(b), Some("v2".to_string()));
+    assert_eq!(map.short_id(a), Some("v5".to_string()));
+    assert_eq!(map.short_id(b), Some("v9".to_string()));
 }
 
 #[test]

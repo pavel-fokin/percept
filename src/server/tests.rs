@@ -226,7 +226,7 @@ async fn api_maps_cuts_the_named_project_root_around_a_node() {
             name: "the rule".to_string(),
             properties: Default::default(),
             sources: Vec::new(),
-            seq: 0,
+            seq: 1,
         },
     );
     let created = crate::core::Event::map_created(

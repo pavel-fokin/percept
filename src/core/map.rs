@@ -452,11 +452,9 @@ impl Map {
     }
 
     /// The next short id number for a fresh `kind` node. `apply` mints
-    /// with this; `replay` falls back to it only for a `NodeAdded`
-    /// whose event carried no `seq` of its own. Tracked in
-    /// `next_seq_by_kind`, never by counting live nodes: a `NodeRemoved`
-    /// must not free a number for reuse, or an old citation of it would
-    /// point at whatever node minted it next.
+    /// with this. Tracked in `next_seq_by_kind`, never by counting live
+    /// nodes: a `NodeRemoved` must not free a number for reuse, or an
+    /// old citation of it would point at whatever node minted it next.
     fn next_seq(&self, kind: &str) -> u32 {
         self.next_seq_by_kind.get(kind).copied().unwrap_or(1)
     }

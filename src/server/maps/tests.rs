@@ -53,7 +53,7 @@ fn node_added(path: &Path, kind: &str, name: &str) -> (Event, NodeId) {
             name: name.to_string(),
             properties: BTreeMap::new(),
             sources: Vec::new(),
-            seq: 0,
+            seq: 1,
         },
     );
     (event, node)

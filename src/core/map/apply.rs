@@ -198,11 +198,7 @@ impl Map {
             } => {
                 self.check_node_kind(kind)?;
                 self.check_name(kind, name, None)?;
-                // `0` is an event from before short ids existed - the
-                // same count `apply` would have minted for it, taken
-                // here from its position among nodes of its kind, since
-                // nothing recorded one at the time.
-                let seq = if *seq == 0 { self.next_seq(kind) } else { *seq };
+                let seq = *seq;
                 let next = self.next_seq_by_kind.entry(kind.clone()).or_insert(1);
                 *next = (*next).max(seq + 1);
                 self.by_id.insert(*node, self.nodes.len());

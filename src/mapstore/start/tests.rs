@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use super::*;
 use crate::core::testing::{
     created_at, edge_added, file_cited, file_cited_citing, human, node_added, node_added_citing,
-    map_id, node_added_on, node_changed, node_id, schemas, source_at, Fixture, ROOT,
+    map_id, node_added_on, node_added_seq, node_changed, node_id, schemas, source_at, Fixture, ROOT,
 };
 use crate::core::{Actor, Event};
 use crate::mapstore::{last_session, of_path};
@@ -423,7 +423,7 @@ fn next_offers_read_around_only_for_the_ids_attention_printed() {
     let mut events = vec![session];
     for i in 0..=LIMIT {
         let at = since.minus_minutes(-(10 + i as i64)).unwrap();
-        events.push(created_at(node_added("topic", &format!("t{i}")), at));
+        events.push(created_at(node_added_seq("topic", &format!("t{i}"), i as u32 + 1), at));
     }
 
     let text = rendered(&events, Fixture::new().path());

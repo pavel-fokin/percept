@@ -175,6 +175,18 @@ pub fn node_added_by(actor: Actor, kind: &str, name: &str) -> Event {
     node_added_citing(actor, kind, name, vec![EventId::new()])
 }
 
+/// `node_added`, numbered `seq` - for a test whose debates map holds
+/// more than one node of `kind`, where each needs the number `apply`
+/// would have minted for it: `1`, then `2`, and so on.
+pub fn node_added_seq(kind: &str, name: &str, seq: u32) -> Event {
+    Event::new(
+        Actor::Human(human()),
+        source("test"),
+        None,
+        node_added_payload_seq("debates", kind, name, BTreeMap::new(), vec![EventId::new()], seq),
+    )
+}
+
 /// `node_added`, from a path other than `/test` - for a test that
 /// folds one path's map and not another's.
 pub fn node_added_at(path: &str, kind: &str, name: &str) -> Event {
@@ -195,6 +207,20 @@ pub fn node_added_payload(
     properties: BTreeMap<String, String>,
     sources: Vec<EventId>,
 ) -> Payload {
+    node_added_payload_seq(map, kind, name, properties, sources, 1)
+}
+
+/// `node_added_payload`, numbered `seq` - for a test whose map holds
+/// more than one node of `kind`, where each needs the number `apply`
+/// would have minted for it: `1`, then `2`, and so on.
+pub fn node_added_payload_seq(
+    map: &str,
+    kind: &str,
+    name: &str,
+    properties: BTreeMap<String, String>,
+    sources: Vec<EventId>,
+    seq: u32,
+) -> Payload {
     Payload::NodeAdded {
         map: map_id(map),
         node: NodeId::new(),
@@ -202,9 +228,7 @@ pub fn node_added_payload(
         name: name.to_string(),
         properties,
         sources,
-        // Left at the sentinel: nothing here has more than one node of
-        // a kind, so a positional fallback and a minted one agree.
-        seq: 0,
+        seq,
     }
 }
 

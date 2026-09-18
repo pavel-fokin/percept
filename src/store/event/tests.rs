@@ -516,7 +516,7 @@ fn node_added_round_trips_through_json() {
 }
 
 #[test]
-fn a_node_added_line_with_no_seq_decodes_to_the_sentinel() {
+fn a_node_added_line_with_no_seq_is_a_bad_line() {
     let node = NodeId::new();
     let json = serde_json::json!({
         "map": crate::core::testing::map_id("decisions").as_uuid().to_string(),
@@ -527,9 +527,12 @@ fn a_node_added_line_with_no_seq_decodes_to_the_sentinel() {
         "sources": [],
     });
 
-    let event = decode("user", source("cli"), "node.added", None, json, human()).unwrap();
+    let err = match decode("user", source("cli"), "node.added", None, json, human()) {
+        Err(e) => e,
+        Ok(_) => panic!("expected a missing seq to be rejected"),
+    };
 
-    assert!(matches!(event.payload(), Payload::NodeAdded { seq: 0, .. }));
+    assert!(matches!(err, Error::BadPayload(_)), "{err}");
 }
 
 #[test]
@@ -719,6 +722,7 @@ fn a_malformed_source_in_a_node_added_payload_is_an_error() {
         "name": "x",
         "properties": {},
         "sources": ["not-a-uuid"],
+        "seq": 1,
     });
 
     let err = match decode("user", source("cli"), "node.added", None, payload, human()) {

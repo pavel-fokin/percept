@@ -98,16 +98,7 @@ struct NodeAddedBody {
     name: String,
     properties: BTreeMap<String, String>,
     sources: Vec<String>,
-    /// Missing on a line written before short ids existed - `default`
-    /// reads that as `0`, `Map::replay`'s sentinel for "not recorded".
-    /// Omitted on encode at that same sentinel, so a payload a caller
-    /// built with no `seq` at all still round-trips through `decode`.
-    #[serde(default, skip_serializing_if = "is_zero")]
     seq: u32,
-}
-
-fn is_zero(seq: &u32) -> bool {
-    *seq == 0
 }
 
 /// `Payload::NodeChanged` on the wire. `name` is present only on a
