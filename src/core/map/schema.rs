@@ -4,7 +4,7 @@
 //! `mapstore` loads these values from it. `Map` checks every write
 //! against the schema it was folded with.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use super::{Map, MapError};
@@ -252,14 +252,39 @@ impl Schemas {
         self.schemas.iter()
     }
 
-    /// Every map `Map::fold` gives for `events` - one per schema.
+    /// Every created map `Map::fold` gives for `events`, in schema
+    /// order. A schema with no `map.created` event is not a map yet.
     pub fn fold_all<'a>(
         &self,
         events: impl IntoIterator<Item = &'a Event> + Clone,
     ) -> Result<Vec<Map>, MapError> {
-        self.folded()
-            .map(|schema| Map::fold(schema.clone(), events.clone()))
-            .collect()
+        self.fold_matching(|_| true, events)
+    }
+
+    /// `fold_all`, restricted to the schemas named in `names` - what a
+    /// batch of commits actually touches, so a caller checking that a
+    /// batch fits its own map never refolds every other schema too.
+    pub fn fold_named<'a>(
+        &self,
+        names: &HashSet<String>,
+        events: impl IntoIterator<Item = &'a Event> + Clone,
+    ) -> Result<Vec<Map>, MapError> {
+        self.fold_matching(|schema| names.contains(&schema.name), events)
+    }
+
+    fn fold_matching<'a>(
+        &self,
+        matches: impl Fn(&Schema) -> bool,
+        events: impl IntoIterator<Item = &'a Event> + Clone,
+    ) -> Result<Vec<Map>, MapError> {
+        let mut maps = Vec::new();
+        for schema in self.folded().filter(|schema| matches(schema)) {
+            let Some(id) = super::map_id_for(&schema.name, events.clone())? else {
+                continue;
+            };
+            maps.push(Map::fold(id, schema.clone(), events.clone())?);
+        }
+        Ok(maps)
     }
 
     /// Every schema's name, in stored order, for an "expected one of"

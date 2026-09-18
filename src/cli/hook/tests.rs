@@ -5,7 +5,7 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::*;
-use crate::core::testing::{content, file_cited_payload, human, node_added_payload, FakeLog};
+use crate::core::testing::{content, file_cited_payload, human, map_id, node_added_payload, FakeLog};
 use crate::core::{HumanId, Payload};
 use crate::shared::Timestamp;
 
@@ -46,10 +46,15 @@ impl Fixture {
         // canonical form.
         let root = root.canonicalize().unwrap();
         write_debates_schema(&root);
+        let created = Event::map_created(
+            map_id("debates"),
+            "debates".to_string(),
+            Source { name: "percept".to_string(), path: root.clone() },
+        );
         Self {
             sessions: temp.path().join("storage/hook-sessions"),
             root,
-            log: FakeLog::default(),
+            log: FakeLog::seeded(vec![created]),
             me: human(),
             _temp: temp,
         }
@@ -73,6 +78,13 @@ impl Fixture {
         std::fs::create_dir_all(other.join(".percept")).unwrap();
         let other = other.canonicalize().unwrap();
         write_debates_schema(&other);
+        self.log
+            .append(&Event::map_created(
+                map_id("debates"),
+                "debates".to_string(),
+                Source { name: "percept".to_string(), path: other.clone() },
+            ))
+            .unwrap();
         other
     }
 
@@ -220,7 +232,12 @@ impl Fixture {
     }
 
     fn events(&self) -> Vec<crate::core::Event> {
-        self.log.load().unwrap()
+        self.log
+            .load()
+            .unwrap()
+            .into_iter()
+            .filter(|event| !matches!(event.payload(), Payload::MapCreated { .. }))
+            .collect()
     }
 
     /// Appends a `node.added` event for this fixture's own project,

@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::Deserialize;
 
-use crate::core::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Schemas};
+use crate::core::{Actor, EventLog, Map, Mutation, NodeRef, Payload, Schemas, Source};
 use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::mapstore::{NodeRefArgs, Snapshot};
 
@@ -15,12 +14,12 @@ use crate::mapstore::{NodeRefArgs, Snapshot};
 pub struct ReviseMap {
     log: Arc<dyn EventLog>,
     schemas: Arc<Schemas>,
-    path: PathBuf,
+    source: Source,
 }
 
 impl ReviseMap {
-    pub fn new(log: Arc<dyn EventLog>, schemas: Arc<Schemas>, path: PathBuf) -> Self {
-        Self { log, schemas, path }
+    pub fn new(log: Arc<dyn EventLog>, schemas: Arc<Schemas>, source: Source) -> Self {
+        Self { log, schemas, source }
     }
 }
 
@@ -270,9 +269,15 @@ impl Tool for ReviseMap {
         if args.changes.is_empty() {
             return Err("changes must not be empty".into());
         }
-        let mut snapshot = Snapshot::load(self.log.as_ref(), &self.schemas, &args.map, &self.path)?;
+        let (created, mut snapshot) = Snapshot::for_write(
+            &self.schemas,
+            &args.map,
+            &self.source,
+            self.log.load()?,
+        )?;
         let mut lines = Vec::with_capacity(args.changes.len());
-        let mut commits = Vec::with_capacity(args.changes.len());
+        let mut commits = Vec::with_capacity(args.changes.len() + usize::from(created.is_some()));
+        commits.extend(created.map(|event| event.payload().clone()));
 
         for (index, change) in args.changes.into_iter().enumerate() {
             let (line, payload) =

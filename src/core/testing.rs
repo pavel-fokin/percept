@@ -8,13 +8,25 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use crate::core::{
-    Actor, EdgeKind, Event, EventId, EventLog, HumanId, NodeId, NodeKind, NodeRef, Payload, Rules,
-    Schema, Schemas, Source, Usage,
+    Actor, EdgeKind, Event, EventId, EventLog, HumanId, MapId, NodeId, NodeKind, NodeRef, Payload,
+    Rules, Schema, Schemas, Source, Usage,
 };
 use crate::shared::Timestamp;
 
 /// The project root `source` stamps, for a test that compares paths.
 pub const ROOT: &str = "/test";
+
+/// A stable map id for fixtures that still name maps by schema. The
+/// production path mints UUIDv7; tests restore this deterministic UUID
+/// so separately built events for one name fold together.
+pub fn map_id(name: &str) -> MapId {
+    let value = name
+        .bytes()
+        .fold(0xcbf29ce484222325u128, |hash, byte| {
+            hash.wrapping_mul(0x100000001b3).wrapping_add(u128::from(byte))
+        });
+    MapId::from_uuid(uuid::Uuid::from_u128(value))
+}
 
 /// A scratch directory a test writes files into, torn down when the
 /// test ends - never the repository itself.
@@ -115,25 +127,8 @@ impl EventLog for FakeLog {
         Ok(events.iter().find(|event| event.id() == id).cloned())
     }
 
-    /// Holds the events lock for the whole of `compute` and the push
-    /// that follows, so two threads sharing one `FakeLog` see the same
-    /// ordering `Jsonl`'s file lock gives two processes.
-    fn append_computed(
-        &self,
-        compute: crate::core::ComputeEvent<'_>,
-    ) -> Result<Event, Box<dyn std::error::Error>> {
-        if self.fail_append.load(Ordering::Relaxed) {
-            return Err("append failed".into());
-        }
-        let mut events = self.events.lock().unwrap();
-        let event = compute(events.clone())?;
-        events.push(event.clone());
-        Ok(event)
-    }
-
-    /// `append_computed`'s batch form: holds the events lock for
-    /// `compute` and every push that follows, the same guarantee
-    /// `Jsonl`'s file lock gives two processes.
+    /// Holds the events lock for `compute` and every push that follows,
+    /// the same guarantee `Jsonl`'s file lock gives two processes.
     fn append_batch_computed(
         &self,
         compute: crate::core::ComputeEvents<'_>,
@@ -201,7 +196,7 @@ pub fn node_added_payload(
     sources: Vec<EventId>,
 ) -> Payload {
     Payload::NodeAdded {
-        map: map.to_string(),
+        map: map_id(map),
         node: NodeId::new(),
         kind: kind.to_string(),
         name: name.to_string(),
@@ -259,7 +254,7 @@ pub fn node_changed(
         source("test"),
         None,
         Payload::NodeChanged {
-            map: map.to_string(),
+            map: map_id(map),
             node,
             name: name.map(str::to_string),
             properties,
@@ -299,7 +294,7 @@ pub fn edge_added(kind: &str, from: &Event, to: &Event) -> Event {
         source("test"),
         None,
         Payload::EdgeAdded {
-            map: "debates".to_string(),
+            map: map_id("debates"),
             kind: kind.to_string(),
             from: node_id(from),
             to: node_id(to),

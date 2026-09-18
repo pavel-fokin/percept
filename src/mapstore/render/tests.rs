@@ -72,13 +72,13 @@ fn link(map: &mut Map, kind: &str, from: (&str, &str), to: (&str, &str)) {
 
 #[test]
 fn an_empty_map_renders_its_title_and_the_empty_notice() {
-    let map = Map::empty(debates());
+    let map = Map::empty(crate::core::testing::map_id("debates"), debates());
     assert_eq!(markdown(&map), "# debates\n\n(empty: nothing has been recorded here yet.)\n");
 }
 
 #[test]
 fn sections_order_headlines_by_state_then_by_when_they_were_added() {
-    let mut map = Map::empty(chores());
+    let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
     add(&mut map, "chore", "a", Some("first added"), Some("open"), &[], Actor::Human(human()));
     add(&mut map, "chore", "b", Some("second added"), Some("done"), &[], Actor::Human(human()));
     add(&mut map, "chore", "c", Some("third added"), Some("open"), &[], Actor::Human(human()));
@@ -94,7 +94,7 @@ fn sections_order_headlines_by_state_then_by_when_they_were_added() {
 
 #[test]
 fn sections_order_headlines_by_their_kinds_place_in_headlines() {
-    let mut map = Map::empty(debates());
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "verdict", "ship it", None, None, &[], Actor::Human(human()));
     add(&mut map, "topic", "Which parser?", None, None, &[], Actor::Human(human()));
 
@@ -106,7 +106,7 @@ fn sections_order_headlines_by_their_kinds_place_in_headlines() {
 
 #[test]
 fn a_claim_is_printed_under_its_topic_with_its_why() {
-    let mut map = Map::empty(debates());
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "topic", "Which parser?", None, None, &[], Actor::Human(human()));
     add(
         &mut map,
@@ -134,7 +134,7 @@ fn a_claim_is_printed_under_its_topic_with_its_why() {
 
 #[test]
 fn a_replaced_verdict_and_a_doubting_topic_nest_under_the_verdict_that_claims_them() {
-    let mut map = Map::empty(debates());
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "verdict", "Go", None, None, &[], Actor::Human(human()));
     add(&mut map, "verdict", "Rust", None, None, &[], Actor::Human(human()));
     link(&mut map, "replaces", ("verdict", "Rust"), ("verdict", "Go"));
@@ -156,7 +156,7 @@ fn a_replaced_verdict_and_a_doubting_topic_nest_under_the_verdict_that_claims_th
 
 #[test]
 fn a_verdict_nests_under_its_topic_and_the_one_it_replaces_under_it() {
-    let mut map = Map::empty(debates());
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "topic", "Which language?", None, None, &[], Actor::Human(human()));
     add(&mut map, "verdict", "Go", None, None, &[], Actor::Human(human()));
     link(&mut map, "settles", ("verdict", "Go"), ("topic", "Which language?"));
@@ -183,7 +183,7 @@ fn a_verdict_nests_under_its_topic_and_the_one_it_replaces_under_it() {
 
 #[test]
 fn a_blocked_chore_nests_under_the_chore_that_blocks_it() {
-    let mut map = Map::empty(chores());
+    let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
     add(&mut map, "chore", "cancel a turn", Some("Esc drops the session"), Some("open"), &[], Actor::Human(human()));
     add(
         &mut map,
@@ -211,7 +211,7 @@ fn a_blocked_chore_nests_under_the_chore_that_blocks_it() {
 
 #[test]
 fn a_map_with_no_headlines_says_so() {
-    let map = Map::empty(debates());
+    let map = Map::empty(crate::core::testing::map_id("debates"), debates());
     // The map has a node, but no headline kind: no topic or verdict
     // was ever added.
     let mut map = map;
@@ -225,7 +225,7 @@ fn a_map_with_no_headlines_says_so() {
 
 #[test]
 fn a_map_the_agent_wrote_alone_is_marked_once_on_its_heading() {
-    let mut map = Map::empty(debates());
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "topic", "Which key?", None, None, &[], Actor::Agent);
 
     let text = markdown(&map);
@@ -236,7 +236,7 @@ fn a_map_the_agent_wrote_alone_is_marked_once_on_its_heading() {
 
 #[test]
 fn a_map_with_both_authors_marks_each_agent_node() {
-    let mut map = Map::empty(debates());
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "topic", "Which key?", None, None, &[], Actor::Agent);
     add(&mut map, "topic", "Which lock?", None, None, &[], Actor::Human(human()));
 
@@ -249,7 +249,7 @@ fn a_map_with_both_authors_marks_each_agent_node() {
 
 #[test]
 fn a_changed_node_renders_its_changed_by_line_with_its_why() {
-    let mut map = Map::empty(debates());
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "verdict", "gemma4 by default", Some("the local model"), None, &[], Actor::Agent);
     change(
         &mut map,
@@ -267,7 +267,7 @@ fn a_changed_node_renders_its_changed_by_line_with_its_why() {
 
 #[test]
 fn an_unchanged_node_carries_no_changed_by_line() {
-    let mut map = Map::empty(debates());
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "verdict", "gemma4 by default", None, None, &[], Actor::Human(human()));
 
     let text = markdown(&map);
@@ -277,7 +277,7 @@ fn an_unchanged_node_carries_no_changed_by_line() {
 
 #[test]
 fn a_non_headline_neighbour_prints_its_own_properties_indented() {
-    let mut map = Map::empty(files());
+    let mut map = Map::empty(crate::core::testing::map_id("files"), files());
     add(&mut map, "file", "src/main.rs", None, None, &[], Actor::System);
     map.apply(
         Mutation::AddNode {
@@ -322,7 +322,7 @@ fn court() -> Map {
         headline_kinds: vec!["area".to_string(), "topic".to_string(), "verdict".to_string()],
         rules: crate::core::Rules::default(),
     };
-    let mut map = Map::empty(schema);
+    let mut map = Map::empty(crate::core::MapId::new(), schema);
     add(&mut map, "area", "parsing", None, None, &[], Actor::Human(human()));
     add(&mut map, "topic", "Which parser?", None, None, &[], Actor::Human(human()));
     add(&mut map, "verdict", "ship it", None, None, &[], Actor::Human(human()));
@@ -368,7 +368,7 @@ fn a_schema_with_no_headline_kind_falls_back_to_a_section_per_kind() {
         headline_kinds: Vec::new(),
         rules: crate::core::Rules::default(),
     };
-    let mut map = Map::empty(schema);
+    let mut map = Map::empty(crate::core::MapId::new(), schema);
     add(&mut map, "term", "harness", None, None, &[], Actor::Human(human()));
 
     let text = markdown(&map);
@@ -378,7 +378,7 @@ fn a_schema_with_no_headline_kind_falls_back_to_a_section_per_kind() {
 
 #[test]
 fn the_catalogue_gives_each_map_a_section_listing_its_kinds() {
-    let mut map = Map::empty(debates());
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "topic", "Where does the log live?", None, None, &[], Actor::Human(human()));
 
     let text = catalogue(std::slice::from_ref(&map));
@@ -396,7 +396,7 @@ fn the_catalogue_gives_each_map_a_section_listing_its_kinds() {
 
 #[test]
 fn a_kind_with_no_gloss_renders_without_a_trailing_dash() {
-    let text = catalogue(&[Map::empty(debates())]);
+    let text = catalogue(&[Map::empty(crate::core::testing::map_id("debates"), debates())]);
 
     assert!(
         text.contains("\n- `verdict` (may carry `why`)\n"),
@@ -406,7 +406,7 @@ fn a_kind_with_no_gloss_renders_without_a_trailing_dash() {
 
 #[test]
 fn the_catalogue_names_a_kinds_required_properties() {
-    let text = catalogue(&[Map::empty(debates())]);
+    let text = catalogue(&[Map::empty(crate::core::testing::map_id("debates"), debates())]);
 
     assert!(
         text.contains(
@@ -426,7 +426,7 @@ fn the_catalogue_of_no_maps_prints_the_no_schemas_hint() {
 
 #[test]
 fn the_catalogue_glosses_a_package_kind_as_an_external_crate() {
-    let text = catalogue(&[Map::empty(files())]);
+    let text = catalogue(&[Map::empty(crate::core::testing::map_id("files"), files())]);
 
     assert!(text.contains("- `package` - an external crate a file imports"));
     assert!(text.contains("never one of this project's own modules"));

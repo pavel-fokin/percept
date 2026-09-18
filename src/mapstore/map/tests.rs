@@ -1,6 +1,6 @@
 use super::*;
 use crate::core::testing::{human, schemas, source, source_at, FakeLog};
-use crate::core::{Actor, Change, Event, NodeId, NodeRef};
+use crate::core::{Actor, Change, Event, MapId, NodeId, NodeRef};
 use crate::shared::Timestamp;
 
 fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
@@ -34,6 +34,7 @@ fn a_claim_without_a_why_is_refused_as_a_new_write() {
 
     assert!(err.contains("lacks its `why` property"), "{err}");
     assert!(err.contains("saying why"), "{err}");
+    assert!(log.load().unwrap().is_empty());
 }
 
 #[test]
@@ -103,6 +104,12 @@ fn commit_appends_the_event_that_records_the_mutation() {
     .unwrap();
 
     assert!(matches!(event.payload(), Payload::NodeAdded { name, .. } if name == "Rust"));
+    let events = log.load().unwrap();
+    let Payload::MapCreated { map, schema } = events[0].payload() else {
+        panic!("expected map.created before the first mutation")
+    };
+    assert_eq!(schema, "debates");
+    assert!(matches!(events[1].payload(), Payload::NodeAdded { map: changed, .. } if changed == map));
     assert!(fold_map(&log, &schemas(), "debates", &source.path)
         .unwrap()
         .find("verdict", "Rust")
@@ -139,6 +146,14 @@ fn commit_loads_the_log_so_a_second_call_sees_the_first() {
     .unwrap();
 
     assert_eq!(err.to_string(), "verdict \"Rust\" is already in the map");
+    assert_eq!(
+        log.load()
+            .unwrap()
+            .iter()
+            .filter(|event| matches!(event.payload(), Payload::MapCreated { .. }))
+            .count(),
+        1
+    );
 }
 
 #[test]
@@ -174,6 +189,19 @@ fn commit_allows_the_same_name_under_a_different_path() {
         .unwrap()
         .find("verdict", "Rust")
         .is_some());
+    let here_id = fold_map(&log, &schemas(), "debates", &here.path).unwrap().id();
+    let there_id = fold_map(&log, &schemas(), "debates", &there.path).unwrap().id();
+    assert_ne!(here_id, there_id);
+}
+
+#[test]
+fn a_map_summary_exposes_the_map_id() {
+    let id = MapId::new();
+    let map = Map::empty(id, crate::core::testing::debates());
+
+    let line: serde_json::Value = serde_json::from_str(&encode_map(&map)).unwrap();
+
+    assert_eq!(line["id"], id.as_uuid().to_string());
 }
 
 #[test]
@@ -295,7 +323,7 @@ fn a_source_is_checked_against_the_loaded_log() {
 
 #[test]
 fn a_node_line_carries_its_id_sources_actor_and_time() {
-    let map = Map::empty(crate::core::testing::debates());
+    let map = Map::empty(crate::core::testing::map_id("debates"), crate::core::testing::debates());
     let me = crate::core::testing::human();
     let node = Node {
         id: NodeId::new(),
@@ -334,7 +362,7 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
 
 #[test]
 fn a_node_line_carries_its_short_id() {
-    let mut map = Map::empty(crate::core::testing::debates());
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), crate::core::testing::debates());
     map.apply(
         Mutation::AddNode {
             kind: "fact".to_string(),
@@ -354,7 +382,10 @@ fn a_node_line_carries_its_short_id() {
 
 #[test]
 fn an_edge_line_names_its_ends_as_kind_and_name() {
-    let mut map = Map::empty(crate::core::testing::files());
+    let mut map = Map::empty(
+        crate::core::testing::map_id("files"),
+        crate::core::testing::files(),
+    );
     for (kind, name) in [("file", "src/main.rs"), ("package", "clap")] {
         map.apply(
             Mutation::AddNode {
@@ -394,7 +425,7 @@ fn an_edge_line_names_its_ends_as_kind_and_name() {
 }
 
 fn map_with_a_verdict() -> Map {
-    let mut map = Map::empty(crate::core::testing::debates());
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), crate::core::testing::debates());
     map.apply(
         Mutation::AddNode {
             kind: "verdict".to_string(),

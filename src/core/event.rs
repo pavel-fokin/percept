@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use super::NodeId;
+use super::{MapId, NodeId};
 use crate::shared::{Id, Timestamp};
 
 /// Identifies an Event.
@@ -111,6 +111,11 @@ pub enum Payload {
     ToolResulted {
         content: String,
     },
+    /// A cognitive map was created with a stable identity and a schema.
+    MapCreated {
+        map: MapId,
+        schema: String,
+    },
     /// A node added to a cognitive map. `sources` names the events the
     /// node was folded from. `seq` is the node's short id number within
     /// its kind - `d41` is `d` plus this - minted once by `Map::apply`
@@ -121,7 +126,7 @@ pub enum Payload {
     /// its position among nodes of its kind for those, so an old log
     /// still folds without a migration.
     NodeAdded {
-        map: String,
+        map: MapId,
         node: NodeId,
         kind: String,
         name: String,
@@ -140,7 +145,7 @@ pub enum Payload {
     /// neither `name` nor a property, only `why`, is a comment: legal,
     /// and it still becomes the node's last change.
     NodeChanged {
-        map: String,
+        map: MapId,
         node: NodeId,
         name: Option<String>,
         properties: BTreeMap<String, String>,
@@ -149,7 +154,7 @@ pub enum Payload {
     },
     /// A node removed from a cognitive map, with why.
     NodeRemoved {
-        map: String,
+        map: MapId,
         node: NodeId,
         why: String,
         sources: Vec<EventId>,
@@ -157,7 +162,7 @@ pub enum Payload {
     /// An edge added to a cognitive map. Carries no id of its own -
     /// `kind`, `from`, and `to` identify one.
     EdgeAdded {
-        map: String,
+        map: MapId,
         kind: String,
         from: NodeId,
         to: NodeId,
@@ -165,7 +170,7 @@ pub enum Payload {
     },
     /// An edge removed from a cognitive map, with why.
     EdgeRemoved {
-        map: String,
+        map: MapId,
         kind: String,
         from: NodeId,
         to: NodeId,
@@ -186,7 +191,7 @@ pub enum Payload {
     /// reader can tell which changes came from which reflection, and
     /// each of those carries the actor who made it.
     ReflectionStarted {
-        map: String,
+        map: MapId,
     },
     /// A file, or a range of it, as it was when a node cited it -
     /// experience, not judgment: this event says nothing about why the
@@ -228,6 +233,7 @@ impl Payload {
             | Self::ToolResulted { content } => Some(content),
             Self::FileCited { excerpt, .. } => Some(excerpt),
             Self::ToolCalled { .. }
+            | Self::MapCreated { .. }
             | Self::NodeAdded { .. }
             | Self::NodeChanged { .. }
             | Self::NodeRemoved { .. }
@@ -250,6 +256,7 @@ pub enum EventKind {
     ThoughtRecorded,
     ToolCalled,
     ToolResulted,
+    MapCreated,
     NodeAdded,
     NodeChanged,
     NodeRemoved,
@@ -270,6 +277,7 @@ impl EventKind {
             Self::ThoughtRecorded => "thought.recorded",
             Self::ToolCalled => "tool.called",
             Self::ToolResulted => "tool.resulted",
+            Self::MapCreated => "map.created",
             Self::NodeAdded => "node.added",
             Self::NodeChanged => "node.changed",
             Self::NodeRemoved => "node.removed",
@@ -375,6 +383,17 @@ impl Event {
         )
     }
 
+    /// A `map.created` event - always percept establishing a map's
+    /// identity, never a model's action.
+    pub fn map_created(map: MapId, schema: String, source: Source) -> Self {
+        Self::new(
+            Actor::System,
+            source,
+            None,
+            Payload::MapCreated { map, schema },
+        )
+    }
+
     /// A `model.called` event - always percept recording what one round
     /// trip to the model cost, never the model's own words.
     pub fn model_called(usage: Usage, source: Source, causation_id: Option<EventId>) -> Self {
@@ -399,7 +418,7 @@ impl Event {
     /// by an agent, and who judged is carried by the revisions that
     /// follow, each with its own actor, not by the event that opens
     /// them.
-    pub fn reflection_started(map: String, source: Source) -> Self {
+    pub fn reflection_started(map: MapId, source: Source) -> Self {
         Self::new(Actor::System, source, None, Payload::ReflectionStarted { map })
     }
 
@@ -454,6 +473,7 @@ impl Event {
             Payload::ThoughtRecorded { .. } => EventKind::ThoughtRecorded,
             Payload::ToolCalled { .. } => EventKind::ToolCalled,
             Payload::ToolResulted { .. } => EventKind::ToolResulted,
+            Payload::MapCreated { .. } => EventKind::MapCreated,
             Payload::NodeAdded { .. } => EventKind::NodeAdded,
             Payload::NodeChanged { .. } => EventKind::NodeChanged,
             Payload::NodeRemoved { .. } => EventKind::NodeRemoved,

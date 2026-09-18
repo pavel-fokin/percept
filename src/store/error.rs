@@ -42,8 +42,8 @@ pub enum Error {
     /// its `type`.
     BadLine(serde_json::Error),
     Io(std::io::Error),
-    /// `EventLog::append_computed`'s `compute` refused what it was
-    /// given - a mutation `Map::apply` rejected, most often.
+    /// A computed append refused what it was given - a mutation
+    /// `Map::apply` rejected, most often.
     Compute(Box<dyn std::error::Error>),
     /// Wraps any of the above with the 1-based line number it came from.
     AtLine {

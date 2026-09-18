@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use ratatui::layout::{Constraint, Layout, Margin, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -5,7 +7,7 @@ use ratatui::widgets::{Block, BorderType, Clear, List, ListItem, ListState, Para
 use ratatui::Frame;
 
 use super::{Chat, ModelsMenu};
-use crate::core::{Actor, Event, EventId, EventKind, Payload};
+use crate::core::{Actor, Event, EventId, EventKind, MapId, Payload};
 
 /// One marker plus a space. Every wrapped line of a turn indents past
 /// it, so the gutter stays a column of markers and nothing else.
@@ -180,11 +182,25 @@ fn draw_input(frame: &mut Frame, chat: &Chat, area: Rect) {
 /// can be mapped back to the event it landed on.
 fn transcript(chat: &Chat, area: Rect) -> (Text<'static>, u16, Vec<Option<EventId>>) {
     let width = area.width.max(1) as usize;
+    let map_names: HashMap<MapId, String> = chat
+        .app
+        .events()
+        .iter()
+        .filter_map(|event| match event.payload() {
+            Payload::MapCreated { map, schema } => Some((*map, schema.clone())),
+            _ => None,
+        })
+        .collect();
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut ids: Vec<Option<EventId>> = Vec::new();
     for event in chat.app.events() {
         let id = matches!(event.payload(), Payload::ThoughtRecorded { .. }).then(|| event.id());
-        push_turn(&mut lines, &mut ids, id, event_lines(chat, event, width));
+        push_turn(
+            &mut lines,
+            &mut ids,
+            id,
+            event_lines(chat, event, width, &map_names),
+        );
     }
     // Full and dimmed while it streams; once committed it renders
     // collapsed instead, in `event_lines`. Never clickable, so no id.
@@ -230,7 +246,22 @@ fn push_turn(
     lines.extend(turn);
 }
 
-fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
+/// `id`'s schema name, from the `map.created` events already scanned
+/// into `names` - or the id itself, for a map whose creation this
+/// transcript hasn't loaded.
+fn map_label(names: &HashMap<MapId, String>, id: &MapId) -> String {
+    names
+        .get(id)
+        .cloned()
+        .unwrap_or_else(|| id.as_uuid().to_string())
+}
+
+fn event_lines(
+    chat: &Chat,
+    event: &Event,
+    width: usize,
+    map_names: &HashMap<MapId, String>,
+) -> Vec<Line<'static>> {
     match event.payload() {
         Payload::MessageReceived { content } => actor_lines(chat, event.actor(), content, width),
         // Tool activity shows dimmed, so the reader can see what the
@@ -251,26 +282,35 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
             };
             lines(content, chat.thought_style, chat.thought_style, width)
         }
+        // Map creation is bookkeeping, not something to show.
+        Payload::MapCreated { .. } => Vec::new(),
         // Bookkeeping about a round trip, not something to show.
         Payload::ModelCalled(..) => Vec::new(),
         // Bookkeeping about a session opening, not something to show.
         Payload::SessionStarted => Vec::new(),
         // A reflection starting shows dimmed too - it's context the
         // model built, not dialogue.
-        Payload::ReflectionStarted { map } => {
-            tool_lines(chat, &format!("{map}: reflection started"), width)
-        }
+        Payload::ReflectionStarted { map } => tool_lines(
+            chat,
+            &format!("{}: reflection started", map_label(map_names, map)),
+            width,
+        ),
         // A map change shows dimmed too - it's context the model built,
         // not dialogue.
         Payload::NodeAdded {
             map, kind, name, ..
-        } => tool_lines(chat, &format!("{map}: added {kind} {name:?}"), width),
+        } => tool_lines(
+            chat,
+            &format!("{}: added {kind} {name:?}", map_label(map_names, map)),
+            width,
+        ),
         Payload::NodeChanged {
             map, node, name, ..
         } => tool_lines(
             chat,
             &format!(
-                "{map}: changed node {}{}",
+                "{}: changed node {}{}",
+                map_label(map_names, map),
                 node.as_uuid(),
                 name.as_deref()
                     .map(|name| format!(" -> {name:?}"))
@@ -280,7 +320,11 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
         ),
         Payload::NodeRemoved { map, node, why, .. } => tool_lines(
             chat,
-            &format!("{map}: removed node {} - {why}", node.as_uuid()),
+            &format!(
+                "{}: removed node {} - {why}",
+                map_label(map_names, map),
+                node.as_uuid()
+            ),
             width,
         ),
         Payload::EdgeAdded {
@@ -304,7 +348,8 @@ fn event_lines(chat: &Chat, event: &Event, width: usize) -> Vec<Line<'static>> {
             tool_lines(
                 chat,
                 &format!(
-                    "{map}: {verb} edge {kind} {} \u{2192} {}",
+                    "{}: {verb} edge {kind} {} \u{2192} {}",
+                    map_label(map_names, map),
                     from.as_uuid(),
                     to.as_uuid()
                 ),

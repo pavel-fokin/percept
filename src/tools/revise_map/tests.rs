@@ -1,14 +1,18 @@
-use std::path::PathBuf;
-
 use super::*;
 use crate::core::testing::{
-    edge_added, human, node_added, node_added_by, node_id, schemas, source, FakeLog, ROOT,
+    edge_added, human, node_added, node_added_by, node_id, schemas, source, FakeLog,
 };
 use crate::core::{Actor, Event, EventId};
 
 fn tool(events: Vec<Event>) -> ReviseMap {
-    let log = Arc::new(FakeLog::seeded(events));
-    ReviseMap::new(log, Arc::new(schemas()), PathBuf::from(ROOT))
+    let mut initialized = vec![Event::map_created(
+        crate::core::testing::map_id("debates"),
+        "debates".to_string(),
+        source("init"),
+    )];
+    initialized.extend(events);
+    let log = Arc::new(FakeLog::seeded(initialized));
+    ReviseMap::new(log, Arc::new(schemas()), source("tui"))
 }
 
 #[test]
@@ -107,8 +111,8 @@ fn a_failing_change_names_its_index_and_commits_nothing() {
     assert!(err.to_string().starts_with("change 1: "), "{err}");
     assert_eq!(
         revise.log.load().unwrap().len(),
-        1,
-        "a refused batch must append nothing"
+        2,
+        "a refused batch must append nothing beyond the seeded map and citation"
     );
 }
 

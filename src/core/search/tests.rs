@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::core::testing::{human, source, source_at};
-use crate::core::{EventId, NodeId, Payload};
+use crate::core::{EventId, MapId, NodeId, Payload};
 
 /// A message from `name`, timestamped `offset_minutes` back.
 fn event_at(name: &str, offset_minutes: i64) -> Event {
@@ -294,7 +294,7 @@ fn a_text_term_matches_every_payload_kind() {
             arguments: "{}".to_string(),
         },
         Payload::NodeAdded {
-            map: "tasks".to_string(),
+            map: crate::core::testing::map_id("tasks"),
             node: NodeId::new(),
             kind: "goal".to_string(),
             name: "Deploy by Friday".to_string(),
@@ -303,7 +303,7 @@ fn a_text_term_matches_every_payload_kind() {
             seq: 1,
         },
         Payload::NodeAdded {
-            map: "tasks".to_string(),
+            map: crate::core::testing::map_id("tasks"),
             node: NodeId::new(),
             kind: "goal".to_string(),
             name: "Ship".to_string(),
@@ -312,20 +312,20 @@ fn a_text_term_matches_every_payload_kind() {
             seq: 2,
         },
         Payload::NodeRemoved {
-            map: "tasks".to_string(),
+            map: crate::core::testing::map_id("tasks"),
             node: NodeId::new(),
             why: "deployed already".to_string(),
             sources: Vec::new(),
         },
         Payload::EdgeAdded {
-            map: "deploys".to_string(),
-            kind: "blocks".to_string(),
+            map: crate::core::testing::map_id("deploys"),
+            kind: "deploy_blocks".to_string(),
             from: NodeId::new(),
             to: NodeId::new(),
             sources: Vec::new(),
         },
         Payload::EdgeRemoved {
-            map: "tasks".to_string(),
+            map: crate::core::testing::map_id("tasks"),
             kind: "deploys_to".to_string(),
             from: NodeId::new(),
             to: NodeId::new(),
@@ -352,7 +352,8 @@ fn a_text_term_matches_every_payload_kind() {
 }
 
 #[test]
-fn a_reflection_started_matches_on_its_map_name() {
+fn a_reflection_started_matches_on_its_map_id() {
+    let map = crate::core::testing::map_id("deploys");
     let event = Event::restore(
         EventId::new(),
         Actor::Agent,
@@ -360,14 +361,32 @@ fn a_reflection_started_matches_on_its_map_name() {
         None,
         Timestamp::now(),
         Payload::ReflectionStarted {
-            map: "deploys".to_string(),
+            map,
         },
     );
     let query = EventQuery {
-        text: vec!["deploy".to_string()],
+        text: vec![map.as_uuid().to_string()],
         ..Default::default()
     };
     assert!(query.matches(&event));
+}
+
+#[test]
+fn a_map_created_matches_on_its_id_and_schema() {
+    let map = MapId::new();
+    let event = Event::map_created(map, "decisions".to_string(), source("cli"));
+
+    let by_id = EventQuery {
+        text: vec![map.as_uuid().to_string()],
+        ..Default::default()
+    };
+    let by_schema = EventQuery {
+        text: vec!["decision".to_string()],
+        ..Default::default()
+    };
+
+    assert!(by_id.matches(&event));
+    assert!(by_schema.matches(&event));
 }
 
 #[test]

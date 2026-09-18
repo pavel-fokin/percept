@@ -1,5 +1,7 @@
 use super::*;
-use crate::core::testing::{content, edge_added, human, node_added, schemas, source, usage, FakeLog};
+use crate::core::testing::{
+    content, edge_added, human, node_added, schemas, source, usage, FakeLog,
+};
 use crate::core::{Actor, Payload};
 use crate::harness::testing::{FakeCatalog, FakeSnapshot, FakeTool, FixedPolicy, Scripted};
 use crate::harness::{Chunk, Verdict};
@@ -255,20 +257,27 @@ fn another_source_s_conversation_in_the_same_project_stays_out_of_the_transcript
 
 #[test]
 fn another_source_s_map_mutation_in_the_same_project_still_folds() {
-    let seeded = vec![Event::new(
-        Actor::Agent,
-        source("codex"),
-        None,
-        Payload::NodeAdded {
-            map: "debates".to_string(),
-            node: crate::core::NodeId::new(),
-            kind: "topic".to_string(),
-            name: "why?".to_string(),
-            properties: Default::default(),
-            sources: Vec::new(),
-            seq: 1,
-        },
-    )];
+    let seeded = vec![
+        Event::map_created(
+            crate::core::testing::map_id("debates"),
+            "debates".to_string(),
+            source("codex"),
+        ),
+        Event::new(
+            Actor::Agent,
+            source("codex"),
+            None,
+            Payload::NodeAdded {
+                map: crate::core::testing::map_id("debates"),
+                node: crate::core::NodeId::new(),
+                kind: "topic".to_string(),
+                name: "why?".to_string(),
+                properties: Default::default(),
+                sources: Vec::new(),
+                seq: 1,
+            },
+        ),
+    ];
     let log = Arc::new(FakeLog::seeded(seeded));
     let app = App::new(
         Arc::new(Silent),
@@ -577,10 +586,22 @@ fn an_app_without_a_snapshot_takes_none_and_cannot_undo() {
 #[test]
 fn instructions_go_to_the_model_as_system_text_before_the_maps_every_round() {
     let model = Arc::new(Scripted::new(vec![], true));
+    let log = FakeLog::seeded(vec![
+        Event::map_created(
+            crate::core::testing::map_id("debates"),
+            "debates".to_string(),
+            source("init"),
+        ),
+        Event::map_created(
+            crate::core::testing::map_id("chores"),
+            "chores".to_string(),
+            source("init"),
+        ),
+    ]);
     let mut app = App::new(
         model.clone(),
         Arc::new(FakeCatalog::default()),
-        Arc::new(FakeLog::default()),
+        Arc::new(log),
         Arc::new(schemas()),
         Harness {
             instructions: Some("Commit subjects stay under 72 chars.".to_string()),
@@ -884,11 +905,24 @@ fn seeded_app_with_shape(
     tools: Vec<Arc<dyn crate::harness::Tool>>,
     map_shape: MapShape,
 ) -> (Arc<Scripted>, App) {
+    let mut initialized = vec![
+        Event::map_created(
+            crate::core::testing::map_id("debates"),
+            "debates".to_string(),
+            source("init"),
+        ),
+        Event::map_created(
+            crate::core::testing::map_id("chores"),
+            "chores".to_string(),
+            source("init"),
+        ),
+    ];
+    initialized.extend(events);
     let model = Arc::new(Scripted::new(vec![], true));
     let app = App::new(
         model.clone(),
         Arc::new(FakeCatalog::default()),
-        Arc::new(FakeLog::seeded(events)),
+        Arc::new(FakeLog::seeded(initialized)),
         Arc::new(schemas()),
         Harness::new(tools, map_shape),
         source(SOURCE),
@@ -920,7 +954,7 @@ fn a_log_longer_than_the_window_sends_only_its_newest_events() {
     let _ = app.submit("now".to_string()).unwrap();
 
     // The whole log stays in the transcript the TUI renders.
-    assert_eq!(app.events().len(), 26);
+    assert_eq!(app.events().len(), 28);
     let sent = model.last_request();
     assert!(!has_filler(&sent, "0"));
     assert!(has_filler(&sent, "24"));
@@ -951,7 +985,7 @@ fn a_map_is_sent_with_its_kinds_ahead_of_the_transcript_and_outside_the_window()
         source(SOURCE),
         None,
         crate::core::Payload::NodeAdded {
-            map: "debates".to_string(),
+            map: crate::core::testing::map_id("debates"),
             node: crate::core::NodeId::new(),
             kind: "verdict".to_string(),
             name: "Rust over Go".to_string(),
@@ -1089,20 +1123,27 @@ fn an_empty_map_header_says_it_holds_nothing_yet() {
 
 #[test]
 fn a_map_that_does_not_fold_fails_at_open() {
-    let events = vec![Event::new(
-        Actor::Human(human()),
-        source(SOURCE),
-        None,
-        crate::core::Payload::NodeAdded {
-            map: "debates".to_string(),
-            node: crate::core::NodeId::new(),
-            kind: "goal".to_string(),
-            name: "Ship".to_string(),
-            properties: Default::default(),
-            sources: Vec::new(),
-            seq: 1,
-        },
-    )];
+    let events = vec![
+        Event::map_created(
+            crate::core::testing::map_id("debates"),
+            "debates".to_string(),
+            source("init"),
+        ),
+        Event::new(
+            Actor::Human(human()),
+            source(SOURCE),
+            None,
+            crate::core::Payload::NodeAdded {
+                map: crate::core::testing::map_id("debates"),
+                node: crate::core::NodeId::new(),
+                kind: "goal".to_string(),
+                name: "Ship".to_string(),
+                properties: Default::default(),
+                sources: Vec::new(),
+                seq: 1,
+            },
+        ),
+    ];
     let err = App::new(
         Arc::new(Silent),
         Arc::new(FakeCatalog::default()),
@@ -1121,7 +1162,7 @@ fn a_map_that_does_not_fold_fails_at_open() {
 #[test]
 fn a_tool_commit_the_transcript_cannot_fold_becomes_the_result_not_a_crash() {
     let dangling = Payload::EdgeAdded {
-        map: "debates".to_string(),
+        map: crate::core::testing::map_id("debates"),
         kind: "backs".to_string(),
         from: crate::core::NodeId::new(),
         to: crate::core::NodeId::new(),
@@ -1133,9 +1174,9 @@ fn a_tool_commit_the_transcript_cannot_fold_becomes_the_result_not_a_crash() {
     run_one_tool(&mut app, "search_events", "{}");
 
     let events = app.events();
-    assert_eq!(events.len(), 3);
+    assert_eq!(events.len(), 5);
     assert!(matches!(
-        events[2].payload(),
+        events.last().unwrap().payload(),
         Payload::ToolResulted { content } if content.contains("does not fit its map")
     ));
 }

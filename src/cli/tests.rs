@@ -32,6 +32,14 @@ fn no_checkout() -> &'static Path {
     Path::new(ROOT)
 }
 
+fn map_created(name: &str) -> Event {
+    Event::map_created(
+        crate::core::testing::map_id(name),
+        name.to_string(),
+        source("test"),
+    )
+}
+
 #[test]
 fn a_publish_citing_a_cause_records_it() {
     let log = FakeLog::default();
@@ -438,7 +446,7 @@ fn a_prop_with_no_equals_sign_is_rejected() {
 }
 
 fn map_with_a_verdict() -> Map {
-    let mut map = Map::empty(crate::core::testing::debates());
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), crate::core::testing::debates());
     map.apply(
         Mutation::AddNode {
             kind: "verdict".to_string(),
@@ -550,9 +558,12 @@ fn maps_reflect_appends_exactly_one_reflection_started_event_naming_the_map() {
     .unwrap();
 
     let events = log.load().unwrap();
-    assert_eq!(events.len(), 1);
-    match events[0].payload() {
-        Payload::ReflectionStarted { map } => assert_eq!(map, "debates"),
+    assert_eq!(events.len(), 2);
+    let Payload::MapCreated { map: created, .. } = events[0].payload() else {
+        panic!("expected map.created")
+    };
+    match events[1].payload() {
+        Payload::ReflectionStarted { map } => assert_eq!(map, created),
         _ => panic!("expected reflection.started"),
     }
 }
@@ -717,7 +728,7 @@ fn a_map_write_commits_as_the_actor_given_and_defaults_to_human() {
     maps_add_node(args, &log, &schemas(), &source("cli"), human(), None).unwrap();
 
     let events = log.load().unwrap();
-    assert!(events[0].actor() == Actor::Agent);
+    assert!(events.last().unwrap().actor() == Actor::Agent);
     let default = Cli::try_parse_from([
         "percept",
         "maps",
@@ -756,7 +767,7 @@ fn maps_add_node_carries_the_cause_it_is_given() {
     maps_add_node(args, &log, &schemas(), &source("cli"), human(), Some(cause)).unwrap();
 
     let events = log.load().unwrap();
-    assert_eq!(events[0].causation_id(), Some(cause));
+    assert_eq!(events.last().unwrap().causation_id(), Some(cause));
 }
 
 fn change_node_args(node: &str, why: Option<&str>) -> ChangeNodeArgs {
@@ -777,7 +788,7 @@ fn change_node_args(node: &str, why: Option<&str>) -> ChangeNodeArgs {
 fn maps_change_node_with_why_appends_a_node_changed_whose_why_is_set() {
     let added = node_added_by(Actor::Agent, "verdict", "Rust");
     let node = node_id(&added);
-    let log = FakeLog::seeded(vec![added]);
+    let log = FakeLog::seeded(vec![map_created("debates"), added]);
 
     maps_change_node(
         change_node_args("verdict:Rust", Some("never proposed")),
@@ -790,14 +801,14 @@ fn maps_change_node_with_why_appends_a_node_changed_whose_why_is_set() {
     .unwrap();
 
     let events = log.load().unwrap();
-    match events[1].payload() {
+    match events[2].payload() {
         Payload::NodeChanged { node: changed, why, .. } => {
             assert!(*changed == node);
             assert_eq!(why.as_deref(), Some("never proposed"));
         }
         _ => panic!("expected NodeChanged"),
     }
-    assert!(matches!(events[1].actor(), Actor::Human(_)));
+    assert!(matches!(events[2].actor(), Actor::Human(_)));
 }
 
 #[test]
@@ -822,7 +833,7 @@ fn maps_change_node_refuses_a_node_the_map_does_not_hold() {
 #[test]
 fn maps_change_node_refuses_an_agent_s_property_change_of_a_node_a_human_wrote() {
     let added = node_added("claim", "wasm render");
-    let log = FakeLog::seeded(vec![added]);
+    let log = FakeLog::seeded(vec![map_created("debates"), added]);
 
     let mut args = change_node_args("claim:wasm render", None);
     args.target.actor = "agent".to_string();
@@ -830,7 +841,7 @@ fn maps_change_node_refuses_an_agent_s_property_change_of_a_node_a_human_wrote()
     let err = maps_change_node(args, &log, &schemas(), &source("cli"), None, None).err().unwrap();
 
     assert!(err.to_string().contains("was written by"), "{err}");
-    assert_eq!(log.load().unwrap().len(), 1);
+    assert_eq!(log.load().unwrap().len(), 2);
 }
 
 fn record_args(map: &str) -> RecordArgs {
@@ -860,12 +871,8 @@ fn a_document_writes_its_nodes_and_edges_in_order() {
     .unwrap();
 
     let events = log.load().unwrap();
-    assert_eq!(events.len(), 3);
-    let map = Map::fold(
-        crate::core::testing::debates(),
-        &log.load().unwrap(),
-    )
-    .unwrap();
+    assert_eq!(events.len(), 4);
+    let map = mapstore::fold_map(&log, &schemas(), "debates", Path::new(ROOT)).unwrap();
     assert!(map.find("topic", "Does record work?").is_some());
     let verdict = map.find("verdict", "yes").unwrap();
     assert_eq!(verdict.properties.get("why").unwrap(), "it ran");
@@ -895,7 +902,7 @@ fn a_record_takes_the_turns_cause_when_none_is_given() {
 
     let events = log.load().unwrap();
     assert!(!events.is_empty());
-    for event in &events {
+    for event in events.iter().skip(1) {
         assert_eq!(event.causation_id(), Some(cause));
     }
 }
@@ -952,9 +959,9 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
     // The `cites` event is published before the node it cites - `record`
     // writes a node's cites first - so it lands second, right after the
     // topic node.
-    assert!(matches!(events[1].payload(), Payload::FileCited { .. }));
-    let cite_id = events[1].id();
-    let map = Map::fold(crate::core::testing::debates(), &events).unwrap();
+    assert!(matches!(events[2].payload(), Payload::FileCited { .. }));
+    let cite_id = events[2].id();
+    let map = mapstore::fold_map(&log, &schemas(), "debates", Path::new(ROOT)).unwrap();
     let verdict = map.find("verdict", "yes").unwrap();
     assert!(verdict.sources.contains(&cite_id));
 }
@@ -962,6 +969,7 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
 #[test]
 fn a_ref_to_an_existing_short_id_resolves() {
     let log = FakeLog::default();
+    log.append(&map_created("debates")).unwrap();
     log.append(&node_added("topic", "Does record work?")).unwrap();
     let document = "verdict \"yes\"\n  why \"it ran\"\n  settles t1\n";
     record_document(
@@ -976,8 +984,7 @@ fn a_ref_to_an_existing_short_id_resolves() {
     )
     .unwrap();
 
-    let events = log.load().unwrap();
-    let map = Map::fold(crate::core::testing::debates(), &events).unwrap();
+    let map = mapstore::fold_map(&log, &schemas(), "debates", Path::new(ROOT)).unwrap();
     assert_eq!(map.edges().len(), 1);
     assert_eq!(map.edges()[0].kind, "settles");
 }
@@ -1115,7 +1122,7 @@ fn a_short_id_document_changes_the_node_and_records_node_changed() {
         Payload::NodeChanged { .. }
     ));
 
-    let map = Map::fold(crate::core::testing::chores(), &events).unwrap();
+    let map = mapstore::fold_map(&log, &schemas(), "chores", Path::new(ROOT)).unwrap();
     let chore = map.find("chore", "cancel a turn").unwrap();
     assert_eq!(chore.properties.get("state").unwrap(), "done");
     assert_eq!(chore.properties.get("outcome").unwrap(), "1f1a9a9: done");
@@ -1192,7 +1199,7 @@ fn a_record_why_line_under_an_existing_node_sets_the_changes_why_not_a_property(
         _ => panic!("expected NodeChanged"),
     }
 
-    let map = Map::fold(crate::core::testing::chores(), &events).unwrap();
+    let map = mapstore::fold_map(&log, &schemas(), "chores", Path::new(ROOT)).unwrap();
     let chore = map.find("chore", "cancel a turn").unwrap();
     assert_eq!(chore.properties.get("why").unwrap(), "Esc drops the session");
 }

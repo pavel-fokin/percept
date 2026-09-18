@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::{
-    Actor, Change, Edge, Event, EventId, EventLog, Fragment, Map, MapError, MapReader, Mutation,
-    Node, NodeId, Payload, Schemas, Written,
+    map_id_for, Actor, Change, Edge, Event, EventId, EventLog, Fragment, Map, MapError, MapId,
+    MapReader, Mutation, Node, NodeId, Payload, Schemas, Written,
 };
 use crate::store::{ids, parse_event_id};
 
@@ -32,13 +32,21 @@ pub fn paths(events: &[Event]) -> Vec<PathBuf> {
 
 /// The map `name` names, folded from those of `events` whose source
 /// ran at `path`.
+/// A schema with no `map.created` event yet folds empty, under a
+/// placeholder identity nothing else refers to - the same "not a map
+/// yet" reading `Schemas::fold_all` gives a schema it skips, so a
+/// reader that asks for one map by name sees an empty map rather than
+/// an error mid-session.
 pub fn fold_map_at(
     schemas: &Schemas,
     name: &str,
     events: &[Event],
     path: &Path,
 ) -> Result<Map, Box<dyn std::error::Error>> {
-    Ok(Map::fold(schemas.find(name)?, of_path(events, path))?)
+    let schema = schemas.find(name)?;
+    let own = of_path(events, path);
+    let id = map_id_for(name, own.clone())?.unwrap_or_else(MapId::new);
+    Ok(Map::fold(id, schema, own)?)
 }
 
 /// `fold_map_at` over every event in `log`.
@@ -80,30 +88,29 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    pub fn load(
-        log: &dyn EventLog,
+    /// Opens an existing map for a write, or mints its identity and
+    /// returns the `map.created` event that must commit with the write.
+    /// Called only inside an event-log computed append, so creation and
+    /// the first mutation share one lock and one batch.
+    pub fn for_write(
         schemas: &Schemas,
         name: &str,
-        path: &Path,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        Self::from_events(schemas, name, path, log.load()?)
-    }
-
-    /// `load`, given the events already read rather than reading them
-    /// itself - what `revise` and `commit` share, so a caller holding
-    /// events `EventLog::append_computed` handed it under its lock
-    /// folds them the same way a fresh `load` would. `ids` is taken
-    /// from every event, not only `path`'s: a node may cite an event
-    /// from any path.
-    fn from_events(
-        schemas: &Schemas,
-        name: &str,
-        path: &Path,
+        source: &crate::core::Source,
         events: Vec<crate::core::Event>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
-        let map = fold_map_at(schemas, name, &events, path)?;
+    ) -> Result<(Option<Event>, Self), Box<dyn std::error::Error>> {
+        let schema = schemas.find(name)?;
+        let own = of_path(&events, &source.path);
+        let existing = map_id_for(name, own.clone())?;
+        let (id, created) = match existing {
+            Some(id) => (id, None),
+            None => {
+                let id = crate::core::MapId::new();
+                (id, Some(Event::map_created(id, name.to_string(), source.clone())))
+            }
+        };
+        let map = Map::fold(id, schema, own)?;
         let ids = events.iter().map(|event| event.id().as_uuid()).collect();
-        Ok(Self { map, ids })
+        Ok((created, Self { map, ids }))
     }
 
     /// Each cited id as an `EventId` the log carries. An id the log
@@ -132,31 +139,12 @@ impl Snapshot {
     }
 }
 
-/// `commit`'s check-and-apply, given the events its closure was handed
-/// by `EventLog::append_computed` under the log's lock: `sources`
-/// resolved against them, the `Mutation` built from them checked and
-/// applied to their fold.
-fn revised(
-    schemas: &Schemas,
-    name: &str,
-    path: &Path,
-    events: Vec<crate::core::Event>,
-    sources: &[String],
-    actor: Actor,
-    mutation: impl FnOnce(Vec<EventId>) -> Mutation,
-) -> Result<Payload, Box<dyn std::error::Error>> {
-    let mut snapshot = Snapshot::from_events(schemas, name, path, events)?;
-    let sources = snapshot.resolve(sources)?;
-    let mutation = mutation(sources);
-    Ok(snapshot.apply(mutation, actor)?)
-}
-
 /// One change to the map `name` names, folded at `source`'s path and
 /// minted and committed atomically:
-/// `EventLog::append_computed` hands `compute` every event already in
+/// `EventLog::append_batch_computed` hands `compute` every event already in
 /// the log under its lock, `revised` checks and applies `mutation`
 /// against that exact fold, and the event built from the payload it
-/// returns is appended before any other writer's own `append_computed`
+/// returns is appended before any other writer's own computed append
 /// call can run. Two writers each loading the log on their own could
 /// both count the same kind's existing nodes and mint the same short
 /// id; this is the seam that stops them.
@@ -172,10 +160,17 @@ pub fn commit(
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
 ) -> Result<crate::core::Event, Box<dyn std::error::Error>> {
     let (name, source) = (name.to_string(), source.clone());
-    log.append_computed(Box::new(move |events| {
-        let payload = revised(schemas, &name, &source.path, events, sources, actor, mutation)?;
-        Ok(crate::core::Event::new(actor, source, causation, payload))
-    }))
+    let batch = log.append_batch_computed(Box::new(move |events| {
+        let (created, mut snapshot) = Snapshot::for_write(schemas, &name, &source, events)?;
+        let sources = snapshot.resolve(sources)?;
+        let payload = snapshot.apply(mutation(sources), actor)?;
+        let changed = crate::core::Event::new(actor, source, causation, payload);
+        Ok(created.into_iter().chain(std::iter::once(changed)).collect())
+    }))?;
+    batch
+        .last()
+        .cloned()
+        .ok_or_else(|| "map write produced no event".into())
 }
 
 /// One batch of changes to the map `name` names, folded at `source`'s
@@ -195,15 +190,63 @@ pub fn commit_batch(
     source: &crate::core::Source,
     build: impl FnOnce(&mut Snapshot) -> Result<Vec<crate::core::Event>, Box<dyn std::error::Error>>,
 ) -> Result<Vec<crate::core::Event>, Box<dyn std::error::Error>> {
-    let (name, path) = (name.to_string(), source.path.clone());
+    let name = name.to_string();
+    let source = source.clone();
     log.append_batch_computed(Box::new(move |events| {
-        let mut snapshot = Snapshot::from_events(schemas, &name, &path, events)?;
-        build(&mut snapshot)
+        let (created, mut snapshot) = Snapshot::for_write(schemas, &name, &source, events)?;
+        let changes = build(&mut snapshot)?;
+        Ok(created.into_iter().chain(changes).collect())
     }))
+}
+
+/// Ensures every declared schema has one map identity at `source`'s
+/// path. Existing identities are reused; all missing creations commit
+/// under one lock, so repeating the operation adds nothing.
+pub fn ensure_maps(
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    source: &crate::core::Source,
+) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
+    let source = source.clone();
+    log.append_batch_computed(Box::new(move |events| {
+        let own: Vec<&Event> = of_path(&events, &source.path).collect();
+        let mut created = Vec::new();
+        for schema in schemas.folded() {
+            if map_id_for(&schema.name, own.iter().copied())?.is_none() {
+                created.push(Event::map_created(
+                    crate::core::MapId::new(),
+                    schema.name.clone(),
+                    source.clone(),
+                ));
+            }
+        }
+        Ok(created)
+    }))
+}
+
+/// Opens a reflection, creating its map in the same batch when this is
+/// the first write to that schema at this path.
+pub fn start_reflection(
+    log: &dyn EventLog,
+    schemas: &Schemas,
+    name: &str,
+    source: &crate::core::Source,
+) -> Result<Event, Box<dyn std::error::Error>> {
+    let (name, source) = (name.to_string(), source.clone());
+    let batch = log.append_batch_computed(Box::new(move |events| {
+        let (created, snapshot) = Snapshot::for_write(schemas, &name, &source, events)?;
+        let reflection = Event::reflection_started(snapshot.map.id(), source);
+        Ok(created.into_iter().chain(std::iter::once(reflection)).collect())
+    }))?;
+    batch
+        .last()
+        .cloned()
+        .ok_or_else(|| "reflection produced no event".into())
 }
 
 #[derive(Serialize)]
 struct MapLine<'a> {
+    id: String,
     map: &'a str,
     purpose: &'a str,
     nodes: usize,
@@ -288,6 +331,7 @@ struct EdgeLine<'a> {
 /// One line naming a map and its size, for `maps list`.
 pub fn encode_map(map: &Map) -> String {
     serde_json::to_string(&MapLine {
+        id: map.id().as_uuid().to_string(),
         map: &map.schema().name,
         purpose: &map.schema().purpose,
         nodes: map.nodes().len(),

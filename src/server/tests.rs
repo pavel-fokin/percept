@@ -220,7 +220,7 @@ async fn api_maps_cuts_the_named_project_root_around_a_node() {
         },
         None,
         Payload::NodeAdded {
-            map: "decisions".to_string(),
+            map: crate::core::testing::map_id("decisions"),
             node: crate::core::NodeId::new(),
             kind: "concept".to_string(),
             name: "the rule".to_string(),
@@ -229,7 +229,15 @@ async fn api_maps_cuts_the_named_project_root_around_a_node() {
             seq: 0,
         },
     );
-    let (_log, addr) = spawn_over(vec![concept]).await;
+    let created = crate::core::Event::map_created(
+        crate::core::testing::map_id("decisions"),
+        "decisions".to_string(),
+        crate::core::Source {
+            name: "percept".to_string(),
+            path: fixture.path().to_path_buf(),
+        },
+    );
+    let (_log, addr) = spawn_over(vec![created, concept]).await;
 
     let path = format!("/api/maps/decisions?root={}", fixture.path().to_string_lossy());
     let (status, body) = get_json(addr, &path).await;

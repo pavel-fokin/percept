@@ -456,6 +456,19 @@ fn resolve_node<'a>(map: &'a Map, s: &str) -> Result<&'a Node, Box<dyn std::erro
     Ok(map.node(id).expect("resolve_str returns a live node's id"))
 }
 
+/// One fold of `name`, taken before a write's own atomic commit
+/// re-folds it - just enough to resolve refs against, so a caller
+/// that only needs the map never has to name the discarded creation
+/// event `Snapshot::for_write` also returns.
+fn map_for(
+    schemas: &Schemas,
+    name: &str,
+    source: &crate::core::Source,
+    log: &dyn EventLog,
+) -> Result<mapstore::Snapshot, Box<dyn std::error::Error>> {
+    Ok(mapstore::Snapshot::for_write(schemas, name, source, log.load()?)?.1)
+}
+
 /// Appends one event built from `args` to `log`. `store` owns the
 /// decode, so the CLI only parses flags. `root` is the writer's project
 /// root, resolved once in `main`; `args.source` only names the writer,
@@ -732,8 +745,7 @@ pub fn maps_reflect(
     checkout: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let schema = schemas.find(&args.map)?;
-    let event = Event::reflection_started(args.map, source.clone());
-    log.append(&event)?;
+    let event = mapstore::start_reflection(log, schemas, &args.map, source)?;
     print_lines(std::iter::once(event.id().as_uuid().to_string()))?;
     if let Some(rules) = mapstore::for_schema_moment(&schema, checkout, mapstore::REFLECTION_STARTED) {
         print_text(&rules)?;
@@ -832,9 +844,9 @@ pub fn maps_add_edge(
     me: Option<crate::core::HumanId>,
     cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let map = mapstore::fold_map(log, schemas, &args.target.map, &source.path)?;
-    let from = resolve_ref(&map, &args.from)?;
-    let to = resolve_ref(&map, &args.to)?;
+    let snapshot = map_for(schemas, &args.target.map, source, log)?;
+    let from = resolve_ref(snapshot.map(), &args.from)?;
+    let to = resolve_ref(snapshot.map(), &args.to)?;
     write(args.target, log, schemas, source, me, cause, |sources| {
         Mutation::AddEdge {
             kind: args.kind,
@@ -855,8 +867,8 @@ pub fn maps_remove_node(
     me: Option<crate::core::HumanId>,
     cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let map = mapstore::fold_map(log, schemas, &args.target.map, &source.path)?;
-    let node = resolve_ref(&map, &args.node)?;
+    let snapshot = map_for(schemas, &args.target.map, source, log)?;
+    let node = resolve_ref(snapshot.map(), &args.node)?;
     write(args.target, log, schemas, source, me, cause, |sources| {
         Mutation::RemoveNode {
             node,
@@ -877,9 +889,9 @@ pub fn maps_remove_edge(
     cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let RemoveEdgeArgs { edge, why } = args;
-    let map = mapstore::fold_map(log, schemas, &edge.target.map, &source.path)?;
-    let from = resolve_ref(&map, &edge.from)?;
-    let to = resolve_ref(&map, &edge.to)?;
+    let snapshot = map_for(schemas, &edge.target.map, source, log)?;
+    let from = resolve_ref(snapshot.map(), &edge.from)?;
+    let to = resolve_ref(snapshot.map(), &edge.to)?;
     write(edge.target, log, schemas, source, me, cause, |sources| {
         Mutation::RemoveEdge {
             kind: edge.kind,
@@ -910,8 +922,8 @@ pub fn maps_change_node(
         prop,
         why,
     } = args;
-    let map = mapstore::fold_map(log, schemas, &target.map, &source.path)?;
-    let node = resolve_ref(&map, &node)?;
+    let snapshot = map_for(schemas, &target.map, source, log)?;
+    let node = resolve_ref(snapshot.map(), &node)?;
     let payload = write(target, log, schemas, source, me, cause, |sources| {
         Mutation::ChangeNode {
             node,

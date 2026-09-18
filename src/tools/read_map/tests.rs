@@ -1,12 +1,20 @@
 use std::path::PathBuf;
 
 use super::*;
-use crate::core::testing::{edge_added, node_added, node_added_at, schemas, FakeLog, ROOT};
-use crate::core::Event;
+use crate::core::testing::{
+    edge_added, map_id, node_added, node_added_at, schemas, source, FakeLog, ROOT,
+};
+use crate::core::{Event, EventLog};
 use crate::mapstore::LogMaps;
 
 /// A `read_map` over the log-folded maps, the way `main` wires it.
 fn tool(log: FakeLog) -> ReadMap {
+    log.append(&Event::map_created(
+        map_id("debates"),
+        "debates".to_string(),
+        source("init"),
+    ))
+    .unwrap();
     ReadMap::new(Arc::new(LogMaps::new(
         Arc::new(log),
         Arc::new(schemas()),

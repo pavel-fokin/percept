@@ -7,7 +7,7 @@
 use std::fmt;
 
 use super::{EdgeEnd, NodeId, NodeRef};
-use crate::core::{Actor, EventId};
+use crate::core::{Actor, EventId, MapId};
 
 /// Why a mutation, or a stored event, doesn't fit its map. Each names
 /// the rule and the value that broke it. `apply` checks a mutation
@@ -21,6 +21,11 @@ pub enum MapError {
         /// Every map `Schemas` knows, `, `-joined - what the error
         /// offers in place of a global registry.
         maps: String,
+    },
+    DuplicateMapIdentity {
+        name: String,
+        first: MapId,
+        second: MapId,
     },
     UnknownNodeKind {
         map: String,
@@ -131,6 +136,16 @@ impl fmt::Display for MapError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownMap { name, maps } => write!(f, "no map named {name:?}; maps are {maps}"),
+            Self::DuplicateMapIdentity {
+                name,
+                first,
+                second,
+            } => write!(
+                f,
+                "map {name:?} has two identities: {} and {}",
+                first.as_uuid(),
+                second.as_uuid()
+            ),
             Self::UnknownNodeKind { map, kinds, kind } => write!(
                 f,
                 "no node kind {kind:?} in map {map:?}; kinds are {kinds}"
