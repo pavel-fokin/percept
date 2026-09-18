@@ -140,17 +140,13 @@ pub enum Payload {
     /// `supersedes` edge. `name` is `Some` only on a rename;
     /// `properties` are merged into the node's own, last write wins, a
     /// key present here replacing that key alone; `sources` join the
-    /// node's. `why` is the writer's reason, when they gave one - the
-    /// fold carries it in the node's last `Change`. A change naming
-    /// neither `name` nor a property, only `why`, is a comment: legal,
-    /// and it still becomes the node's last change.
+    /// node's.
     NodeChanged {
         map: MapId,
         node: NodeId,
         name: Option<String>,
         properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
-        why: Option<String>,
     },
     /// A node removed from a cognitive map, with why.
     NodeRemoved {

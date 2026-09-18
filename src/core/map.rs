@@ -97,14 +97,11 @@ pub struct Edge {
     pub history: Vec<Change>,
 }
 
-/// One write that reached a node or an edge: who, when, and on what
-/// grounds. `why` is `None` on an addition - a node's own why is a
-/// property - and on a plain edit that gave none.
+/// One write that reached a node or an edge: who and when.
 #[derive(Clone, Debug)]
 pub struct Change {
     pub actor: Actor,
     pub at: Timestamp,
-    pub why: Option<String>,
 }
 
 /// A node or an edge that keeps every write that reached it. Default
@@ -223,7 +220,6 @@ pub enum Mutation {
         name: Option<String>,
         properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
-        why: Option<String>,
     },
     RemoveNode {
         node: NodeRef,

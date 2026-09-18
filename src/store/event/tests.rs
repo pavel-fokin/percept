@@ -549,7 +549,6 @@ fn node_changed_round_trips_through_json() {
             name: Some("cancel a turn cleanly".to_string()),
             properties: properties.clone(),
             sources: Vec::new(),
-            why: Some("clearer".to_string()),
         },
     );
 
@@ -557,7 +556,6 @@ fn node_changed_round_trips_through_json() {
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "node.changed");
     assert_eq!(wire.payload["name"], "cancel a turn cleanly");
-    assert_eq!(wire.payload["why"], "clearer");
     let restored = crate::store::from_wire(wire).unwrap();
 
     match restored.payload() {
@@ -567,44 +565,15 @@ fn node_changed_round_trips_through_json() {
             name,
             properties: restored_properties,
             sources,
-            why,
         } => {
             assert_eq!(*map, crate::core::testing::map_id("tasks"));
             assert!(*restored_node == node);
             assert_eq!(name.as_deref(), Some("cancel a turn cleanly"));
             assert_eq!(*restored_properties, properties);
             assert!(sources.is_empty());
-            assert_eq!(why.as_deref(), Some("clearer"));
         }
         _ => panic!("expected NodeChanged"),
     }
-}
-
-#[test]
-fn a_node_changed_with_no_why_omits_it_on_the_wire() {
-    let node = NodeId::new();
-    let original = crate::core::Event::restore(
-        EventId::new(),
-        Actor::Agent,
-        source("cli"),
-        None,
-        Timestamp::now(),
-        Payload::NodeChanged {
-            map: crate::core::testing::map_id("tasks"),
-            node,
-            name: None,
-            properties: BTreeMap::new(),
-            sources: Vec::new(),
-            why: None,
-        },
-    );
-
-    let json = serde_json::to_string(&Event::from(&original)).unwrap();
-    let wire: Event = serde_json::from_str(&json).unwrap();
-    assert!(wire.payload.get("why").is_none());
-
-    let restored = crate::store::from_wire(wire).unwrap();
-    assert!(matches!(restored.payload(), Payload::NodeChanged { why: None, .. }));
 }
 
 #[test]

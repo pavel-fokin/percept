@@ -277,27 +277,24 @@ impl Stamp {
     }
 }
 
-/// `Stamp` plus a node's last change: who, and why, when the writer
-/// gave one - beside `actor`, the way the node itself carries them
-/// beside its own. `NodeLine`'s form of `Stamp`; an edge is never
-/// changed yet, so `encode_edge` still uses `Stamp` alone.
+/// `Stamp` plus who last changed a node - beside `actor`, the way the
+/// node itself carries them beside its own. `NodeLine`'s form of
+/// `Stamp`; an edge is never changed yet, so `encode_edge` still uses
+/// `Stamp` alone.
 #[derive(Serialize)]
-struct NodeStamp<'a> {
+struct NodeStamp {
     #[serde(flatten)]
     stamp: Stamp,
     changed_by: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    changed_why: Option<&'a str>,
 }
 
-impl<'a> NodeStamp<'a> {
+impl NodeStamp {
     /// `Some` when `stamped`, else `None` - see `Stamp::of`.
-    fn of(node: &'a Node, stamped: bool) -> Option<Self> {
+    fn of(node: &Node, stamped: bool) -> Option<Self> {
         let changed = node.changed();
         Stamp::of(node.added(), stamped).map(|stamp| Self {
             stamp,
             changed_by: changed.actor.name(),
-            changed_why: changed.why.as_deref(),
         })
     }
 }
@@ -315,7 +312,7 @@ struct NodeLine<'a> {
     properties: &'a BTreeMap<String, String>,
     sources: Vec<String>,
     #[serde(flatten)]
-    stamp: Option<NodeStamp<'a>>,
+    stamp: Option<NodeStamp>,
 }
 
 #[derive(Serialize)]

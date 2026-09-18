@@ -293,7 +293,6 @@ fn node_changed(
         name: name.map(str::to_string),
         properties,
         sources: Vec::new(),
-        why: None,
     })
 }
 
@@ -378,24 +377,11 @@ fn add_chore(name: &str) -> Mutation {
 }
 
 fn change_node(kind: &str, name: &str, rename: Option<&str>, properties: BTreeMap<String, String>) -> Mutation {
-    change_node_why(kind, name, rename, properties, None)
-}
-
-/// `change_node`, also carrying `why` - for a test about the comment
-/// change W6 always allows.
-fn change_node_why(
-    kind: &str,
-    name: &str,
-    rename: Option<&str>,
-    properties: BTreeMap<String, String>,
-    why: Option<&str>,
-) -> Mutation {
     Mutation::ChangeNode {
         node: node_ref(kind, name),
         name: rename.map(str::to_string),
         properties,
         sources: Vec::new(),
-        why: why.map(str::to_string),
     }
 }
 
@@ -1141,7 +1127,12 @@ fn after_the_humans_why_the_agent_may_not_rename_or_remove_the_node() {
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
     map.apply(add_chore("cancel a turn"), Actor::Agent).unwrap();
     map.apply(
-        change_node_why("chore", "cancel a turn", None, BTreeMap::new(), Some("wrong")),
+        change_node(
+            "chore",
+            "cancel a turn",
+            None,
+            BTreeMap::from([("why".to_string(), "wrong".to_string())]),
+        ),
         Actor::Human(human()),
     )
     .unwrap();
@@ -1174,7 +1165,12 @@ fn after_the_humans_why_the_agent_may_still_set_the_nodes_state() {
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
     map.apply(add_chore("cancel a turn"), Actor::Agent).unwrap();
     map.apply(
-        change_node_why("chore", "cancel a turn", None, BTreeMap::new(), Some("wrong")),
+        change_node(
+            "chore",
+            "cancel a turn",
+            None,
+            BTreeMap::from([("why".to_string(), "wrong".to_string())]),
+        ),
         Actor::Human(human()),
     )
     .unwrap();
@@ -1195,32 +1191,36 @@ fn after_the_humans_why_the_agent_may_still_set_the_nodes_state() {
 }
 
 #[test]
-fn a_change_carrying_only_why_becomes_the_nodes_last_change() {
+fn a_change_becomes_the_nodes_last_change() {
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
     let me = human();
     map.apply(add_chore("cancel a turn"), Actor::Agent).unwrap();
     let added_at = map.find("chore", "cancel a turn").unwrap().changed().at;
 
     map.apply(
-        change_node_why("chore", "cancel a turn", None, BTreeMap::new(), Some("wrong")),
+        change_node(
+            "chore",
+            "cancel a turn",
+            None,
+            BTreeMap::from([("why".to_string(), "wrong".to_string())]),
+        ),
         Actor::Human(me),
     )
     .unwrap();
 
     let node = map.find("chore", "cancel a turn").unwrap();
     assert_eq!(node.changed().actor, Actor::Human(me));
-    assert_eq!(node.changed().why.as_deref(), Some("wrong"));
     assert!(node.changed().at >= added_at);
 }
 
 #[test]
-fn an_added_nodes_only_change_is_its_addition_with_no_why() {
+fn an_added_nodes_only_change_is_its_addition() {
     let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     map.apply(add_node("verdict", "Rust"), Actor::Agent).unwrap();
 
     let node = map.find("verdict", "Rust").unwrap();
     assert_eq!(node.changed().actor, Actor::Agent);
-    assert_eq!(node.changed().why, None);
+    assert_eq!(node.history.len(), 1);
 }
 
 #[test]
@@ -1826,7 +1826,12 @@ fn a_state_set_from_below_does_not_lift_the_lock_the_humans_change_put_on_a_node
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
     map.apply(add_chore("cancel a turn"), Actor::Agent).unwrap();
     map.apply(
-        change_node_why("chore", "cancel a turn", None, BTreeMap::new(), Some("wrong")),
+        change_node(
+            "chore",
+            "cancel a turn",
+            None,
+            BTreeMap::from([("why".to_string(), "wrong".to_string())]),
+        ),
         Actor::Human(human()),
     )
     .unwrap();
@@ -1894,7 +1899,12 @@ fn removing_the_agents_own_edge_off_a_node_the_human_touched_is_refused() {
     )
     .unwrap();
     map.apply(
-        change_node_why("verdict", "Rust", None, BTreeMap::new(), Some("does not settle it")),
+        change_node(
+            "verdict",
+            "Rust",
+            None,
+            BTreeMap::from([("why".to_string(), "does not settle it".to_string())]),
+        ),
         Actor::Human(human()),
     )
     .unwrap();
@@ -1928,7 +1938,7 @@ fn removing_the_agents_own_node_is_refused_while_its_edge_hangs_on_a_node_the_hu
     )
     .unwrap();
     map.apply(
-        change_node_why("topic", "Which language?", None, BTreeMap::new(), Some("still open")),
+        change_node("topic", "Which language?", Some("Which language, still open?"), BTreeMap::new()),
         Actor::Human(human()),
     )
     .unwrap();
@@ -1946,22 +1956,6 @@ fn removing_the_agents_own_node_is_refused_while_its_edge_hangs_on_a_node_the_hu
         .unwrap();
 
     assert!(matches!(err, MapError::NotYours { .. }), "{err}");
-}
-
-#[test]
-fn a_blank_why_is_refused_on_a_change() {
-    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
-    map.apply(add_node("verdict", "Rust"), Actor::Agent).unwrap();
-
-    let err = map
-        .apply(
-            change_node_why("verdict", "Rust", None, BTreeMap::new(), Some("  ")),
-            Actor::Agent,
-        )
-        .err()
-        .unwrap();
-
-    assert!(matches!(err, MapError::BlankWhy), "{err}");
 }
 
 #[test]

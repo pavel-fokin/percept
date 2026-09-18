@@ -770,7 +770,7 @@ fn maps_add_node_carries_the_cause_it_is_given() {
     assert_eq!(events.last().unwrap().causation_id(), Some(cause));
 }
 
-fn change_node_args(node: &str, why: Option<&str>) -> ChangeNodeArgs {
+fn change_node_args(node: &str) -> ChangeNodeArgs {
     ChangeNodeArgs {
         target: MapArgs {
             map: "debates".to_string(),
@@ -780,31 +780,28 @@ fn change_node_args(node: &str, why: Option<&str>) -> ChangeNodeArgs {
         node: node.to_string(),
         name: None,
         prop: Vec::new(),
-        why: why.map(str::to_string),
     }
 }
 
 #[test]
-fn maps_change_node_with_why_appends_a_node_changed_whose_why_is_set() {
+fn maps_change_node_with_prop_why_sets_the_nodes_why_property() {
     let added = node_added_by(Actor::Agent, "verdict", "Rust");
     let node = node_id(&added);
     let log = FakeLog::seeded(vec![map_created("debates"), added]);
 
-    maps_change_node(
-        change_node_args("verdict:Rust", Some("never proposed")),
-        &log,
-        &schemas(),
-        &source("cli"),
-        human(),
-        None,
-    )
-    .unwrap();
+    let mut args = change_node_args("verdict:Rust");
+    args.prop = vec![("why".to_string(), "never proposed".to_string())];
+    maps_change_node(args, &log, &schemas(), &source("cli"), human(), None).unwrap();
 
     let events = log.load().unwrap();
     match events[2].payload() {
-        Payload::NodeChanged { node: changed, why, .. } => {
+        Payload::NodeChanged {
+            node: changed,
+            properties,
+            ..
+        } => {
             assert!(*changed == node);
-            assert_eq!(why.as_deref(), Some("never proposed"));
+            assert_eq!(properties.get("why").map(String::as_str), Some("never proposed"));
         }
         _ => panic!("expected NodeChanged"),
     }
@@ -816,7 +813,7 @@ fn maps_change_node_refuses_a_node_the_map_does_not_hold() {
     let log = FakeLog::default();
 
     let err = maps_change_node(
-        change_node_args("verdict:Rust", Some("never proposed")),
+        change_node_args("verdict:Rust"),
         &log,
         &schemas(),
         &source("cli"),
@@ -835,7 +832,7 @@ fn maps_change_node_refuses_an_agent_s_property_change_of_a_node_a_human_wrote()
     let added = node_added("claim", "wasm render");
     let log = FakeLog::seeded(vec![map_created("debates"), added]);
 
-    let mut args = change_node_args("claim:wasm render", None);
+    let mut args = change_node_args("claim:wasm render");
     args.target.actor = "agent".to_string();
     args.prop = vec![("why".to_string(), "faster paint".to_string())];
     let err = maps_change_node(args, &log, &schemas(), &source("cli"), None, None).err().unwrap();
@@ -1164,7 +1161,7 @@ fn a_change_to_an_unknown_short_id_is_an_error() {
 }
 
 #[test]
-fn a_record_why_line_under_an_existing_node_sets_the_changes_why_not_a_property() {
+fn a_record_why_line_under_a_change_block_sets_the_nodes_why_property() {
     let log = FakeLog::default();
     record_document(
         "chore \"cancel a turn\"\n  why \"Esc drops the session\"\n  state \"open\"\n",
@@ -1192,16 +1189,15 @@ fn a_record_why_line_under_an_existing_node_sets_the_changes_why_not_a_property(
 
     let events = log.load().unwrap();
     match events.last().unwrap().payload() {
-        Payload::NodeChanged { why, properties, .. } => {
-            assert_eq!(why.as_deref(), Some("never proposed"));
-            assert!(!properties.contains_key("why"), "{properties:?}");
+        Payload::NodeChanged { properties, .. } => {
+            assert_eq!(properties.get("why").map(String::as_str), Some("never proposed"));
         }
         _ => panic!("expected NodeChanged"),
     }
 
     let map = mapstore::fold_map(&log, &schemas(), "chores", Path::new(ROOT)).unwrap();
     let chore = map.find("chore", "cancel a turn").unwrap();
-    assert_eq!(chore.properties.get("why").unwrap(), "Esc drops the session");
+    assert_eq!(chore.properties.get("why").unwrap(), "never proposed");
 }
 
 #[test]

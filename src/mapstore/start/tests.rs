@@ -129,7 +129,7 @@ fn attention_marks_a_fresh_node_as_added() {
 }
 
 #[test]
-fn attention_marks_a_node_changed_by_a_human_with_who_and_why() {
+fn attention_marks_a_node_changed_by_a_human_with_who() {
     let session = Event::session_started(source_at("claude-code", ROOT));
     let since = session.created_at();
     let earlier = since.minus_minutes(60).unwrap();
@@ -141,8 +141,7 @@ fn attention_marks_a_node_changed_by_a_human_with_who_and_why() {
             "debates",
             node_id(&verdict),
             None,
-            BTreeMap::new(),
-            Some("still hurts"),
+            BTreeMap::from([("why".to_string(), "still hurts".to_string())]),
         ),
         after,
     );
@@ -151,7 +150,7 @@ fn attention_marks_a_node_changed_by_a_human_with_who_and_why() {
     let text = rendered(&events, Fixture::new().path());
 
     assert!(text.contains("verdict \"old one\""), "{text:?}");
-    assert!(text.contains("changed by human: \"still hurts\""), "{text:?}");
+    assert!(text.contains("changed by human"), "{text:?}");
 }
 
 #[test]

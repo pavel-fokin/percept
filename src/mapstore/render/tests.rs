@@ -35,22 +35,14 @@ fn add(
 }
 
 /// Changes a node already in `map`, merging `properties` into its own,
-/// as `actor`, with `why` when the change carries one.
-fn change(
-    map: &mut Map,
-    kind: &str,
-    name: &str,
-    properties: BTreeMap<String, String>,
-    why: Option<&str>,
-    actor: Actor,
-) {
+/// as `actor`.
+fn change(map: &mut Map, kind: &str, name: &str, properties: BTreeMap<String, String>, actor: Actor) {
     map.apply(
         Mutation::ChangeNode {
             node: node_ref(kind, name),
             name: None,
             properties,
             sources: Vec::new(),
-            why: why.map(str::to_string),
         },
         actor,
     )
@@ -248,21 +240,20 @@ fn a_map_with_both_authors_marks_each_agent_node() {
 }
 
 #[test]
-fn a_changed_node_renders_its_changed_by_line_with_its_why() {
+fn a_changed_node_renders_its_changed_by_line() {
     let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "verdict", "gemma4 by default", Some("the local model"), None, &[], Actor::Agent);
     change(
         &mut map,
         "verdict",
         "gemma4 by default",
-        BTreeMap::new(),
-        Some("never proposed"),
+        BTreeMap::from([("why".to_string(), "never proposed".to_string())]),
         Actor::Human(human()),
     );
 
     let text = markdown(&map);
 
-    assert!(text.contains("changed by human: \"never proposed\"\n"), "{text}");
+    assert!(text.contains("changed by human\n"), "{text}");
 }
 
 #[test]

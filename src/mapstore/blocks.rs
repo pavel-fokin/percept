@@ -44,18 +44,14 @@ pub(crate) fn last_session<'a>(events: impl IntoIterator<Item = &'a Event>) -> O
         .max()
 }
 
-/// `changed by <actor>`, with `: "<why>"` when the change carried one -
-/// `None` when `node`'s last change is its addition. The one wording
-/// every render of a node's last change uses.
+/// `changed by <actor>` - `None` when `node`'s last change is its
+/// addition. The one wording every render of a node's last change
+/// uses.
 pub(crate) fn changed_line(node: &Node) -> Option<String> {
     let [_, .., changed] = node.history() else {
         return None;
     };
-    let mut line = format!("changed by {}", changed.actor.name());
-    if let Some(why) = &changed.why {
-        line.push_str(&format!(": {why:?}"));
-    }
-    Some(line)
+    Some(format!("changed by {}", changed.actor.name()))
 }
 
 /// `root`'s last path component, the name a reader knows the project

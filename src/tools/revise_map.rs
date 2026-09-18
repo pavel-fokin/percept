@@ -86,8 +86,7 @@ const PARAMETERS: &str = r#"{
               },
               "name": {"type": "string", "description": "a rename, if any"},
               "properties": {"type": "object", "additionalProperties": {"type": "string"}, "description": "merged into the node's own; a key given here replaces that key alone"},
-              "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"},
-              "why": {"type": "string", "description": "why this change is made, if there is more to say than the properties themselves; a change naming neither a rename nor a property, only this, is a comment"}
+              "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"}
             },
             "required": ["op", "node"],
             "additionalProperties": false
@@ -212,7 +211,6 @@ enum ChangeArgs {
         properties: BTreeMap<String, String>,
         #[serde(default)]
         sources: Vec<String>,
-        why: Option<String>,
     },
     RemoveNode {
         node: NodeRefArgs,
@@ -323,7 +321,6 @@ fn apply(
             name,
             properties,
             sources,
-            why,
         } => {
             let node = node_ref(snapshot.map(), node)?;
             cited(&sources, format_args!("{node}"))?;
@@ -336,7 +333,6 @@ fn apply(
                 name,
                 properties,
                 sources: snapshot.resolve(&sources)?,
-                why,
             };
             (mutation, line)
         }

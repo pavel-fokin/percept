@@ -99,7 +99,6 @@ fn the_change_example_is_present_for_a_schema_with_states() {
     assert!(text.contains("example: change"));
     assert!(text.contains("c1"));
     assert!(text.contains("state \"done\""));
-    assert!(text.contains("why \"what happened\""));
 }
 
 #[test]

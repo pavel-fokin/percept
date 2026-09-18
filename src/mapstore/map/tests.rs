@@ -335,12 +335,10 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
             Change {
                 actor: Actor::Human(me),
                 at: Timestamp::now(),
-                why: None,
             },
             Change {
                 actor: Actor::Agent,
                 at: Timestamp::now(),
-                why: Some("looked stale".to_string()),
             },
         ],
         seq: 1,
@@ -357,7 +355,6 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
     assert_eq!(line["actor"]["id"], me.unwrap().as_uuid().to_string());
     assert_eq!(line["added_at"], node.added().at.to_string());
     assert_eq!(line["changed_by"], "agent");
-    assert_eq!(line["changed_why"], "looked stale");
 }
 
 #[test]

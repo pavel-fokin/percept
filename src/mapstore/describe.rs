@@ -146,12 +146,11 @@ const GRAMMAR: &str = "
   text as seen and adds it to the node's sources. A claim that rests on code
   cites it, so a later session is told when that code has changed. A margin
   line naming a short id, t4, changes that node: state \"done\" under it sets a
-  property, name \"...\" renames it, and why \"...\" is the change's own reason,
-  not a property. A node is refused without its required properties; a node
-  the user last changed takes only state from an agent. This document adds
-  and changes; it never removes. percept maps remove-node and remove-edge do
-  that, each taking the same --actor and --source, and remove-node drops the
-  edges that touch the node it takes.
+  property and name \"...\" renames it. A node is refused without its required
+  properties; a node the user last changed takes only state from an agent.
+  This document adds and changes; it never removes. percept maps remove-node
+  and remove-edge do that, each taking the same --actor and --source, and
+  remove-node drops the edges that touch the node it takes.
 ";
 
 /// One node per node kind, in schema order, its name always `"..."`,
@@ -196,13 +195,11 @@ fn push_example(out: &mut String, schema: &Schema) {
 }
 
 /// `kind`'s short id at its first minted number, its `state` set to its
-/// second declared value, or its first when it has only one, changed
-/// with a `why`.
+/// second declared value, or its first when it has only one.
 fn push_change_example(out: &mut String, kind: &NodeKind) {
     let state = kind.states.get(1).unwrap_or(&kind.states[0]);
     let _ = writeln!(out, "  {}1", kind.prefix);
     let _ = writeln!(out, "    state \"{state}\"");
-    out.push_str("    why \"what happened\"\n");
 }
 
 #[cfg(test)]

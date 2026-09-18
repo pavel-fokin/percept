@@ -101,7 +101,7 @@ fn is_zero(seq: &u32) -> bool {
 }
 
 /// `Payload::NodeChanged` on the wire. `name` is present only on a
-/// rename; `why` only when the writer gave one.
+/// rename.
 #[derive(Serialize, Deserialize)]
 struct NodeChangedBody {
     map: String,
@@ -110,8 +110,6 @@ struct NodeChangedBody {
     name: Option<String>,
     properties: BTreeMap<String, String>,
     sources: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    why: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -525,14 +523,12 @@ impl From<&crate::core::Event> for Event {
                 name,
                 properties,
                 sources,
-                why,
             } => serde_json::to_value(NodeChangedBody {
                 map: map.as_uuid().to_string(),
                 node: node.as_uuid().to_string(),
                 name: name.clone(),
                 properties: properties.clone(),
                 sources: ids(sources),
-                why: why.clone(),
             })
             .expect("NodeChangedBody always serializes"),
             Payload::NodeRemoved {
@@ -736,7 +732,6 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 name: body.name,
                 properties: body.properties,
                 sources: parse_event_ids(body.sources)?,
-                why: body.why,
             })
         }
         EventKind::NodeRemoved => {

@@ -110,7 +110,6 @@ impl Map {
                 name,
                 properties,
                 sources,
-                why,
             } => {
                 let node_id = self.resolve(node)?;
                 let existing = self.node(node_id).expect("resolve returns a live node's id");
@@ -118,7 +117,6 @@ impl Map {
                     check_state(node_kind, &properties)?;
                     check_properties(node_kind, &properties)?;
                 }
-                blank_why(why.as_deref())?;
                 let needs_rank = name.is_some() || properties.keys().any(|key| key != "state");
                 if needs_rank {
                     self.check_may_of(actor, self.label(node_id), existing)?;
@@ -129,7 +127,6 @@ impl Map {
                     name,
                     properties,
                     sources,
-                    why,
                 }
             }
             Mutation::RemoveNode { node, why, sources } => {
@@ -227,7 +224,7 @@ impl Map {
                     name: name.clone(),
                     properties: properties.clone(),
                     sources: sources.clone(),
-                    history: vec![Change { actor, at, why: None }],
+                    history: vec![Change { actor, at }],
                     seq,
                 });
             }
@@ -236,7 +233,6 @@ impl Map {
                 name,
                 properties,
                 sources,
-                why,
                 ..
             } => {
                 let index = *self.by_id.get(node).ok_or(MapError::NoSuchNodeId(*node))?;
@@ -256,11 +252,7 @@ impl Map {
                         self.nodes[index].sources.push(*source);
                     }
                 }
-                self.nodes[index].history.push(Change {
-                    actor,
-                    at,
-                    why: why.clone(),
-                });
+                self.nodes[index].history.push(Change { actor, at });
             }
             Payload::NodeRemoved { node, .. } => {
                 let removed = self.node(*node).ok_or(MapError::NoSuchNodeId(*node))?;
@@ -301,7 +293,7 @@ impl Map {
                     from: *from,
                     to: *to,
                     sources: sources.clone(),
-                    history: vec![Change { actor, at, why: None }],
+                    history: vec![Change { actor, at }],
                 });
             }
             Payload::EdgeRemoved { kind, from, to, .. } => {

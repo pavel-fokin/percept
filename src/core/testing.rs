@@ -240,15 +240,9 @@ pub fn node_added_on(
 }
 
 /// A `node.changed` event for `node` on `map`, renaming to `name`
-/// (kept when `None`), setting `properties`, and saying `why` - a
-/// human's correction, for a test that compares against it.
-pub fn node_changed(
-    map: &str,
-    node: NodeId,
-    name: Option<&str>,
-    properties: BTreeMap<String, String>,
-    why: Option<&str>,
-) -> Event {
+/// (kept when `None`) and setting `properties` - a human's correction,
+/// for a test that compares against it.
+pub fn node_changed(map: &str, node: NodeId, name: Option<&str>, properties: BTreeMap<String, String>) -> Event {
     Event::new(
         Actor::Human(human()),
         source("test"),
@@ -259,7 +253,6 @@ pub fn node_changed(
             name: name.map(str::to_string),
             properties,
             sources: Vec::new(),
-            why: why.map(str::to_string),
         },
     )
 }
