@@ -7,15 +7,16 @@
 export const PATHS = {
   index: "/",
   log: "/log",
-  map: "/maps/:name",
+  map: "/maps/:id",
 } as const;
 
-/** One project's map, with the root it belongs to. The root is a
- * filesystem path and the only unambiguous name a project has - two
- * checkouts can share a basename - so it rides the query string
- * beside the cut. */
-export function mapPath(name: string, root: string): string {
-  return `/maps/${encodeURIComponent(name)}?root=${encodeURIComponent(root)}`;
+/** One project's map, with the root it belongs to. `id` is the map's
+ * own id, not its schema name - two projects can declare the same
+ * schema. The root is a filesystem path and the only unambiguous name
+ * a project has - two checkouts can share a basename - so it rides
+ * the query string beside the cut. */
+export function mapPath(id: string, root: string): string {
+  return `/maps/${encodeURIComponent(id)}?root=${encodeURIComponent(root)}`;
 }
 
 /** The log's search field, named once: the field wears it as its `id`,
