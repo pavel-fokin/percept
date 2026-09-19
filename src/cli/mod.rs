@@ -757,6 +757,7 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
         around: around.as_ref().map(|node| (node, args.depth)),
         since: args.since,
         kinds: &args.kind,
+        nodes: &[],
     };
     let fragment = map.select(&selection)?;
     if !selection.is_whole() {

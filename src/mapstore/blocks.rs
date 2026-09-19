@@ -67,5 +67,5 @@ pub(crate) fn project_name(root: &Path) -> String {
 /// `Map::since`, which would also surface an older node a fresh edge
 /// only touched.
 pub(crate) fn gained(map: &Map, since: Timestamp) -> Vec<&Node> {
-    map.headlines().filter(|node| node.changed().at >= since).collect()
+    map.nodes().iter().filter(|node| node.changed().at >= since).collect()
 }

@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use super::blocks::{capped_lines, changed_line, gained, line_id, project_name, LIMIT};
+use super::outline;
 use crate::core::{Event, EventId, Map, Node, Payload};
 use crate::shared::Timestamp;
 use crate::workspace::{Cited, Citations};
@@ -187,8 +188,8 @@ fn pad_rows(rows: &[(String, String)]) -> Vec<String> {
         .collect()
 }
 
-/// `<n> <state>` for every declared state of every headline kind of
-/// `map`, in declared order, skipping states no headline node is in -
+/// `<n> <state>` for every declared state of every node kind of
+/// `map`, in declared order, skipping states no node is in -
 /// `1 open   2 done` for a kind with those states. Every state is
 /// counted, since a schema lists them as a set and no position means
 /// "initial".
@@ -197,11 +198,11 @@ fn state_counts(map: &Map) -> Vec<String> {
     schema
         .node_kinds
         .iter()
-        .filter(|kind| schema.headline_kinds.contains(&kind.kind))
         .flat_map(|kind| {
             kind.states.iter().filter_map(|state| {
                 let count = map
-                    .headlines()
+                    .nodes()
+                    .iter()
                     .filter(|node| node.kind == kind.kind && node.properties.get("state") == Some(state))
                     .count();
                 (count > 0).then(|| format!("{count} {state}"))
@@ -221,7 +222,11 @@ fn state_block(maps: &[Map], moved: &[Vec<&Node>]) -> String {
         .iter()
         .zip(moved)
         .map(|(map, moved)| {
-            let mut parts = vec![format!("{} of {}", map.roots().count(), map.headlines().count())];
+            let mut parts = vec![format!(
+                "{} of {}",
+                outline::roots(map).len(),
+                map.nodes().len()
+            )];
             if !moved.is_empty() {
                 parts.push(format!("+{} since last session", moved.len()));
             }
@@ -287,7 +292,7 @@ fn attention_block(
 fn next_block(maps: &[Map], printed: &[(String, String)]) -> String {
     let mut rows: Vec<(String, String)> = maps
         .iter()
-        .filter(|map| map.headlines().next().is_some())
+        .filter(|map| !map.nodes().is_empty())
         .map(|map| {
             let name = &map.schema().name;
             (format!("read {name}"), format!("percept maps show {name}"))

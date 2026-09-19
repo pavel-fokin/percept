@@ -163,18 +163,22 @@ impl fmt::Display for NodeRef {
 }
 
 /// How much of a map a reader asked for. `around` cuts first, then
-/// `since`, then `kinds`, so the three together read as "what changed
-/// near this node, of these kinds". All absent is the whole map.
+/// `since`, then `kinds`, then `nodes`, so they read together as "what
+/// changed near this node, of these kinds". All absent is the whole
+/// map.
 #[derive(Default)]
 pub struct Selection<'a> {
     pub around: Option<(&'a NodeRef, usize)>,
     pub since: Option<Timestamp>,
     pub kinds: &'a [String],
+    /// The nodes to keep, named one by one - the cut a caller makes by
+    /// a rule of its own, which no kind or distance describes.
+    pub nodes: &'a [NodeId],
 }
 
 impl Selection<'_> {
     pub fn is_whole(&self) -> bool {
-        self.around.is_none() && self.since.is_none() && self.kinds.is_empty()
+        self.around.is_none() && self.since.is_none() && self.kinds.is_empty() && self.nodes.is_empty()
     }
 }
 
@@ -596,6 +600,9 @@ impl Map {
         if !selection.kinds.is_empty() {
             cut = cut.keep_kinds(selection.kinds)?;
         }
+        if !selection.nodes.is_empty() {
+            cut = cut.keep_nodes(selection.nodes);
+        }
         let boundary_edges = self
             .edges
             .iter()
@@ -607,6 +614,13 @@ impl Map {
             total_edges,
             boundary_edges,
         })
+    }
+
+    /// The map cut to the nodes `ids` names, keeping only the edges
+    /// that join two of them. An id the map does not hold is skipped.
+    fn keep_nodes(&self, ids: &[NodeId]) -> Self {
+        let nodes: Vec<Node> = self.nodes.iter().filter(|node| ids.contains(&node.id)).cloned().collect();
+        self.cut_to(nodes)
     }
 
     /// A copy holding `nodes` and only the edges that join two of them.

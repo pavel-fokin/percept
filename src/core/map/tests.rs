@@ -1696,6 +1696,7 @@ fn select_walks_around_before_it_keeps_kinds() {
         around: Some((&topic, 2)),
         since: None,
         kinds: &kinds,
+        nodes: &[],
     };
 
     let fragment = chain().select(&selection).unwrap();

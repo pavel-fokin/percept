@@ -23,6 +23,7 @@
 mod blocks;
 mod describe;
 mod map;
+pub(crate) mod outline;
 mod render;
 mod rules;
 mod schemas;

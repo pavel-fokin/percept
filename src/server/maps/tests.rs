@@ -5,10 +5,11 @@ use super::*;
 use crate::core::testing::{human, FakeLog, Fixture};
 use crate::core::{Actor, Event, NodeId, Payload, Source};
 
-/// A schema with three kinds - `concept`, `question`, `fact` - only
-/// `concept` a headline, and a two-hop chain of edges between them:
-/// `fact` -backs-> `question` -about-> `concept`. What every test here
-/// folds its map from.
+/// A schema with three kinds - `concept`, `question`, `fact` - and a
+/// two-hop chain of edges between them: `fact` -backs-> `question`
+/// -about-> `concept`. Both `concept` and `question` are named as an
+/// edge's `to` end, so both are section kinds; `fact` never is. What
+/// every test here folds its map from.
 const SCHEMA: &str = "\
 name = \"decisions\"\n\
 purpose = \"test\"\n\
@@ -109,15 +110,17 @@ fn decisions_id() -> String {
 }
 
 #[test]
-fn the_overview_carries_headline_nodes_only() {
+fn the_overview_carries_the_nodes_that_head_the_map() {
     let (fixture, log) = chain();
 
     let body = get(&log, &decisions_id(), params(fixture.path(), None, None)).unwrap();
 
-    let nodes = body["nodes"].as_array().unwrap();
+    let mut kinds: Vec<&str> = body["nodes"].as_array().unwrap().iter().map(|n| n["kind"].as_str().unwrap()).collect();
+    kinds.sort_unstable();
     assert_eq!(body["map"]["id"], decisions_id());
-    assert_eq!(nodes.len(), 1, "{body}");
-    assert_eq!(nodes[0]["kind"], "concept");
+    // The question is about the concept, so the concept claims it and
+    // the overview is the concept alone.
+    assert_eq!(kinds, ["concept"], "{body}");
 }
 
 #[test]

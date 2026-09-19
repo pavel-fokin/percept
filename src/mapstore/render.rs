@@ -5,15 +5,12 @@
 use std::collections::HashSet;
 use std::fmt::Write as _;
 
-use crate::core::{Actor, EdgeEnd, Map, Node, NodeId, Schema, Written};
-use crate::store::ids;
+use crate::core::{Actor, EdgeEnd, Map, Node, NodeId, Written};
+use crate::mapstore::outline;
 
-/// `map` as Markdown: a heading, then the map's body. A map with any
-/// headline kind renders one `##` section per headline node nobody
-/// claims, the claimed ones nested under their claimant - see
-/// `push_headlines`. A map with none renders one `## <kind>` section
-/// per node kind that holds a node, plus a `## edges` section - see
-/// `push_by_kind`. Empty for a map with no nodes, past the preamble.
+/// `map` as Markdown: a heading, then one `##` section per node
+/// nobody claims, the claimed ones nested under their claimant - see
+/// `push_sections`. Empty for a map with no nodes, past the preamble.
 /// A map the agent wrote alone says so once, on the heading; a map
 /// with both human and agent nodes marks each agent line instead.
 pub fn markdown(map: &Map) -> String {
@@ -31,12 +28,7 @@ pub fn markdown(map: &Map) -> String {
         return out;
     }
 
-    if schema.headline_kinds.is_empty() {
-        push_by_kind(&mut out, map, mark);
-    } else {
-        push_headlines(&mut out, map, mark);
-    }
-
+    push_sections(&mut out, map, mark);
     out
 }
 
@@ -121,90 +113,26 @@ fn push_example(out: &mut String, map: &Map) {
     }
 }
 
-/// One `## <kind>` section per node kind that holds a node - headline
-/// kinds first, then the schema's remaining kinds - then a `## edges`
-/// section when the map has any. The fallback for a schema that
-/// declares no headline kind at all, so a map like that still lists
-/// everything somewhere.
-fn push_by_kind(out: &mut String, map: &Map, mark: bool) {
-    for kind in ordered_kinds(map.schema()) {
-        let nodes: Vec<&Node> = map
-            .nodes()
-            .iter()
-            .filter(|node| node.kind == kind)
-            .collect();
-        if nodes.is_empty() {
-            continue;
-        }
-        out.push_str("\n## ");
-        out.push_str(kind);
-        out.push('\n');
-        for node in nodes {
-            push_node(out, map, node, mark);
-        }
-    }
-
-    if !map.edges().is_empty() {
-        out.push_str("\n## edges\n");
-        for edge in map.edges() {
-            let _ = writeln!(out, "- {}", map.edge_line(edge));
-        }
-    }
-}
-
-/// Headline kinds first, in `headline_kinds` order, then the rest of
-/// `node_kinds` in schema order - the order a reader wants a map's
-/// sections in.
-fn ordered_kinds(schema: &Schema) -> Vec<&str> {
-    let mut kinds: Vec<&str> = schema.headline_kinds.iter().map(String::as_str).collect();
-    for kind in schema.node_kind_names() {
-        if !kinds.contains(&kind) {
-            kinds.push(kind);
-        }
-    }
-    kinds
-}
-
-/// One node's bullet - its name and properties, the kind being the
-/// section's - then, on its own indented line, the sources it cites,
-/// when it cites any.
-fn push_node(out: &mut String, map: &Map, node: &Node, mark: bool) {
-    let _ = writeln!(out, "- {}{}", marked_name(map, node, mark), node.properties_line());
-    push_changed(out, node, "  ");
-    if !node.sources.is_empty() {
-        let _ = writeln!(out, "  sources: {}", ids(&node.sources).join(", "));
-    }
-}
-
-/// One `##` section per headline node nobody claims, in an order this
-/// render alone gives meaning to - never the core's: by its kind's
-/// position in `headlines`, then by the index of its `state` property
-/// in its kind's declared list, unknown or missing last, then by when
-/// it was added. A kind with no states sorts by `added_at` alone
-/// within its kind. Under each heading: the node's own
+/// One `##` section per node nobody claims, in an order this render
+/// alone gives meaning to - never the core's: by its kind's position
+/// among the schema's node kinds, then by the index of its `state`
+/// property in its kind's declared list, unknown or missing last, then
+/// by when it was added. A kind with no states sorts by `added_at`
+/// alone within its kind. Under each heading: the node's own
 /// properties, then its neighbours as `push_tree` prints them, the
-/// headline nodes it claims nested with theirs. A headline node left
-/// unprinted - claimed in a cycle - heads a section of its own at the
-/// end, so nothing a map holds goes unseen.
-fn push_headlines(out: &mut String, map: &Map, mark: bool) {
-    let mut headlines: Vec<&Node> = map.headlines().collect();
-    headlines.sort_by_key(|node| (map.kind_rank(node), state_rank(map, node), node.added().at));
-    if headlines.is_empty() {
-        let _ = writeln!(
-            out,
-            "\n(no headline node yet; {} nodes of other kinds.)",
-            map.nodes().len()
-        );
-        return;
-    }
-
-    let roots: Vec<&Node> = headlines
+/// nodes it claims nested with theirs. A node left unprinted - claimed
+/// in a cycle - heads a section of its own at the end, so nothing a
+/// map holds goes unseen.
+fn push_sections(out: &mut String, map: &Map, mark: bool) {
+    let mut all: Vec<&Node> = map.nodes().iter().collect();
+    all.sort_by_key(|node| (outline::rank(map, node), state_rank(map, node), node.added().at));
+    let roots: Vec<&Node> = all
         .iter()
         .copied()
-        .filter(|node| map.claimant(node).is_none())
+        .filter(|node| outline::claimant(map, node).is_none())
         .collect();
     let mut printed: HashSet<NodeId> = HashSet::new();
-    for node in roots.iter().chain(headlines.iter()) {
+    for node in roots.iter().chain(all.iter()) {
         if !printed.insert(node.id) {
             continue;
         }
@@ -219,14 +147,13 @@ fn push_headlines(out: &mut String, map: &Map, mark: bool) {
 /// <kind>`, edge kinds in schema order, outgoing before incoming. Each
 /// neighbour prints its properties indented under its line. A
 /// neighbour already printed in this map is skipped, so a node appears
-/// once, where it was first reached; a headline neighbour nests here,
-/// with its own neighbours one level deeper, only when `node` is its
-/// claimant. One that nests elsewhere is named on its line and nothing
-/// more, so a concept still lists every question about it when they
-/// nest under the decisions they doubt - unless it nests inside this
-/// section, or this section inside it, where a reader meets it anyway.
+/// once, where it was first reached; a neighbour nests here, with its
+/// own neighbours one level deeper, only when `node` is its claimant.
+/// One that nests elsewhere is named on its line and nothing more, so
+/// a concept still lists every question about it when they nest under
+/// the decisions they doubt - unless it nests inside this section, or
+/// this section inside it, where a reader meets it anyway.
 fn push_tree(out: &mut String, map: &Map, node: &Node, indent: &str, printed: &mut HashSet<NodeId>, mark: bool) {
-    let headline_kinds = &map.schema().headline_kinds;
     let deeper = format!("{indent}  ");
     for edge_kind in &map.schema().edge_kinds {
         let outgoing = map.linked(node.id, &edge_kind.kind, EdgeEnd::From);
@@ -236,9 +163,8 @@ fn push_tree(out: &mut String, map: &Map, node: &Node, indent: &str, printed: &m
             .map(|neighbour| (EdgeEnd::From, neighbour))
             .chain(incoming.into_iter().map(|neighbour| (EdgeEnd::To, neighbour)));
         for (end, neighbour) in ends {
-            let headline = headline_kinds.contains(&neighbour.kind);
-            let nests_here = map.claimant(neighbour).is_some_and(|claimant| claimant.id == node.id);
-            if headline && !nests_here {
+            let nests_here = outline::claimant(map, neighbour).is_some_and(|claimant| claimant.id == node.id);
+            if !nests_here {
                 if nests_within(map, neighbour, node) || nests_within(map, node, neighbour) {
                     continue;
                 }
@@ -250,9 +176,7 @@ fn push_tree(out: &mut String, map: &Map, node: &Node, indent: &str, printed: &m
             }
             push_edge_line(out, map, indent, end, &edge_kind.kind, neighbour, mark);
             push_props(out, neighbour, &deeper);
-            if headline {
-                push_tree(out, map, neighbour, &deeper, printed, mark);
-            }
+            push_tree(out, map, neighbour, &deeper, printed, mark);
         }
     }
 }
@@ -263,7 +187,7 @@ fn push_tree(out: &mut String, map: &Map, node: &Node, indent: &str, printed: &m
 fn nests_within(map: &Map, inner: &Node, outer: &Node) -> bool {
     let mut seen = HashSet::new();
     let mut node = inner;
-    while let Some(above) = map.claimant(node) {
+    while let Some(above) = outline::claimant(map, node) {
         if above.id == outer.id {
             return true;
         }

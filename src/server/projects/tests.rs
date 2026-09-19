@@ -99,7 +99,7 @@ fn projects_are_ordered_newest_last_active_first() {
 }
 
 #[test]
-fn a_map_reports_its_name_and_headline_count() {
+fn a_map_reports_its_name_and_node_count() {
     let fixture = Fixture::new();
     fixture.write(".percept/schemas/decisions.toml", SCHEMA);
     let log = FakeLog::seeded(vec![map_created(fixture.path()), node_added(fixture.path(), "why blue?")]);
@@ -115,7 +115,7 @@ fn a_map_reports_its_name_and_headline_count() {
             .to_string()
     );
     assert_eq!(maps[0]["name"], "decisions");
-    assert_eq!(maps[0]["headlines"], 1);
+    assert_eq!(maps[0]["nodes"], 1);
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn gained_counts_only_nodes_changed_at_or_after_the_last_session() {
     let body = list(&log, after_everything()).unwrap();
 
     let maps = body["projects"][0]["maps"].as_array().unwrap();
-    assert_eq!(maps[0]["headlines"], 2);
+    assert_eq!(maps[0]["nodes"], 2);
     assert_eq!(maps[0]["gained"], 1);
 }
 

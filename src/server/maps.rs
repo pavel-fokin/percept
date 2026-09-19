@@ -14,7 +14,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::core::{map_id_for, EventLog, Map, Node, NodeRef, Selection};
-use crate::mapstore;
+use crate::mapstore::{self, outline};
 use crate::server::events::Error;
 use crate::store;
 
@@ -65,7 +65,7 @@ pub fn get(log: &dyn EventLog, id: &str, params: Params) -> Result<Value, Error>
         .ok_or_else(|| Error::NotFound(format!("no map with id {}", id.as_uuid())))?;
     let map = mapstore::fold_map_at(&schemas, &name, &events, &root)
         .map_err(|err| Error::Internal(err.to_string()))?;
-    let headline_kinds = map.schema().headline_kinds.clone();
+    let roots: Vec<crate::core::NodeId> = outline::roots(&map).iter().map(|node| node.id).collect();
 
     let node_ref;
     let selection = match params.around.as_deref() {
@@ -78,13 +78,13 @@ pub fn get(log: &dyn EventLog, id: &str, params: Params) -> Result<Value, Error>
                 ..Selection::default()
             }
         }
-        // No `around`: the overview is the map's headline kinds alone,
-        // in map order - `keep_kinds` under `select` gives exactly
-        // that cut, with `Fragment`'s counts already reporting the
-        // whole map behind it, so no new arm on `Selection` earns its
-        // place for this one caller.
+        // No `around`: the overview is what heads the map - the nodes
+        // nobody claims, the same ones `maps show` gives a `##`
+        // section. Which those are is the outline's rule, not a cut
+        // any kind describes, so the server names them one by one and
+        // `Fragment`'s counts report the whole map behind them.
         None => Selection {
-            kinds: &headline_kinds,
+            nodes: &roots,
             ..Selection::default()
         },
     };

@@ -202,16 +202,16 @@ fn a_blocked_chore_nests_under_the_chore_that_blocks_it() {
 }
 
 #[test]
-fn a_map_with_no_headlines_says_so() {
-    let map = Map::empty(crate::core::testing::map_id("debates"), debates());
-    // The map has a node, but no headline kind: no topic or verdict
-    // was ever added.
-    let mut map = map;
+fn a_claim_pointed_at_by_no_edge_heads_its_own_section() {
+    // `claim` is a section kind - `backs` names it as a `to` end - so a
+    // claim nobody points at now heads a section of its own, where
+    // before only `topic` and `verdict` could.
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "claim", "Rust", Some("only alternative weighed"), None, &[], Actor::Human(human()));
 
     assert_eq!(
         markdown(&map),
-        "# debates\n\n(no headline node yet; 1 nodes of other kinds.)\n"
+        "# debates\n\n## c1 \"Rust\"\n\nwhy: \"only alternative weighed\"\n"
     );
 }
 
@@ -267,7 +267,13 @@ fn an_unchanged_node_carries_no_changed_by_line() {
 }
 
 #[test]
-fn a_non_headline_neighbour_prints_its_own_properties_indented() {
+fn a_node_pointed_at_by_two_section_kinds_ranks_under_the_one_declared_later() {
+    // `contains` names `function` as its `to` end, so `function` is a
+    // section kind now, declared after `file` - the two ends of one
+    // edge, each eligible, file the contained end. `function` ranking
+    // later means `file` nests under `main`, not the other way -
+    // `contains`'s own direction says nothing about rank; only
+    // declaration order does.
     let mut map = Map::empty(crate::core::testing::map_id("files"), files());
     add(&mut map, "file", "src/main.rs", None, None, &[], Actor::System);
     map.apply(
@@ -284,14 +290,14 @@ fn a_non_headline_neighbour_prints_its_own_properties_indented() {
 
     let text = markdown(&map);
 
-    assert!(
-        text.contains(
-            "## f1 \"src/main.rs\"\n\
-             \n\
-             - contains fn1 \"main\"\n\
-             \x20 returns: \"()\"\n"
-        ),
-        "{text}"
+    assert_eq!(
+        text,
+        "# files\n\
+         \n\
+         ## fn1 \"main\"\n\
+         \n\
+         returns: \"()\"\n\
+         - f1 \"src/main.rs\" contains\n"
     );
 }
 
@@ -350,7 +356,7 @@ fn a_node_does_not_name_the_headline_it_nests_under() {
 /// A schema with no headline kind at all falls back to `push_by_kind`:
 /// one `## <kind>` section per kind that holds a node, then `## edges`.
 #[test]
-fn a_schema_with_no_headline_kind_falls_back_to_a_section_per_kind() {
+fn a_schema_with_no_edges_gives_every_node_its_own_section() {
     let schema = crate::core::Schema {
         name: "glossary".to_string(),
         purpose: "test fixture".to_string(),
@@ -362,9 +368,10 @@ fn a_schema_with_no_headline_kind_falls_back_to_a_section_per_kind() {
     let mut map = Map::empty(crate::core::MapId::new(), schema);
     add(&mut map, "term", "harness", None, None, &[], Actor::Human(human()));
 
-    let text = markdown(&map);
-
-    assert!(text.contains("\n## term\n- t1 \"harness\"\n"), "{text}");
+    // Nothing can claim a node in a schema that declares no edge, so
+    // every node heads a section - the shape a first schema takes
+    // before its edges are written.
+    assert_eq!(markdown(&map), "# glossary\n\n## t1 \"harness\"\n\n");
 }
 
 #[test]
