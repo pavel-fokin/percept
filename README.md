@@ -252,7 +252,7 @@ that tool for the session, `n` declines. `Esc` quits.
 | `PERCEPT_PROVIDER` | `ollama`, `openai`, `fireworks` | `ollama` |
 | `OPENAI_API_KEY`, `FIREWORKS_API_KEY` | the provider's key | |
 | `PERCEPT_TOOLS` | `code`, `maps` | `code` in a git checkout, `maps` elsewhere and headless |
-| `PERCEPT_MAPS` | `prompt`, `headlines`, `tool` | `prompt` |
+| `PERCEPT_MAPS` | `prompt`, `overview`, `tool` | `prompt` |
 
 Ollama is expected at `localhost:11434`.
 

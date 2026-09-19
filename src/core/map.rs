@@ -163,18 +163,22 @@ impl fmt::Display for NodeRef {
 }
 
 /// How much of a map a reader asked for. `around` cuts first, then
-/// `since`, then `kinds`, so the three together read as "what changed
-/// near this node, of these kinds". All absent is the whole map.
+/// `since`, then `kinds`, then `nodes`, so they read together as "what
+/// changed near this node, of these kinds, of these nodes". All absent
+/// is the whole map.
 #[derive(Default)]
 pub struct Selection<'a> {
     pub around: Option<(&'a NodeRef, usize)>,
     pub since: Option<Timestamp>,
     pub kinds: &'a [String],
+    /// The nodes to keep, named one by one - the cut a caller makes by
+    /// a rule of its own, which no kind or distance describes.
+    pub nodes: &'a [NodeId],
 }
 
 impl Selection<'_> {
     pub fn is_whole(&self) -> bool {
-        self.around.is_none() && self.since.is_none() && self.kinds.is_empty()
+        self.around.is_none() && self.since.is_none() && self.kinds.is_empty() && self.nodes.is_empty()
     }
 }
 
@@ -355,62 +359,6 @@ impl Map {
 
     pub fn nodes(&self) -> &[Node] {
         &self.nodes
-    }
-
-    /// The nodes of the schema's headline kinds, in map order - what a
-    /// reader sees of the map before opening it.
-    pub fn headlines(&self) -> impl Iterator<Item = &Node> {
-        let headline_kinds = &self.schema.headline_kinds;
-        self.nodes
-            .iter()
-            .filter(move |node| headline_kinds.contains(&node.kind))
-    }
-
-    /// The headline nodes nobody claims - what heads a map, one
-    /// section per root, in `headlines` order.
-    pub fn roots(&self) -> impl Iterator<Item = &Node> {
-        self.headlines().filter(move |node| self.claimant(node).is_none())
-    }
-
-    /// The headline node `node` prints under, if any: the first
-    /// headline of its own kind pointing at it - the decision that
-    /// supersedes it - else, of the headlines of other kinds it points
-    /// at, the one whose kind sits latest in `headlines` - the question
-    /// a decision resolves over the concept it is about, so `headlines`
-    /// order is nesting order and the schema's edge order decides only
-    /// between two of the same kind, first edge first. A node nobody
-    /// claims heads a section of its own. The rule names no kind, so it
-    /// holds for any schema: a `blocks` chore claims the one it blocks
-    /// the way `supersedes` claims the old decision.
-    pub fn claimant(&self, node: &Node) -> Option<&Node> {
-        let headline_kinds = &self.schema.headline_kinds;
-        let mut same_kind = None;
-        let mut other_kind: Option<&Node> = None;
-        for edge_kind in &self.schema.edge_kinds {
-            for from in self.linked(node.id, &edge_kind.kind, EdgeEnd::To) {
-                if same_kind.is_none() && from.kind == node.kind && headline_kinds.contains(&from.kind) {
-                    same_kind = Some(from);
-                }
-            }
-            for to in self.linked(node.id, &edge_kind.kind, EdgeEnd::From) {
-                let nearer = other_kind.is_none_or(|held| self.kind_rank(to) > self.kind_rank(held));
-                if nearer && to.kind != node.kind && headline_kinds.contains(&to.kind) {
-                    other_kind = Some(to);
-                }
-            }
-        }
-        same_kind.or(other_kind)
-    }
-
-    /// A headline node's position by kind: the index of its kind in the
-    /// schema's `headlines`, so the kind listed first heads the render
-    /// and a node nests under the latest kind it points at.
-    pub fn kind_rank(&self, node: &Node) -> usize {
-        self.schema
-            .headline_kinds
-            .iter()
-            .position(|kind| *kind == node.kind)
-            .unwrap_or(usize::MAX)
     }
 
     pub fn edges(&self) -> &[Edge] {
@@ -596,6 +544,9 @@ impl Map {
         if !selection.kinds.is_empty() {
             cut = cut.keep_kinds(selection.kinds)?;
         }
+        if !selection.nodes.is_empty() {
+            cut = cut.keep_nodes(selection.nodes);
+        }
         let boundary_edges = self
             .edges
             .iter()
@@ -607,6 +558,14 @@ impl Map {
             total_edges,
             boundary_edges,
         })
+    }
+
+    /// The map cut to the nodes `ids` names, keeping only the edges
+    /// that join two of them. An id the map does not hold is skipped.
+    fn keep_nodes(&self, ids: &[NodeId]) -> Self {
+        let kept: HashSet<NodeId> = ids.iter().copied().collect();
+        let nodes: Vec<Node> = self.nodes.iter().filter(|node| kept.contains(&node.id)).cloned().collect();
+        self.cut_to(nodes)
     }
 
     /// A copy holding `nodes` and only the edges that join two of them.

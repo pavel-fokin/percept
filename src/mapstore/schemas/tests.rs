@@ -18,11 +18,14 @@ fn each_shipped_template_parses_under_its_own_name() {
 }
 
 #[test]
-fn the_decisions_template_lists_concept_first_among_headlines() {
+fn the_decisions_template_declares_concept_first() {
     let (name, text) = templates().into_iter().find(|(name, _)| name == "concepts").unwrap();
     let schema = parse(&name, text).unwrap();
 
-    assert_eq!(schema.headline_kinds, ["concept", "question", "decision"]);
+    // Declaration order is nesting order: a question files under a
+    // concept, never the reverse.
+    let kinds: Vec<&str> = schema.node_kind_names().collect();
+    assert_eq!(kinds, ["concept", "question", "option", "decision"]);
 }
 
 #[test]
@@ -42,7 +45,6 @@ fn a_project_schema_of_a_new_name_is_added() {
         ".percept/schemas/glossary.toml",
         "name = \"glossary\"\n\
          purpose = \"terms and their meaning\"\n\
-         headlines = [\"term\"]\n\
          \n\
          [[node]]\n\
          kind = \"term\"\n\
@@ -99,20 +101,18 @@ fn a_schema_with_no_node_kinds_is_refused() {
 }
 
 #[test]
-fn headlines_naming_an_undeclared_kind_is_refused() {
+fn a_schema_that_still_declares_headlines_is_refused() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"acronym\"]\n\n\
+        "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"term\"]\n\n\
          [[node]]\nkind = \"term\"\ngloss = \"g\"\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
 
-    assert_eq!(
-        err,
-        "glossary.toml: headlines names \"acronym\", which is not a declared node kind"
-    );
+    assert!(err.starts_with("glossary.toml:"), "{err}");
+    assert!(err.contains("a schema no longer declares `headlines`"), "{err}");
 }
 
 #[test]
@@ -214,20 +214,6 @@ fn a_kind_with_no_gloss_loads_with_an_empty_gloss() {
 
     let glossary = schemas.find("glossary").unwrap();
     assert_eq!(glossary.node_kind("term").unwrap().gloss, "");
-}
-
-#[test]
-fn a_duplicate_headline_is_refused() {
-    let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"term\", \"term\"]\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\n",
-    );
-
-    let err = load(fixture.path()).err().unwrap().to_string();
-
-    assert!(err.contains("twice"), "{err}");
 }
 
 #[test]

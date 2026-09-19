@@ -384,7 +384,6 @@ pub fn debates() -> Schema {
                 &["verdict"],
             ),
         ],
-        headline_kinds: vec!["topic".to_string(), "verdict".to_string()],
         rules: Rules::default(),
     }
 }
@@ -402,7 +401,6 @@ pub fn chores() -> Schema {
                 .with_states(&["open", "done", "dropped"]),
         ],
         edge_kinds: vec![EdgeKind::new("blocks", "", &["chore"], &["chore"])],
-        headline_kinds: vec!["chore".to_string()],
         rules: Rules::default(),
     }
 }
@@ -411,6 +409,41 @@ pub fn chores() -> Schema {
 /// mirroring a built-in map, without touching a filesystem.
 pub fn schemas() -> Schemas {
     Schemas::new(vec![debates(), chores()])
+}
+
+/// Three node kinds, coarse to fine, with an edge from the finest to
+/// each of the other two - the shape a test needs when it asks which
+/// of two candidates claims a node.
+pub fn court() -> Schema {
+    Schema {
+        name: "court".to_string(),
+        purpose: "test fixture".to_string(),
+        node_kinds: vec![
+            NodeKind::new("area", ""),
+            NodeKind::new("topic", ""),
+            NodeKind::new("verdict", ""),
+        ],
+        edge_kinds: vec![
+            EdgeKind::new("within", "", &["verdict"], &["area"]),
+            EdgeKind::new("settles", "", &["verdict"], &["topic"]),
+        ],
+        rules: Rules::default(),
+    }
+}
+
+/// A `kind` edge from one node to another, both named by kind and
+/// name - the one `AddEdge` every map test writes.
+pub fn link(map: &mut crate::core::Map, kind: &str, from: (&str, &str), to: (&str, &str)) {
+    map.apply(
+        crate::core::Mutation::AddEdge {
+            kind: kind.to_string(),
+            from: node_ref(from.0, from.1),
+            to: node_ref(to.0, to.1),
+            sources: Vec::new(),
+        },
+        Actor::Human(human()),
+    )
+    .unwrap();
 }
 
 /// A schema fixture with `file`, `function`, and `package` node kinds
@@ -450,7 +483,6 @@ pub fn files() -> Schema {
                 &["file", "package"],
             ),
         ],
-        headline_kinds: vec!["file".to_string()],
         rules: Rules::default(),
     }
 }

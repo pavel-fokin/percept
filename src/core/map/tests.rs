@@ -83,69 +83,6 @@ fn two_identities_for_one_schema_are_rejected() {
 }
 
 #[test]
-fn headlines_are_the_schema_s_headline_kinds_in_map_order() {
-    let events = [
-        node_added("debates", NodeId::new(), "claim", "Go"),
-        node_added("debates", NodeId::new(), "topic", "Which language?"),
-        node_added("debates", NodeId::new(), "verdict", "Rust"),
-    ];
-    let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &events).unwrap();
-    let names: Vec<&str> = map.headlines().map(|node| node.name.as_str()).collect();
-    assert_eq!(names, ["Which language?", "Rust"]);
-}
-
-#[test]
-fn a_replaced_verdict_still_shows_in_the_headlines() {
-    // The core keeps no notion of "replaced": a headline is any node
-    // of a headline kind, full stop. A reader tells the two apart by
-    // the `replaces` edge itself, not by one dropping out.
-    let (old, new) = (NodeId::new(), NodeId::new());
-    let events = [
-        node_added_seq("debates", old, "verdict", "Go", 1),
-        node_added_seq("debates", new, "verdict", "Rust", 2),
-        edge_added("debates", "replaces", new, old),
-    ];
-    let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &events).unwrap();
-    let names: Vec<&str> = map.headlines().map(|node| node.name.as_str()).collect();
-    assert_eq!(names, ["Go", "Rust"]);
-}
-
-#[test]
-fn a_headline_nobody_claims_is_a_root() {
-    let events = [node_added("debates", NodeId::new(), "topic", "Which language?")];
-    let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &events).unwrap();
-    let names: Vec<&str> = map.roots().map(|node| node.name.as_str()).collect();
-    assert_eq!(names, ["Which language?"]);
-}
-
-#[test]
-fn a_claimed_headline_is_not_a_root() {
-    let (old, new) = (NodeId::new(), NodeId::new());
-    let events = [
-        node_added_seq("debates", old, "verdict", "Go", 1),
-        node_added_seq("debates", new, "verdict", "Rust", 2),
-        edge_added("debates", "replaces", new, old),
-    ];
-    let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &events).unwrap();
-    let names: Vec<&str> = map.roots().map(|node| node.name.as_str()).collect();
-    assert_eq!(names, ["Rust"]);
-}
-
-#[test]
-fn a_claim_cycle_still_yields_roots_without_hanging() {
-    let (a, b) = (NodeId::new(), NodeId::new());
-    let events = [
-        node_added_seq("chores", a, "chore", "A", 1),
-        node_added_seq("chores", b, "chore", "B", 2),
-        edge_added("chores", "blocks", a, b),
-        edge_added("chores", "blocks", b, a),
-    ];
-    let map = Map::fold(crate::core::testing::map_id("chores"), chores(), &events).unwrap();
-    let names: Vec<&str> = map.roots().map(|node| node.name.as_str()).collect();
-    assert!(names.is_empty());
-}
-
-#[test]
 fn linked_follows_an_edge_kind_the_core_names_no_meaning_for() {
     let (a, b, c) = (NodeId::new(), NodeId::new(), NodeId::new());
     let events = [
@@ -1696,6 +1633,7 @@ fn select_walks_around_before_it_keeps_kinds() {
         around: Some((&topic, 2)),
         since: None,
         kinds: &kinds,
+        ..Selection::default()
     };
 
     let fragment = chain().select(&selection).unwrap();

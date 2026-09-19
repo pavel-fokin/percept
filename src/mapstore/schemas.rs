@@ -67,8 +67,11 @@ pub const SCHEMAS_DIR: &str = ".percept/schemas";
 struct SchemaFile {
     name: String,
     purpose: String,
-    #[serde(default)]
-    headlines: Vec<String>,
+    /// `deny_unknown_fields` would refuse this key anyway; the hook is
+    /// here to say what replaced it, at the line it sits on.
+    #[allow(dead_code)]
+    #[serde(default, deserialize_with = "headlines_was_removed")]
+    headlines: (),
     #[serde(default, rename = "node")]
     nodes: Vec<NodeFile>,
     #[serde(default, rename = "edge")]
@@ -109,6 +112,16 @@ struct NodeFile {
     states: Vec<String>,
     #[serde(default, rename = "state", deserialize_with = "state_was_renamed")]
     _renamed_state: (),
+}
+
+fn headlines_was_removed<'de, D>(_: D) -> Result<(), D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Err(serde::de::Error::custom(
+        "a schema no longer declares `headlines` - what heads a map is read from its own \
+         edges, and node order decides what nests where. Remove the line",
+    ))
 }
 
 fn state_was_renamed<'de, D>(_: D) -> Result<(), D::Error>
@@ -311,21 +324,8 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
         purpose: file.purpose,
         node_kinds,
         edge_kinds,
-        headline_kinds: file.headlines.clone(),
         rules: Rules::new(file.rules.0),
     };
-
-    for headline in &file.headlines {
-        if schema.node_kind(headline).is_none() {
-            return Err(format!(
-                "{stem}.toml: headlines names {headline:?}, which is not a declared node kind"
-            )
-            .into());
-        }
-    }
-    if let Some(headline) = repeated(file.headlines.iter().map(String::as_str)) {
-        return Err(format!("{stem}.toml: headlines names {headline:?} twice").into());
-    }
 
     Ok(schema)
 }
@@ -394,7 +394,7 @@ fn check_prefixes(stem: &str, node_kinds: &[NodeKind]) -> Result<(), Box<dyn std
 }
 
 /// The first name `names` repeats, if any - the one duplicate scan
-/// every kind and headline check shares.
+/// every kind check shares.
 fn repeated<'a>(names: impl Iterator<Item = &'a str>) -> Option<&'a str> {
     let mut seen: Vec<&str> = Vec::new();
     for name in names {

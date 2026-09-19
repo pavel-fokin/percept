@@ -21,9 +21,6 @@ pub struct Schema {
     pub purpose: String,
     pub node_kinds: Vec<NodeKind>,
     pub edge_kinds: Vec<EdgeKind>,
-    /// The node kinds worth a reader's attention without opening the
-    /// whole map - what `MapShape::Headlines` sends.
-    pub headline_kinds: Vec<String>,
     /// The lines this schema injects into an agent's context, by
     /// moment.
     pub rules: Rules,

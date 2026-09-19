@@ -31,7 +31,7 @@ const PROVIDER_VAR: &str = "PERCEPT_PROVIDER";
 pub const CODE_SOURCE_NAME: &str = "percept-code";
 
 /// Names how much of each cognitive map reaches the model each turn:
-/// `prompt` (the default, today's behaviour), `headlines`, or `tool`.
+/// `prompt` (the default, today's behaviour), `overview`, or `tool`.
 const MAPS_VAR: &str = "PERCEPT_MAPS";
 
 /// Names which tools a turn carries. The TUI defaults to `code` in a git
@@ -258,10 +258,10 @@ fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
     let shape = std::env::var(MAPS_VAR).unwrap_or_else(|_| "prompt".to_string());
     match shape.as_str() {
         "prompt" => Ok(MapShape::Prompt),
-        "headlines" => Ok(MapShape::Headlines),
+        "overview" => Ok(MapShape::Overview(crate::mapstore::overview)),
         "tool" => Ok(MapShape::Tool),
         other => Err(
-            format!("{MAPS_VAR}={other:?} names no shape; use prompt, headlines or tool").into(),
+            format!("{MAPS_VAR}={other:?} names no shape; use prompt, overview or tool").into(),
         ),
     }
 }

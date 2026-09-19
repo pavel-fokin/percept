@@ -78,7 +78,7 @@ fn maps(path: &Path, own: &[&Event], since: Option<Timestamp>) -> Result<Vec<Val
             json!({
                 "id": map.id().as_uuid().to_string(),
                 "name": map.schema().name,
-                "headlines": map.headlines().count(),
+                "nodes": map.nodes().len(),
                 "gained": gained,
             })
         })
