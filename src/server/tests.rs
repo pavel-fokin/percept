@@ -200,8 +200,8 @@ async fn api_event_is_not_found_for_an_event_in_another_project() {
     assert!(status.starts_with("HTTP/1.1 404"), "{status}");
 }
 
-/// `/api/maps/{name}` answers for the `root` the query names, not
-/// `state.source.path` - proving the path segment binds `name` and the
+/// `/api/maps/{id}` answers for the `root` the query names, not
+/// `state.source.path` - proving the path segment binds `id` and the
 /// query string binds `root`, `around`, and `depth` together.
 #[tokio::test]
 async fn api_maps_cuts_the_named_project_root_around_a_node() {
@@ -239,7 +239,8 @@ async fn api_maps_cuts_the_named_project_root_around_a_node() {
     );
     let (_log, addr) = spawn_over(vec![created, concept]).await;
 
-    let path = format!("/api/maps/decisions?root={}", fixture.path().to_string_lossy());
+    let id = crate::core::testing::map_id("decisions").as_uuid();
+    let path = format!("/api/maps/{id}?root={}", fixture.path().to_string_lossy());
     let (status, body) = get_json(addr, &path).await;
 
     assert!(status.starts_with("HTTP/1.1 200"), "{status}");
