@@ -18,8 +18,8 @@ mod turn_state;
 pub use error::Error;
 pub use event::{
     decode, encode, encode_at, find_event, from_wire, ids, parse_actor, wire_actor, WireActor,
-    parse_event_id, parse_kind, parse_lines, read_event, summarize, summary, Cursor, Event,
-    PREVIEW_CHARS,
+    parse_event_id, parse_kind, parse_lines, parse_map_id, read_event, summarize, summary, Cursor,
+    Event, PREVIEW_CHARS,
 };
 pub use jsonl::Jsonl;
 pub use turn_state::{turn_dir, TurnState};

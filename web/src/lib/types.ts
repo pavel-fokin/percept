@@ -96,7 +96,7 @@ export interface MapEdge {
   to: string;
 }
 
-/** `GET /api/maps/{name}`'s body: one map cut to what was asked for,
+/** `GET /api/maps/{id}`'s body: one map cut to what was asked for,
  * and what the cut left out counted. `total_nodes` is the whole map's
  * size, `shown_nodes` what came back; `boundary_edges` are the edges
  * with one end inside the cut and one outside - where a reader who

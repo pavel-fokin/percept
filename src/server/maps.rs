@@ -12,11 +12,11 @@ use std::path::PathBuf;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
-use uuid::Uuid;
 
-use crate::core::{EventLog, Map, MapId, Node, NodeRef, Selection};
+use crate::core::{map_id_for, EventLog, Map, Node, NodeRef, Selection};
 use crate::mapstore;
 use crate::server::events::Error;
+use crate::store;
 
 /// How many edges out from `around` the cut reaches when the query
 /// carries no `depth` of its own.
@@ -38,7 +38,7 @@ pub struct Params {
 /// `Fragment` reports. `params.root`'s own schemas declare the map's
 /// name, never this server's project.
 pub fn get(log: &dyn EventLog, id: &str, params: Params) -> Result<Value, Error> {
-    let id = Uuid::parse_str(id).map(MapId::from_uuid).map_err(|_| Error::Bad(format!("{id} is not a map id")))?;
+    let id = store::parse_map_id(id).map_err(|err| Error::Bad(err.to_string()))?;
     let root = params.root.ok_or_else(|| Error::Bad("root is required".to_string()))?;
     let root = PathBuf::from(root);
 
@@ -49,11 +49,22 @@ pub fn get(log: &dyn EventLog, id: &str, params: Params) -> Result<Value, Error>
     }
 
     let schemas = mapstore::load_schemas(&root).map_err(|err| Error::Internal(err.to_string()))?;
-    let maps = schemas.fold_all(own.iter().copied()).map_err(|err| Error::Internal(err.to_string()))?;
-    let map = maps
-        .into_iter()
-        .find(|map| map.id() == id)
+    // `map_id_for` only scans `own` for the schema's `map.created` event,
+    // far cheaper than folding a schema's whole map - so the schema `id`
+    // names is found before anything is folded, and only that one map
+    // pays the fold.
+    let name = schemas
+        .folded()
+        .find_map(|schema| match map_id_for(&schema.name, own.iter().copied()) {
+            Ok(Some(found)) if found == id => Some(Ok(schema.name.clone())),
+            Ok(_) => None,
+            Err(err) => Some(Err(err)),
+        })
+        .transpose()
+        .map_err(|err| Error::Internal(err.to_string()))?
         .ok_or_else(|| Error::NotFound(format!("no map with id {}", id.as_uuid())))?;
+    let map = mapstore::fold_map_at(&schemas, &name, &events, &root)
+        .map_err(|err| Error::Internal(err.to_string()))?;
     let headline_kinds = map.schema().headline_kinds.clone();
 
     let node_ref;
