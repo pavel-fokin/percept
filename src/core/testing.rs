@@ -384,7 +384,6 @@ pub fn debates() -> Schema {
                 &["verdict"],
             ),
         ],
-        headline_kinds: vec!["topic".to_string(), "verdict".to_string()],
         rules: Rules::default(),
     }
 }
@@ -402,7 +401,6 @@ pub fn chores() -> Schema {
                 .with_states(&["open", "done", "dropped"]),
         ],
         edge_kinds: vec![EdgeKind::new("blocks", "", &["chore"], &["chore"])],
-        headline_kinds: vec!["chore".to_string()],
         rules: Rules::default(),
     }
 }
@@ -450,7 +448,6 @@ pub fn files() -> Schema {
                 &["file", "package"],
             ),
         ],
-        headline_kinds: vec!["file".to_string()],
         rules: Rules::default(),
     }
 }

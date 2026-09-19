@@ -69,7 +69,7 @@ fn an_empty_map_renders_its_title_and_the_empty_notice() {
 }
 
 #[test]
-fn sections_order_headlines_by_state_then_by_when_they_were_added() {
+fn sections_are_ordered_by_state_then_by_when_they_were_added() {
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
     add(&mut map, "chore", "a", Some("first added"), Some("open"), &[], Actor::Human(human()));
     add(&mut map, "chore", "b", Some("second added"), Some("done"), &[], Actor::Human(human()));
@@ -85,7 +85,7 @@ fn sections_order_headlines_by_state_then_by_when_they_were_added() {
 }
 
 #[test]
-fn sections_order_headlines_by_their_kinds_place_in_headlines() {
+fn sections_are_ordered_by_their_kinds_place_among_node_kinds() {
     let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "verdict", "ship it", None, None, &[], Actor::Human(human()));
     add(&mut map, "topic", "Which parser?", None, None, &[], Actor::Human(human()));
@@ -316,7 +316,6 @@ fn court() -> Map {
             crate::core::EdgeKind::new("within", "", &["verdict"], &["area"]),
             crate::core::EdgeKind::new("settles", "", &["verdict"], &["topic"]),
         ],
-        headline_kinds: vec!["area".to_string(), "topic".to_string(), "verdict".to_string()],
         rules: crate::core::Rules::default(),
     };
     let mut map = Map::empty(crate::core::MapId::new(), schema);
@@ -328,11 +327,11 @@ fn court() -> Map {
     map
 }
 
-/// `headlines` order is nesting order: a node pointing at two headline
-/// kinds files under the one listed later, whatever the schema's edge
+/// Declaration order is nesting order: a node pointing at two kinds
+/// files under the one declared later, whatever the schema's edge
 /// order says.
 #[test]
-fn a_node_pointing_at_two_headline_kinds_files_under_the_later_one() {
+fn a_node_pointing_at_two_kinds_files_under_the_later_one() {
     let text = markdown(&court());
 
     assert!(text.contains("## t1 \"Which parser?\"\n\n- v1 \"ship it\" settles\n"), "{text}");
@@ -362,7 +361,6 @@ fn a_schema_with_no_edges_gives_every_node_its_own_section() {
         purpose: "test fixture".to_string(),
         node_kinds: vec![crate::core::NodeKind::new("term", "a word")],
         edge_kinds: Vec::new(),
-        headline_kinds: Vec::new(),
         rules: crate::core::Rules::default(),
     };
     let mut map = Map::empty(crate::core::MapId::new(), schema);

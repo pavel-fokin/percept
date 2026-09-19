@@ -13,7 +13,6 @@ use crate::core::{Actor, Event, NodeId, Payload, Source};
 const SCHEMA: &str = "\
 name = \"decisions\"\n\
 purpose = \"test\"\n\
-headlines = [\"concept\"]\n\
 \n\
 [[node]]\n\
 kind = \"concept\"\n\

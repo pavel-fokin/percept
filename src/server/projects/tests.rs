@@ -6,7 +6,7 @@ use crate::core::testing::{created_at, human, FakeLog, Fixture};
 use crate::core::{Actor, Event, NodeId, Payload, Source};
 use crate::shared::Timestamp;
 
-const SCHEMA: &str = "name = \"decisions\"\npurpose = \"test\"\nheadlines = [\"concept\"]\n\n[[node]]\nkind = \"concept\"\n";
+const SCHEMA: &str = "name = \"decisions\"\npurpose = \"test\"\n\n[[node]]\nkind = \"concept\"\n";
 
 fn source_at(name: &str, path: &Path) -> Source {
     Source {

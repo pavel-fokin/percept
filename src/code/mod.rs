@@ -65,7 +65,6 @@ pub fn schema() -> Schema {
                 &["file", "package"],
             ),
         ],
-        headline_kinds: vec!["file".to_string()],
         rules: Rules::default(),
     }
 }

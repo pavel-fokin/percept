@@ -212,11 +212,10 @@ fn state_counts(map: &Map) -> Vec<String> {
 }
 
 /// The State block: one line per map in fold order - how many of its
-/// headline nodes head it against how many it holds, `+N since last
-/// session` when that map's `moved` list is not empty, then any state
-/// counts `state_counts` finds. The pair is the pressure to fold: a
-/// map whose roots trail its headlines far enough is one to reflect
-/// on.
+/// nodes head it against how many it holds, `+N since last session`
+/// when that map's `moved` list is not empty, then any state counts
+/// `state_counts` finds. The pair is the pressure to fold: a map whose
+/// roots trail its nodes far enough is one to reflect on.
 fn state_block(maps: &[Map], moved: &[Vec<&Node>]) -> String {
     let rows: Vec<(String, String)> = maps
         .iter()

@@ -35,7 +35,7 @@ pub use map::{
     commit, commit_batch, encode_fragment, encode_lines, encode_map, encode_schema, ensure_maps,
     fold_map, fold_map_at, of_path, paths, start_reflection, LogMaps, NodeRefArgs, Snapshot,
 };
-pub use render::{catalogue, markdown};
+pub use render::{catalogue, markdown, overview};
 pub use rules::for_moment as moment_rules;
 pub use rules::for_schema_moment;
 pub use schemas::{

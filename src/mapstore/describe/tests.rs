@@ -40,7 +40,6 @@ fn a_relation_carries_its_edge_kinds_gloss() {
             &["verdict"],
             &["topic"],
         )],
-        headline_kinds: vec!["topic".to_string()],
         rules: crate::core::Rules::default(),
     };
 

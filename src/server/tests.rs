@@ -208,7 +208,7 @@ async fn api_maps_cuts_the_named_project_root_around_a_node() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/decisions.toml",
-        "name = \"decisions\"\npurpose = \"test\"\nheadlines = [\"concept\"]\n\n\
+        "name = \"decisions\"\npurpose = \"test\"\n\n\
          [[node]]\nkind = \"concept\"\n\n[[node]]\nkind = \"question\"\n\n\
          [[edge]]\nkind = \"about\"\nfrom = \"question\"\nto = \"concept\"\n",
     );

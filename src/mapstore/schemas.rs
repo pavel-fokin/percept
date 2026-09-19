@@ -67,6 +67,8 @@ pub const SCHEMAS_DIR: &str = ".percept/schemas";
 struct SchemaFile {
     name: String,
     purpose: String,
+    /// Only still read so a schema written against the old rule is
+    /// refused by name rather than ignored in silence.
     #[serde(default)]
     headlines: Vec<String>,
     #[serde(default, rename = "node")]
@@ -311,20 +313,15 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
         purpose: file.purpose,
         node_kinds,
         edge_kinds,
-        headline_kinds: file.headlines.clone(),
         rules: Rules::new(file.rules.0),
     };
 
-    for headline in &file.headlines {
-        if schema.node_kind(headline).is_none() {
-            return Err(format!(
-                "{stem}.toml: headlines names {headline:?}, which is not a declared node kind"
-            )
-            .into());
-        }
-    }
-    if let Some(headline) = repeated(file.headlines.iter().map(String::as_str)) {
-        return Err(format!("{stem}.toml: headlines names {headline:?} twice").into());
+    if !file.headlines.is_empty() {
+        return Err(format!(
+            "{stem}.toml: `headlines` is no longer a schema's to declare - what heads a map is \
+             every node nothing else points at. Remove the line."
+        )
+        .into());
     }
 
     Ok(schema)

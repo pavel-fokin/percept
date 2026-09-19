@@ -32,6 +32,18 @@ pub fn markdown(map: &Map) -> String {
     out
 }
 
+/// A map's overview for a prompt: the nodes that head it, one line
+/// each, as `Map`'s `Display` formats a node, without properties - a
+/// reader deciding whether to open the map with `read_map` doesn't
+/// need them yet.
+pub fn overview(map: &Map) -> String {
+    let lines: Vec<String> = outline::roots(map).into_iter().map(|node| format!("- {node}")).collect();
+    format!(
+        "The nodes that head it follow; read_map opens the rest, whole or around one node.\n{}",
+        lines.join("\n")
+    )
+}
+
 /// Whether `map` holds nodes by the agent and by someone else both -
 /// when a per-line `(agent)` mark tells them apart.
 fn mixed_authors(map: &Map) -> bool {

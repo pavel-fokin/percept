@@ -127,7 +127,6 @@ fn body(map: &Map, fragment: &crate::core::Fragment, root: &std::path::Path) -> 
             "id": map.id().as_uuid().to_string(),
             "name": schema.name,
             "purpose": schema.purpose,
-            "headline_kinds": schema.headline_kinds,
         },
         "kinds": kinds,
         "nodes": nodes,

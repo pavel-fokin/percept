@@ -13,7 +13,7 @@ use crate::shared::Timestamp;
 /// `topic` headline kind and nothing else - a mini schema of this
 /// fixture's own, so no test here rests on a shipped template.
 const DEBATES_TOML: &str = "name = \"debates\"\npurpose = \"what a hook test needs\"\n\
-                            headlines = [\"topic\"]\n\n[[node]]\nkind = \"topic\"\n";
+                            [[node]]\nkind = \"topic\"\n";
 
 fn write_debates_schema(root: &Path) {
     let dir = root.join(".percept/schemas");
@@ -502,7 +502,7 @@ fn with_turn_rules(turn: &str) -> Fixture {
     Fixture::new().with_extra_schema(
         "glossary",
         &format!(
-            "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"concept\"]\n\n\
+            "name = \"glossary\"\npurpose = \"p\"\n\n\
              [[node]]\nkind = \"concept\"\nrequires = [\"definition\"]\n\n\
              [rules]\n\"message.received\" = [{turn}]\n"
         ),
@@ -515,7 +515,7 @@ fn with_session_started_rules(started: &str) -> Fixture {
     Fixture::new().with_extra_schema(
         "glossary",
         &format!(
-            "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"concept\"]\n\n\
+            "name = \"glossary\"\npurpose = \"p\"\n\n\
              [[node]]\nkind = \"concept\"\nrequires = [\"definition\"]\n\n\
              [rules]\n\"session.started\" = [{started}]\n"
         ),

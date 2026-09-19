@@ -117,7 +117,6 @@ fn a_node_pointing_at_two_kinds_nests_under_the_one_declared_later() {
             crate::core::EdgeKind::new("within", "", &["verdict"], &["area"]),
             crate::core::EdgeKind::new("settles", "", &["verdict"], &["topic"]),
         ],
-        headline_kinds: vec!["area".to_string(), "topic".to_string(), "verdict".to_string()],
         rules: crate::core::Rules::default(),
     };
     let mut map = Map::empty(crate::core::MapId::new(), schema);

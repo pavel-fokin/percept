@@ -18,19 +18,6 @@ fn catalogue_line(map: &Map) -> String {
     }
 }
 
-/// `MapShape::Headlines`'s body: the map's root nodes - the headlines
-/// nobody claims, what heads it - as `Map`'s `Display` formats a node
-/// line, without properties - a reader deciding whether to open the
-/// map with `read_map` doesn't need them yet.
-fn headlines_body(map: &Map) -> String {
-    let lines: Vec<String> = map.roots().map(|node| format!("- {node}")).collect();
-    format!(
-        "The {} nodes that head it follow; read_map opens the rest, whole or around one node.\n{}",
-        map.schema().headline_kinds.join(" and "),
-        lines.join("\n")
-    )
-}
-
 /// A `message.received` percept itself submitted, as `reflect` does.
 fn is_percepts_prompt(event: &Event) -> bool {
     event.actor() == Actor::System && event.kind() == EventKind::MessageReceived
@@ -210,7 +197,7 @@ impl fmt::Display for Section {
                 "maps ({})",
                 match shape {
                     MapShape::Prompt => "prompt",
-                    MapShape::Headlines => "headlines",
+                    MapShape::Overview(_) => "overview",
                     MapShape::Tool => "tool",
                 }
             ),
@@ -353,7 +340,7 @@ fn render(
                 } else {
                     match map_shape {
                         MapShape::Prompt => map.to_string(),
-                        MapShape::Headlines => headlines_body(&map),
+                        MapShape::Overview(body) => body(&map),
                         MapShape::Tool => "read_map shows it.".to_string(),
                     }
                 };

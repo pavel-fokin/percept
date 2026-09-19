@@ -12,7 +12,6 @@
 
 name = "concepts"
 purpose = "what was asked, what was chosen, and why, so a settled question is not reopened"
-headlines = ["concept", "question", "decision"]
 
 [[node]]
 kind = "concept"
