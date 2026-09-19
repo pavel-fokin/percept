@@ -4,7 +4,7 @@
 //! project with no such directory, or none in it, declares no maps at
 //! all: `load` returns an empty `Schemas`, and `percept init <client>`
 //! is what gives a fresh checkout its first schema file, copied from
-//! the `decisions` template this binary embeds - see `templates`.
+//! the templates this binary embeds - see `templates`.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -28,11 +28,35 @@ pub const REFLECTION_STARTED: &str = "reflection.started";
 /// list depending on them.
 pub const MOMENTS: [&str; 3] = [SESSION_STARTED, MESSAGE_RECEIVED, REFLECTION_STARTED];
 
-/// The schema template `percept init <client>` copies into a fresh
-/// checkout's `SCHEMAS_DIR`, as `(<name>, <text>)`. Nothing else reads
-/// this; a loaded project's schemas come only from `load`, over the
-/// files `init` or the project's own author wrote.
-pub const TEMPLATES: [(&str, &str); 1] = [("decisions", include_str!("schemas/decisions.toml"))];
+include!(concat!(env!("OUT_DIR"), "/schema_templates.rs"));
+
+/// The schema templates `percept init <client>` copies into a fresh
+/// checkout's `SCHEMAS_DIR`, as `(<name>, <text>)`. `build.rs` embeds
+/// every `*.toml` under `schemas/` as `TEMPLATE_TEXTS`, discovered, so
+/// no file name is hand-kept here; each one's `name` is read back out
+/// of its own `name = "..."` line. Nothing else reads this; a loaded
+/// project's schemas come only from `load`, over the files `init` or
+/// the project's own author wrote.
+pub fn templates() -> Vec<(String, &'static str)> {
+    TEMPLATE_TEXTS
+        .iter()
+        .map(|text| (shipped_name(text), *text))
+        .collect()
+}
+
+/// The `name` a shipped template declares, read back out of its own
+/// text rather than kept a second time in Rust: `parse` already
+/// requires it to match the file's stem, so this is the one place
+/// that fact is trusted.
+fn shipped_name(text: &str) -> String {
+    #[derive(Deserialize)]
+    struct NameOnly {
+        name: String,
+    }
+    toml::from_str::<NameOnly>(text)
+        .expect("shipped schema template declares name")
+        .name
+}
 
 /// Where a project's schema files live, under the project root
 /// `checkout_root` finds - what `load` reads and `init` writes.

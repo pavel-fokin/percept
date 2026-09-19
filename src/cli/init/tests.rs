@@ -278,7 +278,7 @@ fn init_writes_the_shipped_schemas() {
 
     let schemas = mapstore::load_schemas(fixture.path()).unwrap();
     let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
-    assert_eq!(names, ["decisions"]);
+    assert_eq!(names, ["concepts"]);
 }
 
 #[test]
@@ -294,7 +294,7 @@ fn init_creates_each_map_once() {
     assert_eq!(events.len(), 1);
     assert!(matches!(
         events[0].payload(),
-        crate::core::Payload::MapCreated { schema, .. } if schema == "decisions"
+        crate::core::Payload::MapCreated { schema, .. } if schema == "concepts"
     ));
 }
 

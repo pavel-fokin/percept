@@ -9,8 +9,8 @@
 //! `for_schema_moment` one schema's alone - what `maps reflect` sends
 //! for the one map it opened on. The
 //! tools that call these live in `src/tools`. `load_schemas` reads a
-//! project's schemas from `SCHEMAS_DIR` alone; `TEMPLATES` is the
-//! `decisions` TOML `percept init <client>` copies there for a project
+//! project's schemas from `SCHEMAS_DIR` alone; `templates` is the
+//! shipped TOML `percept init <client>` copies there for a project
 //! that has none yet. A project with no
 //! schemas has no maps: `catalogue` and `start` print `NO_SCHEMAS_HINT`
 //! in place of their usual body.
@@ -38,7 +38,7 @@ pub use render::{catalogue, markdown};
 pub use rules::for_moment as moment_rules;
 pub use rules::for_schema_moment;
 pub use schemas::{
-    load as load_schemas, MESSAGE_RECEIVED, REFLECTION_STARTED, SCHEMAS_DIR, SESSION_STARTED, TEMPLATES,
+    load as load_schemas, templates, MESSAGE_RECEIVED, REFLECTION_STARTED, SCHEMAS_DIR, SESSION_STARTED,
 };
 pub use start::start;
 

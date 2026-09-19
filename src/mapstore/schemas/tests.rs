@@ -11,24 +11,24 @@ fn a_project_with_no_schemas_directory_has_no_maps() {
 
 #[test]
 fn each_shipped_template_parses_under_its_own_name() {
-    for (name, text) in TEMPLATES {
-        let schema = parse(name, text).unwrap();
+    for (name, text) in templates() {
+        let schema = parse(&name, text).unwrap();
         assert_eq!(schema.name, name);
     }
 }
 
 #[test]
 fn the_decisions_template_lists_concept_first_among_headlines() {
-    let (name, text) = TEMPLATES.iter().find(|(name, _)| *name == "decisions").unwrap();
-    let schema = parse(name, text).unwrap();
+    let (name, text) = templates().into_iter().find(|(name, _)| name == "concepts").unwrap();
+    let schema = parse(&name, text).unwrap();
 
     assert_eq!(schema.headline_kinds, ["concept", "question", "decision"]);
 }
 
 #[test]
 fn the_decisions_template_lets_a_concept_cover_a_concept() {
-    let (name, text) = TEMPLATES.iter().find(|(name, _)| *name == "decisions").unwrap();
-    let schema = parse(name, text).unwrap();
+    let (name, text) = templates().into_iter().find(|(name, _)| name == "concepts").unwrap();
+    let schema = parse(&name, text).unwrap();
     let covers = schema.edge_kind("covers").unwrap();
 
     assert_eq!(covers.from, ["concept"]);
@@ -570,16 +570,16 @@ fn a_key_outside_the_three_moments_is_refused_naming_them() {
 
 #[test]
 fn the_decisions_template_carries_message_received_rules() {
-    let (name, text) = TEMPLATES.iter().find(|(name, _)| *name == "decisions").unwrap();
-    let schema = parse(name, text).unwrap();
+    let (name, text) = templates().into_iter().find(|(name, _)| name == "concepts").unwrap();
+    let schema = parse(&name, text).unwrap();
 
     assert_eq!(schema.rules.at("message.received").len(), 2);
 }
 
 #[test]
 fn the_decisions_template_carries_reflection_started_rules() {
-    let (name, text) = TEMPLATES.iter().find(|(name, _)| *name == "decisions").unwrap();
-    let schema = parse(name, text).unwrap();
+    let (name, text) = templates().into_iter().find(|(name, _)| name == "concepts").unwrap();
+    let schema = parse(&name, text).unwrap();
 
     assert_eq!(schema.rules.at("reflection.started").len(), 5);
 }

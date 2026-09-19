@@ -4,6 +4,11 @@
 //! A checkout without a built page still compiles: a stub page lands
 //! at the same path instead, saying so itself.
 //!
+//! Also generates the list of shipped schema templates
+//! `mapstore::templates` embeds, so a new or renamed file under
+//! `src/mapstore/schemas` needs no matching change in Rust source -
+//! see `generate_schema_templates`.
+//!
 //! Also stamps in the release number `percept --version` prints.
 
 use std::env;
@@ -26,6 +31,7 @@ npm run build`, then `cargo build`.</p>
 
 fn main() {
     stamp_version();
+    generate_schema_templates();
 
     let source = Path::new("web/dist/index.html");
     println!("cargo:rerun-if-changed=web/dist");
@@ -53,6 +59,36 @@ fn stamp_version() {
         None => release,
     };
     println!("cargo:rustc-env=PERCEPT_VERSION={version}");
+}
+
+/// Every `*.toml` file directly under `src/mapstore/schemas`, sorted,
+/// as one `include_str!` each in a generated `TEMPLATE_TEXTS` const -
+/// `schemas.rs` reads the name each template ships back out of its
+/// own `name = "..."` line, so the file list lives here, discovered,
+/// and never as a name a person keeps in sync by hand.
+fn generate_schema_templates() {
+    let dir = Path::new("src/mapstore/schemas");
+    println!("cargo:rerun-if-changed={}", dir.display());
+
+    let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR set by cargo");
+    let mut files: Vec<_> = fs::read_dir(dir)
+        .expect("read src/mapstore/schemas")
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "toml"))
+        .collect();
+    files.sort();
+
+    let mut code = String::from("pub const TEMPLATE_TEXTS: &[&str] = &[\n");
+    for file in &files {
+        let absolute = Path::new(&manifest_dir).join(file);
+        code.push_str(&format!("    include_str!({absolute:?}),\n"));
+    }
+    code.push_str("];\n");
+
+    let out_dir = env::var("OUT_DIR").expect("OUT_DIR set by cargo");
+    fs::write(Path::new(&out_dir).join("schema_templates.rs"), code)
+        .expect("write schema_templates.rs");
 }
 
 /// A variable set to the empty string is as absent as an unset one.
