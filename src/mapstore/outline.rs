@@ -12,6 +12,17 @@ pub fn roots(map: &Map) -> Vec<&Node> {
     map.nodes().iter().filter(|node| claimant(map, node).is_none()).collect()
 }
 
+/// What a reader sees of `map` before opening it: the nodes nobody
+/// claims, or every node when a cycle of claims leaves none - a map
+/// whose claims all point at each other still has to show something.
+pub fn heads(map: &Map) -> Vec<&Node> {
+    let roots = roots(map);
+    if roots.is_empty() {
+        return map.nodes().iter().collect();
+    }
+    roots
+}
+
 /// The node `node` prints under, if any: the first node of its own
 /// kind pointing at it - the decision that supersedes it - else, of
 /// the nodes of other kinds it points at, the one whose kind ranks

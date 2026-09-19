@@ -318,8 +318,8 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
 
     if !file.headlines.is_empty() {
         return Err(format!(
-            "{stem}.toml: `headlines` is no longer a schema's to declare - what heads a map is \
-             every node nothing else points at. Remove the line."
+            "{stem}.toml: a schema no longer declares `headlines` - what heads a map is now \
+             read from its own edges, and node order decides what nests where. Remove the line."
         )
         .into());
     }

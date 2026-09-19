@@ -37,7 +37,7 @@ pub fn markdown(map: &Map) -> String {
 /// reader deciding whether to open the map with `read_map` doesn't
 /// need them yet.
 pub fn overview(map: &Map) -> String {
-    let lines: Vec<String> = outline::roots(map).into_iter().map(|node| format!("- {node}")).collect();
+    let lines: Vec<String> = outline::heads(map).into_iter().map(|node| format!("- {node}")).collect();
     format!(
         "The nodes that head it follow; read_map opens the rest, whole or around one node.\n{}",
         lines.join("\n")

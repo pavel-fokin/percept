@@ -104,6 +104,34 @@ fn a_claim_cycle_still_yields_roots_without_hanging() {
 }
 
 #[test]
+fn heads_fall_back_to_every_node_when_every_claim_cycles() {
+    // Two chores blocking each other claim one another, so neither is
+    // a root - but the map is not empty, and what a reader opens it on
+    // cannot be nothing.
+    let mut map = Map::empty(map_id("chores"), chores());
+    add(&mut map, "chore", "A");
+    add(&mut map, "chore", "B");
+    link(&mut map, "blocks", ("chore", "A"), ("chore", "B"));
+    link(&mut map, "blocks", ("chore", "B"), ("chore", "A"));
+
+    assert!(roots(&map).is_empty());
+    let names: Vec<&str> = heads(&map).into_iter().map(|node| node.name.as_str()).collect();
+    assert_eq!(names, ["A", "B"]);
+}
+
+#[test]
+fn heads_are_the_roots_when_the_map_has_any() {
+    let mut map = Map::empty(map_id("debates"), debates());
+    add(&mut map, "topic", "Which language?");
+    add(&mut map, "claim", "Rust is faster");
+    link(&mut map, "about", ("claim", "Rust is faster"), ("topic", "Which language?"));
+
+    let names: Vec<&str> = heads(&map).into_iter().map(|node| node.name.as_str()).collect();
+
+    assert_eq!(names, ["Which language?"]);
+}
+
+#[test]
 fn a_node_pointing_at_two_kinds_nests_under_the_one_declared_later() {
     let schema = crate::core::Schema {
         name: "court".to_string(),

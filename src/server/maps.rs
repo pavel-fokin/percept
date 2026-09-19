@@ -65,9 +65,8 @@ pub fn get(log: &dyn EventLog, id: &str, params: Params) -> Result<Value, Error>
         .ok_or_else(|| Error::NotFound(format!("no map with id {}", id.as_uuid())))?;
     let map = mapstore::fold_map_at(&schemas, &name, &events, &root)
         .map_err(|err| Error::Internal(err.to_string()))?;
-    let roots: Vec<crate::core::NodeId> = outline::roots(&map).iter().map(|node| node.id).collect();
-
     let node_ref;
+    let heads: Vec<crate::core::NodeId>;
     let selection = match params.around.as_deref() {
         Some(around) => {
             let id = map.resolve_str(around).map_err(|err| Error::NotFound(err.to_string()))?;
@@ -83,10 +82,13 @@ pub fn get(log: &dyn EventLog, id: &str, params: Params) -> Result<Value, Error>
         // section. Which those are is the outline's rule, not a cut
         // any kind describes, so the server names them one by one and
         // `Fragment`'s counts report the whole map behind them.
-        None => Selection {
-            nodes: &roots,
-            ..Selection::default()
-        },
+        None => {
+            heads = outline::heads(&map).iter().map(|node| node.id).collect();
+            Selection {
+                nodes: &heads,
+                ..Selection::default()
+            }
+        }
     };
     let fragment = map.select(&selection).map_err(|err| Error::Internal(err.to_string()))?;
 

@@ -428,3 +428,21 @@ fn the_catalogue_glosses_a_package_kind_as_an_external_crate() {
     assert!(text.contains("never one of this project's own modules"));
     assert!(text.contains("\nExample: nothing recorded here yet.\n"));
 }
+
+#[test]
+fn a_map_whose_claims_all_cycle_still_shows_every_node() {
+    // Nothing heads a map where every node is claimed, so every node
+    // heads a section of its own rather than the map reading empty.
+    let mut map = Map::empty(crate::core::testing::map_id("chores"), crate::core::testing::chores());
+    add(&mut map, "chore", "A", Some("because"), Some("open"), &[], Actor::Human(human()));
+    add(&mut map, "chore", "B", Some("because"), Some("open"), &[], Actor::Human(human()));
+    link(&mut map, "blocks", ("chore", "A"), ("chore", "B"));
+    link(&mut map, "blocks", ("chore", "B"), ("chore", "A"));
+
+    let text = markdown(&map);
+
+    // One heads the section and the other nests inside it; neither is
+    // dropped for want of a root.
+    assert!(text.contains("## c1 \"A\""), "{text}");
+    assert!(text.contains("c2 \"B\""), "{text}");
+}

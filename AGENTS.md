@@ -30,9 +30,10 @@ serde-free.
   change goes through `Map::apply`, so the rules live once.
 - `Schema`: a map kind - purpose, node and edge kinds, rules - loaded
   from `.percept/schemas/<name>.toml`, the only place a kind is
-  declared. The Rust names no kind. What heads a map is not declared:
-  a node nothing else points at heads it, and node declaration order
-  decides which of two claimants a node nests under.
+  declared. The Rust names no kind. What heads a map is not declared
+  at all: a node nests under the first node of its own kind that
+  points at it, else under the latest-declared kind among those it
+  points at, and a node nothing claims heads the map.
 - `Selection` and `Fragment`: a cut of a map, and what the cut left
   out.
 - `Usage`: token counts for one round trip, the core's, not the

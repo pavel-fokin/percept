@@ -563,7 +563,8 @@ impl Map {
     /// The map cut to the nodes `ids` names, keeping only the edges
     /// that join two of them. An id the map does not hold is skipped.
     fn keep_nodes(&self, ids: &[NodeId]) -> Self {
-        let nodes: Vec<Node> = self.nodes.iter().filter(|node| ids.contains(&node.id)).cloned().collect();
+        let kept: HashSet<NodeId> = ids.iter().copied().collect();
+        let nodes: Vec<Node> = self.nodes.iter().filter(|node| kept.contains(&node.id)).cloned().collect();
         self.cut_to(nodes)
     }
 
