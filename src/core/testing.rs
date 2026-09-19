@@ -411,6 +411,41 @@ pub fn schemas() -> Schemas {
     Schemas::new(vec![debates(), chores()])
 }
 
+/// Three node kinds, coarse to fine, with an edge from the finest to
+/// each of the other two - the shape a test needs when it asks which
+/// of two candidates claims a node.
+pub fn court() -> Schema {
+    Schema {
+        name: "court".to_string(),
+        purpose: "test fixture".to_string(),
+        node_kinds: vec![
+            NodeKind::new("area", ""),
+            NodeKind::new("topic", ""),
+            NodeKind::new("verdict", ""),
+        ],
+        edge_kinds: vec![
+            EdgeKind::new("within", "", &["verdict"], &["area"]),
+            EdgeKind::new("settles", "", &["verdict"], &["topic"]),
+        ],
+        rules: Rules::default(),
+    }
+}
+
+/// A `kind` edge from one node to another, both named by kind and
+/// name - the one `AddEdge` every map test writes.
+pub fn link(map: &mut crate::core::Map, kind: &str, from: (&str, &str), to: (&str, &str)) {
+    map.apply(
+        crate::core::Mutation::AddEdge {
+            kind: kind.to_string(),
+            from: node_ref(from.0, from.1),
+            to: node_ref(to.0, to.1),
+            sources: Vec::new(),
+        },
+        Actor::Human(human()),
+    )
+    .unwrap();
+}
+
 /// A schema fixture with `file`, `function`, and `package` node kinds
 /// and `contains`/`imports` edge kinds - what a test needs when it
 /// exercises the shape the code map used to have, now that `code` is

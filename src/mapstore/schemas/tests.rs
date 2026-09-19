@@ -111,7 +111,8 @@ fn a_schema_that_still_declares_headlines_is_refused() {
 
     let err = load(fixture.path()).err().unwrap().to_string();
 
-    assert!(err.starts_with("glossary.toml: a schema no longer declares `headlines`"), "{err}");
+    assert!(err.starts_with("glossary.toml:"), "{err}");
+    assert!(err.contains("a schema no longer declares `headlines`"), "{err}");
 }
 
 #[test]

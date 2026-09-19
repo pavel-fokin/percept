@@ -67,10 +67,11 @@ pub const SCHEMAS_DIR: &str = ".percept/schemas";
 struct SchemaFile {
     name: String,
     purpose: String,
-    /// Only still read so a schema written against the old rule is
-    /// refused by name rather than ignored in silence.
-    #[serde(default)]
-    headlines: Vec<String>,
+    /// `deny_unknown_fields` would refuse this key anyway; the hook is
+    /// here to say what replaced it, at the line it sits on.
+    #[allow(dead_code)]
+    #[serde(default, deserialize_with = "headlines_was_removed")]
+    headlines: (),
     #[serde(default, rename = "node")]
     nodes: Vec<NodeFile>,
     #[serde(default, rename = "edge")]
@@ -111,6 +112,16 @@ struct NodeFile {
     states: Vec<String>,
     #[serde(default, rename = "state", deserialize_with = "state_was_renamed")]
     _renamed_state: (),
+}
+
+fn headlines_was_removed<'de, D>(_: D) -> Result<(), D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Err(serde::de::Error::custom(
+        "a schema no longer declares `headlines` - what heads a map is read from its own \
+         edges, and node order decides what nests where. Remove the line",
+    ))
 }
 
 fn state_was_renamed<'de, D>(_: D) -> Result<(), D::Error>
@@ -315,14 +326,6 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
         edge_kinds,
         rules: Rules::new(file.rules.0),
     };
-
-    if !file.headlines.is_empty() {
-        return Err(format!(
-            "{stem}.toml: a schema no longer declares `headlines` - what heads a map is now \
-             read from its own edges, and node order decides what nests where. Remove the line."
-        )
-        .into());
-    }
 
     Ok(schema)
 }

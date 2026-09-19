@@ -9,6 +9,11 @@
 # question reaches everything weighed for it. A concept covers another
 # it absorbs, so the covered one nests under it and leaves the
 # overview.
+#
+# Node kinds are declared coarsest first. Nothing declares what heads
+# the map: a node nests under what it points at, and where it points
+# at two kinds, the one declared later wins. A node nothing claims
+# heads the map.
 
 name = "concepts"
 purpose = "what was asked, what was chosen, and why, so a settled question is not reopened"

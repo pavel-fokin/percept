@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::core::testing::{chores, debates, files, human, node_ref};
+use crate::core::testing::{chores, debates, files, human, link, node_ref};
 use crate::core::{Actor, EventId, Mutation};
 
 /// Adds a node with one `why` property when `why` is given, and one
@@ -49,18 +49,6 @@ fn change(map: &mut Map, kind: &str, name: &str, properties: BTreeMap<String, St
     .unwrap();
 }
 
-fn link(map: &mut Map, kind: &str, from: (&str, &str), to: (&str, &str)) {
-    map.apply(
-        Mutation::AddEdge {
-            kind: kind.to_string(),
-            from: node_ref(from.0, from.1),
-            to: node_ref(to.0, to.1),
-            sources: Vec::new(),
-        },
-        Actor::Human(human()),
-    )
-    .unwrap();
-}
 
 #[test]
 fn an_empty_map_renders_its_title_and_the_empty_notice() {
@@ -268,12 +256,11 @@ fn an_unchanged_node_carries_no_changed_by_line() {
 
 #[test]
 fn a_node_pointed_at_by_two_section_kinds_ranks_under_the_one_declared_later() {
-    // `contains` names `function` as its `to` end, so `function` is a
-    // section kind now, declared after `file` - the two ends of one
-    // edge, each eligible, file the contained end. `function` ranking
-    // later means `file` nests under `main`, not the other way -
-    // `contains`'s own direction says nothing about rank; only
-    // declaration order does.
+    // A node nests under what it points at, so `contains` running from
+    // `file` to `function` files the file under the function - the one
+    // candidate it has. Declaration order breaks ties between two
+    // candidates; with one it decides nothing, which is why a schema
+    // whose edges mean containment renders inside out.
     let mut map = Map::empty(crate::core::testing::map_id("files"), files());
     add(&mut map, "file", "src/main.rs", None, None, &[], Actor::System);
     map.apply(
@@ -301,24 +288,10 @@ fn a_node_pointed_at_by_two_section_kinds_ranks_under_the_one_declared_later() {
     );
 }
 
-/// Three node kinds, coarse to fine, with an edge from the finest
-/// to each of the other two - the coarser one declared first.
+/// The `court` schema with its three nodes and the two edges the
+/// finest one points out along.
 fn court() -> Map {
-    let schema = crate::core::Schema {
-        name: "court".to_string(),
-        purpose: "test fixture".to_string(),
-        node_kinds: vec![
-            crate::core::NodeKind::new("area", ""),
-            crate::core::NodeKind::new("topic", ""),
-            crate::core::NodeKind::new("verdict", ""),
-        ],
-        edge_kinds: vec![
-            crate::core::EdgeKind::new("within", "", &["verdict"], &["area"]),
-            crate::core::EdgeKind::new("settles", "", &["verdict"], &["topic"]),
-        ],
-        rules: crate::core::Rules::default(),
-    };
-    let mut map = Map::empty(crate::core::MapId::new(), schema);
+    let mut map = Map::empty(crate::core::MapId::new(), crate::core::testing::court());
     add(&mut map, "area", "parsing", None, None, &[], Actor::Human(human()));
     add(&mut map, "topic", "Which parser?", None, None, &[], Actor::Human(human()));
     add(&mut map, "verdict", "ship it", None, None, &[], Actor::Human(human()));

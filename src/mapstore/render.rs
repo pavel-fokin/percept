@@ -137,14 +137,20 @@ fn push_example(out: &mut String, map: &Map) {
 /// map holds goes unseen.
 fn push_sections(out: &mut String, map: &Map, mark: bool) {
     let mut all: Vec<&Node> = map.nodes().iter().collect();
-    all.sort_by_key(|node| (outline::rank(map, node), state_rank(map, node), node.added().at));
-    let roots: Vec<&Node> = all
-        .iter()
-        .copied()
-        .filter(|node| outline::claimant(map, node).is_none())
-        .collect();
+    // Unclaimed first, so a node heads its own section before anything
+    // that claims it can nest it; a claimed node left unreached by any
+    // section still gets one, further down. `cached` because every key
+    // here walks the map's edges.
+    all.sort_by_cached_key(|node| {
+        (
+            outline::claimant(map, node).is_some(),
+            outline::rank(map, node),
+            state_rank(map, node),
+            node.added().at,
+        )
+    });
     let mut printed: HashSet<NodeId> = HashSet::new();
-    for node in roots.iter().chain(all.iter()) {
+    for node in all {
         if !printed.insert(node.id) {
             continue;
         }

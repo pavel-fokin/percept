@@ -15,6 +15,8 @@ pub fn roots(map: &Map) -> Vec<&Node> {
 /// What a reader sees of `map` before opening it: the nodes nobody
 /// claims, or every node when a cycle of claims leaves none - a map
 /// whose claims all point at each other still has to show something.
+/// The fallback is coarser than `markdown`'s, which nests what a
+/// section already reached; a cut has no nesting to lean on.
 pub fn heads(map: &Map) -> Vec<&Node> {
     let roots = roots(map);
     if roots.is_empty() {

@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::core::testing::{chores, debates, human, map_id, node_ref};
+use crate::core::testing::{chores, court, debates, human, link, map_id};
 use crate::core::{Actor, Map, Mutation};
 
 /// Adds a node, with whatever properties its kind requires: a `why`
@@ -29,18 +29,6 @@ fn add(map: &mut Map, kind: &str, name: &str) {
     .unwrap();
 }
 
-fn link(map: &mut Map, kind: &str, from: (&str, &str), to: (&str, &str)) {
-    map.apply(
-        Mutation::AddEdge {
-            kind: kind.to_string(),
-            from: node_ref(from.0, from.1),
-            to: node_ref(to.0, to.1),
-            sources: Vec::new(),
-        },
-        Actor::Human(human()),
-    )
-    .unwrap();
-}
 
 #[test]
 fn a_node_of_any_kind_nobody_claims_heads_a_section() {
@@ -71,16 +59,6 @@ fn a_node_its_neighbour_claims_leaves_the_roots() {
 }
 
 #[test]
-fn a_node_nobody_claims_is_a_root() {
-    let mut map = Map::empty(map_id("debates"), debates());
-    add(&mut map, "topic", "Which language?");
-
-    let names: Vec<&str> = roots(&map).into_iter().map(|node| node.name.as_str()).collect();
-
-    assert_eq!(names, ["Which language?"]);
-}
-
-#[test]
 fn a_claimed_node_is_not_a_root() {
     let mut map = Map::empty(map_id("debates"), debates());
     add(&mut map, "verdict", "Go");
@@ -90,17 +68,6 @@ fn a_claimed_node_is_not_a_root() {
     let names: Vec<&str> = roots(&map).into_iter().map(|node| node.name.as_str()).collect();
 
     assert_eq!(names, ["Rust"]);
-}
-
-#[test]
-fn a_claim_cycle_still_yields_roots_without_hanging() {
-    let mut map = Map::empty(map_id("chores"), chores());
-    add(&mut map, "chore", "A");
-    add(&mut map, "chore", "B");
-    link(&mut map, "blocks", ("chore", "A"), ("chore", "B"));
-    link(&mut map, "blocks", ("chore", "B"), ("chore", "A"));
-
-    assert!(roots(&map).is_empty());
 }
 
 #[test]
@@ -133,21 +100,7 @@ fn heads_are_the_roots_when_the_map_has_any() {
 
 #[test]
 fn a_node_pointing_at_two_kinds_nests_under_the_one_declared_later() {
-    let schema = crate::core::Schema {
-        name: "court".to_string(),
-        purpose: "test fixture".to_string(),
-        node_kinds: vec![
-            crate::core::NodeKind::new("area", ""),
-            crate::core::NodeKind::new("topic", ""),
-            crate::core::NodeKind::new("verdict", ""),
-        ],
-        edge_kinds: vec![
-            crate::core::EdgeKind::new("within", "", &["verdict"], &["area"]),
-            crate::core::EdgeKind::new("settles", "", &["verdict"], &["topic"]),
-        ],
-        rules: crate::core::Rules::default(),
-    };
-    let mut map = Map::empty(crate::core::MapId::new(), schema);
+    let mut map = Map::empty(crate::core::MapId::new(), court());
     add(&mut map, "area", "parsing");
     add(&mut map, "topic", "Which parser?");
     add(&mut map, "verdict", "ship it");

@@ -164,8 +164,8 @@ impl fmt::Display for NodeRef {
 
 /// How much of a map a reader asked for. `around` cuts first, then
 /// `since`, then `kinds`, then `nodes`, so they read together as "what
-/// changed near this node, of these kinds". All absent is the whole
-/// map.
+/// changed near this node, of these kinds, of these nodes". All absent
+/// is the whole map.
 #[derive(Default)]
 pub struct Selection<'a> {
     pub around: Option<(&'a NodeRef, usize)>,
