@@ -29,7 +29,7 @@ const DEPTH_OPTIONS: FilterMenuOption<string>[] = [
  * that re-cuts around it, which is the position the CLI's `--around`
  * asks a reader to already know. */
 export default function MapView() {
-  const { name = "" } = useParams();
+  const { id = "" } = useParams();
   const [params] = useSearchParams();
   const root = params.get("root") ?? "";
   const around = params.get("around");
@@ -41,7 +41,7 @@ export default function MapView() {
   useEffect(() => {
     let cancelled = false;
     setLoad({ state: "loading" });
-    fetchMap(name, root, around, depth)
+    fetchMap(id, root, around, depth)
       .then((cut) => {
         if (!cancelled) setLoad({ state: "ready", cut });
       })
@@ -51,9 +51,10 @@ export default function MapView() {
     return () => {
       cancelled = true;
     };
-  }, [name, root, around, depth]);
+  }, [id, root, around, depth]);
 
   const cut = load.state === "ready" ? load.cut : null;
+  const name = cut?.map.name ?? "";
 
   return (
     <main id="map" className="mx-auto w-full max-w-3xl flex-1 px-4 pb-14 sm:px-8">
@@ -69,7 +70,7 @@ export default function MapView() {
             chipLabel={DEPTH_OPTIONS.find((option) => option.value === String(depth))?.label ?? `${depth} steps out`}
             options={DEPTH_OPTIONS}
             isSelected={(value) => value === String(depth)}
-            onSelect={(value) => navigate(`${mapPath(name, root)}&around=${encodeURIComponent(around)}&depth=${value}`)}
+            onSelect={(value) => navigate(`${mapPath(id, root)}&around=${encodeURIComponent(around)}&depth=${value}`)}
             multi={false}
             open={depthOpen}
             onOpenChange={setDepthOpen}
@@ -84,7 +85,7 @@ export default function MapView() {
           <>
             <span>{bound(cut, around)}</span>
             {around && (
-              <Link to={mapPath(name, root)} className="text-accent underline decoration-rule underline-offset-4 hover:decoration-faint">
+              <Link to={mapPath(id, root)} className="text-accent underline decoration-rule underline-offset-4 hover:decoration-faint">
                 Show the whole map
               </Link>
             )}
@@ -99,7 +100,7 @@ export default function MapView() {
               key={node.node}
               className={"border-t border-rule py-3" + (index === all.length - 1 ? " border-b" : "")}
             >
-              <NodeRow node={node} cut={cut} name={name} root={root} around={around} />
+              <NodeRow node={node} cut={cut} mapId={id} root={root} around={around} />
             </li>
           ))}
         </ul>
@@ -129,13 +130,13 @@ function bound(cut: MapResponse, around: string | null): string {
 function NodeRow({
   node,
   cut,
-  name,
+  mapId,
   root,
   around,
 }: {
   node: MapNode;
   cut: MapResponse;
-  name: string;
+  mapId: string;
   root: string;
   around: string | null;
 }) {
@@ -149,7 +150,7 @@ function NodeRow({
           <span className="font-mono text-accent">{node.id}</span>
         ) : (
           <Link
-            to={`${mapPath(name, root)}&around=${encodeURIComponent(node.id)}&depth=${DEFAULT_DEPTH}`}
+            to={`${mapPath(mapId, root)}&around=${encodeURIComponent(node.id)}&depth=${DEFAULT_DEPTH}`}
             className="font-mono text-accent underline decoration-rule underline-offset-4 hover:decoration-faint"
           >
             {node.id}

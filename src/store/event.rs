@@ -832,7 +832,7 @@ fn parse_node_id(s: &str) -> Result<NodeId, Error> {
     Ok(NodeId::from_uuid(parse_uuid(s)?))
 }
 
-fn parse_map_id(s: &str) -> Result<MapId, Error> {
+pub fn parse_map_id(s: &str) -> Result<MapId, Error> {
     Ok(MapId::from_uuid(parse_uuid(s)?))
 }
 

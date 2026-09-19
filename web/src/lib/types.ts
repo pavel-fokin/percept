@@ -40,11 +40,13 @@ export interface EventsResponse {
   project: string;
 }
 
-/** One map a project keeps, as `GET /api/projects` reports it:
- * `headlines` is how many of its nodes a reader sees before opening
- * it, and `gained` how many of those changed since that project's last
- * session. */
+/** One map a project keeps, as `GET /api/projects` reports it: `id` is
+ * the map's own stable id - what `GET /api/maps/{id}` addresses it
+ * by - `name` its schema's, for display only; `headlines` is how many
+ * of its nodes a reader sees before opening it, and `gained` how many
+ * of those changed since that project's last session. */
 export interface ProjectMap {
+  id: string;
   name: string;
   headlines: number;
   gained: number;
@@ -94,13 +96,13 @@ export interface MapEdge {
   to: string;
 }
 
-/** `GET /api/maps/{name}`'s body: one map cut to what was asked for,
+/** `GET /api/maps/{id}`'s body: one map cut to what was asked for,
  * and what the cut left out counted. `total_nodes` is the whole map's
  * size, `shown_nodes` what came back; `boundary_edges` are the edges
  * with one end inside the cut and one outside - where a reader who
  * needs more widens from. */
 export interface MapResponse {
-  map: { name: string; purpose: string; headline_kinds: string[] };
+  map: { id: string; name: string; purpose: string; headline_kinds: string[] };
   kinds: MapKind[];
   nodes: MapNode[];
   edges: MapEdge[];

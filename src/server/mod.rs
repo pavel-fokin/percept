@@ -12,9 +12,10 @@
 //! never needs Node, and a checkout without the built page still
 //! serves something explaining how to build it.
 //!
-//! `GET /api/maps/{name}` is a third route unscoped to this server's
-//! own project, like `GET /api/projects`: `root` names the project
-//! whose own schemas and events the map is folded from.
+//! `GET /api/maps/{id}` is a third route unscoped to this server's
+//! own project, like `GET /api/projects`: `id` is a map's own
+//! `MapId`, and `root` names the project whose own schemas and events
+//! it is folded from.
 
 use std::error::Error;
 use std::net::SocketAddr;
@@ -100,7 +101,7 @@ async fn bind() -> Result<(TcpListener, SocketAddr), Box<dyn Error>> {
 /// Serves requests on `listener` until the process is killed: `GET
 /// /api/events` and `GET /api/events/{id}` return the project's own
 /// log, `GET /api/projects` every project the log holds, `GET
-/// /api/maps/{name}` one project's map cut to a reader's ask, and
+/// /api/maps/{id}` one project's map cut to a reader's ask, and
 /// every other path the page, which routes itself. An unknown path
 /// under `/api` is a 404, never the page: a request for data that
 /// answers with HTML is harder to read than one that says it found
@@ -117,7 +118,7 @@ fn router(state: Arc<AppState>) -> Router {
         .route("/api/events", get(api_events))
         .route("/api/events/{id}", get(api_event))
         .route("/api/projects", get(api_projects))
-        .route("/api/maps/{name}", get(api_maps))
+        .route("/api/maps/{id}", get(api_maps))
         .fallback(page)
         .with_state(state)
 }
@@ -168,15 +169,15 @@ async fn api_projects(State(state): State<Arc<AppState>>) -> Response {
     events_response(result)
 }
 
-/// `GET /api/maps/{name}`: `name`'s map, cut to `params`'s `root`,
+/// `GET /api/maps/{id}`: `id`'s map, cut to `params`'s `root`,
 /// `around`, and `depth` - `root` names the project, any this log
 /// holds, not only `state.source.path`.
 async fn api_maps(
     State(state): State<Arc<AppState>>,
-    Path(name): Path<String>,
+    Path(id): Path<String>,
     Query(params): Query<maps::Params>,
 ) -> Response {
-    let result = tokio::task::spawn_blocking(move || maps::get(&*state.log, &name, params))
+    let result = tokio::task::spawn_blocking(move || maps::get(&*state.log, &id, params))
         .await
         .expect("api_maps's blocking read never panics");
     events_response(result)

@@ -97,9 +97,9 @@ function ProjectRow({ project }: { project: Project }) {
       ) : (
         <ul className="mt-2 space-y-1">
           {project.maps.map((map) => (
-            <li key={map.name} className="flex flex-wrap items-baseline gap-x-2 text-[0.8125rem]">
+            <li key={map.id} className="flex flex-wrap items-baseline gap-x-2 text-[0.8125rem]">
               <Link
-                to={mapPath(map.name, project.path)}
+                to={mapPath(map.id, project.path)}
                 className="inline-flex min-h-11 items-center text-accent underline decoration-rule underline-offset-4 hover:decoration-faint"
               >
                 {map.name}
