@@ -33,12 +33,14 @@ const INDEX_EVENTS: usize = 200;
 /// How much of each cognitive map `Context::build` sends every turn.
 /// The map's kinds go in regardless of shape - `revise_map` needs them
 /// to check a change before it commits.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub enum MapShape {
     /// The whole map, as today.
     Prompt,
-    /// Only its headline nodes; `read_map` opens the rest.
-    Headlines,
+    /// Only the nodes that head it, rendered by the function given -
+    /// what heads a map is the render's rule, which `app` cannot see.
+    /// `read_map` opens the rest.
+    Overview(fn(&crate::core::Map) -> String),
     /// Only its size; `read_map` opens it.
     Tool,
 }

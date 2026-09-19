@@ -117,6 +117,20 @@ pub enum MapError {
         from: String,
         to: String,
     },
+    /// A second edge pointing at one node. A map is a forest: a node
+    /// hangs under one parent, the `from` end of the one edge that
+    /// reaches it.
+    SecondParent {
+        child: String,
+        parent: String,
+        existing: String,
+    },
+    /// An edge that would put a node under its own descendant. A map
+    /// is a forest, so a claim cannot come back round to itself.
+    EdgeWouldCycle {
+        from: String,
+        to: String,
+    },
     /// A new edge whose `from` or `to` end is not of a kind its edge
     /// kind allows. A write-only rule: `replay` never checks ends, so
     /// an edge recorded before its kind declared ends still folds.
@@ -222,6 +236,17 @@ impl fmt::Display for MapError {
                 write!(f, "{from} {kind} {to} is already in the map")
             }
             Self::NoSuchEdge { kind, from, to } => write!(f, "no edge {from} {kind} {to}"),
+            Self::SecondParent {
+                child,
+                parent,
+                existing,
+            } => write!(
+                f,
+                "{child} already hangs under {existing}; {parent} cannot take it too"
+            ),
+            Self::EdgeWouldCycle { from, to } => {
+                write!(f, "{from} hangs under {to} already, so it cannot take it")
+            }
             Self::WrongEdgeEnd {
                 edge_kind,
                 end,

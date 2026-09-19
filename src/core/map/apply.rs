@@ -270,13 +270,29 @@ impl Map {
                 self.check_edge_kind(kind)?;
                 self.check_node_id(*from)?;
                 self.check_node_id(*to)?;
-                if !self.edge_keys.insert((kind.clone(), *from, *to)) {
+                if self.edge_keys.contains(&(kind.clone(), *from, *to)) {
                     return Err(MapError::DuplicateEdge {
                         kind: kind.clone(),
                         from: self.label(*from),
                         to: self.label(*to),
                     });
                 }
+                if !self.is_graph() {
+                    if let Some(existing) = self.parent(*to) {
+                        return Err(MapError::SecondParent {
+                            child: self.label(*to),
+                            parent: self.label(*from),
+                            existing: self.label(existing.id),
+                        });
+                    }
+                    if self.hangs_under(*from, *to) {
+                        return Err(MapError::EdgeWouldCycle {
+                            from: self.label(*from),
+                            to: self.label(*to),
+                        });
+                    }
+                }
+                self.edge_keys.insert((kind.clone(), *from, *to));
                 self.edges.push(Edge {
                     kind: kind.clone(),
                     from: *from,

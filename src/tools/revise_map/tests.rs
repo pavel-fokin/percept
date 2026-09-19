@@ -209,7 +209,7 @@ fn a_change_can_reference_a_node_an_earlier_change_just_added() {
             r#"{{"map":"debates","changes":[
                 {{"op":"add_node","kind":"topic","name":"Which language?","sources":["{id}"]}},
                 {{"op":"add_node","kind":"verdict","name":"Rust over Go","sources":["{id}"]}},
-                {{"op":"add_edge","kind":"settles","from":{{"kind":"verdict","name":"Rust over Go"}},"to":{{"kind":"topic","name":"Which language?"}},"sources":[]}}
+                {{"op":"add_edge","kind":"settles","from":{{"kind":"topic","name":"Which language?"}},"to":{{"kind":"verdict","name":"Rust over Go"}},"sources":[]}}
             ]}}"#
         ))
         .unwrap();
@@ -218,7 +218,7 @@ fn a_change_can_reference_a_node_an_earlier_change_just_added() {
     assert!(matches!(output.commits[2], Payload::EdgeAdded { .. }));
     assert_eq!(
         output.content.lines().last().unwrap(),
-        "added edge verdict \"Rust over Go\" settles topic \"Which language?\""
+        "added edge topic \"Which language?\" settles verdict \"Rust over Go\""
     );
 }
 

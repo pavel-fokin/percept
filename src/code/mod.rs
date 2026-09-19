@@ -65,7 +65,6 @@ pub fn schema() -> Schema {
                 &["file", "package"],
             ),
         ],
-        headline_kinds: vec!["file".to_string()],
         rules: Rules::default(),
     }
 }
@@ -80,7 +79,7 @@ pub fn build(root: &Path) -> Result<Map, MapError> {
     let files = rust_files(root);
     let known: HashSet<String> = files.iter().cloned().collect();
 
-    let mut map = Map::empty(crate::core::MapId::new(), schema());
+    let mut map = Map::empty_graph(crate::core::MapId::new(), schema());
     let mut packages = HashSet::new();
     for file in &files {
         map.apply(

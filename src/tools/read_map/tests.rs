@@ -78,9 +78,9 @@ fn weighed_topic() -> Vec<Event> {
     let verdict = node_added("verdict", "JSONL");
     let claim = node_added("claim", "SQLite");
     let fact = node_added("fact", "benchmarks");
-    let settles = edge_added("settles", &verdict, &topic);
-    let about = edge_added("about", &claim, &topic);
-    let backs = edge_added("backs", &fact, &claim);
+    let settles = edge_added("settles", &topic, &verdict);
+    let about = edge_added("about", &topic, &claim);
+    let backs = edge_added("backs", &claim, &fact);
     vec![
         topic, verdict, claim, fact, settles, about, backs,
     ]

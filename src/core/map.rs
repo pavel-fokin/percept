@@ -163,18 +163,22 @@ impl fmt::Display for NodeRef {
 }
 
 /// How much of a map a reader asked for. `around` cuts first, then
-/// `since`, then `kinds`, so the three together read as "what changed
-/// near this node, of these kinds". All absent is the whole map.
+/// `since`, then `kinds`, then `nodes`, so they read together as "what
+/// changed near this node, of these kinds, of these nodes". All absent
+/// is the whole map.
 #[derive(Default)]
 pub struct Selection<'a> {
     pub around: Option<(&'a NodeRef, usize)>,
     pub since: Option<Timestamp>,
     pub kinds: &'a [String],
+    /// The nodes to keep, named one by one - the cut a caller makes by
+    /// a rule of its own, which no kind or distance describes.
+    pub nodes: &'a [NodeId],
 }
 
 impl Selection<'_> {
     pub fn is_whole(&self) -> bool {
-        self.around.is_none() && self.since.is_none() && self.kinds.is_empty()
+        self.around.is_none() && self.since.is_none() && self.kinds.is_empty() && self.nodes.is_empty()
     }
 }
 
@@ -280,14 +284,27 @@ pub struct Map {
     // point at the wrong node.
     next_seq_by_kind: HashMap<String, u32>,
     edge_keys: HashSet<(String, NodeId, NodeId)>,
+    // Whether this map is a free graph rather than a forest. Every map
+    // percept folds from the log is a forest: one edge reaches a node,
+    // and `apply` refuses a second or one that closes a cycle, so the
+    // outline needs no rule beyond reading the shape. The code map is
+    // the exception - a package is imported by many files - and it is
+    // never folded from the log and never rendered as an outline.
+    graph: bool,
 }
 
 impl Map {
     pub fn empty(id: MapId, schema: impl Into<Arc<Schema>>) -> Self {
-        Self::from_parts(id, schema.into(), Vec::new(), Vec::new())
+        Self::from_parts(id, schema.into(), Vec::new(), Vec::new(), false)
     }
 
-    fn from_parts(id: MapId, schema: Arc<Schema>, nodes: Vec<Node>, edges: Vec<Edge>) -> Self {
+    /// An empty map whose edges are free to form any graph - see
+    /// `graph`. Only the code map is built this way.
+    pub fn empty_graph(id: MapId, schema: impl Into<Arc<Schema>>) -> Self {
+        Self::from_parts(id, schema.into(), Vec::new(), Vec::new(), true)
+    }
+
+    fn from_parts(id: MapId, schema: Arc<Schema>, nodes: Vec<Node>, edges: Vec<Edge>, graph: bool) -> Self {
         let by_id = nodes.iter().enumerate().map(|(i, n)| (n.id, i)).collect();
         let by_name = nodes
             .iter()
@@ -316,6 +333,7 @@ impl Map {
             by_seq,
             next_seq_by_kind,
             edge_keys,
+            graph,
         }
     }
 
@@ -357,80 +375,51 @@ impl Map {
         &self.nodes
     }
 
-    /// The nodes of the schema's headline kinds, in map order - what a
-    /// reader sees of the map before opening it.
-    pub fn headlines(&self) -> impl Iterator<Item = &Node> {
-        let headline_kinds = &self.schema.headline_kinds;
-        self.nodes
-            .iter()
-            .filter(move |node| headline_kinds.contains(&node.kind))
-    }
-
-    /// The headline nodes nobody claims - what heads a map, one
-    /// section per root, in `headlines` order.
-    pub fn roots(&self) -> impl Iterator<Item = &Node> {
-        self.headlines().filter(move |node| self.claimant(node).is_none())
-    }
-
-    /// The headline node `node` prints under, if any: the first
-    /// headline of its own kind pointing at it - the decision that
-    /// supersedes it - else, of the headlines of other kinds it points
-    /// at, the one whose kind sits latest in `headlines` - the question
-    /// a decision resolves over the concept it is about, so `headlines`
-    /// order is nesting order and the schema's edge order decides only
-    /// between two of the same kind, first edge first. A node nobody
-    /// claims heads a section of its own. The rule names no kind, so it
-    /// holds for any schema: a `blocks` chore claims the one it blocks
-    /// the way `supersedes` claims the old decision.
-    pub fn claimant(&self, node: &Node) -> Option<&Node> {
-        let headline_kinds = &self.schema.headline_kinds;
-        let mut same_kind = None;
-        let mut other_kind: Option<&Node> = None;
-        for edge_kind in &self.schema.edge_kinds {
-            for from in self.linked(node.id, &edge_kind.kind, EdgeEnd::To) {
-                if same_kind.is_none() && from.kind == node.kind && headline_kinds.contains(&from.kind) {
-                    same_kind = Some(from);
-                }
-            }
-            for to in self.linked(node.id, &edge_kind.kind, EdgeEnd::From) {
-                let nearer = other_kind.is_none_or(|held| self.kind_rank(to) > self.kind_rank(held));
-                if nearer && to.kind != node.kind && headline_kinds.contains(&to.kind) {
-                    other_kind = Some(to);
-                }
-            }
-        }
-        same_kind.or(other_kind)
-    }
-
-    /// A headline node's position by kind: the index of its kind in the
-    /// schema's `headlines`, so the kind listed first heads the render
-    /// and a node nests under the latest kind it points at.
-    pub fn kind_rank(&self, node: &Node) -> usize {
-        self.schema
-            .headline_kinds
-            .iter()
-            .position(|kind| *kind == node.kind)
-            .unwrap_or(usize::MAX)
-    }
-
     pub fn edges(&self) -> &[Edge] {
         &self.edges
     }
 
-    /// The nodes across every edge of `edge_kind` touching `id`, in map
-    /// order, for a caller that knows no kind's name. `EdgeEnd::From`
-    /// reads the `to` end of an edge whose `from` is `id`; `EdgeEnd::To`
-    /// reads the `from` end of an edge whose `to` is `id`.
-    pub fn linked(&self, id: NodeId, edge_kind: &str, end: EdgeEnd) -> Vec<&Node> {
+    /// The node `id` hangs under, if any: the `from` end of the one
+    /// edge that reaches it. A map is a forest, so there is never a
+    /// second - `apply` refuses the edge that would make one.
+    pub fn parent(&self, id: NodeId) -> Option<&Node> {
+        self.parent_id(id).and_then(|from| self.node(from))
+    }
+
+    /// `parent` without the node lookup, for the walk `apply` makes
+    /// before it lets an edge in.
+    fn parent_id(&self, id: NodeId) -> Option<NodeId> {
+        self.edges.iter().find(|edge| edge.to == id).map(|edge| edge.from)
+    }
+
+    /// The nodes hanging under `id`, in the order their edges were
+    /// added - one `- <kind> <child>` line each, in the order a reader
+    /// meets them.
+    pub fn children(&self, id: NodeId) -> Vec<(&str, &Node)> {
         self.edges
             .iter()
-            .filter(|edge| edge.kind == edge_kind)
-            .filter_map(|edge| match end {
-                EdgeEnd::From if edge.from == id => self.node(edge.to),
-                EdgeEnd::To if edge.to == id => self.node(edge.from),
-                _ => None,
-            })
+            .filter(|edge| edge.from == id)
+            .filter_map(|edge| self.node(edge.to).map(|node| (edge.kind.as_str(), node)))
             .collect()
+    }
+
+    /// Whether `id` sits at or under `ancestor` - the walk that keeps
+    /// a new edge from closing a cycle.
+    /// Whether this map's edges are free to form any graph - see the
+    /// field's own note.
+    pub(crate) fn is_graph(&self) -> bool {
+        self.graph
+    }
+
+    pub(crate) fn hangs_under(&self, id: NodeId, ancestor: NodeId) -> bool {
+        let mut at = Some(id);
+        while let Some(node) = at {
+            if node == ancestor {
+                return true;
+            }
+            at = self.parent_id(node);
+        }
+        false
     }
 
     /// When the map last gained or changed a node, or gained an edge;
@@ -567,7 +556,7 @@ impl Map {
             .cloned()
             .collect();
         let edges = fresh.into_iter().cloned().collect();
-        Self::from_parts(self.id, self.schema.clone(), nodes, edges)
+        Self::from_parts(self.id, self.schema.clone(), nodes, edges, self.graph)
     }
 
     /// The map cut to `selection`, in its fixed order, counting what
@@ -596,6 +585,9 @@ impl Map {
         if !selection.kinds.is_empty() {
             cut = cut.keep_kinds(selection.kinds)?;
         }
+        if !selection.nodes.is_empty() {
+            cut = cut.keep_nodes(selection.nodes);
+        }
         let boundary_edges = self
             .edges
             .iter()
@@ -609,6 +601,14 @@ impl Map {
         })
     }
 
+    /// The map cut to the nodes `ids` names, keeping only the edges
+    /// that join two of them. An id the map does not hold is skipped.
+    fn keep_nodes(&self, ids: &[NodeId]) -> Self {
+        let kept: HashSet<NodeId> = ids.iter().copied().collect();
+        let nodes: Vec<Node> = self.nodes.iter().filter(|node| kept.contains(&node.id)).cloned().collect();
+        self.cut_to(nodes)
+    }
+
     /// A copy holding `nodes` and only the edges that join two of them.
     /// An edge to a node outside the cut is not a fact of the cut.
     fn cut_to(&self, nodes: Vec<Node>) -> Self {
@@ -619,7 +619,7 @@ impl Map {
             .filter(|edge| kept.contains(&edge.from) && kept.contains(&edge.to))
             .cloned()
             .collect();
-        Self::from_parts(self.id, self.schema.clone(), nodes, edges)
+        Self::from_parts(self.id, self.schema.clone(), nodes, edges, self.graph)
     }
 }
 

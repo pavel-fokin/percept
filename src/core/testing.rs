@@ -372,19 +372,18 @@ pub fn debates() -> Schema {
             NodeKind::new("verdict", "").with_properties(&["why"]),
         ],
         edge_kinds: vec![
-            EdgeKind::new("about", "", &["claim"], &["topic"]),
-            EdgeKind::new("backs", "", &["fact"], &["claim"]),
-            EdgeKind::new("settles", "", &["verdict"], &["topic"]),
+            EdgeKind::new("about", "", &["topic"], &["claim"]),
+            EdgeKind::new("backs", "", &["claim"], &["fact"]),
+            EdgeKind::new("settles", "", &["topic"], &["verdict"]),
             EdgeKind::new("replaces", "", &["verdict"], &["verdict"]),
             EdgeKind::new(
                 "doubts",
-                "from a topic to a verdict it puts in doubt; the verdict stands until a new \
+                "from a verdict to a topic reopened over it; the verdict stands until a new \
                  one replaces it",
-                &["topic"],
                 &["verdict"],
+                &["topic"],
             ),
         ],
-        headline_kinds: vec!["topic".to_string(), "verdict".to_string()],
         rules: Rules::default(),
     }
 }
@@ -402,7 +401,6 @@ pub fn chores() -> Schema {
                 .with_states(&["open", "done", "dropped"]),
         ],
         edge_kinds: vec![EdgeKind::new("blocks", "", &["chore"], &["chore"])],
-        headline_kinds: vec!["chore".to_string()],
         rules: Rules::default(),
     }
 }
@@ -411,6 +409,21 @@ pub fn chores() -> Schema {
 /// mirroring a built-in map, without touching a filesystem.
 pub fn schemas() -> Schemas {
     Schemas::new(vec![debates(), chores()])
+}
+
+/// A `kind` edge from one node to another, both named by kind and
+/// name - the one `AddEdge` every map test writes.
+pub fn link(map: &mut crate::core::Map, kind: &str, from: (&str, &str), to: (&str, &str)) {
+    map.apply(
+        crate::core::Mutation::AddEdge {
+            kind: kind.to_string(),
+            from: node_ref(from.0, from.1),
+            to: node_ref(to.0, to.1),
+            sources: Vec::new(),
+        },
+        Actor::Human(human()),
+    )
+    .unwrap();
 }
 
 /// A schema fixture with `file`, `function`, and `package` node kinds
@@ -450,7 +463,6 @@ pub fn files() -> Schema {
                 &["file", "package"],
             ),
         ],
-        headline_kinds: vec!["file".to_string()],
         rules: Rules::default(),
     }
 }

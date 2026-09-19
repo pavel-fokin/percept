@@ -40,7 +40,6 @@ fn a_relation_carries_its_edge_kinds_gloss() {
             &["verdict"],
             &["topic"],
         )],
-        headline_kinds: vec!["topic".to_string()],
         rules: crate::core::Rules::default(),
     };
 
@@ -52,24 +51,26 @@ fn a_relation_carries_its_edge_kinds_gloss() {
 #[test]
 fn relations_name_each_edge_kinds_ends() {
     let text = describe(&debates());
-    assert!(text.contains("claim --about--> topic"));
-    assert!(text.contains("verdict --settles--> topic"));
+    assert!(text.contains("topic --about--> claim"));
+    assert!(text.contains("topic --settles--> verdict"));
     assert!(text.contains("verdict --replaces--> verdict"));
-    assert!(text.contains("topic --doubts--> verdict"));
+    assert!(text.contains("verdict --doubts--> topic"));
 }
 
 #[test]
 fn the_add_example_only_edges_to_kinds_already_listed() {
     let text = describe(&debates());
-    // `topic` comes first, so `doubts verdict` - a verdict not
-    // yet listed - is skipped; `verdict` comes last, so `replaces
-    // verdict` - itself, not yet listed - is skipped too.
-    assert!(!text.contains("doubts verdict"));
+    // `about`, `settles`, and `backs` each run from a coarser kind to
+    // a finer one, so their target kind's node has not yet appeared
+    // in the example when the source kind is written; `replaces`
+    // points at its own kind, not yet listed either. Only `doubts`,
+    // which points back from `verdict`, the last kind, to `topic`,
+    // the first, finds its target already listed.
+    assert!(!text.contains("about claim"));
+    assert!(!text.contains("settles verdict"));
+    assert!(!text.contains("backs fact"));
     assert!(!text.contains("replaces verdict"));
-    // What is listed by the time each kind is reached does appear.
-    assert!(text.contains("about topic"));
-    assert!(text.contains("settles topic"));
-    assert!(text.contains("backs claim"));
+    assert!(text.contains("doubts topic"));
 }
 
 #[test]
@@ -88,7 +89,7 @@ fn the_grammar_is_indented_under_the_record_command() {
 fn the_add_example_cites_a_file_under_its_last_node() {
     let text = describe(&debates());
     assert!(
-        text.contains("  verdict \"...\"\n    settles topic\n    cites src/path.rs:10-20\n"),
+        text.contains("  verdict \"...\"\n    doubts topic\n    cites src/path.rs:10-20\n"),
         "{text}"
     );
 }

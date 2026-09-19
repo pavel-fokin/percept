@@ -1,18 +1,21 @@
 # The decisions map: the concepts a reader reasons with, and under each
 # what was asked, what was weighed, what was chosen and on what
 # grounds. A concept's definition is the rule that holds here, so a
-# decision can break it. A question or decision is about a concept. An
-# option answers a question - or the decision itself, when none was
-# raised - and says whether it still stands and why. A decision
-# resolves the question, and a later decision supersedes an earlier
-# one. A question reopens a decision it puts in doubt, so --around a
-# question reaches everything weighed for it. A concept covers another
-# it absorbs, so the covered one nests under it and leaves the
-# overview.
+# decision can break it. A concept asks the questions raised under it,
+# a question weighs the options put to it, and the decision that
+# answered it is what settled it. A later decision supersedes an
+# earlier one, and a decision asks a question that puts it back in
+# doubt, so --around a question reaches everything weighed for it. A
+# concept covers another it absorbs, so the covered one hangs under it
+# and leaves the overview.
+#
+# Every edge runs from the node above to the one under it, so the map
+# is a forest: one edge reaches a node, and what no edge reaches heads
+# the map. A second edge into one node is refused, and so is one that
+# would close a cycle.
 
 name = "concepts"
 purpose = "what was asked, what was chosen, and why, so a settled question is not reopened"
-headlines = ["concept", "question", "decision"]
 
 [[node]]
 kind = "concept"
@@ -34,37 +37,33 @@ kind = "decision"
 properties = ["why"]
 
 [[edge]]
-kind = "about"
-gloss = "from a question or decision to the concept it belongs under; a decision that resolves a question inherits its place"
-from = ["question", "decision"]
-to = "concept"
+kind = "asks"
+gloss = "from a concept to a question raised under it, or from a decision to a question it puts back in doubt"
+from = ["concept", "decision"]
+to = "question"
+
+[[edge]]
+kind = "settled"
+gloss = "from a question to the decision that answered it, or from a concept to a decision taken under it when no question was raised"
+from = ["concept", "question"]
+to = "decision"
+
+[[edge]]
+kind = "weighs"
+gloss = "from a question to an option weighed for it: open while it still stands, dead once it lost"
+from = "question"
+to = "option"
 
 [[edge]]
 kind = "covers"
-gloss = "from a concept to one it absorbs - a narrower rule, or a worse wording of the same one; the covered concept nests under it and leaves the overview"
+gloss = "from a concept to one it absorbs - a narrower rule, or a worse wording of the same one; the covered concept hangs under it and leaves the overview"
 from = "concept"
 to = "concept"
 
 [[edge]]
-kind = "resolves"
-from = "decision"
-to = "question"
-
-[[edge]]
-kind = "answers"
-gloss = "from an option to the question it answers, or to the decision it was weighed against when no question was raised"
-from = "option"
-to = ["question", "decision"]
-
-[[edge]]
 kind = "supersedes"
+gloss = "from a decision to the earlier one it replaces; the earlier one hangs under it"
 from = "decision"
-to = "decision"
-
-[[edge]]
-kind = "reopens"
-gloss = "from a question to a decision it puts in doubt; the decision stands until a new one supersedes it"
-from = "question"
 to = "decision"
 
 # The lines percept sends at each moment it has a channel to speak on:

@@ -105,7 +105,7 @@ function ProjectRow({ project }: { project: Project }) {
                 {map.name}
               </Link>
               <span className="text-faint">
-                <span className="font-mono tabular-nums">{count(map.headlines)}</span> headlines
+                <span className="font-mono tabular-nums">{count(map.nodes)}</span> nodes
               </span>
               {map.gained > 0 && (
                 <span className="text-accent">

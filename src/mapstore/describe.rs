@@ -16,11 +16,11 @@ pub fn describe(schema: &Schema) -> String {
     let _ = writeln!(out, "{}", schema.name);
     let _ = writeln!(out, "{}", schema.purpose);
 
-    out.push_str("\nnode kinds\n");
+    out.push_str("\nnode kinds, coarsest first\n");
     push_node_kinds(&mut out, schema);
 
     if !schema.edge_kinds.is_empty() {
-        out.push_str("\nrelations\n");
+        out.push_str("\nrelations, each from the node above to the one under it\n");
         push_edge_kinds(&mut out, schema);
     }
 

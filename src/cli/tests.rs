@@ -842,8 +842,8 @@ fn record_args(map: &str) -> RecordArgs {
 #[test]
 fn a_document_writes_its_nodes_and_edges_in_order() {
     let log = FakeLog::default();
-    let document = "topic \"Does record work?\"\n\
-                     verdict \"yes\"\n  why \"it ran\"\n  settles topic\n";
+    let document = "verdict \"yes\"\n  why \"it ran\"\n\
+                     topic \"Does record work?\"\n  settles verdict\n";
     record_document(
         document,
         record_args("debates"),
@@ -926,9 +926,8 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
     let fixture = Fixture::new();
     fixture.write("src/cli/mod.rs", "one\ntwo\nthree\n");
     let log = FakeLog::default();
-    let document = "topic \"Does record work?\"\n\
-                     verdict \"yes\"\n  why \"it ran\"\n  settles topic\n  \
-                     cites src/cli/mod.rs:1-3\n";
+    let document = "verdict \"yes\"\n  why \"it ran\"\n  cites src/cli/mod.rs:1-3\n\
+                     topic \"Does record work?\"\n  settles verdict\n";
     record_document(
         document,
         record_args("debates"),
@@ -943,10 +942,10 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
 
     let events = log.load().unwrap();
     // The `cites` event is published before the node it cites - `record`
-    // writes a node's cites first - so it lands second, right after the
-    // topic node.
-    assert!(matches!(events[2].payload(), Payload::FileCited { .. }));
-    let cite_id = events[2].id();
+    // writes a node's cites first - so it lands right after the map is
+    // created, ahead of the verdict node it belongs to.
+    assert!(matches!(events[1].payload(), Payload::FileCited { .. }));
+    let cite_id = events[1].id();
     let map = mapstore::fold_map(&log, &schemas(), "debates", Path::new(ROOT)).unwrap();
     let verdict = map.find("verdict", "yes").unwrap();
     assert!(verdict.sources.contains(&cite_id));
@@ -957,7 +956,10 @@ fn a_ref_to_an_existing_short_id_resolves() {
     let log = FakeLog::default();
     log.append(&map_created("debates")).unwrap();
     log.append(&node_added("topic", "Does record work?")).unwrap();
-    let document = "verdict \"yes\"\n  why \"it ran\"\n  settles t1\n";
+    // `doubts` runs from a verdict to a topic, so the new verdict is
+    // the doc's current node - the `from` end the syntax always gives
+    // the enclosing line - and the existing topic, `t1`, is its `to`.
+    let document = "verdict \"yes\"\n  why \"it ran\"\n  doubts t1\n";
     record_document(
         document,
         record_args("debates"),
@@ -972,7 +974,7 @@ fn a_ref_to_an_existing_short_id_resolves() {
 
     let map = mapstore::fold_map(&log, &schemas(), "debates", Path::new(ROOT)).unwrap();
     assert_eq!(map.edges().len(), 1);
-    assert_eq!(map.edges()[0].kind, "settles");
+    assert_eq!(map.edges()[0].kind, "doubts");
 }
 
 #[test]
