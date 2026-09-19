@@ -24,8 +24,8 @@ const DEPTH_OPTIONS: FilterMenuOption<string>[] = [
   { value: "3", label: "Three steps out" },
 ];
 
-/** One cognitive map, cut. It opens on the overview - the headline
- * nodes, the level a reader can hold - and every node id is a link
+/** One cognitive map, cut. It opens on the overview - the nodes that
+ * head the map, the level a reader can hold - and every node id is a link
  * that re-cuts around it, which is the position the CLI's `--around`
  * asks a reader to already know. */
 export default function MapView() {
@@ -121,7 +121,7 @@ function readDepth(raw: string | null): number {
  * what it left out is not finished. */
 function bound(cut: MapResponse, around: string | null): string {
   const shown = `${count(cut.shown_nodes)} of ${count(cut.total_nodes)} nodes`;
-  if (!around) return `${shown}, the headlines of this map.`;
+  if (!around) return `${shown}, what heads this map.`;
   const beyond = cut.boundary_edges;
   const out = beyond === 0 ? "" : `, with ${count(beyond)} ${beyond === 1 ? "link" : "links"} out of it`;
   return `${shown}, around ${around}${out}.`;

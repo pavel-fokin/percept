@@ -1,8 +1,8 @@
 //! What the session-start block, the web view, and the Markdown
 //! render share: the truncation rule, a node's line id, the wording of
 //! its last change, the session rule both a hook and the review page
-//! cut their since by, a project's display name, and which headline
-//! nodes counted as gained since a cut.
+//! cut their since by, a project's display name, and which nodes
+//! counted as gained since a cut.
 
 use std::path::Path;
 
@@ -25,7 +25,7 @@ pub(crate) fn capped_lines(mut lines: Vec<String>) -> Vec<String> {
 }
 
 /// The short id `node` has on `map`, or a `kind:name` fallback for the
-/// unexpected case a headline node carries none.
+/// unexpected case a node carries none.
 pub(crate) fn line_id(map: &Map, node: &Node) -> String {
     map.short_id(node.id)
         .unwrap_or_else(|| format!("{}:{}", node.kind, node.name))
@@ -62,7 +62,7 @@ pub(crate) fn project_name(root: &Path) -> String {
         .unwrap_or_else(|| root.display().to_string())
 }
 
-/// The headline nodes of `map` whose last change happened at or after
+/// The nodes of `map` whose last change happened at or after
 /// `since` - a node's last change is compared directly, not
 /// `Map::since`, which would also surface an older node a fresh edge
 /// only touched.

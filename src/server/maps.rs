@@ -1,5 +1,5 @@
 //! `GET /api/maps/{id}` - one project's cognitive map, cut to what the
-//! reader asked for: the overview (headline nodes only, in map order)
+//! reader asked for: the overview (the nodes that head it, in map order)
 //! with no `around`, or the cut `Map::around` gives around one node.
 //! `id` is the map's own `MapId`, the same one `GET /api/projects`
 //! lists per map - never its schema name, which repeats across
@@ -33,7 +33,7 @@ pub struct Params {
 }
 
 /// `GET /api/maps/{id}`'s body: the map's own name, purpose, and
-/// headline kinds, every node kind the schema declares with its gloss,
+/// every node kind the schema declares with its gloss,
 /// the cut's nodes and edges named by short id, and the four counts
 /// `Fragment` reports. `params.root`'s own schemas declare the map's
 /// name, never this server's project.

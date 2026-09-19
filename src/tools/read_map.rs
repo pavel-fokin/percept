@@ -35,7 +35,7 @@ const DESCRIPTION: &str = "Read one cognitive map by name, whole or cut to \
     crossing edge is where to widen when an exception or a \
     contradiction could change the answer. Open a map before answering \
     from it or revising it; what the conversation shows of a map may \
-    be only its headlines.";
+    be only the nodes that head it.";
 
 /// JSON Schema for `run`'s `arguments`. A string, not a `Value` - the
 /// domain's `ToolSpec` is serde-free, so the provider parses this.

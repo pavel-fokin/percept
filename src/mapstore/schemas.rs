@@ -391,7 +391,7 @@ fn check_prefixes(stem: &str, node_kinds: &[NodeKind]) -> Result<(), Box<dyn std
 }
 
 /// The first name `names` repeats, if any - the one duplicate scan
-/// every kind and headline check shares.
+/// every kind check shares.
 fn repeated<'a>(names: impl Iterator<Item = &'a str>) -> Option<&'a str> {
     let mut seen: Vec<&str> = Vec::new();
     for name in names {

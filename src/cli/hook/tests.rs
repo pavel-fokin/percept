@@ -10,7 +10,7 @@ use crate::core::{HumanId, Payload};
 use crate::shared::Timestamp;
 
 /// The one map a hook test's project declares: `debates`, with a
-/// `topic` headline kind and nothing else - a mini schema of this
+/// `topic` node kind and nothing else - a mini schema of this
 /// fixture's own, so no test here rests on a shipped template.
 const DEBATES_TOML: &str = "name = \"debates\"\npurpose = \"what a hook test needs\"\n\
                             [[node]]\nkind = \"topic\"\n";

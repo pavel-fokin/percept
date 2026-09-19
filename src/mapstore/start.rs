@@ -72,8 +72,8 @@ struct Row {
 
 /// What every current node cites that no longer matches the working
 /// tree - an option carries citations as readily as the decision it
-/// answers, so the walk is over every node rather than the headline
-/// kinds - one Attention row per node with at least one stale
+/// answers, so the walk is over every node - one Attention row per
+/// node with at least one stale
 /// citation, `<id> cites <label> changed, <label> gone`, `findings`
 /// each `"<label> changed"`, `"<label> gone"`, or `"<label> renamed to
 /// <new label>"`. This module's Attention block builds its lines from
@@ -285,7 +285,7 @@ fn attention_block(
     (Some(lines.join("\n")), printed)
 }
 
-/// The Next block: `read <map>` for every map with a headline node,
+/// The Next block: `read <map>` for every map that holds a node,
 /// `read around <id>` for every node Attention printed, then the two
 /// fixed pointers every render carries.
 fn next_block(maps: &[Map], printed: &[(String, String)]) -> String {

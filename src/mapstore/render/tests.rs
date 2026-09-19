@@ -301,8 +301,8 @@ fn a_node_pointed_at_by_two_section_kinds_ranks_under_the_one_declared_later() {
     );
 }
 
-/// Three headline kinds, coarse to fine, with an edge from the finest
-/// to each of the other two - the coarser one listed first.
+/// Three node kinds, coarse to fine, with an edge from the finest
+/// to each of the other two - the coarser one declared first.
 fn court() -> Map {
     let schema = crate::core::Schema {
         name: "court".to_string(),
@@ -339,21 +339,21 @@ fn a_node_pointing_at_two_kinds_files_under_the_later_one() {
 }
 
 #[test]
-fn a_headline_that_nests_elsewhere_is_still_named_where_an_edge_reaches_it() {
+fn a_node_that_nests_elsewhere_is_still_named_where_an_edge_reaches_it() {
     let text = markdown(&court());
 
     assert!(text.contains("## a1 \"parsing\"\n\n- v1 \"ship it\" within\n"), "{text}");
 }
 
 #[test]
-fn a_node_does_not_name_the_headline_it_nests_under() {
+fn a_node_does_not_name_the_section_it_nests_under() {
     let text = markdown(&court());
 
     assert!(!text.contains("- settles t1"), "{text}");
 }
 
-/// A schema with no headline kind at all falls back to `push_by_kind`:
-/// one `## <kind>` section per kind that holds a node, then `## edges`.
+/// A schema declaring no edge at all: nothing can claim a node, so
+/// every node heads a section of its own.
 #[test]
 fn a_schema_with_no_edges_gives_every_node_its_own_section() {
     let schema = crate::core::Schema {
