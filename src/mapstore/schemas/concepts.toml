@@ -10,7 +10,7 @@
 # it absorbs, so the covered one nests under it and leaves the
 # overview.
 
-name = "decisions"
+name = "concepts"
 purpose = "what was asked, what was chosen, and why, so a settled question is not reopened"
 headlines = ["concept", "question", "decision"]
 
