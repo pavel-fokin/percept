@@ -53,19 +53,42 @@ fn relations_name_each_edge_kinds_ends() {
 }
 
 #[test]
-fn the_add_example_only_edges_to_kinds_already_listed() {
+fn the_add_example_edges_to_kinds_written_above() {
     let text = describe(&debates());
-    // `about`, `settles`, and `backs` each run from a coarser kind to
-    // a finer one, so their target kind's node has not yet appeared
-    // in the example when the source kind is written; `replaces`
-    // points at its own kind, not yet listed either. Only `doubts`,
-    // which points back from `verdict`, the last kind, to `topic`,
-    // the first, finds its target already listed.
-    assert!(!text.contains("about claim"));
-    assert!(!text.contains("settles verdict"));
-    assert!(!text.contains("backs fact"));
-    assert!(!text.contains("replaces verdict"));
-    assert!(text.contains("doubts topic"));
+    // Kinds are written finest first, so an edge from a coarser kind
+    // finds its target above it: `backs` from claim, `about` and
+    // `settles` from topic. `doubts` and `replaces` point at a kind
+    // not yet written when their own is, so neither appears.
+    assert!(text.contains("backs fact"), "{text}");
+    assert!(text.contains("about claim"), "{text}");
+    assert!(text.contains("settles verdict"), "{text}");
+    assert!(!text.contains("doubts topic"), "{text}");
+    assert!(!text.contains("replaces verdict"), "{text}");
+}
+
+#[test]
+fn the_add_example_points_one_edge_at_a_kind_two_others_may_reach() {
+    let schema = crate::core::Schema {
+        name: "court".to_string(),
+        purpose: "test fixture".to_string(),
+        node_kinds: vec![
+            crate::core::NodeKind::new("hearing"),
+            crate::core::NodeKind::new("motion"),
+            crate::core::NodeKind::new("ruling"),
+        ],
+        edge_kinds: vec![
+            crate::core::EdgeKind::new("opens", &["hearing"], &["ruling"]),
+            crate::core::EdgeKind::new("seeks", &["motion"], &["ruling"]),
+        ],
+        rules: crate::core::Rules::default(),
+    };
+
+    let text = describe(&schema);
+
+    // A second edge into `ruling` would be a second parent, which
+    // `apply` refuses, so the example shows only the first.
+    assert!(text.contains("seeks ruling"), "{text}");
+    assert!(!text.contains("opens ruling"), "{text}");
 }
 
 #[test]
@@ -87,7 +110,7 @@ fn the_grammar_is_indented_under_the_record_command() {
 fn the_add_example_cites_a_file_under_its_last_node() {
     let text = describe(&debates());
     assert!(
-        text.contains("  verdict \"...\"\n    why \"...\"\n    doubts topic\n    cites src/path.rs:10-20\n"),
+        text.contains("  topic \"...\"\n    about claim\n    settles verdict\n    cites src/path.rs:10-20\n"),
         "{text}"
     );
 }

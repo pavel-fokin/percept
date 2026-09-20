@@ -125,7 +125,10 @@ const GRAMMAR: &str = "
   remove-node drops the edges that touch the node it takes.
 ";
 
-/// One node per node kind, in schema order, its name always `"..."`,
+/// One node per node kind, finest first - the reverse of the schema's
+/// own coarsest-first order, because an edge runs from a node to the
+/// one hanging under it, so the child must stand above the parent that
+/// names it. Its name is always `"..."`,
 /// each declared property under it as `<prop> "..."` - a closed list's
 /// first value in place of `...` - and one indented edge line per kind
 /// already listed above it that an edge from this kind may reach - the
@@ -136,14 +139,16 @@ const GRAMMAR: &str = "
 /// than running as it stands.
 fn push_example(out: &mut String, schema: &Schema) {
     let mut listed: Vec<&str> = Vec::new();
+    // One edge into a kind across the whole example, not one per node
+    // written: a second would be a second parent, which `apply` refuses.
+    let mut reached: Vec<&str> = Vec::new();
     let last = schema.node_kinds.len().saturating_sub(1);
-    for (index, kind) in schema.node_kinds.iter().enumerate() {
+    for (index, kind) in schema.node_kinds.iter().rev().enumerate() {
         let _ = writeln!(out, "  {} \"...\"", kind.kind);
         for (property, values) in &kind.properties {
             let value = values.first().map_or("...", String::as_str);
             let _ = writeln!(out, "    {property} \"{value}\"");
         }
-        let mut reached: Vec<&str> = Vec::new();
         for edge in &schema.edge_kinds {
             if !edge.from.iter().any(|from| from == kind.kind.as_str()) {
                 continue;
