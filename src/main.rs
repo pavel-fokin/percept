@@ -129,7 +129,7 @@ fn hook_run(args: cli::hook::HookArgs) -> Result<serde_json::Value, Box<dyn std:
     };
     let log = open_log(&checkout)?;
     let me = log.me();
-    cli::hook::run(input, &source, &log, &sessions_dir(&checkout)?, me)
+    cli::hook::run(input, &source, &log, &sessions_dir(&checkout)?, &checkout, me)
 }
 
 /// Where `percept hook` keeps every checkout's turns, beside the log.

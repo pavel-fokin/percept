@@ -3,7 +3,10 @@
 //! the same log every other subcommand appends to. Never fails the
 //! client's turn: `main` catches every error here, prints it to
 //! stderr as `percept hook: <error>`, and still prints `{}` to
-//! stdout.
+//! stdout. Two events are answered with more than `{}`: a
+//! `SessionStart` with the start screen a bare `percept` prints, so
+//! the model opens on this project's maps and the rule for recording,
+//! and a `UserPromptSubmit` with the prompt's event id.
 //!
 //! Reading and validating the input (`read`) is split from acting on
 //! it (`run`): `main` needs the client's own `cwd` before it can find
@@ -130,12 +133,14 @@ pub fn read(input: &mut dyn Read) -> Result<HookInput, Box<dyn std::error::Error
 /// Appends the events `input`'s event implies to `log` under `source`,
 /// and returns the JSON object the client expects back on stdout -
 /// `{}` unless the event asks for something. `sessions_dir` holds one
-/// directory per checkout root, created if missing.
+/// directory per checkout root, created if missing; `checkout` is
+/// where a `SessionStart` loads the project's schemas from.
 pub fn run(
     input: HookInput,
     source: &Source,
     log: &dyn EventLog,
     sessions_dir: &Path,
+    checkout: &Path,
     me: Option<crate::core::HumanId>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let dir = turn_dir(sessions_dir, &source.path);
@@ -146,11 +151,17 @@ pub fn run(
         HookEvent::SessionStart {} => {
             // A session opens with no turn, whatever a killed one left.
             TurnState::unpoint(&dir)?;
-            // Nothing is said back on this channel; the marker is
-            // recorded because the review page cuts "gained since" by
-            // the last session.
+            // The marker goes in before the schemas are read, so a
+            // broken TOML still leaves the session on record: the
+            // review page cuts "gained since" by the last one.
             log.append(&Event::session_started(source.clone()))?;
-            Ok(json!({}))
+            let schemas = crate::mapstore::load_schemas(checkout)?;
+            Ok(json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "SessionStart",
+                    "additionalContext": super::start_text(log, &schemas, &source.path)?,
+                }
+            }))
         }
         HookEvent::UserPromptSubmit { prompt } => {
             submit_prompt(prompt, source, log, &mut state, &dir, me)

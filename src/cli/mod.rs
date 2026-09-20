@@ -562,12 +562,18 @@ fn per_path(
     Ok(())
 }
 
-/// A bare `percept`: prints the start screen - `mapstore::start` over
-/// every map of `project`, folded from one read of `log`.
+/// A bare `percept`: prints `start_text`.
 pub fn start(log: &dyn EventLog, schemas: &Schemas, project: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    print_text(&start_text(log, schemas, project)?)
+}
+
+/// The start screen - `mapstore::start` over every map of `project`,
+/// folded from one read of `log`. What a bare `percept` prints and
+/// what `hook` answers a coding client's `SessionStart` with.
+pub fn start_text(log: &dyn EventLog, schemas: &Schemas, project: &Path) -> Result<String, Box<dyn std::error::Error>> {
     let events = log.load()?;
     let maps = schemas.fold_all(mapstore::of_path(&events, project))?;
-    print_text(&mapstore::start(schemas, &maps))
+    Ok(mapstore::start(schemas, &maps))
 }
 
 /// Prints every map percept knows with its size: the log's maps, folded

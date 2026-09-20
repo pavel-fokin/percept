@@ -22,10 +22,10 @@ fn write_debates_schema(root: &Path) {
 
 /// A checkout `run` can discover a root in - a `.percept` marker is
 /// enough, so a test needs no `git init` - plus the sessions directory
-/// and log `run` is given. `run` loads schemas itself, from this same
-/// root, exactly as production does, so this fixture writes its own
-/// `debates` schema there; `with_extra_schema` adds another beside
-/// it, for a test that needs a map shape `debates` doesn't have.
+/// and log `run` is given. A `SessionStart` loads schemas from this
+/// same root, exactly as production does, so this fixture writes its
+/// own `debates` schema there; `with_extra_schema` adds another beside
+/// it.
 struct Fixture {
     _temp: TempDir,
     root: PathBuf,
@@ -59,9 +59,7 @@ impl Fixture {
         }
     }
 
-    /// Writes `<root>/.percept/schemas/<name>.toml`, so the next
-    /// `session_start` folds a project schema alongside the shipped
-    /// decisions template.
+    /// Writes `<root>/.percept/schemas/<name>.toml` beside `debates`.
     fn with_extra_schema(self, name: &str, toml: &str) -> Self {
         let dir = self.root.join(".percept/schemas");
         std::fs::create_dir_all(&dir).unwrap();
@@ -97,12 +95,12 @@ impl Fixture {
     fn call_raw(&self, client: &str, raw: &str) -> Result<Value, Box<dyn std::error::Error>> {
         let mut cursor = Cursor::new(raw.as_bytes().to_vec());
         let input = read(&mut cursor)?;
-        let root = crate::project_of(&crate::root_for(Path::new(input.cwd()))?);
+        let checkout = crate::root_for(Path::new(input.cwd()))?;
         let source = Source {
             name: client.to_string(),
-            path: root,
+            path: crate::project_of(&checkout),
         };
-        run(input, &source, &self.log, &self.sessions, self.me)
+        run(input, &source, &self.log, &self.sessions, &checkout, self.me)
     }
 
     /// The number of turn state files kept anywhere under
@@ -373,10 +371,35 @@ fn a_session_start_records_one_marker_from_the_system() {
 }
 
 #[test]
-fn a_session_start_answers_the_client_nothing() {
+fn a_session_start_answers_the_client_the_start_screen() {
     let fixture = Fixture::new();
 
-    assert_eq!(fixture.session_start("codex"), json!({}));
+    let output = fixture.session_start("codex");
+
+    let output = &output["hookSpecificOutput"];
+    assert_eq!(output["hookEventName"], "SessionStart");
+    let context = output["additionalContext"].as_str().unwrap();
+    assert!(context.contains("percept maps record <map>"), "{context}");
+    assert!(context.contains("\n# debates\n\nwhat a hook test needs\n"), "{context}");
+}
+
+#[test]
+fn a_session_start_with_a_broken_schema_still_records_its_marker() {
+    let fixture = Fixture::new().with_extra_schema("broken", "not valid toml");
+
+    let result = fixture.call(
+        "codex",
+        json!({
+            "hook_event_name": "SessionStart",
+            "cwd": fixture.root.to_str().unwrap(),
+            "session_id": "session",
+        }),
+    );
+
+    assert!(result.is_err());
+    let events = fixture.events();
+    assert_eq!(events.len(), 1);
+    assert!(matches!(events[0].payload(), Payload::SessionStarted));
 }
 
 #[test]
