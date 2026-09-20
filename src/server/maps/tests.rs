@@ -5,33 +5,27 @@ use super::*;
 use crate::core::testing::{human, FakeLog, Fixture};
 use crate::core::{Actor, Event, NodeId, Payload, Source};
 
-/// A schema with three kinds - `concept`, `question`, `fact` - only
-/// `concept` a headline, and a two-hop chain of edges between them:
-/// `fact` -backs-> `question` -about-> `concept`. What every test here
-/// folds its map from.
+/// A schema with three kinds - `concept`, `question`, `fact` - and a
+/// two-hop chain of edges between them: `concept` -about-> `question`
+/// -backs-> `fact`. Every edge runs from the parent to the child, so
+/// `concept` heads the chain - no edge reaches it - and `fact` hangs
+/// deepest. What every test here folds its map from.
 const SCHEMA: &str = "\
-name = \"decisions\"\n\
 purpose = \"test\"\n\
-headlines = [\"concept\"]\n\
 \n\
-[[node]]\n\
-kind = \"concept\"\n\
+[nodes.concept]\n\
 \n\
-[[node]]\n\
-kind = \"question\"\n\
+[nodes.question]\n\
 \n\
-[[node]]\n\
-kind = \"fact\"\n\
+[nodes.fact]\n\
 \n\
-[[edge]]\n\
-kind = \"about\"\n\
+[edges.about]\n\
+from = \"concept\"\n\
+to = \"question\"\n\
+\n\
+[edges.backs]\n\
 from = \"question\"\n\
-to = \"concept\"\n\
-\n\
-[[edge]]\n\
-kind = \"backs\"\n\
-from = \"fact\"\n\
-to = \"question\"\n";
+to = \"fact\"\n";
 
 fn source_at(path: &Path) -> Source {
     Source {
@@ -92,8 +86,8 @@ fn chain() -> (Fixture, FakeLog) {
     let (concept, concept_id) = node_added(fixture.path(), "concept", "the rule");
     let (question, question_id) = node_added(fixture.path(), "question", "why the rule?");
     let (fact, fact_id) = node_added(fixture.path(), "fact", "precedent");
-    let about = edge_added(fixture.path(), "about", question_id, concept_id);
-    let backs = edge_added(fixture.path(), "backs", fact_id, question_id);
+    let about = edge_added(fixture.path(), "about", concept_id, question_id);
+    let backs = edge_added(fixture.path(), "backs", question_id, fact_id);
     let created = Event::map_created(
         crate::core::testing::map_id("decisions"),
         "decisions".to_string(),
@@ -109,15 +103,17 @@ fn decisions_id() -> String {
 }
 
 #[test]
-fn the_overview_carries_headline_nodes_only() {
+fn the_overview_carries_the_nodes_that_head_the_map() {
     let (fixture, log) = chain();
 
     let body = get(&log, &decisions_id(), params(fixture.path(), None, None)).unwrap();
 
-    let nodes = body["nodes"].as_array().unwrap();
+    let mut kinds: Vec<&str> = body["nodes"].as_array().unwrap().iter().map(|n| n["kind"].as_str().unwrap()).collect();
+    kinds.sort_unstable();
     assert_eq!(body["map"]["id"], decisions_id());
-    assert_eq!(nodes.len(), 1, "{body}");
-    assert_eq!(nodes[0]["kind"], "concept");
+    // `concept` is the one node no edge reaches, so it alone heads
+    // the map.
+    assert_eq!(kinds, ["concept"], "{body}");
 }
 
 #[test]

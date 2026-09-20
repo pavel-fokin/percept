@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use super::*;
 use crate::core::testing::{human, schemas, source, source_at, FakeLog};
 use crate::core::{Actor, Change, Event, MapId, NodeId, NodeRef};
@@ -14,35 +16,11 @@ fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
 }
 
 #[test]
-fn a_claim_without_a_why_is_refused_as_a_new_write() {
+fn a_chore_without_a_state_commits_with_none_written() {
     let log = FakeLog::default();
     let source = source("cli");
 
-    let err = commit(
-        &log,
-        &schemas(),
-        "debates",
-        &source,
-        &[],
-        Actor::Human(human()),
-        None,
-        add_node("claim", "SQLite"),
-    )
-    .err()
-    .unwrap()
-    .to_string();
-
-    assert!(err.contains("lacks its `why` property"), "{err}");
-    assert!(err.contains("saying why"), "{err}");
-    assert!(log.load().unwrap().is_empty());
-}
-
-#[test]
-fn a_chore_without_a_why_is_refused_as_a_new_write() {
-    let log = FakeLog::default();
-    let source = source("cli");
-
-    let err = commit(
+    let event = commit(
         &log,
         &schemas(),
         "chores",
@@ -52,12 +30,11 @@ fn a_chore_without_a_why_is_refused_as_a_new_write() {
         None,
         add_node("chore", "cancel a turn without quitting"),
     )
-    .err()
-    .unwrap()
-    .to_string();
+    .unwrap();
 
-    assert!(err.contains("lacks its `why` property"), "{err}");
-    assert!(err.contains("why it matters"), "{err}");
+    assert!(
+        matches!(event.payload(), Payload::NodeAdded { properties, .. } if properties.is_empty())
+    );
 }
 
 #[test]

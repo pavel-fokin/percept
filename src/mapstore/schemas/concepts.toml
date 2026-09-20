@@ -1,70 +1,53 @@
 # The decisions map: the concepts a reader reasons with, and under each
 # what was asked, what was weighed, what was chosen and on what
 # grounds. A concept's definition is the rule that holds here, so a
-# decision can break it. A question or decision is about a concept. An
-# option answers a question - or the decision itself, when none was
-# raised - and says whether it still stands and why. A decision
-# resolves the question, and a later decision supersedes an earlier
-# one. A question reopens a decision it puts in doubt, so --around a
-# question reaches everything weighed for it. A concept covers another
-# it absorbs, so the covered one nests under it and leaves the
-# overview.
+# decision can break it. A concept asks the questions raised under it,
+# a question weighs the options put to it, and the decision that
+# answered it is what settled it. A later decision supersedes an
+# earlier one, and a decision asks a question that puts it back in
+# doubt, so --around a question reaches everything weighed for it. A
+# concept covers another it absorbs, so the covered one hangs under it
+# and leaves the overview.
+#
+# Every edge runs from the node above to the one under it, and a
+# node may take more than one: a decision that supersedes another keeps
+# whatever settled it too. What no edge reaches heads the map; maps
+# show names a node once and points back to it wherever a later edge
+# reaches it again.
 
-name = "concepts"
 purpose = "what was asked, what was chosen, and why, so a settled question is not reopened"
-headlines = ["concept", "question", "decision"]
 
-[[node]]
-kind = "concept"
-gloss = "one thing a reader reasons with; its definition is the rule that holds here, not a gloss"
-requires = ["definition"]
+[nodes.concept]
+definition = ""
 
-[[node]]
-kind = "question"
-properties = ["why"]
+[nodes.question]
+why = ""
 
-[[node]]
-kind = "option"
-gloss = "an answer weighed for a question: open while it still stands, dead once it lost, saying which in `state` and why in `why`"
-requires = ["why"]
-states = ["open", "dead"]
+[nodes.option]
+why = ""
+state = ["open", "dead"]
 
-[[node]]
-kind = "decision"
-properties = ["why"]
+[nodes.decision]
+why = ""
 
-[[edge]]
-kind = "about"
-gloss = "from a question or decision to the concept it belongs under; a decision that resolves a question inherits its place"
-from = ["question", "decision"]
-to = "concept"
+[edges.asks]
+from = ["concept", "decision"]
+to = "question"
 
-[[edge]]
-kind = "covers"
-gloss = "from a concept to one it absorbs - a narrower rule, or a worse wording of the same one; the covered concept nests under it and leaves the overview"
+[edges.settled]
+from = ["concept", "question"]
+to = "decision"
+
+[edges.weighs]
+from = "question"
+to = "option"
+
+[edges.covers]
 from = "concept"
 to = "concept"
 
-[[edge]]
-kind = "resolves"
+[edges.supersedes]
 from = "decision"
-to = "question"
-
-[[edge]]
-kind = "answers"
-gloss = "from an option to the question it answers, or to the decision it was weighed against when no question was raised"
-from = "option"
-to = ["question", "decision"]
-
-[[edge]]
-kind = "supersedes"
-from = "decision"
-to = "decision"
-
-[[edge]]
-kind = "reopens"
-gloss = "from a question to a decision it puts in doubt; the decision stands until a new one supersedes it"
-from = "question"
 to = "decision"
 
 # The lines percept sends at each moment it has a channel to speak on:
@@ -72,7 +55,7 @@ to = "decision"
 # opening.
 [rules]
 "message.received" = [
-  "propose by recording: an option under its question, state \"open\", before arguing for it",
+  "propose by recording: an option under its question, before arguing for it",
   "before stopping, record what you reasoned with. Sharpen a concept that already states it, or cover yours under it; add a peer only when neither fits",
 ]
 "reflection.started" = [

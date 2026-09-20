@@ -71,8 +71,8 @@ struct Row {
 
 /// What every current node cites that no longer matches the working
 /// tree - an option carries citations as readily as the decision it
-/// answers, so the walk is over every node rather than the headline
-/// kinds - one Attention row per node with at least one stale
+/// answers, so the walk is over every node - one Attention row per
+/// node with at least one stale
 /// citation, `<id> cites <label> changed, <label> gone`, `findings`
 /// each `"<label> changed"`, `"<label> gone"`, or `"<label> renamed to
 /// <new label>"`. This module's Attention block builds its lines from
@@ -187,45 +187,53 @@ fn pad_rows(rows: &[(String, String)]) -> Vec<String> {
         .collect()
 }
 
-/// `<n> <state>` for every declared state of every headline kind of
-/// `map`, in declared order, skipping states no headline node is in -
-/// `1 open   2 done` for a kind with those states. Every state is
-/// counted, since a schema lists them as a set and no position means
-/// "initial".
-fn state_counts(map: &Map) -> Vec<String> {
+/// `<n> <value>` for every value of every node kind's closed list, in
+/// declared order, skipping values no node is in - `1 open   2 done`
+/// for a kind whose closed list is `state` with those values. Every
+/// value is counted, since a schema lists them as a set and no
+/// position means "initial".
+fn closed_list_counts(map: &Map) -> Vec<String> {
     let schema = map.schema();
     schema
         .node_kinds
         .iter()
-        .filter(|kind| schema.headline_kinds.contains(&kind.kind))
         .flat_map(|kind| {
-            kind.states.iter().filter_map(|state| {
-                let count = map
-                    .headlines()
-                    .filter(|node| node.kind == kind.kind && node.properties.get("state") == Some(state))
-                    .count();
-                (count > 0).then(|| format!("{count} {state}"))
+            kind.closed_list().into_iter().flat_map(move |(property, values)| {
+                values.iter().filter_map(move |value| {
+                    let count = map
+                        .nodes()
+                        .iter()
+                        .filter(|node| {
+                            node.kind == kind.kind
+                                && map.property(node, property) == Some(value.as_str())
+                        })
+                        .count();
+                    (count > 0).then(|| format!("{count} {value}"))
+                })
             })
         })
         .collect()
 }
 
 /// The State block: one line per map in fold order - how many of its
-/// headline nodes head it against how many it holds, `+N since last
-/// session` when that map's `moved` list is not empty, then any state
-/// counts `state_counts` finds. The pair is the pressure to fold: a
-/// map whose roots trail its headlines far enough is one to reflect
-/// on.
+/// nodes head it against how many it holds, `+N since last session`
+/// when that map's `moved` list is not empty, then any state counts
+/// `closed_list_counts` finds. The pair is the pressure to fold: a map whose
+/// roots trail its nodes far enough is one to reflect on.
 fn state_block(maps: &[Map], moved: &[Vec<&Node>]) -> String {
     let rows: Vec<(String, String)> = maps
         .iter()
         .zip(moved)
         .map(|(map, moved)| {
-            let mut parts = vec![format!("{} of {}", map.roots().count(), map.headlines().count())];
+            let mut parts = vec![format!(
+                "{} of {}",
+                map.roots().count(),
+                map.nodes().len()
+            )];
             if !moved.is_empty() {
                 parts.push(format!("+{} since last session", moved.len()));
             }
-            parts.extend(state_counts(map));
+            parts.extend(closed_list_counts(map));
             (map.schema().name.clone(), parts.join("   "))
         })
         .collect();
@@ -281,13 +289,13 @@ fn attention_block(
     (Some(lines.join("\n")), printed)
 }
 
-/// The Next block: `read <map>` for every map with a headline node,
+/// The Next block: `read <map>` for every map that holds a node,
 /// `read around <id>` for every node Attention printed, then the two
 /// fixed pointers every render carries.
 fn next_block(maps: &[Map], printed: &[(String, String)]) -> String {
     let mut rows: Vec<(String, String)> = maps
         .iter()
-        .filter(|map| map.headlines().next().is_some())
+        .filter(|map| !map.nodes().is_empty())
         .map(|map| {
             let name = &map.schema().name;
             (format!("read {name}"), format!("percept maps show {name}"))

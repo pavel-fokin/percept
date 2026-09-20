@@ -137,19 +137,24 @@ fn a_node_with_no_sources_is_refused_and_the_error_names_the_rule() {
 }
 
 #[test]
-fn a_claim_with_no_why_is_refused() {
-    let cited = Event::message_received(Actor::Human(human()), "Rust".to_string(), source("tui"), None);
+fn a_chore_with_no_state_records_with_none_written() {
+    let cited = Event::message_received(Actor::Human(human()), "cancel a turn".to_string(), source("tui"), None);
     let cited_id = cited.id();
     let revise = tool(vec![cited]);
 
     let args = format!(
-        r#"{{"map":"debates","changes":[{{"op":"add_node","kind":"claim","name":"Rust","sources":["{}"]}}]}}"#,
+        r#"{{"map":"chores","changes":[{{"op":"add_node","kind":"chore","name":"cancel a turn","sources":["{}"]}}]}}"#,
         cited_id.as_uuid()
     );
 
-    let err = revise.run(&args).err().unwrap();
+    let output = revise.run(&args).unwrap();
 
-    assert!(err.to_string().contains("lacks its `why` property"), "{err}");
+    match output.commits.last().unwrap() {
+        Payload::NodeAdded { properties, .. } => {
+            assert_eq!(properties.get("state"), None);
+        }
+        _ => panic!("expected a NodeAdded payload"),
+    }
 }
 
 #[test]
@@ -209,7 +214,7 @@ fn a_change_can_reference_a_node_an_earlier_change_just_added() {
             r#"{{"map":"debates","changes":[
                 {{"op":"add_node","kind":"topic","name":"Which language?","sources":["{id}"]}},
                 {{"op":"add_node","kind":"verdict","name":"Rust over Go","sources":["{id}"]}},
-                {{"op":"add_edge","kind":"settles","from":{{"kind":"verdict","name":"Rust over Go"}},"to":{{"kind":"topic","name":"Which language?"}},"sources":[]}}
+                {{"op":"add_edge","kind":"settles","from":{{"kind":"topic","name":"Which language?"}},"to":{{"kind":"verdict","name":"Rust over Go"}},"sources":[]}}
             ]}}"#
         ))
         .unwrap();
@@ -218,7 +223,7 @@ fn a_change_can_reference_a_node_an_earlier_change_just_added() {
     assert!(matches!(output.commits[2], Payload::EdgeAdded { .. }));
     assert_eq!(
         output.content.lines().last().unwrap(),
-        "added edge verdict \"Rust over Go\" settles topic \"Which language?\""
+        "added edge topic \"Which language?\" settles verdict \"Rust over Go\""
     );
 }
 

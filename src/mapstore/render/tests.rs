@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::core::testing::{chores, debates, files, human, node_ref};
+use crate::core::testing::{chores, debates, files, human, link, node_ref};
 use crate::core::{Actor, EventId, Mutation};
 
 /// Adds a node with one `why` property when `why` is given, and one
@@ -49,18 +49,6 @@ fn change(map: &mut Map, kind: &str, name: &str, properties: BTreeMap<String, St
     .unwrap();
 }
 
-fn link(map: &mut Map, kind: &str, from: (&str, &str), to: (&str, &str)) {
-    map.apply(
-        Mutation::AddEdge {
-            kind: kind.to_string(),
-            from: node_ref(from.0, from.1),
-            to: node_ref(to.0, to.1),
-            sources: Vec::new(),
-        },
-        Actor::Human(human()),
-    )
-    .unwrap();
-}
 
 #[test]
 fn an_empty_map_renders_its_title_and_the_empty_notice() {
@@ -69,7 +57,7 @@ fn an_empty_map_renders_its_title_and_the_empty_notice() {
 }
 
 #[test]
-fn sections_order_headlines_by_state_then_by_when_they_were_added() {
+fn sections_are_ordered_by_state_then_by_when_they_were_added() {
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
     add(&mut map, "chore", "a", Some("first added"), Some("open"), &[], Actor::Human(human()));
     add(&mut map, "chore", "b", Some("second added"), Some("done"), &[], Actor::Human(human()));
@@ -85,7 +73,11 @@ fn sections_order_headlines_by_state_then_by_when_they_were_added() {
 }
 
 #[test]
-fn sections_order_headlines_by_their_kinds_place_in_headlines() {
+fn sections_with_no_state_are_ordered_by_when_they_were_added() {
+    // `push_sections` now sorts roots only by `closed_list_rank` then
+    // `added_at` - see its doc comment, which still says kind order
+    // breaks the tie first; it no longer does, so two roots of
+    // different kinds and no state sort by add order alone.
     let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "verdict", "ship it", None, None, &[], Actor::Human(human()));
     add(&mut map, "topic", "Which parser?", None, None, &[], Actor::Human(human()));
@@ -93,7 +85,7 @@ fn sections_order_headlines_by_their_kinds_place_in_headlines() {
     let text = markdown(&map);
 
     let at = |name: &str| text.find(&format!("\n## {name}\n")).unwrap();
-    assert!(at("t1 \"Which parser?\"") < at("v1 \"ship it\""), "{text}");
+    assert!(at("v1 \"ship it\"") < at("t1 \"Which parser?\""), "{text}");
 }
 
 #[test]
@@ -109,7 +101,7 @@ fn a_claim_is_printed_under_its_topic_with_its_why() {
         &[],
         Actor::Human(human()),
     );
-    link(&mut map, "about", ("claim", "reuse OpenAi"), ("topic", "Which parser?"));
+    link(&mut map, "about", ("topic", "Which parser?"), ("claim", "reuse OpenAi"));
 
     let text = markdown(&map);
 
@@ -117,8 +109,8 @@ fn a_claim_is_printed_under_its_topic_with_its_why() {
         text.contains(
             "## t1 \"Which parser?\"\n\
              \n\
-             - c1 \"reuse OpenAi\" about\n\
-             \x20 why: \"the wire shapes differ\"\n"
+             - about c1 \"reuse OpenAi\"\n\
+             \x20\x20why: \"the wire shapes differ\"\n"
         ),
         "{text}"
     );
@@ -131,7 +123,7 @@ fn a_replaced_verdict_and_a_doubting_topic_nest_under_the_verdict_that_claims_th
     add(&mut map, "verdict", "Rust", None, None, &[], Actor::Human(human()));
     link(&mut map, "replaces", ("verdict", "Rust"), ("verdict", "Go"));
     add(&mut map, "topic", "Does Rust still fit?", None, None, &[], Actor::Human(human()));
-    link(&mut map, "doubts", ("topic", "Does Rust still fit?"), ("verdict", "Rust"));
+    link(&mut map, "doubts", ("verdict", "Rust"), ("topic", "Does Rust still fit?"));
 
     let text = markdown(&map);
 
@@ -142,21 +134,79 @@ fn a_replaced_verdict_and_a_doubting_topic_nest_under_the_verdict_that_claims_th
          ## v2 \"Rust\"\n\
          \n\
          - replaces v1 \"Go\"\n\
-         - t1 \"Does Rust still fit?\" doubts\n"
+         - doubts t1 \"Does Rust still fit?\"\n"
+    );
+}
+
+#[test]
+fn a_node_with_two_parents_is_printed_once_and_marked_above_the_second_time() {
+    let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
+    add(&mut map, "chore", "a", Some("first"), Some("open"), &[], Actor::Human(human()));
+    add(&mut map, "chore", "b", Some("second"), Some("open"), &[], Actor::Human(human()));
+    add(&mut map, "chore", "c", Some("blocked either way"), Some("open"), &[], Actor::Human(human()));
+    link(&mut map, "blocks", ("chore", "a"), ("chore", "c"));
+    link(&mut map, "blocks", ("chore", "b"), ("chore", "c"));
+
+    let text = markdown(&map);
+
+    assert_eq!(
+        text,
+        "# chores\n\
+         \n\
+         ## c1 \"a\"\n\
+         \n\
+         why: \"first\"\n\
+         state: \"open\"\n\
+         - blocks c3 \"c\"\n\
+         \x20\x20why: \"blocked either way\"\n\
+         \x20\x20state: \"open\"\n\
+         \n\
+         ## c2 \"b\"\n\
+         \n\
+         why: \"second\"\n\
+         state: \"open\"\n\
+         - blocks c3 \"c\" (above)\n"
+    );
+}
+
+#[test]
+fn a_cycle_with_no_root_heads_a_section_on_one_of_its_own_and_the_walk_ends() {
+    let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
+    add(&mut map, "chore", "a", Some("first"), Some("open"), &[], Actor::Human(human()));
+    add(&mut map, "chore", "b", Some("second"), Some("open"), &[], Actor::Human(human()));
+    link(&mut map, "blocks", ("chore", "a"), ("chore", "b"));
+    link(&mut map, "blocks", ("chore", "b"), ("chore", "a"));
+
+    let text = markdown(&map);
+
+    assert_eq!(
+        text,
+        "# chores\n\
+         \n\
+         ## c1 \"a\"\n\
+         \n\
+         why: \"first\"\n\
+         state: \"open\"\n\
+         - blocks c2 \"b\"\n\
+         \x20\x20why: \"second\"\n\
+         \x20\x20state: \"open\"\n\
+         \x20\x20- blocks c1 \"a\" (above)\n"
     );
 }
 
 #[test]
 fn a_verdict_nests_under_its_topic_and_the_one_it_replaces_under_it() {
+    // A second edge into `Go` would give it a second section too; here
+    // it takes only the one from `replaces`, so it hangs under `Rust`
+    // alone and is not also settled directly under the topic.
     let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "topic", "Which language?", None, None, &[], Actor::Human(human()));
     add(&mut map, "verdict", "Go", None, None, &[], Actor::Human(human()));
-    link(&mut map, "settles", ("verdict", "Go"), ("topic", "Which language?"));
     add(&mut map, "verdict", "Rust", None, None, &[], Actor::Human(human()));
-    link(&mut map, "settles", ("verdict", "Rust"), ("topic", "Which language?"));
+    link(&mut map, "settles", ("topic", "Which language?"), ("verdict", "Rust"));
     link(&mut map, "replaces", ("verdict", "Rust"), ("verdict", "Go"));
     add(&mut map, "claim", "Java", Some("no one here writes it"), None, &[], Actor::Human(human()));
-    link(&mut map, "about", ("claim", "Java"), ("topic", "Which language?"));
+    link(&mut map, "about", ("topic", "Which language?"), ("claim", "Java"));
 
     let text = markdown(&map);
 
@@ -166,10 +216,10 @@ fn a_verdict_nests_under_its_topic_and_the_one_it_replaces_under_it() {
          \n\
          ## t1 \"Which language?\"\n\
          \n\
-         - c1 \"Java\" about\n\
-         \x20 why: \"no one here writes it\"\n\
-         - v2 \"Rust\" settles\n\
-         \x20 - replaces v1 \"Go\"\n"
+         - settles v2 \"Rust\"\n\
+         \x20\x20- replaces v1 \"Go\"\n\
+         - about c1 \"Java\"\n\
+         \x20\x20why: \"no one here writes it\"\n"
     );
 }
 
@@ -202,16 +252,16 @@ fn a_blocked_chore_nests_under_the_chore_that_blocks_it() {
 }
 
 #[test]
-fn a_map_with_no_headlines_says_so() {
-    let map = Map::empty(crate::core::testing::map_id("debates"), debates());
-    // The map has a node, but no headline kind: no topic or verdict
-    // was ever added.
-    let mut map = map;
+fn a_claim_pointed_at_by_no_edge_heads_its_own_section() {
+    // `claim` is a section kind - `backs` names it as a `to` end - so a
+    // claim nobody points at now heads a section of its own, where
+    // before only `topic` and `verdict` could.
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "claim", "Rust", Some("only alternative weighed"), None, &[], Actor::Human(human()));
 
     assert_eq!(
         markdown(&map),
-        "# debates\n\n(no headline node yet; 1 nodes of other kinds.)\n"
+        "# debates\n\n## c1 \"Rust\"\n\nwhy: \"only alternative weighed\"\n"
     );
 }
 
@@ -267,7 +317,10 @@ fn an_unchanged_node_carries_no_changed_by_line() {
 }
 
 #[test]
-fn a_non_headline_neighbour_prints_its_own_properties_indented() {
+fn a_file_heads_its_section_and_the_symbols_it_contains_nest_under_it() {
+    // `contains` runs from a file to a symbol it defines, so the file
+    // heads the section - it has no parent - and the function it
+    // contains nests under it.
     let mut map = Map::empty(crate::core::testing::map_id("files"), files());
     add(&mut map, "file", "src/main.rs", None, None, &[], Actor::System);
     map.apply(
@@ -284,87 +337,50 @@ fn a_non_headline_neighbour_prints_its_own_properties_indented() {
 
     let text = markdown(&map);
 
-    assert!(
-        text.contains(
-            "## f1 \"src/main.rs\"\n\
-             \n\
-             - contains fn1 \"main\"\n\
-             \x20 returns: \"()\"\n"
-        ),
-        "{text}"
+    assert_eq!(
+        text,
+        "# files\n\
+         \n\
+         ## f1 \"src/main.rs\"\n\
+         \n\
+         - contains fn1 \"main\"\n\
+         \x20\x20returns: \"()\"\n"
     );
 }
 
-/// Three headline kinds, coarse to fine, with an edge from the finest
-/// to each of the other two - the coarser one listed first.
-fn court() -> Map {
-    let schema = crate::core::Schema {
-        name: "court".to_string(),
-        purpose: "test fixture".to_string(),
-        node_kinds: vec![
-            crate::core::NodeKind::new("area", ""),
-            crate::core::NodeKind::new("topic", ""),
-            crate::core::NodeKind::new("verdict", ""),
-        ],
-        edge_kinds: vec![
-            crate::core::EdgeKind::new("within", "", &["verdict"], &["area"]),
-            crate::core::EdgeKind::new("settles", "", &["verdict"], &["topic"]),
-        ],
-        headline_kinds: vec!["area".to_string(), "topic".to_string(), "verdict".to_string()],
-        rules: crate::core::Rules::default(),
-    };
-    let mut map = Map::empty(crate::core::MapId::new(), schema);
-    add(&mut map, "area", "parsing", None, None, &[], Actor::Human(human()));
+/// A node one edge reaches hangs under the section that edge names,
+/// never one of its own.
+#[test]
+fn a_node_is_named_under_the_one_section_it_hangs_in() {
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     add(&mut map, "topic", "Which parser?", None, None, &[], Actor::Human(human()));
     add(&mut map, "verdict", "ship it", None, None, &[], Actor::Human(human()));
-    link(&mut map, "within", ("verdict", "ship it"), ("area", "parsing"));
-    link(&mut map, "settles", ("verdict", "ship it"), ("topic", "Which parser?"));
-    map
-}
+    link(&mut map, "settles", ("topic", "Which parser?"), ("verdict", "ship it"));
 
-/// `headlines` order is nesting order: a node pointing at two headline
-/// kinds files under the one listed later, whatever the schema's edge
-/// order says.
-#[test]
-fn a_node_pointing_at_two_headline_kinds_files_under_the_later_one() {
-    let text = markdown(&court());
+    let text = markdown(&map);
 
-    assert!(text.contains("## t1 \"Which parser?\"\n\n- v1 \"ship it\" settles\n"), "{text}");
+    assert!(text.contains("## t1 \"Which parser?\"\n\n- settles v1 \"ship it\"\n"), "{text}");
     assert!(!text.contains("\n## v1 "), "{text}");
 }
 
+/// A schema declaring no edge at all: nothing can reach a node, so
+/// every node heads a section of its own.
 #[test]
-fn a_headline_that_nests_elsewhere_is_still_named_where_an_edge_reaches_it() {
-    let text = markdown(&court());
-
-    assert!(text.contains("## a1 \"parsing\"\n\n- v1 \"ship it\" within\n"), "{text}");
-}
-
-#[test]
-fn a_node_does_not_name_the_headline_it_nests_under() {
-    let text = markdown(&court());
-
-    assert!(!text.contains("- settles t1"), "{text}");
-}
-
-/// A schema with no headline kind at all falls back to `push_by_kind`:
-/// one `## <kind>` section per kind that holds a node, then `## edges`.
-#[test]
-fn a_schema_with_no_headline_kind_falls_back_to_a_section_per_kind() {
+fn a_schema_with_no_edges_gives_every_node_its_own_section() {
     let schema = crate::core::Schema {
         name: "glossary".to_string(),
         purpose: "test fixture".to_string(),
-        node_kinds: vec![crate::core::NodeKind::new("term", "a word")],
+        node_kinds: vec![crate::core::NodeKind::new("term")],
         edge_kinds: Vec::new(),
-        headline_kinds: Vec::new(),
         rules: crate::core::Rules::default(),
     };
     let mut map = Map::empty(crate::core::MapId::new(), schema);
     add(&mut map, "term", "harness", None, None, &[], Actor::Human(human()));
 
-    let text = markdown(&map);
-
-    assert!(text.contains("\n## term\n- t1 \"harness\"\n"), "{text}");
+    // Nothing can reach a node in a schema that declares no edge, so
+    // every node heads a section - the shape a first schema takes
+    // before its edges are written.
+    assert_eq!(markdown(&map), "# glossary\n\n## t1 \"harness\"\n\n");
 }
 
 #[test]
@@ -379,33 +395,24 @@ fn the_catalogue_gives_each_map_a_section_listing_its_kinds() {
     assert!(text.contains(&debates().purpose));
     assert!(text.contains("1 nodes, 0 edges.\n"));
     assert!(text.contains(
-        "- `backs` (fact -> claim)\n- `settles` (verdict -> topic)"
+        "- `backs` (claim -> fact)\n- `settles` (topic -> verdict)"
     ));
     assert!(text.contains("\nExample node and edge:\n\n    {\"node\":"));
     assert!(text.contains("\"name\":\"Where does the log live?\""));
 }
 
 #[test]
-fn a_kind_with_no_gloss_renders_without_a_trailing_dash() {
+fn the_catalogue_lists_a_kinds_one_carried_property() {
     let text = catalogue(&[Map::empty(crate::core::testing::map_id("debates"), debates())]);
 
-    assert!(
-        text.contains("\n- `verdict` (may carry `why`)\n"),
-        "{text}"
-    );
+    assert!(text.contains("\n- `verdict` (carries `why`)\n"), "{text}");
 }
 
 #[test]
-fn the_catalogue_names_a_kinds_required_properties() {
+fn the_catalogue_names_a_kinds_carried_properties() {
     let text = catalogue(&[Map::empty(crate::core::testing::map_id("debates"), debates())]);
 
-    assert!(
-        text.contains(
-            "- `claim` (requires `why`, may carry `summary`) - a side taken on a topic, saying \
-             why in its `why` property"
-        ),
-        "{text}"
-    );
+    assert!(text.contains("- `claim` (carries `why`, `summary`)"), "{text}");
 }
 
 #[test]
@@ -416,10 +423,9 @@ fn the_catalogue_of_no_maps_prints_the_no_schemas_hint() {
 }
 
 #[test]
-fn the_catalogue_glosses_a_package_kind_as_an_external_crate() {
+fn the_catalogue_lists_a_package_kind_with_no_properties() {
     let text = catalogue(&[Map::empty(crate::core::testing::map_id("files"), files())]);
 
-    assert!(text.contains("- `package` - an external crate a file imports"));
-    assert!(text.contains("never one of this project's own modules"));
+    assert!(text.contains("- `package`\n"));
     assert!(text.contains("\nExample: nothing recorded here yet.\n"));
 }

@@ -62,7 +62,7 @@ fn no_schemas_prints_the_hint_and_nothing_else() {
 }
 
 #[test]
-fn the_state_line_shows_a_maps_headline_count() {
+fn the_state_line_shows_a_maps_node_count() {
     let events = vec![node_added("topic", "why blue?")];
     let text = rendered(&events, Fixture::new().path());
 
@@ -70,7 +70,7 @@ fn the_state_line_shows_a_maps_headline_count() {
 }
 
 #[test]
-fn the_state_line_counts_a_claimed_headline_out_of_the_roots() {
+fn the_state_line_counts_a_claimed_node_out_of_the_roots() {
     let topic = node_added("topic", "why blue?");
     let verdict = node_added("verdict", "blue it is");
     let settles = edge_added("settles", &verdict, &topic);
@@ -168,7 +168,7 @@ fn attention_marks_a_stale_citation_as_changed() {
 }
 
 #[test]
-fn attention_marks_a_stale_citation_on_a_node_of_no_headline_kind() {
+fn attention_marks_a_stale_citation_on_a_node_that_heads_nothing() {
     let checkout = Fixture::new();
     checkout.write("a.rs", "fn one() { edited }\n");
 
@@ -197,7 +197,7 @@ fn next_offers_a_read_around_for_every_attention_id() {
 }
 
 #[test]
-fn next_has_no_read_line_for_a_map_with_no_headline() {
+fn next_has_no_read_line_for_a_map_with_no_node() {
     let events = vec![node_added("topic", "why?")];
 
     let text = rendered(&events, Fixture::new().path());
@@ -374,10 +374,9 @@ fn a_citation_whose_excerpt_is_blank_reports_changed() {
 }
 
 #[test]
-fn a_superseded_verdict_is_still_a_headline_and_still_checked() {
+fn a_superseded_verdict_is_still_shown_and_still_checked() {
     // The core keeps no notion of "superseded" - a `replaces` edge is
-    // a fact between two headline nodes, not a reason to skip one of
-    // them.
+    // a fact between two nodes, not a reason to skip one of them.
     let checkout = Fixture::new();
     let cited = file_cited("src/gone.rs", None, "fn gone() {}");
     let old = node_added_citing(Actor::Human(human()), "verdict", "old answer", vec![cited.id()]);

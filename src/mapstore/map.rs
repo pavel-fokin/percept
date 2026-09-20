@@ -3,10 +3,11 @@
 //! does, and revising it - a writer's `Mutation` checked against a
 //! `Snapshot` of the log and turned into the payload that records it.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -308,10 +309,21 @@ struct NodeLine<'a> {
     id: String,
     kind: &'a str,
     name: &'a str,
-    properties: &'a BTreeMap<String, String>,
+    /// `Map::properties`, in schema-declared order - a closed list's
+    /// default among them when the node carries none of its own - as
+    /// an `IndexMap`, so it serializes as a JSON object in that same
+    /// order.
+    properties: IndexMap<&'a str, &'a str>,
     sources: Vec<String>,
     #[serde(flatten)]
     stamp: Option<NodeStamp>,
+}
+
+/// `node`'s properties as `Map::properties` gives them, in an
+/// `IndexMap`, so serializing it to JSON keeps that declared order
+/// instead of the alphabetical one a plain map would impose.
+pub fn properties_map<'a>(map: &'a Map, node: &'a Node) -> IndexMap<&'a str, &'a str> {
+    map.properties(node).collect()
 }
 
 #[derive(Serialize)]
@@ -336,13 +348,21 @@ pub fn encode_map(map: &Map) -> String {
     .expect("MapLine always serializes")
 }
 
+/// One property a node kind declares: its name and the values it may
+/// hold, empty for free text.
+#[derive(Serialize)]
+struct PropertyLine<'a> {
+    name: &'a str,
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    values: &'a [String],
+}
+
 #[derive(Serialize)]
 struct KindLine<'a> {
     name: &'a str,
-    #[serde(skip_serializing_if = "str::is_empty")]
-    gloss: &'a str,
-    #[serde(skip_serializing_if = "<[String]>::is_empty")]
-    requires: &'a [String],
+    /// Empty for an edge kind, which declares no properties.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    properties: Vec<PropertyLine<'a>>,
 }
 
 impl<'a> KindLine<'a> {
@@ -351,22 +371,19 @@ impl<'a> KindLine<'a> {
             .iter()
             .map(|kind| Self {
                 name: &kind.kind,
-                gloss: &kind.gloss,
-                requires: &kind.requires,
+                properties: kind
+                    .properties
+                    .iter()
+                    .map(|(name, values)| PropertyLine { name, values })
+                    .collect(),
             })
             .collect()
     }
 
-    /// An edge kind carries no `requires`, so every line here reports
-    /// none.
     fn of_edges(kinds: &'a [crate::core::EdgeKind]) -> Vec<Self> {
         kinds
             .iter()
-            .map(|kind| Self {
-                name: &kind.kind,
-                gloss: &kind.gloss,
-                requires: &[],
-            })
+            .map(|kind| Self { name: &kind.kind, properties: Vec::new() })
             .collect()
     }
 }
@@ -379,10 +396,10 @@ struct SchemaLine<'a> {
     edge_kinds: Vec<KindLine<'a>>,
 }
 
-/// One line describing a map's kinds, each with the gloss it carries on
-/// its `Schema` - what `read_map` returns before the fragment, so the
-/// model meets `package` or `option` with its meaning attached and does
-/// not guess a selector from a name alone.
+/// One line describing a map's kinds, each with the properties it
+/// carries on its `Schema` - what `read_map` returns before the
+/// fragment, so the model meets `package` or `option` with the
+/// properties it may set already in view.
 pub fn encode_schema(schema: &crate::core::Schema) -> String {
     serde_json::to_string(&SchemaLine {
         schema: &schema.name,
@@ -464,7 +481,7 @@ pub fn encode_node(map: &Map, node: &Node, stamped: bool) -> String {
         id: map.short_id(node.id).unwrap_or_default(),
         kind: &node.kind,
         name: &node.name,
-        properties: &node.properties,
+        properties: properties_map(map, node),
         sources: ids(&node.sources),
         stamp: NodeStamp::of(node, stamped),
     })

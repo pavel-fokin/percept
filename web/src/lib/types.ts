@@ -42,13 +42,13 @@ export interface EventsResponse {
 
 /** One map a project keeps, as `GET /api/projects` reports it: `id` is
  * the map's own stable id - what `GET /api/maps/{id}` addresses it
- * by - `name` its schema's, for display only; `headlines` is how many
- * of its nodes a reader sees before opening it, and `gained` how many
- * of those changed since that project's last session. */
+ * by - `name` its schema's, for display only; `nodes` is how many it
+ * holds, and `gained` how many of those changed since that project's
+ * last session. */
 export interface ProjectMap {
   id: string;
   name: string;
-  headlines: number;
+  nodes: number;
   gained: number;
 }
 
@@ -71,12 +71,11 @@ export interface ProjectsResponse {
   projects: Project[];
 }
 
-/** One node kind the schema declares, with the words it carries - so a
- * page can name a kind in the schema's language and never in its own. */
+/** One node kind the schema declares - its short id prefix, so a page
+ * can name a kind in the schema's language and never in its own. */
 export interface MapKind {
   kind: string;
   prefix: string;
-  gloss: string;
 }
 
 /** One node in a cut: `id` is the map's own short id (`c1`, `q12`),
@@ -102,7 +101,7 @@ export interface MapEdge {
  * with one end inside the cut and one outside - where a reader who
  * needs more widens from. */
 export interface MapResponse {
-  map: { id: string; name: string; purpose: string; headline_kinds: string[] };
+  map: { id: string; name: string; purpose: string };
   kinds: MapKind[];
   nodes: MapNode[];
   edges: MapEdge[];

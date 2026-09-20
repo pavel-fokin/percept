@@ -163,18 +163,22 @@ impl fmt::Display for NodeRef {
 }
 
 /// How much of a map a reader asked for. `around` cuts first, then
-/// `since`, then `kinds`, so the three together read as "what changed
-/// near this node, of these kinds". All absent is the whole map.
+/// `since`, then `kinds`, then `nodes`, so they read together as "what
+/// changed near this node, of these kinds, of these nodes". All absent
+/// is the whole map.
 #[derive(Default)]
 pub struct Selection<'a> {
     pub around: Option<(&'a NodeRef, usize)>,
     pub since: Option<Timestamp>,
     pub kinds: &'a [String],
+    /// The nodes to keep, named one by one - the cut a caller makes by
+    /// a rule of its own, which no kind or distance describes.
+    pub nodes: &'a [NodeId],
 }
 
 impl Selection<'_> {
     pub fn is_whole(&self) -> bool {
-        self.around.is_none() && self.since.is_none() && self.kinds.is_empty()
+        self.around.is_none() && self.since.is_none() && self.kinds.is_empty() && self.nodes.is_empty()
     }
 }
 
@@ -357,80 +361,30 @@ impl Map {
         &self.nodes
     }
 
-    /// The nodes of the schema's headline kinds, in map order - what a
-    /// reader sees of the map before opening it.
-    pub fn headlines(&self) -> impl Iterator<Item = &Node> {
-        let headline_kinds = &self.schema.headline_kinds;
-        self.nodes
-            .iter()
-            .filter(move |node| headline_kinds.contains(&node.kind))
-    }
-
-    /// The headline nodes nobody claims - what heads a map, one
-    /// section per root, in `headlines` order.
-    pub fn roots(&self) -> impl Iterator<Item = &Node> {
-        self.headlines().filter(move |node| self.claimant(node).is_none())
-    }
-
-    /// The headline node `node` prints under, if any: the first
-    /// headline of its own kind pointing at it - the decision that
-    /// supersedes it - else, of the headlines of other kinds it points
-    /// at, the one whose kind sits latest in `headlines` - the question
-    /// a decision resolves over the concept it is about, so `headlines`
-    /// order is nesting order and the schema's edge order decides only
-    /// between two of the same kind, first edge first. A node nobody
-    /// claims heads a section of its own. The rule names no kind, so it
-    /// holds for any schema: a `blocks` chore claims the one it blocks
-    /// the way `supersedes` claims the old decision.
-    pub fn claimant(&self, node: &Node) -> Option<&Node> {
-        let headline_kinds = &self.schema.headline_kinds;
-        let mut same_kind = None;
-        let mut other_kind: Option<&Node> = None;
-        for edge_kind in &self.schema.edge_kinds {
-            for from in self.linked(node.id, &edge_kind.kind, EdgeEnd::To) {
-                if same_kind.is_none() && from.kind == node.kind && headline_kinds.contains(&from.kind) {
-                    same_kind = Some(from);
-                }
-            }
-            for to in self.linked(node.id, &edge_kind.kind, EdgeEnd::From) {
-                let nearer = other_kind.is_none_or(|held| self.kind_rank(to) > self.kind_rank(held));
-                if nearer && to.kind != node.kind && headline_kinds.contains(&to.kind) {
-                    other_kind = Some(to);
-                }
-            }
-        }
-        same_kind.or(other_kind)
-    }
-
-    /// A headline node's position by kind: the index of its kind in the
-    /// schema's `headlines`, so the kind listed first heads the render
-    /// and a node nests under the latest kind it points at.
-    pub fn kind_rank(&self, node: &Node) -> usize {
-        self.schema
-            .headline_kinds
-            .iter()
-            .position(|kind| *kind == node.kind)
-            .unwrap_or(usize::MAX)
-    }
-
     pub fn edges(&self) -> &[Edge] {
         &self.edges
     }
 
-    /// The nodes across every edge of `edge_kind` touching `id`, in map
-    /// order, for a caller that knows no kind's name. `EdgeEnd::From`
-    /// reads the `to` end of an edge whose `from` is `id`; `EdgeEnd::To`
-    /// reads the `from` end of an edge whose `to` is `id`.
-    pub fn linked(&self, id: NodeId, edge_kind: &str, end: EdgeEnd) -> Vec<&Node> {
+    /// The nodes hanging under `id`, in the order their edges were
+    /// added - one `- <kind> <child>` line each, in the order a reader
+    /// meets them.
+    pub fn children(&self, id: NodeId) -> Vec<(&str, &Node)> {
         self.edges
             .iter()
-            .filter(|edge| edge.kind == edge_kind)
-            .filter_map(|edge| match end {
-                EdgeEnd::From if edge.from == id => self.node(edge.to),
-                EdgeEnd::To if edge.to == id => self.node(edge.from),
-                _ => None,
-            })
+            .filter(|edge| edge.from == id)
+            .filter_map(|edge| self.node(edge.to).map(|node| (edge.kind.as_str(), node)))
             .collect()
+    }
+
+    /// The nodes no edge reaches - what heads the map. A node can take
+    /// more than one edge in, so this is a filter, not a walk: a node
+    /// with two parents is not a root, and neither claims it alone. A
+    /// cycle with nothing pointing in from outside leaves no root at
+    /// all; a render that must show every node then heads a section
+    /// with one of the cycle's own, in add order.
+    pub fn roots(&self) -> impl Iterator<Item = &Node> {
+        let reached: HashSet<NodeId> = self.edges.iter().map(|edge| edge.to).collect();
+        self.nodes.iter().filter(move |node| !reached.contains(&node.id))
     }
 
     /// When the map last gained or changed a node, or gained an edge;
@@ -465,6 +419,58 @@ impl Map {
         let node = self.node(id)?;
         let kind = self.schema.node_kind(&node.kind)?;
         Some(format!("{}{}", kind.prefix, node.seq))
+    }
+
+    /// `node`'s properties as any reader sees them, the one place that
+    /// merge happens: each property its kind declares, in declared
+    /// order, with the value `node` was written with, or - for a
+    /// closed list only - its first value when `node` carries none, so
+    /// a node that never wrote it still reads as starting from
+    /// somewhere. A free property `node` never wrote has nothing to
+    /// default to, so it is left out. Then any property `node` carries
+    /// that its kind does not declare - recorded before the schema
+    /// dropped it - in the order its own map keeps them, so nothing
+    /// recorded goes unseen. Values as written, never what `Map::apply`
+    /// would accept today. A kind declares one to three properties, so
+    /// this walks them rather than building a set.
+    pub fn properties<'a>(&'a self, node: &'a Node) -> impl Iterator<Item = (&'a str, &'a str)> {
+        let kind = self.schema.node_kind(&node.kind);
+        let declared = kind.into_iter().flat_map(move |kind| {
+            kind.properties.iter().filter_map(move |(name, values)| {
+                match node.properties.get(name) {
+                    Some(value) => Some((name.as_str(), value.as_str())),
+                    None => values.first().map(|default| (name.as_str(), default.as_str())),
+                }
+            })
+        });
+        let undeclared = node.properties.iter().filter_map(move |(name, value)| {
+            match kind {
+                Some(kind) if kind.property(name).is_some() => None,
+                _ => Some((name.as_str(), value.as_str())),
+            }
+        });
+        declared.chain(undeclared)
+    }
+
+    /// The value `node` carries for `property`, as `properties` gives
+    /// it - written, or a closed list's default. `None` when neither
+    /// the kind nor the node has anything to say about it.
+    pub fn property<'a>(&'a self, node: &'a Node, property: &str) -> Option<&'a str> {
+        self.properties(node).find(|(name, _)| *name == property).map(|(_, value)| value)
+    }
+
+    /// The tail of a node's line, wherever one is printed: `: key:
+    /// "value"; key: "value"` over `properties`, empty when there are
+    /// none. Values are quoted, so a newline inside one stays inside
+    /// its line.
+    pub fn properties_line(&self, node: &Node) -> String {
+        let mut out = String::new();
+        let mut sep = ": ";
+        for (key, value) in self.properties(node) {
+            let _ = write!(out, "{sep}{key}: {value:?}");
+            sep = "; ";
+        }
+        out
     }
 
     /// Resolves `s` to a node id, either way a writer may name one:
@@ -596,6 +602,9 @@ impl Map {
         if !selection.kinds.is_empty() {
             cut = cut.keep_kinds(selection.kinds)?;
         }
+        if !selection.nodes.is_empty() {
+            cut = cut.keep_nodes(selection.nodes);
+        }
         let boundary_edges = self
             .edges
             .iter()
@@ -607,6 +616,14 @@ impl Map {
             total_edges,
             boundary_edges,
         })
+    }
+
+    /// The map cut to the nodes `ids` names, keeping only the edges
+    /// that join two of them. An id the map does not hold is skipped.
+    fn keep_nodes(&self, ids: &[NodeId]) -> Self {
+        let kept: HashSet<NodeId> = ids.iter().copied().collect();
+        let nodes: Vec<Node> = self.nodes.iter().filter(|node| kept.contains(&node.id)).cloned().collect();
+        self.cut_to(nodes)
     }
 
     /// A copy holding `nodes` and only the edges that join two of them.
@@ -630,28 +647,12 @@ impl Map {
 impl fmt::Display for Map {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for node in &self.nodes {
-            writeln!(f, "- {node}{}", node.properties_line())?;
+            writeln!(f, "- {node}{}", self.properties_line(node))?;
         }
         for edge in &self.edges {
             writeln!(f, "- {}", self.edge_line(edge))?;
         }
         Ok(())
-    }
-}
-
-impl Node {
-    /// The tail of a node's line, wherever one is printed: `: key:
-    /// "value"; key: "value"` over its properties, empty when it has
-    /// none. Values are quoted, so a newline inside one stays inside
-    /// its line.
-    pub fn properties_line(&self) -> String {
-        let mut out = String::new();
-        let mut sep = ": ";
-        for (key, value) in &self.properties {
-            let _ = write!(out, "{sep}{key}: {value:?}");
-            sep = "; ";
-        }
-        out
     }
 }
 
