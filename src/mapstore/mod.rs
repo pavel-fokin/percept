@@ -4,10 +4,7 @@
 //! applies one change to it atomically, under the log's own lock;
 //! `encode_*` serialize a map or a fragment to JSON lines; `markdown`,
 //! `catalogue`, `describe`, and `start` render it to text for `maps
-//! show`, `maps list`, `maps describe`, and `percept start`, and
-//! `moment_rules` every loaded schema's lines at one of `MOMENTS`,
-//! `for_schema_moment` one schema's alone - what `maps reflect` sends
-//! for the one map it opened on. The
+//! show`, `maps list`, `maps describe`, and `percept start`. The
 //! tools that call these live in `src/tools`. `load_schemas` reads a
 //! project's schemas from `SCHEMAS_DIR` alone; `templates` is the
 //! shipped TOML `percept init <client>` copies there for a project
@@ -24,7 +21,6 @@ mod blocks;
 mod describe;
 mod map;
 mod render;
-mod rules;
 mod schemas;
 mod start;
 
@@ -36,11 +32,7 @@ pub use map::{
     Snapshot,
 };
 pub use render::{catalogue, markdown};
-pub use rules::for_moment as moment_rules;
-pub use rules::for_schema_moment;
-pub use schemas::{
-    load as load_schemas, templates, MESSAGE_RECEIVED, REFLECTION_STARTED, SCHEMAS_DIR, SESSION_STARTED,
-};
+pub use schemas::{load as load_schemas, templates, SCHEMAS_DIR};
 pub use start::start;
 
 /// Printed in place of `catalogue`'s and `start`'s usual body when a

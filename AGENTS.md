@@ -33,7 +33,7 @@ serde-free.
   what it has seen, so it names a node once and points back wherever a
   later edge reaches it again. The code map, where a package is
   imported by many files, is no exception: every map takes this shape.
-- `Schema`: a map kind - purpose, node and edge kinds, rules - loaded
+- `Schema`: a map kind - purpose, node and edge kinds - loaded
   from `.percept/schemas/<name>.toml`, the only place a kind is
   declared. The Rust names no kind, and nothing declares what heads a
   map: the edges say it. Node kinds are declared coarsest first, which

@@ -6,28 +6,12 @@
 //! is what gives a fresh checkout its first schema file, copied from
 //! the templates this binary embeds - see `templates`.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer};
 
-use crate::core::{default_prefix, EdgeKind, NodeKind, Rules, Schema, Schemas};
-
-/// A session's start - `percept start`'s own moment, and the hook's
-/// `SessionStart`.
-pub const SESSION_STARTED: &str = "session.started";
-/// A prompt reaching the log - the hook's `UserPromptSubmit`.
-pub const MESSAGE_RECEIVED: &str = "message.received";
-/// A reflection's own opening moment.
-pub const REFLECTION_STARTED: &str = "reflection.started";
-
-/// The moments a schema may declare `[rules]` lines for - the only
-/// three percept has a channel to speak on. `mapstore` is the layer
-/// that knows this, not `core`: a schema's `Rules` holds whatever a
-/// loader gives it, and `store` names its own event kinds without this
-/// list depending on them.
-pub const MOMENTS: [&str; 3] = [SESSION_STARTED, MESSAGE_RECEIVED, REFLECTION_STARTED];
+use crate::core::{default_prefix, EdgeKind, NodeKind, Schema, Schemas};
 
 include!(concat!(env!("OUT_DIR"), "/schema_templates.rs"));
 
@@ -57,18 +41,7 @@ struct SchemaFile {
     nodes: IndexMap<String, IndexMap<String, PropertyValue>>,
     #[serde(default)]
     edges: IndexMap<String, EdgeFile>,
-    #[serde(default)]
-    rules: RulesFile,
 }
-
-/// The lines a schema injects into an agent's context, by moment - a
-/// missing `[rules]` table means no rules at all. Any key parses here;
-/// `parse` refuses one outside `MOMENTS`, so the "expected one of"
-/// error is worded once rather than by serde's own unknown-field
-/// message.
-#[derive(Deserialize, Default)]
-#[serde(transparent)]
-struct RulesFile(BTreeMap<String, Vec<String>>);
 
 /// A node kind's property value as TOML writes it: a string declares
 /// free text and its content is never read, so it must be `""` -
@@ -166,18 +139,6 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
 
     check_kind_names(stem, "node", file.nodes.keys())?;
     check_kind_names(stem, "edge", file.edges.keys())?;
-    for (moment, lines) in &file.rules.0 {
-        if !MOMENTS.contains(&moment.as_str()) {
-            return Err(format!(
-                "{stem}.toml: rules declares {moment:?}, which is not one of {}",
-                MOMENTS.join(", ")
-            )
-            .into());
-        }
-        if lines.iter().any(|line| line.trim().is_empty()) {
-            return Err(format!("{stem}.toml: rules declares a blank {moment:?} entry").into());
-        }
-    }
 
     let node_kinds: Vec<NodeKind> = file
         .nodes
@@ -205,7 +166,6 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
         purpose: file.purpose,
         node_kinds,
         edge_kinds,
-        rules: Rules::new(file.rules.0),
     })
 }
 

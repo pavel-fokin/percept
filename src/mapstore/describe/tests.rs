@@ -35,7 +35,6 @@ fn a_relation_line_names_its_ends() {
         purpose: "test fixture".to_string(),
         node_kinds: vec![crate::core::NodeKind::new("topic"), crate::core::NodeKind::new("verdict")],
         edge_kinds: vec![crate::core::EdgeKind::new("settles", &["verdict"], &["topic"])],
-        rules: crate::core::Rules::default(),
     };
 
     let text = describe(&schema);
@@ -80,7 +79,6 @@ fn the_add_example_points_one_edge_at_a_kind_two_others_may_reach() {
             crate::core::EdgeKind::new("opens", &["hearing"], &["ruling"]),
             crate::core::EdgeKind::new("seeks", &["motion"], &["ruling"]),
         ],
-        rules: crate::core::Rules::default(),
     };
 
     let text = describe(&schema);
@@ -127,42 +125,4 @@ fn the_change_example_is_present_for_a_schema_with_states() {
 fn the_change_example_is_absent_for_a_schema_with_no_states() {
     let text = describe(&debates());
     assert!(!text.contains("example: change"));
-}
-
-#[test]
-fn a_schema_with_rules_prints_them_in_a_rules_section() {
-    let mut schema = debates();
-    schema.rules = crate::core::Rules::new(std::collections::BTreeMap::from([(
-        "message.received".to_string(),
-        vec!["first rule".to_string(), "second rule".to_string()],
-    )]));
-
-    let text = describe(&schema);
-
-    assert!(
-        text.contains(
-            "\nrules\n  message.received   first rule\n                     second rule\n"
-        ),
-        "{text}"
-    );
-}
-
-#[test]
-fn a_schema_with_rules_at_two_moments_lists_both() {
-    let mut schema = debates();
-    schema.rules = crate::core::Rules::new(std::collections::BTreeMap::from([
-        ("session.started".to_string(), vec!["s".to_string()]),
-        ("message.received".to_string(), vec!["m".to_string()]),
-    ]));
-
-    let text = describe(&schema);
-
-    assert!(text.contains("session.started"), "{text}");
-    assert!(text.contains("message.received"), "{text}");
-}
-
-#[test]
-fn a_schema_with_no_rules_prints_no_rules_section() {
-    let text = describe(&debates());
-    assert!(!text.contains("\nrules\n"), "{text}");
 }

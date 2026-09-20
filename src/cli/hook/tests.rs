@@ -487,43 +487,7 @@ fn a_returning_session_still_prints_starts_render() {
 }
 
 #[test]
-fn a_session_start_carries_a_schemas_own_session_started_rules() {
-    let fixture = with_session_started_rules("\"a\", \"b\"");
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("rules from"), "{context:?}");
-    assert!(context.ends_with("\na\nb"), "{context:?}");
-}
-
-/// A fixture whose second schema declares `message.received` rules,
-/// `turn` being the TOML array's own contents.
-fn with_turn_rules(turn: &str) -> Fixture {
-    Fixture::new().with_extra_schema(
-        "glossary",
-        &format!(
-            "purpose = \"p\"\n\n\
-             [nodes.concept]\ndefinition = \"\"\n\n\
-             [rules]\n\"message.received\" = [{turn}]\n"
-        ),
-    )
-}
-
-/// A fixture whose second schema declares `session.started` rules,
-/// `started` being the TOML array's own contents.
-fn with_session_started_rules(started: &str) -> Fixture {
-    Fixture::new().with_extra_schema(
-        "glossary",
-        &format!(
-            "purpose = \"p\"\n\n\
-             [nodes.concept]\ndefinition = \"\"\n\n\
-             [rules]\n\"session.started\" = [{started}]\n"
-        ),
-    )
-}
-
-#[test]
-fn a_prompts_context_is_the_event_id_alone_when_no_schema_declares_rules() {
+fn a_prompts_context_is_the_event_id_alone() {
     let fixture = Fixture::new();
 
     let output = fixture
@@ -541,51 +505,6 @@ fn a_prompts_context_is_the_event_id_alone_when_no_schema_declares_rules() {
     let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
     let prompt = fixture.events().pop().unwrap();
     assert_eq!(context, format!("percept event {}", prompt.id().as_uuid()));
-}
-
-#[test]
-fn a_prompt_carries_a_schemas_own_turn_rules_after_the_id() {
-    let fixture = with_turn_rules("\"a\", \"b\"");
-
-    let output = fixture
-        .call(
-            "codex",
-            json!({
-                "hook_event_name": "UserPromptSubmit",
-                "cwd": fixture.root.to_str().unwrap(),
-                "session_id": "session",
-                "prompt": "hello",
-            }),
-        )
-        .unwrap();
-
-    let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
-    let lines: Vec<&str> = context.lines().collect();
-    assert_eq!(lines[2..], ["a", "b"]);
-}
-
-#[test]
-fn rule_lines_arrive_under_a_line_naming_where_they_came_from() {
-    let fixture = with_turn_rules("\"a\"");
-
-    let output = fixture
-        .call(
-            "codex",
-            json!({
-                "hook_event_name": "UserPromptSubmit",
-                "cwd": fixture.root.to_str().unwrap(),
-                "session_id": "session",
-                "prompt": "hello",
-            }),
-        )
-        .unwrap();
-
-    let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
-    let lines: Vec<&str> = context.lines().collect();
-    assert_eq!(
-        lines[1],
-        format!("rules from {}", fixture.root.join(".percept/schemas").display())
-    );
 }
 
 #[test]

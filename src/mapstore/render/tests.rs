@@ -372,7 +372,6 @@ fn a_schema_with_no_edges_gives_every_node_its_own_section() {
         purpose: "test fixture".to_string(),
         node_kinds: vec![crate::core::NodeKind::new("term")],
         edge_kinds: Vec::new(),
-        rules: crate::core::Rules::default(),
     };
     let mut map = Map::empty(crate::core::MapId::new(), schema);
     add(&mut map, "term", "harness", None, None, &[], Actor::Human(human()));

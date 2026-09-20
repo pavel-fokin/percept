@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use crate::core::{
     Actor, EdgeKind, Event, EventId, EventLog, HumanId, MapId, NodeId, NodeKind, NodeRef, Payload,
-    Rules, Schema, Schemas, Source, Usage,
+    Schema, Schemas, Source, Usage,
 };
 use crate::shared::Timestamp;
 
@@ -373,7 +373,6 @@ pub fn debates() -> Schema {
             EdgeKind::new("replaces", &["verdict"], &["verdict"]),
             EdgeKind::new("doubts", &["verdict"], &["topic"]),
         ],
-        rules: Rules::default(),
     }
 }
 
@@ -389,7 +388,6 @@ pub fn chores() -> Schema {
             ("state", &["open", "done", "dropped"]),
         ])],
         edge_kinds: vec![EdgeKind::new("blocks", &["chore"], &["chore"])],
-        rules: Rules::default(),
     }
 }
 
@@ -437,6 +435,5 @@ pub fn files() -> Schema {
             EdgeKind::new("contains", &["file"], &["function"]),
             EdgeKind::new("imports", &["file"], &["file", "package"]),
         ],
-        rules: Rules::default(),
     }
 }

@@ -24,11 +24,6 @@ pub fn describe(schema: &Schema) -> String {
         push_edge_kinds(&mut out, schema);
     }
 
-    if !schema.rules.is_empty() {
-        out.push_str("\nrules\n");
-        push_rules(&mut out, schema);
-    }
-
     out.push_str("\nrecord\n");
     push_record(&mut out, schema);
 
@@ -85,22 +80,6 @@ fn kind_suffix(kind: &NodeKind) -> String {
         })
         .collect::<Vec<_>>()
         .join(" \u{b7} ")
-}
-
-/// Every moment's rules, one line per entry: the moment name before its
-/// first line, later lines of the same moment aligned under it. Moment
-/// names are padded to the widest, so every line's rule starts at the
-/// same column.
-fn push_rules(out: &mut String, schema: &Schema) {
-    let moments: Vec<(&str, &[String])> = schema.rules.iter().collect();
-    let width = moments.iter().map(|(moment, _)| moment.len()).max().unwrap_or(0);
-    let indent = " ".repeat(width);
-    for (moment, lines) in moments {
-        for (index, line) in lines.iter().enumerate() {
-            let prefix = if index == 0 { moment } else { indent.as_str() };
-            let _ = writeln!(out, "  {prefix:<width$}   {line}");
-        }
-    }
 }
 
 fn push_record(out: &mut String, schema: &Schema) {

@@ -158,12 +158,7 @@ pub fn run(
             start_session(source, log, &schemas, checkout)
         }
         HookEvent::UserPromptSubmit { prompt } => {
-            // A schema file that fails to load costs its rules, never
-            // the prompt's capture.
-            let schemas = crate::mapstore::load_schemas(checkout).ok();
-            let rules = schemas
-                .and_then(|schemas| mapstore::moment_rules(&schemas, checkout, mapstore::MESSAGE_RECEIVED));
-            submit_prompt(prompt, source, log, rules, &mut state, &dir, me)
+            submit_prompt(prompt, source, log, &mut state, &dir, me)
         }
         HookEvent::PostToolUse {
             tool_name,
@@ -207,8 +202,7 @@ pub fn run(
 /// the previous session and not this one, then records a fresh
 /// `session.started` for the next call to find. The
 /// `additionalContext` is `mapstore::start`'s own block, exactly what
-/// `percept start` prints from the shell, with any schema's
-/// `session.started` rules appended after it.
+/// `percept start` prints from the shell.
 fn start_session(
     source: &Source,
     log: &dyn EventLog,
@@ -218,11 +212,7 @@ fn start_session(
     let events = log.load()?;
     let maps = schemas.fold_all(of_path(&events, &source.path))?;
     let since = last_session(events.iter().filter(|event| event.source() == source));
-    let mut rendered = mapstore::start(&maps, &events, &source.path, checkout, since);
-    if let Some(rules) = mapstore::moment_rules(schemas, checkout, mapstore::SESSION_STARTED) {
-        rendered.push('\n');
-        rendered.push_str(&rules);
-    }
+    let rendered = mapstore::start(&maps, &events, &source.path, checkout, since);
 
     log.append(&Event::session_started(source.clone()))?;
 
@@ -269,14 +259,12 @@ fn framed(text: &str, tag: &str) -> bool {
 /// `message.received` from whoever `prompt_actor` says wrote it,
 /// stores its id as the turn's cause and as the checkout's open turn
 /// under `dir`, and returns the client's expected `additionalContext`:
-/// the event's id alone on the first line, since a model reads it off
-/// that line to pass as `--source`, and `rules` under it when a
-/// schema declared any.
+/// the event's id alone, since a model reads it off that line to pass
+/// as `--source`.
 fn submit_prompt(
     prompt: String,
     source: &Source,
     log: &dyn EventLog,
-    rules: Option<String>,
     state: &mut TurnState,
     dir: &Path,
     me: Option<crate::core::HumanId>,
@@ -289,11 +277,7 @@ fn submit_prompt(
     state.set(id)?;
     TurnState::point(dir, id)?;
 
-    let mut context = format!("percept event {}", id.as_uuid());
-    if let Some(rules) = rules {
-        context.push('\n');
-        context.push_str(&rules);
-    }
+    let context = format!("percept event {}", id.as_uuid());
 
     Ok(json!({
         "hookSpecificOutput": {

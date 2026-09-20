@@ -553,7 +553,6 @@ fn maps_reflect_appends_exactly_one_reflection_started_event_naming_the_map() {
         &log,
         &schemas(),
         &source("cli"),
-        no_checkout(),
     )
     .unwrap();
 
@@ -579,7 +578,6 @@ fn maps_reflect_fails_on_a_map_name_no_schema_declares() {
         &log,
         &schemas(),
         &source("cli"),
-        no_checkout(),
     )
     .err()
     .unwrap();

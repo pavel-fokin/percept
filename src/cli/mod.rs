@@ -725,23 +725,17 @@ pub fn maps_describe(args: DescribeMapArgs, schemas: &Schemas) -> Result<(), Box
 
 /// Opens a reflection on `args.map`: appends a `reflection.started`
 /// event and prints its id alone, for the caller to cite as `--source`
-/// on every node the reflection then records; then that schema's own
-/// `"reflection.started"` lines, when it declares any; then `maps
-/// describe`'s own output, unchanged.
+/// on every node the reflection then records; then `maps describe`'s
+/// own output, unchanged.
 pub fn maps_reflect(
     args: DescribeMapArgs,
     log: &dyn EventLog,
     schemas: &Schemas,
     source: &crate::core::Source,
-    checkout: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let schema = schemas.find(&args.map)?;
     let event = mapstore::start_reflection(log, schemas, &args.map, source)?;
     print_lines(std::iter::once(event.id().as_uuid().to_string()))?;
-    if let Some(rules) = mapstore::for_schema_moment(&schema, checkout, mapstore::REFLECTION_STARTED) {
-        print_text(&rules)?;
-        print_text("\n")?;
-    }
     print_text(&mapstore::describe(&schema))
 }
 

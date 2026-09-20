@@ -49,19 +49,3 @@ to = "concept"
 [edges.supersedes]
 from = "decision"
 to = "decision"
-
-# The lines percept sends at each moment it has a channel to speak on:
-# a session's start, a prompt reaching the log, and a reflection's own
-# opening.
-[rules]
-"message.received" = [
-  "propose by recording: an option under its question, before arguing for it",
-  "before stopping, record what you reasoned with. Sharpen a concept that already states it, or cover yours under it; add a peer only when neither fits",
-]
-"reflection.started" = [
-  "cite the event id printed above as --source for everything you record here, and stop at what you can defend in one pass - a map is folded over many reflections, not one",
-  "read `percept start` first: repoint a citation it calls renamed, reread the claim behind one it calls changed, and leave what it calls gone as history",
-  "two concepts stating one rule leave one - change the survivor to carry the loser's sources, re-point what was about the loser, then remove it",
-  "a concept that is an instance of another is covered by it, never removed: `covers` points from the keeper down to what it holds",
-  "a concept the user last changed is theirs - record a question against it, never a change",
-]

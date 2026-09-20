@@ -21,7 +21,7 @@ mod schema;
 use apply::highest;
 
 pub use error::MapError;
-pub use schema::{default_prefix, EdgeKind, NodeKind, Rules, Schema, Schemas};
+pub use schema::{default_prefix, EdgeKind, NodeKind, Schema, Schemas};
 
 /// Identifies a cognitive map.
 pub type MapId = Id<Map>;

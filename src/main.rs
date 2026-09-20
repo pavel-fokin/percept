@@ -294,7 +294,7 @@ async fn main() {
                     cli::maps_change_node(args, &log, &schemas, &cli_source, me, cause()?)
                 }
                 MapsCommand::Reflect(args) => {
-                    cli::maps_reflect(args, &log, &schemas, &cli_source, &checkout)
+                    cli::maps_reflect(args, &log, &schemas, &cli_source)
                 }
             }
         }),
