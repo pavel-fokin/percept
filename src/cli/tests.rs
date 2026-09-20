@@ -1116,6 +1116,51 @@ fn a_short_id_document_changes_the_node_and_records_node_changed() {
 }
 
 #[test]
+fn a_change_block_carrying_only_an_edge_records_no_node_change() {
+    let log = FakeLog::default();
+    record_document(
+        "chore \"first\"\n  why \"it came up\"\n  state \"open\"\n",
+        record_args("chores"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+        None,
+    )
+    .unwrap();
+
+    let mut agent = record_args("chores");
+    agent.actor = "agent".to_string();
+    record_document(
+        "chore \"second\"\n  why \"it follows\"\n  state \"open\"\nc1\n  blocks c2\n",
+        agent,
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+        None,
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.payload(), Payload::NodeChanged { .. })),
+        "an edge under a short id changed nothing about the node it names"
+    );
+
+    let map = mapstore::fold_map(&log, &schemas(), "chores", Path::new(ROOT)).unwrap();
+    let first = map.find("chore", "first").unwrap();
+    let children = map.children(first.id);
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].0, "blocks");
+    assert_eq!(children[0].1.name, "second");
+}
+
+#[test]
 fn a_short_id_line_with_a_quoted_name_is_an_error() {
     let log = FakeLog::default();
     let err = record_document(

@@ -1180,24 +1180,31 @@ fn record_document(
                 batch.push(event);
             }
 
-            // Either arm yields the mutation and the kind and name the
-            // node has once it lands, so one tail applies both.
-            let (mutation, kind, name) = if node.is_change {
+            // Either arm yields the kind and name the node has once it
+            // lands, so one tail applies both. A change block that
+            // carries only edges yields no mutation: nothing about the
+            // node it names changes, and the edges under it are their
+            // own writes.
+            let (mutation, kind, name, standing) = if node.is_change {
                 let target = resolve_node(snapshot.map(), &node.kind).map_err(context)?;
-                let (kind, old_name) = (target.kind.clone(), target.name.clone());
+                let (kind, old_name, standing) = (target.kind.clone(), target.name.clone(), target.id);
                 let mut properties = node.properties;
                 let rename = properties.remove("name");
                 let name = rename.clone().unwrap_or_else(|| old_name.clone());
-                let mutation = Mutation::ChangeNode {
-                    node: NodeRef {
-                        kind: kind.clone(),
-                        name: old_name,
-                    },
-                    name: rename,
-                    properties,
-                    sources,
-                };
-                (mutation, kind, name)
+                if rename.is_none() && properties.is_empty() {
+                    (None, kind, name, Some(standing))
+                } else {
+                    let mutation = Mutation::ChangeNode {
+                        node: NodeRef {
+                            kind: kind.clone(),
+                            name: old_name,
+                        },
+                        name: rename,
+                        properties,
+                        sources,
+                    };
+                    (Some(mutation), kind, name, None)
+                }
             } else {
                 let mutation = Mutation::AddNode {
                     kind: node.kind.clone(),
@@ -1205,14 +1212,21 @@ fn record_document(
                     properties: node.properties,
                     sources,
                 };
-                (mutation, node.kind, node.name)
+                (Some(mutation), node.kind, node.name, None)
             };
-            let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
-            let node_id = match &payload {
-                Payload::NodeAdded { node, .. } | Payload::NodeChanged { node, .. } => *node,
-                _ => unreachable!("AddNode and ChangeNode yield a node payload"),
+            let node_id = match mutation {
+                Some(mutation) => {
+                    let payload =
+                        snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
+                    let node_id = match &payload {
+                        Payload::NodeAdded { node, .. } | Payload::NodeChanged { node, .. } => *node,
+                        _ => unreachable!("AddNode and ChangeNode yield a node payload"),
+                    };
+                    batch.push(Event::new(actor, batch_source.clone(), causation_id, payload));
+                    node_id
+                }
+                None => standing.expect("a block with no mutation is a change that resolved a node"),
             };
-            batch.push(Event::new(actor, batch_source.clone(), causation_id, payload));
             last_of_kind.insert(kind.clone(), node_id);
             let from_ref = NodeRef { kind, name };
 
