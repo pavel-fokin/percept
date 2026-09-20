@@ -11,25 +11,19 @@ use crate::core::{Actor, Event, NodeId, Payload, Source};
 /// `concept` heads the chain - no edge reaches it - and `fact` hangs
 /// deepest. What every test here folds its map from.
 const SCHEMA: &str = "\
-name = \"decisions\"\n\
 purpose = \"test\"\n\
 \n\
-[[node]]\n\
-kind = \"concept\"\n\
+[nodes.concept]\n\
 \n\
-[[node]]\n\
-kind = \"question\"\n\
+[nodes.question]\n\
 \n\
-[[node]]\n\
-kind = \"fact\"\n\
+[nodes.fact]\n\
 \n\
-[[edge]]\n\
-kind = \"about\"\n\
+[edges.about]\n\
 from = \"concept\"\n\
 to = \"question\"\n\
 \n\
-[[edge]]\n\
-kind = \"backs\"\n\
+[edges.backs]\n\
 from = \"question\"\n\
 to = \"fact\"\n";
 

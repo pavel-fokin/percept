@@ -6,7 +6,7 @@ use crate::core::testing::{created_at, human, FakeLog, Fixture};
 use crate::core::{Actor, Event, NodeId, Payload, Source};
 use crate::shared::Timestamp;
 
-const SCHEMA: &str = "name = \"decisions\"\npurpose = \"test\"\n\n[[node]]\nkind = \"concept\"\n";
+const SCHEMA: &str = "purpose = \"test\"\n\n[nodes.concept]\n";
 
 fn source_at(name: &str, path: &Path) -> Source {
     Source {
@@ -172,7 +172,7 @@ fn gained_is_zero_when_the_project_has_no_session_recorded() {
 #[test]
 fn a_project_whose_schemas_cannot_be_read_says_why_and_leaves_the_others_listed() {
     let broken = Fixture::new();
-    broken.write(".percept/schemas/decisions.toml", "name = \"decisions\"\n");
+    broken.write(".percept/schemas/decisions.toml", "purpose = \"test\"\n");
     let sound = Fixture::new();
     sound.write(".percept/schemas/decisions.toml", SCHEMA);
     let events = vec![

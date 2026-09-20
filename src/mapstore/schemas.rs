@@ -6,9 +6,9 @@
 //! is what gives a fresh checkout its first schema file, copied from
 //! the templates this binary embeds - see `templates`.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer};
 
 use crate::core::{default_prefix, EdgeKind, NodeKind, Rules, Schema, Schemas};
@@ -32,30 +32,16 @@ include!(concat!(env!("OUT_DIR"), "/schema_templates.rs"));
 
 /// The schema templates `percept init <client>` copies into a fresh
 /// checkout's `SCHEMAS_DIR`, as `(<name>, <text>)`. `build.rs` embeds
-/// every `*.toml` under `schemas/` as `TEMPLATE_TEXTS`, discovered, so
-/// no file name is hand-kept here; each one's `name` is read back out
-/// of its own `name = "..."` line. Nothing else reads this; a loaded
-/// project's schemas come only from `load`, over the files `init` or
-/// the project's own author wrote.
+/// every `*.toml` under `schemas/` as `TEMPLATE_TEXTS`, discovered,
+/// its own stem paired with its text, so no file name is hand-kept
+/// here. Nothing else reads this; a loaded project's schemas come only
+/// from `load`, over the files `init` or the project's own author
+/// wrote.
 pub fn templates() -> Vec<(String, &'static str)> {
     TEMPLATE_TEXTS
         .iter()
-        .map(|text| (shipped_name(text), *text))
+        .map(|(stem, text)| (stem.to_string(), *text))
         .collect()
-}
-
-/// The `name` a shipped template declares, read back out of its own
-/// text rather than kept a second time in Rust: `parse` already
-/// requires it to match the file's stem, so this is the one place
-/// that fact is trusted.
-fn shipped_name(text: &str) -> String {
-    #[derive(Deserialize)]
-    struct NameOnly {
-        name: String,
-    }
-    toml::from_str::<NameOnly>(text)
-        .expect("shipped schema template declares name")
-        .name
 }
 
 /// Where a project's schema files live, under the project root
@@ -65,17 +51,11 @@ pub const SCHEMAS_DIR: &str = ".percept/schemas";
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SchemaFile {
-    name: String,
     purpose: String,
-    /// `deny_unknown_fields` would refuse this key anyway; the hook is
-    /// here to say what replaced it, at the line it sits on.
-    #[allow(dead_code)]
-    #[serde(default, deserialize_with = "headlines_was_removed")]
-    headlines: (),
-    #[serde(default, rename = "node")]
-    nodes: Vec<NodeFile>,
-    #[serde(default, rename = "edge")]
-    edges: Vec<EdgeFile>,
+    #[serde(default)]
+    nodes: IndexMap<String, IndexMap<String, PropertyValue>>,
+    #[serde(default)]
+    edges: IndexMap<String, EdgeFile>,
     #[serde(default)]
     rules: RulesFile,
 }
@@ -87,64 +67,21 @@ struct SchemaFile {
 /// message.
 #[derive(Deserialize, Default)]
 #[serde(transparent)]
-struct RulesFile(BTreeMap<String, Vec<String>>);
+struct RulesFile(IndexMap<String, Vec<String>>);
 
+/// A node kind's property value as TOML writes it: a string declares
+/// free text, its content unread; a list declares a closed set of
+/// values.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct NodeFile {
-    kind: String,
-    /// Read for backward compatibility with an existing TOML file, then
-    /// discarded: a node kind no longer carries a gloss.
-    #[allow(dead_code)]
-    #[serde(default)]
-    gloss: String,
-    #[serde(default)]
-    requires: Vec<String>,
-    /// The properties a node of this kind may carry beyond `requires` -
-    /// `properties = ["note", "summary"]`. `state` is declared through
-    /// `states = [...]` only, never listed here or in `requires`.
-    #[serde(default)]
-    properties: Vec<String>,
-    /// A node kind's short id prefix, `d` for `decision` - optional,
-    /// since `default_prefix` covers the common case.
-    prefix: Option<String>,
-    /// The values a `state` property on a node of this kind may hold -
-    /// `states = ["open", "done", "dropped"]`, a set with no value open
-    /// by position. Empty when the kind carries no state.
-    #[serde(default)]
-    states: Vec<String>,
-    #[serde(default, rename = "state", deserialize_with = "state_was_renamed")]
-    _renamed_state: (),
-}
-
-fn headlines_was_removed<'de, D>(_: D) -> Result<(), D::Error>
-where
-    D: Deserializer<'de>,
-{
-    Err(serde::de::Error::custom(
-        "a schema no longer declares `headlines` - what heads a map is read from its own \
-         edges, and node order decides what nests where. Remove the line",
-    ))
-}
-
-fn state_was_renamed<'de, D>(_: D) -> Result<(), D::Error>
-where
-    D: Deserializer<'de>,
-{
-    Err(serde::de::Error::custom(
-        "schema key `state` was renamed to `states`",
-    ))
+#[serde(untagged)]
+enum PropertyValue {
+    Text(String),
+    Closed(Vec<String>),
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EdgeFile {
-    kind: String,
-    /// Read for backward compatibility with an existing TOML file, then
-    /// discarded: an edge kind no longer carries a gloss.
-    #[allow(dead_code)]
-    #[serde(default)]
-    gloss: String,
     #[serde(deserialize_with = "one_or_many")]
     from: Vec<String>,
     #[serde(deserialize_with = "one_or_many")]
@@ -168,6 +105,10 @@ where
         OneOrMany::Many(names) => names,
     })
 }
+
+/// The one key reserved in a node kind's table - its short id prefix.
+/// Every other key names a property.
+const PREFIX_KEY: &str = "prefix";
 
 /// Every schema `<project>/.percept/schemas` declares, in the stable
 /// order `project_files` gives - empty when the directory is missing
@@ -211,23 +152,18 @@ fn project_files(project: &Path) -> Result<Vec<(String, String)>, Box<dyn std::e
 }
 
 /// Parses and validates one schema file: `stem` names it in every
-/// error, so a project with several files knows which one is wrong.
+/// error, so a project with several files knows which one is wrong,
+/// and names the schema itself - a file no longer declares its own
+/// name.
 fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
     let file: SchemaFile = toml::from_str(text).map_err(|err| format!("{stem}.toml: {err}"))?;
 
-    if file.name != stem {
-        return Err(format!(
-            "{stem}.toml: declares name {:?}, which does not match the file name",
-            file.name
-        )
-        .into());
-    }
     if file.nodes.is_empty() {
         return Err(format!("{stem}.toml: declares no node kinds").into());
     }
 
-    check_kinds(stem, "node", file.nodes.iter().map(|n| n.kind.as_str()))?;
-    check_kinds(stem, "edge", file.edges.iter().map(|e| e.kind.as_str()))?;
+    check_kind_names(stem, "node", file.nodes.keys())?;
+    check_kind_names(stem, "edge", file.edges.keys())?;
     for (moment, lines) in &file.rules.0 {
         if !MOMENTS.contains(&moment.as_str()) {
             return Err(format!(
@@ -240,123 +176,118 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
             return Err(format!("{stem}.toml: rules declares a blank {moment:?} entry").into());
         }
     }
-    for node in &file.nodes {
-        let declared = || node.requires.iter().chain(&node.properties);
-        if declared().any(|property| property.trim().is_empty()) {
-            return Err(format!(
-                "{stem}.toml: node kind {:?} declares a blank property",
-                node.kind
-            )
-            .into());
-        }
-        if declared().any(|property| property == "state") {
-            return Err(format!(
-                "{stem}.toml: node kind {:?} declares \"state\" as a property; state is declared \
-                 through states = [...] only",
-                node.kind
-            )
-            .into());
-        }
-        if let Some(property) = node
-            .properties
-            .iter()
-            .find(|property| node.requires.contains(property))
-        {
-            return Err(format!(
-                "{stem}.toml: node kind {:?} declares {property:?} in both requires and properties",
-                node.kind
-            )
-            .into());
-        }
-        if !node.states.is_empty() {
-            if node.states.len() < 2 {
-                return Err(format!(
-                    "{stem}.toml: node kind {:?} declares fewer than two states",
-                    node.kind
-                )
-                .into());
-            }
-            if node.states.iter().any(|state| state.trim().is_empty()) {
-                return Err(format!(
-                    "{stem}.toml: node kind {:?} declares a blank state",
-                    node.kind
-                )
-                .into());
-            }
-            if let Some(state) = repeated(node.states.iter().map(String::as_str)) {
-                return Err(format!(
-                    "{stem}.toml: node kind {:?} declares the state {state:?} twice",
-                    node.kind
-                )
-                .into());
-            }
-        }
-    }
 
     let node_kinds: Vec<NodeKind> = file
         .nodes
         .into_iter()
-        .map(|node| {
-            let prefix = node.prefix.unwrap_or_else(|| default_prefix(&node.kind));
-            let mut properties: Vec<(String, Vec<String>)> = node
-                .requires
-                .into_iter()
-                .chain(node.properties)
-                .map(|property| (property, Vec::new()))
-                .collect();
-            if !node.states.is_empty() {
-                properties.push(("state".to_string(), node.states));
-            }
-            NodeKind {
-                prefix,
-                kind: node.kind,
-                properties,
-            }
-        })
-        .collect();
+        .map(|(kind, table)| node_kind(stem, kind, table))
+        .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
     check_prefixes(stem, &node_kinds)?;
 
     let edge_kinds: Vec<EdgeKind> = file
         .edges
         .into_iter()
-        .map(|edge| {
-            check_edge_end(stem, &edge.kind, "from", &edge.from, &node_kinds)?;
-            check_edge_end(stem, &edge.kind, "to", &edge.to, &node_kinds)?;
+        .map(|(kind, edge)| {
+            check_edge_end(stem, &kind, "from", &edge.from, &node_kinds)?;
+            check_edge_end(stem, &kind, "to", &edge.to, &node_kinds)?;
             Ok(EdgeKind {
-                kind: edge.kind,
+                kind,
                 from: edge.from,
                 to: edge.to,
             })
         })
         .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
 
-    let schema = Schema {
-        name: file.name,
+    Ok(Schema {
+        name: stem.to_string(),
         purpose: file.purpose,
         node_kinds,
         edge_kinds,
-        rules: Rules::new(file.rules.0),
-    };
-
-    Ok(schema)
+        rules: Rules::new(file.rules.0.into_iter().collect()),
+    })
 }
 
-/// Refuses a blank kind name, or a name repeated within `kinds` -
-/// `group` names the kind (`node` or `edge`) in the error.
-fn check_kinds<'a>(
+/// Builds one node kind from its declared table: `prefix`, when given,
+/// pulled out first, every remaining key a property in declared order.
+fn node_kind(
+    stem: &str,
+    kind: String,
+    mut table: IndexMap<String, PropertyValue>,
+) -> Result<NodeKind, Box<dyn std::error::Error>> {
+    let prefix = match table.shift_remove(PREFIX_KEY) {
+        Some(PropertyValue::Text(prefix)) => prefix,
+        Some(PropertyValue::Closed(_)) => {
+            return Err(format!(
+                "{stem}.toml: node kind {kind:?} declares \"prefix\" as a list; prefix must be a \
+                 string, not a property"
+            )
+            .into());
+        }
+        None => default_prefix(&kind),
+    };
+
+    let mut properties: Vec<(String, Vec<String>)> = Vec::with_capacity(table.len());
+    let mut closed_already: Option<String> = None;
+    for (name, value) in table {
+        if name.trim().is_empty() {
+            return Err(format!("{stem}.toml: node kind {kind:?} declares a blank property").into());
+        }
+        let values = match value {
+            PropertyValue::Text(_) => Vec::new(),
+            PropertyValue::Closed(values) => {
+                if let Some(first) = &closed_already {
+                    return Err(format!(
+                        "{stem}.toml: node kind {kind:?} declares a second closed list, \
+                         {name:?}; a kind carries at most one, alongside {first:?}"
+                    )
+                    .into());
+                }
+                if values.len() < 2 {
+                    return Err(format!(
+                        "{stem}.toml: node kind {kind:?} declares fewer than two values for {name:?}"
+                    )
+                    .into());
+                }
+                if values.iter().any(|value| value.trim().is_empty()) {
+                    return Err(format!(
+                        "{stem}.toml: node kind {kind:?} declares a blank value for {name:?}"
+                    )
+                    .into());
+                }
+                if let Some(value) = repeated(values.iter().map(String::as_str)) {
+                    return Err(format!(
+                        "{stem}.toml: node kind {kind:?} declares the value {value:?} twice for \
+                         {name:?}"
+                    )
+                    .into());
+                }
+                closed_already = Some(name.clone());
+                values
+            }
+        };
+        properties.push((name, values));
+    }
+
+    Ok(NodeKind {
+        prefix,
+        kind,
+        properties,
+    })
+}
+
+/// Refuses a blank kind name among `names` - `group` names the kind
+/// (`node` or `edge`) in the error. A repeated name cannot reach here:
+/// `[nodes.x]` or `[edges.x]` written twice is a TOML parse error
+/// before this point.
+fn check_kind_names<'a>(
     stem: &str,
     group: &str,
-    kinds: impl Iterator<Item = &'a str>,
+    names: impl Iterator<Item = &'a String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut names: Vec<&str> = Vec::new();
-    for name in kinds {
+    for name in names {
         if name.trim().is_empty() {
             return Err(format!("{stem}.toml: a {group} kind must not be blank").into());
         }
-        names.push(name);
-    }
-    if let Some(name) = repeated(names.into_iter()) {
-        return Err(format!("{stem}.toml: {group} declares {name:?} twice").into());
     }
     Ok(())
 }

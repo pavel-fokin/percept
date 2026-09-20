@@ -62,10 +62,10 @@ fn stamp_version() {
 }
 
 /// Every `*.toml` file directly under `src/mapstore/schemas`, sorted,
-/// as one `include_str!` each in a generated `TEMPLATE_TEXTS` const -
-/// `schemas.rs` reads the name each template ships back out of its
-/// own `name = "..."` line, so the file list lives here, discovered,
-/// and never as a name a person keeps in sync by hand.
+/// as one `(<stem>, include_str!(...))` pair each in a generated
+/// `TEMPLATE_TEXTS` const - a schema's name is its file's stem, so the
+/// file list lives here, discovered, and never as a name a person
+/// keeps in sync by hand.
 fn generate_schema_templates() {
     let dir = Path::new("src/mapstore/schemas");
     println!("cargo:rerun-if-changed={}", dir.display());
@@ -79,10 +79,11 @@ fn generate_schema_templates() {
         .collect();
     files.sort();
 
-    let mut code = String::from("pub const TEMPLATE_TEXTS: &[&str] = &[\n");
+    let mut code = String::from("pub const TEMPLATE_TEXTS: &[(&str, &str)] = &[\n");
     for file in &files {
+        let stem = file.file_stem().expect("schema file has a stem").to_string_lossy();
         let absolute = Path::new(&manifest_dir).join(file);
-        code.push_str(&format!("    include_str!({absolute:?}),\n"));
+        code.push_str(&format!("    ({stem:?}, include_str!({absolute:?})),\n"));
     }
     code.push_str("];\n");
 

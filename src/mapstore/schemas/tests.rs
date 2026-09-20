@@ -43,13 +43,9 @@ fn a_project_schema_of_a_new_name_is_added() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\n\
-         purpose = \"terms and their meaning\"\n\
-         \n\
-         [[node]]\n\
-         kind = \"term\"\n\
-         gloss = \"a word this project uses in a specific way\"\n\
-         requires = [\"meaning\"]\n",
+        "purpose = \"terms and their meaning\"\n\n\
+         [nodes.term]\n\
+         meaning = \"\"\n",
     );
 
     let schemas = load(fixture.path()).unwrap();
@@ -63,7 +59,7 @@ fn a_project_schema_of_a_new_name_is_added() {
 #[test]
 fn a_toml_syntax_error_names_the_file() {
     let fixture = Fixture::new();
-    fixture.write(".percept/schemas/broken.toml", "name = \"broken\npurpose =");
+    fixture.write(".percept/schemas/broken.toml", "purpose = \"unterminated");
 
     let err = load(fixture.path()).err().unwrap().to_string();
 
@@ -72,47 +68,13 @@ fn a_toml_syntax_error_names_the_file() {
 }
 
 #[test]
-fn a_name_that_does_not_match_the_file_stem_is_refused() {
-    let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "name = \"terms\"\npurpose = \"p\"\n\n[[node]]\nkind = \"term\"\ngloss = \"g\"\n",
-    );
-
-    let err = load(fixture.path()).err().unwrap().to_string();
-
-    assert_eq!(
-        err,
-        "glossary.toml: declares name \"terms\", which does not match the file name"
-    );
-}
-
-#[test]
 fn a_schema_with_no_node_kinds_is_refused() {
     let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n",
-    );
+    fixture.write(".percept/schemas/glossary.toml", "purpose = \"p\"\n");
 
     let err = load(fixture.path()).err().unwrap().to_string();
 
     assert_eq!(err, "glossary.toml: declares no node kinds");
-}
-
-#[test]
-fn a_schema_that_still_declares_headlines_is_refused() {
-    let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"term\"]\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\n",
-    );
-
-    let err = load(fixture.path()).err().unwrap().to_string();
-
-    assert!(err.starts_with("glossary.toml:"), "{err}");
-    assert!(err.contains("a schema no longer declares `headlines`"), "{err}");
 }
 
 #[test]
@@ -122,9 +84,9 @@ fn a_settles_key_is_an_unknown_field() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\
+        "purpose = \"p\"\n\
          settles = { by = \"resolution\", of = \"term\" }\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\n",
+         [nodes.term]\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
@@ -149,8 +111,7 @@ fn a_file_with_an_unknown_key_is_refused_naming_the_key() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\nheadline = [\"term\"]\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\n",
+        "purpose = \"p\"\nheadline = [\"term\"]\n\n[nodes.term]\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
@@ -160,26 +121,22 @@ fn a_file_with_an_unknown_key_is_refused_naming_the_key() {
 }
 
 #[test]
-fn a_kind_declared_with_name_is_refused() {
+fn a_blank_property_name_is_refused() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n[[node]]\nname = \"term\"\ngloss = \"g\"\n",
+        "purpose = \"p\"\n\n[nodes.term]\n\"\" = \"\"\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
 
-    assert!(err.starts_with("glossary.toml:"), "{err}");
-    assert!(err.contains("name"), "{err}");
+    assert!(err.contains("blank property"), "{err}");
 }
 
 #[test]
 fn a_blank_kind_name_is_refused() {
     let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n[[node]]\nkind = \"\"\ngloss = \"g\"\n",
-    );
+    fixture.write(".percept/schemas/glossary.toml", "purpose = \"p\"\n\n[nodes.\"\"]\n");
 
     let err = load(fixture.path()).err().unwrap().to_string();
 
@@ -188,27 +145,9 @@ fn a_blank_kind_name_is_refused() {
 }
 
 #[test]
-fn a_duplicate_node_kind_name_is_refused() {
-    let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g2\"\n",
-    );
-
-    let err = load(fixture.path()).err().unwrap().to_string();
-
-    assert!(err.contains("twice"), "{err}");
-}
-
-#[test]
 fn a_node_kind_with_no_prefix_defaults_to_its_first_letter() {
     let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n[[node]]\nkind = \"term\"\ngloss = \"g\"\n",
-    );
+    fixture.write(".percept/schemas/glossary.toml", "purpose = \"p\"\n\n[nodes.term]\n");
 
     let schemas = load(fixture.path()).unwrap();
 
@@ -221,8 +160,7 @@ fn a_node_kind_with_an_explicit_prefix_keeps_it() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\nprefix = \"tm\"\n",
+        "purpose = \"p\"\n\n[nodes.term]\nprefix = \"tm\"\n",
     );
 
     let schemas = load(fixture.path()).unwrap();
@@ -232,13 +170,25 @@ fn a_node_kind_with_an_explicit_prefix_keeps_it() {
 }
 
 #[test]
+fn a_prefix_declared_as_a_list_is_refused() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "purpose = \"p\"\n\n[nodes.term]\nprefix = [\"t\", \"tm\"]\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert!(err.contains("\"prefix\""), "{err}");
+    assert!(err.contains("must be a string"), "{err}");
+}
+
+#[test]
 fn two_node_kinds_defaulting_to_the_same_prefix_are_refused() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
-         [[node]]\nkind = \"taxonomy\"\ngloss = \"g2\"\n",
+        "purpose = \"p\"\n\n[nodes.term]\n\n[nodes.taxonomy]\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
@@ -254,9 +204,7 @@ fn an_explicit_prefix_colliding_with_a_default_is_refused() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
-         [[node]]\nkind = \"acronym\"\ngloss = \"g2\"\nprefix = \"t\"\n",
+        "purpose = \"p\"\n\n[nodes.term]\n\n[nodes.acronym]\nprefix = \"t\"\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
@@ -268,26 +216,11 @@ fn an_explicit_prefix_colliding_with_a_default_is_refused() {
 }
 
 #[test]
-fn a_blank_requires_entry_is_refused() {
+fn a_closed_list_property_loads_onto_the_node_kind() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\nrequires = [\"\"]\n",
-    );
-
-    let err = load(fixture.path()).err().unwrap().to_string();
-
-    assert!(err.contains("blank property"), "{err}");
-}
-
-#[test]
-fn a_states_list_loads_onto_the_node_kind() {
-    let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\nstates = [\"open\", \"done\"]\n",
+        "purpose = \"p\"\n\n[nodes.term]\nstate = [\"open\", \"done\"]\n",
     );
 
     let schemas = load(fixture.path()).unwrap();
@@ -300,57 +233,37 @@ fn a_states_list_loads_onto_the_node_kind() {
 }
 
 #[test]
-fn the_old_state_key_is_refused_with_the_rename() {
+fn a_closed_list_of_one_entry_is_refused() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\nstate = [\"open\", \"done\"]\n",
+        "purpose = \"p\"\n\n[nodes.term]\nstate = [\"open\"]\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
 
-    assert!(
-        err.contains("schema key `state` was renamed to `states`"),
-        "{err}"
-    );
+    assert!(err.contains("fewer than two values"), "{err}");
 }
 
 #[test]
-fn a_states_list_of_one_entry_is_refused() {
+fn a_blank_closed_list_value_is_refused() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\nstates = [\"open\"]\n",
+        "purpose = \"p\"\n\n[nodes.term]\nstate = [\"open\", \"\"]\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
 
-    assert!(err.contains("fewer than two states"), "{err}");
+    assert!(err.contains("blank value"), "{err}");
 }
 
 #[test]
-fn a_blank_states_entry_is_refused() {
+fn a_repeated_closed_list_value_is_refused() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\nstates = [\"open\", \"\"]\n",
-    );
-
-    let err = load(fixture.path()).err().unwrap().to_string();
-
-    assert!(err.contains("blank state"), "{err}");
-}
-
-#[test]
-fn a_repeated_states_entry_is_refused() {
-    let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\nstates = [\"open\", \"open\"]\n",
+        "purpose = \"p\"\n\n[nodes.term]\nstate = [\"open\", \"open\"]\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
@@ -359,13 +272,25 @@ fn a_repeated_states_entry_is_refused() {
 }
 
 #[test]
+fn a_second_closed_list_on_one_kind_is_refused() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "purpose = \"p\"\n\n[nodes.term]\nstate = [\"open\", \"done\"]\nkind = [\"a\", \"b\"]\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert!(err.contains("second closed list"), "{err}");
+}
+
+#[test]
 fn an_edge_end_naming_an_undeclared_kind_is_refused() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
-         [[edge]]\nkind = \"relates\"\ngloss = \"g\"\nfrom = \"term\"\nto = \"acronym\"\n",
+        "purpose = \"p\"\n\n[nodes.term]\n\n\
+         [edges.relates]\nfrom = \"term\"\nto = \"acronym\"\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
@@ -382,9 +307,8 @@ fn an_edge_end_with_no_kinds_is_refused() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
-         [[edge]]\nkind = \"relates\"\ngloss = \"g\"\nfrom = \"term\"\nto = []\n",
+        "purpose = \"p\"\n\n[nodes.term]\n\n\
+         [edges.relates]\nfrom = \"term\"\nto = []\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
@@ -397,11 +321,8 @@ fn an_edge_end_naming_a_list_loads_both_kinds() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
-         [[node]]\nkind = \"acronym\"\ngloss = \"g\"\n\n\
-         [[edge]]\nkind = \"relates\"\ngloss = \"g\"\nfrom = \"term\"\nto = [\"term\", \
-         \"acronym\"]\n",
+        "purpose = \"p\"\n\n[nodes.term]\n\n[nodes.acronym]\n\n\
+         [edges.relates]\nfrom = \"term\"\nto = [\"term\", \"acronym\"]\n",
     );
 
     let schemas = load(fixture.path()).unwrap();
@@ -412,12 +333,26 @@ fn an_edge_end_naming_a_list_loads_both_kinds() {
 }
 
 #[test]
-fn a_properties_list_loads_onto_the_node_kind() {
+fn an_edge_kind_with_an_unknown_key_is_refused() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\nproperties = [\"note\", \"summary\"]\n",
+        "purpose = \"p\"\n\n[nodes.term]\n\n\
+         [edges.relates]\nfrom = \"term\"\nto = \"term\"\nvia = \"link\"\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert!(err.starts_with("glossary.toml:"), "{err}");
+    assert!(err.contains("via"), "{err}");
+}
+
+#[test]
+fn free_text_properties_load_onto_the_node_kind() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "purpose = \"p\"\n\n[nodes.term]\nnote = \"\"\nsummary = \"\"\n",
     );
 
     let schemas = load(fixture.path()).unwrap();
@@ -429,58 +364,11 @@ fn a_properties_list_loads_onto_the_node_kind() {
 }
 
 #[test]
-fn a_property_listed_in_both_requires_and_properties_is_refused() {
-    let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\nrequires = [\"meaning\"]\n\
-         properties = [\"meaning\"]\n",
-    );
-
-    let err = load(fixture.path()).err().unwrap().to_string();
-
-    assert_eq!(
-        err,
-        "glossary.toml: node kind \"term\" declares \"meaning\" in both requires and properties"
-    );
-}
-
-#[test]
-fn state_under_properties_is_refused() {
-    let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\nproperties = [\"state\"]\n",
-    );
-
-    let err = load(fixture.path()).err().unwrap().to_string();
-
-    assert!(err.contains("states = [...] only"), "{err}");
-}
-
-#[test]
-fn state_under_requires_is_refused() {
-    let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\nrequires = [\"state\"]\n",
-    );
-
-    let err = load(fixture.path()).err().unwrap().to_string();
-
-    assert!(err.contains("states = [...] only"), "{err}");
-}
-
-#[test]
 fn a_rules_table_loads_lines_for_each_declared_moment() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
+        "purpose = \"p\"\n\n[nodes.term]\n\n\
          [rules]\n\"session.started\" = [\"s\"]\n\"message.received\" = [\"a\", \"b\"]\n",
     );
 
@@ -496,9 +384,7 @@ fn reflection_started_lines_load_onto_the_schema() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
-         [rules]\n\"reflection.started\" = [\"r\"]\n",
+        "purpose = \"p\"\n\n[nodes.term]\n\n[rules]\n\"reflection.started\" = [\"r\"]\n",
     );
 
     let schemas = load(fixture.path()).unwrap();
@@ -512,9 +398,7 @@ fn a_blank_line_under_any_moment_is_refused() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
-         [rules]\n\"message.received\" = [\"\"]\n",
+        "purpose = \"p\"\n\n[nodes.term]\n\n[rules]\n\"message.received\" = [\"\"]\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
@@ -528,9 +412,7 @@ fn a_key_outside_the_three_moments_is_refused_naming_them() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n\
-         [[node]]\nkind = \"term\"\ngloss = \"g\"\n\n\
-         [rules]\nturn = [\"a\"]\n",
+        "purpose = \"p\"\n\n[nodes.term]\n\n[rules]\nturn = [\"a\"]\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();

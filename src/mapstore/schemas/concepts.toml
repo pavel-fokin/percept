@@ -14,55 +14,38 @@
 # the map. A second edge into one node is refused, and so is one that
 # would close a cycle.
 
-name = "concepts"
 purpose = "what was asked, what was chosen, and why, so a settled question is not reopened"
 
-[[node]]
-kind = "concept"
-gloss = "one thing a reader reasons with; its definition is the rule that holds here, not a gloss"
-requires = ["definition"]
+[nodes.concept]
+definition = ""
 
-[[node]]
-kind = "question"
-properties = ["why"]
+[nodes.question]
+why = ""
 
-[[node]]
-kind = "option"
-gloss = "an answer weighed for a question: open while it still stands, dead once it lost, saying which in `state` and why in `why`"
-requires = ["why"]
-states = ["open", "dead"]
+[nodes.option]
+why = ""
+state = ["open", "dead"]
 
-[[node]]
-kind = "decision"
-properties = ["why"]
+[nodes.decision]
+why = ""
 
-[[edge]]
-kind = "asks"
-gloss = "from a concept to a question raised under it, or from a decision to a question it puts back in doubt"
+[edges.asks]
 from = ["concept", "decision"]
 to = "question"
 
-[[edge]]
-kind = "settled"
-gloss = "from a question to the decision that answered it, or from a concept to a decision taken under it when no question was raised"
+[edges.settled]
 from = ["concept", "question"]
 to = "decision"
 
-[[edge]]
-kind = "weighs"
-gloss = "from a question to an option weighed for it: open while it still stands, dead once it lost"
+[edges.weighs]
 from = "question"
 to = "option"
 
-[[edge]]
-kind = "covers"
-gloss = "from a concept to one it absorbs - a narrower rule, or a worse wording of the same one; the covered concept hangs under it and leaves the overview"
+[edges.covers]
 from = "concept"
 to = "concept"
 
-[[edge]]
-kind = "supersedes"
-gloss = "from a decision to the earlier one it replaces; the earlier one hangs under it"
+[edges.supersedes]
 from = "decision"
 to = "decision"
 
