@@ -501,7 +501,7 @@ fn a_node_added_line_with_no_seq_is_a_bad_line() {
         "sources": [],
     });
 
-    let err = match decode("user", source("cli"), "node.added", None, json, human()) {
+    let err = match decode_payload("node.added", json) {
         Err(e) => e,
         Ok(_) => panic!("expected a missing seq to be rejected"),
     };
@@ -563,9 +563,9 @@ fn a_node_changed_line_with_no_name_decodes_to_none() {
         "sources": [],
     });
 
-    let event = decode("agent", source("cli"), "node.changed", None, json, human()).unwrap();
+    let payload = decode_payload("node.changed", json).unwrap();
 
-    assert!(matches!(event.payload(), Payload::NodeChanged { name: None, .. }));
+    assert!(matches!(payload, Payload::NodeChanged { name: None, .. }));
 }
 
 #[test]
@@ -699,7 +699,7 @@ fn a_malformed_source_in_a_node_added_payload_is_an_error() {
         "seq": 1,
     });
 
-    let err = match decode("user", source("cli"), "node.added", None, payload, human()) {
+    let err = match decode_payload("node.added", payload) {
         Err(e) => e,
         Ok(_) => panic!("expected a malformed source to be rejected"),
     };
@@ -930,13 +930,12 @@ fn parse_lines_rejects_a_zero_start() {
 
 #[test]
 fn a_file_cited_payload_with_a_reversed_range_fails_to_decode() {
-    let source = source("percept-cli");
     let payload = serde_json::json!({
         "path": "src/lib.rs",
         "lines": "3-1",
         "excerpt": "text",
     });
-    assert!(decode("model", source, "file.cited", None, payload, human()).is_err());
+    assert!(decode_payload("file.cited", payload).is_err());
 }
 
 #[test]

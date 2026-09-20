@@ -58,9 +58,9 @@ by every project; each event names the project it came from. It never \
 ranks, summarises, or answers: its job is to make looking cheap and \
 leave relevance to the caller.
 
-`events publish` appends one event, `events search` and `events show` \
-query it, `maps list` and `maps show` print a cognitive map folded \
-from it, `maps record` and `maps change-node` change one, `hook \
+`events search` and `events show` query the log, `maps list` and \
+`maps show` print a cognitive map folded from it, `maps record` and \
+`maps change-node` change one, `hook \
 <client>` records one coding client's turn from the hook JSON it reads \
 on stdin, and `init <client>` writes that client's project config to \
 call it.")]
@@ -272,28 +272,10 @@ pub struct ChangeNodeArgs {
 
 #[derive(Subcommand)]
 pub enum EventsCommand {
-    /// Append one event to the log.
-    Publish(PublishArgs),
     /// Search events, one JSON object per line, oldest first.
     Search(SearchArgs),
     /// Print one event by id.
     Show(ShowArgs),
-}
-
-#[derive(Args)]
-pub struct PublishArgs {
-    /// Who is writing: `human`, `agent`, or `system`.
-    #[arg(long, value_parser = parse_actor_word)]
-    actor: String,
-    #[arg(long, value_parser = non_blank)]
-    source: String,
-    #[arg(long = "type")]
-    kind: String,
-    #[arg(long)]
-    payload: String,
-    /// The id of the event this one follows from.
-    #[arg(long)]
-    causation: Option<String>,
 }
 
 #[derive(Args, Default)]
@@ -447,77 +429,6 @@ fn map_for(
 /// decode, so the CLI only parses flags. `root` is the writer's project
 /// root, resolved once in `main`; `args.source` only names the writer,
 /// so `publish` pairs the two into the `Source` the event carries.
-/// `checkout` is the working tree a `file.cited` payload with no
-/// `excerpt` reads from - in a worktree it differs from `root`, which
-/// stays the project identity the event's `Source` carries.
-/// Appends one event and prints its id, so a writer can cite it as the
-/// `--causation` of the next. A cause the log lacks is an error: a typo
-/// in provenance is worse than none.
-pub fn publish(
-    args: PublishArgs,
-    log: &dyn EventLog,
-    root: &Path,
-    checkout: &Path,
-    me: Option<crate::core::HumanId>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let causation_id = args
-        .causation
-        .as_deref()
-        .map(|id| known_event_id(id, log))
-        .transpose()?;
-    let source = crate::core::Source {
-        name: args.source,
-        path: root.to_path_buf(),
-    };
-
-    let event = if args.kind == "file.cited" {
-        let payload = file_cited_payload(&args.payload, checkout)?;
-        Event::new(
-            store::parse_actor(&args.actor, me)?,
-            source,
-            causation_id,
-            payload,
-        )
-    } else {
-        let payload = serde_json::from_str(&args.payload).map_err(store::Error::BadPayload)?;
-        let event = store::decode(&args.actor, source, &args.kind, causation_id, payload, me)?;
-        // A raw map event would skip `Map::apply`, and one that breaks
-        // a rule fails every fold from then on, with no undo in an
-        // append-only log.
-        if crate::core::map_of(event.payload()).is_some() {
-            return Err(format!(
-                "{} is written through `percept maps`, not published raw",
-                args.kind
-            )
-            .into());
-        }
-        event
-    };
-    log.append(&event)?;
-    print_lines(std::iter::once(event.id().as_uuid().to_string()))
-}
-
-/// The `payload` argument to `percept events publish --type file.cited`,
-/// as the caller wrote it - `excerpt` absent when the tree should
-/// supply it.
-#[derive(serde::Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RawFileCited {
-    path: String,
-    lines: Option<String>,
-    excerpt: Option<String>,
-}
-
-/// Parses the JSON `publish --type file.cited` takes and builds its
-/// payload - `build_file_cited` does the work, over a `Workspace`
-/// opened once for this one call.
-fn file_cited_payload(raw: &str, checkout: &Path) -> Result<Payload, Box<dyn std::error::Error>> {
-    let raw: RawFileCited = serde_json::from_str(raw).map_err(store::Error::BadPayload)?;
-    let lines = raw.lines.as_deref().map(store::parse_lines).transpose()?;
-    let workspace = workspace::Workspace::new(checkout)?;
-    build_file_cited(&workspace, &raw.path, lines, raw.excerpt)
-}
-
 /// Resolves `path` inside `workspace`, refusing one outside it, and
 /// reads `excerpt` from the tree when the caller gave none, refusing a
 /// binary file, a range past the file's end, or an excerpt that is

@@ -255,7 +255,6 @@ async fn main() {
         Some(Command::Events { command }) => open_log(&checkout).and_then(|log| {
             let me = log.me();
             match command {
-                EventsCommand::Publish(args) => cli::publish(args, &log, &root, &checkout, me),
                 EventsCommand::Search(args) => cli::search(args, &log, me),
                 EventsCommand::Show(args) => cli::show(args, &log),
             }

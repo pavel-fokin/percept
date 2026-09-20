@@ -6,28 +6,7 @@ use crate::core::testing::{
 use crate::core::{Actor, Payload};
 use std::path::{Path, PathBuf};
 
-fn args(actor: &str, payload: &str) -> PublishArgs {
-    PublishArgs {
-        actor: actor.to_string(),
-        source: "claude-code".to_string(),
-        kind: "message.received".to_string(),
-        payload: payload.to_string(),
-        causation: None,
-    }
-}
-
-fn file_cited_args(payload: &str) -> PublishArgs {
-    PublishArgs {
-        actor: "model".to_string(),
-        source: "claude-code".to_string(),
-        kind: "file.cited".to_string(),
-        payload: payload.to_string(),
-        causation: None,
-    }
-}
-
-/// The checkout most tests never read from - `publish` only opens it
-/// for a `file.cited` payload with no `excerpt`.
+/// The checkout most tests never read from - only a `cites` line does.
 fn no_checkout() -> &'static Path {
     Path::new(ROOT)
 }
@@ -40,108 +19,32 @@ fn map_created(name: &str) -> Event {
     )
 }
 
-#[test]
-fn a_publish_citing_a_cause_records_it() {
-    let log = FakeLog::default();
-    publish(
-        args("user", r#"{"content":"hi"}"#),
-        &log,
-        Path::new(ROOT),
-        no_checkout(),
-        human(),
-    )
-    .unwrap();
-    let cause = log.load().unwrap()[0].id();
+/// The refusal `result` carries - `Payload` is not `Debug`, so the
+/// error comes out as its own text rather than through `unwrap_err`.
+fn err_of(result: Result<Payload, Box<dyn std::error::Error>>) -> String {
+    match result {
+        Err(err) => err.to_string(),
+        Ok(_) => panic!("expected a refusal"),
+    }
+}
 
-    let mut reply = args("model", r#"{"content":"hello"}"#);
-    reply.causation = Some(cause.as_uuid().to_string());
-    publish(reply, &log, Path::new(ROOT), no_checkout(), human()).unwrap();
-
-    assert!(log.load().unwrap()[1].causation_id() == Some(cause));
+/// A `Workspace` over `fixture`'s root - what a `cites` line resolves
+/// its path inside.
+fn workspace_at(fixture: &Fixture) -> workspace::Workspace {
+    workspace::Workspace::new(fixture.path()).unwrap()
 }
 
 #[test]
-fn a_publish_citing_a_cause_the_log_lacks_is_rejected() {
-    let log = FakeLog::default();
-    let mut orphan = args("model", r#"{"content":"hello"}"#);
-    orphan.causation = Some(crate::core::EventId::new().as_uuid().to_string());
-    assert!(publish(orphan, &log, Path::new(ROOT), no_checkout(), human()).is_err());
-    assert!(log.load().unwrap().is_empty());
-}
-
-#[test]
-fn a_valid_publish_appends_one_event_carrying_its_source() {
-    let log = FakeLog::default();
-    publish(
-        args("user", r#"{"content":"hi"}"#),
-        &log,
-        Path::new(ROOT),
-        no_checkout(),
-        human(),
-    )
-    .unwrap();
-
-    let events = log.load().unwrap();
-    assert_eq!(events.len(), 1);
-    assert_eq!(events[0].source().name, "claude-code");
-    assert_eq!(events[0].source().path, Path::new(ROOT));
-    assert!(matches!(events[0].actor(), crate::core::Actor::Human(_)));
-}
-
-#[test]
-fn a_payload_field_the_type_does_not_record_is_rejected() {
-    let log = FakeLog::default();
-    let extra = r#"{"content":"hi","meta":{"thread":42}}"#;
-    assert!(publish(args("user", extra), &log, Path::new(ROOT), no_checkout(), human()).is_err());
-    assert!(log.load().unwrap().is_empty());
-}
-
-#[test]
-fn a_rejected_event_appends_nothing() {
-    let log = FakeLog::default();
-    assert!(publish(
-        args("robot", r#"{"content":"hi"}"#),
-        &log,
-        Path::new(ROOT),
-        no_checkout(),
-        human(),
-    )
-    .is_err());
-    assert!(publish(
-        args("user", "not json"),
-        &log,
-        Path::new(ROOT),
-        no_checkout(),
-        human(),
-    )
-    .is_err());
-    assert!(log.load().unwrap().is_empty());
-}
-
-#[test]
-fn a_file_cited_publish_reads_the_range_from_the_checkout() {
+fn a_citation_reads_its_range_from_the_checkout() {
     let fixture = Fixture::new();
     fixture.write("src/lib.rs", "line one\nline two\nline three\nline four\n");
-    let log = FakeLog::default();
-    let payload = r#"{"path":"src/lib.rs","lines":"2-3"}"#;
-    publish(
-        file_cited_args(payload),
-        &log,
-        Path::new(ROOT),
-        fixture.path(),
-        human(),
-    )
-    .unwrap();
 
-    let events = log.load().unwrap();
-    match events[0].payload() {
-        Payload::FileCited {
-            path,
-            lines,
-            excerpt,
-        } => {
+    let payload = build_file_cited(&workspace_at(&fixture), "src/lib.rs", Some((2, 3)), None).unwrap();
+
+    match payload {
+        Payload::FileCited { path, lines, excerpt } => {
             assert_eq!(path.to_str().unwrap(), "src/lib.rs");
-            assert_eq!(*lines, Some((2, 3)));
+            assert_eq!(lines, Some((2, 3)));
             assert_eq!(excerpt, "line two\nline three");
         }
         _ => panic!("expected FileCited"),
@@ -149,23 +52,15 @@ fn a_file_cited_publish_reads_the_range_from_the_checkout() {
 }
 
 #[test]
-fn a_file_cited_publish_with_no_lines_reads_the_whole_file() {
+fn a_citation_with_no_lines_reads_the_whole_file() {
     let fixture = Fixture::new();
     fixture.write("README.md", "hello\nworld\n");
-    let log = FakeLog::default();
-    let payload = r#"{"path":"README.md"}"#;
-    publish(
-        file_cited_args(payload),
-        &log,
-        Path::new(ROOT),
-        fixture.path(),
-        human(),
-    )
-    .unwrap();
 
-    match log.load().unwrap()[0].payload() {
+    let payload = build_file_cited(&workspace_at(&fixture), "README.md", None, None).unwrap();
+
+    match payload {
         Payload::FileCited { lines, excerpt, .. } => {
-            assert_eq!(*lines, None);
+            assert_eq!(lines, None);
             assert_eq!(excerpt, "hello\nworld\n");
         }
         _ => panic!("expected FileCited"),
@@ -173,172 +68,78 @@ fn a_file_cited_publish_with_no_lines_reads_the_whole_file() {
 }
 
 #[test]
-fn a_file_cited_publish_stores_an_absolute_path_relative() {
+fn a_citation_stores_an_absolute_path_relative() {
     let fixture = Fixture::new();
     fixture.write("src/lib.rs", "one\n");
-    let log = FakeLog::default();
     let absolute = fixture.path().join("src/lib.rs");
-    let payload = format!(r#"{{"path":"{}"}}"#, absolute.to_str().unwrap());
-    publish(
-        file_cited_args(&payload),
-        &log,
-        Path::new(ROOT),
-        fixture.path(),
-        human(),
-    )
-    .unwrap();
 
-    match log.load().unwrap()[0].payload() {
+    let payload =
+        build_file_cited(&workspace_at(&fixture), absolute.to_str().unwrap(), None, None).unwrap();
+
+    match payload {
         Payload::FileCited { path, .. } => assert_eq!(path.to_str().unwrap(), "src/lib.rs"),
         _ => panic!("expected FileCited"),
     }
 }
 
 #[test]
-fn a_file_cited_publish_with_an_excerpt_stores_it_as_given() {
+fn a_citation_given_an_excerpt_never_reads_the_tree() {
     let fixture = Fixture::new();
-    let log = FakeLog::default();
-    // No file on disk at all - an `excerpt` in the payload means the
-    // tree is never read.
-    let payload = r#"{"path":"src/missing.rs","excerpt":"whatever the caller said"}"#;
-    publish(
-        file_cited_args(payload),
-        &log,
-        Path::new(ROOT),
-        fixture.path(),
-        human(),
+
+    // No file on disk at all.
+    let payload = build_file_cited(
+        &workspace_at(&fixture),
+        "src/missing.rs",
+        None,
+        Some("whatever the caller said".to_string()),
     )
     .unwrap();
 
-    match log.load().unwrap()[0].payload() {
-        Payload::FileCited { excerpt, .. } => {
-            assert_eq!(excerpt, "whatever the caller said");
-        }
+    match payload {
+        Payload::FileCited { excerpt, .. } => assert_eq!(excerpt, "whatever the caller said"),
         _ => panic!("expected FileCited"),
     }
 }
 
 #[test]
-fn a_file_cited_publish_refuses_a_path_outside_the_checkout() {
+fn a_citation_refuses_a_path_outside_the_checkout() {
     let fixture = Fixture::new();
-    let log = FakeLog::default();
-    let payload = r#"{"path":"../../etc/passwd"}"#;
-    assert!(publish(
-        file_cited_args(payload),
-        &log,
-        Path::new(ROOT),
-        fixture.path(),
-        human(),
-    )
-    .is_err());
-    assert!(log.load().unwrap().is_empty());
+
+    assert!(build_file_cited(&workspace_at(&fixture), "../../etc/passwd", None, None).is_err());
 }
 
 #[test]
-fn a_file_cited_publish_refuses_a_binary_file() {
+fn a_citation_refuses_a_binary_file() {
     let fixture = Fixture::new();
-    let full = fixture.path().join("bin");
-    std::fs::write(&full, [0u8, 1, 2, 0, 3]).unwrap();
-    let log = FakeLog::default();
-    let payload = r#"{"path":"bin"}"#;
-    let err = publish(
-        file_cited_args(payload),
-        &log,
-        Path::new(ROOT),
-        fixture.path(),
-        human(),
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("binary"), "{err}");
-    assert!(log.load().unwrap().is_empty());
+    std::fs::write(fixture.path().join("bin"), [0u8, 1, 2, 0, 3]).unwrap();
+
+    let err = err_of(build_file_cited(&workspace_at(&fixture), "bin", None, None));
+
+    assert!(err.contains("binary"), "{err}");
 }
 
 #[test]
-fn a_file_cited_publish_refuses_an_unknown_field() {
+fn a_citation_refuses_a_blank_excerpt() {
     let fixture = Fixture::new();
-    let log = FakeLog::default();
-    // `line` instead of `lines` - the unknown-field guard every other
-    // payload shape already gets from `store::decode`.
-    let payload = r#"{"path":"f.txt","line":"1-1"}"#;
-    let err = publish(
-        file_cited_args(payload),
-        &log,
-        Path::new(ROOT),
-        fixture.path(),
-        human(),
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("line"), "{err}");
-    assert!(log.load().unwrap().is_empty());
+
+    let err = err_of(build_file_cited(
+        &workspace_at(&fixture),
+        "src/missing.rs",
+        None,
+        Some("   \n  ".to_string()),
+    ));
+
+    assert!(err.contains("blank"), "{err}");
 }
 
 #[test]
-fn a_file_cited_publish_refuses_a_blank_excerpt() {
-    let fixture = Fixture::new();
-    let log = FakeLog::default();
-    let payload = r#"{"path":"src/missing.rs","excerpt":"   \n  "}"#;
-    let err = publish(
-        file_cited_args(payload),
-        &log,
-        Path::new(ROOT),
-        fixture.path(),
-        human(),
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("blank"), "{err}");
-    assert!(log.load().unwrap().is_empty());
-}
-
-#[test]
-fn a_file_cited_publish_refuses_a_reversed_range() {
+fn a_citation_refuses_a_range_past_the_end() {
     let fixture = Fixture::new();
     fixture.write("f.txt", "a\nb\nc\n");
-    let log = FakeLog::default();
-    let payload = r#"{"path":"f.txt","lines":"3-1"}"#;
-    assert!(publish(
-        file_cited_args(payload),
-        &log,
-        Path::new(ROOT),
-        fixture.path(),
-        human(),
-    )
-    .is_err());
-    assert!(log.load().unwrap().is_empty());
-}
 
-#[test]
-fn a_file_cited_publish_refuses_a_zero_line() {
-    let fixture = Fixture::new();
-    fixture.write("f.txt", "a\nb\nc\n");
-    let log = FakeLog::default();
-    let payload = r#"{"path":"f.txt","lines":"0-1"}"#;
-    assert!(publish(
-        file_cited_args(payload),
-        &log,
-        Path::new(ROOT),
-        fixture.path(),
-        human(),
-    )
-    .is_err());
-    assert!(log.load().unwrap().is_empty());
-}
+    let err = err_of(build_file_cited(&workspace_at(&fixture), "f.txt", Some((1, 9000)), None));
 
-#[test]
-fn a_file_cited_publish_refuses_a_range_past_the_end() {
-    let fixture = Fixture::new();
-    fixture.write("f.txt", "a\nb\nc\n");
-    let log = FakeLog::default();
-    let payload = r#"{"path":"f.txt","lines":"1-9000"}"#;
-    let err = publish(
-        file_cited_args(payload),
-        &log,
-        Path::new(ROOT),
-        fixture.path(),
-        human(),
-    )
-    .unwrap_err();
-    assert!(err.to_string().contains("past"), "{err}");
-    assert!(log.load().unwrap().is_empty());
+    assert!(err.contains("past"), "{err}");
 }
 
 #[test]

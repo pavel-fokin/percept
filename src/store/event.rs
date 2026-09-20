@@ -620,35 +620,6 @@ pub fn from_wire(event: Event) -> Result<crate::core::Event, Error> {
     ))
 }
 
-/// Builds a fresh domain event from the parts a writer supplies - the
-/// inbound half of the serde boundary. `kind` and `payload` are checked
-/// against the same shapes `load` accepts, so one place decides what a
-/// payload of each type may hold. `me` resolves `actor` when it names
-/// the human by the legacy alias `"user"` alone.
-pub fn decode(
-    actor: &str,
-    source: crate::core::Source,
-    kind: &str,
-    causation_id: Option<EventId>,
-    payload: Value,
-    me: Option<HumanId>,
-) -> Result<crate::core::Event, Error> {
-    let event = crate::core::Event::new(
-        parse_actor(actor, me)?,
-        source,
-        causation_id,
-        decode_payload(kind, payload.clone())?,
-    );
-
-    // `load` drops unknown payload fields on purpose, so a log written
-    // by an older build still reads. Inbound, that same tolerance would
-    // record less than the caller passed and report success.
-    if Event::from(&event).payload != payload {
-        return Err(Error::UnrecordedPayloadFields(kind.to_string()));
-    }
-    Ok(event)
-}
-
 fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
     match parse_kind(kind)? {
         EventKind::MessageReceived => {

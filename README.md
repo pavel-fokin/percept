@@ -81,8 +81,6 @@ percept events search --contains worktree --size 5
 percept events search --source codex
 percept events show <id>
 percept events show <id> --range 400:
-percept events publish --actor human --source percept-cli \
-  --type message.received --payload '{"content":"..."}'
 ```
 
 Output is one JSON object per line, oldest first. A search line keeps
