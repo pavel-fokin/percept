@@ -299,7 +299,7 @@ async fn main() {
             Err(err) => Err(err),
         },
         #[cfg(feature = "lab")]
-        None => {
+        Some(Command::Code) => {
             lab::try_main(
                 crate::core::Source {
                     name: lab::CODE_SOURCE_NAME.to_string(),
@@ -309,10 +309,8 @@ async fn main() {
             )
             .await
         }
-        // Without the lab, clap's `arg_required_else_help` on `Cli`
-        // has already printed help and exited.
-        #[cfg(not(feature = "lab"))]
-        None => unreachable!(),
+        None => mapstore::load_schemas(&checkout)
+            .and_then(|schemas| open_log(&checkout).and_then(|log| cli::start(&log, &schemas, &root))),
     };
 
     if let Err(err) = result {
