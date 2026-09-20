@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::*;
 use crate::core::testing::{chores, debates, files, human, link, node_ref};
-use crate::core::{Actor, EventId, Mutation};
+use crate::core::{Actor, EventId, Mutation, Schemas};
 
 /// Adds a node with one `why` property when `why` is given, and one
 /// `state` when `state` is given - `Map::apply` requires one for any
@@ -436,4 +436,43 @@ fn the_catalogue_lists_a_package_kind_with_no_properties() {
 
     assert!(text.contains("- `package`\n"));
     assert!(text.contains("\nExample: nothing recorded here yet.\n"));
+}
+
+#[test]
+fn the_start_screen_frames_the_record_rule_before_the_maps() {
+    let text = start(&Schemas::new(vec![debates()]), &[]);
+
+    let frame = text.split("\n# debates\n").next().unwrap();
+    assert!(frame.contains("record it in the same turn"), "{text}");
+    assert!(frame.contains("percept maps record <map> --actor agent --source <event>"), "{text}");
+}
+
+#[test]
+fn the_start_screen_prints_each_map_whole_under_its_purpose_and_kinds() {
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
+    add(&mut map, "topic", "Where does the log live?", None, None, &[], Actor::Human(human()));
+
+    let text = start(&Schemas::new(vec![debates()]), std::slice::from_ref(&map));
+
+    let section = text.split("\n# debates\n\n").nth(1).unwrap();
+    assert!(section.starts_with(debates().purpose()), "{text}");
+    assert!(section.contains("\nNode kinds:\n- `topic`\n"), "{text}");
+    assert!(section.contains("\nEdge kinds:\n- `about` (topic -> claim)\n"), "{text}");
+    assert!(section.ends_with("\n## t1 \"Where does the log live?\"\n\n"), "{text}");
+}
+
+#[test]
+fn the_start_screen_prints_a_declared_schema_with_no_map_yet_as_empty() {
+    let text = start(&Schemas::new(vec![debates()]), &[]);
+
+    assert!(text.contains("\n# debates\n\nwhat a test needs from a question-and-answer map\n"), "{text}");
+    assert!(text.ends_with("- `doubts` (verdict -> topic)\n\n(empty: nothing has been recorded here yet.)\n"), "{text}");
+}
+
+#[test]
+fn the_start_screen_of_no_schemas_prints_the_no_schemas_hint() {
+    let text = start(&Schemas::new(Vec::new()), &[]);
+
+    assert!(text.ends_with(&format!("\n{}\n", crate::mapstore::NO_SCHEMAS_HINT)), "{text}");
+    assert!(!text.contains("# "), "{text}");
 }

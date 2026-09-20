@@ -8,8 +8,8 @@
 //! project's schemas from `SCHEMAS_DIR` alone; `templates` is the
 //! shipped TOML `percept init <client>` copies there for a project
 //! that has none yet. A project with no
-//! schemas has no maps: `catalogue` prints `NO_SCHEMAS_HINT` in place
-//! of its usual body.
+//! schemas has no maps: `catalogue` and `start` print
+//! `NO_SCHEMAS_HINT` in place of their usual body.
 
 // Reachability here is judged with the lab present: the lab build is
 // the one that sees every consumer, and `--all-features` clippy is
@@ -26,10 +26,10 @@ pub use map::{
     commit, commit_batch, encode_fragment, encode_lines, encode_map, encode_schema, ensure_maps,
     fold_map, fold_map_at, of_path, paths, properties_map, LogMaps, NodeRefArgs, Snapshot,
 };
-pub use render::{catalogue, markdown};
+pub use render::{catalogue, markdown, start};
 pub use schemas::{load as load_schemas, templates, SCHEMAS_DIR};
 
-/// Printed in place of `catalogue`'s usual body when a project has
-/// declared no schema at all.
+/// Printed in place of `catalogue`'s and `start`'s usual body when a
+/// project has declared no schema at all.
 pub(crate) const NO_SCHEMAS_HINT: &str =
     "no maps declared under .percept/schemas; run percept init <client>";
