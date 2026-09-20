@@ -144,8 +144,7 @@ fn body(map: &Map, fragment: &crate::core::Fragment, root: &std::path::Path) -> 
 /// list's default among them when `node` carries none of its own -
 /// as a JSON object, in that same declared order.
 fn properties_json(map: &Map, node: &Node) -> Value {
-    let properties: serde_json::Map<String, Value> = map
-        .properties(node)
+    let properties: serde_json::Map<String, Value> = mapstore::properties_map(map, node)
         .into_iter()
         .map(|(key, value)| (key.to_string(), Value::String(value.to_string())))
         .collect();

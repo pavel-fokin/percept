@@ -71,12 +71,11 @@ export interface ProjectsResponse {
   projects: Project[];
 }
 
-/** One node kind the schema declares, with the words it carries - so a
- * page can name a kind in the schema's language and never in its own. */
+/** One node kind the schema declares - its short id prefix, so a page
+ * can name a kind in the schema's language and never in its own. */
 export interface MapKind {
   kind: string;
   prefix: string;
-  gloss: string;
 }
 
 /** One node in a cut: `id` is the map's own short id (`c1`, `q12`),

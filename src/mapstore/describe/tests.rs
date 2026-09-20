@@ -107,10 +107,10 @@ fn the_grammar_is_indented_under_the_record_command() {
 }
 
 #[test]
-fn the_add_example_cites_a_file_under_its_last_node() {
+fn the_add_example_cites_a_file_under_its_first_node() {
     let text = describe(&debates());
     assert!(
-        text.contains("  topic \"...\"\n    about claim\n    settles verdict\n    cites src/path.rs:10-20\n"),
+        text.contains("  verdict \"...\"\n    why \"...\"\n    cites src/path.rs:10-20\n"),
         "{text}"
     );
 }

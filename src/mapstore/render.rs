@@ -109,15 +109,15 @@ fn push_example(out: &mut String, map: &Map) {
 }
 
 /// One `##` section per root, in an order this render alone gives
-/// meaning to - never the core's: by the index of its `state` property
-/// in its kind's declared list, unknown or missing last, then by when
-/// it was added. Under each heading: the node's own properties, then
-/// what hangs under it, as `push_tree` prints it. A forest, so every
-/// node is reached from exactly one root and nothing a map holds goes
-/// unseen.
+/// meaning to - never the core's: by the index of its kind's closed
+/// list value - `state` on a `task`, say - in that list's declared
+/// order, unknown or missing last, then by when it was added. Under
+/// each heading: the node's own properties, then what hangs under it,
+/// as `push_tree` prints it. A forest, so every node is reached from
+/// exactly one root and nothing a map holds goes unseen.
 fn push_sections(out: &mut String, map: &Map, mark: bool) {
     let mut roots = outline::roots(map);
-    roots.sort_by_cached_key(|node| (state_rank(map, node), node.added().at));
+    roots.sort_by_cached_key(|node| (closed_list_rank(map, node), node.added().at));
     for node in roots {
         let _ = write!(out, "\n## {}\n\n", marked_name(map, node, mark));
         push_props(out, map, node, "");
@@ -141,7 +141,7 @@ fn push_tree(out: &mut String, map: &Map, node: &Node, indent: &str, mark: bool)
 /// `node`'s position among its kind's closed list - unknown, missing,
 /// or a kind with no closed list sort last, so listing order says
 /// nothing the core does not already know from the property itself.
-fn state_rank(map: &Map, node: &Node) -> usize {
+fn closed_list_rank(map: &Map, node: &Node) -> usize {
     let Some(kind) = map.schema().node_kind(&node.kind) else {
         return usize::MAX;
     };

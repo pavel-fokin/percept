@@ -6,6 +6,7 @@
 //! is what gives a fresh checkout its first schema file, copied from
 //! the templates this binary embeds - see `templates`.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use indexmap::IndexMap;
@@ -67,11 +68,12 @@ struct SchemaFile {
 /// message.
 #[derive(Deserialize, Default)]
 #[serde(transparent)]
-struct RulesFile(IndexMap<String, Vec<String>>);
+struct RulesFile(BTreeMap<String, Vec<String>>);
 
 /// A node kind's property value as TOML writes it: a string declares
-/// free text, its content unread; a list declares a closed set of
-/// values.
+/// free text and its content is never read, so it must be `""` -
+/// anything else is refused rather than silently dropped; a list
+/// declares a closed set of values.
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum PropertyValue {
@@ -203,7 +205,7 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
         purpose: file.purpose,
         node_kinds,
         edge_kinds,
-        rules: Rules::new(file.rules.0.into_iter().collect()),
+        rules: Rules::new(file.rules.0),
     })
 }
 
@@ -233,34 +235,19 @@ fn node_kind(
             return Err(format!("{stem}.toml: node kind {kind:?} declares a blank property").into());
         }
         let values = match value {
-            PropertyValue::Text(_) => Vec::new(),
+            PropertyValue::Text(text) => {
+                if !text.is_empty() {
+                    return Err(format!(
+                        "{stem}.toml: node kind {kind:?} declares free property {name:?} as \
+                         {text:?}; a free property's value is always \"\", since its content is \
+                         never read"
+                    )
+                    .into());
+                }
+                Vec::new()
+            }
             PropertyValue::Closed(values) => {
-                if let Some(first) = &closed_already {
-                    return Err(format!(
-                        "{stem}.toml: node kind {kind:?} declares a second closed list, \
-                         {name:?}; a kind carries at most one, alongside {first:?}"
-                    )
-                    .into());
-                }
-                if values.len() < 2 {
-                    return Err(format!(
-                        "{stem}.toml: node kind {kind:?} declares fewer than two values for {name:?}"
-                    )
-                    .into());
-                }
-                if values.iter().any(|value| value.trim().is_empty()) {
-                    return Err(format!(
-                        "{stem}.toml: node kind {kind:?} declares a blank value for {name:?}"
-                    )
-                    .into());
-                }
-                if let Some(value) = repeated(values.iter().map(String::as_str)) {
-                    return Err(format!(
-                        "{stem}.toml: node kind {kind:?} declares the value {value:?} twice for \
-                         {name:?}"
-                    )
-                    .into());
-                }
+                check_closed_list(stem, &kind, &name, &values, closed_already.as_deref())?;
                 closed_already = Some(name.clone());
                 values
             }
@@ -273,6 +260,44 @@ fn node_kind(
         kind,
         properties,
     })
+}
+
+/// Refuses a closed list's values when they break a rule: a second
+/// closed list on one kind, fewer than two values, a blank value, or a
+/// value repeated. `closed_already` names the kind's own closed
+/// property, if it already declared one.
+fn check_closed_list(
+    stem: &str,
+    kind: &str,
+    name: &str,
+    values: &[String],
+    closed_already: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(first) = closed_already {
+        return Err(format!(
+            "{stem}.toml: node kind {kind:?} declares a second closed list, {name:?}; a kind \
+             carries at most one, alongside {first:?}"
+        )
+        .into());
+    }
+    if values.len() < 2 {
+        return Err(format!(
+            "{stem}.toml: node kind {kind:?} declares fewer than two values for {name:?}"
+        )
+        .into());
+    }
+    if values.iter().any(|value| value.trim().is_empty()) {
+        return Err(
+            format!("{stem}.toml: node kind {kind:?} declares a blank value for {name:?}").into(),
+        );
+    }
+    if let Some(value) = repeated(values.iter().map(String::as_str)) {
+        return Err(format!(
+            "{stem}.toml: node kind {kind:?} declares the value {value:?} twice for {name:?}"
+        )
+        .into());
+    }
+    Ok(())
 }
 
 /// Refuses a blank kind name among `names` - `group` names the kind
@@ -335,8 +360,8 @@ fn check_prefixes(stem: &str, node_kinds: &[NodeKind]) -> Result<(), Box<dyn std
     Ok(())
 }
 
-/// The first name `names` repeats, if any - the one duplicate scan
-/// every kind check shares.
+/// The first value `names` repeats, if any - what `check_closed_list`
+/// refuses a closed list for.
 fn repeated<'a>(names: impl Iterator<Item = &'a str>) -> Option<&'a str> {
     let mut seen: Vec<&str> = Vec::new();
     for name in names {

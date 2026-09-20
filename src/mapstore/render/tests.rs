@@ -74,7 +74,7 @@ fn sections_are_ordered_by_state_then_by_when_they_were_added() {
 
 #[test]
 fn sections_with_no_state_are_ordered_by_when_they_were_added() {
-    // `push_sections` now sorts roots only by `state_rank` then
+    // `push_sections` now sorts roots only by `closed_list_rank` then
     // `added_at` - see its doc comment, which still says kind order
     // breaks the tie first; it no longer does, so two roots of
     // different kinds and no state sort by add order alone.

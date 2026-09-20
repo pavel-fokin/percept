@@ -7,6 +7,7 @@ use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -309,28 +310,20 @@ struct NodeLine<'a> {
     kind: &'a str,
     name: &'a str,
     /// `Map::properties`, in schema-declared order - a closed list's
-    /// default among them when the node carries none of its own -
-    /// written as a JSON object in that same order.
-    #[serde(serialize_with = "serialize_properties")]
-    properties: Vec<(&'a str, &'a str)>,
+    /// default among them when the node carries none of its own - as
+    /// an `IndexMap`, so it serializes as a JSON object in that same
+    /// order.
+    properties: IndexMap<&'a str, &'a str>,
     sources: Vec<String>,
     #[serde(flatten)]
     stamp: Option<NodeStamp>,
 }
 
-/// `properties` as a JSON object, entries written in the order given -
-/// `Map::properties`'s declared order - rather than the alphabetical
-/// order a `BTreeMap` field would impose.
-fn serialize_properties<S>(properties: &[(&str, &str)], serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    use serde::ser::SerializeMap;
-    let mut map = serializer.serialize_map(Some(properties.len()))?;
-    for (key, value) in properties {
-        map.serialize_entry(key, value)?;
-    }
-    map.end()
+/// `node`'s properties as `Map::properties` gives them, in an
+/// `IndexMap`, so serializing it to JSON keeps that declared order
+/// instead of the alphabetical one a plain map would impose.
+pub fn properties_map<'a>(map: &'a Map, node: &'a Node) -> IndexMap<&'a str, &'a str> {
+    map.properties(node).collect()
 }
 
 #[derive(Serialize)]
@@ -488,7 +481,7 @@ pub fn encode_node(map: &Map, node: &Node, stamped: bool) -> String {
         id: map.short_id(node.id).unwrap_or_default(),
         kind: &node.kind,
         name: &node.name,
-        properties: map.properties(node),
+        properties: properties_map(map, node),
         sources: ids(&node.sources),
         stamp: NodeStamp::of(node, stamped),
     })

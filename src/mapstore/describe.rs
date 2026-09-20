@@ -35,9 +35,13 @@ pub fn describe(schema: &Schema) -> String {
     out.push_str("\nexample\n");
     push_example(&mut out, schema);
 
-    if let Some(kind) = schema.node_kinds.iter().find(|kind| kind.closed_list().is_some()) {
+    if let Some((kind, closed)) = schema
+        .node_kinds
+        .iter()
+        .find_map(|kind| kind.closed_list().map(|closed| (kind, closed)))
+    {
         out.push_str("\nexample: change\n");
-        push_change_example(&mut out, kind);
+        push_change_example(&mut out, kind, closed);
     }
 
     out
@@ -117,9 +121,9 @@ const GRAMMAR: &str = "
   text as seen and adds it to the node's sources. A claim that rests on code
   cites it, so a later session is told when that code has changed. A margin
   line naming a short id, t4, changes that node: state \"done\" under it sets a
-  property and name \"...\" renames it. A node is refused without the property
-  its kind lists values for. A node the user last changed takes no change from
-  an agent at all.
+  property and name \"...\" renames it. A node written without its kind's
+  closed-list property starts from that list's first value. A node the user
+  last changed takes no change from an agent at all.
   This document adds and changes; it never removes. percept maps remove-node
   and remove-edge do that, each taking the same --actor and --source, and
   remove-node drops the edges that touch the node it takes.
@@ -133,16 +137,15 @@ const GRAMMAR: &str = "
 /// first value in place of `...` - and one indented edge line per kind
 /// already listed above it that an edge from this kind may reach - the
 /// first such edge kind, so a node is not shown both supporting and
-/// contradicting the same neighbour. The last kind carries the `cites`
-/// line, being the one a claim resting on code would be written as;
-/// its path is a placeholder, so the example shows the shape rather
-/// than running as it stands.
+/// contradicting the same neighbour. The first kind written - the
+/// finest - carries the `cites` line, being the one a claim resting on
+/// code would be written as; its path is a placeholder, so the
+/// example shows the shape rather than running as it stands.
 fn push_example(out: &mut String, schema: &Schema) {
     let mut listed: Vec<&str> = Vec::new();
     // One edge into a kind across the whole example, not one per node
     // written: a second would be a second parent, which `apply` refuses.
     let mut reached: Vec<&str> = Vec::new();
-    let last = schema.node_kinds.len().saturating_sub(1);
     for (index, kind) in schema.node_kinds.iter().rev().enumerate() {
         let _ = writeln!(out, "  {} \"...\"", kind.kind);
         for (property, values) in &kind.properties {
@@ -162,7 +165,7 @@ fn push_example(out: &mut String, schema: &Schema) {
                 reached.push(to);
             }
         }
-        if index == last {
+        if index == 0 {
             out.push_str("    cites src/path.rs:10-20\n");
         }
         listed.push(&kind.kind);
@@ -172,8 +175,7 @@ fn push_example(out: &mut String, schema: &Schema) {
 /// `kind`'s short id at its first minted number, its closed-list
 /// property set to its second declared value, or its first when it has
 /// only one.
-fn push_change_example(out: &mut String, kind: &NodeKind) {
-    let (property, values) = kind.closed_list().expect("caller found a kind with a closed list");
+fn push_change_example(out: &mut String, kind: &NodeKind, (property, values): (&str, &[String])) {
     let value = values.get(1).unwrap_or(&values[0]);
     let _ = writeln!(out, "  {}1", kind.prefix);
     let _ = writeln!(out, "    {property} \"{value}\"");

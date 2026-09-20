@@ -364,6 +364,20 @@ fn free_text_properties_load_onto_the_node_kind() {
 }
 
 #[test]
+fn a_free_property_written_with_text_is_refused() {
+    let fixture = Fixture::new();
+    fixture.write(
+        ".percept/schemas/glossary.toml",
+        "purpose = \"p\"\n\n[nodes.term]\nnote = \"what this explains\"\n",
+    );
+
+    let err = load(fixture.path()).err().unwrap().to_string();
+
+    assert!(err.contains("note"), "{err}");
+    assert!(err.contains("never read"), "{err}");
+}
+
+#[test]
 fn a_rules_table_loads_lines_for_each_declared_moment() {
     let fixture = Fixture::new();
     fixture.write(

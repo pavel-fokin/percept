@@ -193,20 +193,24 @@ fn pad_rows(rows: &[(String, String)]) -> Vec<String> {
 /// for a kind whose closed list is `state` with those values. Every
 /// value is counted, since a schema lists them as a set and no
 /// position means "initial".
-fn state_counts(map: &Map) -> Vec<String> {
+fn closed_list_counts(map: &Map) -> Vec<String> {
     let schema = map.schema();
     schema
         .node_kinds
         .iter()
         .flat_map(|kind| {
-            let (property, values) = kind.closed_list().unwrap_or(("", &[]));
-            values.iter().filter_map(move |value| {
-                let count = map
-                    .nodes()
-                    .iter()
-                    .filter(|node| node.kind == kind.kind && map.property(node, property) == Some(value.as_str()))
-                    .count();
-                (count > 0).then(|| format!("{count} {value}"))
+            kind.closed_list().into_iter().flat_map(move |(property, values)| {
+                values.iter().filter_map(move |value| {
+                    let count = map
+                        .nodes()
+                        .iter()
+                        .filter(|node| {
+                            node.kind == kind.kind
+                                && map.property(node, property) == Some(value.as_str())
+                        })
+                        .count();
+                    (count > 0).then(|| format!("{count} {value}"))
+                })
             })
         })
         .collect()
@@ -215,7 +219,7 @@ fn state_counts(map: &Map) -> Vec<String> {
 /// The State block: one line per map in fold order - how many of its
 /// nodes head it against how many it holds, `+N since last session`
 /// when that map's `moved` list is not empty, then any state counts
-/// `state_counts` finds. The pair is the pressure to fold: a map whose
+/// `closed_list_counts` finds. The pair is the pressure to fold: a map whose
 /// roots trail its nodes far enough is one to reflect on.
 fn state_block(maps: &[Map], moved: &[Vec<&Node>]) -> String {
     let rows: Vec<(String, String)> = maps
@@ -230,7 +234,7 @@ fn state_block(maps: &[Map], moved: &[Vec<&Node>]) -> String {
             if !moved.is_empty() {
                 parts.push(format!("+{} since last session", moved.len()));
             }
-            parts.extend(state_counts(map));
+            parts.extend(closed_list_counts(map));
             (map.schema().name.clone(), parts.join("   "))
         })
         .collect();

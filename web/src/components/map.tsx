@@ -141,7 +141,6 @@ function NodeRow({
   around: string | null;
 }) {
   const here = node.id === around;
-  const kind = cut.kinds.find((candidate) => candidate.kind === node.kind);
 
   return (
     <>
@@ -156,9 +155,7 @@ function NodeRow({
             {node.id}
           </Link>
         )}
-        <span className="text-faint" title={kind?.gloss}>
-          {node.kind}
-        </span>
+        <span className="text-faint">{node.kind}</span>
       </div>
       <p className="mt-0.5 text-[0.9375rem] leading-relaxed text-ink">{node.name}</p>
       {Object.entries(node.properties).map(([key, value]) => (

@@ -403,15 +403,9 @@ impl Map {
             .collect()
     }
 
-    /// Whether this map's edges are free to form any graph - see the
-    /// field's own note.
-    pub(crate) fn is_graph(&self) -> bool {
-        self.graph
-    }
-
     /// Whether `id` sits at or under `ancestor` - the walk that keeps
     /// a new edge from closing a cycle.
-    pub(crate) fn hangs_under(&self, id: NodeId, ancestor: NodeId) -> bool {
+    fn hangs_under(&self, id: NodeId, ancestor: NodeId) -> bool {
         let mut at = Some(id);
         while let Some(node) = at {
             if node == ancestor {
@@ -466,39 +460,32 @@ impl Map {
     /// that its kind does not declare - recorded before the schema
     /// dropped it - in the order its own map keeps them, so nothing
     /// recorded goes unseen. Values as written, never what `Map::apply`
-    /// would accept today.
-    pub fn properties<'a>(&'a self, node: &'a Node) -> Vec<(&'a str, &'a str)> {
-        let mut out = Vec::new();
-        let mut declared: HashSet<&str> = HashSet::new();
-        if let Some(kind) = self.schema.node_kind(&node.kind) {
-            for (name, values) in &kind.properties {
-                declared.insert(name.as_str());
+    /// would accept today. A kind declares one to three properties, so
+    /// this walks them rather than building a set.
+    pub fn properties<'a>(&'a self, node: &'a Node) -> impl Iterator<Item = (&'a str, &'a str)> {
+        let kind = self.schema.node_kind(&node.kind);
+        let declared = kind.into_iter().flat_map(move |kind| {
+            kind.properties.iter().filter_map(move |(name, values)| {
                 match node.properties.get(name) {
-                    Some(value) => out.push((name.as_str(), value.as_str())),
-                    None => {
-                        if let Some(default) = values.first() {
-                            out.push((name.as_str(), default.as_str()));
-                        }
-                    }
+                    Some(value) => Some((name.as_str(), value.as_str())),
+                    None => values.first().map(|default| (name.as_str(), default.as_str())),
                 }
+            })
+        });
+        let undeclared = node.properties.iter().filter_map(move |(name, value)| {
+            match kind {
+                Some(kind) if kind.property(name).is_some() => None,
+                _ => Some((name.as_str(), value.as_str())),
             }
-        }
-        for (name, value) in &node.properties {
-            if !declared.contains(name.as_str()) {
-                out.push((name.as_str(), value.as_str()));
-            }
-        }
-        out
+        });
+        declared.chain(undeclared)
     }
 
     /// The value `node` carries for `property`, as `properties` gives
     /// it - written, or a closed list's default. `None` when neither
     /// the kind nor the node has anything to say about it.
     pub fn property<'a>(&'a self, node: &'a Node, property: &str) -> Option<&'a str> {
-        self.properties(node)
-            .into_iter()
-            .find(|(name, _)| *name == property)
-            .map(|(_, value)| value)
+        self.properties(node).find(|(name, _)| *name == property).map(|(_, value)| value)
     }
 
     /// The tail of a node's line, wherever one is printed: `: key:
