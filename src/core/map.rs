@@ -403,14 +403,14 @@ impl Map {
             .collect()
     }
 
-    /// Whether `id` sits at or under `ancestor` - the walk that keeps
-    /// a new edge from closing a cycle.
     /// Whether this map's edges are free to form any graph - see the
     /// field's own note.
     pub(crate) fn is_graph(&self) -> bool {
         self.graph
     }
 
+    /// Whether `id` sits at or under `ancestor` - the walk that keeps
+    /// a new edge from closing a cycle.
     pub(crate) fn hangs_under(&self, id: NodeId, ancestor: NodeId) -> bool {
         let mut at = Some(id);
         while let Some(node) = at {

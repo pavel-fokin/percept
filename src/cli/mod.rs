@@ -123,9 +123,9 @@ pub enum MapsCommand {
     /// one per edge, then one per `cites` line.
     Record(RecordArgs),
     /// Change a node already in a map - a rename, a property, or both.
-    /// A rename, or any property but `state`, is subject to the rank
-    /// rule a removal always has; `state` alone an agent may set on
-    /// anyone's node. Prints the node's id.
+    /// Every change is subject to the rank rule a removal has: a node
+    /// the user wrote, or last changed, takes no change from an agent.
+    /// Prints the node's id.
     ChangeNode(ChangeNodeArgs),
     /// One map's kinds, relations, and how to record to it, from its
     /// schema.
