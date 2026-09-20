@@ -43,54 +43,44 @@ pub enum MapError {
     /// does not already cite: nothing would land, and it would still
     /// stamp the node. Write-only.
     EmptyChange,
-    /// A new node of a kind that `requires` a property the caller did
-    /// not supply. A rule for new writes only, so a node recorded
-    /// before its kind gained the requirement still folds; checked by
-    /// `Map::apply` on a mutation, never by `replay` on a stored
-    /// payload.
+    /// A new node of a kind whose closed list - the first property with
+    /// a non-empty list of values - the caller did not supply. A rule
+    /// for new writes only, so a node recorded before its kind declared
+    /// one still folds; checked by `Map::apply` on `AddNode`, never by
+    /// `replay` on a stored payload.
     MissingProperty {
         kind: String,
-        name: String,
         property: String,
-        gloss: String,
+        values: Vec<String>,
     },
     DuplicateNode {
         kind: String,
         name: String,
     },
-    /// A `state` property whose value is not among the values its
-    /// node's kind declares - including a kind that declares none at
-    /// all, whose list is then empty. Write-only: checked by
-    /// `Map::apply` on `AddNode` and `ChangeNode`, never by `replay`.
-    UnknownState {
+    /// A property whose value is not among the values its kind declares
+    /// for it. Write-only: checked by `Map::apply` on `AddNode` and
+    /// `ChangeNode`, never by `replay`.
+    UnknownValue {
         kind: String,
+        property: String,
         value: String,
-        states: Vec<String>,
+        values: Vec<String>,
     },
-    /// A new node of a kind that declares states, sent without one.
-    /// Write-only, like `UnknownState`.
-    MissingState {
-        kind: String,
-        states: Vec<String>,
-    },
-    /// A property outside `requires`, `properties`, and `state` when
-    /// the kind declares states - the write path's schema for what a
-    /// kind may carry. Write-only, like `UnknownState`: checked by
-    /// `Map::apply` on `AddNode` and `ChangeNode`, never by `replay`,
-    /// so a node recorded before its kind's properties were declared
-    /// still folds.
+    /// A property outside the ones the kind declares. Write-only:
+    /// checked by `Map::apply` on `AddNode` and `ChangeNode`, never by
+    /// `replay`, so a node recorded before its kind's properties were
+    /// declared still folds.
     UnknownProperty {
         kind: String,
         property: String,
-        /// `requires`, then `properties`, then `state` when the kind
-        /// declares states - in that order, the union `apply` checks
-        /// against.
+        /// The kind's declared property names, in declared order - the
+        /// list `apply` checks against.
         allowed: Vec<String>,
     },
-    /// A rename, a property other than `state`, or a removal that W6's
-    /// rank rule refuses: the actor neither owns nor outranks the
-    /// writer, or is outranked by whoever touched it since.
-    /// Write-only: `state` and a new edge are any actor's.
+    /// A rename, a property change, or a removal that W6's rank rule
+    /// refuses: the actor neither owns nor outranks the writer, or is
+    /// outranked by whoever touched it since. Write-only: a new edge is
+    /// any actor's.
     NotYours {
         node: String,
         owner: Actor,
@@ -174,23 +164,13 @@ impl fmt::Display for MapError {
                 f,
                 "a change must name a rename, a property, or a source the node does not already cite"
             ),
-            Self::MissingProperty {
-                kind,
-                name,
-                property,
-                gloss,
-            } => {
-                write!(f, "{kind} {name:?} lacks its `{property}` property, which every {kind} carries")?;
-                if !gloss.is_empty() {
-                    write!(f, ": {gloss}")?;
-                }
-                Ok(())
-            }
+            Self::MissingProperty { kind, property, values } => write!(
+                f,
+                "{kind} needs a `{property}`; {property} is {}",
+                values.join(", ")
+            ),
             Self::DuplicateNode { kind, name } => {
                 write!(f, "{kind} {name:?} is already in the map")
-            }
-            Self::MissingState { kind, states } => {
-                write!(f, "{kind} needs a state; states are {}", states.join(", "))
             }
             Self::UnknownProperty {
                 kind,
@@ -203,14 +183,15 @@ impl fmt::Display for MapError {
                     write!(f, "{kind} has no property {property:?}; properties are {}", allowed.join(", "))
                 }
             }
-            Self::UnknownState { kind, value, states } => write!(
+            Self::UnknownValue {
+                kind,
+                property,
+                value,
+                values,
+            } => write!(
                 f,
-                "{kind} has no state {value:?}; states are {}",
-                if states.is_empty() {
-                    "none - this kind carries no state".to_string()
-                } else {
-                    states.join(", ")
-                }
+                "{kind} has no `{property}` {value:?}; {property} is {}",
+                values.join(", ")
             ),
             Self::NotYours {
                 node,
@@ -218,8 +199,8 @@ impl fmt::Display for MapError {
                 touched_by,
             } => write!(
                 f,
-                "{node} was written by {} and touched by {}; you may still set a node's state, \
-                 or add a node and an edge beside it",
+                "{node} was written by {} and touched by {}; you may still add a node and an \
+                 edge beside it",
                 owner.name(),
                 touched_by.name()
             ),

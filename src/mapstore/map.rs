@@ -336,13 +336,21 @@ pub fn encode_map(map: &Map) -> String {
     .expect("MapLine always serializes")
 }
 
+/// One property a node kind declares: its name and the values it may
+/// hold, empty for free text.
+#[derive(Serialize)]
+struct PropertyLine<'a> {
+    name: &'a str,
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    values: &'a [String],
+}
+
 #[derive(Serialize)]
 struct KindLine<'a> {
     name: &'a str,
-    #[serde(skip_serializing_if = "str::is_empty")]
-    gloss: &'a str,
-    #[serde(skip_serializing_if = "<[String]>::is_empty")]
-    requires: &'a [String],
+    /// Empty for an edge kind, which declares no properties.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    properties: Vec<PropertyLine<'a>>,
 }
 
 impl<'a> KindLine<'a> {
@@ -351,22 +359,19 @@ impl<'a> KindLine<'a> {
             .iter()
             .map(|kind| Self {
                 name: &kind.kind,
-                gloss: &kind.gloss,
-                requires: &kind.requires,
+                properties: kind
+                    .properties
+                    .iter()
+                    .map(|(name, values)| PropertyLine { name, values })
+                    .collect(),
             })
             .collect()
     }
 
-    /// An edge kind carries no `requires`, so every line here reports
-    /// none.
     fn of_edges(kinds: &'a [crate::core::EdgeKind]) -> Vec<Self> {
         kinds
             .iter()
-            .map(|kind| Self {
-                name: &kind.kind,
-                gloss: &kind.gloss,
-                requires: &[],
-            })
+            .map(|kind| Self { name: &kind.kind, properties: Vec::new() })
             .collect()
     }
 }
@@ -379,10 +384,10 @@ struct SchemaLine<'a> {
     edge_kinds: Vec<KindLine<'a>>,
 }
 
-/// One line describing a map's kinds, each with the gloss it carries on
-/// its `Schema` - what `read_map` returns before the fragment, so the
-/// model meets `package` or `option` with its meaning attached and does
-/// not guess a selector from a name alone.
+/// One line describing a map's kinds, each with the properties it
+/// carries on its `Schema` - what `read_map` returns before the
+/// fragment, so the model meets `package` or `option` with the
+/// properties it may set already in view.
 pub fn encode_schema(schema: &crate::core::Schema) -> String {
     serde_json::to_string(&SchemaLine {
         schema: &schema.name,

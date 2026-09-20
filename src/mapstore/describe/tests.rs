@@ -18,34 +18,29 @@ fn the_record_grammar_names_the_commands_that_remove() {
 }
 
 #[test]
-fn a_kind_with_requires_and_states_lists_both() {
+fn a_kind_with_free_properties_and_a_closed_list_lists_both() {
     let text = describe(&chores());
     let line = text
         .lines()
-        .find(|line| line.contains("requires"))
-        .expect("a line with `requires`");
-    assert!(line.contains("requires why"));
+        .find(|line| line.contains("why"))
+        .expect("a line with `why`");
+    assert!(line.contains("why"));
     assert!(line.contains("state open | done | dropped"));
 }
 
 #[test]
-fn a_relation_carries_its_edge_kinds_gloss() {
+fn a_relation_line_names_its_ends() {
     let schema = crate::core::Schema {
         name: "court".to_string(),
         purpose: "test fixture".to_string(),
-        node_kinds: vec![crate::core::NodeKind::new("topic", ""), crate::core::NodeKind::new("verdict", "")],
-        edge_kinds: vec![crate::core::EdgeKind::new(
-            "settles",
-            "from a verdict to the topic it closes",
-            &["verdict"],
-            &["topic"],
-        )],
+        node_kinds: vec![crate::core::NodeKind::new("topic"), crate::core::NodeKind::new("verdict")],
+        edge_kinds: vec![crate::core::EdgeKind::new("settles", &["verdict"], &["topic"])],
         rules: crate::core::Rules::default(),
     };
 
     let text = describe(&schema);
 
-    assert!(text.contains("verdict --settles--> topic   from a verdict to the topic it closes\n"), "{text}");
+    assert!(text.contains("verdict --settles--> topic\n"), "{text}");
 }
 
 #[test]
@@ -74,9 +69,12 @@ fn the_add_example_only_edges_to_kinds_already_listed() {
 }
 
 #[test]
-fn the_add_example_sets_the_first_state_on_a_kind_that_declares_states() {
+fn the_add_example_sets_the_first_value_on_a_kind_with_a_closed_list() {
     let text = describe(&chores());
-    assert!(text.contains("  chore \"...\"\n    why \"...\"\n    state \"open\"\n"), "{text}");
+    assert!(
+        text.contains("  chore \"...\"\n    why \"...\"\n    outcome \"...\"\n    state \"open\"\n"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -89,7 +87,7 @@ fn the_grammar_is_indented_under_the_record_command() {
 fn the_add_example_cites_a_file_under_its_last_node() {
     let text = describe(&debates());
     assert!(
-        text.contains("  verdict \"...\"\n    doubts topic\n    cites src/path.rs:10-20\n"),
+        text.contains("  verdict \"...\"\n    why \"...\"\n    doubts topic\n    cites src/path.rs:10-20\n"),
         "{text}"
     );
 }

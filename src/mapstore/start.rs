@@ -188,24 +188,25 @@ fn pad_rows(rows: &[(String, String)]) -> Vec<String> {
         .collect()
 }
 
-/// `<n> <state>` for every declared state of every node kind of
-/// `map`, in declared order, skipping states no node is in -
-/// `1 open   2 done` for a kind with those states. Every state is
-/// counted, since a schema lists them as a set and no position means
-/// "initial".
+/// `<n> <value>` for every value of every node kind's closed list, in
+/// declared order, skipping values no node is in - `1 open   2 done`
+/// for a kind whose closed list is `state` with those values. Every
+/// value is counted, since a schema lists them as a set and no
+/// position means "initial".
 fn state_counts(map: &Map) -> Vec<String> {
     let schema = map.schema();
     schema
         .node_kinds
         .iter()
         .flat_map(|kind| {
-            kind.states.iter().filter_map(|state| {
+            let (property, values) = kind.closed_list().unwrap_or(("", &[]));
+            values.iter().filter_map(move |value| {
                 let count = map
                     .nodes()
                     .iter()
-                    .filter(|node| node.kind == kind.kind && node.properties.get("state") == Some(state))
+                    .filter(|node| node.kind == kind.kind && node.properties.get(property) == Some(value))
                     .count();
-                (count > 0).then(|| format!("{count} {state}"))
+                (count > 0).then(|| format!("{count} {value}"))
             })
         })
         .collect()

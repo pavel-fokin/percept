@@ -281,9 +281,8 @@ fn add_topic(name: &str) -> Mutation {
     add_node("topic", name)
 }
 
-/// A `claim` node with the `why` its kind requires - `add_node`
-/// leaves `properties` empty, which `Map::apply` now refuses for a
-/// kind that requires one.
+/// A `claim` node with a `why` set, though its kind, carrying only
+/// free-text properties, requires none.
 fn add_claim(name: &str) -> Mutation {
     Mutation::AddNode {
         kind: "claim".to_string(),
@@ -302,8 +301,8 @@ fn add_edge(kind: &str, from: NodeRef, to: NodeRef) -> Mutation {
     }
 }
 
-/// A `chore` node with the `why` its kind requires and the `state`
-/// `Map::apply` now requires on add for any kind that declares one.
+/// A `chore` node with a `why` set and the `state` `Map::apply`
+/// requires on add for any kind whose closed list is `state`.
 fn add_chore(name: &str) -> Mutation {
     Mutation::AddNode {
         kind: "chore".to_string(),
@@ -437,8 +436,8 @@ fn an_unknown_kind_fails_the_fold() {
         }
         .to_string(),
         "no node kind \"goal\" in map \"debates\"; kinds are `topic`, `claim` \
-         (requires `why`, may carry `summary`), `fact` (may carry `summary`, `when`), \
-         `verdict` (may carry `why`)"
+         (carries `why`, `summary`), `fact` (carries `summary`, `when`), \
+         `verdict` (carries `why`)"
     );
 }
 
@@ -570,27 +569,6 @@ fn apply_stamps_the_node_with_the_actor_given() {
 }
 
 #[test]
-fn apply_refuses_a_claim_without_a_why() {
-    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
-
-    let err = map
-        .apply(add_node("claim", "Rust"), Actor::Human(human()))
-        .err()
-        .unwrap();
-
-    assert_eq!(
-        err,
-        MapError::MissingProperty {
-            kind: "claim".to_string(),
-            name: "Rust".to_string(),
-            property: "why".to_string(),
-            gloss: debates().node_kind("claim").unwrap().gloss.clone(),
-        }
-    );
-    assert!(map.nodes().is_empty());
-}
-
-#[test]
 fn apply_refuses_a_mutation_and_leaves_the_map_as_it_was() {
     let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     map.apply(add_claim("Rust"), Actor::Human(human())).unwrap();
@@ -707,9 +685,9 @@ fn a_rename_to_a_taken_name_is_refused() {
 }
 
 #[test]
-fn a_state_off_the_list_is_refused_on_add_and_on_change() {
+fn a_value_off_the_closed_list_is_refused_on_add_and_on_change() {
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
-    let states = vec!["open".to_string(), "done".to_string(), "dropped".to_string()];
+    let values = vec!["open".to_string(), "done".to_string(), "dropped".to_string()];
 
     let on_add = map
         .apply(
@@ -728,10 +706,11 @@ fn a_state_off_the_list_is_refused_on_add_and_on_change() {
         .unwrap();
     assert_eq!(
         on_add,
-        MapError::UnknownState {
+        MapError::UnknownValue {
             kind: "chore".to_string(),
+            property: "state".to_string(),
             value: "urgent".to_string(),
-            states: states.clone(),
+            values: values.clone(),
         }
     );
 
@@ -750,40 +729,11 @@ fn a_state_off_the_list_is_refused_on_add_and_on_change() {
         .unwrap();
     assert_eq!(
         on_change,
-        MapError::UnknownState {
+        MapError::UnknownValue {
             kind: "chore".to_string(),
+            property: "state".to_string(),
             value: "urgent".to_string(),
-            states,
-        }
-    );
-}
-
-#[test]
-fn a_state_on_a_kind_with_no_states_is_refused() {
-    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
-
-    let err = map
-        .apply(
-            Mutation::AddNode {
-                kind: "claim".to_string(),
-                name: "Rust".to_string(),
-                properties: BTreeMap::from([
-                    ("why".to_string(), "because".to_string()),
-                    ("state".to_string(), "open".to_string()),
-                ]),
-                sources: Vec::new(),
-            },
-            Actor::Human(human()),
-        )
-        .err()
-        .unwrap();
-
-    assert_eq!(
-        err,
-        MapError::UnknownState {
-            kind: "claim".to_string(),
-            value: "open".to_string(),
-            states: Vec::new(),
+            values,
         }
     );
 }
@@ -873,30 +823,6 @@ fn a_required_property_and_a_declared_one_are_accepted() {
 }
 
 #[test]
-fn a_state_on_a_kind_without_states_is_unknown_state_not_unknown_property() {
-    let mut debates_map = Map::empty(crate::core::testing::map_id("debates"), debates());
-    let err = debates_map
-        .apply(
-            Mutation::AddNode {
-                kind: "claim".to_string(),
-                name: "Rust".to_string(),
-                properties: BTreeMap::from([
-                    ("why".to_string(), "because".to_string()),
-                    ("state".to_string(), "open".to_string()),
-                ]),
-                sources: Vec::new(),
-            },
-            Actor::Human(human()),
-        )
-        .err()
-        .unwrap();
-
-    // A kind with no states refuses `state` as `UnknownState`, never
-    // `UnknownProperty` - the two rules stay distinct.
-    assert!(matches!(err, MapError::UnknownState { .. }), "{err}");
-}
-
-#[test]
 fn a_stored_node_carrying_an_undeclared_property_still_folds() {
     let event = node_added_with_properties(
         "debates",
@@ -954,24 +880,25 @@ fn agent_removing_the_humans_node_is_refused() {
 }
 
 #[test]
-fn agent_setting_state_on_the_humans_node_succeeds() {
+fn agent_setting_state_on_the_humans_node_is_refused() {
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
     map.apply(add_chore("cancel a turn"), Actor::Human(human()))
         .unwrap();
 
-    map.apply(
-        change_node(
-            "chore",
-            "cancel a turn",
-            None,
-            BTreeMap::from([("state".to_string(), "done".to_string())]),
-        ),
-        Actor::Agent,
-    )
-    .unwrap();
+    let err = map
+        .apply(
+            change_node(
+                "chore",
+                "cancel a turn",
+                None,
+                BTreeMap::from([("state".to_string(), "done".to_string())]),
+            ),
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
 
-    let node = map.find("chore", "cancel a turn").unwrap();
-    assert_eq!(node.properties.get("state").unwrap(), "done");
+    assert!(matches!(err, MapError::NotYours { .. }), "{err}");
 }
 
 #[test]
@@ -1095,7 +1022,7 @@ fn after_the_humans_why_the_agent_may_not_rename_or_remove_the_node() {
 }
 
 #[test]
-fn after_the_humans_why_the_agent_may_still_set_the_nodes_state() {
+fn after_the_humans_why_the_agent_may_not_set_the_nodes_state_either() {
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
     map.apply(add_chore("cancel a turn"), Actor::Agent).unwrap();
     map.apply(
@@ -1109,19 +1036,41 @@ fn after_the_humans_why_the_agent_may_still_set_the_nodes_state() {
     )
     .unwrap();
 
-    map.apply(
-        change_node(
-            "chore",
-            "cancel a turn",
-            None,
-            BTreeMap::from([("state".to_string(), "done".to_string())]),
-        ),
-        Actor::Agent,
-    )
-    .unwrap();
+    let err = map
+        .apply(
+            change_node(
+                "chore",
+                "cancel a turn",
+                None,
+                BTreeMap::from([("state".to_string(), "done".to_string())]),
+            ),
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
 
-    let node = map.find("chore", "cancel a turn").unwrap();
-    assert_eq!(node.properties.get("state").unwrap(), "done");
+    assert!(matches!(err, MapError::NotYours { .. }), "{err}");
+}
+
+#[test]
+fn an_agent_may_not_cite_a_source_onto_a_node_the_human_wrote() {
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
+    map.apply(add_node("verdict", "Rust"), Actor::Human(human())).unwrap();
+
+    let err = map
+        .apply(
+            Mutation::ChangeNode {
+                node: node_ref("verdict", "Rust"),
+                name: None,
+                properties: BTreeMap::new(),
+                sources: vec![EventId::new()],
+            },
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
+
+    assert!(matches!(err, MapError::NotYours { .. }), "{err}");
 }
 
 #[test]
@@ -1223,7 +1172,7 @@ fn an_added_nodes_only_change_is_its_addition() {
 }
 
 #[test]
-fn adding_a_node_of_a_kind_with_states_and_no_state_is_refused() {
+fn adding_a_node_of_a_kind_with_a_closed_list_and_no_value_is_refused() {
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
 
     let err = map
@@ -1241,12 +1190,13 @@ fn adding_a_node_of_a_kind_with_states_and_no_state_is_refused() {
 
     assert_eq!(
         err,
-        MapError::MissingState {
+        MapError::MissingProperty {
             kind: "chore".to_string(),
-            states: vec!["open".to_string(), "done".to_string(), "dropped".to_string()],
+            property: "state".to_string(),
+            values: vec!["open".to_string(), "done".to_string(), "dropped".to_string()],
         }
     );
-    assert_eq!(err.to_string(), "chore needs a state; states are open, done, dropped");
+    assert_eq!(err.to_string(), "chore needs a `state`; state is open, done, dropped");
 }
 
 #[test]
@@ -1537,8 +1487,8 @@ fn a_schema_is_found_by_name() {
 }
 
 #[test]
-fn a_topic_requires_nothing() {
-    assert!(debates().node_kind("topic").unwrap().requires.is_empty());
+fn a_topic_declares_no_properties() {
+    assert!(debates().node_kind("topic").unwrap().properties.is_empty());
 }
 
 #[test]
@@ -1893,45 +1843,6 @@ fn fold_keeps_the_seq_the_event_recorded_rather_than_the_nodes_position() {
     let b = map.find("verdict", "B").unwrap().id;
     assert_eq!(map.short_id(a), Some("v5".to_string()));
     assert_eq!(map.short_id(b), Some("v9".to_string()));
-}
-
-#[test]
-fn a_state_set_from_below_does_not_lift_the_lock_the_humans_change_put_on_a_node() {
-    let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
-    map.apply(add_chore("cancel a turn"), Actor::Agent).unwrap();
-    map.apply(
-        change_node(
-            "chore",
-            "cancel a turn",
-            None,
-            BTreeMap::from([("why".to_string(), "wrong".to_string())]),
-        ),
-        Actor::Human(human()),
-    )
-    .unwrap();
-
-    map.apply(
-        change_node(
-            "chore",
-            "cancel a turn",
-            None,
-            BTreeMap::from([("state".to_string(), "done".to_string())]),
-        ),
-        Actor::Agent,
-    )
-    .unwrap();
-
-    let node = map.find("chore", "cancel a turn").unwrap();
-    assert_eq!(node.changed().actor, Actor::Agent);
-    assert!(matches!(node.touched_by(), Actor::Human(_)), "{:?}", node.touched_by());
-    let renamed = map
-        .apply(
-            change_node("chore", "cancel a turn", Some("renamed"), BTreeMap::new()),
-            Actor::Agent,
-        )
-        .err()
-        .unwrap();
-    assert!(matches!(renamed, MapError::NotYours { .. }), "{renamed}");
 }
 
 #[test]

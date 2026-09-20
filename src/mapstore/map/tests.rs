@@ -14,31 +14,7 @@ fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
 }
 
 #[test]
-fn a_claim_without_a_why_is_refused_as_a_new_write() {
-    let log = FakeLog::default();
-    let source = source("cli");
-
-    let err = commit(
-        &log,
-        &schemas(),
-        "debates",
-        &source,
-        &[],
-        Actor::Human(human()),
-        None,
-        add_node("claim", "SQLite"),
-    )
-    .err()
-    .unwrap()
-    .to_string();
-
-    assert!(err.contains("lacks its `why` property"), "{err}");
-    assert!(err.contains("saying why"), "{err}");
-    assert!(log.load().unwrap().is_empty());
-}
-
-#[test]
-fn a_chore_without_a_why_is_refused_as_a_new_write() {
+fn a_chore_without_a_state_is_refused_as_a_new_write() {
     let log = FakeLog::default();
     let source = source("cli");
 
@@ -56,8 +32,8 @@ fn a_chore_without_a_why_is_refused_as_a_new_write() {
     .unwrap()
     .to_string();
 
-    assert!(err.contains("lacks its `why` property"), "{err}");
-    assert!(err.contains("why it matters"), "{err}");
+    assert!(err.contains("needs a `state`"), "{err}");
+    assert!(log.load().unwrap().is_empty());
 }
 
 #[test]

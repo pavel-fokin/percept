@@ -314,7 +314,7 @@ fn a_schema_with_no_edges_gives_every_node_its_own_section() {
     let schema = crate::core::Schema {
         name: "glossary".to_string(),
         purpose: "test fixture".to_string(),
-        node_kinds: vec![crate::core::NodeKind::new("term", "a word")],
+        node_kinds: vec![crate::core::NodeKind::new("term")],
         edge_kinds: Vec::new(),
         rules: crate::core::Rules::default(),
     };
@@ -346,26 +346,17 @@ fn the_catalogue_gives_each_map_a_section_listing_its_kinds() {
 }
 
 #[test]
-fn a_kind_with_no_gloss_renders_without_a_trailing_dash() {
+fn the_catalogue_lists_a_kinds_one_carried_property() {
     let text = catalogue(&[Map::empty(crate::core::testing::map_id("debates"), debates())]);
 
-    assert!(
-        text.contains("\n- `verdict` (may carry `why`)\n"),
-        "{text}"
-    );
+    assert!(text.contains("\n- `verdict` (carries `why`)\n"), "{text}");
 }
 
 #[test]
-fn the_catalogue_names_a_kinds_required_properties() {
+fn the_catalogue_names_a_kinds_carried_properties() {
     let text = catalogue(&[Map::empty(crate::core::testing::map_id("debates"), debates())]);
 
-    assert!(
-        text.contains(
-            "- `claim` (requires `why`, may carry `summary`) - a side taken on a topic, saying \
-             why in its `why` property"
-        ),
-        "{text}"
-    );
+    assert!(text.contains("- `claim` (carries `why`, `summary`)"), "{text}");
 }
 
 #[test]
@@ -376,10 +367,9 @@ fn the_catalogue_of_no_maps_prints_the_no_schemas_hint() {
 }
 
 #[test]
-fn the_catalogue_glosses_a_package_kind_as_an_external_crate() {
+fn the_catalogue_lists_a_package_kind_with_no_properties() {
     let text = catalogue(&[Map::empty(crate::core::testing::map_id("files"), files())]);
 
-    assert!(text.contains("- `package` - an external crate a file imports"));
-    assert!(text.contains("never one of this project's own modules"));
+    assert!(text.contains("- `package`\n"));
     assert!(text.contains("\nExample: nothing recorded here yet.\n"));
 }

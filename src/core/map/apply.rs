@@ -37,11 +37,11 @@ fn same_actor(a: Actor, b: Actor) -> bool {
     )
 }
 
-/// W6's rank rule: whether `actor` may rename, change a property beyond
-/// `state`, or remove something `owner` wrote and `touched_by` is the
-/// highest rank to have touched. `actor` must own it or outrank
-/// `owner`, and must not be outranked by `touched_by` - a change from
-/// above locks what it touched against everyone below that rank.
+/// W6's rank rule: whether `actor` may change or remove something
+/// `owner` wrote and `touched_by` is the highest rank to have touched.
+/// `actor` must own it or outrank `owner`, and must not be outranked
+/// by `touched_by` - a change from above locks what it touched against
+/// everyone below that rank.
 fn may(actor: Actor, owner: Actor, touched_by: Actor) -> bool {
     (same_actor(actor, owner) || outranks(actor, owner)) && !outranks(touched_by, actor)
 }
@@ -66,25 +66,15 @@ impl Map {
                 sources,
             } => {
                 if let Some(node_kind) = self.schema.node_kind(&kind) {
-                    if let Some(property) = node_kind
-                        .requires
-                        .iter()
-                        .find(|property| !properties.contains_key(*property))
-                    {
-                        return Err(MapError::MissingProperty {
-                            kind: kind.clone(),
-                            name: name.clone(),
-                            property: property.clone(),
-                            gloss: node_kind.gloss.clone(),
-                        });
+                    if let Some((property, values)) = node_kind.closed_list() {
+                        if !properties.contains_key(property) {
+                            return Err(MapError::MissingProperty {
+                                kind: kind.clone(),
+                                property: property.to_string(),
+                                values: values.to_vec(),
+                            });
+                        }
                     }
-                    if !node_kind.states.is_empty() && !properties.contains_key("state") {
-                        return Err(MapError::MissingState {
-                            kind: kind.clone(),
-                            states: node_kind.states.clone(),
-                        });
-                    }
-                    check_state(node_kind, &properties)?;
                     check_properties(node_kind, &properties)?;
                 }
                 Payload::NodeAdded {
@@ -112,13 +102,9 @@ impl Map {
                     return Err(MapError::EmptyChange);
                 }
                 if let Some(node_kind) = self.schema.node_kind(&existing.kind) {
-                    check_state(node_kind, &properties)?;
                     check_properties(node_kind, &properties)?;
                 }
-                let needs_rank = name.is_some() || properties.keys().any(|key| key != "state");
-                if needs_rank {
-                    self.check_may_of(actor, self.label(node_id), existing)?;
-                }
+                self.check_may_of(actor, self.label(node_id), existing)?;
                 Payload::NodeChanged {
                     map,
                     node: node_id,
@@ -505,33 +491,26 @@ impl Map {
     }
 }
 
-/// Refuses a `state` property in `properties` whose value `kind` does
-/// not list - including a kind with no `states` at all, whose list is
-/// then empty. Shared by `Mutation::AddNode` and `Mutation::ChangeNode`
-/// in `Map::apply`.
-fn check_state(kind: &NodeKind, properties: &BTreeMap<String, String>) -> Result<(), MapError> {
-    if let Some(value) = properties.get("state") {
-        if !kind.states.iter().any(|state| state == value) {
-            return Err(MapError::UnknownState {
+/// Refuses a property in `properties` that `kind` does not declare, or
+/// one it declares with a closed list whose value is not on it. Shared
+/// by `Mutation::AddNode` and `Mutation::ChangeNode` in `Map::apply`.
+fn check_properties(kind: &NodeKind, properties: &BTreeMap<String, String>) -> Result<(), MapError> {
+    for (key, value) in properties {
+        let Some((_, values)) = kind.property(key) else {
+            return Err(MapError::UnknownProperty {
                 kind: kind.kind.clone(),
+                property: key.clone(),
+                allowed: kind.allowed_properties().map(str::to_string).collect(),
+            });
+        };
+        if !values.is_empty() && !values.iter().any(|allowed| allowed == value) {
+            return Err(MapError::UnknownValue {
+                kind: kind.kind.clone(),
+                property: key.clone(),
                 value: value.clone(),
-                states: kind.states.clone(),
+                values: values.clone(),
             });
         }
     }
     Ok(())
-}
-
-/// Refuses a property in `properties` that `kind` does not allow.
-/// Runs after `check_state`, which has already refused `state` on a
-/// kind with none, so a `state` reaching here is allowed.
-fn check_properties(kind: &NodeKind, properties: &BTreeMap<String, String>) -> Result<(), MapError> {
-    match properties.keys().find(|key| !kind.allows(key)) {
-        Some(key) => Err(MapError::UnknownProperty {
-            kind: kind.kind.clone(),
-            property: key.clone(),
-            allowed: kind.allowed_properties().map(str::to_string).collect(),
-        }),
-        None => Ok(()),
-    }
 }

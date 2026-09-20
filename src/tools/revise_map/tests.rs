@@ -137,19 +137,19 @@ fn a_node_with_no_sources_is_refused_and_the_error_names_the_rule() {
 }
 
 #[test]
-fn a_claim_with_no_why_is_refused() {
-    let cited = Event::message_received(Actor::Human(human()), "Rust".to_string(), source("tui"), None);
+fn a_chore_with_no_state_is_refused() {
+    let cited = Event::message_received(Actor::Human(human()), "cancel a turn".to_string(), source("tui"), None);
     let cited_id = cited.id();
     let revise = tool(vec![cited]);
 
     let args = format!(
-        r#"{{"map":"debates","changes":[{{"op":"add_node","kind":"claim","name":"Rust","sources":["{}"]}}]}}"#,
+        r#"{{"map":"chores","changes":[{{"op":"add_node","kind":"chore","name":"cancel a turn","sources":["{}"]}}]}}"#,
         cited_id.as_uuid()
     );
 
     let err = revise.run(&args).err().unwrap();
 
-    assert!(err.to_string().contains("lacks its `why` property"), "{err}");
+    assert!(err.to_string().contains("needs a `state`"), "{err}");
 }
 
 #[test]

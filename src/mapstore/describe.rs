@@ -35,7 +35,7 @@ pub fn describe(schema: &Schema) -> String {
     out.push_str("\nexample\n");
     push_example(&mut out, schema);
 
-    if let Some(kind) = schema.node_kinds.iter().find(|kind| !kind.states.is_empty()) {
+    if let Some(kind) = schema.node_kinds.iter().find(|kind| kind.closed_list().is_some()) {
         out.push_str("\nexample: change\n");
         push_change_example(&mut out, kind);
     }
@@ -43,11 +43,10 @@ pub fn describe(schema: &Schema) -> String {
     out
 }
 
-/// One aligned line per node kind: its name, its gloss, and - when it
-/// carries either - `requires ...` and `state ... | ...`, joined by ` ·
-/// `. Names are padded to the widest kind's, glosses to the widest
-/// gloss among the kinds that carry a suffix, so the suffix column
-/// lines up.
+/// One aligned line per node kind: its name, then - when it declares
+/// any - its properties, joined by ` · `, each a closed list's values
+/// after its name. Names are padded to the widest kind's, so the
+/// suffix column lines up.
 fn push_node_kinds(out: &mut String, schema: &Schema) {
     let name_width = schema
         .node_kinds
@@ -55,61 +54,33 @@ fn push_node_kinds(out: &mut String, schema: &Schema) {
         .map(|kind| kind.kind.chars().count())
         .max()
         .unwrap_or(0);
-    let suffixes: Vec<String> = schema.node_kinds.iter().map(kind_suffix).collect();
-    let gloss_width = schema
-        .node_kinds
-        .iter()
-        .zip(&suffixes)
-        .filter(|(_, suffix)| !suffix.is_empty())
-        .map(|(kind, _)| kind.gloss.chars().count())
-        .max()
-        .unwrap_or(0);
-
-    for (kind, suffix) in schema.node_kinds.iter().zip(&suffixes) {
-        let line = if suffix.is_empty() {
-            format!("  {:<name_width$}   {}", kind.kind, kind.gloss)
-        } else {
-            format!(
-                "  {:<name_width$}   {:<gloss_width$}   {}",
-                kind.kind, kind.gloss, suffix
-            )
-        };
+    for kind in &schema.node_kinds {
+        let line = format!("  {:<name_width$}   {}", kind.kind, kind_suffix(kind));
         let _ = writeln!(out, "{}", line.trim_end());
     }
 }
 
-/// One aligned line per edge kind, `<from> --<kind>--> <to>`, its
-/// gloss after it when it has one, padded to the widest relation so
-/// the glosses line up.
+/// One line per edge kind, `<from> --<kind>--> <to>`.
 fn push_edge_kinds(out: &mut String, schema: &Schema) {
-    let relations: Vec<String> = schema
-        .edge_kinds
-        .iter()
-        .map(|edge| format!("{} --{}--> {}", edge.from.join(" | "), edge.kind, edge.to.join(" | ")))
-        .collect();
-    let width = relations.iter().map(|line| line.chars().count()).max().unwrap_or(0);
-    for (edge, relation) in schema.edge_kinds.iter().zip(relations) {
-        let _ = if edge.gloss.is_empty() {
-            writeln!(out, "  {relation}")
-        } else {
-            writeln!(out, "  {relation:<width$}   {}", edge.gloss)
-        };
+    for edge in &schema.edge_kinds {
+        let _ = writeln!(out, "  {} --{}--> {}", edge.from.join(" | "), edge.kind, edge.to.join(" | "));
     }
 }
 
-/// `requires <prop> <prop>`, ` · state <a> | <b>`, both, or neither.
+/// Every property a node kind declares, each `<name>` or `<name> <a> |
+/// <b>` for a closed list, joined by ` · `.
 fn kind_suffix(kind: &NodeKind) -> String {
-    let mut suffix = String::new();
-    if !kind.requires.is_empty() {
-        let _ = write!(suffix, "requires {}", kind.requires.join(" "));
-    }
-    if !kind.states.is_empty() {
-        if !suffix.is_empty() {
-            suffix.push_str(" · ");
-        }
-        let _ = write!(suffix, "state {}", kind.states.join(" | "));
-    }
-    suffix
+    kind.properties
+        .iter()
+        .map(|(name, values)| {
+            if values.is_empty() {
+                name.clone()
+            } else {
+                format!("{name} {}", values.join(" | "))
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" \u{b7} ")
 }
 
 /// Every moment's rules, one line per entry: the moment name before its
@@ -154,8 +125,8 @@ const GRAMMAR: &str = "
 ";
 
 /// One node per node kind, in schema order, its name always `"..."`,
-/// each required property under it as `<prop> "..."`, its first
-/// declared state when it has any, and one indented edge line per kind
+/// each declared property under it as `<prop> "..."` - a closed list's
+/// first value in place of `...` - and one indented edge line per kind
 /// already listed above it that an edge from this kind may reach - the
 /// first such edge kind, so a node is not shown both supporting and
 /// contradicting the same neighbour. The last kind carries the `cites`
@@ -167,11 +138,9 @@ fn push_example(out: &mut String, schema: &Schema) {
     let last = schema.node_kinds.len().saturating_sub(1);
     for (index, kind) in schema.node_kinds.iter().enumerate() {
         let _ = writeln!(out, "  {} \"...\"", kind.kind);
-        for property in &kind.requires {
-            let _ = writeln!(out, "    {property} \"...\"");
-        }
-        if let Some(state) = kind.states.first() {
-            let _ = writeln!(out, "    state \"{state}\"");
+        for (property, values) in &kind.properties {
+            let value = values.first().map_or("...", String::as_str);
+            let _ = writeln!(out, "    {property} \"{value}\"");
         }
         let mut reached: Vec<&str> = Vec::new();
         for edge in &schema.edge_kinds {
@@ -194,12 +163,14 @@ fn push_example(out: &mut String, schema: &Schema) {
     }
 }
 
-/// `kind`'s short id at its first minted number, its `state` set to its
-/// second declared value, or its first when it has only one.
+/// `kind`'s short id at its first minted number, its closed-list
+/// property set to its second declared value, or its first when it has
+/// only one.
 fn push_change_example(out: &mut String, kind: &NodeKind) {
-    let state = kind.states.get(1).unwrap_or(&kind.states[0]);
+    let (property, values) = kind.closed_list().expect("caller found a kind with a closed list");
+    let value = values.get(1).unwrap_or(&values[0]);
     let _ = writeln!(out, "  {}1", kind.prefix);
-    let _ = writeln!(out, "    state \"{state}\"");
+    let _ = writeln!(out, "    {property} \"{value}\"");
 }
 
 #[cfg(test)]

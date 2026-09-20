@@ -4,7 +4,7 @@
 
 use std::fmt::Write as _;
 
-use crate::core::{Actor, Map, Node, Written};
+use crate::core::{Actor, EdgeKind, Map, Node, NodeKind, Written};
 use crate::mapstore::outline;
 
 /// `map` as Markdown: a heading, then one `##` section per node
@@ -52,11 +52,11 @@ fn mixed_authors(map: &Map) -> bool {
 
 /// `maps list`: one `##` section per map, in the order the
 /// caller folded them. Each names the map's purpose and size, lists its
-/// node and edge kinds with the gloss each carries on its `Schema`, and
-/// shows one real node line and one real edge line so a reader sees the
-/// shape the JSONL takes and how an edge names its ends (`kind:name`).
-/// `maps` empty - a project with no schema declared - prints the
-/// header and `super::NO_SCHEMAS_HINT` alone.
+/// node and edge kinds, and shows one real node line and one real edge
+/// line so a reader sees the shape the JSONL takes and how an edge
+/// names its ends (`kind:name`). `maps` empty - a project with no
+/// schema declared - prints the header and `super::NO_SCHEMAS_HINT`
+/// alone.
 pub fn catalogue(maps: &[Map]) -> String {
     if maps.is_empty() {
         return format!("# maps\n\n{}\n", super::NO_SCHEMAS_HINT);
@@ -76,33 +76,17 @@ pub fn catalogue(maps: &[Map]) -> String {
             map.nodes().len(),
             map.edges().len()
         );
-        push_kind_glosses(
-            &mut out,
-            "Node kinds",
-            schema.node_kinds.iter().map(|k| (k.label(), k.gloss.as_str())),
-        );
-        push_kind_glosses(
-            &mut out,
-            "Edge kinds",
-            schema.edge_kinds.iter().map(|k| (k.label(), k.gloss.as_str())),
-        );
+        push_kind_labels(&mut out, "Node kinds", schema.node_kinds.iter().map(NodeKind::label));
+        push_kind_labels(&mut out, "Edge kinds", schema.edge_kinds.iter().map(EdgeKind::label));
         push_example(&mut out, map);
     }
     out
 }
 
-fn push_kind_glosses<'a>(
-    out: &mut String,
-    heading: &str,
-    kinds: impl Iterator<Item = (String, &'a str)>,
-) {
+fn push_kind_labels(out: &mut String, heading: &str, labels: impl Iterator<Item = String>) {
     let _ = write!(out, "\n{heading}:\n");
-    for (label, gloss) in kinds {
-        if gloss.is_empty() {
-            let _ = writeln!(out, "- {label}");
-        } else {
-            let _ = writeln!(out, "- {label} - {gloss}");
-        }
+    for label in labels {
+        let _ = writeln!(out, "- {label}");
     }
 }
 
@@ -154,20 +138,20 @@ fn push_tree(out: &mut String, map: &Map, node: &Node, indent: &str, mark: bool)
     }
 }
 
-/// `node`'s position among its kind's declared states - unknown,
-/// missing, or a kind with no states sort last, so listing order says
+/// `node`'s position among its kind's closed list - unknown, missing,
+/// or a kind with no closed list sort last, so listing order says
 /// nothing the core does not already know from the property itself.
 fn state_rank(map: &Map, node: &Node) -> usize {
     let Some(kind) = map.schema().node_kind(&node.kind) else {
         return usize::MAX;
     };
-    let Some(value) = node.properties.get("state") else {
+    let Some((property, values)) = kind.closed_list() else {
         return usize::MAX;
     };
-    kind.states
-        .iter()
-        .position(|state| state == value)
-        .unwrap_or(usize::MAX)
+    let Some(value) = node.properties.get(property) else {
+        return usize::MAX;
+    };
+    values.iter().position(|v| v == value).unwrap_or(usize::MAX)
 }
 
 /// A node's properties, each on its own line under `indent` - a long

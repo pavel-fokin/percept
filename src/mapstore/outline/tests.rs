@@ -4,17 +4,18 @@ use super::*;
 use crate::core::testing::{chores, debates, human, link, map_id};
 use crate::core::{Actor, Map, Mutation};
 
-/// Adds a node, with whatever properties its kind requires: a `why`
-/// when it requires one, and a `state` when it declares any - `claim`
-/// and `chore` both require `why`, and `chore` declares states.
+/// Adds a node, with whatever properties its kind carries: a `why`
+/// when it declares one, and its closed list's first value when it has
+/// one - `claim` and `chore` both declare `why`, and `chore` declares a
+/// `state` closed list.
 fn add(map: &mut Map, kind: &str, name: &str) {
     let mut properties = BTreeMap::new();
     if let Some(node_kind) = map.schema().node_kind(kind) {
-        if node_kind.requires.iter().any(|p| p == "why") {
+        if node_kind.property("why").is_some() {
             properties.insert("why".to_string(), "because".to_string());
         }
-        if let Some(state) = node_kind.states.first() {
-            properties.insert("state".to_string(), state.clone());
+        if let Some((property, values)) = node_kind.closed_list() {
+            properties.insert(property.to_string(), values[0].clone());
         }
     }
     map.apply(

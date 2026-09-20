@@ -57,7 +57,7 @@ fn a_project_schema_of_a_new_name_is_added() {
     let names: Vec<&str> = schemas.folded().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["glossary"]);
     let glossary = schemas.find("glossary").unwrap();
-    assert_eq!(glossary.node_kind("term").unwrap().requires, ["meaning"]);
+    assert!(glossary.node_kind("term").unwrap().property("meaning").is_some());
 }
 
 #[test]
@@ -203,20 +203,6 @@ fn a_duplicate_node_kind_name_is_refused() {
 }
 
 #[test]
-fn a_kind_with_no_gloss_loads_with_an_empty_gloss() {
-    let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "name = \"glossary\"\npurpose = \"p\"\n\n[[node]]\nkind = \"term\"\n",
-    );
-
-    let schemas = load(fixture.path()).unwrap();
-
-    let glossary = schemas.find("glossary").unwrap();
-    assert_eq!(glossary.node_kind("term").unwrap().gloss, "");
-}
-
-#[test]
 fn a_node_kind_with_no_prefix_defaults_to_its_first_letter() {
     let fixture = Fixture::new();
     fixture.write(
@@ -307,7 +293,10 @@ fn a_states_list_loads_onto_the_node_kind() {
     let schemas = load(fixture.path()).unwrap();
 
     let glossary = schemas.find("glossary").unwrap();
-    assert_eq!(glossary.node_kind("term").unwrap().states, ["open", "done"]);
+    assert_eq!(
+        glossary.node_kind("term").unwrap().closed_list(),
+        Some(("state", ["open".to_string(), "done".to_string()].as_slice()))
+    );
 }
 
 #[test]
@@ -434,10 +423,9 @@ fn a_properties_list_loads_onto_the_node_kind() {
     let schemas = load(fixture.path()).unwrap();
 
     let glossary = schemas.find("glossary").unwrap();
-    assert_eq!(
-        glossary.node_kind("term").unwrap().properties,
-        ["note", "summary"]
-    );
+    let term = glossary.node_kind("term").unwrap();
+    assert!(term.property("note").is_some());
+    assert!(term.property("summary").is_some());
 }
 
 #[test]

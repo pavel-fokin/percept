@@ -33,10 +33,10 @@ pub struct Params {
 }
 
 /// `GET /api/maps/{id}`'s body: the map's own name, purpose, and
-/// every node kind the schema declares with its gloss,
-/// the cut's nodes and edges named by short id, and the four counts
-/// `Fragment` reports. `params.root`'s own schemas declare the map's
-/// name, never this server's project.
+/// every node kind the schema declares, the cut's nodes and edges
+/// named by short id, and the four counts `Fragment` reports.
+/// `params.root`'s own schemas declare the map's name, never this
+/// server's project.
 pub fn get(log: &dyn EventLog, id: &str, params: Params) -> Result<Value, Error> {
     let id = store::parse_map_id(id).map_err(|err| Error::Bad(err.to_string()))?;
     let root = params.root.ok_or_else(|| Error::Bad("root is required".to_string()))?;
@@ -99,7 +99,7 @@ fn body(map: &Map, fragment: &crate::core::Fragment, root: &std::path::Path) -> 
     let kinds: Vec<Value> = schema
         .node_kinds
         .iter()
-        .map(|kind| json!({ "kind": kind.kind, "prefix": kind.prefix, "gloss": kind.gloss }))
+        .map(|kind| json!({ "kind": kind.kind, "prefix": kind.prefix }))
         .collect();
     let nodes: Vec<Value> = map
         .nodes()

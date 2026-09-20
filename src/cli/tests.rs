@@ -999,11 +999,10 @@ fn an_unknown_node_kind_fails_before_anything_is_written() {
 #[test]
 fn a_missing_required_property_fails_before_anything_is_written() {
     let log = FakeLog::default();
-    let document = "topic \"Does record work?\"\n\
-                     claim \"maybe\"\n  about topic\n";
+    let document = "chore \"cancel a turn\"\n  why \"Esc drops the session\"\n";
     let err = record_document(
         document,
-        record_args("debates"),
+        record_args("chores"),
         &log,
         &schemas(),
         &source("cli"),
@@ -1012,7 +1011,7 @@ fn a_missing_required_property_fails_before_anything_is_written() {
         None,
     )
     .unwrap_err();
-    assert!(err.to_string().contains("why"), "{err}");
+    assert!(err.to_string().contains("state"), "{err}");
     assert!(log.load().unwrap().is_empty());
 }
 

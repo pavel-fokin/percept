@@ -361,28 +361,17 @@ pub fn debates() -> Schema {
         name: "debates".to_string(),
         purpose: "what a test needs from a question-and-answer map".to_string(),
         node_kinds: vec![
-            NodeKind::new("topic", ""),
-            NodeKind::new(
-                "claim",
-                "a side taken on a topic, saying why in its `why` property",
-            )
-            .requiring("why")
-            .with_properties(&["summary"]),
-            NodeKind::new("fact", "a fact that backs a claim").with_properties(&["summary", "when"]),
-            NodeKind::new("verdict", "").with_properties(&["why"]),
+            NodeKind::new("topic"),
+            NodeKind::new("claim").with_properties(&[("why", &[]), ("summary", &[])]),
+            NodeKind::new("fact").with_properties(&[("summary", &[]), ("when", &[])]),
+            NodeKind::new("verdict").with_properties(&[("why", &[])]),
         ],
         edge_kinds: vec![
-            EdgeKind::new("about", "", &["topic"], &["claim"]),
-            EdgeKind::new("backs", "", &["claim"], &["fact"]),
-            EdgeKind::new("settles", "", &["topic"], &["verdict"]),
-            EdgeKind::new("replaces", "", &["verdict"], &["verdict"]),
-            EdgeKind::new(
-                "doubts",
-                "from a verdict to a topic reopened over it; the verdict stands until a new \
-                 one replaces it",
-                &["verdict"],
-                &["topic"],
-            ),
+            EdgeKind::new("about", &["topic"], &["claim"]),
+            EdgeKind::new("backs", &["claim"], &["fact"]),
+            EdgeKind::new("settles", &["topic"], &["verdict"]),
+            EdgeKind::new("replaces", &["verdict"], &["verdict"]),
+            EdgeKind::new("doubts", &["verdict"], &["topic"]),
         ],
         rules: Rules::default(),
     }
@@ -394,13 +383,12 @@ pub fn chores() -> Schema {
     Schema {
         name: "chores".to_string(),
         purpose: "what a test needs from a to-do map".to_string(),
-        node_kinds: vec![
-            NodeKind::new("chore", "one piece of work, saying why it matters in its `why` property")
-                .requiring("why")
-                .with_properties(&["outcome"])
-                .with_states(&["open", "done", "dropped"]),
-        ],
-        edge_kinds: vec![EdgeKind::new("blocks", "", &["chore"], &["chore"])],
+        node_kinds: vec![NodeKind::new("chore").with_properties(&[
+            ("why", &[]),
+            ("outcome", &[]),
+            ("state", &["open", "done", "dropped"]),
+        ])],
+        edge_kinds: vec![EdgeKind::new("blocks", &["chore"], &["chore"])],
         rules: Rules::default(),
     }
 }
@@ -435,33 +423,19 @@ pub fn files() -> Schema {
         name: "files".to_string(),
         purpose: "test fixture".to_string(),
         node_kinds: vec![
-            NodeKind::new("file", "a source file"),
+            NodeKind::new("file"),
             // Its default prefix, `f`, collides with `file`'s; `fn`
             // both avoids that and reads as the keyword it names.
             NodeKind {
                 prefix: "fn".to_string(),
-                properties: vec!["returns".to_string()],
-                ..NodeKind::new("function", "a function or method")
+                properties: vec![("returns".to_string(), Vec::new())],
+                ..NodeKind::new("function")
             },
-            NodeKind::new(
-                "package",
-                "an external crate a file imports, like `serde_json` - never one of this \
-                 project's own modules",
-            ),
+            NodeKind::new("package"),
         ],
         edge_kinds: vec![
-            EdgeKind::new(
-                "contains",
-                "from a file to a symbol it defines",
-                &["file"],
-                &["function"],
-            ),
-            EdgeKind::new(
-                "imports",
-                "from a file to what it imports",
-                &["file"],
-                &["file", "package"],
-            ),
+            EdgeKind::new("contains", &["file"], &["function"]),
+            EdgeKind::new("imports", &["file"], &["file", "package"]),
         ],
         rules: Rules::default(),
     }

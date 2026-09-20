@@ -1,5 +1,5 @@
 //! A map's schema: the node and edge kinds it allows, the properties
-//! and states each kind demands, and the set of schemas a project has.
+//! each node kind carries, and the set of schemas a project has.
 //! Data, not an enum - a project adds a map by adding a TOML file, and
 //! `mapstore` loads these values from it. `Map` checks every write
 //! against the schema it was folded with.
@@ -62,32 +62,23 @@ impl Rules {
     }
 }
 
-/// A node kind and, when its name does not say it all, one line saying
-/// what it is, so a reader who meets the kind in a map's output learns
-/// its meaning without a separate doc. The gloss lives here and
-/// nowhere else.
+/// A node kind: its short id prefix and the properties a node of this
+/// kind may carry, in declared order. Each property names the values it
+/// may hold - empty for free text, like `why` on a `fact`; non-empty
+/// for a closed list, like `state` on a `task`. The first property with
+/// a closed list is this kind's own: the one a new node of this kind
+/// must carry, checked on a write, never on a fold, so what was
+/// recorded before the rule still folds.
 #[derive(Debug, PartialEq, Eq)]
 pub struct NodeKind {
     pub kind: String,
-    pub gloss: String,
-    /// The properties a new node of this kind must carry - `why` on an
-    /// option or a task. Checked on a write, never on a fold, so what
-    /// was recorded before the rule still folds.
-    pub requires: Vec<String>,
-    /// The properties a node of this kind may carry beyond `requires` -
-    /// `note` on a `fact`. A write refuses any property outside
-    /// `requires`, `properties`, and `state` when `states` is
-    /// non-empty; checked on a write, never on a fold, so what was
-    /// recorded before the rule still folds.
-    pub properties: Vec<String>,
     /// This node kind's short id prefix - `d` for `decision`, so a
     /// node reads as `d41` rather than its full id.
     pub prefix: String,
-    /// The values a `state` property on a node of this kind may hold -
-    /// `["open", "done", "dropped"]` on `task`, a set with no value
-    /// open by position. Empty when the kind carries no state at all.
-    /// Checked on a write, never on a fold, the way `requires` is.
-    pub states: Vec<String>,
+    /// Property name paired with the values it may hold, in the order
+    /// declared - the order an error lists them and a render prints
+    /// them.
+    pub properties: Vec<(String, Vec<String>)>,
 }
 
 /// A kind's prefix when its schema names none: the name's own first
@@ -102,101 +93,80 @@ pub fn default_prefix(name: &str) -> String {
 }
 
 impl NodeKind {
-    pub(crate) fn new(kind: &str, gloss: &str) -> Self {
+    pub(crate) fn new(kind: &str) -> Self {
         Self {
             prefix: default_prefix(kind),
             kind: kind.to_string(),
-            gloss: gloss.to_string(),
-            requires: Vec::new(),
             properties: Vec::new(),
-            states: Vec::new(),
         }
     }
 
-    /// `self`, requiring `property` on a new node of this kind. Used
-    /// only by `core::testing`'s fixture schemas today, so it is
-    /// `cfg(test)` like the rest of that module.
+    /// `self`, with `properties` declared in order - each name paired
+    /// with the values it may hold, empty for free text. Used only by
+    /// `core::testing`'s fixture schemas and this module's own tests,
+    /// so `cfg(test)`.
     #[cfg(test)]
-    pub(crate) fn requiring(mut self, property: &str) -> Self {
-        self.requires.push(property.to_string());
-        self
-    }
-
-    /// `self`, with `properties` as the optional properties beyond
-    /// `requires` a node of this kind may carry. Used only by
-    /// `core::testing`'s fixture schemas today, so `cfg(test)` too.
-    #[cfg(test)]
-    pub(crate) fn with_properties(mut self, properties: &[&str]) -> Self {
-        self.properties = properties.iter().map(|p| p.to_string()).collect();
-        self
-    }
-
-    /// `self`, with `states` as the values a `state` property on a node
-    /// of this kind may hold. Used only by `core::testing`'s fixture
-    /// schemas, so `cfg(test)` too.
-    #[cfg(test)]
-    pub(crate) fn with_states(mut self, states: &[&str]) -> Self {
-        self.states = states.iter().map(|s| s.to_string()).collect();
+    pub(crate) fn with_properties(mut self, properties: &[(&str, &[&str])]) -> Self {
+        self.properties = properties
+            .iter()
+            .map(|(name, values)| {
+                (name.to_string(), values.iter().map(|v| v.to_string()).collect())
+            })
+            .collect();
         self
     }
 
     /// This kind's name, backticked, alone or with the properties it
-    /// requires and may carry - `` `option` (requires `why`, may carry
-    /// `note`) `` - for a csv or a rendered list, so the one shape is
-    /// built once and read everywhere a kind is named.
+    /// carries - `` `option` (carries `why`, `note`) `` - for a csv or
+    /// a rendered list, so the one shape is built once and read
+    /// everywhere a kind is named.
     pub fn label(&self) -> String {
-        let ticked = |names: &[String]| {
-            let ticked: Vec<String> = names.iter().map(|p| format!("`{p}`")).collect();
-            ticked.join(", ")
-        };
-        let mut parts: Vec<String> = Vec::new();
-        if !self.requires.is_empty() {
-            parts.push(format!("requires {}", ticked(&self.requires)));
-        }
-        if !self.properties.is_empty() {
-            parts.push(format!("may carry {}", ticked(&self.properties)));
-        }
-        if parts.is_empty() {
+        if self.properties.is_empty() {
             format!("`{}`", self.kind)
         } else {
-            format!("`{}` ({})", self.kind, parts.join(", "))
+            let names: Vec<String> =
+                self.properties.iter().map(|(name, _)| format!("`{name}`")).collect();
+            format!("`{}` (carries {})", self.kind, names.join(", "))
         }
     }
 
-    /// Every property a write may put on a node of this kind, in the
-    /// order an error lists them: `requires`, `properties`, then
-    /// `state` when the kind declares states. The one place that rule
-    /// lives; `allows` and `Map::apply` read through it.
-    pub fn allowed_properties(&self) -> impl Iterator<Item = &str> {
-        self.requires
-            .iter()
-            .chain(&self.properties)
-            .map(String::as_str)
-            .chain((!self.states.is_empty()).then_some("state"))
+    /// The property named `name`, when this kind declares it.
+    pub fn property(&self, name: &str) -> Option<&(String, Vec<String>)> {
+        self.properties.iter().find(|(declared, _)| declared == name)
     }
 
-    pub fn allows(&self, property: &str) -> bool {
-        self.allowed_properties().any(|allowed| allowed == property)
+    /// This kind's closed list - the first property with a non-empty
+    /// list of values, name and values both - or `None` when every
+    /// property this kind declares is free text.
+    pub fn closed_list(&self) -> Option<(&str, &[String])> {
+        self.properties
+            .iter()
+            .find(|(_, values)| !values.is_empty())
+            .map(|(name, values)| (name.as_str(), values.as_slice()))
+    }
+
+    /// Every property a write may put on a node of this kind, in
+    /// declared order - what `Map::apply` lists in an "expected one of"
+    /// error.
+    pub fn allowed_properties(&self) -> impl Iterator<Item = &str> {
+        self.properties.iter().map(|(name, _)| name.as_str())
     }
 }
 
-/// An edge kind and one line saying what it is, plus the node kinds it
-/// may join: `from` on the tail, `to` on the head, each naming one or
-/// more node kinds by name. `Map::apply` refuses an `AddEdge` whose
-/// ends are not of these kinds.
+/// An edge kind and the node kinds it may join: `from` on the tail,
+/// `to` on the head, each naming one or more node kinds by name.
+/// `Map::apply` refuses an `AddEdge` whose ends are not of these kinds.
 #[derive(Debug, PartialEq, Eq)]
 pub struct EdgeKind {
     pub kind: String,
-    pub gloss: String,
     pub from: Vec<String>,
     pub to: Vec<String>,
 }
 
 impl EdgeKind {
-    pub(crate) fn new(kind: &str, gloss: &str, from: &[&str], to: &[&str]) -> Self {
+    pub(crate) fn new(kind: &str, from: &[&str], to: &[&str]) -> Self {
         Self {
             kind: kind.to_string(),
-            gloss: gloss.to_string(),
             from: from.iter().map(|s| s.to_string()).collect(),
             to: to.iter().map(|s| s.to_string()).collect(),
         }
@@ -204,7 +174,7 @@ impl EdgeKind {
 
     /// This kind's name, backticked, with its ends - `` `contains`
     /// (file -> function | type) `` - so a reader meets the direction
-    /// alongside the gloss.
+    /// alongside the name.
     pub fn label(&self) -> String {
         format!(
             "`{}` ({} -> {})",

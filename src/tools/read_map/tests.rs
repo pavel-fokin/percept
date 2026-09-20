@@ -110,7 +110,7 @@ fn a_read_opens_with_the_schema_then_the_counts_then_the_nodes_then_the_edges() 
 }
 
 #[test]
-fn the_schema_line_glosses_a_kind_so_a_selector_is_not_a_guess() {
+fn the_schema_line_names_a_kinds_properties_so_a_selector_is_not_a_guess() {
     let rows = read(r#"{"map":"debates"}"#).unwrap();
 
     let claim = rows[0]["node_kinds"]
@@ -119,20 +119,13 @@ fn the_schema_line_glosses_a_kind_so_a_selector_is_not_a_guess() {
         .iter()
         .find(|kind| kind["name"] == "claim")
         .unwrap();
-    assert!(claim["gloss"]
-        .as_str()
-        .unwrap()
-        .contains("saying why"));
-    let doubts = rows[0]["edge_kinds"]
+    let names: Vec<&str> = claim["properties"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|kind| kind["name"] == "doubts")
-        .unwrap();
-    assert!(doubts["gloss"]
-        .as_str()
-        .unwrap()
-        .contains("the verdict stands until"));
+        .map(|property| property["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["why", "summary"]);
 }
 
 #[test]

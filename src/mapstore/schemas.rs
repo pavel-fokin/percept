@@ -93,6 +93,9 @@ struct RulesFile(BTreeMap<String, Vec<String>>);
 #[serde(deny_unknown_fields)]
 struct NodeFile {
     kind: String,
+    /// Read for backward compatibility with an existing TOML file, then
+    /// discarded: a node kind no longer carries a gloss.
+    #[allow(dead_code)]
     #[serde(default)]
     gloss: String,
     #[serde(default)]
@@ -137,6 +140,9 @@ where
 #[serde(deny_unknown_fields)]
 struct EdgeFile {
     kind: String,
+    /// Read for backward compatibility with an existing TOML file, then
+    /// discarded: an edge kind no longer carries a gloss.
+    #[allow(dead_code)]
     #[serde(default)]
     gloss: String,
     #[serde(deserialize_with = "one_or_many")]
@@ -292,13 +298,19 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
         .into_iter()
         .map(|node| {
             let prefix = node.prefix.unwrap_or_else(|| default_prefix(&node.kind));
+            let mut properties: Vec<(String, Vec<String>)> = node
+                .requires
+                .into_iter()
+                .chain(node.properties)
+                .map(|property| (property, Vec::new()))
+                .collect();
+            if !node.states.is_empty() {
+                properties.push(("state".to_string(), node.states));
+            }
             NodeKind {
                 prefix,
                 kind: node.kind,
-                gloss: node.gloss.trim().to_string(),
-                requires: node.requires,
-                properties: node.properties,
-                states: node.states,
+                properties,
             }
         })
         .collect();
@@ -312,7 +324,6 @@ fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
             check_edge_end(stem, &edge.kind, "to", &edge.to, &node_kinds)?;
             Ok(EdgeKind {
                 kind: edge.kind,
-                gloss: edge.gloss.trim().to_string(),
                 from: edge.from,
                 to: edge.to,
             })
