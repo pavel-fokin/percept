@@ -17,9 +17,9 @@ pub fn markdown(map: &Map) -> String {
     let mark = mixed_authors(map);
     let all_agent = !mark && map.nodes().iter().any(|node| matches!(node.added().actor, Actor::Agent));
     let mut out = if all_agent {
-        format!("# {} (agent)\n", schema.name)
+        format!("# {} (agent)\n", schema.name())
     } else {
-        format!("# {}\n", schema.name)
+        format!("# {}\n", schema.name())
     };
 
     if map.nodes().is_empty() {
@@ -59,13 +59,13 @@ pub fn catalogue(maps: &[Map]) -> String {
         let _ = write!(
             out,
             "\n## {}\n\n{}\n\n{} nodes, {} edges.\n",
-            schema.name,
-            schema.purpose,
+            schema.name(),
+            schema.purpose(),
             map.nodes().len(),
             map.edges().len()
         );
-        push_kind_labels(&mut out, "Node kinds", schema.node_kinds.iter().map(NodeKind::label));
-        push_kind_labels(&mut out, "Edge kinds", schema.edge_kinds.iter().map(EdgeKind::label));
+        push_kind_labels(&mut out, "Node kinds", schema.node_kinds().iter().map(NodeKind::label));
+        push_kind_labels(&mut out, "Edge kinds", schema.edge_kinds().iter().map(EdgeKind::label));
         push_example(&mut out, map);
     }
     out

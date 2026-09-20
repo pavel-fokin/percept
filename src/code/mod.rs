@@ -23,32 +23,51 @@ use crate::shared::to_slash;
 /// fresh from the working tree by the `read_code` tool alone, never a
 /// log-folded map `core::Schemas` knows about.
 pub fn schema() -> Schema {
-    Schema {
-        name: "code".to_string(),
-        purpose: "which file defines which symbol and imports which file or package".to_string(),
-        node_kinds: vec![
-            NodeKind {
-                properties: vec![("language".to_string(), Vec::new())],
-                ..NodeKind::new("file")
-            },
-            // Its default prefix, `f`, collides with `file`'s; `fn`
-            // both avoids that and reads as the keyword it names.
-            NodeKind {
-                prefix: "fn".to_string(),
-                properties: vec![("public".to_string(), Vec::new()), ("line".to_string(), Vec::new())],
-                ..NodeKind::new("function")
-            },
-            NodeKind {
-                properties: vec![("public".to_string(), Vec::new()), ("line".to_string(), Vec::new())],
-                ..NodeKind::new("type")
-            },
-            NodeKind::new("package"),
-        ],
-        edge_kinds: vec![
-            EdgeKind::new("contains", &["file"], &["function", "type"]),
-            EdgeKind::new("imports", &["file"], &["file", "package"]),
-        ],
-    }
+    let node_kinds = vec![
+        NodeKind::new("file", vec![("language".to_string(), Vec::new())])
+            .expect("the code schema's file kind is valid"),
+        // Its default prefix, `f`, collides with `file`'s; `fn`
+        // both avoids that and reads as the keyword it names.
+        NodeKind::with_prefix(
+            "function",
+            "fn",
+            vec![
+                ("public".to_string(), Vec::new()),
+                ("line".to_string(), Vec::new()),
+            ],
+        )
+        .expect("the code schema's function kind is valid"),
+        NodeKind::new(
+            "type",
+            vec![
+                ("public".to_string(), Vec::new()),
+                ("line".to_string(), Vec::new()),
+            ],
+        )
+        .expect("the code schema's type kind is valid"),
+        NodeKind::new("package", Vec::new()).expect("the code schema's package kind is valid"),
+    ];
+    let edge_kinds = vec![
+        EdgeKind::new(
+            "contains",
+            vec!["file".to_string()],
+            vec!["function".to_string(), "type".to_string()],
+        )
+        .expect("the code schema's contains kind is valid"),
+        EdgeKind::new(
+            "imports",
+            vec!["file".to_string()],
+            vec!["file".to_string(), "package".to_string()],
+        )
+        .expect("the code schema's imports kind is valid"),
+    ];
+    Schema::new(
+        "code",
+        "which file defines which symbol and imports which file or package",
+        node_kinds,
+        edge_kinds,
+    )
+    .expect("the code schema is valid")
 }
 
 /// Builds the code map from every `.rs` file under `root`, gitignore

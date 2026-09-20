@@ -293,7 +293,7 @@ fn two_impls_of_one_generic_trait_keep_their_methods_apart() {
 #[test]
 fn the_schema_s_node_kinds_carry_distinct_prefixes() {
     let s = schema();
-    let mut prefixes: Vec<&str> = s.node_kinds.iter().map(|k| k.prefix.as_str()).collect();
+    let mut prefixes: Vec<&str> = s.node_kinds().iter().map(|k| k.prefix()).collect();
     let before = prefixes.len();
     prefixes.sort_unstable();
     prefixes.dedup();

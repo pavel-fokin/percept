@@ -417,7 +417,7 @@ impl Map {
     pub fn short_id(&self, id: NodeId) -> Option<String> {
         let node = self.node(id)?;
         let kind = self.schema.node_kind(&node.kind)?;
-        Some(format!("{}{}", kind.prefix, node.seq))
+        Some(format!("{}{}", kind.prefix(), node.seq))
     }
 
     /// `node`'s properties as any reader sees them, the one place that
@@ -435,7 +435,7 @@ impl Map {
     pub fn properties<'a>(&'a self, node: &'a Node) -> impl Iterator<Item = (&'a str, &'a str)> {
         let kind = self.schema.node_kind(&node.kind);
         let declared = kind.into_iter().flat_map(move |kind| {
-            kind.properties.iter().filter_map(move |(name, values)| {
+            kind.properties().iter().filter_map(move |(name, values)| {
                 match node.properties.get(name) {
                     Some(value) => Some((name.as_str(), value.as_str())),
                     None => values.first().map(|default| (name.as_str(), default.as_str())),
@@ -499,13 +499,13 @@ impl Map {
         }
         let kind = self
             .schema
-            .node_kinds
+            .node_kinds()
             .iter()
-            .find(|kind| kind.prefix == prefix)
+            .find(|kind| kind.prefix() == prefix)
             .ok_or_else(unknown)?;
         let seq: u32 = digits.parse().map_err(|_| unknown())?;
         self.by_seq
-            .get(&(kind.kind.clone(), seq))
+            .get(&(kind.kind().to_string(), seq))
             .copied()
             .ok_or_else(unknown)
     }

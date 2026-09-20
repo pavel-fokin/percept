@@ -49,7 +49,7 @@ fn schemas_fold_only_maps_the_log_created() {
     let maps = crate::core::testing::schemas().fold_all(&events).unwrap();
 
     assert_eq!(maps.len(), 1);
-    assert_eq!(maps[0].schema().name, "debates");
+    assert_eq!(maps[0].schema().name(), "debates");
 }
 
 #[test]

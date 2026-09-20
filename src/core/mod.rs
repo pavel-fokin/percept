@@ -28,5 +28,6 @@ pub use map::{
     NodeId, NodeRef, Selection, Written,
 };
 pub use map_reader::MapReader;
-pub use schema::{default_prefix, EdgeKind, NodeKind, Schema, Schemas};
+#[allow(unused_imports)]
+pub use schema::{EdgeKind, NodeKind, Schema, SchemaError, Schemas};
 pub use search::{EventQuery, EventSearch};

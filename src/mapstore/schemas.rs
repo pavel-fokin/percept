@@ -1,6 +1,6 @@
 //! Loads a project's cognitive-map schemas from
 //! `<project>/.percept/schemas/*.toml`. `core` stays serde-free, so
-//! the parsing and the checks a declared schema must pass live here. A
+//! the parsing lives here. `core` checks the resulting declaration. A
 //! project with no such directory, or none in it, declares no maps at
 //! all: `load` returns an empty `Schemas`, and `percept init <client>`
 //! is what gives a fresh checkout its first schema file, copied from
@@ -11,7 +11,7 @@ use std::path::Path;
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer};
 
-use crate::core::{default_prefix, EdgeKind, NodeKind, Schema, Schemas};
+use crate::core::{EdgeKind, NodeKind, Schema, Schemas};
 
 include!(concat!(env!("OUT_DIR"), "/schema_templates.rs"));
 
@@ -133,40 +133,23 @@ fn project_files(project: &Path) -> Result<Vec<(String, String)>, Box<dyn std::e
 fn parse(stem: &str, text: &str) -> Result<Schema, Box<dyn std::error::Error>> {
     let file: SchemaFile = toml::from_str(text).map_err(|err| format!("{stem}.toml: {err}"))?;
 
-    if file.nodes.is_empty() {
-        return Err(format!("{stem}.toml: declares no node kinds").into());
-    }
-
-    check_kind_names(stem, "node", file.nodes.keys())?;
-    check_kind_names(stem, "edge", file.edges.keys())?;
-
     let node_kinds: Vec<NodeKind> = file
         .nodes
         .into_iter()
         .map(|(kind, table)| node_kind(stem, kind, table))
         .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
-    check_prefixes(stem, &node_kinds)?;
 
     let edge_kinds: Vec<EdgeKind> = file
         .edges
         .into_iter()
         .map(|(kind, edge)| {
-            check_edge_end(stem, &kind, "from", &edge.from, &node_kinds)?;
-            check_edge_end(stem, &kind, "to", &edge.to, &node_kinds)?;
-            Ok(EdgeKind {
-                kind,
-                from: edge.from,
-                to: edge.to,
-            })
+            EdgeKind::new(kind, edge.from, edge.to)
+                .map_err(|err| format!("{stem}.toml: {err}").into())
         })
         .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
 
-    Ok(Schema {
-        name: stem.to_string(),
-        purpose: file.purpose,
-        node_kinds,
-        edge_kinds,
-    })
+    Schema::new(stem.to_string(), file.purpose, node_kinds, edge_kinds)
+        .map_err(|err| format!("{stem}.toml: {err}").into())
 }
 
 /// Builds one node kind from its declared table: `prefix`, when given,
@@ -177,7 +160,7 @@ fn node_kind(
     mut table: IndexMap<String, PropertyValue>,
 ) -> Result<NodeKind, Box<dyn std::error::Error>> {
     let prefix = match table.shift_remove(PREFIX_KEY) {
-        Some(PropertyValue::Text(prefix)) => prefix,
+        Some(PropertyValue::Text(prefix)) => Some(prefix),
         Some(PropertyValue::Closed(_)) => {
             return Err(format!(
                 "{stem}.toml: node kind {kind:?} declares \"prefix\" as a list; prefix must be a \
@@ -185,15 +168,11 @@ fn node_kind(
             )
             .into());
         }
-        None => default_prefix(&kind),
+        None => None,
     };
 
     let mut properties: Vec<(String, Vec<String>)> = Vec::with_capacity(table.len());
-    let mut closed_already: Option<String> = None;
     for (name, value) in table {
-        if name.trim().is_empty() {
-            return Err(format!("{stem}.toml: node kind {kind:?} declares a blank property").into());
-        }
         let values = match value {
             PropertyValue::Text(text) => {
                 if !text.is_empty() {
@@ -206,131 +185,16 @@ fn node_kind(
                 }
                 Vec::new()
             }
-            PropertyValue::Closed(values) => {
-                check_closed_list(stem, &kind, &name, &values, closed_already.as_deref())?;
-                closed_already = Some(name.clone());
-                values
-            }
+            PropertyValue::Closed(values) => values,
         };
         properties.push((name, values));
     }
 
-    Ok(NodeKind {
-        prefix,
-        kind,
-        properties,
-    })
-}
-
-/// Refuses a closed list's values when they break a rule: a second
-/// closed list on one kind, fewer than two values, a blank value, or a
-/// value repeated. `closed_already` names the kind's own closed
-/// property, if it already declared one.
-fn check_closed_list(
-    stem: &str,
-    kind: &str,
-    name: &str,
-    values: &[String],
-    closed_already: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(first) = closed_already {
-        return Err(format!(
-            "{stem}.toml: node kind {kind:?} declares a second closed list, {name:?}; a kind \
-             carries at most one, alongside {first:?}"
-        )
-        .into());
+    match prefix {
+        Some(prefix) => NodeKind::with_prefix(kind, prefix, properties),
+        None => NodeKind::new(kind, properties),
     }
-    if values.len() < 2 {
-        return Err(format!(
-            "{stem}.toml: node kind {kind:?} declares fewer than two values for {name:?}"
-        )
-        .into());
-    }
-    if values.iter().any(|value| value.trim().is_empty()) {
-        return Err(
-            format!("{stem}.toml: node kind {kind:?} declares a blank value for {name:?}").into(),
-        );
-    }
-    if let Some(value) = repeated(values.iter().map(String::as_str)) {
-        return Err(format!(
-            "{stem}.toml: node kind {kind:?} declares the value {value:?} twice for {name:?}"
-        )
-        .into());
-    }
-    Ok(())
-}
-
-/// Refuses a blank kind name among `names` - `group` names the kind
-/// (`node` or `edge`) in the error. A repeated name cannot reach here:
-/// `[nodes.x]` or `[edges.x]` written twice is a TOML parse error
-/// before this point.
-fn check_kind_names<'a>(
-    stem: &str,
-    group: &str,
-    names: impl Iterator<Item = &'a String>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    for name in names {
-        if name.trim().is_empty() {
-            return Err(format!("{stem}.toml: a {group} kind must not be blank").into());
-        }
-    }
-    Ok(())
-}
-
-/// Refuses `end` (`from` or `to`) of edge kind `name` when it is empty
-/// or names a node kind `node_kinds` does not declare - a blank name
-/// falls in the latter, since no declared kind is blank.
-fn check_edge_end(
-    stem: &str,
-    edge: &str,
-    end: &str,
-    kinds: &[String],
-    node_kinds: &[NodeKind],
-) -> Result<(), Box<dyn std::error::Error>> {
-    if kinds.is_empty() {
-        return Err(format!("{stem}.toml: edge kind {edge:?}'s {end} names no node kind").into());
-    }
-    for kind in kinds {
-        if !node_kinds.iter().any(|node| node.kind == *kind) {
-            return Err(format!(
-                "{stem}.toml: edge kind {edge:?}'s {end} names {kind:?}, which is not a \
-                 declared node kind"
-            )
-            .into());
-        }
-    }
-    Ok(())
-}
-
-/// Refuses two node kinds - explicit or defaulted - that resolve to
-/// the same short id prefix: a schema load error, so the collision is
-/// caught once, not the first time two nodes' short ids clash.
-fn check_prefixes(stem: &str, node_kinds: &[NodeKind]) -> Result<(), Box<dyn std::error::Error>> {
-    let mut seen: Vec<&NodeKind> = Vec::new();
-    for kind in node_kinds {
-        if let Some(other) = seen.iter().find(|other| other.prefix == kind.prefix) {
-            return Err(format!(
-                "{stem}.toml: node kinds {:?} and {:?} both take the short id prefix {:?}",
-                other.kind, kind.kind, kind.prefix
-            )
-            .into());
-        }
-        seen.push(kind);
-    }
-    Ok(())
-}
-
-/// The first value `names` repeats, if any - what `check_closed_list`
-/// refuses a closed list for.
-fn repeated<'a>(names: impl Iterator<Item = &'a str>) -> Option<&'a str> {
-    let mut seen: Vec<&str> = Vec::new();
-    for name in names {
-        if seen.contains(&name) {
-            return Some(name);
-        }
-        seen.push(name);
-    }
-    None
+    .map_err(|err| format!("{stem}.toml: {err}").into())
 }
 
 #[cfg(test)]

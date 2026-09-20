@@ -55,8 +55,8 @@ pub fn get(log: &dyn EventLog, id: &str, params: Params) -> Result<Value, Error>
     // pays the fold.
     let name = schemas
         .folded()
-        .find_map(|schema| match map_id_for(&schema.name, own.iter().copied()) {
-            Ok(Some(found)) if found == id => Some(Ok(schema.name.clone())),
+        .find_map(|schema| match map_id_for(schema.name(), own.iter().copied()) {
+            Ok(Some(found)) if found == id => Some(Ok(schema.name().to_string())),
             Ok(_) => None,
             Err(err) => Some(Err(err)),
         })
@@ -98,9 +98,9 @@ pub fn get(log: &dyn EventLog, id: &str, params: Params) -> Result<Value, Error>
 fn body(map: &Map, fragment: &crate::core::Fragment, root: &std::path::Path) -> Value {
     let schema = map.schema();
     let kinds: Vec<Value> = schema
-        .node_kinds
+        .node_kinds()
         .iter()
-        .map(|kind| json!({ "kind": kind.kind, "prefix": kind.prefix }))
+        .map(|kind| json!({ "kind": kind.kind(), "prefix": kind.prefix() }))
         .collect();
     let nodes: Vec<Value> = map
         .nodes()
@@ -127,8 +127,8 @@ fn body(map: &Map, fragment: &crate::core::Fragment, root: &std::path::Path) -> 
     json!({
         "map": {
             "id": map.id().as_uuid().to_string(),
-            "name": schema.name,
-            "purpose": schema.purpose,
+            "name": schema.name(),
+            "purpose": schema.purpose(),
         },
         "kinds": kinds,
         "nodes": nodes,
