@@ -11,6 +11,7 @@ mod event;
 mod event_log;
 mod map;
 mod map_reader;
+mod schema;
 mod search;
 
 #[cfg(test)]
@@ -23,9 +24,9 @@ pub use event::{
 pub(crate) use event_log::ComputeEvents;
 pub use event_log::EventLog;
 pub use map::{
-    default_prefix, map_id_for, map_of, map_of_mut, Change, Edge, EdgeKind, Fragment,
-    Map, MapError, MapId, Mutation, Node, NodeId, NodeKind, NodeRef, Schema, Schemas,
-    Selection, Written,
+    map_id_for, map_of, map_of_mut, Change, Edge, Fragment, Map, MapError, MapId, Mutation, Node,
+    NodeId, NodeRef, Selection, Written,
 };
 pub use map_reader::MapReader;
+pub use schema::{default_prefix, EdgeKind, NodeKind, Schema, Schemas};
 pub use search::{EventQuery, EventSearch};

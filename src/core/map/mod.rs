@@ -16,12 +16,11 @@ use crate::shared::{Id, Timestamp};
 
 mod apply;
 mod error;
-mod schema;
 
 use apply::highest;
 
 pub use error::MapError;
-pub use schema::{default_prefix, EdgeKind, NodeKind, Schema, Schemas};
+use super::schema::{NodeKind, Schema};
 
 /// Identifies a cognitive map.
 pub type MapId = Id<Map>;

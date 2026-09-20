@@ -160,14 +160,12 @@ binary with no library target, so a top-level `tests/` directory would
 see nothing internal. A test reaches private items by nesting under the
 module it tests, as `mod tests { use super::* }`.
 
-Every `mod tests` sits in its own file, never inline. The
-implementation file keeps `#[cfg(test)] mod tests;`; the cases move to
-a sibling `tests.rs` nested under that module - `src/app/mod.rs` beside
-`src/app/tests.rs`, `src/core/map.rs` beside
-`src/core/map/tests.rs`. A file and its same-named directory
-coexist, so the implementation file keeps its name and needs no
-`#[path]`. Split an inline module the next time you touch its tests,
-not before.
+Every `mod tests` sits outside the implementation file, never inline.
+The implementation file keeps `#[cfg(test)] mod tests;`. A small test
+module lives in a sibling `tests.rs`, such as `src/app/mod.rs` beside
+`src/app/tests.rs`. A large one lives in `tests/mod.rs`, with cases
+split into files named for behavior, such as `map/tests/reading.rs`.
+Split an inline module the next time you touch its tests, not before.
 
 Shared fakes live in `src/core/testing.rs` and `src/harness/testing.rs`,
 each beside the port it fakes. Each implements one port and nothing

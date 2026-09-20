@@ -7,8 +7,7 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::{Map, MapError};
-use crate::core::Event;
+use super::{Event, Map, MapError};
 
 /// Which node and edge kinds a map allows. Data, not an enum: adding a
 /// map is adding a value.
