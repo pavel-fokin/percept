@@ -355,7 +355,7 @@ impl Map {
             Ok(())
         } else {
             Err(MapError::UnknownNodeKind {
-                map: self.schema.name.clone(),
+                map: self.schema.name().to_string(),
                 kinds: self.schema.node_kinds_csv(),
                 kind: kind.to_string(),
             })
@@ -367,7 +367,7 @@ impl Map {
             Ok(())
         } else {
             Err(MapError::UnknownEdgeKind {
-                map: self.schema.name.clone(),
+                map: self.schema.name().to_string(),
                 kinds: self.schema.edge_kinds_csv(),
                 kind: kind.to_string(),
             })
@@ -431,8 +431,8 @@ impl Map {
             return Ok(());
         };
         let ends = [
-            (EdgeEnd::From, &edge_kind.from, from),
-            (EdgeEnd::To, &edge_kind.to, to),
+            (EdgeEnd::From, edge_kind.from(), from),
+            (EdgeEnd::To, edge_kind.to(), to),
         ];
         for (end, allowed, id) in ends {
             let node = self.node(id).ok_or(MapError::NoSuchNodeId(id))?;
@@ -440,7 +440,7 @@ impl Map {
                 return Err(MapError::WrongEdgeEnd {
                     edge_kind: kind.to_string(),
                     end,
-                    allowed: allowed.clone(),
+                    allowed: allowed.to_vec(),
                     found: node.kind.clone(),
                 });
             }
@@ -475,14 +475,14 @@ fn check_properties(kind: &NodeKind, properties: &BTreeMap<String, String>) -> R
     for (key, value) in properties {
         let Some((_, values)) = kind.property(key) else {
             return Err(MapError::UnknownProperty {
-                kind: kind.kind.clone(),
+                kind: kind.kind().to_string(),
                 property: key.clone(),
                 allowed: kind.allowed_properties().map(str::to_string).collect(),
             });
         };
         if !values.is_empty() && !values.iter().any(|allowed| allowed == value) {
             return Err(MapError::UnknownValue {
-                kind: kind.kind.clone(),
+                kind: kind.kind().to_string(),
                 property: key.clone(),
                 value: value.clone(),
                 values: values.clone(),

@@ -213,10 +213,10 @@ pub fn ensure_maps(
         let own: Vec<&Event> = of_path(&events, &source.path).collect();
         let mut created = Vec::new();
         for schema in schemas.folded() {
-            if map_id_for(&schema.name, own.iter().copied())?.is_none() {
+            if map_id_for(schema.name(), own.iter().copied())?.is_none() {
                 created.push(Event::map_created(
                     crate::core::MapId::new(),
-                    schema.name.clone(),
+                    schema.name().to_string(),
                     source.clone(),
                 ));
             }
@@ -320,8 +320,8 @@ struct EdgeLine<'a> {
 pub fn encode_map(map: &Map) -> String {
     serde_json::to_string(&MapLine {
         id: map.id().as_uuid().to_string(),
-        map: &map.schema().name,
-        purpose: &map.schema().purpose,
+        map: map.schema().name(),
+        purpose: map.schema().purpose(),
         nodes: map.nodes().len(),
         edges: map.edges().len(),
     })
@@ -350,9 +350,9 @@ impl<'a> KindLine<'a> {
         kinds
             .iter()
             .map(|kind| Self {
-                name: &kind.kind,
+                name: kind.kind(),
                 properties: kind
-                    .properties
+                    .properties()
                     .iter()
                     .map(|(name, values)| PropertyLine { name, values })
                     .collect(),
@@ -363,7 +363,7 @@ impl<'a> KindLine<'a> {
     fn of_edges(kinds: &'a [crate::core::EdgeKind]) -> Vec<Self> {
         kinds
             .iter()
-            .map(|kind| Self { name: &kind.kind, properties: Vec::new() })
+            .map(|kind| Self { name: kind.kind(), properties: Vec::new() })
             .collect()
     }
 }
@@ -382,10 +382,10 @@ struct SchemaLine<'a> {
 /// properties it may set already in view.
 pub fn encode_schema(schema: &crate::core::Schema) -> String {
     serde_json::to_string(&SchemaLine {
-        schema: &schema.name,
-        purpose: &schema.purpose,
-        node_kinds: KindLine::of_nodes(&schema.node_kinds),
-        edge_kinds: KindLine::of_edges(&schema.edge_kinds),
+        schema: schema.name(),
+        purpose: schema.purpose(),
+        node_kinds: KindLine::of_nodes(schema.node_kinds()),
+        edge_kinds: KindLine::of_edges(schema.edge_kinds()),
     })
     .expect("SchemaLine always serializes")
 }
@@ -410,7 +410,7 @@ const NOTHING_RECORDED: &str =
 pub fn encode_fragment(fragment: &Fragment) -> String {
     let map = fragment.map();
     serde_json::to_string(&FragmentLine {
-        map: &map.schema().name,
+        map: map.schema().name(),
         shown_nodes: map.nodes().len(),
         total_nodes: fragment.total_nodes(),
         shown_edges: map.edges().len(),

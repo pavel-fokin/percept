@@ -294,7 +294,7 @@ fn another_source_s_map_mutation_in_the_same_project_still_folds() {
         .fold_all(app.events())
         .unwrap()
         .into_iter()
-        .find(|map| map.schema().name == "debates")
+        .find(|map| map.schema().name() == "debates")
         .unwrap();
     assert_eq!(debates.nodes().len(), 1);
 }
@@ -1009,7 +1009,7 @@ fn a_map_is_sent_with_its_kinds_ahead_of_the_transcript_and_outside_the_window()
 fn assert_debates_header(message: &str) {
     assert!(message.starts_with(&format!(
         "The debates map: {}. It holds ",
-        crate::core::testing::debates().purpose
+        crate::core::testing::debates().purpose()
     )));
     assert!(message.contains(
         ". Node kinds: `topic`, `claim` (carries `why`, `summary`), `fact` \
@@ -1104,7 +1104,7 @@ fn a_map_header_carries_its_purpose_size_and_last_change() {
     let sent = model.last_request();
     assert!(sent[0].starts_with(&format!(
         "The debates map: {}. It holds 1 nodes and 0 edges, last changed {changed}. Node kinds:",
-        crate::core::testing::debates().purpose
+        crate::core::testing::debates().purpose()
     )));
 }
 

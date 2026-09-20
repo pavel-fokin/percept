@@ -360,8 +360,8 @@ fn render(
                     role: Actor::System,
                     content: format!(
                         "The {} map: {}. {}. Node kinds: {}. Edge kinds: {}.\n{body}",
-                        schema.name,
-                        schema.purpose,
+                        schema.name(),
+                        schema.purpose(),
                         catalogue_line(&map),
                         schema.node_kinds_csv(),
                         schema.edge_kinds_csv()

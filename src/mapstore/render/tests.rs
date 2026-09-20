@@ -367,14 +367,23 @@ fn a_node_is_named_under_the_one_section_it_hangs_in() {
 /// every node heads a section of its own.
 #[test]
 fn a_schema_with_no_edges_gives_every_node_its_own_section() {
-    let schema = crate::core::Schema {
-        name: "glossary".to_string(),
-        purpose: "test fixture".to_string(),
-        node_kinds: vec![crate::core::NodeKind::new("term")],
-        edge_kinds: Vec::new(),
-    };
+    let schema = crate::core::Schema::new(
+        "glossary",
+        "test fixture",
+        vec![crate::core::NodeKind::new("term", Vec::new()).unwrap()],
+        Vec::new(),
+    )
+    .unwrap();
     let mut map = Map::empty(crate::core::MapId::new(), schema);
-    add(&mut map, "term", "harness", None, None, &[], Actor::Human(human()));
+    add(
+        &mut map,
+        "term",
+        "harness",
+        None,
+        None,
+        &[],
+        Actor::Human(human()),
+    );
 
     // Nothing can reach a node in a schema that declares no edge, so
     // every node heads a section - the shape a first schema takes
@@ -391,7 +400,7 @@ fn the_catalogue_gives_each_map_a_section_listing_its_kinds() {
 
     assert!(text.starts_with("# maps\n"));
     assert!(text.contains("## debates\n"));
-    assert!(text.contains(&debates().purpose));
+    assert!(text.contains(debates().purpose()));
     assert!(text.contains("1 nodes, 0 edges.\n"));
     assert!(text.contains(
         "- `backs` (claim -> fact)\n- `settles` (topic -> verdict)"

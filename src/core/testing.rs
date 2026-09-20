@@ -285,39 +285,86 @@ pub fn edge_added(kind: &str, from: &Event, to: &Event) -> Event {
 
 /// A test-only map shaped like a decisions map, but not one: it exists
 /// so a change to a built-in TOML never touches a map-mechanics test.
+fn node_kind(name: &str, properties: &[(&str, &[&str])]) -> NodeKind {
+    NodeKind::new(
+        name,
+        properties
+            .iter()
+            .map(|(name, values)| {
+                (
+                    name.to_string(),
+                    values.iter().map(|value| value.to_string()).collect(),
+                )
+            })
+            .collect(),
+    )
+    .expect("test node kind is valid")
+}
+
+fn node_kind_with_prefix(name: &str, prefix: &str, properties: &[(&str, &[&str])]) -> NodeKind {
+    NodeKind::with_prefix(
+        name,
+        prefix,
+        properties
+            .iter()
+            .map(|(name, values)| {
+                (
+                    name.to_string(),
+                    values.iter().map(|value| value.to_string()).collect(),
+                )
+            })
+            .collect(),
+    )
+    .expect("test node kind is valid")
+}
+
+fn edge_kind(name: &str, from: &[&str], to: &[&str]) -> EdgeKind {
+    EdgeKind::new(
+        name,
+        from.iter().map(|kind| kind.to_string()).collect(),
+        to.iter().map(|kind| kind.to_string()).collect(),
+    )
+    .expect("test edge kind is valid")
+}
+
 pub fn debates() -> Schema {
-    Schema {
-        name: "debates".to_string(),
-        purpose: "what a test needs from a question-and-answer map".to_string(),
-        node_kinds: vec![
-            NodeKind::new("topic"),
-            NodeKind::new("claim").with_properties(&[("why", &[]), ("summary", &[])]),
-            NodeKind::new("fact").with_properties(&[("summary", &[]), ("when", &[])]),
-            NodeKind::new("verdict").with_properties(&[("why", &[])]),
+    Schema::new(
+        "debates",
+        "what a test needs from a question-and-answer map",
+        vec![
+            node_kind("topic", &[]),
+            node_kind("claim", &[("why", &[]), ("summary", &[])]),
+            node_kind("fact", &[("summary", &[]), ("when", &[])]),
+            node_kind("verdict", &[("why", &[])]),
         ],
-        edge_kinds: vec![
-            EdgeKind::new("about", &["topic"], &["claim"]),
-            EdgeKind::new("backs", &["claim"], &["fact"]),
-            EdgeKind::new("settles", &["topic"], &["verdict"]),
-            EdgeKind::new("replaces", &["verdict"], &["verdict"]),
-            EdgeKind::new("doubts", &["verdict"], &["topic"]),
+        vec![
+            edge_kind("about", &["topic"], &["claim"]),
+            edge_kind("backs", &["claim"], &["fact"]),
+            edge_kind("settles", &["topic"], &["verdict"]),
+            edge_kind("replaces", &["verdict"], &["verdict"]),
+            edge_kind("doubts", &["verdict"], &["topic"]),
         ],
-    }
+    )
+    .expect("the debates test schema is valid")
 }
 
 /// A test-only map shaped like a tasks map, but not one - see
 /// `debates`.
 pub fn chores() -> Schema {
-    Schema {
-        name: "chores".to_string(),
-        purpose: "what a test needs from a to-do map".to_string(),
-        node_kinds: vec![NodeKind::new("chore").with_properties(&[
-            ("why", &[]),
-            ("outcome", &[]),
-            ("state", &["open", "done", "dropped"]),
-        ])],
-        edge_kinds: vec![EdgeKind::new("blocks", &["chore"], &["chore"])],
-    }
+    Schema::new(
+        "chores",
+        "what a test needs from a to-do map",
+        vec![node_kind(
+            "chore",
+            &[
+                ("why", &[]),
+                ("outcome", &[]),
+                ("state", &["open", "done", "dropped"]),
+            ],
+        )],
+        vec![edge_kind("blocks", &["chore"], &["chore"])],
+    )
+    .expect("the chores test schema is valid")
 }
 
 /// The schemas a test project has: `debates` and `chores`, neither
@@ -346,23 +393,20 @@ pub fn link(map: &mut crate::core::Map, kind: &str, from: (&str, &str), to: (&st
 /// exercises the shape the code map used to have, now that `code` is
 /// walked fresh by `read_code` and is not one of `core`'s schemas.
 pub fn files() -> Schema {
-    Schema {
-        name: "files".to_string(),
-        purpose: "test fixture".to_string(),
-        node_kinds: vec![
-            NodeKind::new("file"),
+    Schema::new(
+        "files",
+        "test fixture",
+        vec![
+            node_kind("file", &[]),
             // Its default prefix, `f`, collides with `file`'s; `fn`
             // both avoids that and reads as the keyword it names.
-            NodeKind {
-                prefix: "fn".to_string(),
-                properties: vec![("returns".to_string(), Vec::new())],
-                ..NodeKind::new("function")
-            },
-            NodeKind::new("package"),
+            node_kind_with_prefix("function", "fn", &[("returns", &[])]),
+            node_kind("package", &[]),
         ],
-        edge_kinds: vec![
-            EdgeKind::new("contains", &["file"], &["function"]),
-            EdgeKind::new("imports", &["file"], &["file", "package"]),
+        vec![
+            edge_kind("contains", &["file"], &["function"]),
+            edge_kind("imports", &["file"], &["file", "package"]),
         ],
-    }
+    )
+    .expect("the files test schema is valid")
 }

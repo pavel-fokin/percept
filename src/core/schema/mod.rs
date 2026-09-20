@@ -7,20 +7,23 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::{Map, MapError};
-use crate::core::Event;
+use super::{Event, Map, MapError};
+
+mod error;
+
+pub use error::SchemaError;
 
 /// Which node and edge kinds a map allows. Data, not an enum: adding a
 /// map is adding a value.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Schema {
-    pub name: String,
+    name: String,
     /// The one reasoning operation this map makes cheap, as a reader
     /// deciding whether to open it needs to hear it - what the prompt
     /// carries in place of the map.
-    pub purpose: String,
-    pub node_kinds: Vec<NodeKind>,
-    pub edge_kinds: Vec<EdgeKind>,
+    purpose: String,
+    node_kinds: Vec<NodeKind>,
+    edge_kinds: Vec<EdgeKind>,
 }
 
 /// A node kind: its short id prefix and the properties a node of this
@@ -32,49 +35,111 @@ pub struct Schema {
 /// that never wrote it.
 #[derive(Debug, PartialEq, Eq)]
 pub struct NodeKind {
-    pub kind: String,
+    kind: String,
     /// This node kind's short id prefix - `d` for `decision`, so a
     /// node reads as `d41` rather than its full id.
-    pub prefix: String,
+    prefix: String,
     /// Property name paired with the values it may hold, in the order
     /// declared - the order an error lists them and a render prints
     /// them.
-    pub properties: Vec<(String, Vec<String>)>,
+    properties: Vec<(String, Vec<String>)>,
 }
 
 /// A kind's prefix when its schema names none: the name's own first
 /// character, lowercased - `d` for `decision`, `t` for `task`. Used
-/// both by `NodeKind::new` and by the TOML loader, so the one rule for
-/// "no prefix given" lives once.
-pub fn default_prefix(name: &str) -> String {
+/// by `NodeKind::new`, so the rule for "no prefix given" lives in the
+/// domain rather than its file format.
+fn default_prefix(name: &str) -> String {
     name.chars()
         .next()
         .map(|c| c.to_lowercase().to_string())
         .unwrap_or_default()
 }
 
-impl NodeKind {
-    pub(crate) fn new(kind: &str) -> Self {
-        Self {
-            prefix: default_prefix(kind),
-            kind: kind.to_string(),
-            properties: Vec::new(),
+fn repeated<'a>(names: impl Iterator<Item = &'a str>) -> Option<&'a str> {
+    let mut seen = Vec::new();
+    for name in names {
+        if seen.contains(&name) {
+            return Some(name);
         }
+        seen.push(name);
+    }
+    None
+}
+
+impl NodeKind {
+    pub fn new(
+        kind: impl Into<String>,
+        properties: Vec<(String, Vec<String>)>,
+    ) -> Result<Self, SchemaError> {
+        let kind = kind.into();
+        let prefix = default_prefix(&kind);
+        Self::with_prefix(kind, prefix, properties)
     }
 
-    /// `self`, with `properties` declared in order - each name paired
-    /// with the values it may hold, empty for free text. Used only by
-    /// `core::testing`'s fixture schemas and this module's own tests,
-    /// so `cfg(test)`.
-    #[cfg(test)]
-    pub(crate) fn with_properties(mut self, properties: &[(&str, &[&str])]) -> Self {
-        self.properties = properties
-            .iter()
-            .map(|(name, values)| {
-                (name.to_string(), values.iter().map(|v| v.to_string()).collect())
-            })
-            .collect();
-        self
+    pub fn with_prefix(
+        kind: impl Into<String>,
+        prefix: impl Into<String>,
+        properties: Vec<(String, Vec<String>)>,
+    ) -> Result<Self, SchemaError> {
+        let kind = kind.into();
+        let prefix = prefix.into();
+        if kind.trim().is_empty() {
+            return Err(SchemaError::BlankKind { group: "node" });
+        }
+        let mut closed = None;
+        for (name, values) in &properties {
+            if name.trim().is_empty() {
+                return Err(SchemaError::BlankProperty { kind });
+            }
+            if values.is_empty() {
+                continue;
+            }
+            if let Some(first) = closed {
+                return Err(SchemaError::SecondClosedList {
+                    kind,
+                    property: name.clone(),
+                    first,
+                });
+            }
+            if values.len() < 2 {
+                return Err(SchemaError::TooFewValues {
+                    kind,
+                    property: name.clone(),
+                });
+            }
+            if values.iter().any(|value| value.trim().is_empty()) {
+                return Err(SchemaError::BlankValue {
+                    kind,
+                    property: name.clone(),
+                });
+            }
+            if let Some(value) = repeated(values.iter().map(String::as_str)) {
+                return Err(SchemaError::RepeatedValue {
+                    kind,
+                    property: name.clone(),
+                    value: value.to_string(),
+                });
+            }
+            closed = Some(name.clone());
+        }
+        Ok(Self {
+            kind,
+            prefix,
+            properties,
+        })
+    }
+
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    pub fn prefix(&self) -> &str {
+        &self.prefix
+    }
+
+    pub fn properties(&self) -> &[(String, Vec<String>)] {
+        &self.properties
     }
 
     /// This kind's name, backticked, alone or with the properties it
@@ -85,15 +150,20 @@ impl NodeKind {
         if self.properties.is_empty() {
             format!("`{}`", self.kind)
         } else {
-            let names: Vec<String> =
-                self.properties.iter().map(|(name, _)| format!("`{name}`")).collect();
+            let names: Vec<String> = self
+                .properties
+                .iter()
+                .map(|(name, _)| format!("`{name}`"))
+                .collect();
             format!("`{}` (carries {})", self.kind, names.join(", "))
         }
     }
 
     /// The property named `name`, when this kind declares it.
     pub fn property(&self, name: &str) -> Option<&(String, Vec<String>)> {
-        self.properties.iter().find(|(declared, _)| declared == name)
+        self.properties
+            .iter()
+            .find(|(declared, _)| declared == name)
     }
 
     /// This kind's closed list - the first property with a non-empty
@@ -119,18 +189,46 @@ impl NodeKind {
 /// `Map::apply` refuses an `AddEdge` whose ends are not of these kinds.
 #[derive(Debug, PartialEq, Eq)]
 pub struct EdgeKind {
-    pub kind: String,
-    pub from: Vec<String>,
-    pub to: Vec<String>,
+    kind: String,
+    from: Vec<String>,
+    to: Vec<String>,
 }
 
 impl EdgeKind {
-    pub(crate) fn new(kind: &str, from: &[&str], to: &[&str]) -> Self {
-        Self {
-            kind: kind.to_string(),
-            from: from.iter().map(|s| s.to_string()).collect(),
-            to: to.iter().map(|s| s.to_string()).collect(),
+    pub fn new(
+        kind: impl Into<String>,
+        from: Vec<String>,
+        to: Vec<String>,
+    ) -> Result<Self, SchemaError> {
+        let kind = kind.into();
+        if kind.trim().is_empty() {
+            return Err(SchemaError::BlankKind { group: "edge" });
         }
+        if from.is_empty() {
+            return Err(SchemaError::EmptyEdgeEnd {
+                edge: kind,
+                end: "from",
+            });
+        }
+        if to.is_empty() {
+            return Err(SchemaError::EmptyEdgeEnd {
+                edge: kind,
+                end: "to",
+            });
+        }
+        Ok(Self { kind, from, to })
+    }
+
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    pub fn from(&self) -> &[String] {
+        &self.from
+    }
+
+    pub fn to(&self) -> &[String] {
+        &self.to
     }
 
     /// This kind's name, backticked, with its ends - `` `contains`
@@ -235,6 +333,63 @@ fn csv_or_none(items: impl Iterator<Item = String>) -> String {
 }
 
 impl Schema {
+    pub fn new(
+        name: impl Into<String>,
+        purpose: impl Into<String>,
+        node_kinds: Vec<NodeKind>,
+        edge_kinds: Vec<EdgeKind>,
+    ) -> Result<Self, SchemaError> {
+        if node_kinds.is_empty() {
+            return Err(SchemaError::NoNodeKinds);
+        }
+        let mut seen: Vec<&NodeKind> = Vec::new();
+        for kind in &node_kinds {
+            if let Some(other) = seen.iter().find(|other| other.prefix == kind.prefix) {
+                return Err(SchemaError::PrefixCollision {
+                    first: other.kind.clone(),
+                    second: kind.kind.clone(),
+                    prefix: kind.prefix.clone(),
+                });
+            }
+            seen.push(kind);
+        }
+        for edge in &edge_kinds {
+            for (end, kinds) in [("from", &edge.from), ("to", &edge.to)] {
+                for kind in kinds {
+                    if !node_kinds.iter().any(|node| node.kind == *kind) {
+                        return Err(SchemaError::UnknownEdgeEnd {
+                            edge: edge.kind.clone(),
+                            end,
+                            kind: kind.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        Ok(Self {
+            name: name.into(),
+            purpose: purpose.into(),
+            node_kinds,
+            edge_kinds,
+        })
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn purpose(&self) -> &str {
+        &self.purpose
+    }
+
+    pub fn node_kinds(&self) -> &[NodeKind] {
+        &self.node_kinds
+    }
+
+    pub fn edge_kinds(&self) -> &[EdgeKind] {
+        &self.edge_kinds
+    }
+
     /// The node kind `name` names, when the schema has it.
     pub fn node_kind(&self, name: &str) -> Option<&NodeKind> {
         self.node_kinds.iter().find(|k| k.kind == name)
