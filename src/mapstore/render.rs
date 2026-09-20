@@ -31,9 +31,9 @@ pub fn markdown(map: &Map) -> String {
 /// the way in is `percept init`, not `record`.
 pub fn start(schemas: &Schemas, maps: &[Map]) -> String {
     let mut out = String::from(
-        "percept keeps this project's maps, folded from its log. Read them \
-         before you build. When a turn adds what a map's purpose asks for \
-         and the map lacks, record it in the same turn, citing the prompt's \
+        "percept keeps this project's maps, folded from its log. Read them\n\
+         before you build. When a turn adds what a map's purpose asks for\n\
+         and the map lacks, record it in the same turn, citing the prompt's\n\
          event from the `percept event` line:\n\n    \
          percept maps record <map> --actor agent --source <event> <<'EOF'\n    \
          <kind> \"<name>\"\n      \
