@@ -117,8 +117,9 @@ const GRAMMAR: &str = "
   text as seen and adds it to the node's sources. A claim that rests on code
   cites it, so a later session is told when that code has changed. A margin
   line naming a short id, t4, changes that node: state \"done\" under it sets a
-  property and name \"...\" renames it. A node is refused without its required
-  properties; a node the user last changed takes only state from an agent.
+  property and name \"...\" renames it. A node is refused without the property
+  its kind lists values for. A node the user last changed takes no change from
+  an agent at all.
   This document adds and changes; it never removes. percept maps remove-node
   and remove-edge do that, each taking the same --actor and --source, and
   remove-node drops the edges that touch the node it takes.
