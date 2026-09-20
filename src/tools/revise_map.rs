@@ -40,7 +40,7 @@ const DESCRIPTION: &str = "Record into a named map what you have judged \
     not by an id you choose. Correct a settled node by adding the new \
     one and an edge to the old, rather than removing the old: a node \
     the user wrote, or last changed, cannot be renamed, changed, or \
-    removed by you - only its state, and a new edge, are yours to add.";
+    removed by you; a new edge is still yours to add.";
 
 /// JSON Schema for `run`'s `arguments`. A string, not a `Value` - the
 /// domain's `ToolSpec` is serde-free, so the provider parses this. The

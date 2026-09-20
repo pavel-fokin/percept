@@ -18,64 +18,86 @@ fn the_record_grammar_names_the_commands_that_remove() {
 }
 
 #[test]
-fn a_kind_with_requires_and_states_lists_both() {
+fn a_kind_with_free_properties_and_a_closed_list_lists_both() {
     let text = describe(&chores());
     let line = text
         .lines()
-        .find(|line| line.contains("requires"))
-        .expect("a line with `requires`");
-    assert!(line.contains("requires why"));
+        .find(|line| line.contains("why"))
+        .expect("a line with `why`");
+    assert!(line.contains("why"));
     assert!(line.contains("state open | done | dropped"));
 }
 
 #[test]
-fn a_relation_carries_its_edge_kinds_gloss() {
+fn a_relation_line_names_its_ends() {
     let schema = crate::core::Schema {
         name: "court".to_string(),
         purpose: "test fixture".to_string(),
-        node_kinds: vec![crate::core::NodeKind::new("topic", ""), crate::core::NodeKind::new("verdict", "")],
-        edge_kinds: vec![crate::core::EdgeKind::new(
-            "settles",
-            "from a verdict to the topic it closes",
-            &["verdict"],
-            &["topic"],
-        )],
-        headline_kinds: vec!["topic".to_string()],
+        node_kinds: vec![crate::core::NodeKind::new("topic"), crate::core::NodeKind::new("verdict")],
+        edge_kinds: vec![crate::core::EdgeKind::new("settles", &["verdict"], &["topic"])],
         rules: crate::core::Rules::default(),
     };
 
     let text = describe(&schema);
 
-    assert!(text.contains("verdict --settles--> topic   from a verdict to the topic it closes\n"), "{text}");
+    assert!(text.contains("verdict --settles--> topic\n"), "{text}");
 }
 
 #[test]
 fn relations_name_each_edge_kinds_ends() {
     let text = describe(&debates());
-    assert!(text.contains("claim --about--> topic"));
-    assert!(text.contains("verdict --settles--> topic"));
+    assert!(text.contains("topic --about--> claim"));
+    assert!(text.contains("topic --settles--> verdict"));
     assert!(text.contains("verdict --replaces--> verdict"));
-    assert!(text.contains("topic --doubts--> verdict"));
+    assert!(text.contains("verdict --doubts--> topic"));
 }
 
 #[test]
-fn the_add_example_only_edges_to_kinds_already_listed() {
+fn the_add_example_edges_to_kinds_written_above() {
     let text = describe(&debates());
-    // `topic` comes first, so `doubts verdict` - a verdict not
-    // yet listed - is skipped; `verdict` comes last, so `replaces
-    // verdict` - itself, not yet listed - is skipped too.
-    assert!(!text.contains("doubts verdict"));
-    assert!(!text.contains("replaces verdict"));
-    // What is listed by the time each kind is reached does appear.
-    assert!(text.contains("about topic"));
-    assert!(text.contains("settles topic"));
-    assert!(text.contains("backs claim"));
+    // Kinds are written finest first, so an edge from a coarser kind
+    // finds its target above it: `backs` from claim, `about` and
+    // `settles` from topic. `doubts` and `replaces` point at a kind
+    // not yet written when their own is, so neither appears.
+    assert!(text.contains("backs fact"), "{text}");
+    assert!(text.contains("about claim"), "{text}");
+    assert!(text.contains("settles verdict"), "{text}");
+    assert!(!text.contains("doubts topic"), "{text}");
+    assert!(!text.contains("replaces verdict"), "{text}");
 }
 
 #[test]
-fn the_add_example_sets_the_first_state_on_a_kind_that_declares_states() {
+fn the_add_example_points_one_edge_at_a_kind_two_others_may_reach() {
+    let schema = crate::core::Schema {
+        name: "court".to_string(),
+        purpose: "test fixture".to_string(),
+        node_kinds: vec![
+            crate::core::NodeKind::new("hearing"),
+            crate::core::NodeKind::new("motion"),
+            crate::core::NodeKind::new("ruling"),
+        ],
+        edge_kinds: vec![
+            crate::core::EdgeKind::new("opens", &["hearing"], &["ruling"]),
+            crate::core::EdgeKind::new("seeks", &["motion"], &["ruling"]),
+        ],
+        rules: crate::core::Rules::default(),
+    };
+
+    let text = describe(&schema);
+
+    // A second edge into `ruling` would be a second parent, which
+    // `apply` refuses, so the example shows only the first.
+    assert!(text.contains("seeks ruling"), "{text}");
+    assert!(!text.contains("opens ruling"), "{text}");
+}
+
+#[test]
+fn the_add_example_sets_the_first_value_on_a_kind_with_a_closed_list() {
     let text = describe(&chores());
-    assert!(text.contains("  chore \"...\"\n    why \"...\"\n    state \"open\"\n"), "{text}");
+    assert!(
+        text.contains("  chore \"...\"\n    why \"...\"\n    outcome \"...\"\n    state \"open\"\n"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -85,10 +107,10 @@ fn the_grammar_is_indented_under_the_record_command() {
 }
 
 #[test]
-fn the_add_example_cites_a_file_under_its_last_node() {
+fn the_add_example_cites_a_file_under_its_first_node() {
     let text = describe(&debates());
     assert!(
-        text.contains("  verdict \"...\"\n    settles topic\n    cites src/path.rs:10-20\n"),
+        text.contains("  verdict \"...\"\n    why \"...\"\n    cites src/path.rs:10-20\n"),
         "{text}"
     );
 }

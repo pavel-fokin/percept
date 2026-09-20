@@ -208,9 +208,9 @@ async fn api_maps_cuts_the_named_project_root_around_a_node() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/decisions.toml",
-        "name = \"decisions\"\npurpose = \"test\"\nheadlines = [\"concept\"]\n\n\
-         [[node]]\nkind = \"concept\"\n\n[[node]]\nkind = \"question\"\n\n\
-         [[edge]]\nkind = \"about\"\nfrom = \"question\"\nto = \"concept\"\n",
+        "purpose = \"test\"\n\n\
+         [nodes.concept]\n\n[nodes.question]\n\n\
+         [edges.about]\nfrom = \"question\"\nto = \"concept\"\n",
     );
     let concept = crate::core::Event::new(
         Actor::Agent,

@@ -28,44 +28,26 @@ pub fn schema() -> Schema {
         purpose: "which file defines which symbol and imports which file or package".to_string(),
         node_kinds: vec![
             NodeKind {
-                properties: vec!["language".to_string()],
-                ..NodeKind::new("file", "a source file, named by its repo-relative path")
+                properties: vec![("language".to_string(), Vec::new())],
+                ..NodeKind::new("file")
             },
             // Its default prefix, `f`, collides with `file`'s; `fn`
             // both avoids that and reads as the keyword it names.
             NodeKind {
                 prefix: "fn".to_string(),
-                properties: vec!["public".to_string(), "line".to_string()],
-                ..NodeKind::new(
-                    "function",
-                    "a function or method, named `path::Type::method` or `path::func`",
-                )
+                properties: vec![("public".to_string(), Vec::new()), ("line".to_string(), Vec::new())],
+                ..NodeKind::new("function")
             },
             NodeKind {
-                properties: vec!["public".to_string(), "line".to_string()],
-                ..NodeKind::new("type", "a struct, enum, trait, or alias, named `path::Name`")
+                properties: vec![("public".to_string(), Vec::new()), ("line".to_string(), Vec::new())],
+                ..NodeKind::new("type")
             },
-            NodeKind::new(
-                "package",
-                "an external crate a file imports, like `serde_json` - never one of this \
-                 project's own modules",
-            ),
+            NodeKind::new("package"),
         ],
         edge_kinds: vec![
-            EdgeKind::new(
-                "contains",
-                "from a file to a symbol it defines",
-                &["file"],
-                &["function", "type"],
-            ),
-            EdgeKind::new(
-                "imports",
-                "from a file to a file or package it uses",
-                &["file"],
-                &["file", "package"],
-            ),
+            EdgeKind::new("contains", &["file"], &["function", "type"]),
+            EdgeKind::new("imports", &["file"], &["file", "package"]),
         ],
-        headline_kinds: vec!["file".to_string()],
         rules: Rules::default(),
     }
 }

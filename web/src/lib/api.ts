@@ -43,8 +43,8 @@ export async function fetchProjects(): Promise<ProjectsResponse> {
 }
 
 /** `GET /api/maps/{id}` - one project's map, cut to `around` and
- * `depth`. No `around` asks for the overview: the map's headline nodes
- * and nothing else. */
+ * `depth`. No `around` asks for the overview: the nodes that head the
+ * map and nothing else. */
 export async function fetchMap(id: string, root: string, around: string | null, depth: number): Promise<MapResponse> {
   const params = new URLSearchParams({ root });
   if (around) {

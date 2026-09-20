@@ -10,10 +10,10 @@ use crate::core::{HumanId, Payload};
 use crate::shared::Timestamp;
 
 /// The one map a hook test's project declares: `debates`, with a
-/// `topic` headline kind and nothing else - a mini schema of this
+/// `topic` node kind and nothing else - a mini schema of this
 /// fixture's own, so no test here rests on a shipped template.
-const DEBATES_TOML: &str = "name = \"debates\"\npurpose = \"what a hook test needs\"\n\
-                            headlines = [\"topic\"]\n\n[[node]]\nkind = \"topic\"\n";
+const DEBATES_TOML: &str = "purpose = \"what a hook test needs\"\n\
+                            [nodes.topic]\n";
 
 fn write_debates_schema(root: &Path) {
     let dir = root.join(".percept/schemas");
@@ -502,8 +502,8 @@ fn with_turn_rules(turn: &str) -> Fixture {
     Fixture::new().with_extra_schema(
         "glossary",
         &format!(
-            "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"concept\"]\n\n\
-             [[node]]\nkind = \"concept\"\nrequires = [\"definition\"]\n\n\
+            "purpose = \"p\"\n\n\
+             [nodes.concept]\ndefinition = \"\"\n\n\
              [rules]\n\"message.received\" = [{turn}]\n"
         ),
     )
@@ -515,8 +515,8 @@ fn with_session_started_rules(started: &str) -> Fixture {
     Fixture::new().with_extra_schema(
         "glossary",
         &format!(
-            "name = \"glossary\"\npurpose = \"p\"\nheadlines = [\"concept\"]\n\n\
-             [[node]]\nkind = \"concept\"\nrequires = [\"definition\"]\n\n\
+            "purpose = \"p\"\n\n\
+             [nodes.concept]\ndefinition = \"\"\n\n\
              [rules]\n\"session.started\" = [{started}]\n"
         ),
     )

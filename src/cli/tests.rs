@@ -842,8 +842,8 @@ fn record_args(map: &str) -> RecordArgs {
 #[test]
 fn a_document_writes_its_nodes_and_edges_in_order() {
     let log = FakeLog::default();
-    let document = "topic \"Does record work?\"\n\
-                     verdict \"yes\"\n  why \"it ran\"\n  settles topic\n";
+    let document = "verdict \"yes\"\n  why \"it ran\"\n\
+                     topic \"Does record work?\"\n  settles verdict\n";
     record_document(
         document,
         record_args("debates"),
@@ -926,9 +926,8 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
     let fixture = Fixture::new();
     fixture.write("src/cli/mod.rs", "one\ntwo\nthree\n");
     let log = FakeLog::default();
-    let document = "topic \"Does record work?\"\n\
-                     verdict \"yes\"\n  why \"it ran\"\n  settles topic\n  \
-                     cites src/cli/mod.rs:1-3\n";
+    let document = "verdict \"yes\"\n  why \"it ran\"\n  cites src/cli/mod.rs:1-3\n\
+                     topic \"Does record work?\"\n  settles verdict\n";
     record_document(
         document,
         record_args("debates"),
@@ -943,13 +942,53 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
 
     let events = log.load().unwrap();
     // The `cites` event is published before the node it cites - `record`
-    // writes a node's cites first - so it lands second, right after the
-    // topic node.
-    assert!(matches!(events[2].payload(), Payload::FileCited { .. }));
-    let cite_id = events[2].id();
+    // writes a node's cites first - so it lands right after the map is
+    // created, ahead of the verdict node it belongs to.
+    assert!(matches!(events[1].payload(), Payload::FileCited { .. }));
+    let cite_id = events[1].id();
     let map = mapstore::fold_map(&log, &schemas(), "debates", Path::new(ROOT)).unwrap();
     let verdict = map.find("verdict", "yes").unwrap();
     assert!(verdict.sources.contains(&cite_id));
+}
+
+#[test]
+fn a_cites_line_under_a_short_id_reaches_the_node_it_names() {
+    let fixture = Fixture::new();
+    fixture.write("src/cli/mod.rs", "one\ntwo\nthree\n");
+    let log = FakeLog::default();
+    record_document(
+        "topic \"Does record work?\"\n",
+        record_args("debates"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        fixture.path(),
+        human(),
+        None,
+    )
+    .unwrap();
+
+    record_document(
+        "t1\n  cites src/cli/mod.rs:1-3\n",
+        record_args("debates"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        fixture.path(),
+        human(),
+        None,
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    let cite_id = events
+        .iter()
+        .find(|event| matches!(event.payload(), Payload::FileCited { .. }))
+        .expect("the document cited a file")
+        .id();
+    let map = mapstore::fold_map(&log, &schemas(), "debates", Path::new(ROOT)).unwrap();
+    let topic = map.find("topic", "Does record work?").unwrap();
+    assert!(topic.sources.contains(&cite_id), "{:?}", topic.sources);
 }
 
 #[test]
@@ -957,7 +996,10 @@ fn a_ref_to_an_existing_short_id_resolves() {
     let log = FakeLog::default();
     log.append(&map_created("debates")).unwrap();
     log.append(&node_added("topic", "Does record work?")).unwrap();
-    let document = "verdict \"yes\"\n  why \"it ran\"\n  settles t1\n";
+    // `doubts` runs from a verdict to a topic, so the new verdict is
+    // the doc's current node - the `from` end the syntax always gives
+    // the enclosing line - and the existing topic, `t1`, is its `to`.
+    let document = "verdict \"yes\"\n  why \"it ran\"\n  doubts t1\n";
     record_document(
         document,
         record_args("debates"),
@@ -972,7 +1014,7 @@ fn a_ref_to_an_existing_short_id_resolves() {
 
     let map = mapstore::fold_map(&log, &schemas(), "debates", Path::new(ROOT)).unwrap();
     assert_eq!(map.edges().len(), 1);
-    assert_eq!(map.edges()[0].kind, "settles");
+    assert_eq!(map.edges()[0].kind, "doubts");
 }
 
 #[test]
@@ -995,13 +1037,12 @@ fn an_unknown_node_kind_fails_before_anything_is_written() {
 }
 
 #[test]
-fn a_missing_required_property_fails_before_anything_is_written() {
+fn a_closed_list_property_left_unset_records_with_no_value() {
     let log = FakeLog::default();
-    let document = "topic \"Does record work?\"\n\
-                     claim \"maybe\"\n  about topic\n";
-    let err = record_document(
+    let document = "chore \"cancel a turn\"\n  why \"Esc drops the session\"\n";
+    record_document(
         document,
-        record_args("debates"),
+        record_args("chores"),
         &log,
         &schemas(),
         &source("cli"),
@@ -1009,9 +1050,15 @@ fn a_missing_required_property_fails_before_anything_is_written() {
         human(),
         None,
     )
-    .unwrap_err();
-    assert!(err.to_string().contains("why"), "{err}");
-    assert!(log.load().unwrap().is_empty());
+    .unwrap();
+
+    let events = log.load().unwrap();
+    match events.last().unwrap().payload() {
+        Payload::NodeAdded { properties, .. } => {
+            assert_eq!(properties.get("state"), None);
+        }
+        _ => panic!("expected NodeAdded"),
+    }
 }
 
 #[test]
@@ -1112,6 +1159,51 @@ fn a_short_id_document_changes_the_node_and_records_node_changed() {
     let chore = map.find("chore", "cancel a turn").unwrap();
     assert_eq!(chore.properties.get("state").unwrap(), "done");
     assert_eq!(chore.properties.get("outcome").unwrap(), "1f1a9a9: done");
+}
+
+#[test]
+fn a_change_block_carrying_only_an_edge_records_no_node_change() {
+    let log = FakeLog::default();
+    record_document(
+        "chore \"first\"\n  why \"it came up\"\n  state \"open\"\n",
+        record_args("chores"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+        None,
+    )
+    .unwrap();
+
+    let mut agent = record_args("chores");
+    agent.actor = "agent".to_string();
+    record_document(
+        "chore \"second\"\n  why \"it follows\"\n  state \"open\"\nc1\n  blocks c2\n",
+        agent,
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+        None,
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    assert!(
+        !events
+            .iter()
+            .any(|event| matches!(event.payload(), Payload::NodeChanged { .. })),
+        "an edge under a short id changed nothing about the node it names"
+    );
+
+    let map = mapstore::fold_map(&log, &schemas(), "chores", Path::new(ROOT)).unwrap();
+    let first = map.find("chore", "first").unwrap();
+    let children = map.children(first.id);
+    assert_eq!(children.len(), 1);
+    assert_eq!(children[0].0, "blocks");
+    assert_eq!(children[0].1.name, "second");
 }
 
 #[test]

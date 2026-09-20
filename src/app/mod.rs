@@ -37,8 +37,9 @@ const INDEX_EVENTS: usize = 200;
 pub enum MapShape {
     /// The whole map, as today.
     Prompt,
-    /// Only its headline nodes; `read_map` opens the rest.
-    Headlines,
+    /// Only the nodes that head it - `Map::roots` - one line each.
+    /// `read_map` opens the rest.
+    Overview,
     /// Only its size; `read_map` opens it.
     Tool,
 }

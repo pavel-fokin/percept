@@ -1012,11 +1012,11 @@ fn assert_debates_header(message: &str) {
         crate::core::testing::debates().purpose
     )));
     assert!(message.contains(
-        ". Node kinds: `topic`, `claim` (requires `why`, may carry `summary`), `fact` \
-         (may carry `summary`, `when`), `verdict` (may carry `why`). Edge \
-         kinds: `about` (claim -> topic), `backs` (fact -> claim), `settles` \
-         (verdict -> topic), `replaces` (verdict -> verdict), `doubts` (topic -> \
-         verdict).\n"
+        ". Node kinds: `topic`, `claim` (carries `why`, `summary`), `fact` \
+         (carries `summary`, `when`), `verdict` (carries `why`). Edge \
+         kinds: `about` (topic -> claim), `backs` (claim -> fact), `settles` \
+         (topic -> verdict), `replaces` (verdict -> verdict), `doubts` (verdict -> \
+         topic).\n"
     ));
 }
 
@@ -1030,20 +1030,20 @@ fn an_empty_map_is_still_sent_with_its_kinds() {
     // One message per map, the prompt, the time.
     assert_eq!(sent.len(), 2 + schemas().folded().count());
     assert!(sent[0].contains(
-        "Node kinds: `topic`, `claim` (requires `why`, may carry `summary`), `fact` \
-         (may carry `summary`, `when`), `verdict` (may carry `why`)."
+        "Node kinds: `topic`, `claim` (carries `why`, `summary`), `fact` \
+         (carries `summary`, `when`), `verdict` (carries `why`)."
     ));
     assert!(sent[0].contains("\n(empty:"), "{}", sent[0]);
 }
 
 #[test]
-fn a_headlines_map_sends_only_its_headline_nodes() {
+fn an_overview_map_sends_the_nodes_that_head_it() {
     let mut events = vec![
         node_added("verdict", "Rust over Go"),
         node_added("fact", "benchmarks"),
     ];
     events.extend(filler(25));
-    let (model, mut app) = seeded_app_with_shape(events, Vec::new(), MapShape::Headlines);
+    let (model, mut app) = seeded_app_with_shape(events, Vec::new(), MapShape::Overview);
 
     let _ = app.submit("now".to_string()).unwrap();
 
@@ -1051,21 +1051,22 @@ fn a_headlines_map_sends_only_its_headline_nodes() {
     assert_debates_header(&sent[0]);
     assert!(
         sent[0].contains(
-            "The topic and verdict nodes that head it follow; read_map opens the rest, whole or around one node.\n"
+            "The nodes that head it follow; read_map opens the rest, whole or around one node.\n"
         )
     );
+    // Nothing points at either node, so both head the map.
     assert!(sent[0].contains("- verdict \"Rust over Go\""));
-    assert!(!sent[0].contains("benchmarks"));
+    assert!(sent[0].contains("- fact \"benchmarks\""));
 }
 
 #[test]
-fn a_headlines_map_omits_a_headline_another_headline_claims() {
+fn an_overview_map_omits_a_node_another_node_claims() {
     let old = node_added_seq("verdict", "Go", 1);
     let new = node_added_seq("verdict", "Rust", 2);
     let replaces = edge_added("replaces", &new, &old);
     let mut events = vec![old, new, replaces];
     events.extend(filler(25));
-    let (model, mut app) = seeded_app_with_shape(events, Vec::new(), MapShape::Headlines);
+    let (model, mut app) = seeded_app_with_shape(events, Vec::new(), MapShape::Overview);
 
     let _ = app.submit("now".to_string()).unwrap();
 

@@ -301,7 +301,7 @@ fn init_creates_each_map_once() {
 #[test]
 fn init_keeps_an_existing_schema_file() {
     let fixture = Fixture::new();
-    let other = "name = \"decisions\"\npurpose = \"p\"\n\n[[node]]\nkind = \"decision\"\n";
+    let other = "purpose = \"p\"\n\n[nodes.decision]\n";
     fixture.write(".percept/schemas/decisions.toml", other);
 
     run(init("claude-code"), fixture.path()).unwrap();

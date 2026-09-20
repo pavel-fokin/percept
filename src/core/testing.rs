@@ -361,30 +361,18 @@ pub fn debates() -> Schema {
         name: "debates".to_string(),
         purpose: "what a test needs from a question-and-answer map".to_string(),
         node_kinds: vec![
-            NodeKind::new("topic", ""),
-            NodeKind::new(
-                "claim",
-                "a side taken on a topic, saying why in its `why` property",
-            )
-            .requiring("why")
-            .with_properties(&["summary"]),
-            NodeKind::new("fact", "a fact that backs a claim").with_properties(&["summary", "when"]),
-            NodeKind::new("verdict", "").with_properties(&["why"]),
+            NodeKind::new("topic"),
+            NodeKind::new("claim").with_properties(&[("why", &[]), ("summary", &[])]),
+            NodeKind::new("fact").with_properties(&[("summary", &[]), ("when", &[])]),
+            NodeKind::new("verdict").with_properties(&[("why", &[])]),
         ],
         edge_kinds: vec![
-            EdgeKind::new("about", "", &["claim"], &["topic"]),
-            EdgeKind::new("backs", "", &["fact"], &["claim"]),
-            EdgeKind::new("settles", "", &["verdict"], &["topic"]),
-            EdgeKind::new("replaces", "", &["verdict"], &["verdict"]),
-            EdgeKind::new(
-                "doubts",
-                "from a topic to a verdict it puts in doubt; the verdict stands until a new \
-                 one replaces it",
-                &["topic"],
-                &["verdict"],
-            ),
+            EdgeKind::new("about", &["topic"], &["claim"]),
+            EdgeKind::new("backs", &["claim"], &["fact"]),
+            EdgeKind::new("settles", &["topic"], &["verdict"]),
+            EdgeKind::new("replaces", &["verdict"], &["verdict"]),
+            EdgeKind::new("doubts", &["verdict"], &["topic"]),
         ],
-        headline_kinds: vec!["topic".to_string(), "verdict".to_string()],
         rules: Rules::default(),
     }
 }
@@ -395,14 +383,12 @@ pub fn chores() -> Schema {
     Schema {
         name: "chores".to_string(),
         purpose: "what a test needs from a to-do map".to_string(),
-        node_kinds: vec![
-            NodeKind::new("chore", "one piece of work, saying why it matters in its `why` property")
-                .requiring("why")
-                .with_properties(&["outcome"])
-                .with_states(&["open", "done", "dropped"]),
-        ],
-        edge_kinds: vec![EdgeKind::new("blocks", "", &["chore"], &["chore"])],
-        headline_kinds: vec!["chore".to_string()],
+        node_kinds: vec![NodeKind::new("chore").with_properties(&[
+            ("why", &[]),
+            ("outcome", &[]),
+            ("state", &["open", "done", "dropped"]),
+        ])],
+        edge_kinds: vec![EdgeKind::new("blocks", &["chore"], &["chore"])],
         rules: Rules::default(),
     }
 }
@@ -411,6 +397,21 @@ pub fn chores() -> Schema {
 /// mirroring a built-in map, without touching a filesystem.
 pub fn schemas() -> Schemas {
     Schemas::new(vec![debates(), chores()])
+}
+
+/// A `kind` edge from one node to another, both named by kind and
+/// name - the one `AddEdge` every map test writes.
+pub fn link(map: &mut crate::core::Map, kind: &str, from: (&str, &str), to: (&str, &str)) {
+    map.apply(
+        crate::core::Mutation::AddEdge {
+            kind: kind.to_string(),
+            from: node_ref(from.0, from.1),
+            to: node_ref(to.0, to.1),
+            sources: Vec::new(),
+        },
+        Actor::Human(human()),
+    )
+    .unwrap();
 }
 
 /// A schema fixture with `file`, `function`, and `package` node kinds
@@ -422,35 +423,20 @@ pub fn files() -> Schema {
         name: "files".to_string(),
         purpose: "test fixture".to_string(),
         node_kinds: vec![
-            NodeKind::new("file", "a source file"),
+            NodeKind::new("file"),
             // Its default prefix, `f`, collides with `file`'s; `fn`
             // both avoids that and reads as the keyword it names.
             NodeKind {
                 prefix: "fn".to_string(),
-                properties: vec!["returns".to_string()],
-                ..NodeKind::new("function", "a function or method")
+                properties: vec![("returns".to_string(), Vec::new())],
+                ..NodeKind::new("function")
             },
-            NodeKind::new(
-                "package",
-                "an external crate a file imports, like `serde_json` - never one of this \
-                 project's own modules",
-            ),
+            NodeKind::new("package"),
         ],
         edge_kinds: vec![
-            EdgeKind::new(
-                "contains",
-                "from a file to a symbol it defines",
-                &["file"],
-                &["function"],
-            ),
-            EdgeKind::new(
-                "imports",
-                "from a file to what it imports",
-                &["file"],
-                &["file", "package"],
-            ),
+            EdgeKind::new("contains", &["file"], &["function"]),
+            EdgeKind::new("imports", &["file"], &["file", "package"]),
         ],
-        headline_kinds: vec!["file".to_string()],
         rules: Rules::default(),
     }
 }

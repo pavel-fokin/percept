@@ -97,6 +97,7 @@ pub(crate) fn read_selection(
         around: around.as_ref().map(|node| (node, depth)),
         since,
         kinds,
+        ..Selection::default()
     };
     let fragment = map.select(&selection)?;
     let lines = [

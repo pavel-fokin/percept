@@ -1,5 +1,5 @@
 //! `GET /api/maps/{id}` - one project's cognitive map, cut to what the
-//! reader asked for: the overview (headline nodes only, in map order)
+//! reader asked for: the overview (the nodes that head it, in map order)
 //! with no `around`, or the cut `Map::around` gives around one node.
 //! `id` is the map's own `MapId`, the same one `GET /api/projects`
 //! lists per map - never its schema name, which repeats across
@@ -33,10 +33,10 @@ pub struct Params {
 }
 
 /// `GET /api/maps/{id}`'s body: the map's own name, purpose, and
-/// headline kinds, every node kind the schema declares with its gloss,
-/// the cut's nodes and edges named by short id, and the four counts
-/// `Fragment` reports. `params.root`'s own schemas declare the map's
-/// name, never this server's project.
+/// every node kind the schema declares, the cut's nodes and edges
+/// named by short id, and the four counts `Fragment` reports.
+/// `params.root`'s own schemas declare the map's name, never this
+/// server's project.
 pub fn get(log: &dyn EventLog, id: &str, params: Params) -> Result<Value, Error> {
     let id = store::parse_map_id(id).map_err(|err| Error::Bad(err.to_string()))?;
     let root = params.root.ok_or_else(|| Error::Bad("root is required".to_string()))?;
@@ -65,9 +65,11 @@ pub fn get(log: &dyn EventLog, id: &str, params: Params) -> Result<Value, Error>
         .ok_or_else(|| Error::NotFound(format!("no map with id {}", id.as_uuid())))?;
     let map = mapstore::fold_map_at(&schemas, &name, &events, &root)
         .map_err(|err| Error::Internal(err.to_string()))?;
-    let headline_kinds = map.schema().headline_kinds.clone();
-
     let node_ref;
+    let heads: Vec<crate::core::NodeId> = match params.around {
+        Some(_) => Vec::new(),
+        None => map.roots().map(|node| node.id).collect(),
+    };
     let selection = match params.around.as_deref() {
         Some(around) => {
             let id = map.resolve_str(around).map_err(|err| Error::NotFound(err.to_string()))?;
@@ -78,13 +80,13 @@ pub fn get(log: &dyn EventLog, id: &str, params: Params) -> Result<Value, Error>
                 ..Selection::default()
             }
         }
-        // No `around`: the overview is the map's headline kinds alone,
-        // in map order - `keep_kinds` under `select` gives exactly
-        // that cut, with `Fragment`'s counts already reporting the
-        // whole map behind it, so no new arm on `Selection` earns its
-        // place for this one caller.
+        // No `around`: the overview is what heads the map - the nodes
+        // no edge reaches. Which those are is the graph's own rule, in
+        // `core`, not a cut any kind describes, so the server names
+        // them one by one and `Fragment`'s counts report the whole map
+        // behind them.
         None => Selection {
-            kinds: &headline_kinds,
+            nodes: &heads,
             ..Selection::default()
         },
     };
@@ -98,7 +100,7 @@ fn body(map: &Map, fragment: &crate::core::Fragment, root: &std::path::Path) -> 
     let kinds: Vec<Value> = schema
         .node_kinds
         .iter()
-        .map(|kind| json!({ "kind": kind.kind, "prefix": kind.prefix, "gloss": kind.gloss }))
+        .map(|kind| json!({ "kind": kind.kind, "prefix": kind.prefix }))
         .collect();
     let nodes: Vec<Value> = map
         .nodes()
@@ -109,7 +111,7 @@ fn body(map: &Map, fragment: &crate::core::Fragment, root: &std::path::Path) -> 
                 "node": node.id.as_uuid().to_string(),
                 "kind": node.kind,
                 "name": node.name,
-                "properties": node.properties,
+                "properties": properties_json(map, node),
             })
         })
         .collect();
@@ -127,7 +129,6 @@ fn body(map: &Map, fragment: &crate::core::Fragment, root: &std::path::Path) -> 
             "id": map.id().as_uuid().to_string(),
             "name": schema.name,
             "purpose": schema.purpose,
-            "headline_kinds": schema.headline_kinds,
         },
         "kinds": kinds,
         "nodes": nodes,
@@ -138,6 +139,17 @@ fn body(map: &Map, fragment: &crate::core::Fragment, root: &std::path::Path) -> 
         "boundary_edges": fragment.boundary_edges(),
         "project": root.to_string_lossy(),
     })
+}
+
+/// `node`'s properties as `Map::properties` gives them - a closed
+/// list's default among them when `node` carries none of its own -
+/// as a JSON object, in that same declared order.
+fn properties_json(map: &Map, node: &Node) -> Value {
+    let properties: serde_json::Map<String, Value> = mapstore::properties_map(map, node)
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), Value::String(value.to_string())))
+        .collect();
+    Value::Object(properties)
 }
 
 /// `node`'s short id, or the `kind:name` form when the map minted none -

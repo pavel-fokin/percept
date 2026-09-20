@@ -83,70 +83,7 @@ fn two_identities_for_one_schema_are_rejected() {
 }
 
 #[test]
-fn headlines_are_the_schema_s_headline_kinds_in_map_order() {
-    let events = [
-        node_added("debates", NodeId::new(), "claim", "Go"),
-        node_added("debates", NodeId::new(), "topic", "Which language?"),
-        node_added("debates", NodeId::new(), "verdict", "Rust"),
-    ];
-    let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &events).unwrap();
-    let names: Vec<&str> = map.headlines().map(|node| node.name.as_str()).collect();
-    assert_eq!(names, ["Which language?", "Rust"]);
-}
-
-#[test]
-fn a_replaced_verdict_still_shows_in_the_headlines() {
-    // The core keeps no notion of "replaced": a headline is any node
-    // of a headline kind, full stop. A reader tells the two apart by
-    // the `replaces` edge itself, not by one dropping out.
-    let (old, new) = (NodeId::new(), NodeId::new());
-    let events = [
-        node_added_seq("debates", old, "verdict", "Go", 1),
-        node_added_seq("debates", new, "verdict", "Rust", 2),
-        edge_added("debates", "replaces", new, old),
-    ];
-    let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &events).unwrap();
-    let names: Vec<&str> = map.headlines().map(|node| node.name.as_str()).collect();
-    assert_eq!(names, ["Go", "Rust"]);
-}
-
-#[test]
-fn a_headline_nobody_claims_is_a_root() {
-    let events = [node_added("debates", NodeId::new(), "topic", "Which language?")];
-    let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &events).unwrap();
-    let names: Vec<&str> = map.roots().map(|node| node.name.as_str()).collect();
-    assert_eq!(names, ["Which language?"]);
-}
-
-#[test]
-fn a_claimed_headline_is_not_a_root() {
-    let (old, new) = (NodeId::new(), NodeId::new());
-    let events = [
-        node_added_seq("debates", old, "verdict", "Go", 1),
-        node_added_seq("debates", new, "verdict", "Rust", 2),
-        edge_added("debates", "replaces", new, old),
-    ];
-    let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &events).unwrap();
-    let names: Vec<&str> = map.roots().map(|node| node.name.as_str()).collect();
-    assert_eq!(names, ["Rust"]);
-}
-
-#[test]
-fn a_claim_cycle_still_yields_roots_without_hanging() {
-    let (a, b) = (NodeId::new(), NodeId::new());
-    let events = [
-        node_added_seq("chores", a, "chore", "A", 1),
-        node_added_seq("chores", b, "chore", "B", 2),
-        edge_added("chores", "blocks", a, b),
-        edge_added("chores", "blocks", b, a),
-    ];
-    let map = Map::fold(crate::core::testing::map_id("chores"), chores(), &events).unwrap();
-    let names: Vec<&str> = map.roots().map(|node| node.name.as_str()).collect();
-    assert!(names.is_empty());
-}
-
-#[test]
-fn linked_follows_an_edge_kind_the_core_names_no_meaning_for() {
+fn a_chain_of_edges_reads_as_children_and_a_single_root() {
     let (a, b, c) = (NodeId::new(), NodeId::new(), NodeId::new());
     let events = [
         node_added_seq("debates", a, "verdict", "A", 1),
@@ -157,20 +94,18 @@ fn linked_follows_an_edge_kind_the_core_names_no_meaning_for() {
     ];
     let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &events).unwrap();
 
+    // c replaces b replaces a: each edge runs from the parent (the
+    // replacer) to the child (the replaced), so `c` heads the chain
+    // and `a` hangs deepest.
     assert_eq!(
-        map.linked(a, "replaces", EdgeEnd::To)
-            .iter()
-            .map(|n| n.id)
-            .collect::<Vec<_>>(),
+        map.children(c).iter().map(|(_, node)| node.id).collect::<Vec<_>>(),
         vec![b]
     );
     assert_eq!(
-        map.linked(c, "replaces", EdgeEnd::From)
-            .iter()
-            .map(|n| n.id)
-            .collect::<Vec<_>>(),
-        vec![b]
+        map.children(b).iter().map(|(_, node)| node.id).collect::<Vec<_>>(),
+        vec![a]
     );
+    assert_eq!(map.roots().map(|node| node.id).collect::<Vec<_>>(), vec![c]);
 }
 
 #[test]
@@ -185,7 +120,7 @@ fn since_keeps_what_was_added_from_that_instant_and_what_it_attached_to() {
         ),
         created_at(node_added("debates", old, "claim", "Go"), earlier),
         created_at(node_added("debates", new, "verdict", "Rust"), at),
-        created_at(edge_added("debates", "settles", new, topic), at),
+        created_at(edge_added("debates", "settles", topic, new), at),
     ];
     let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &events).unwrap();
 
@@ -209,7 +144,7 @@ fn since_leaves_out_an_edge_older_than_the_instant_between_kept_nodes() {
         ),
         created_at(node_added("debates", verdict, "verdict", "Rust"), at),
         created_at(
-            edge_added("debates", "settles", verdict, topic),
+            edge_added("debates", "settles", topic, verdict),
             earlier,
         ),
     ];
@@ -320,7 +255,7 @@ fn rust_over_go() -> ([NodeId; 3], Vec<Event>) {
         node_added("debates", ids[0], "topic", "Which language?"),
         node_added("debates", ids[1], "claim", "Rust"),
         node_added("debates", ids[2], "verdict", "Rust over Go"),
-        edge_added("debates", "settles", ids[2], ids[0]),
+        edge_added("debates", "settles", ids[0], ids[2]),
     ];
     (ids, events)
 }
@@ -348,9 +283,8 @@ fn add_topic(name: &str) -> Mutation {
     add_node("topic", name)
 }
 
-/// A `claim` node with the `why` its kind requires - `add_node`
-/// leaves `properties` empty, which `Map::apply` now refuses for a
-/// kind that requires one.
+/// A `claim` node with a `why` set, though its kind, carrying only
+/// free-text properties, requires none.
 fn add_claim(name: &str) -> Mutation {
     Mutation::AddNode {
         kind: "claim".to_string(),
@@ -369,8 +303,8 @@ fn add_edge(kind: &str, from: NodeRef, to: NodeRef) -> Mutation {
     }
 }
 
-/// A `chore` node with the `why` its kind requires and the `state`
-/// `Map::apply` now requires on add for any kind that declares one.
+/// A `chore` node with a `why` set and the `state` `Map::apply`
+/// requires on add for any kind whose closed list is `state`.
 fn add_chore(name: &str) -> Mutation {
     Mutation::AddNode {
         kind: "chore".to_string(),
@@ -436,8 +370,8 @@ fn a_fold_holds_every_node_and_edge_still_present() {
     assert_eq!(map.nodes().len(), 3);
     assert_eq!(map.edges().len(), 1);
     assert!(map.find("verdict", "Rust over Go").unwrap().id == ids[2]);
-    assert!(map.edges()[0].from == ids[2]);
-    assert!(map.edges()[0].to == ids[0]);
+    assert!(map.edges()[0].from == ids[0]);
+    assert!(map.edges()[0].to == ids[2]);
 }
 
 #[test]
@@ -470,8 +404,8 @@ fn removing_an_edge_leaves_its_nodes() {
     events.push(committed(Payload::EdgeRemoved {
         map: crate::core::testing::map_id("debates"),
         kind: "settles".to_string(),
-        from: ids[2],
-        to: ids[0],
+        from: ids[0],
+        to: ids[2],
         sources: Vec::new(),
     }));
 
@@ -504,8 +438,8 @@ fn an_unknown_kind_fails_the_fold() {
         }
         .to_string(),
         "no node kind \"goal\" in map \"debates\"; kinds are `topic`, `claim` \
-         (requires `why`, may carry `summary`), `fact` (may carry `summary`, `when`), \
-         `verdict` (may carry `why`)"
+         (carries `why`, `summary`), `fact` (carries `summary`, `when`), \
+         `verdict` (carries `why`)"
     );
 }
 
@@ -552,7 +486,7 @@ fn a_name_is_unique_within_its_kind_only() {
 #[test]
 fn an_edge_needs_both_ends_and_is_stated_once() {
     let (ids, mut events) = rust_over_go();
-    let dangling = edge_added("debates", "backs", NodeId::new(), ids[1]);
+    let dangling = edge_added("debates", "backs", ids[1], NodeId::new());
     let dangling_id = dangling.id();
     let mut with_dangling = events.clone();
     with_dangling.push(dangling);
@@ -565,7 +499,7 @@ fn an_edge_needs_both_ends_and_is_stated_once() {
         MapError::NoSuchNodeId(_)
     ));
 
-    let twice = edge_added("debates", "settles", ids[2], ids[0]);
+    let twice = edge_added("debates", "settles", ids[0], ids[2]);
     let twice_id = twice.id();
     events.push(twice);
 
@@ -574,8 +508,8 @@ fn an_edge_needs_both_ends_and_is_stated_once() {
         rejected_with(err, twice_id),
         MapError::DuplicateEdge {
             kind: "settles".to_string(),
-            from: "verdict \"Rust over Go\"".to_string(),
-            to: "topic \"Which language?\"".to_string()
+            from: "topic \"Which language?\"".to_string(),
+            to: "verdict \"Rust over Go\"".to_string()
         }
     );
 }
@@ -609,8 +543,8 @@ fn apply_records_what_a_fold_rebuilds() {
         add_node("verdict", "Rust over Go"),
         add_edge(
             "settles",
-            node_ref("verdict", "Rust over Go"),
             node_ref("topic", "Which language?"),
+            node_ref("verdict", "Rust over Go"),
         ),
     ]
     .into_iter()
@@ -622,7 +556,7 @@ fn apply_records_what_a_fold_rebuilds() {
     let verdict = folded.find("verdict", "Rust over Go").unwrap();
     assert!(verdict.id == built.find("verdict", "Rust over Go").unwrap().id);
     assert_eq!(folded.edges().len(), 1);
-    assert!(folded.edges()[0].from == verdict.id);
+    assert!(folded.edges()[0].to == verdict.id);
 }
 
 #[test]
@@ -634,27 +568,6 @@ fn apply_stamps_the_node_with_the_actor_given() {
     let node = map.find("claim", "Rust").unwrap();
 
     assert_eq!(node.added().actor, Actor::Human(me));
-}
-
-#[test]
-fn apply_refuses_a_claim_without_a_why() {
-    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
-
-    let err = map
-        .apply(add_node("claim", "Rust"), Actor::Human(human()))
-        .err()
-        .unwrap();
-
-    assert_eq!(
-        err,
-        MapError::MissingProperty {
-            kind: "claim".to_string(),
-            name: "Rust".to_string(),
-            property: "why".to_string(),
-            gloss: debates().node_kind("claim").unwrap().gloss.clone(),
-        }
-    );
-    assert!(map.nodes().is_empty());
 }
 
 #[test]
@@ -774,9 +687,9 @@ fn a_rename_to_a_taken_name_is_refused() {
 }
 
 #[test]
-fn a_state_off_the_list_is_refused_on_add_and_on_change() {
+fn a_value_off_the_closed_list_is_refused_on_add_and_on_change() {
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
-    let states = vec!["open".to_string(), "done".to_string(), "dropped".to_string()];
+    let values = vec!["open".to_string(), "done".to_string(), "dropped".to_string()];
 
     let on_add = map
         .apply(
@@ -795,10 +708,11 @@ fn a_state_off_the_list_is_refused_on_add_and_on_change() {
         .unwrap();
     assert_eq!(
         on_add,
-        MapError::UnknownState {
+        MapError::UnknownValue {
             kind: "chore".to_string(),
+            property: "state".to_string(),
             value: "urgent".to_string(),
-            states: states.clone(),
+            values: values.clone(),
         }
     );
 
@@ -817,40 +731,11 @@ fn a_state_off_the_list_is_refused_on_add_and_on_change() {
         .unwrap();
     assert_eq!(
         on_change,
-        MapError::UnknownState {
+        MapError::UnknownValue {
             kind: "chore".to_string(),
+            property: "state".to_string(),
             value: "urgent".to_string(),
-            states,
-        }
-    );
-}
-
-#[test]
-fn a_state_on_a_kind_with_no_states_is_refused() {
-    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
-
-    let err = map
-        .apply(
-            Mutation::AddNode {
-                kind: "claim".to_string(),
-                name: "Rust".to_string(),
-                properties: BTreeMap::from([
-                    ("why".to_string(), "because".to_string()),
-                    ("state".to_string(), "open".to_string()),
-                ]),
-                sources: Vec::new(),
-            },
-            Actor::Human(human()),
-        )
-        .err()
-        .unwrap();
-
-    assert_eq!(
-        err,
-        MapError::UnknownState {
-            kind: "claim".to_string(),
-            value: "open".to_string(),
-            states: Vec::new(),
+            values,
         }
     );
 }
@@ -940,30 +825,6 @@ fn a_required_property_and_a_declared_one_are_accepted() {
 }
 
 #[test]
-fn a_state_on_a_kind_without_states_is_unknown_state_not_unknown_property() {
-    let mut debates_map = Map::empty(crate::core::testing::map_id("debates"), debates());
-    let err = debates_map
-        .apply(
-            Mutation::AddNode {
-                kind: "claim".to_string(),
-                name: "Rust".to_string(),
-                properties: BTreeMap::from([
-                    ("why".to_string(), "because".to_string()),
-                    ("state".to_string(), "open".to_string()),
-                ]),
-                sources: Vec::new(),
-            },
-            Actor::Human(human()),
-        )
-        .err()
-        .unwrap();
-
-    // A kind with no states refuses `state` as `UnknownState`, never
-    // `UnknownProperty` - the two rules stay distinct.
-    assert!(matches!(err, MapError::UnknownState { .. }), "{err}");
-}
-
-#[test]
 fn a_stored_node_carrying_an_undeclared_property_still_folds() {
     let event = node_added_with_properties(
         "debates",
@@ -1021,24 +882,25 @@ fn agent_removing_the_humans_node_is_refused() {
 }
 
 #[test]
-fn agent_setting_state_on_the_humans_node_succeeds() {
+fn agent_setting_state_on_the_humans_node_is_refused() {
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
     map.apply(add_chore("cancel a turn"), Actor::Human(human()))
         .unwrap();
 
-    map.apply(
-        change_node(
-            "chore",
-            "cancel a turn",
-            None,
-            BTreeMap::from([("state".to_string(), "done".to_string())]),
-        ),
-        Actor::Agent,
-    )
-    .unwrap();
+    let err = map
+        .apply(
+            change_node(
+                "chore",
+                "cancel a turn",
+                None,
+                BTreeMap::from([("state".to_string(), "done".to_string())]),
+            ),
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
 
-    let node = map.find("chore", "cancel a turn").unwrap();
-    assert_eq!(node.properties.get("state").unwrap(), "done");
+    assert!(matches!(err, MapError::NotYours { .. }), "{err}");
 }
 
 #[test]
@@ -1162,7 +1024,7 @@ fn after_the_humans_why_the_agent_may_not_rename_or_remove_the_node() {
 }
 
 #[test]
-fn after_the_humans_why_the_agent_may_still_set_the_nodes_state() {
+fn after_the_humans_why_the_agent_may_not_set_the_nodes_state_either() {
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
     map.apply(add_chore("cancel a turn"), Actor::Agent).unwrap();
     map.apply(
@@ -1176,19 +1038,41 @@ fn after_the_humans_why_the_agent_may_still_set_the_nodes_state() {
     )
     .unwrap();
 
-    map.apply(
-        change_node(
-            "chore",
-            "cancel a turn",
-            None,
-            BTreeMap::from([("state".to_string(), "done".to_string())]),
-        ),
-        Actor::Agent,
-    )
-    .unwrap();
+    let err = map
+        .apply(
+            change_node(
+                "chore",
+                "cancel a turn",
+                None,
+                BTreeMap::from([("state".to_string(), "done".to_string())]),
+            ),
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
 
-    let node = map.find("chore", "cancel a turn").unwrap();
-    assert_eq!(node.properties.get("state").unwrap(), "done");
+    assert!(matches!(err, MapError::NotYours { .. }), "{err}");
+}
+
+#[test]
+fn an_agent_may_not_cite_a_source_onto_a_node_the_human_wrote() {
+    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
+    map.apply(add_node("verdict", "Rust"), Actor::Human(human())).unwrap();
+
+    let err = map
+        .apply(
+            Mutation::ChangeNode {
+                node: node_ref("verdict", "Rust"),
+                name: None,
+                properties: BTreeMap::new(),
+                sources: vec![EventId::new()],
+            },
+            Actor::Agent,
+        )
+        .err()
+        .unwrap();
+
+    assert!(matches!(err, MapError::NotYours { .. }), "{err}");
 }
 
 #[test]
@@ -1290,30 +1174,23 @@ fn an_added_nodes_only_change_is_its_addition() {
 }
 
 #[test]
-fn adding_a_node_of_a_kind_with_states_and_no_state_is_refused() {
+fn adding_a_node_of_a_kind_with_a_closed_list_and_no_value_writes_none() {
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
 
-    let err = map
-        .apply(
-            Mutation::AddNode {
-                kind: "chore".to_string(),
-                name: "a".to_string(),
-                properties: BTreeMap::from([("why".to_string(), "because".to_string())]),
-                sources: Vec::new(),
-            },
-            Actor::Human(human()),
-        )
-        .err()
-        .unwrap();
-
-    assert_eq!(
-        err,
-        MapError::MissingState {
+    map.apply(
+        Mutation::AddNode {
             kind: "chore".to_string(),
-            states: vec!["open".to_string(), "done".to_string(), "dropped".to_string()],
-        }
-    );
-    assert_eq!(err.to_string(), "chore needs a state; states are open, done, dropped");
+            name: "a".to_string(),
+            properties: BTreeMap::from([("why".to_string(), "because".to_string())]),
+            sources: Vec::new(),
+        },
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    let node = map.find("chore", "a").unwrap();
+    assert_eq!(node.properties.get("state"), None);
+    assert_eq!(map.property(node, "state"), Some("open"));
 }
 
 #[test]
@@ -1329,7 +1206,7 @@ fn adding_a_node_with_a_listed_state_succeeds() {
 }
 
 #[test]
-fn linked_reads_in_both_directions() {
+fn an_edge_reads_as_a_child_of_its_from_end_and_a_root_of_its_to_end() {
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
     map.apply(add_chore("cancel a turn"), Actor::Human(human()))
         .unwrap();
@@ -1348,22 +1225,134 @@ fn linked_reads_in_both_directions() {
     let blocker = map.find("chore", "cancellable streams").unwrap().id;
     let blocked = map.find("chore", "cancel a turn").unwrap().id;
 
-    let from_blocker: Vec<NodeId> = map
-        .linked(blocker, "blocks", EdgeEnd::From)
-        .iter()
-        .map(|node| node.id)
-        .collect();
-    assert_eq!(from_blocker, vec![blocked]);
+    let under_blocker: Vec<NodeId> = map.children(blocker).iter().map(|(_, node)| node.id).collect();
+    assert_eq!(under_blocker, vec![blocked]);
+    assert!(map.children(blocked).is_empty());
+    assert_eq!(map.roots().map(|node| node.id).collect::<Vec<_>>(), vec![blocker]);
+}
 
-    let to_blocked: Vec<NodeId> = map
-        .linked(blocked, "blocks", EdgeEnd::To)
-        .iter()
-        .map(|node| node.id)
-        .collect();
-    assert_eq!(to_blocked, vec![blocker]);
+#[test]
+fn a_second_edge_into_one_node_is_accepted() {
+    let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
+    map.apply(add_chore("a"), Actor::Human(human())).unwrap();
+    map.apply(add_chore("b"), Actor::Human(human())).unwrap();
+    map.apply(add_chore("c"), Actor::Human(human())).unwrap();
+    map.apply(
+        add_edge("blocks", node_ref("chore", "a"), node_ref("chore", "c")),
+        Actor::Human(human()),
+    )
+    .unwrap();
 
-    assert!(map.linked(blocked, "blocks", EdgeEnd::From).is_empty());
-    assert!(map.linked(blocker, "blocks", EdgeEnd::To).is_empty());
+    map.apply(
+        add_edge("blocks", node_ref("chore", "b"), node_ref("chore", "c")),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    assert_eq!(map.edges().len(), 2);
+}
+
+#[test]
+fn an_edge_closing_a_cycle_is_accepted() {
+    let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
+    map.apply(add_chore("a"), Actor::Human(human())).unwrap();
+    map.apply(add_chore("b"), Actor::Human(human())).unwrap();
+    map.apply(
+        add_edge("blocks", node_ref("chore", "a"), node_ref("chore", "b")),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    map.apply(
+        add_edge("blocks", node_ref("chore", "b"), node_ref("chore", "a")),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    assert_eq!(map.edges().len(), 2);
+    assert!(map.roots().next().is_none(), "the cycle leaves no root");
+}
+
+#[test]
+fn an_edge_from_a_node_to_itself_is_accepted() {
+    let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
+    map.apply(add_chore("a"), Actor::Human(human())).unwrap();
+
+    map.apply(
+        add_edge("blocks", node_ref("chore", "a"), node_ref("chore", "a")),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    assert_eq!(map.edges().len(), 1);
+}
+
+#[test]
+fn roots_are_the_nodes_no_edge_reaches() {
+    let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
+    map.apply(add_chore("a"), Actor::Human(human())).unwrap();
+    map.apply(add_chore("b"), Actor::Human(human())).unwrap();
+    map.apply(
+        add_edge("blocks", node_ref("chore", "a"), node_ref("chore", "b")),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    let names: Vec<&str> = map.roots().map(|node| node.name.as_str()).collect();
+
+    assert_eq!(names, ["a"]);
+}
+
+#[test]
+fn a_node_with_two_parents_is_not_a_root() {
+    let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
+    map.apply(add_chore("a"), Actor::Human(human())).unwrap();
+    map.apply(add_chore("b"), Actor::Human(human())).unwrap();
+    map.apply(add_chore("c"), Actor::Human(human())).unwrap();
+    map.apply(
+        add_edge("blocks", node_ref("chore", "a"), node_ref("chore", "c")),
+        Actor::Human(human()),
+    )
+    .unwrap();
+    map.apply(
+        add_edge("blocks", node_ref("chore", "b"), node_ref("chore", "c")),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    let mut names: Vec<&str> = map.roots().map(|node| node.name.as_str()).collect();
+    names.sort_unstable();
+
+    assert_eq!(names, ["a", "b"]);
+}
+
+#[test]
+fn a_node_no_edge_touches_is_its_own_root() {
+    let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
+    map.apply(add_chore("alone"), Actor::Human(human())).unwrap();
+
+    let names: Vec<&str> = map.roots().map(|node| node.name.as_str()).collect();
+
+    assert_eq!(names, ["alone"]);
+}
+
+#[test]
+fn a_cycle_leaves_no_root() {
+    let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
+    map.apply(add_chore("a"), Actor::Human(human())).unwrap();
+    map.apply(add_chore("b"), Actor::Human(human())).unwrap();
+    map.apply(
+        add_edge("blocks", node_ref("chore", "a"), node_ref("chore", "b")),
+        Actor::Human(human()),
+    )
+    .unwrap();
+    map.apply(
+        add_edge("blocks", node_ref("chore", "b"), node_ref("chore", "a")),
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    assert!(map.roots().next().is_none());
 }
 
 #[test]
@@ -1390,16 +1379,16 @@ fn a_human_may_change_anything_on_a_humans_node() {
 #[test]
 fn apply_refuses_an_edge_whose_from_node_is_the_wrong_kind() {
     let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
-    map.apply(add_topic("Which language?"), Actor::Human(human()))
-        .unwrap();
     map.apply(add_claim("Go"), Actor::Human(human())).unwrap();
+    map.apply(add_node("verdict", "Rust over Go"), Actor::Human(human()))
+        .unwrap();
 
     let err = map
         .apply(
             add_edge(
                 "settles",
                 node_ref("claim", "Go"),
-                node_ref("topic", "Which language?"),
+                node_ref("verdict", "Rust over Go"),
             ),
             Actor::Human(human()),
         )
@@ -1411,7 +1400,7 @@ fn apply_refuses_an_edge_whose_from_node_is_the_wrong_kind() {
         MapError::WrongEdgeEnd {
             edge_kind: "settles".to_string(),
             end: EdgeEnd::From,
-            allowed: vec!["verdict".to_string()],
+            allowed: vec!["topic".to_string()],
             found: "claim".to_string(),
         }
     );
@@ -1428,7 +1417,7 @@ fn a_fold_still_accepts_an_edge_between_the_wrong_kinds_from_history() {
     let events = [
         node_added("debates", topic, "topic", "Which language?"),
         node_added("debates", claim, "claim", "Go"),
-        edge_added("debates", "settles", claim, topic),
+        edge_added("debates", "settles", topic, claim),
     ];
 
     let map = Map::fold(crate::core::testing::map_id("debates"), debates(), &events).unwrap();
@@ -1446,8 +1435,8 @@ fn apply_removes_a_node_by_name_and_its_edges_with_it() {
     map.apply(
         add_edge(
             "settles",
-            node_ref("verdict", "Rust over Go"),
             node_ref("topic", "Which language?"),
+            node_ref("verdict", "Rust over Go"),
         ),
         Actor::Human(human()),
     )
@@ -1491,8 +1480,8 @@ fn a_map_reads_as_one_line_per_node_then_per_edge() {
     map.apply(
         add_edge(
             "settles",
-            node_ref("verdict", "Rust over Go"),
             node_ref("topic", "Which language?"),
+            node_ref("verdict", "Rust over Go"),
         ),
         Actor::Human(human()),
     )
@@ -1503,7 +1492,7 @@ fn a_map_reads_as_one_line_per_node_then_per_edge() {
         "- topic \"Which language?\"\n\
          - fact \"Built both\": summary: \"side by\\nside\"; when: \"August\"\n\
          - verdict \"Rust over Go\"\n\
-         - verdict \"Rust over Go\" settles topic \"Which language?\"\n"
+         - topic \"Which language?\" settles verdict \"Rust over Go\"\n"
     );
     assert_eq!(Map::empty(crate::core::testing::map_id("debates"), debates()).to_string(), "");
 }
@@ -1528,8 +1517,8 @@ fn a_schema_is_found_by_name() {
 }
 
 #[test]
-fn a_topic_requires_nothing() {
-    assert!(debates().node_kind("topic").unwrap().requires.is_empty());
+fn a_topic_declares_no_properties() {
+    assert!(debates().node_kind("topic").unwrap().properties.is_empty());
 }
 
 #[test]
@@ -1561,12 +1550,12 @@ fn keeping_a_kind_the_schema_lacks_is_an_error() {
     assert!(matches!(err, MapError::UnknownNodeKind { .. }));
 }
 
-/// A chain: topic <- verdict, topic <- claim <- fact, plus
-/// an unlinked claim, so depth walks one step at a time, against the
-/// edge direction, and a genuinely unlinked node stays out at any
-/// depth. `settles`, `about`, and `backs` are the only edge
-/// kinds that can build it, since `Map::apply` now refuses an edge
-/// whose ends are not of the kinds its edge kind declares.
+/// A chain: topic -> verdict, topic -> claim -> fact, plus
+/// an unlinked claim, so depth walks one step at a time, along and
+/// against the edge direction, and a genuinely unlinked node stays
+/// out at any depth. `settles`, `about`, and `backs` are the only
+/// edge kinds that can build it, since `Map::apply` now refuses an
+/// edge whose ends are not of the kinds its edge kind declares.
 fn chain() -> Map {
     let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     map.apply(add_topic("Which language?"), Actor::Human(human()))
@@ -1580,8 +1569,8 @@ fn chain() -> Map {
     map.apply(
         add_edge(
             "settles",
-            node_ref("verdict", "Rust over Go"),
             node_ref("topic", "Which language?"),
+            node_ref("verdict", "Rust over Go"),
         ),
         Actor::Human(human()),
     )
@@ -1589,8 +1578,8 @@ fn chain() -> Map {
     map.apply(
         add_edge(
             "about",
-            node_ref("claim", "Go"),
             node_ref("topic", "Which language?"),
+            node_ref("claim", "Go"),
         ),
         Actor::Human(human()),
     )
@@ -1598,8 +1587,8 @@ fn chain() -> Map {
     map.apply(
         add_edge(
             "backs",
-            node_ref("fact", "Built both"),
             node_ref("claim", "Go"),
+            node_ref("fact", "Built both"),
         ),
         Actor::Human(human()),
     )
@@ -1696,6 +1685,7 @@ fn select_walks_around_before_it_keeps_kinds() {
         around: Some((&topic, 2)),
         since: None,
         kinds: &kinds,
+        ..Selection::default()
     };
 
     let fragment = chain().select(&selection).unwrap();
@@ -1886,52 +1876,13 @@ fn fold_keeps_the_seq_the_event_recorded_rather_than_the_nodes_position() {
 }
 
 #[test]
-fn a_state_set_from_below_does_not_lift_the_lock_the_humans_change_put_on_a_node() {
-    let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
-    map.apply(add_chore("cancel a turn"), Actor::Agent).unwrap();
-    map.apply(
-        change_node(
-            "chore",
-            "cancel a turn",
-            None,
-            BTreeMap::from([("why".to_string(), "wrong".to_string())]),
-        ),
-        Actor::Human(human()),
-    )
-    .unwrap();
-
-    map.apply(
-        change_node(
-            "chore",
-            "cancel a turn",
-            None,
-            BTreeMap::from([("state".to_string(), "done".to_string())]),
-        ),
-        Actor::Agent,
-    )
-    .unwrap();
-
-    let node = map.find("chore", "cancel a turn").unwrap();
-    assert_eq!(node.changed().actor, Actor::Agent);
-    assert!(matches!(node.touched_by(), Actor::Human(_)), "{:?}", node.touched_by());
-    let renamed = map
-        .apply(
-            change_node("chore", "cancel a turn", Some("renamed"), BTreeMap::new()),
-            Actor::Agent,
-        )
-        .err()
-        .unwrap();
-    assert!(matches!(renamed, MapError::NotYours { .. }), "{renamed}");
-}
-
-#[test]
 fn removing_a_node_a_humans_edge_touches_is_refused_to_the_agent() {
     let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
     map.apply(add_claim("Rust"), Actor::Agent).unwrap();
     map.apply(add_topic("Which language?"), Actor::Human(human()))
         .unwrap();
     map.apply(
-        add_edge("about", node_ref("claim", "Rust"), node_ref("topic", "Which language?")),
+        add_edge("about", node_ref("topic", "Which language?"), node_ref("claim", "Rust")),
         Actor::Human(human()),
     )
     .unwrap();
@@ -1957,7 +1908,7 @@ fn removing_the_agents_own_edge_off_a_node_the_human_touched_is_refused() {
     map.apply(add_topic("Which language?"), Actor::Agent)
         .unwrap();
     map.apply(
-        add_edge("settles", node_ref("verdict", "Rust"), node_ref("topic", "Which language?")),
+        add_edge("settles", node_ref("topic", "Which language?"), node_ref("verdict", "Rust")),
         Actor::Agent,
     )
     .unwrap();
@@ -1976,8 +1927,8 @@ fn removing_the_agents_own_edge_off_a_node_the_human_touched_is_refused() {
         .apply(
             Mutation::RemoveEdge {
                 kind: "settles".to_string(),
-                from: node_ref("verdict", "Rust"),
-                to: node_ref("topic", "Which language?"),
+                from: node_ref("topic", "Which language?"),
+                to: node_ref("verdict", "Rust"),
                 sources: Vec::new(),
             },
             Actor::Agent,
@@ -1995,7 +1946,7 @@ fn removing_the_agents_own_node_is_refused_while_its_edge_hangs_on_a_node_the_hu
     map.apply(add_topic("Which language?"), Actor::Agent)
         .unwrap();
     map.apply(
-        add_edge("settles", node_ref("verdict", "Rust"), node_ref("topic", "Which language?")),
+        add_edge("settles", node_ref("topic", "Which language?"), node_ref("verdict", "Rust")),
         Actor::Agent,
     )
     .unwrap();

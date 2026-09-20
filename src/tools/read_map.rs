@@ -27,15 +27,15 @@ const NAME: &str = "read_map";
 const DESCRIPTION: &str = "Read one cognitive map by name, whole or cut to \
     a fragment: around one node to a depth, since an instant, of some \
     kinds. The maps are the ones the catalogue lists. Returns JSONL: \
-    first a line naming the map's node and edge kinds, with a gloss on \
-    a kind whose name does not say it all - read it before choosing an \
+    first a line naming the map's node and edge kinds, each node kind \
+    with the properties it carries - read it before choosing an \
     `around` selector. Then a line counting what \
     was shown of the whole and how many edges cross the cut, then \
     every node, then every edge, each with the event ids it cites. A \
     crossing edge is where to widen when an exception or a \
     contradiction could change the answer. Open a map before answering \
     from it or revising it; what the conversation shows of a map may \
-    be only its headlines.";
+    be only the nodes that head it.";
 
 /// JSON Schema for `run`'s `arguments`. A string, not a `Value` - the
 /// domain's `ToolSpec` is serde-free, so the provider parses this.
