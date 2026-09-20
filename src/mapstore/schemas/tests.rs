@@ -18,18 +18,16 @@ fn each_shipped_template_parses_under_its_own_name() {
 }
 
 #[test]
-fn the_decisions_template_declares_concept_first() {
+fn the_concepts_template_declares_concept_alone() {
     let (name, text) = templates().into_iter().find(|(name, _)| name == "concepts").unwrap();
     let schema = parse(&name, text).unwrap();
 
-    // Declaration order is nesting order: a question files under a
-    // concept, never the reverse.
     let kinds: Vec<&str> = schema.node_kind_names().collect();
-    assert_eq!(kinds, ["concept", "question", "option", "decision"]);
+    assert_eq!(kinds, ["concept"]);
 }
 
 #[test]
-fn the_decisions_template_lets_a_concept_cover_a_concept() {
+fn the_concepts_template_lets_a_concept_cover_a_concept() {
     let (name, text) = templates().into_iter().find(|(name, _)| name == "concepts").unwrap();
     let schema = parse(&name, text).unwrap();
     let covers = schema.edge_kind("covers").unwrap();
