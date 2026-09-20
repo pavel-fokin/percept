@@ -124,20 +124,6 @@ pub enum MapsCommand {
     /// the user wrote, or last changed, takes no change from an agent.
     /// Prints the node's id.
     ChangeNode(ChangeNodeArgs),
-    /// One map's kinds, relations, and how to record to it, from its
-    /// schema.
-    Describe(DescribeMapArgs),
-    /// Opens a reflection on a map: appends a `reflection.started`
-    /// event, prints its id to cite from every node the reflection then
-    /// records, that schema's own `"reflection.started"` lines, then
-    /// what `maps describe` prints.
-    Reflect(DescribeMapArgs),
-}
-
-#[derive(Args)]
-pub struct DescribeMapArgs {
-    /// The map's name, as `maps list` prints it.
-    map: String,
 }
 
 #[derive(Args)]
@@ -695,30 +681,6 @@ pub fn maps_show(
     per_path(args.all_paths, args.json, root, &events, |path| {
         print_map(mapstore::fold_map_at(schemas, &args.map, &events, path)?, &args)
     })
-}
-
-/// Prints the map `args.map` names' capabilities from its schema alone:
-/// what it can hold and how to write to it. Needs no log and no fold,
-/// so it works on an empty map.
-pub fn maps_describe(args: DescribeMapArgs, schemas: &Schemas) -> Result<(), Box<dyn std::error::Error>> {
-    let schema = schemas.find(&args.map)?;
-    print_text(&mapstore::describe(&schema))
-}
-
-/// Opens a reflection on `args.map`: appends a `reflection.started`
-/// event and prints its id alone, for the caller to cite as `--source`
-/// on every node the reflection then records; then `maps describe`'s
-/// own output, unchanged.
-pub fn maps_reflect(
-    args: DescribeMapArgs,
-    log: &dyn EventLog,
-    schemas: &Schemas,
-    source: &crate::core::Source,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let schema = schemas.find(&args.map)?;
-    let event = mapstore::start_reflection(log, schemas, &args.map, source)?;
-    print_lines(std::iter::once(event.id().as_uuid().to_string()))?;
-    print_text(&mapstore::describe(&schema))
 }
 
 /// `maps_show`'s tail: cut `map` to `args`'s filters, then print it

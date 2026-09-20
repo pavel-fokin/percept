@@ -225,26 +225,6 @@ pub fn ensure_maps(
     }))
 }
 
-/// Opens a reflection, creating its map in the same batch when this is
-/// the first write to that schema at this path.
-pub fn start_reflection(
-    log: &dyn EventLog,
-    schemas: &Schemas,
-    name: &str,
-    source: &crate::core::Source,
-) -> Result<Event, Box<dyn std::error::Error>> {
-    let (name, source) = (name.to_string(), source.clone());
-    let batch = log.append_batch_computed(Box::new(move |events| {
-        let (created, snapshot) = Snapshot::for_write(schemas, &name, &source, events)?;
-        let reflection = Event::reflection_started(snapshot.map.id(), source);
-        Ok(created.into_iter().chain(std::iter::once(reflection)).collect())
-    }))?;
-    batch
-        .last()
-        .cloned()
-        .ok_or_else(|| "reflection produced no event".into())
-}
-
 #[derive(Serialize)]
 struct MapLine<'a> {
     id: String,

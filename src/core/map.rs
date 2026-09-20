@@ -698,8 +698,7 @@ pub fn map_of_mut(payload: &mut Payload) -> Option<&mut MapId> {
         | Payload::NodeChanged { map, .. }
         | Payload::NodeRemoved { map, .. }
         | Payload::EdgeAdded { map, .. }
-        | Payload::EdgeRemoved { map, .. }
-        | Payload::ReflectionStarted { map } => Some(map),
+        | Payload::EdgeRemoved { map, .. } => Some(map),
         _ => None,
     }
 }

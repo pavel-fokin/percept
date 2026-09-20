@@ -230,7 +230,6 @@ feature, and `scripts/install.sh` leaves it out.
 cargo run --features lab                  # the TUI
 cargo run --features lab -- ask "what did the last session leave open?"
 cargo run --features lab -- ask --yes "rename Foo to Bar"    # run calls the policy would ask about
-cargo run --features lab -- reflect       # one turn revising the decisions map
 ```
 
 The TUI is a chat over the log with tools, and in a git checkout a

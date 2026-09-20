@@ -344,25 +344,6 @@ fn a_text_term_matches_every_payload_kind() {
     }
 }
 
-#[test]
-fn a_reflection_started_matches_on_its_map_id() {
-    let map = crate::core::testing::map_id("deploys");
-    let event = Event::restore(
-        EventId::new(),
-        Actor::Agent,
-        source("tui"),
-        None,
-        Timestamp::now(),
-        Payload::ReflectionStarted {
-            map,
-        },
-    );
-    let query = EventQuery {
-        text: vec![map.as_uuid().to_string()],
-        ..Default::default()
-    };
-    assert!(query.matches(&event));
-}
 
 #[test]
 fn a_map_created_matches_on_its_id_and_schema() {

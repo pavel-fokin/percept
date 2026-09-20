@@ -260,19 +260,13 @@ async fn main() {
                 EventsCommand::Show(args) => cli::show(args, &log),
             }
         }),
-        // Schemas first: `describe` reads them alone, and must not fail
-        // on a log that cannot be opened.
         Some(Command::Maps { command }) => mapstore::load_schemas(&checkout).and_then(|schemas| {
-            if let MapsCommand::Describe(args) = command {
-                return cli::maps_describe(args, &schemas);
-            }
             let log = open_log(&checkout)?;
             let me = log.me();
             // Read by the write commands only: a read never opens the
             // turn directory.
             let cause = || turn_cause(&checkout, &root);
             match command {
-                MapsCommand::Describe(_) => unreachable!(),
                 MapsCommand::List(args) => cli::maps_list(args, &log, &schemas, &root),
                 MapsCommand::Show(args) => cli::maps_show(args, &log, &schemas, &root),
                 MapsCommand::AddNode(args) => {
@@ -292,9 +286,6 @@ async fn main() {
                 }
                 MapsCommand::ChangeNode(args) => {
                     cli::maps_change_node(args, &log, &schemas, &cli_source, me, cause()?)
-                }
-                MapsCommand::Reflect(args) => {
-                    cli::maps_reflect(args, &log, &schemas, &cli_source)
                 }
             }
         }),
