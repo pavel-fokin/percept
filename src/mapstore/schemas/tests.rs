@@ -378,78 +378,16 @@ fn a_free_property_written_with_text_is_refused() {
 }
 
 #[test]
-fn a_rules_table_loads_lines_for_each_declared_moment() {
+fn a_rules_table_left_from_an_older_schema_is_refused() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/glossary.toml",
-        "purpose = \"p\"\n\n[nodes.term]\n\n\
-         [rules]\n\"session.started\" = [\"s\"]\n\"message.received\" = [\"a\", \"b\"]\n",
-    );
-
-    let schemas = load(fixture.path()).unwrap();
-
-    let glossary = schemas.find("glossary").unwrap();
-    assert_eq!(glossary.rules.at("session.started"), ["s"]);
-    assert_eq!(glossary.rules.at("message.received"), ["a", "b"]);
-}
-
-#[test]
-fn reflection_started_lines_load_onto_the_schema() {
-    let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "purpose = \"p\"\n\n[nodes.term]\n\n[rules]\n\"reflection.started\" = [\"r\"]\n",
-    );
-
-    let schemas = load(fixture.path()).unwrap();
-
-    let glossary = schemas.find("glossary").unwrap();
-    assert_eq!(glossary.rules.at("reflection.started"), ["r"]);
-}
-
-#[test]
-fn a_blank_line_under_any_moment_is_refused() {
-    let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "purpose = \"p\"\n\n[nodes.term]\n\n[rules]\n\"message.received\" = [\"\"]\n",
+        "purpose = \"p\"\n\n[nodes.term]\n\n[rules]\n\"message.received\" = [\"a\"]\n",
     );
 
     let err = load(fixture.path()).err().unwrap().to_string();
 
     assert!(err.contains("glossary.toml"), "{err}");
-    assert!(err.contains("blank \"message.received\" entry"), "{err}");
+    assert!(err.contains("rules"), "{err}");
 }
 
-#[test]
-fn a_key_outside_the_three_moments_is_refused_naming_them() {
-    let fixture = Fixture::new();
-    fixture.write(
-        ".percept/schemas/glossary.toml",
-        "purpose = \"p\"\n\n[nodes.term]\n\n[rules]\nturn = [\"a\"]\n",
-    );
-
-    let err = load(fixture.path()).err().unwrap().to_string();
-
-    assert!(err.contains("glossary.toml"), "{err}");
-    assert!(err.contains("\"turn\""), "{err}");
-    assert!(err.contains("session.started"), "{err}");
-    assert!(err.contains("message.received"), "{err}");
-    assert!(err.contains("reflection.started"), "{err}");
-}
-
-#[test]
-fn the_decisions_template_carries_message_received_rules() {
-    let (name, text) = templates().into_iter().find(|(name, _)| name == "concepts").unwrap();
-    let schema = parse(&name, text).unwrap();
-
-    assert_eq!(schema.rules.at("message.received").len(), 2);
-}
-
-#[test]
-fn the_decisions_template_carries_reflection_started_rules() {
-    let (name, text) = templates().into_iter().find(|(name, _)| name == "concepts").unwrap();
-    let schema = parse(&name, text).unwrap();
-
-    assert_eq!(schema.rules.at("reflection.started").len(), 5);
-}

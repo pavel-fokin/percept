@@ -21,9 +21,6 @@ pub enum Error {
     /// `file.cited`'s `lines` wasn't `"from-to"` with both sides a
     /// number.
     BadLines(String),
-    /// A payload carried fields the event type doesn't record, so
-    /// storing it would silently drop them.
-    UnrecordedPayloadFields(String),
     /// A range was asked for on an event whose payload carries no
     /// `content` - `tool.called`, whose payload is `{tool, arguments}`.
     NoRangeableContent(String),
@@ -69,9 +66,6 @@ impl fmt::Display for Error {
             Self::BadTimestamp(s) => write!(f, "malformed timestamp: {s}"),
             Self::BadPayload(e) => write!(f, "malformed payload: {e}"),
             Self::BadLines(s) => write!(f, "malformed lines {s:?}, expected \"from-to\""),
-            Self::UnrecordedPayloadFields(t) => {
-                write!(f, "payload has fields {t} does not record")
-            }
             Self::NoRangeableContent(kind) => write!(f, "{kind} has no content to slice"),
             Self::RangeStartPastEnd { start, len } => write!(
                 f,

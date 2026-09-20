@@ -17,7 +17,7 @@ mod turn_state;
 
 pub use error::Error;
 pub use event::{
-    decode, encode, encode_at, find_event, from_wire, ids, parse_actor, wire_actor, WireActor,
+    encode, encode_at, find_event, from_wire, ids, parse_actor, wire_actor, WireActor,
     parse_event_id, parse_kind, parse_lines, parse_map_id, read_event, summarize, summary, Cursor,
     Event, PREVIEW_CHARS,
 };

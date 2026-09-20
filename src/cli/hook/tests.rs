@@ -5,9 +5,8 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::*;
-use crate::core::testing::{content, file_cited_payload, human, map_id, node_added_payload, FakeLog};
+use crate::core::testing::{content, human, map_id, FakeLog};
 use crate::core::{HumanId, Payload};
-use crate::shared::Timestamp;
 
 /// The one map a hook test's project declares: `debates`, with a
 /// `topic` node kind and nothing else - a mini schema of this
@@ -98,13 +97,12 @@ impl Fixture {
     fn call_raw(&self, client: &str, raw: &str) -> Result<Value, Box<dyn std::error::Error>> {
         let mut cursor = Cursor::new(raw.as_bytes().to_vec());
         let input = read(&mut cursor)?;
-        let checkout = crate::root_for(Path::new(input.cwd()))?;
-        let root = crate::project_of(&checkout);
+        let root = crate::project_of(&crate::root_for(Path::new(input.cwd()))?);
         let source = Source {
             name: client.to_string(),
             path: root,
         };
-        run(input, &source, &self.log, &self.sessions, &checkout, self.me)
+        run(input, &source, &self.log, &self.sessions, self.me)
     }
 
     /// The number of turn state files kept anywhere under
@@ -131,22 +129,17 @@ impl Fixture {
     }
 
     /// Fires `SessionStart` for `client` against this fixture's own
-    /// root, returning the `additionalContext` block.
-    fn session_start(&self, client: &str) -> String {
-        let output = self
-            .call(
-                client,
-                json!({
-                    "hook_event_name": "SessionStart",
-                    "cwd": self.root.to_str().unwrap(),
-                    "session_id": "session",
-                }),
-            )
-            .unwrap();
-        output["hookSpecificOutput"]["additionalContext"]
-            .as_str()
-            .unwrap()
-            .to_string()
+    /// root, returning what the client is answered.
+    fn session_start(&self, client: &str) -> Value {
+        self.call(
+            client,
+            json!({
+                "hook_event_name": "SessionStart",
+                "cwd": self.root.to_str().unwrap(),
+                "session_id": "session",
+            }),
+        )
+        .unwrap()
     }
 
     /// `prompt_at`, against this fixture's own root.
@@ -240,99 +233,6 @@ impl Fixture {
             .collect()
     }
 
-    /// Appends a `node.added` event for this fixture's own project,
-    /// `at` a given moment - the moment a "gained since" test needs to
-    /// control - and returns it so a test can point an edge at the
-    /// node it minted.
-    fn seed_node(&self, map: &str, kind: &str, name: &str, at: Timestamp) -> Event {
-        self.seed_node_with_sources(map, kind, name, at, Vec::new())
-    }
-
-    /// Appends a `file.cited` event citing `path` (repo-relative)
-    /// with `excerpt` as its text, `lines` the ranged read or `None`
-    /// for the whole file, `at` the moment it was seen, caused by
-    /// `causation` when this is a re-citation of an earlier one.
-    fn seed_citation(
-        &self,
-        path: &str,
-        lines: Option<(u32, u32)>,
-        excerpt: &str,
-        at: Timestamp,
-        causation: Option<EventId>,
-    ) -> Event {
-        let event = Event::restore(
-            EventId::new(),
-            Actor::Agent,
-            self.source(),
-            causation,
-            at,
-            file_cited_payload(path, lines, excerpt),
-        );
-        self.log.append(&event).unwrap();
-        event
-    }
-
-    /// `seed_node`, but with `sources` set - the ids a node cites, as a
-    /// `changed since recorded` test needs to point one at a
-    /// file.cited event.
-    fn seed_node_with_sources(
-        &self,
-        map: &str,
-        kind: &str,
-        name: &str,
-        at: Timestamp,
-        sources: Vec<EventId>,
-    ) -> Event {
-        self.seed_node_by(Actor::Human(human()), map, kind, name, at, sources)
-    }
-
-    fn seed_node_by(
-        &self,
-        actor: Actor,
-        map: &str,
-        kind: &str,
-        name: &str,
-        at: Timestamp,
-        sources: Vec<EventId>,
-    ) -> Event {
-        let event = Event::restore(
-            EventId::new(),
-            actor,
-            self.source(),
-            None,
-            at,
-            node_added_payload(map, kind, name, std::collections::BTreeMap::new(), sources),
-        );
-        self.log.append(&event).unwrap();
-        event
-    }
-
-    /// The source every seeded event carries: this fixture's project,
-    /// written by codex.
-    fn source(&self) -> Source {
-        Source {
-            name: "codex".to_string(),
-            path: self.root.clone(),
-        }
-    }
-
-    /// When the previous session started - what a returning session's
-    /// "since" is, after one `session_start` has run.
-    fn since(&self) -> Timestamp {
-        self.events()
-            .into_iter()
-            .find(|event| matches!(event.payload(), Payload::SessionStarted))
-            .unwrap()
-            .created_at()
-    }
-
-    /// Writes `<root>/<path>`, creating any missing parent directories -
-    /// the working tree a `changed since recorded` test checks against.
-    fn write_file(&self, path: &str, content: &str) {
-        let full = self.root.join(path);
-        std::fs::create_dir_all(full.parent().unwrap()).unwrap();
-        std::fs::write(full, content).unwrap();
-    }
 }
 
 fn merge(base: &mut Value, extra: Value) {
@@ -385,10 +285,7 @@ fn every_hook_event_names_itself_after_deserializing() {
 }
 
 #[test]
-fn a_broken_project_schema_does_not_stop_prompt_capture() {
-    // Only `SessionStart` needs schemas at all; a project's own
-    // `.percept/schemas/*.toml` failing to load must not also break
-    // recording an ordinary prompt, which reads no schema.
+fn a_broken_project_schema_does_not_stop_the_hook() {
     let fixture = Fixture::new().with_extra_schema("broken", "not valid toml");
 
     let id = fixture.prompt("codex", "session", "", "hello");
@@ -465,11 +362,10 @@ fn a_prompt_whose_first_word_only_starts_like_a_frame_is_the_humans() {
 }
 
 #[test]
-fn a_first_session_here_prints_starts_render_and_records_the_marker() {
+fn a_session_start_records_one_marker_from_the_system() {
     let fixture = Fixture::new();
-    let context = fixture.session_start("codex");
+    fixture.session_start("codex");
 
-    assert!(context.contains("nothing recorded yet"), "{context:?}");
     let events = fixture.events();
     assert_eq!(events.len(), 1);
     assert!(matches!(events[0].payload(), Payload::SessionStarted));
@@ -477,53 +373,23 @@ fn a_first_session_here_prints_starts_render_and_records_the_marker() {
 }
 
 #[test]
-fn a_returning_session_still_prints_starts_render() {
+fn a_session_start_answers_the_client_nothing() {
+    let fixture = Fixture::new();
+
+    assert_eq!(fixture.session_start("codex"), json!({}));
+}
+
+#[test]
+fn a_returning_session_records_its_own_marker() {
     let fixture = Fixture::new();
     fixture.session_start("codex");
-    let context = fixture.session_start("codex");
+    fixture.session_start("codex");
 
-    assert!(context.contains("nothing recorded yet"), "{context:?}");
     assert_eq!(fixture.events().len(), 2);
 }
 
 #[test]
-fn a_session_start_carries_a_schemas_own_session_started_rules() {
-    let fixture = with_session_started_rules("\"a\", \"b\"");
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("rules from"), "{context:?}");
-    assert!(context.ends_with("\na\nb"), "{context:?}");
-}
-
-/// A fixture whose second schema declares `message.received` rules,
-/// `turn` being the TOML array's own contents.
-fn with_turn_rules(turn: &str) -> Fixture {
-    Fixture::new().with_extra_schema(
-        "glossary",
-        &format!(
-            "purpose = \"p\"\n\n\
-             [nodes.concept]\ndefinition = \"\"\n\n\
-             [rules]\n\"message.received\" = [{turn}]\n"
-        ),
-    )
-}
-
-/// A fixture whose second schema declares `session.started` rules,
-/// `started` being the TOML array's own contents.
-fn with_session_started_rules(started: &str) -> Fixture {
-    Fixture::new().with_extra_schema(
-        "glossary",
-        &format!(
-            "purpose = \"p\"\n\n\
-             [nodes.concept]\ndefinition = \"\"\n\n\
-             [rules]\n\"session.started\" = [{started}]\n"
-        ),
-    )
-}
-
-#[test]
-fn a_prompts_context_is_the_event_id_alone_when_no_schema_declares_rules() {
+fn a_prompts_context_is_the_event_id_alone() {
     let fixture = Fixture::new();
 
     let output = fixture
@@ -544,123 +410,14 @@ fn a_prompts_context_is_the_event_id_alone_when_no_schema_declares_rules() {
 }
 
 #[test]
-fn a_prompt_carries_a_schemas_own_turn_rules_after_the_id() {
-    let fixture = with_turn_rules("\"a\", \"b\"");
-
-    let output = fixture
-        .call(
-            "codex",
-            json!({
-                "hook_event_name": "UserPromptSubmit",
-                "cwd": fixture.root.to_str().unwrap(),
-                "session_id": "session",
-                "prompt": "hello",
-            }),
-        )
-        .unwrap();
-
-    let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
-    let lines: Vec<&str> = context.lines().collect();
-    assert_eq!(lines[2..], ["a", "b"]);
-}
-
-#[test]
-fn rule_lines_arrive_under_a_line_naming_where_they_came_from() {
-    let fixture = with_turn_rules("\"a\"");
-
-    let output = fixture
-        .call(
-            "codex",
-            json!({
-                "hook_event_name": "UserPromptSubmit",
-                "cwd": fixture.root.to_str().unwrap(),
-                "session_id": "session",
-                "prompt": "hello",
-            }),
-        )
-        .unwrap();
-
-    let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
-    let lines: Vec<&str> = context.lines().collect();
-    assert_eq!(
-        lines[1],
-        format!("rules from {}", fixture.root.join(".percept/schemas").display())
-    );
-}
-
-#[test]
-fn the_context_carries_no_recording_section() {
-    let fixture = Fixture::new();
-    let context = fixture.session_start("codex");
-
-    assert!(!context.contains("recording\n"), "{context:?}");
-    assert!(!context.contains("Recorded to debates:"), "{context:?}");
-}
-
-#[test]
-fn the_sessions_own_marker_does_not_count_as_the_last_session() {
+fn each_client_records_its_own_session_marker() {
     let fixture = Fixture::new();
     fixture.session_start("codex");
-    let since = fixture.since();
+    fixture.session_start("claude-code");
 
-    fixture.seed_node(
-        "debates",
-        "topic",
-        "a fresh one",
-        since.minus_minutes(-10).unwrap(),
-    );
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("+1 since last session"), "{context:?}");
-}
-
-#[test]
-fn a_changed_cited_file_reaches_the_hook_context() {
-    let fixture = Fixture::new();
-    fixture.write_file("src/a.rs", "fn one() { edited }\n");
-    let citation = fixture.seed_citation(
-        "src/a.rs",
-        Some((1, 1)),
-        "fn one() {}",
-        Timestamp::now(),
-        None,
-    );
-    fixture.seed_node_with_sources(
-        "debates",
-        "topic",
-        "why a?",
-        Timestamp::now(),
-        vec![citation.id()],
-    );
-
-    let context = fixture.session_start("codex");
-
-    assert!(context.contains("cites src/a.rs changed"), "{context:?}");
-}
-
-#[test]
-fn a_different_client_or_project_sees_its_own_first_session() {
-    let fixture = Fixture::new();
-    fixture.session_start("codex");
-
-    assert!(fixture.session_start("claude-code").contains("nothing recorded yet"));
-
-    let other = fixture.other_root();
-    let output = fixture
-        .call(
-            "codex",
-            json!({
-                "hook_event_name": "SessionStart",
-                "cwd": other.to_str().unwrap(),
-                "session_id": "session",
-            }),
-        )
-        .unwrap();
-    let context = output["hookSpecificOutput"]["additionalContext"]
-        .as_str()
-        .unwrap();
-    assert!(context.contains("nothing recorded yet"), "{context:?}");
+    let events = fixture.events();
+    let names: Vec<&str> = events.iter().map(|event| event.source().name.as_str()).collect();
+    assert_eq!(names, ["codex", "claude-code"]);
 }
 
 #[test]

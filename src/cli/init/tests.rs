@@ -49,11 +49,7 @@ fn writes_claude_code_from_nothing() {
     );
     assert_eq!(
         root["permissions"]["allow"],
-        json!([
-            "Bash(percept maps *)",
-            "Bash(percept events *)",
-            "Bash(percept start*)"
-        ])
+        json!(["Bash(percept maps *)", "Bash(percept events *)"])
     );
 }
 
@@ -102,7 +98,7 @@ fn does_not_duplicate_an_existing_allow_entry() {
 
     let merged = claude_code(existing.clone(), "percept hook claude-code");
 
-    assert_eq!(merged["permissions"]["allow"].as_array().unwrap().len(), 3);
+    assert_eq!(merged["permissions"]["allow"].as_array().unwrap().len(), 2);
 }
 
 #[test]

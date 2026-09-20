@@ -61,7 +61,6 @@ claude                         # work as usual; prompts and replies are recorded
 
 percept events search --since 1h
 percept maps show decisions
-percept start                 # what's recorded, what needs attention, and where to go next
 ```
 
 `percept init codex` does the same for Codex. The [Coding
@@ -82,8 +81,6 @@ percept events search --contains worktree --size 5
 percept events search --source codex
 percept events show <id>
 percept events show <id> --range 400:
-percept events publish --actor human --source percept-cli \
-  --type message.received --payload '{"content":"..."}'
 ```
 
 Output is one JSON object per line, oldest first. A search line keeps
@@ -166,9 +163,8 @@ and per client only the files that point at it.
 `percept init <client>` writes the shipped schemas under
 `.percept/schemas`, leaving a file already there alone, and the
 client's hook entries into the checkout, merging into an existing
-file. For Claude Code it also
-allows `percept maps`, `percept events`, and `percept start` without a
-permission prompt. Both files are committed in this repo. Open the client from
+file. For Claude Code it also allows `percept maps` and `percept
+events` without a permission prompt. Both files are committed in this repo. Open the client from
 the checkout and trust the repository; in Codex, `/hooks` reviews the
 capture hooks. Restart a running session to load the configuration.
 
@@ -232,7 +228,6 @@ feature, and `scripts/install.sh` leaves it out.
 cargo run --features lab                  # the TUI
 cargo run --features lab -- ask "what did the last session leave open?"
 cargo run --features lab -- ask --yes "rename Foo to Bar"    # run calls the policy would ask about
-cargo run --features lab -- reflect       # one turn revising the decisions map
 ```
 
 The TUI is a chat over the log with tools, and in a git checkout a

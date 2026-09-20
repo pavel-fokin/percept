@@ -129,7 +129,7 @@ fn hook_run(args: cli::hook::HookArgs) -> Result<serde_json::Value, Box<dyn std:
     };
     let log = open_log(&checkout)?;
     let me = log.me();
-    cli::hook::run(input, &source, &log, &sessions_dir(&checkout)?, &checkout, me)
+    cli::hook::run(input, &source, &log, &sessions_dir(&checkout)?, me)
 }
 
 /// Where `percept hook` keeps every checkout's turns, beside the log.
@@ -255,24 +255,17 @@ async fn main() {
         Some(Command::Events { command }) => open_log(&checkout).and_then(|log| {
             let me = log.me();
             match command {
-                EventsCommand::Publish(args) => cli::publish(args, &log, &root, &checkout, me),
                 EventsCommand::Search(args) => cli::search(args, &log, me),
                 EventsCommand::Show(args) => cli::show(args, &log),
             }
         }),
-        // Schemas first: `describe` reads them alone, and must not fail
-        // on a log that cannot be opened.
         Some(Command::Maps { command }) => mapstore::load_schemas(&checkout).and_then(|schemas| {
-            if let MapsCommand::Describe(args) = command {
-                return cli::maps_describe(args, &schemas);
-            }
             let log = open_log(&checkout)?;
             let me = log.me();
             // Read by the write commands only: a read never opens the
             // turn directory.
             let cause = || turn_cause(&checkout, &root);
             match command {
-                MapsCommand::Describe(_) => unreachable!(),
                 MapsCommand::List(args) => cli::maps_list(args, &log, &schemas, &root),
                 MapsCommand::Show(args) => cli::maps_show(args, &log, &schemas, &root),
                 MapsCommand::AddNode(args) => {
@@ -293,9 +286,6 @@ async fn main() {
                 MapsCommand::ChangeNode(args) => {
                     cli::maps_change_node(args, &log, &schemas, &cli_source, me, cause()?)
                 }
-                MapsCommand::Reflect(args) => {
-                    cli::maps_reflect(args, &log, &schemas, &cli_source, &checkout)
-                }
             }
         }),
         #[cfg(feature = "lab")]
@@ -304,10 +294,6 @@ async fn main() {
         }
         Some(Command::Init(args)) => open_log(&checkout)
             .and_then(|log| cli::init::run(args, &checkout, &log, &cli_source)),
-        Some(Command::Start) => open_log(&checkout).and_then(|log| {
-            let schemas = mapstore::load_schemas(&checkout)?;
-            cli::start(&log, &schemas, &root, &checkout)
-        }),
         Some(Command::Web) => match open_log(&checkout) {
             Ok(log) => server::run(std::sync::Arc::new(log), cli_source.clone()).await,
             Err(err) => Err(err),

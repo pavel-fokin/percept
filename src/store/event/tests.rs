@@ -436,32 +436,6 @@ fn session_started_round_trips_through_json() {
 }
 
 #[test]
-fn reflection_started_round_trips_through_json() {
-    let original = crate::core::Event::restore(
-        EventId::new(),
-        Actor::Agent,
-        source("percept-code"),
-        None,
-        Timestamp::now(),
-        Payload::ReflectionStarted {
-            map: crate::core::testing::map_id("decisions"),
-        },
-    );
-
-    let json = serde_json::to_string(&Event::from(&original)).unwrap();
-    let wire: Event = serde_json::from_str(&json).unwrap();
-    assert_eq!(wire.kind, "reflection.started");
-    assert!(matches!(wire.actor, WireActor::Agent));
-    let restored = crate::store::from_wire(wire).unwrap();
-
-    assert!(restored.actor() == Actor::Agent);
-    match restored.payload() {
-        Payload::ReflectionStarted { map } => assert_eq!(*map, crate::core::testing::map_id("decisions")),
-        _ => panic!("expected ReflectionStarted"),
-    }
-}
-
-#[test]
 fn node_added_round_trips_through_json() {
     let cited = EventId::new();
     let node = NodeId::new();
@@ -527,7 +501,7 @@ fn a_node_added_line_with_no_seq_is_a_bad_line() {
         "sources": [],
     });
 
-    let err = match decode("user", source("cli"), "node.added", None, json, human()) {
+    let err = match decode_payload("node.added", json) {
         Err(e) => e,
         Ok(_) => panic!("expected a missing seq to be rejected"),
     };
@@ -589,9 +563,9 @@ fn a_node_changed_line_with_no_name_decodes_to_none() {
         "sources": [],
     });
 
-    let event = decode("agent", source("cli"), "node.changed", None, json, human()).unwrap();
+    let payload = decode_payload("node.changed", json).unwrap();
 
-    assert!(matches!(event.payload(), Payload::NodeChanged { name: None, .. }));
+    assert!(matches!(payload, Payload::NodeChanged { name: None, .. }));
 }
 
 #[test]
@@ -725,7 +699,7 @@ fn a_malformed_source_in_a_node_added_payload_is_an_error() {
         "seq": 1,
     });
 
-    let err = match decode("user", source("cli"), "node.added", None, payload, human()) {
+    let err = match decode_payload("node.added", payload) {
         Err(e) => e,
         Ok(_) => panic!("expected a malformed source to be rejected"),
     };
@@ -956,13 +930,12 @@ fn parse_lines_rejects_a_zero_start() {
 
 #[test]
 fn a_file_cited_payload_with_a_reversed_range_fails_to_decode() {
-    let source = source("percept-cli");
     let payload = serde_json::json!({
         "path": "src/lib.rs",
         "lines": "3-1",
         "excerpt": "text",
     });
-    assert!(decode("model", source, "file.cited", None, payload, human()).is_err());
+    assert!(decode_payload("file.cited", payload).is_err());
 }
 
 #[test]
@@ -1046,7 +1019,6 @@ fn every_kind_names_round_trip_through_the_store_parser() {
         EventKind::EdgeRemoved,
         EventKind::ModelCalled,
         EventKind::SessionStarted,
-        EventKind::ReflectionStarted,
         EventKind::FileCited,
     ];
 

@@ -147,7 +147,6 @@ fn carries(payload: &Payload, term: &str) -> bool {
         Payload::EdgeRemoved { map, kind, .. } => has(&map.as_uuid().to_string()) || has(kind),
         Payload::ModelCalled(usage) => has(&usage.model),
         Payload::SessionStarted => false,
-        Payload::ReflectionStarted { map } => has(&map.as_uuid().to_string()),
         Payload::FileCited { path, excerpt, .. } => has(&path.to_string_lossy()) || has(excerpt),
     }
 }

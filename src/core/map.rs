@@ -21,7 +21,7 @@ mod schema;
 use apply::highest;
 
 pub use error::MapError;
-pub use schema::{default_prefix, EdgeKind, NodeKind, Rules, Schema, Schemas};
+pub use schema::{default_prefix, EdgeKind, NodeKind, Schema, Schemas};
 
 /// Identifies a cognitive map.
 pub type MapId = Id<Map>;
@@ -698,8 +698,7 @@ pub fn map_of_mut(payload: &mut Payload) -> Option<&mut MapId> {
         | Payload::NodeChanged { map, .. }
         | Payload::NodeRemoved { map, .. }
         | Payload::EdgeAdded { map, .. }
-        | Payload::EdgeRemoved { map, .. }
-        | Payload::ReflectionStarted { map } => Some(map),
+        | Payload::EdgeRemoved { map, .. } => Some(map),
         _ => None,
     }
 }
