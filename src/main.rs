@@ -129,7 +129,7 @@ fn hook_run(args: cli::hook::HookArgs) -> Result<serde_json::Value, Box<dyn std:
     };
     let log = open_log(&checkout)?;
     let me = log.me();
-    cli::hook::run(input, &source, &log, &sessions_dir(&checkout)?, &checkout, me)
+    cli::hook::run(input, &source, &log, &sessions_dir(&checkout)?, me)
 }
 
 /// Where `percept hook` keeps every checkout's turns, beside the log.
@@ -304,10 +304,6 @@ async fn main() {
         }
         Some(Command::Init(args)) => open_log(&checkout)
             .and_then(|log| cli::init::run(args, &checkout, &log, &cli_source)),
-        Some(Command::Start) => open_log(&checkout).and_then(|log| {
-            let schemas = mapstore::load_schemas(&checkout)?;
-            cli::start(&log, &schemas, &root, &checkout)
-        }),
         Some(Command::Web) => match open_log(&checkout) {
             Ok(log) => server::run(std::sync::Arc::new(log), cli_source.clone()).await,
             Err(err) => Err(err),

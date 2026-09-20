@@ -1278,13 +1278,3 @@ fn a_record_why_line_under_a_change_block_sets_the_nodes_why_property() {
     let chore = map.find("chore", "cancel a turn").unwrap();
     assert_eq!(chore.properties.get("why").unwrap(), "never proposed");
 }
-
-#[test]
-fn start_reads_and_appends_no_event() {
-    let log = FakeLog::seeded(vec![node_added("topic", "why?")]);
-    let checkout = Fixture::new();
-
-    start(&log, &schemas(), Path::new(ROOT), checkout.path()).unwrap();
-
-    assert_eq!(log.load().unwrap().len(), 1);
-}

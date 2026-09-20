@@ -61,7 +61,6 @@ claude                         # work as usual; prompts and replies are recorded
 
 percept events search --since 1h
 percept maps show decisions
-percept start                 # what's recorded, what needs attention, and where to go next
 ```
 
 `percept init codex` does the same for Codex. The [Coding
@@ -166,9 +165,8 @@ and per client only the files that point at it.
 `percept init <client>` writes the shipped schemas under
 `.percept/schemas`, leaving a file already there alone, and the
 client's hook entries into the checkout, merging into an existing
-file. For Claude Code it also
-allows `percept maps`, `percept events`, and `percept start` without a
-permission prompt. Both files are committed in this repo. Open the client from
+file. For Claude Code it also allows `percept maps` and `percept
+events` without a permission prompt. Both files are committed in this repo. Open the client from
 the checkout and trust the repository; in Codex, `/hooks` reviews the
 capture hooks. Restart a running session to load the configuration.
 

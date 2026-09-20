@@ -17,9 +17,6 @@
 //! or reply can name it as its cause. Opening it also takes its lock,
 //! held exclusively for the length of one hook call, so two hook calls
 //! for the same turn never race.
-//!
-//! `SessionStart`'s `additionalContext` is exactly `mapstore::start`'s
-//! output - the same text `percept start` prints from the shell.
 
 use std::fs::File;
 use std::io::{BufRead, Read};
@@ -28,8 +25,7 @@ use std::path::Path;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::core::{Actor, Event, EventId, EventLog, Schemas, Source};
-use crate::mapstore::{self, last_session, of_path};
+use crate::core::{Actor, Event, EventId, EventLog, Source};
 use crate::store::{turn_dir, TurnState};
 
 
@@ -134,16 +130,12 @@ pub fn read(input: &mut dyn Read) -> Result<HookInput, Box<dyn std::error::Error
 /// Appends the events `input`'s event implies to `log` under `source`,
 /// and returns the JSON object the client expects back on stdout -
 /// `{}` unless the event asks for something. `sessions_dir` holds one
-/// directory per checkout root, created if missing. `checkout` is only
-/// read - as schemas, from `.percept/schemas/*.toml` - for
-/// `SessionStart`; a project schema that fails to load must not also
-/// break the other four events, which need no schema at all.
+/// directory per checkout root, created if missing.
 pub fn run(
     input: HookInput,
     source: &Source,
     log: &dyn EventLog,
     sessions_dir: &Path,
-    checkout: &Path,
     me: Option<crate::core::HumanId>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let dir = turn_dir(sessions_dir, &source.path);
@@ -154,8 +146,11 @@ pub fn run(
         HookEvent::SessionStart {} => {
             // A session opens with no turn, whatever a killed one left.
             TurnState::unpoint(&dir)?;
-            let schemas = crate::mapstore::load_schemas(checkout)?;
-            start_session(source, log, &schemas, checkout)
+            // Nothing is said back on this channel; the marker is
+            // recorded because the review page cuts "gained since" by
+            // the last session.
+            log.append(&Event::session_started(source.clone()))?;
+            Ok(json!({}))
         }
         HookEvent::UserPromptSubmit { prompt } => {
             submit_prompt(prompt, source, log, &mut state, &dir, me)
@@ -195,33 +190,6 @@ pub fn run(
             output
         }
     }
-}
-
-/// `SessionStart`: folds every log-backed schema from the events
-/// recorded before this call, so `mapstore::start`'s own since-cut finds
-/// the previous session and not this one, then records a fresh
-/// `session.started` for the next call to find. The
-/// `additionalContext` is `mapstore::start`'s own block, exactly what
-/// `percept start` prints from the shell.
-fn start_session(
-    source: &Source,
-    log: &dyn EventLog,
-    schemas: &Schemas,
-    checkout: &Path,
-) -> Result<Value, Box<dyn std::error::Error>> {
-    let events = log.load()?;
-    let maps = schemas.fold_all(of_path(&events, &source.path))?;
-    let since = last_session(events.iter().filter(|event| event.source() == source));
-    let rendered = mapstore::start(&maps, &events, &source.path, checkout, since);
-
-    log.append(&Event::session_started(source.clone()))?;
-
-    Ok(json!({
-        "hookSpecificOutput": {
-            "hookEventName": "SessionStart",
-            "additionalContext": rendered,
-        }
-    }))
 }
 
 /// Who a prompt is from. A client delivers more than the user's own

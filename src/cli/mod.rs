@@ -95,9 +95,6 @@ pub enum Command {
     /// Open percept in a browser: an HTTP server on `127.0.0.1` serving
     /// the embedded page, until the process is killed.
     Web,
-    /// What this project has recorded, what needs attention, and where
-    /// to go next.
-    Start,
 }
 
 #[derive(Subcommand)]
@@ -698,21 +695,6 @@ pub fn maps_show(
     per_path(args.all_paths, args.json, root, &events, |path| {
         print_map(mapstore::fold_map_at(schemas, &args.map, &events, path)?, &args)
     })
-}
-
-/// `percept start`: loads the log, folds every schema at `root`'s path,
-/// and prints `mapstore::start`'s render, cut since the last session
-/// anyone started here. Appends nothing: a look, not a checkpoint.
-pub fn start(
-    log: &dyn EventLog,
-    schemas: &Schemas,
-    root: &Path,
-    checkout: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let events = log.load()?;
-    let maps = schemas.fold_all(mapstore::of_path(&events, root))?;
-    let since = mapstore::last_session(mapstore::of_path(&events, root));
-    print_text(&mapstore::start(&maps, &events, root, checkout, since))
 }
 
 /// Prints the map `args.map` names' capabilities from its schema alone:
