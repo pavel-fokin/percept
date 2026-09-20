@@ -440,6 +440,13 @@ fn resolve_node<'a>(map: &'a Map, s: &str) -> Result<&'a Node, Box<dyn std::erro
     Ok(map.node(id).expect("resolve_str returns a live node's id"))
 }
 
+/// What a document's block resolves to: a write to apply, or a node
+/// already in the map that the block only hangs edges under.
+enum Target {
+    Written(Mutation),
+    Standing(NodeId),
+}
+
 /// One fold of `name`, taken before a write's own atomic commit
 /// re-folds it - just enough to resolve refs against, so a caller
 /// that only needs the map never has to name the discarded creation
@@ -1181,20 +1188,24 @@ fn record_document(
             }
 
             // Either arm yields the kind and name the node has once it
-            // lands, so one tail applies both. A change block that
-            // carries only edges yields no mutation: nothing about the
-            // node it names changes, and the edges under it are their
-            // own writes.
-            let (mutation, kind, name, standing) = if node.is_change {
-                let target = resolve_node(snapshot.map(), &node.kind).map_err(context)?;
-                let (kind, old_name, standing) = (target.kind.clone(), target.name.clone(), target.id);
+            // lands, so one tail applies both.
+            let cited = !node.cites.is_empty();
+            let (target, kind, name) = if node.is_change {
+                let standing = resolve_node(snapshot.map(), &node.kind).map_err(context)?;
+                let (kind, old_name, standing) =
+                    (standing.kind.clone(), standing.name.clone(), standing.id);
                 let mut properties = node.properties;
                 let rename = properties.remove("name");
                 let name = rename.clone().unwrap_or_else(|| old_name.clone());
-                if rename.is_none() && properties.is_empty() {
-                    (None, kind, name, Some(standing))
+                // A block naming a short id and nothing but edges leaves
+                // the node alone: the edges under it are their own
+                // writes, and the document's own `--source` is about
+                // what is being recorded, not about this node. A `cites`
+                // line is about this node, so it is a change.
+                let target = if rename.is_none() && properties.is_empty() && !cited {
+                    Target::Standing(standing)
                 } else {
-                    let mutation = Mutation::ChangeNode {
+                    Target::Written(Mutation::ChangeNode {
                         node: NodeRef {
                             kind: kind.clone(),
                             name: old_name,
@@ -1202,9 +1213,9 @@ fn record_document(
                         name: rename,
                         properties,
                         sources,
-                    };
-                    (Some(mutation), kind, name, None)
-                }
+                    })
+                };
+                (target, kind, name)
             } else {
                 let mutation = Mutation::AddNode {
                     kind: node.kind.clone(),
@@ -1212,10 +1223,10 @@ fn record_document(
                     properties: node.properties,
                     sources,
                 };
-                (Some(mutation), node.kind, node.name, None)
+                (Target::Written(mutation), node.kind, node.name)
             };
-            let node_id = match mutation {
-                Some(mutation) => {
+            let node_id = match target {
+                Target::Written(mutation) => {
                     let payload =
                         snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
                     let node_id = match &payload {
@@ -1225,7 +1236,7 @@ fn record_document(
                     batch.push(Event::new(actor, batch_source.clone(), causation_id, payload));
                     node_id
                 }
-                None => standing.expect("a block with no mutation is a change that resolved a node"),
+                Target::Standing(node_id) => node_id,
             };
             last_of_kind.insert(kind.clone(), node_id);
             let from_ref = NodeRef { kind, name };

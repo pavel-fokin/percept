@@ -952,6 +952,46 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
 }
 
 #[test]
+fn a_cites_line_under_a_short_id_reaches_the_node_it_names() {
+    let fixture = Fixture::new();
+    fixture.write("src/cli/mod.rs", "one\ntwo\nthree\n");
+    let log = FakeLog::default();
+    record_document(
+        "topic \"Does record work?\"\n",
+        record_args("debates"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        fixture.path(),
+        human(),
+        None,
+    )
+    .unwrap();
+
+    record_document(
+        "t1\n  cites src/cli/mod.rs:1-3\n",
+        record_args("debates"),
+        &log,
+        &schemas(),
+        &source("cli"),
+        fixture.path(),
+        human(),
+        None,
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    let cite_id = events
+        .iter()
+        .find(|event| matches!(event.payload(), Payload::FileCited { .. }))
+        .expect("the document cited a file")
+        .id();
+    let map = mapstore::fold_map(&log, &schemas(), "debates", Path::new(ROOT)).unwrap();
+    let topic = map.find("topic", "Does record work?").unwrap();
+    assert!(topic.sources.contains(&cite_id), "{:?}", topic.sources);
+}
+
+#[test]
 fn a_ref_to_an_existing_short_id_resolves() {
     let log = FakeLog::default();
     log.append(&map_created("debates")).unwrap();
