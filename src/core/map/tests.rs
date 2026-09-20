@@ -1172,31 +1172,23 @@ fn an_added_nodes_only_change_is_its_addition() {
 }
 
 #[test]
-fn adding_a_node_of_a_kind_with_a_closed_list_and_no_value_is_refused() {
+fn adding_a_node_of_a_kind_with_a_closed_list_and_no_value_writes_none() {
     let mut map = Map::empty(crate::core::testing::map_id("chores"), chores());
 
-    let err = map
-        .apply(
-            Mutation::AddNode {
-                kind: "chore".to_string(),
-                name: "a".to_string(),
-                properties: BTreeMap::from([("why".to_string(), "because".to_string())]),
-                sources: Vec::new(),
-            },
-            Actor::Human(human()),
-        )
-        .err()
-        .unwrap();
-
-    assert_eq!(
-        err,
-        MapError::MissingProperty {
+    map.apply(
+        Mutation::AddNode {
             kind: "chore".to_string(),
-            property: "state".to_string(),
-            values: vec!["open".to_string(), "done".to_string(), "dropped".to_string()],
-        }
-    );
-    assert_eq!(err.to_string(), "chore needs a `state`; state is open, done, dropped");
+            name: "a".to_string(),
+            properties: BTreeMap::from([("why".to_string(), "because".to_string())]),
+            sources: Vec::new(),
+        },
+        Actor::Human(human()),
+    )
+    .unwrap();
+
+    let node = map.find("chore", "a").unwrap();
+    assert_eq!(node.properties.get("state"), None);
+    assert_eq!(map.property(node, "state"), Some("open"));
 }
 
 #[test]

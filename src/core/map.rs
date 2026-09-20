@@ -456,6 +456,65 @@ impl Map {
         Some(format!("{}{}", kind.prefix, node.seq))
     }
 
+    /// `node`'s properties as any reader sees them, the one place that
+    /// merge happens: each property its kind declares, in declared
+    /// order, with the value `node` was written with, or - for a
+    /// closed list only - its first value when `node` carries none, so
+    /// a node that never wrote it still reads as starting from
+    /// somewhere. A free property `node` never wrote has nothing to
+    /// default to, so it is left out. Then any property `node` carries
+    /// that its kind does not declare - recorded before the schema
+    /// dropped it - in the order its own map keeps them, so nothing
+    /// recorded goes unseen. Values as written, never what `Map::apply`
+    /// would accept today.
+    pub fn properties<'a>(&'a self, node: &'a Node) -> Vec<(&'a str, &'a str)> {
+        let mut out = Vec::new();
+        let mut declared: HashSet<&str> = HashSet::new();
+        if let Some(kind) = self.schema.node_kind(&node.kind) {
+            for (name, values) in &kind.properties {
+                declared.insert(name.as_str());
+                match node.properties.get(name) {
+                    Some(value) => out.push((name.as_str(), value.as_str())),
+                    None => {
+                        if let Some(default) = values.first() {
+                            out.push((name.as_str(), default.as_str()));
+                        }
+                    }
+                }
+            }
+        }
+        for (name, value) in &node.properties {
+            if !declared.contains(name.as_str()) {
+                out.push((name.as_str(), value.as_str()));
+            }
+        }
+        out
+    }
+
+    /// The value `node` carries for `property`, as `properties` gives
+    /// it - written, or a closed list's default. `None` when neither
+    /// the kind nor the node has anything to say about it.
+    pub fn property<'a>(&'a self, node: &'a Node, property: &str) -> Option<&'a str> {
+        self.properties(node)
+            .into_iter()
+            .find(|(name, _)| *name == property)
+            .map(|(_, value)| value)
+    }
+
+    /// The tail of a node's line, wherever one is printed: `: key:
+    /// "value"; key: "value"` over `properties`, empty when there are
+    /// none. Values are quoted, so a newline inside one stays inside
+    /// its line.
+    pub fn properties_line(&self, node: &Node) -> String {
+        let mut out = String::new();
+        let mut sep = ": ";
+        for (key, value) in self.properties(node) {
+            let _ = write!(out, "{sep}{key}: {value:?}");
+            sep = "; ";
+        }
+        out
+    }
+
     /// Resolves `s` to a node id, either way a writer may name one:
     /// `kind:name`, or the short id this map's own render shows it as.
     /// A short id never contains `:`, so the two forms cannot collide.
@@ -630,28 +689,12 @@ impl Map {
 impl fmt::Display for Map {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for node in &self.nodes {
-            writeln!(f, "- {node}{}", node.properties_line())?;
+            writeln!(f, "- {node}{}", self.properties_line(node))?;
         }
         for edge in &self.edges {
             writeln!(f, "- {}", self.edge_line(edge))?;
         }
         Ok(())
-    }
-}
-
-impl Node {
-    /// The tail of a node's line, wherever one is printed: `: key:
-    /// "value"; key: "value"` over its properties, empty when it has
-    /// none. Values are quoted, so a newline inside one stays inside
-    /// its line.
-    pub fn properties_line(&self) -> String {
-        let mut out = String::new();
-        let mut sep = ": ";
-        for (key, value) in &self.properties {
-            let _ = write!(out, "{sep}{key}: {value:?}");
-            sep = "; ";
-        }
-        out
     }
 }
 

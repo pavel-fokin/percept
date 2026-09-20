@@ -66,9 +66,9 @@ impl Rules {
 /// kind may carry, in declared order. Each property names the values it
 /// may hold - empty for free text, like `why` on a `fact`; non-empty
 /// for a closed list, like `state` on a `task`. The first property with
-/// a closed list is this kind's own: the one a new node of this kind
-/// must carry, checked on a write, never on a fold, so what was
-/// recorded before the rule still folds.
+/// a closed list is this kind's own: a node that carries none starts
+/// from its first value, so a reader always finds one, even on a node
+/// that never wrote it.
 #[derive(Debug, PartialEq, Eq)]
 pub struct NodeKind {
     pub kind: String,

@@ -3,7 +3,7 @@
 //! does, and revising it - a writer's `Mutation` checked against a
 //! `Snapshot` of the log and turned into the payload that records it.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -308,10 +308,29 @@ struct NodeLine<'a> {
     id: String,
     kind: &'a str,
     name: &'a str,
-    properties: &'a BTreeMap<String, String>,
+    /// `Map::properties`, in schema-declared order - a closed list's
+    /// default among them when the node carries none of its own -
+    /// written as a JSON object in that same order.
+    #[serde(serialize_with = "serialize_properties")]
+    properties: Vec<(&'a str, &'a str)>,
     sources: Vec<String>,
     #[serde(flatten)]
     stamp: Option<NodeStamp>,
+}
+
+/// `properties` as a JSON object, entries written in the order given -
+/// `Map::properties`'s declared order - rather than the alphabetical
+/// order a `BTreeMap` field would impose.
+fn serialize_properties<S>(properties: &[(&str, &str)], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    use serde::ser::SerializeMap;
+    let mut map = serializer.serialize_map(Some(properties.len()))?;
+    for (key, value) in properties {
+        map.serialize_entry(key, value)?;
+    }
+    map.end()
 }
 
 #[derive(Serialize)]
@@ -469,7 +488,7 @@ pub fn encode_node(map: &Map, node: &Node, stamped: bool) -> String {
         id: map.short_id(node.id).unwrap_or_default(),
         kind: &node.kind,
         name: &node.name,
-        properties: &node.properties,
+        properties: map.properties(node),
         sources: ids(&node.sources),
         stamp: NodeStamp::of(node, stamped),
     })

@@ -54,7 +54,7 @@ to = "decision"
 # opening.
 [rules]
 "message.received" = [
-  "propose by recording: an option under its question, state \"open\", before arguing for it",
+  "propose by recording: an option under its question, before arguing for it",
   "before stopping, record what you reasoned with. Sharpen a concept that already states it, or cover yours under it; add a peer only when neither fits",
 ]
 "reflection.started" = [

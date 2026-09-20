@@ -43,16 +43,6 @@ pub enum MapError {
     /// does not already cite: nothing would land, and it would still
     /// stamp the node. Write-only.
     EmptyChange,
-    /// A new node of a kind whose closed list - the first property with
-    /// a non-empty list of values - the caller did not supply. A rule
-    /// for new writes only, so a node recorded before its kind declared
-    /// one still folds; checked by `Map::apply` on `AddNode`, never by
-    /// `replay` on a stored payload.
-    MissingProperty {
-        kind: String,
-        property: String,
-        values: Vec<String>,
-    },
     DuplicateNode {
         kind: String,
         name: String,
@@ -163,11 +153,6 @@ impl fmt::Display for MapError {
             Self::EmptyChange => write!(
                 f,
                 "a change must name a rename, a property, or a source the node does not already cite"
-            ),
-            Self::MissingProperty { kind, property, values } => write!(
-                f,
-                "{kind} needs a `{property}`; {property} is {}",
-                values.join(", ")
             ),
             Self::DuplicateNode { kind, name } => {
                 write!(f, "{kind} {name:?} is already in the map")

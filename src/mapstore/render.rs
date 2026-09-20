@@ -120,7 +120,7 @@ fn push_sections(out: &mut String, map: &Map, mark: bool) {
     roots.sort_by_cached_key(|node| (state_rank(map, node), node.added().at));
     for node in roots {
         let _ = write!(out, "\n## {}\n\n", marked_name(map, node, mark));
-        push_props(out, node, "");
+        push_props(out, map, node, "");
         push_tree(out, map, node, "", mark);
     }
 }
@@ -133,7 +133,7 @@ fn push_tree(out: &mut String, map: &Map, node: &Node, indent: &str, mark: bool)
     let deeper = format!("{indent}  ");
     for (kind, child) in map.children(node.id) {
         let _ = writeln!(out, "{indent}- {kind} {}", marked_name(map, child, mark));
-        push_props(out, child, &deeper);
+        push_props(out, map, child, &deeper);
         push_tree(out, map, child, &deeper, mark);
     }
 }
@@ -148,7 +148,7 @@ fn state_rank(map: &Map, node: &Node) -> usize {
     let Some((property, values)) = kind.closed_list() else {
         return usize::MAX;
     };
-    let Some(value) = node.properties.get(property) else {
+    let Some(value) = map.property(node, property) else {
         return usize::MAX;
     };
     values.iter().position(|v| v == value).unwrap_or(usize::MAX)
@@ -157,9 +157,11 @@ fn state_rank(map: &Map, node: &Node) -> usize {
 /// A node's properties, each on its own line under `indent` - a long
 /// `why` reads on a line of its own, never wrapped onto the name - then
 /// one `changed by` line, when the node's last change is not its
-/// addition.
-fn push_props(out: &mut String, node: &Node, indent: &str) {
-    for (key, value) in &node.properties {
+/// addition. Written values and a closed list's default both, as
+/// `Map::properties` gives them - a reader here meets the same values
+/// a fresh node of this kind would start from.
+fn push_props(out: &mut String, map: &Map, node: &Node, indent: &str) {
+    for (key, value) in map.properties(node) {
         let _ = writeln!(out, "{indent}{key}: {value:?}");
     }
     push_changed(out, node, indent);

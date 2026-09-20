@@ -110,7 +110,7 @@ fn body(map: &Map, fragment: &crate::core::Fragment, root: &std::path::Path) -> 
                 "node": node.id.as_uuid().to_string(),
                 "kind": node.kind,
                 "name": node.name,
-                "properties": node.properties,
+                "properties": properties_json(map, node),
             })
         })
         .collect();
@@ -138,6 +138,18 @@ fn body(map: &Map, fragment: &crate::core::Fragment, root: &std::path::Path) -> 
         "boundary_edges": fragment.boundary_edges(),
         "project": root.to_string_lossy(),
     })
+}
+
+/// `node`'s properties as `Map::properties` gives them - a closed
+/// list's default among them when `node` carries none of its own -
+/// as a JSON object, in that same declared order.
+fn properties_json(map: &Map, node: &Node) -> Value {
+    let properties: serde_json::Map<String, Value> = map
+        .properties(node)
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), Value::String(value.to_string())))
+        .collect();
+    Value::Object(properties)
 }
 
 /// `node`'s short id, or the `kind:name` form when the map minted none -

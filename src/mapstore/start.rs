@@ -204,7 +204,7 @@ fn state_counts(map: &Map) -> Vec<String> {
                 let count = map
                     .nodes()
                     .iter()
-                    .filter(|node| node.kind == kind.kind && node.properties.get(property) == Some(value))
+                    .filter(|node| node.kind == kind.kind && map.property(node, property) == Some(value.as_str()))
                     .count();
                 (count > 0).then(|| format!("{count} {value}"))
             })

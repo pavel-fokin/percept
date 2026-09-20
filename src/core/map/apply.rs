@@ -66,15 +66,6 @@ impl Map {
                 sources,
             } => {
                 if let Some(node_kind) = self.schema.node_kind(&kind) {
-                    if let Some((property, values)) = node_kind.closed_list() {
-                        if !properties.contains_key(property) {
-                            return Err(MapError::MissingProperty {
-                                kind: kind.clone(),
-                                property: property.to_string(),
-                                values: values.to_vec(),
-                            });
-                        }
-                    }
                     check_properties(node_kind, &properties)?;
                 }
                 Payload::NodeAdded {

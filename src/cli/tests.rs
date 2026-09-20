@@ -997,10 +997,10 @@ fn an_unknown_node_kind_fails_before_anything_is_written() {
 }
 
 #[test]
-fn a_missing_required_property_fails_before_anything_is_written() {
+fn a_closed_list_property_left_unset_records_with_no_value() {
     let log = FakeLog::default();
     let document = "chore \"cancel a turn\"\n  why \"Esc drops the session\"\n";
-    let err = record_document(
+    record_document(
         document,
         record_args("chores"),
         &log,
@@ -1010,9 +1010,15 @@ fn a_missing_required_property_fails_before_anything_is_written() {
         human(),
         None,
     )
-    .unwrap_err();
-    assert!(err.to_string().contains("state"), "{err}");
-    assert!(log.load().unwrap().is_empty());
+    .unwrap();
+
+    let events = log.load().unwrap();
+    match events.last().unwrap().payload() {
+        Payload::NodeAdded { properties, .. } => {
+            assert_eq!(properties.get("state"), None);
+        }
+        _ => panic!("expected NodeAdded"),
+    }
 }
 
 #[test]

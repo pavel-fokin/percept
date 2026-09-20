@@ -137,7 +137,7 @@ fn a_node_with_no_sources_is_refused_and_the_error_names_the_rule() {
 }
 
 #[test]
-fn a_chore_with_no_state_is_refused() {
+fn a_chore_with_no_state_records_with_none_written() {
     let cited = Event::message_received(Actor::Human(human()), "cancel a turn".to_string(), source("tui"), None);
     let cited_id = cited.id();
     let revise = tool(vec![cited]);
@@ -147,9 +147,14 @@ fn a_chore_with_no_state_is_refused() {
         cited_id.as_uuid()
     );
 
-    let err = revise.run(&args).err().unwrap();
+    let output = revise.run(&args).unwrap();
 
-    assert!(err.to_string().contains("needs a `state`"), "{err}");
+    match output.commits.last().unwrap() {
+        Payload::NodeAdded { properties, .. } => {
+            assert_eq!(properties.get("state"), None);
+        }
+        _ => panic!("expected a NodeAdded payload"),
+    }
 }
 
 #[test]
