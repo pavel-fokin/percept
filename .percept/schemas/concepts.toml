@@ -1,51 +1,34 @@
-# The decisions map: the concepts a reader reasons with, and under each
-# what was asked, what was weighed, what was chosen and on what
-# grounds. A concept's definition is the rule that holds here, so a
-# decision can break it. A concept asks the questions raised under it,
-# a question weighs the options put to it, and the decision that
-# answered it is what settled it. A later decision supersedes an
-# earlier one, and a decision asks a question that puts it back in
-# doubt, so --around a question reaches everything weighed for it. A
-# concept covers another it absorbs, so the covered one hangs under it
-# and leaves the overview.
+# The concept map: the project's shared cognitive model. It holds the
+# concepts a reader or agent needs in order to understand and reason
+# about the project. A concept is a meaningful unit of understanding -
+# a thing, mechanism, abstraction, subsystem, or domain idea that
+# matters to how the project works or is discussed.
 #
-# Every edge runs from the node above to the one under it, and a
-# node may take more than one: a decision that supersedes another keeps
-# whatever settled it too. What no edge reaches heads the map; maps
-# show names a node once and points back to it wherever a later edge
-# reaches it again.
+# Add a concept when it is referenced again and again in reasoning
+# about the project, when understanding it cuts the context needed
+# elsewhere, when other concepts depend on its meaning, or when its
+# meaning is specific enough to this project to be made explicit.
+#
+# Do not add every file, type, function, command, or implementation
+# detail; a temporary task or observation; a fact that matters to one
+# local change; or a generic technical term whose meaning is obvious
+# and unchanged here.
+#
+# `definition` states what the concept means in this project. Prefer a
+# precise local definition over a generic dictionary description.
+#
+# `covers` structures the map. A covers B means B belongs within the
+# conceptual area A represents. It organises, and implies no strict
+# containment, ownership, or implementation dependency.
+#
+# The map answers: what concepts do I need to understand this project,
+# and how are they organised?
 
-purpose = "what was asked, what was chosen, and why, so a settled question is not reopened"
+purpose = "the concepts a reader or agent needs to understand this project, and how they are organised"
 
 [nodes.concept]
 definition = ""
 
-[nodes.question]
-why = ""
-
-[nodes.option]
-why = ""
-state = ["open", "dead"]
-
-[nodes.decision]
-why = ""
-
-[edges.asks]
-from = ["concept", "decision"]
-to = "question"
-
-[edges.settled]
-from = ["concept", "question"]
-to = "decision"
-
-[edges.weighs]
-from = "question"
-to = "option"
-
 [edges.covers]
 from = "concept"
 to = "concept"
-
-[edges.supersedes]
-from = "decision"
-to = "decision"
