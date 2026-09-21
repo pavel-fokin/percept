@@ -64,7 +64,7 @@ def drive(binary, cwd, rows, cols, script, total):
     if pid == 0:
         os.chdir(cwd)
         os.environ["TERM"] = "xterm-256color"
-        os.execv(binary, [binary])
+        os.execv(binary, [binary, "code"])
 
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
     out = bytearray()

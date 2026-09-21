@@ -1,11 +1,12 @@
 //! A map's Markdown: `markdown` renders one map, `catalogue` a
-//! summary of several - the text powering `maps show` and `maps
-//! list`.
+//! summary of several, `start` the start screen - the text powering
+//! `maps show`, `maps list`, and a bare `percept`, which a coding
+//! client's session also opens on.
 
 use std::collections::HashSet;
 use std::fmt::Write as _;
 
-use crate::core::{Actor, EdgeKind, Map, Node, NodeId, NodeKind, Written};
+use crate::core::{Actor, EdgeKind, Map, Node, NodeId, NodeKind, Schemas, Written};
 
 /// `map` as Markdown: a heading, then one `##` section per node
 /// nobody claims, the claimed ones nested under their claimant - see
@@ -13,22 +14,79 @@ use crate::core::{Actor, EdgeKind, Map, Node, NodeId, NodeKind, Written};
 /// A map the agent wrote alone says so once, on the heading; a map
 /// with both human and agent nodes marks each agent line instead.
 pub fn markdown(map: &Map) -> String {
-    let schema = map.schema();
-    let mark = mixed_authors(map);
-    let all_agent = !mark && map.nodes().iter().any(|node| matches!(node.added().actor, Actor::Agent));
-    let mut out = if all_agent {
-        format!("# {} (agent)\n", schema.name())
-    } else {
-        format!("# {}\n", schema.name())
-    };
+    let mut out = heading(map);
+    push_body(&mut out, map);
+    out
+}
 
-    if map.nodes().is_empty() {
-        out.push_str("\n(empty: nothing has been recorded here yet.)\n");
+/// The start screen: what a bare `percept` prints and what a coding
+/// client reads at a session's start, so the two see one text. A
+/// frame first - the rule for recording and the shape of the command -
+/// then every schema in `schemas` whole: its heading, purpose, kinds,
+/// and the body of its map in `maps` as `markdown` prints it. A schema
+/// whose map `maps` lacks - declared, nothing recorded under it yet,
+/// so no `map.created` names it - prints the empty notice, since a
+/// reader about to record needs its shape most of all. No schemas at
+/// all prints `super::NO_SCHEMAS_HINT` under the frame instead, since
+/// the way in is `percept init`, not `record`.
+pub fn start(schemas: &Schemas, maps: &[Map]) -> String {
+    let mut out = String::from(
+        "percept keeps this project's maps, folded from its log. Read them\n\
+         before you build. When a turn adds what a map's purpose asks for\n\
+         and the map lacks, record it in the same turn, citing the prompt's\n\
+         event from the `percept event` line:\n\n    \
+         percept maps record <map> --actor agent --source <event> <<'EOF'\n    \
+         <kind> \"<name>\"\n      \
+         <property> \"<value>\"\n    \
+         EOF\n",
+    );
+    if schemas.folded().next().is_none() {
+        let _ = write!(out, "\n{}\n", super::NO_SCHEMAS_HINT);
         return out;
     }
-
-    push_sections(&mut out, map, mark);
+    for schema in schemas.folded() {
+        let map = maps.iter().find(|map| map.schema().name() == schema.name());
+        let heading = match map {
+            Some(map) => heading(map),
+            None => format!("# {}\n", schema.name()),
+        };
+        let _ = write!(out, "\n{heading}\n{}\n", schema.purpose());
+        push_kind_labels(&mut out, "Node kinds", schema.node_kinds().iter().map(NodeKind::label));
+        push_kind_labels(&mut out, "Edge kinds", schema.edge_kinds().iter().map(EdgeKind::label));
+        match map {
+            Some(map) => push_body(&mut out, map),
+            None => push_empty(&mut out),
+        }
+    }
     out
+}
+
+/// `map`'s `#` heading line. A map the agent wrote alone says so
+/// there; one with both human and agent nodes marks each agent line
+/// in the body instead - see `mixed_authors`.
+fn heading(map: &Map) -> String {
+    let all_agent =
+        !mixed_authors(map) && map.nodes().iter().any(|node| matches!(node.added().actor, Actor::Agent));
+    if all_agent {
+        format!("# {} (agent)\n", map.schema().name())
+    } else {
+        format!("# {}\n", map.schema().name())
+    }
+}
+
+/// What follows `map`'s heading: the empty notice, or one `##` section
+/// per node nobody claims with the claimed ones nested under their
+/// claimant - see `push_sections`.
+fn push_body(out: &mut String, map: &Map) {
+    if map.nodes().is_empty() {
+        push_empty(out);
+        return;
+    }
+    push_sections(out, map, mixed_authors(map));
+}
+
+fn push_empty(out: &mut String) {
+    out.push_str("\n(empty: nothing has been recorded here yet.)\n");
 }
 
 /// Whether `map` holds nodes by the agent and by someone else both -

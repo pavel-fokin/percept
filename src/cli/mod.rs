@@ -58,13 +58,13 @@ by every project; each event names the project it came from. It never \
 ranks, summarises, or answers: its job is to make looking cheap and \
 leave relevance to the caller.
 
-`events search` and `events show` query the log, `maps list` and \
-`maps show` print a cognitive map folded from it, `maps record` and \
-`maps change-node` change one, `hook \
-<client>` records one coding client's turn from the hook JSON it reads \
-on stdin, and `init <client>` writes that client's project config to \
-call it.")]
-#[cfg_attr(not(feature = "lab"), command(arg_required_else_help = true))]
+A bare `percept` prints the start screen: how to record, then this \
+project's maps whole - the same text a coding client reads when its \
+session opens. `events search` and `events show` query the log, `maps \
+list` and `maps show` print a cognitive map folded from it, `maps \
+record` and `maps change-node` change one, `hook <client>` records one \
+coding client's turn from the hook JSON it reads on stdin, and `init \
+<client>` writes that client's project config to call it.")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -85,6 +85,9 @@ pub enum Command {
     /// Run one turn headlessly and print the reply.
     #[cfg(feature = "lab")]
     Ask(AskArgs),
+    /// Open percept's own coding agent in the terminal.
+    #[cfg(feature = "lab")]
+    Code,
     /// Record one coding client's turn from the hook JSON it sends on
     /// stdin. Never fails the client's turn: an error prints to
     /// stderr and still exits with a JSON object on stdout.
@@ -557,6 +560,20 @@ fn per_path(
         print(path)?;
     }
     Ok(())
+}
+
+/// A bare `percept`: prints `start_text`.
+pub fn start(log: &dyn EventLog, schemas: &Schemas, project: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    print_text(&start_text(log, schemas, project)?)
+}
+
+/// The start screen - `mapstore::start` over every map of `project`,
+/// folded from one read of `log`. What a bare `percept` prints and
+/// what `hook` answers a coding client's `SessionStart` with.
+pub fn start_text(log: &dyn EventLog, schemas: &Schemas, project: &Path) -> Result<String, Box<dyn std::error::Error>> {
+    let events = log.load()?;
+    let maps = schemas.fold_all(mapstore::of_path(&events, project))?;
+    Ok(mapstore::start(schemas, &maps))
 }
 
 /// Prints every map percept knows with its size: the log's maps, folded
