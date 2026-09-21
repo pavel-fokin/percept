@@ -1,4 +1,30 @@
-purpose = "the concepts this project reasons with, and the rule each one names"
+# The concept map: the project's shared cognitive model. It holds the
+# concepts a reader or agent needs in order to understand and reason
+# about the project. A concept is a meaningful unit of understanding -
+# a thing, mechanism, abstraction, subsystem, or domain idea that
+# matters to how the project works or is discussed.
+#
+# Add a concept when it is referenced again and again in reasoning
+# about the project, when understanding it cuts the context needed
+# elsewhere, when other concepts depend on its meaning, or when its
+# meaning is specific enough to this project to be made explicit.
+#
+# Do not add every file, type, function, command, or implementation
+# detail; a temporary task or observation; a fact that matters to one
+# local change; or a generic technical term whose meaning is obvious
+# and unchanged here.
+#
+# `definition` states what the concept means in this project. Prefer a
+# precise local definition over a generic dictionary description.
+#
+# `covers` structures the map. A covers B means B belongs within the
+# conceptual area A represents. It organises, and implies no strict
+# containment, ownership, or implementation dependency.
+#
+# The map answers: what concepts do I need to understand this project,
+# and how are they organised?
+
+purpose = "the concepts a reader or agent needs to understand this project, and how they are organised"
 
 [nodes.concept]
 definition = ""
