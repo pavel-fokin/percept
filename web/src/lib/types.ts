@@ -78,7 +78,7 @@ export interface MapKind {
   prefix: string;
 }
 
-/** One node in a cut: `id` is the map's own short id (`c1`, `q12`),
+/** One node of a map: `id` is the map's own short id (`c1`, `q12`),
  * `node` the uuid. An edge names the short ids, so the page joins on
  * what it displays. */
 export interface MapNode {
@@ -96,11 +96,13 @@ export interface MapEdge {
 }
 
 /** `GET /api/maps/{id}`'s body: one map, whole - every node and edge
- * it folds to. */
+ * it folds to. `heads` is the nodes no edge reaches, in the one order
+ * the server and the CLI's render agree on. */
 export interface MapResponse {
   map: { id: string; name: string; purpose: string };
   kinds: MapKind[];
   nodes: MapNode[];
   edges: MapEdge[];
+  heads: string[];
   project: string;
 }

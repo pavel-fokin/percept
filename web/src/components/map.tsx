@@ -51,14 +51,15 @@ export default function MapView() {
 
   const map = load.state === "ready" ? load.map : null;
   const name = map?.map.name ?? "";
-  const outline = useMemo(() => buildOutline(map?.nodes ?? [], map?.edges ?? []), [map]);
+  const outline = useMemo(() => (map ? buildOutline(map) : null), [map]);
 
-  const select = useCallback(
-    (nodeId: string) => {
+  const setNode = useCallback(
+    (nodeId: string | null) => {
       setParams(
         (prev) => {
           const next = new URLSearchParams(prev);
-          next.set("node", nodeId);
+          if (nodeId) next.set("node", nodeId);
+          else next.delete("node");
           return next;
         },
         { replace: true },
@@ -66,41 +67,23 @@ export default function MapView() {
     },
     [setParams],
   );
-
-  const close = useCallback(() => {
-    setParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete("node");
-        return next;
-      },
-      { replace: true },
-    );
-  }, [setParams]);
+  const close = useCallback(() => setNode(null), [setNode]);
 
   useEffect(() => {
-    if (!selected) return;
+    if (!selected || !wide) return;
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") close();
     }
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [selected, close]);
+  }, [selected, wide, close]);
 
   // An unknown `node` id shows no card - the map may have moved on
   // since the address was shared.
-  const selectedNode = selected && map ? (map.nodes.some((node) => node.id === selected) ? selected : null) : null;
+  const selectedNode = selected && outline?.byId.has(selected) ? selected : null;
 
-  const card = map && selectedNode && (
-    <NodeCard
-      id={selectedNode}
-      nodes={map.nodes}
-      edges={map.edges}
-      kinds={map.kinds}
-      outline={outline}
-      onSelect={select}
-      onClose={close}
-    />
+  const card = map && outline && selectedNode && (
+    <NodeCard id={selectedNode} edges={map.edges} outline={outline} onSelect={setNode} onClose={close} />
   );
 
   return (
@@ -109,7 +92,7 @@ export default function MapView() {
       className={
         "mx-auto w-full flex-1 px-4 pb-14 sm:px-8 " +
         (selectedNode
-          ? "max-w-[62.5rem] min-[900px]:grid min-[900px]:grid-cols-[minmax(0,1fr)_360px] min-[900px]:items-start min-[900px]:gap-8"
+          ? "max-w-[62.5rem]" + (wide && card ? " grid grid-cols-[minmax(0,1fr)_360px] items-start gap-8" : "")
           : "max-w-3xl")
       }
     >
@@ -125,8 +108,8 @@ export default function MapView() {
           {load.state === "failed" && <span className="text-ink">This map could not be read: {load.message}.</span>}
         </div>
 
-        {map && (
-          <MapTree nodes={map.nodes} kinds={map.kinds} outline={outline} selected={selectedNode} onSelect={select} />
+        {map && outline && (
+          <MapTree key={map.map.id} kinds={map.kinds} outline={outline} selected={selectedNode} onSelect={setNode} />
         )}
       </div>
 
@@ -134,7 +117,7 @@ export default function MapView() {
         (wide ? (
           <div className="sticky top-16 mt-4 max-h-[calc(100vh-4.5rem)] overflow-auto border-l border-rule pl-6">{card}</div>
         ) : (
-          <Sheet onClose={close} label={map?.nodes.find((node) => node.id === selectedNode)?.name ?? ""}>
+          <Sheet onClose={close} label={outline?.byId.get(selectedNode)?.name ?? ""}>
             {card}
           </Sheet>
         ))}

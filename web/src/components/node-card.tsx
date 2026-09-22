@@ -2,47 +2,37 @@ import { useMemo, useState } from "react";
 import { pathTo } from "../lib/outline";
 import type { Outline } from "../lib/outline";
 import { CloseIcon, KindGlyph } from "./icons";
-import type { MapEdge, MapKind, MapNode } from "../lib/types";
+import type { MapEdge } from "../lib/types";
 
 /** One selected node, its own component so a narrow viewport's bottom
  * sheet can show the same card the wide layout's side panel does. */
 export default function NodeCard({
   id,
-  nodes,
   edges,
-  kinds,
   outline,
   onSelect,
   onClose,
 }: {
   id: string;
-  nodes: MapNode[];
   edges: MapEdge[];
-  kinds: MapKind[];
   outline: Outline;
   onSelect: (id: string) => void;
   onClose: () => void;
 }) {
-  const byId = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes]);
-  const kindIndex = useMemo(() => new Map(kinds.map((kind, index) => [kind.kind, index])), [kinds]);
-  const multi = kinds.length > 1;
-  const node = byId.get(id);
+  const node = outline.byId.get(id);
 
   const crumbs = useMemo(() => pathTo(id, outline.parent).slice(0, -1), [id, outline]);
-  const down = useMemo(() => edges.filter((edge) => edge.from === id), [edges, id]);
+  const down = useMemo(() => outline.children.get(id) ?? [], [outline, id]);
 
   // Every parent but the first-reach one the outline already shows -
   // where else this node is pointed to from.
   const others = useMemo(() => {
     const primary = outline.parent.get(id);
     const seen = new Set<string>();
-    const result: string[] = [];
     for (const edge of edges) {
-      if (edge.to !== id || edge.from === primary || seen.has(edge.from)) continue;
-      seen.add(edge.from);
-      result.push(edge.from);
+      if (edge.to === id && edge.from !== primary) seen.add(edge.from);
     }
-    return result;
+    return [...seen];
   }, [edges, id, outline]);
 
   const groups = useMemo(() => {
@@ -86,7 +76,7 @@ export default function NodeCard({
             {crumbs.map((crumbId) => (
               <span key={crumbId} className="flex items-center gap-1">
                 <button type="button" onClick={() => onSelect(crumbId)} className="min-h-11 hover:text-accent">
-                  {byId.get(crumbId)?.name ?? crumbId}
+                  {outline.byId.get(crumbId)?.name ?? crumbId}
                 </button>
                 <span aria-hidden="true">&#8250;</span>
               </span>
@@ -108,16 +98,16 @@ export default function NodeCard({
               onClick={() => onSelect(otherId)}
               className="min-h-11 text-muted hover:text-accent"
             >
-              {byId.get(otherId)?.name ?? otherId}
+              {outline.byId.get(otherId)?.name ?? otherId}
             </button>
           ))}
         </div>
       )}
 
       <div className="mt-3 flex items-center gap-2 text-[0.75rem] text-faint">
-        {multi && (
+        {outline.multi && (
           <span className="inline-flex items-center gap-1.5 text-muted">
-            <KindGlyph index={kindIndex.get(node.kind) ?? 0} className="size-3 text-faint" />
+            <KindGlyph index={outline.kindIndex.get(node.kind) ?? 0} className="size-3 text-faint" />
             {node.kind}
           </span>
         )}
@@ -154,7 +144,7 @@ export default function NodeCard({
               {groups.length > 1 && <p className="pt-2 text-[0.75rem] text-faint">{kind}</p>}
               <ul className="border-t border-rule">
                 {list.map((edge) => {
-                  const target = byId.get(edge.to);
+                  const target = outline.byId.get(edge.to);
                   return (
                     <li key={edge.to} className="border-b border-rule">
                       <button
@@ -162,9 +152,9 @@ export default function NodeCard({
                         onClick={() => onSelect(edge.to)}
                         className="flex min-h-11 w-full items-center gap-2 py-2.5 text-left text-[0.875rem] text-ink hover:text-accent"
                       >
-                        {multi && (
+                        {outline.multi && (
                           <KindGlyph
-                            index={kindIndex.get(target?.kind ?? "") ?? 0}
+                            index={outline.kindIndex.get(target?.kind ?? "") ?? 0}
                             className="size-3 shrink-0 text-faint"
                           />
                         )}

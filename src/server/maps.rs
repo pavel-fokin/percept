@@ -88,6 +88,7 @@ fn body(map: &Map, root: &std::path::Path) -> Value {
             json!({ "kind": edge.kind, "from": short_id(map, from), "to": short_id(map, to) })
         })
         .collect();
+    let heads: Vec<Value> = mapstore::heads(map).into_iter().map(|node| json!(short_id(map, node))).collect();
     json!({
         "map": {
             "id": map.id().as_uuid().to_string(),
@@ -97,6 +98,7 @@ fn body(map: &Map, root: &std::path::Path) -> Value {
         "kinds": kinds,
         "nodes": nodes,
         "edges": edges,
+        "heads": heads,
         "project": root.to_string_lossy(),
     })
 }

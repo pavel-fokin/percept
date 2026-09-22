@@ -117,6 +117,25 @@ fn the_body_carries_every_node_and_edge_of_the_map() {
 }
 
 #[test]
+fn heads_lists_the_nodes_no_edge_reaches() {
+    let (fixture, log) = chain();
+
+    let body = get(&log, &decisions_id(), params(fixture.path())).unwrap();
+
+    let heads: Vec<&str> = body["heads"].as_array().unwrap().iter().map(|h| h.as_str().unwrap()).collect();
+    let concept_id = body["nodes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["kind"] == "concept")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(heads, [concept_id], "{body}");
+}
+
+#[test]
 fn an_unknown_map_id_404s() {
     let (fixture, log) = chain();
 
