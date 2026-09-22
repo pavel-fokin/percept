@@ -42,15 +42,10 @@ export async function fetchProjects(): Promise<ProjectsResponse> {
   return response.json() as Promise<ProjectsResponse>;
 }
 
-/** `GET /api/maps/{id}` - one project's map, cut to `around` and
- * `depth`. No `around` asks for the overview: the nodes that head the
- * map and nothing else. */
-export async function fetchMap(id: string, root: string, around: string | null, depth: number): Promise<MapResponse> {
+/** `GET /api/maps/{id}` - one project's map, whole: every node and
+ * edge it folds to. */
+export async function fetchMap(id: string, root: string): Promise<MapResponse> {
   const params = new URLSearchParams({ root });
-  if (around) {
-    params.set("around", around);
-    params.set("depth", String(depth));
-  }
   const response = await fetch(`/api/maps/${encodeURIComponent(id)}?${params.toString()}`);
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`);

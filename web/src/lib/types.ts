@@ -95,19 +95,12 @@ export interface MapEdge {
   to: string;
 }
 
-/** `GET /api/maps/{id}`'s body: one map cut to what was asked for,
- * and what the cut left out counted. `total_nodes` is the whole map's
- * size, `shown_nodes` what came back; `boundary_edges` are the edges
- * with one end inside the cut and one outside - where a reader who
- * needs more widens from. */
+/** `GET /api/maps/{id}`'s body: one map, whole - every node and edge
+ * it folds to. */
 export interface MapResponse {
   map: { id: string; name: string; purpose: string };
   kinds: MapKind[];
   nodes: MapNode[];
   edges: MapEdge[];
-  shown_nodes: number;
-  total_nodes: number;
-  total_edges: number;
-  boundary_edges: number;
   project: string;
 }
