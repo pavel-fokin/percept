@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { pathTo, subtreeSize } from "../lib/outline";
 import type { Outline, OutlineEntry, OutlineNode } from "../lib/outline";
 import { count } from "../lib/format";
@@ -38,15 +38,28 @@ export default function MapTree({
   const [scrollTo, setScrollTo] = useState<string | null>(null);
   const rows = useRef(new Map<string, HTMLDivElement | null>());
 
-  // Opening the branches down to the selected node happens in one
-  // render; scrolling to its row needs the next one, once that row
-  // exists.
+  // Opening the branches down to a node happens in one render;
+  // scrolling to its row needs the next one, once that row exists.
+  const reveal = useCallback(
+    (id: string) => {
+      const ancestors = pathTo(id, outline.parent).slice(0, -1);
+      setExpanded((prev) => new Set([...prev, ...ancestors]));
+      setScrollTo(id);
+    },
+    [outline],
+  );
+
   useEffect(() => {
-    if (!selected || !byId.has(selected)) return;
-    const ancestors = pathTo(selected, outline.parent).slice(0, -1);
-    setExpanded((prev) => new Set([...prev, ...ancestors]));
-    setScrollTo(selected);
-  }, [selected, outline, byId]);
+    if (selected && byId.has(selected)) reveal(selected);
+  }, [selected, byId, reveal]);
+
+  // A click here reveals its node itself: choosing the node already
+  // selected leaves `selected` unchanged, so the effect above would not
+  // bring back a row a collapse has since hidden.
+  function choose(id: string) {
+    reveal(id);
+    onSelect(id);
+  }
 
   useEffect(() => {
     if (!scrollTo) return;
@@ -110,7 +123,7 @@ export default function MapTree({
               selected={selected}
               flashId={flashId}
               onToggle={toggle}
-              onSelect={onSelect}
+              onSelect={choose}
               register={(id, el) => rows.current.set(id, el)}
             />
           ))}
