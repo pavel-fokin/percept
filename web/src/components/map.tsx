@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { fetchMap, messageOf } from "../lib/api";
 import { basename } from "../lib/format";
@@ -6,6 +6,16 @@ import { buildOutline } from "../lib/outline";
 import type { MapResponse } from "../lib/types";
 import MapTree from "./map-tree";
 import NodeCard from "./node-card";
+import Sheet from "./ui/sheet";
+
+/** Where the card stops being a sheet and sits beside the tree. */
+const WIDE = "(min-width: 900px)";
+
+function subscribeWide(onChange: () => void) {
+  const query = window.matchMedia(WIDE);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
 
 type Load =
   | { state: "loading" }
@@ -22,6 +32,7 @@ export default function MapView() {
   const root = params.get("root") ?? "";
   const selected = params.get("node");
   const [load, setLoad] = useState<Load>({ state: "loading" });
+  const wide = useSyncExternalStore(subscribeWide, () => window.matchMedia(WIDE).matches);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,6 +91,18 @@ export default function MapView() {
   // since the address was shared.
   const selectedNode = selected && map ? (map.nodes.some((node) => node.id === selected) ? selected : null) : null;
 
+  const card = map && selectedNode && (
+    <NodeCard
+      id={selectedNode}
+      nodes={map.nodes}
+      edges={map.edges}
+      kinds={map.kinds}
+      outline={outline}
+      onSelect={select}
+      onClose={close}
+    />
+  );
+
   return (
     <main
       id="map"
@@ -107,19 +130,14 @@ export default function MapView() {
         )}
       </div>
 
-      {map && selectedNode && (
-        <div className="hidden min-[900px]:sticky min-[900px]:top-14 min-[900px]:mt-4 min-[900px]:block min-[900px]:max-h-[calc(100vh-4.5rem)] min-[900px]:overflow-auto min-[900px]:border-l min-[900px]:border-rule min-[900px]:pl-6 sm:min-[900px]:top-16">
-          <NodeCard
-            id={selectedNode}
-            nodes={map.nodes}
-            edges={map.edges}
-            kinds={map.kinds}
-            outline={outline}
-            onSelect={select}
-            onClose={close}
-          />
-        </div>
-      )}
+      {card &&
+        (wide ? (
+          <div className="sticky top-16 mt-4 max-h-[calc(100vh-4.5rem)] overflow-auto border-l border-rule pl-6">{card}</div>
+        ) : (
+          <Sheet onClose={close} label={map?.nodes.find((node) => node.id === selectedNode)?.name ?? ""}>
+            {card}
+          </Sheet>
+        ))}
     </main>
   );
 }
