@@ -101,7 +101,7 @@ async fn bind() -> Result<(TcpListener, SocketAddr), Box<dyn Error>> {
 /// Serves requests on `listener` until the process is killed: `GET
 /// /api/events` and `GET /api/events/{id}` return the project's own
 /// log, `GET /api/projects` every project the log holds, `GET
-/// /api/maps/{id}` one project's map cut to a reader's ask, and
+/// /api/maps/{id}` one project's map whole, and
 /// every other path the page, which routes itself. An unknown path
 /// under `/api` is a 404, never the page: a request for data that
 /// answers with HTML is harder to read than one that says it found
@@ -169,9 +169,8 @@ async fn api_projects(State(state): State<Arc<AppState>>) -> Response {
     events_response(result)
 }
 
-/// `GET /api/maps/{id}`: `id`'s map, cut to `params`'s `root`,
-/// `around`, and `depth` - `root` names the project, any this log
-/// holds, not only `state.source.path`.
+/// `GET /api/maps/{id}`: `id`'s map, whole, folded from `params`'s
+/// `root` - any project this log holds, not only `state.source.path`.
 async fn api_maps(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,

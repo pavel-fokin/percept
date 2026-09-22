@@ -202,9 +202,9 @@ async fn api_event_is_not_found_for_an_event_in_another_project() {
 
 /// `/api/maps/{id}` answers for the `root` the query names, not
 /// `state.source.path` - proving the path segment binds `id` and the
-/// query string binds `root`, `around`, and `depth` together.
+/// query string binds `root`.
 #[tokio::test]
-async fn api_maps_cuts_the_named_project_root_around_a_node() {
+async fn api_maps_answers_for_the_named_project_root_not_the_servers_own() {
     let fixture = Fixture::new();
     fixture.write(
         ".percept/schemas/decisions.toml",

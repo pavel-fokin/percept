@@ -68,16 +68,14 @@ fn edge_added(path: &Path, kind: &str, from: NodeId, to: NodeId) -> Event {
     )
 }
 
-fn params(root: &Path, around: Option<&str>, depth: Option<usize>) -> Params {
+fn params(root: &Path) -> Params {
     Params {
         root: Some(root.to_string_lossy().to_string()),
-        around: around.map(str::to_string),
-        depth,
     }
 }
 
 /// A fixture with the chain schema and its three nodes and two edges
-/// seeded, for a test that only cares about cutting an already-built
+/// seeded, for a test that only cares about folding an already-built
 /// map. Returns the fixture and the log so a test's `Fixture` isn't
 /// dropped before `get` reads its schema file.
 fn chain() -> (Fixture, FakeLog) {
@@ -103,58 +101,26 @@ fn decisions_id() -> String {
 }
 
 #[test]
-fn the_overview_carries_the_nodes_that_head_the_map() {
+fn the_body_carries_every_node_and_edge_of_the_map() {
     let (fixture, log) = chain();
 
-    let body = get(&log, &decisions_id(), params(fixture.path(), None, None)).unwrap();
+    let body = get(&log, &decisions_id(), params(fixture.path())).unwrap();
 
     let mut kinds: Vec<&str> = body["nodes"].as_array().unwrap().iter().map(|n| n["kind"].as_str().unwrap()).collect();
     kinds.sort_unstable();
     assert_eq!(body["map"]["id"], decisions_id());
-    // `concept` is the one node no edge reaches, so it alone heads
-    // the map.
-    assert_eq!(kinds, ["concept"], "{body}");
-}
-
-#[test]
-fn around_cuts_to_that_node_and_its_neighbours() {
-    let (fixture, log) = chain();
-
-    let body = get(&log, &decisions_id(), params(fixture.path(), Some("c1"), None)).unwrap();
-
-    let mut kinds: Vec<&str> = body["nodes"].as_array().unwrap().iter().map(|n| n["kind"].as_str().unwrap()).collect();
-    kinds.sort_unstable();
-    assert_eq!(kinds, ["concept", "question"], "{body}");
-}
-
-#[test]
-fn depth_widens_the_cut() {
-    let (fixture, log) = chain();
-
-    let body = get(&log, &decisions_id(), params(fixture.path(), Some("c1"), Some(2))).unwrap();
-
-    let mut kinds: Vec<&str> = body["nodes"].as_array().unwrap().iter().map(|n| n["kind"].as_str().unwrap()).collect();
-    kinds.sort_unstable();
+    // Whole, not cut: the head (`concept`) and the nodes hanging under
+    // it (`question`, `fact`) all come back, with both edges between
+    // them.
     assert_eq!(kinds, ["concept", "fact", "question"], "{body}");
-}
-
-#[test]
-fn the_counts_report_the_whole_map_not_the_cut() {
-    let (fixture, log) = chain();
-
-    let body = get(&log, &decisions_id(), params(fixture.path(), Some("c1"), None)).unwrap();
-
-    assert_eq!(body["shown_nodes"], 2, "{body}");
-    assert_eq!(body["total_nodes"], 3, "{body}");
-    assert_eq!(body["total_edges"], 2, "{body}");
-    assert_eq!(body["boundary_edges"], 1, "{body}");
+    assert_eq!(body["edges"].as_array().unwrap().len(), 2, "{body}");
 }
 
 #[test]
 fn an_unknown_map_id_404s() {
     let (fixture, log) = chain();
 
-    let err = get(&log, &crate::core::MapId::new().as_uuid().to_string(), params(fixture.path(), None, None)).unwrap_err();
+    let err = get(&log, &crate::core::MapId::new().as_uuid().to_string(), params(fixture.path())).unwrap_err();
 
     assert!(matches!(err, Error::NotFound(_)), "{err:?}");
 }
@@ -163,34 +129,16 @@ fn an_unknown_map_id_404s() {
 fn a_map_id_that_does_not_parse_400s() {
     let (fixture, log) = chain();
 
-    let err = get(&log, "not-a-uuid", params(fixture.path(), None, None)).unwrap_err();
+    let err = get(&log, "not-a-uuid", params(fixture.path())).unwrap_err();
 
     assert!(matches!(err, Error::Bad(_)), "{err:?}");
-}
-
-#[test]
-fn an_around_that_resolves_to_nothing_404s() {
-    let (fixture, log) = chain();
-
-    let err = get(&log, &decisions_id(), params(fixture.path(), Some("c99"), None)).unwrap_err();
-
-    assert!(matches!(err, Error::NotFound(_)), "{err:?}");
 }
 
 #[test]
 fn a_missing_root_400s() {
     let log = FakeLog::seeded(Vec::new());
 
-    let err = get(
-        &log,
-        &decisions_id(),
-        Params {
-            root: None,
-            around: None,
-            depth: None,
-        },
-    )
-    .unwrap_err();
+    let err = get(&log, &decisions_id(), Params { root: None }).unwrap_err();
 
     assert!(matches!(err, Error::Bad(_)), "{err:?}");
 }
@@ -200,7 +148,7 @@ fn a_root_the_log_has_no_events_for_404s() {
     let fixture = Fixture::new();
     let log = FakeLog::seeded(Vec::new());
 
-    let err = get(&log, &decisions_id(), params(fixture.path(), None, None)).unwrap_err();
+    let err = get(&log, &decisions_id(), params(fixture.path())).unwrap_err();
 
     assert!(matches!(err, Error::NotFound(_)), "{err:?}");
 }
