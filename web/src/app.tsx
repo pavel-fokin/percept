@@ -1,4 +1,5 @@
 import { Outlet, Route, Routes } from "react-router";
+import Board from "./components/board";
 import Header from "./components/header";
 import LogPage from "./components/log-page";
 import MapView from "./components/map";
@@ -20,6 +21,7 @@ export default function App() {
         <Route path={PATHS.index} element={<Projects />} />
         <Route path={PATHS.log} element={<LogPage />} />
         <Route path={PATHS.map} element={<MapView />} />
+        <Route path={PATHS.board} element={<Board />} />
         <Route path="*" element={<Projects />} />
       </Route>
     </Routes>

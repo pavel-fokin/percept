@@ -1,86 +1,19 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { useParams, useSearchParams } from "react-router";
-import { fetchMap, messageOf } from "../lib/api";
 import { basename } from "../lib/format";
-import { buildOutline } from "../lib/outline";
-import type { MapResponse } from "../lib/types";
+import { boardPath } from "../lib/routes";
+import { useMapView } from "../lib/use-map-view";
+import { Link } from "react-router";
 import MapTree from "./map-tree";
 import NodeCard from "./node-card";
 import Sheet from "./ui/sheet";
-
-/** Where the card stops being a sheet and sits beside the tree. */
-const WIDE = "(min-width: 900px)";
-
-function subscribeWide(onChange: () => void) {
-  const query = window.matchMedia(WIDE);
-  query.addEventListener("change", onChange);
-  return () => query.removeEventListener("change", onChange);
-}
-
-type Load =
-  | { state: "loading" }
-  | { state: "failed"; message: string }
-  | { state: "ready"; map: MapResponse };
 
 /** One cognitive map, whole - rendered as an outline tree from the
  * nodes that head it, with the selected node's card beside it on a
  * wide screen. Selection lives in the URL's `node` param, so an
  * address can be shared straight at one node. */
 export default function MapView() {
-  const { id = "" } = useParams();
-  const [params, setParams] = useSearchParams();
-  const root = params.get("root") ?? "";
-  const selected = params.get("node");
-  const [load, setLoad] = useState<Load>({ state: "loading" });
-  const wide = useSyncExternalStore(subscribeWide, () => window.matchMedia(WIDE).matches);
+  const { id, root, load, map, outline, selected: selectedNode, setNode, close, wide } = useMapView();
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoad({ state: "loading" });
-    fetchMap(id, root)
-      .then((map) => {
-        if (!cancelled) setLoad({ state: "ready", map });
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) setLoad({ state: "failed", message: messageOf(error) });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [id, root]);
-
-  const map = load.state === "ready" ? load.map : null;
   const name = map?.map.name ?? "";
-  const outline = useMemo(() => (map ? buildOutline(map) : null), [map]);
-
-  const setNode = useCallback(
-    (nodeId: string | null) => {
-      setParams(
-        (prev) => {
-          const next = new URLSearchParams(prev);
-          if (nodeId) next.set("node", nodeId);
-          else next.delete("node");
-          return next;
-        },
-        { replace: true },
-      );
-    },
-    [setParams],
-  );
-  const close = useCallback(() => setNode(null), [setNode]);
-
-  useEffect(() => {
-    if (!selected || !wide) return;
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") close();
-    }
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [selected, wide, close]);
-
-  // An unknown `node` id shows no card - the map may have moved on
-  // since the address was shared.
-  const selectedNode = selected && outline?.byId.has(selected) ? selected : null;
 
   const card = map && outline && selectedNode && (
     <NodeCard id={selectedNode} edges={map.edges} outline={outline} onSelect={setNode} onClose={close} />
@@ -100,6 +33,11 @@ export default function MapView() {
         <div className="mt-4 flex min-h-6 items-baseline gap-x-2">
           <h1 className="text-base font-medium tracking-tight text-ink">{name}</h1>
           {root && <p className="text-[0.8125rem] text-faint">&#183; from {basename(root)}</p>}
+          {map && (
+            <Link to={boardPath(id, root)} className="text-[0.8125rem] text-accent hover:underline">
+              Open on a board
+            </Link>
+          )}
         </div>
         {map && <p className="mt-1 font-serif text-[1.0625rem] leading-relaxed text-muted">{map.map.purpose}</p>}
 
