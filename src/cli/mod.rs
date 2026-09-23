@@ -1,5 +1,4 @@
-//! The command-line surface: `percept events publish` appends one event
-//! without opening the TUI, `percept events search` queries the log,
+//! The command-line surface: `percept events search` queries the log,
 //! `percept events show` dereferences one event by id, `percept maps`
 //! folds a cognitive map from the log and prints it - `maps reflect`
 //! opens a reflection on one, printing the event id an agent then
@@ -428,10 +427,6 @@ fn map_for(
     Ok(mapstore::Snapshot::for_write(schemas, name, source, log.load()?)?.1)
 }
 
-/// Appends one event built from `args` to `log`. `store` owns the
-/// decode, so the CLI only parses flags. `root` is the writer's project
-/// root, resolved once in `main`; `args.source` only names the writer,
-/// so `publish` pairs the two into the `Source` the event carries.
 /// Resolves `path` inside `workspace`, refusing one outside it, and
 /// reads `excerpt` from the tree when the caller gave none, refusing a
 /// binary file, a range past the file's end, or an excerpt that is
