@@ -154,23 +154,30 @@ fn push_example(out: &mut String, map: &Map) {
     }
 }
 
-/// One `##` section per root, in an order this render alone gives
-/// meaning to - never the core's: by the index of its kind's closed
-/// list value - `state` on a `task`, say - in that list's declared
-/// order, unknown or missing last, then by when it was added. Under
-/// each heading: the node's own properties, then what hangs under it,
-/// as `push_tree` prints it. A node can take a second edge in, so one
-/// `seen` set spans the whole render: the walk from the roots prints
-/// each node once, under the first parent that reaches it, and marks
-/// it wherever a later edge reaches it again. A second pass then heads
-/// a section with whatever the walk never reached - a cycle with
-/// nothing pointing in from outside - in the order it was added, so
-/// nothing a map holds goes unprinted.
-fn push_sections(out: &mut String, map: &Map, mark: bool) {
-    let mut seen: HashSet<NodeId> = HashSet::new();
+/// `map`'s heads, in the one order any renderer of them uses: by the
+/// index of its kind's closed list value - `state` on a `task`, say -
+/// in that list's declared order, unknown or missing last, then by
+/// when it was added. Order here says nothing the core does not
+/// already know from the property itself; it only picks which of two
+/// heads with the same rank reads first.
+pub fn heads(map: &Map) -> Vec<&Node> {
     let mut roots: Vec<&Node> = map.roots().collect();
     roots.sort_by_cached_key(|node| (closed_list_rank(map, node), node.added().at));
-    for node in roots {
+    roots
+}
+
+/// One `##` section per root, in `heads`' order. Under each heading:
+/// the node's own properties, then what hangs under it, as `push_tree`
+/// prints it. A node can take a second edge in, so one `seen` set
+/// spans the whole render: the walk from the roots prints each node
+/// once, under the first parent that reaches it, and marks it wherever
+/// a later edge reaches it again. A second pass then heads a section
+/// with whatever the walk never reached - a cycle with nothing
+/// pointing in from outside - in the order it was added, so nothing a
+/// map holds goes unprinted.
+fn push_sections(out: &mut String, map: &Map, mark: bool) {
+    let mut seen: HashSet<NodeId> = HashSet::new();
+    for node in heads(map) {
         push_section(out, map, node, mark, &mut seen);
     }
     for node in map.nodes() {

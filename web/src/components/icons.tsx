@@ -53,6 +53,33 @@ export function Sun({ className }: { className: string }) {
   );
 }
 
+/** One monochrome shape per node kind, cycling through five, chosen by
+ * the kind's index in the schema - never by colour, so the tree stays
+ * inside the page's one accent hue. */
+const KIND_SHAPES = [
+  <circle key="0" cx="6" cy="6" r="4" fill="currentColor" />,
+  <rect key="1" x="2.5" y="2.5" width="7" height="7" fill="currentColor" transform="rotate(45 6 6)" />,
+  <circle key="2" cx="6" cy="6" r="3.5" fill="none" stroke="currentColor" strokeWidth="1.4" />,
+  <rect key="3" x="2.5" y="2.5" width="7" height="7" fill="none" stroke="currentColor" strokeWidth="1.4" />,
+  <path key="4" d="M6 2 10 9.5H2Z" fill="currentColor" />,
+];
+
+export function KindGlyph({ index, className }: { index: number; className?: string }) {
+  return (
+    <svg viewBox="0 0 12 12" className={className} aria-hidden="true">
+      {KIND_SHAPES[index % KIND_SHAPES.length]}
+    </svg>
+  );
+}
+
+export function CloseIcon({ className }: { className: string }) {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className={className} aria-hidden="true">
+      <path d="M4 4l8 8M12 4l-8 8" />
+    </svg>
+  );
+}
+
 export function Moon({ className }: { className: string }) {
   return (
     <svg
