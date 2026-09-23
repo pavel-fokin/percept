@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { useParams, useSearchParams } from "react-router";
-import { fetchMap, messageOf } from "./api";
-import { buildOutline } from "./outline";
-import type { MapResponse } from "./types";
+import { useSearchParams } from "react-router";
+import { fetchMap, messageOf } from "../lib/api";
+import { buildOutline } from "../lib/outline";
+import type { MapResponse } from "../lib/types";
 
 /** Where the selected node's card stops being a bottom sheet and sits
  * beside the map instead - the outline page and the board agree on
  * this width, so a reader sees the same layout switch on both. */
-export const WIDE = "(min-width: 900px)";
+const WIDE = "(min-width: 900px)";
 
 function subscribeWide(onChange: () => void) {
   const query = window.matchMedia(WIDE);
@@ -15,20 +15,20 @@ function subscribeWide(onChange: () => void) {
   return () => query.removeEventListener("change", onChange);
 }
 
-type Load =
+export type Load =
   | { state: "loading" }
   | { state: "failed"; message: string }
   | { state: "ready"; map: MapResponse };
 
+export type MapViewState = ReturnType<typeof useMapView>;
+
 /** One cognitive map, loaded once and kept selected through the URL's
  * `node` param - the loading, selection and Escape handling the
  * outline page and the board both need, written once so neither
- * reinvents it. `id` reads from a route param first, `map` next - the
- * outline page names the map in the path, the board in the query. */
-export function useMapView() {
-  const { id: pathId } = useParams();
+ * reinvents it. The page names the map, since each carries it in its
+ * own place in the URL. */
+export function useMapView(id: string) {
   const [params, setParams] = useSearchParams();
-  const id = pathId ?? params.get("map") ?? "";
   const root = params.get("root") ?? "";
   const selected = params.get("node");
   const [load, setLoad] = useState<Load>({ state: "loading" });
@@ -81,5 +81,5 @@ export function useMapView() {
   // since the address was shared.
   const selectedNode = selected && outline?.byId.has(selected) ? selected : null;
 
-  return { id, root, load, map, outline, selected: selectedNode, setNode, close, wide };
+  return { root, load, map, outline, selected: selectedNode, setNode, close, wide };
 }

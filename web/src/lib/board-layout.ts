@@ -1,10 +1,5 @@
 import type { Outline, OutlineEntry } from "./outline";
 
-export interface BoardPosition {
-  x: number;
-  y: number;
-}
-
 const COLUMN_WIDTH = 240;
 const ROW_HEIGHT = 52;
 
@@ -14,8 +9,8 @@ const ROW_HEIGHT = 52;
  * board edge, not a second box. Kept a standalone function, not a
  * method on `Outline`, because a saved layout will replace it without
  * either caller changing. */
-export function layoutBoard(outline: Outline): Map<string, BoardPosition> {
-  const positions = new Map<string, BoardPosition>();
+export function layoutBoard(outline: Outline): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>();
   let row = 0;
 
   function walk(entry: OutlineEntry) {

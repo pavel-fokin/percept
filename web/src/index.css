@@ -43,19 +43,6 @@ details[open] > summary [data-chev] {
   transform: rotate(180deg);
 }
 
-/* The board fills the space under the sticky header rather than
-   scrolling the page - React Flow measures its own element, so that
-   element needs a real height, not just a flex-grow that content could
-   overflow. */
-#board {
-  height: calc(100dvh - 3.5rem);
-}
-@media (min-width: 640px) {
-  #board {
-    height: calc(100dvh - 4rem);
-  }
-}
-
 /* React Flow themed through the app's own tokens (`theme.css`), so the
    canvas, its edges and its controls read as this app's, not the
    library's defaults, in both light and dark. */
