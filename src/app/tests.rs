@@ -291,7 +291,7 @@ fn another_source_s_map_mutation_in_the_same_project_still_folds() {
     .unwrap();
 
     let debates = schemas()
-        .fold_all(app.events(), app.events())
+        .fold_all(app.events())
         .unwrap()
         .into_iter()
         .find(|map| map.schema().name() == "debates")

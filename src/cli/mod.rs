@@ -567,7 +567,7 @@ pub fn start(log: &dyn EventLog, schemas: &Schemas, project: &Path) -> Result<()
 /// what `hook` answers a coding client's `SessionStart` with.
 pub fn start_text(log: &dyn EventLog, schemas: &Schemas, project: &Path) -> Result<String, Box<dyn std::error::Error>> {
     let events = log.load()?;
-    let maps = schemas.fold_all(mapstore::of_path(&events, project), &events)?;
+    let maps = mapstore::fold_all_at(schemas, &events, project)?;
     Ok(mapstore::start(schemas, &maps))
 }
 
@@ -582,7 +582,7 @@ pub fn maps_list(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let events = log.load()?;
     per_path(args.all_paths, args.json, project, &events, |path| {
-        let maps = schemas.fold_all(mapstore::of_path(&events, path), &events)?;
+        let maps = mapstore::fold_all_at(schemas, &events, path)?;
         if args.json {
             print_lines(maps.iter().map(mapstore::encode_map))
         } else {

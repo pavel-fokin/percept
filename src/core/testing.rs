@@ -187,24 +187,15 @@ pub fn node_added_seq(kind: &str, name: &str, seq: u32) -> Event {
     )
 }
 
-/// `node_added`, from a path other than `/test` and a map identity of
-/// its own - a node of a genuinely different project's map, the way a
-/// map's own fold joins events by `MapId`, not by `Source.path`, for a
-/// test that folds one project's map and not another's.
+/// `node_added`, from a path other than `/test`, to a map named for
+/// that path - a node of another project's map, for a test that folds
+/// one project's map and not another's.
 pub fn node_added_at(path: &str, kind: &str, name: &str) -> Event {
     Event::new(
         Actor::Human(human()),
         source_at("test", path),
         None,
-        Payload::NodeAdded {
-            map: MapId::new(),
-            node: NodeId::new(),
-            kind: kind.to_string(),
-            name: name.to_string(),
-            properties: BTreeMap::new(),
-            sources: vec![EventId::new()],
-            seq: 1,
-        },
+        node_added_payload(path, kind, name, BTreeMap::new(), vec![EventId::new()]),
     )
 }
 

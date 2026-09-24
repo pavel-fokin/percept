@@ -52,6 +52,22 @@ pub fn fold_map_at(
     Ok(Map::fold(id, schema, events)?)
 }
 
+/// Every map `path`'s `map.created` events name, in schema order,
+/// each folded over every event in `events` - `fold_map_at`'s rule for
+/// all of `schemas` at once. A schema with no `map.created` at `path`
+/// is not a map yet, and is skipped.
+pub fn fold_all_at(schemas: &Schemas, events: &[Event], path: &Path) -> Result<Vec<Map>, MapError> {
+    let own: Vec<&Event> = of_path(events, path).collect();
+    let mut maps = Vec::new();
+    for schema in schemas.folded() {
+        let Some(id) = map_id_for(schema.name(), own.iter().copied())? else {
+            continue;
+        };
+        maps.push(Map::fold(id, schema.clone(), events)?);
+    }
+    Ok(maps)
+}
+
 /// `fold_map_at` over every event in `log`.
 pub fn fold_map(
     log: &dyn EventLog,

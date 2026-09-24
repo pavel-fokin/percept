@@ -278,18 +278,13 @@ impl Schemas {
         self.schemas.iter()
     }
 
-    /// Every created map `Map::fold` gives, in schema order. `own`
-    /// decides whether a schema has a `map.created` identity - the
-    /// path-scoped lookup - while `events` is what each found identity
-    /// folds over, which may carry more than `own` when a map joins
-    /// events from other sources by id. A schema with no `map.created`
-    /// event in `own` is not a map yet.
+    /// Every created map `Map::fold` gives for `events`, in schema
+    /// order. A schema with no `map.created` event is not a map yet.
     pub fn fold_all<'a>(
         &self,
-        own: impl IntoIterator<Item = &'a Event> + Clone,
         events: impl IntoIterator<Item = &'a Event> + Clone,
     ) -> Result<Vec<Map>, MapError> {
-        self.fold_matching(|_| true, own, events)
+        self.fold_matching(|_| true, events)
     }
 
     /// `fold_all`, restricted to the schemas named in `names` - what a
@@ -300,18 +295,17 @@ impl Schemas {
         names: &HashSet<String>,
         events: impl IntoIterator<Item = &'a Event> + Clone,
     ) -> Result<Vec<Map>, MapError> {
-        self.fold_matching(|schema| names.contains(&schema.name), events.clone(), events)
+        self.fold_matching(|schema| names.contains(&schema.name), events)
     }
 
     fn fold_matching<'a>(
         &self,
         matches: impl Fn(&Schema) -> bool,
-        own: impl IntoIterator<Item = &'a Event> + Clone,
         events: impl IntoIterator<Item = &'a Event> + Clone,
     ) -> Result<Vec<Map>, MapError> {
         let mut maps = Vec::new();
         for schema in self.folded().filter(|schema| matches(schema)) {
-            let Some(id) = super::map_id_for(&schema.name, own.clone())? else {
+            let Some(id) = super::map_id_for(&schema.name, events.clone())? else {
                 continue;
             };
             maps.push(Map::fold(id, schema.clone(), events.clone())?);

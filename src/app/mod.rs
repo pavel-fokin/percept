@@ -423,7 +423,7 @@ impl App {
             .into_iter()
             .filter(|event| belongs_to_transcript(event, &source))
             .collect();
-        schemas.fold_all(&events, &events)?;
+        schemas.fold_all(&events)?;
         let last_usage = last_model_called(&events);
         let reasoning_effort = chat.capabilities().default_reasoning_effort;
 

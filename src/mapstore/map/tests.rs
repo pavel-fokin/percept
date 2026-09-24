@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::core::testing::{human, schemas, source, source_at, FakeLog};
+use crate::core::testing::{human, map_id, node_added_payload, schemas, source, source_at, FakeLog};
 use crate::core::{Actor, Change, Event, MapId, NodeId, NodeRef};
 use crate::shared::Timestamp;
 
@@ -171,59 +171,34 @@ fn commit_allows_the_same_name_under_a_different_path() {
     assert_ne!(here_id, there_id);
 }
 
-#[test]
-fn fold_map_at_joins_a_node_written_from_another_path_by_the_map_id_it_names() {
-    let here = source_at("cli", "/here");
-    let elsewhere = source_at("agent", "/elsewhere");
-    let id = MapId::new();
-    let events = vec![
-        Event::map_created(id, "debates".to_string(), here.clone()),
+/// A `debates` map created at `/here`, and a node for it written from
+/// `/elsewhere`.
+fn node_from_elsewhere() -> Vec<Event> {
+    vec![
+        Event::map_created(map_id("debates"), "debates".to_string(), source_at("cli", "/here")),
         Event::new(
             Actor::Agent,
-            elsewhere,
+            source_at("agent", "/elsewhere"),
             None,
-            Payload::NodeAdded {
-                map: id,
-                node: NodeId::new(),
-                kind: "verdict".to_string(),
-                name: "Rust".to_string(),
-                properties: BTreeMap::new(),
-                sources: Vec::new(),
-                seq: 1,
-            },
+            node_added_payload("debates", "verdict", "Rust", BTreeMap::new(), Vec::new()),
         ),
-    ];
+    ]
+}
 
-    let map = fold_map_at(&schemas(), "debates", &events, &here.path).unwrap();
+#[test]
+fn fold_map_at_joins_a_node_written_from_another_path_by_the_map_id_it_names() {
+    let events = node_from_elsewhere();
+
+    let map = fold_map_at(&schemas(), "debates", &events, Path::new("/here")).unwrap();
 
     assert!(map.find("verdict", "Rust").is_some());
 }
 
 #[test]
-fn fold_all_joins_a_node_written_from_another_path_by_the_map_id_it_names() {
-    let here = source_at("cli", "/here");
-    let elsewhere = source_at("agent", "/elsewhere");
-    let id = MapId::new();
-    let events = vec![
-        Event::map_created(id, "debates".to_string(), here.clone()),
-        Event::new(
-            Actor::Agent,
-            elsewhere,
-            None,
-            Payload::NodeAdded {
-                map: id,
-                node: NodeId::new(),
-                kind: "verdict".to_string(),
-                name: "Rust".to_string(),
-                properties: BTreeMap::new(),
-                sources: Vec::new(),
-                seq: 1,
-            },
-        ),
-    ];
-    let own: Vec<&Event> = of_path(&events, &here.path).collect();
+fn fold_all_at_joins_a_node_written_from_another_path_by_the_map_id_it_names() {
+    let events = node_from_elsewhere();
 
-    let maps = schemas().fold_all(own, &events).unwrap();
+    let maps = fold_all_at(&schemas(), &events, Path::new("/here")).unwrap();
 
     let debates = maps.into_iter().find(|map| map.schema().name() == "debates").unwrap();
     assert!(debates.find("verdict", "Rust").is_some());

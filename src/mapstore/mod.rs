@@ -24,7 +24,7 @@ mod schemas;
 pub(crate) use blocks::{changed_line, gained, last_session, project_name};
 pub use map::{
     commit, commit_batch, encode_fragment, encode_lines, encode_map, encode_schema, ensure_maps,
-    fold_map, fold_map_at, of_path, paths, properties_map, LogMaps, NodeRefArgs, Snapshot,
+    fold_all_at, fold_map, fold_map_at, of_path, paths, properties_map, LogMaps, NodeRefArgs, Snapshot,
 };
 pub use render::{catalogue, heads, markdown, start};
 pub use schemas::{load as load_schemas, templates, SCHEMAS_DIR};
