@@ -1478,3 +1478,46 @@ fn last_usage_is_the_most_recent_round_trip_not_a_sum() {
     app.end_stream().unwrap();
     assert_eq!(app.last_usage().unwrap().input_tokens, 250);
 }
+
+/// A verdict written to this project's `debates` map from another
+/// path, the way a map joins events by id wherever they were written.
+fn verdict_from_elsewhere(name: &str) -> Event {
+    Event::new(
+        Actor::Agent,
+        crate::core::testing::source_at("codex", "/elsewhere"),
+        None,
+        crate::core::testing::node_added_payload("debates", "verdict", name, Default::default(), Vec::new()),
+    )
+}
+
+#[test]
+fn a_node_written_to_this_path_s_map_from_another_path_joins_the_transcript_s_map() {
+    let foreign = verdict_from_elsewhere("Go");
+    let own = node_added_seq("verdict", "Rust", 2);
+    let replaces = edge_added("replaces", &own, &foreign);
+    let (_, app) = seeded_app(vec![foreign, own, replaces], Vec::new());
+
+    let debates = schemas()
+        .fold_all(app.events())
+        .unwrap()
+        .into_iter()
+        .find(|map| map.schema().name() == "debates")
+        .unwrap();
+    assert!(debates.find("verdict", "Go").is_some());
+}
+
+#[test]
+fn a_tool_commit_that_reaches_a_node_written_from_another_path_is_accepted() {
+    let foreign = verdict_from_elsewhere("Go");
+    let own = node_added_seq("verdict", "Rust", 2);
+    let replaces = edge_added("replaces", &own, &foreign).payload().clone();
+    let (_, mut app) = seeded_app(vec![foreign, own], vec![Arc::new(Committing(vec![replaces]))]);
+
+    let _ = app.submit("go".to_string()).unwrap();
+    run_one_tool(&mut app, "search_events", "{}");
+
+    assert!(app
+        .events()
+        .iter()
+        .any(|event| matches!(event.payload(), Payload::EdgeAdded { .. })));
+}

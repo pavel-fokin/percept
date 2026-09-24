@@ -296,14 +296,33 @@ fn normalize_created_maps(
     Ok(())
 }
 
-/// `events` written by `source`'s own path, regardless of actor -
+/// `events` written by `source`'s own path, regardless of actor, plus
+/// every event that changes one of that path's maps from elsewhere -
 /// the slice `map_id_for` and `fold_all` fold over when checking
 /// whether a tool's commits fit the map they target.
 fn own_events<'a>(events: &'a [Event], source: &Source) -> Vec<&'a Event> {
+    let maps = path_maps(events, &source.path);
     events
         .iter()
-        .filter(|event| event.source().path == source.path)
+        .filter(|event| event.source().path == source.path || changes_one_of(event, &maps))
         .collect()
+}
+
+/// The maps whose `map.created` ran at `path` - a map's identity is
+/// its path's, while the events that change it may come from anywhere.
+fn path_maps(events: &[Event], path: &std::path::Path) -> HashSet<MapId> {
+    events
+        .iter()
+        .filter(|event| event.source().path == path)
+        .filter_map(|event| match event.payload() {
+            Payload::MapCreated { map, .. } => Some(*map),
+            _ => None,
+        })
+        .collect()
+}
+
+fn changes_one_of(event: &Event, maps: &HashSet<MapId>) -> bool {
+    crate::core::map_of(event.payload()).is_some_and(|map| maps.contains(&map))
 }
 
 fn retarget_map(payload: &mut Payload, from: MapId, to: MapId) {
@@ -320,13 +339,13 @@ fn retarget_map(payload: &mut Payload, from: MapId, to: MapId) {
 
 /// Whether `event` belongs in `App`'s own transcript cache: either it
 /// is `source`'s own conversation - a message, a thought, a tool call -
-/// or it changes a map at `source`'s path, which stays that path's
-/// shared history no matter who wrote it. A conversational event from
-/// another writer, and anything from another path, is left out, so
-/// another client's dialogue never replays as this one's.
-fn belongs_to_transcript(event: &Event, source: &Source) -> bool {
-    event.source() == source
-        || (event.source().path == source.path && crate::core::map_of(event.payload()).is_some())
+/// or it changes one of `maps`, this path's maps, which stay its
+/// shared history no matter who wrote it or from where. A
+/// conversational event from another writer, and another path's maps,
+/// are left out, so another client's dialogue never replays as this
+/// one's.
+fn belongs_to_transcript(event: &Event, source: &Source, maps: &HashSet<MapId>) -> bool {
+    event.source() == source || changes_one_of(event, maps)
 }
 
 /// The index of the last `model.called` in `events`, so a reopened log
@@ -418,10 +437,11 @@ impl App {
         source: Source,
         me: Option<HumanId>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let events: Vec<Event> = log
-            .load()?
+        let events = log.load()?;
+        let maps = path_maps(&events, &source.path);
+        let events: Vec<Event> = events
             .into_iter()
-            .filter(|event| belongs_to_transcript(event, &source))
+            .filter(|event| belongs_to_transcript(event, &source, &maps))
             .collect();
         schemas.fold_all(&events)?;
         let last_usage = last_model_called(&events);
