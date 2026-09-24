@@ -343,7 +343,7 @@ fn render(
             // It says so in words that keep the log in play: the
             // model read a bare "(empty)" as "nothing was ever
             // decided" and stopped searching.
-            for map in view.schemas.fold_all(view.events)? {
+            for map in view.schemas.fold_all(view.events, view.events)? {
                 let schema = map.schema();
                 let body = if map.nodes().is_empty() {
                     "(empty: nothing has been recorded here yet. The log may still \

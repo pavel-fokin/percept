@@ -47,7 +47,7 @@ fn project(path: &Path, events: &[Event], opened: Timestamp) -> (Timestamp, Valu
     let last_active = own.iter().map(|event| event.created_at()).max().expect("own is never empty");
     let since = last_session(own.iter().copied().filter(|event| event.created_at() < opened));
 
-    let (maps, maps_error) = match maps(path, &own, since) {
+    let (maps, maps_error) = match maps(path, &own, events, since) {
         Ok(maps) => (maps, Value::Null),
         Err(reason) => (Vec::new(), Value::String(reason)),
     };
@@ -63,14 +63,20 @@ fn project(path: &Path, events: &[Event], opened: Timestamp) -> (Timestamp, Valu
     (last_active, entry)
 }
 
-/// Every map `path`'s own schemas declare, folded from `own`, with
-/// what each gained since `since`. A schema percept cannot load, or a
-/// map that will not fold, answers the reason rather than failing the
-/// request: the index crosses projects, so one project's broken file
-/// would otherwise leave every other project unreadable too.
-fn maps(path: &Path, own: &[&Event], since: Option<Timestamp>) -> Result<Vec<Value>, String> {
+/// Every map `path`'s own schemas declare - their identity from
+/// `own`, folded over every event in `events` - with what each gained
+/// since `since`. A schema percept cannot load, or a map that will not
+/// fold, answers the reason rather than failing the request: the index
+/// crosses projects, so one project's broken file would otherwise
+/// leave every other project unreadable too.
+fn maps(
+    path: &Path,
+    own: &[&Event],
+    events: &[Event],
+    since: Option<Timestamp>,
+) -> Result<Vec<Value>, String> {
     let schemas = mapstore::load_schemas(path).map_err(|err| err.to_string())?;
-    let maps = schemas.fold_all(own.iter().copied()).map_err(|err| err.to_string())?;
+    let maps = schemas.fold_all(own.iter().copied(), events).map_err(|err| err.to_string())?;
     Ok(maps
         .iter()
         .map(|map| {

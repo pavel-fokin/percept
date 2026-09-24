@@ -172,6 +172,64 @@ fn commit_allows_the_same_name_under_a_different_path() {
 }
 
 #[test]
+fn fold_map_at_joins_a_node_written_from_another_path_by_the_map_id_it_names() {
+    let here = source_at("cli", "/here");
+    let elsewhere = source_at("agent", "/elsewhere");
+    let id = MapId::new();
+    let events = vec![
+        Event::map_created(id, "debates".to_string(), here.clone()),
+        Event::new(
+            Actor::Agent,
+            elsewhere,
+            None,
+            Payload::NodeAdded {
+                map: id,
+                node: NodeId::new(),
+                kind: "verdict".to_string(),
+                name: "Rust".to_string(),
+                properties: BTreeMap::new(),
+                sources: Vec::new(),
+                seq: 1,
+            },
+        ),
+    ];
+
+    let map = fold_map_at(&schemas(), "debates", &events, &here.path).unwrap();
+
+    assert!(map.find("verdict", "Rust").is_some());
+}
+
+#[test]
+fn fold_all_joins_a_node_written_from_another_path_by_the_map_id_it_names() {
+    let here = source_at("cli", "/here");
+    let elsewhere = source_at("agent", "/elsewhere");
+    let id = MapId::new();
+    let events = vec![
+        Event::map_created(id, "debates".to_string(), here.clone()),
+        Event::new(
+            Actor::Agent,
+            elsewhere,
+            None,
+            Payload::NodeAdded {
+                map: id,
+                node: NodeId::new(),
+                kind: "verdict".to_string(),
+                name: "Rust".to_string(),
+                properties: BTreeMap::new(),
+                sources: Vec::new(),
+                seq: 1,
+            },
+        ),
+    ];
+    let own: Vec<&Event> = of_path(&events, &here.path).collect();
+
+    let maps = schemas().fold_all(own, &events).unwrap();
+
+    let debates = maps.into_iter().find(|map| map.schema().name() == "debates").unwrap();
+    assert!(debates.find("verdict", "Rust").is_some());
+}
+
+#[test]
 fn a_map_summary_exposes_the_map_id() {
     let id = MapId::new();
     let map = Map::empty(id, crate::core::testing::debates());

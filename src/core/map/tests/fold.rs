@@ -46,7 +46,7 @@ fn schemas_fold_only_maps_the_log_created() {
         source("init"),
     )];
 
-    let maps = crate::core::testing::schemas().fold_all(&events).unwrap();
+    let maps = crate::core::testing::schemas().fold_all(&events, &events).unwrap();
 
     assert_eq!(maps.len(), 1);
     assert_eq!(maps[0].schema().name(), "debates");
@@ -61,7 +61,7 @@ fn two_identities_for_one_schema_are_rejected() {
         Event::map_created(second, "debates".to_string(), source("init")),
     ];
 
-    let err = match crate::core::testing::schemas().fold_all(&events) {
+    let err = match crate::core::testing::schemas().fold_all(&events, &events) {
         Err(err) => err,
         Ok(_) => panic!("expected duplicate map identities to be rejected"),
     };

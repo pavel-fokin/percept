@@ -31,8 +31,10 @@ pub fn paths(events: &[Event]) -> Vec<PathBuf> {
     paths.into_iter().map(Path::to_path_buf).collect()
 }
 
-/// The map `name` names, folded from those of `events` whose source
-/// ran at `path`.
+/// The map `name` names: its identity comes from `events` whose
+/// source ran at `path`, but the fold itself runs over every event in
+/// `events`, so a node or edge written from another path still joins
+/// the map its `map` field names.
 /// A schema with no `map.created` event yet folds empty, under a
 /// placeholder identity nothing else refers to - the same "not a map
 /// yet" reading `Schemas::fold_all` gives a schema it skips, so a
@@ -46,8 +48,8 @@ pub fn fold_map_at(
 ) -> Result<Map, Box<dyn std::error::Error>> {
     let schema = schemas.find(name)?;
     let own = of_path(events, path);
-    let id = map_id_for(name, own.clone())?.unwrap_or_else(MapId::new);
-    Ok(Map::fold(id, schema, own)?)
+    let id = map_id_for(name, own)?.unwrap_or_else(MapId::new);
+    Ok(Map::fold(id, schema, events)?)
 }
 
 /// `fold_map_at` over every event in `log`.
@@ -101,7 +103,7 @@ impl Snapshot {
     ) -> Result<(Option<Event>, Self), Box<dyn std::error::Error>> {
         let schema = schemas.find(name)?;
         let own = of_path(&events, &source.path);
-        let existing = map_id_for(name, own.clone())?;
+        let existing = map_id_for(name, own)?;
         let (id, created) = match existing {
             Some(id) => (id, None),
             None => {
@@ -109,7 +111,7 @@ impl Snapshot {
                 (id, Some(Event::map_created(id, name.to_string(), source.clone())))
             }
         };
-        let map = Map::fold(id, schema, own)?;
+        let map = Map::fold(id, schema, &events)?;
         let ids = events.iter().map(|event| event.id().as_uuid()).collect();
         Ok((created, Self { map, ids }))
     }
