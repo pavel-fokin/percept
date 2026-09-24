@@ -1,8 +1,9 @@
 use super::*;
 use crate::core::testing::{
-    content, edge_added, human, node_added, node_added_seq, schemas, source, usage, FakeLog,
+    chores, content, debates, edge_added, human, node_added, node_added_seq, schemas, source,
+    source_at, usage, FakeLog, FakeSchemas, HOME,
 };
-use crate::core::{Actor, Payload};
+use crate::core::{fold_all, Actor, Payload};
 use crate::harness::testing::{FakeCatalog, FakeSnapshot, FakeTool, FixedPolicy, Scripted};
 use crate::harness::{Chunk, Verdict};
 
@@ -290,8 +291,7 @@ fn another_source_s_map_mutation_in_the_same_project_still_folds() {
     )
     .unwrap();
 
-    let debates = schemas()
-        .fold_all(app.events())
+    let debates = fold_all(&schemas(), app.events())
         .unwrap()
         .into_iter()
         .find(|map| map.schema().name() == "debates")
@@ -1028,7 +1028,7 @@ fn an_empty_map_is_still_sent_with_its_kinds() {
 
     let sent = model.last_request();
     // One message per map, the prompt, the time.
-    assert_eq!(sent.len(), 2 + schemas().folded().count());
+    assert_eq!(sent.len(), 2 + schemas().folded().len());
     assert!(sent[0].contains(
         "Node kinds: `topic`, `claim` (carries `why`, `summary`), `fact` \
          (carries `summary`, `when`), `verdict` (carries `why`)."
@@ -1209,7 +1209,7 @@ fn a_log_shorter_than_the_window_sends_all_of_it() {
     let _ = app.submit("now".to_string()).unwrap();
 
     // One message per map, three events, the prompt, the time.
-    assert_eq!(model.last_request().len(), 5 + schemas().folded().count());
+    assert_eq!(model.last_request().len(), 5 + schemas().folded().len());
 }
 
 #[test]
@@ -1227,7 +1227,7 @@ fn a_model_called_event_never_reaches_the_next_request() {
     // One message per map, "first", "ok", "second", the time - the
     // model.called event between "ok" and "second" is never one of
     // them.
-    assert_eq!(sent.len(), 4 + schemas().folded().count());
+    assert_eq!(sent.len(), 4 + schemas().folded().len());
     assert!(sent.contains(&"first".to_string()));
     assert!(sent.contains(&"ok".to_string()));
     assert!(sent.contains(&"second".to_string()));
@@ -1497,13 +1497,53 @@ fn a_node_written_to_this_path_s_map_from_another_path_joins_the_transcript_s_ma
     let replaces = edge_added("replaces", &own, &foreign);
     let (_, app) = seeded_app(vec![foreign, own, replaces], Vec::new());
 
-    let debates = schemas()
-        .fold_all(app.events())
+    let debates = fold_all(&schemas(), app.events())
         .unwrap()
         .into_iter()
         .find(|map| map.schema().name() == "debates")
         .unwrap();
     assert!(debates.find("verdict", "Go").is_some());
+}
+
+#[test]
+fn a_global_maps_created_at_home_joins_the_transcript_though_the_app_runs_at_its_own_path() {
+    let schemas: Arc<dyn Schemas> = Arc::new(FakeSchemas::with_global(vec![debates(), chores()], &["debates"]));
+    let created = Event::map_created(
+        crate::core::testing::map_id("debates"),
+        "debates".to_string(),
+        source_at("init", HOME),
+    );
+    let node = Event::new(
+        Actor::Agent,
+        source_at("codex", HOME),
+        None,
+        crate::core::testing::node_added_payload(
+            "debates",
+            "verdict",
+            "Rust",
+            Default::default(),
+            Vec::new(),
+        ),
+    );
+    let log = Arc::new(FakeLog::seeded(vec![created, node]));
+
+    let app = App::new(
+        Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
+        log,
+        schemas.clone(),
+        Harness::new(Vec::new(), MapShape::Prompt),
+        source(SOURCE),
+        human(),
+    )
+    .unwrap();
+
+    let debates = fold_all(schemas.as_ref(), app.events())
+        .unwrap()
+        .into_iter()
+        .find(|map| map.schema().name() == "debates")
+        .unwrap();
+    assert!(debates.find("verdict", "Rust").is_some());
 }
 
 #[test]
@@ -1520,4 +1560,34 @@ fn a_tool_commit_that_reaches_a_node_written_from_another_path_is_accepted() {
         .events()
         .iter()
         .any(|event| matches!(event.payload(), Payload::EdgeAdded { .. })));
+}
+
+#[test]
+fn a_project_map_left_behind_by_a_schema_now_global_stays_out_of_the_transcript() {
+    let schemas: Arc<dyn Schemas> = Arc::new(FakeSchemas::with_global(vec![debates(), chores()], &["debates"]));
+    let left_behind = Event::map_created(MapId::new(), "debates".to_string(), source("init"));
+    let global = Event::map_created(
+        crate::core::testing::map_id("debates"),
+        "debates".to_string(),
+        source_at("init", HOME),
+    );
+    let log = Arc::new(FakeLog::seeded(vec![left_behind, global]));
+
+    let app = App::new(
+        Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
+        log,
+        schemas.clone(),
+        Harness::new(Vec::new(), MapShape::Prompt),
+        source(SOURCE),
+        human(),
+    )
+    .unwrap();
+
+    let debates = fold_all(schemas.as_ref(), app.events())
+        .unwrap()
+        .into_iter()
+        .find(|map| map.schema().name() == "debates")
+        .unwrap();
+    assert_eq!(debates.id(), crate::core::testing::map_id("debates"));
 }

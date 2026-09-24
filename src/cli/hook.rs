@@ -134,13 +134,15 @@ pub fn read(input: &mut dyn Read) -> Result<HookInput, Box<dyn std::error::Error
 /// and returns the JSON object the client expects back on stdout -
 /// `{}` unless the event asks for something. `sessions_dir` holds one
 /// directory per checkout root, created if missing; `checkout` is
-/// where a `SessionStart` loads the project's schemas from.
+/// where a `SessionStart` loads the project's schemas from, and `home`
+/// where it loads any global schema from, when there is one.
 pub fn run(
     input: HookInput,
     source: &Source,
     log: &dyn EventLog,
     sessions_dir: &Path,
     checkout: &Path,
+    home: Option<&Path>,
     me: Option<crate::core::HumanId>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let dir = turn_dir(sessions_dir, &source.path);
@@ -155,7 +157,7 @@ pub fn run(
             // broken TOML still leaves the session on record: the
             // review page cuts "gained since" by the last one.
             log.append(&Event::session_started(source.clone()))?;
-            let schemas = crate::mapstore::load_schemas(checkout)?;
+            let schemas = crate::mapstore::load_schemas(checkout, home)?;
             Ok(json!({
                 "hookSpecificOutput": {
                     "hookEventName": "SessionStart",

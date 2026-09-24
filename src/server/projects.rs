@@ -70,7 +70,8 @@ fn project(path: &Path, events: &[Event], opened: Timestamp) -> (Timestamp, Valu
 /// projects, so one project's broken file would otherwise leave every
 /// other project unreadable too.
 fn maps(path: &Path, events: &[Event], since: Option<Timestamp>) -> Result<Vec<Value>, String> {
-    let schemas = mapstore::load_schemas(path).map_err(|err| err.to_string())?;
+    // The web view stays project-only: no home, so no global schema.
+    let schemas = mapstore::load_schemas(path, None).map_err(|err| err.to_string())?;
     let maps = mapstore::fold_all_at(&schemas, events, path).map_err(|err| err.to_string())?;
     Ok(maps
         .iter()

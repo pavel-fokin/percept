@@ -3,9 +3,9 @@
 //! core port and nothing more.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::core::{
     Actor, EdgeKind, Event, EventId, EventLog, HumanId, MapId, NodeId, NodeKind, NodeRef, Payload,
@@ -15,6 +15,10 @@ use crate::shared::Timestamp;
 
 /// The project root `source` stamps, for a test that compares paths.
 pub const ROOT: &str = "/test";
+
+/// A `$HOME` for a test that needs a global schema's root, distinct
+/// from `ROOT`.
+pub const HOME: &str = "/home";
 
 /// A stable map id for fixtures that still name maps by schema. The
 /// production path mints UUIDv7; tests restore this deterministic UUID
@@ -368,10 +372,41 @@ pub fn chores() -> Schema {
     .expect("the chores test schema is valid")
 }
 
+/// A minimal `Schemas` fake - the list, and which of it is global -
+/// without touching a filesystem.
+pub struct FakeSchemas {
+    schemas: Vec<Arc<Schema>>,
+    globals: Vec<String>,
+}
+
+impl FakeSchemas {
+    pub fn new(schemas: Vec<Schema>) -> Self {
+        Self::with_global(schemas, &[])
+    }
+
+    /// `new`, with each name in `names` global, its map at `HOME`.
+    pub fn with_global(schemas: Vec<Schema>, names: &[&str]) -> Self {
+        Self {
+            schemas: schemas.into_iter().map(Arc::new).collect(),
+            globals: names.iter().map(|name| name.to_string()).collect(),
+        }
+    }
+}
+
+impl Schemas for FakeSchemas {
+    fn folded(&self) -> &[Arc<Schema>] {
+        &self.schemas
+    }
+
+    fn global_root(&self, name: &str) -> Option<&Path> {
+        self.globals.iter().any(|global| global == name).then_some(Path::new(HOME))
+    }
+}
+
 /// The schemas a test project has: `debates` and `chores`, neither
 /// mirroring a built-in map, without touching a filesystem.
-pub fn schemas() -> Schemas {
-    Schemas::new(vec![debates(), chores()])
+pub fn schemas() -> FakeSchemas {
+    FakeSchemas::new(vec![debates(), chores()])
 }
 
 /// A `kind` edge from one node to another, both named by kind and

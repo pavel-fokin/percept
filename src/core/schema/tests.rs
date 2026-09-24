@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::testing::{debates, schemas};
+use crate::core::testing::{debates, schemas, FakeSchemas};
 
 fn node(kind: &str, properties: &[(&str, &[&str])]) -> NodeKind {
     NodeKind::new(
@@ -188,7 +188,7 @@ fn an_edge_end_must_name_a_declared_node_kind() {
 
 #[test]
 fn an_unknown_map_with_no_schemas_says_maps_are_none() {
-    let schemas = Schemas::new(Vec::new());
+    let schemas = FakeSchemas::new(Vec::new());
     assert_eq!(
         schemas.find("decisions").err().unwrap().to_string(),
         "no map named \"decisions\"; maps are none"

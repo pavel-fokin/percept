@@ -1,12 +1,17 @@
 //! Loads a project's cognitive-map schemas from
-//! `<project>/.percept/schemas/*.toml`. `core` stays serde-free, so
-//! the parsing lives here. `core` checks the resulting declaration. A
-//! project with no such directory, or none in it, declares no maps at
-//! all: `load` returns an empty `Schemas`, and `percept init <client>`
-//! is what gives a fresh checkout its first schema file, copied from
-//! the templates this binary embeds - see `templates`.
+//! `<project>/.percept/schemas/*.toml`, and, when a home directory is
+//! given, `$HOME`'s own schemas first - a global schema, one that
+//! applies in every project. `core` stays serde-free, so the parsing
+//! lives here. `core` checks the resulting declaration. A project with
+//! no such directory, or none in it, declares no project schema of its
+//! own: `load` returns a `SchemaCatalog` holding only what `home`
+//! declared, if anything. `percept init <client>` is what gives a
+//! fresh checkout its first schema file, copied from the templates
+//! this binary embeds - see `templates`.
 
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer};
@@ -85,17 +90,60 @@ where
 /// Every other key names a property.
 const PREFIX_KEY: &str = "prefix";
 
-/// Every schema `<project>/.percept/schemas` declares, in the stable
-/// order `project_files` gives - empty when the directory is missing
-/// or holds no `.toml` file, so a project that has not run `percept
-/// init <client>` yet has no maps at all. Each error names the file it
-/// came from.
-pub fn load(project: &Path) -> Result<Schemas, Box<dyn std::error::Error>> {
-    let folded = project_files(project)?
+/// The `Schemas` port's concrete implementor: every schema `home` and
+/// `<project>/.percept/schemas` declare, folded once by `load`.
+pub struct SchemaCatalog {
+    schemas: Vec<Arc<Schema>>,
+    home: Option<PathBuf>,
+    /// The names of the schemas `home` declared.
+    globals: HashSet<String>,
+}
+
+impl Schemas for SchemaCatalog {
+    fn folded(&self) -> &[Arc<Schema>] {
+        &self.schemas
+    }
+
+    fn global_root(&self, name: &str) -> Option<&Path> {
+        self.home.as_deref().filter(|_| self.globals.contains(name))
+    }
+}
+
+/// Every schema `home` and `<project>/.percept/schemas` declare: the
+/// global ones first, then the project's, each in the stable order
+/// `project_files` gives - none when a directory is missing or holds
+/// no `.toml` file. Each error names the file it came from. A schema
+/// declared under both is refused, naming both files: a schema is
+/// global or a project's, never both.
+pub fn load(project: &Path, home: Option<&Path>) -> Result<SchemaCatalog, Box<dyn std::error::Error>> {
+    let global_files = match home {
+        Some(home) => project_files(home)?,
+        None => Vec::new(),
+    };
+    let own_files = project_files(project)?;
+    if let (Some(home), Some((stem, _))) = (
+        home,
+        global_files.iter().find(|(stem, _)| own_files.iter().any(|(other, _)| other == stem)),
+    ) {
+        return Err(format!(
+            "{stem}.toml is declared at both {} and {}; a schema is one or the other",
+            home.join(SCHEMAS_DIR).join(format!("{stem}.toml")).display(),
+            project.join(SCHEMAS_DIR).join(format!("{stem}.toml")).display(),
+        )
+        .into());
+    }
+
+    let globals = global_files.iter().map(|(stem, _)| stem.clone()).collect();
+    let schemas = global_files
         .into_iter()
-        .map(|(stem, text)| parse(&stem, &text))
+        .chain(own_files)
+        .map(|(stem, text)| parse(&stem, &text).map(Arc::new))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Schemas::new(folded))
+    Ok(SchemaCatalog {
+        schemas,
+        home: home.map(Path::to_path_buf),
+        globals,
+    })
 }
 
 /// Every `*.toml` file directly under `<project>/.percept/schemas`,

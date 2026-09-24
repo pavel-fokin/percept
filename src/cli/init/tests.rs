@@ -2,6 +2,7 @@ use serde_json::json;
 
 use super::*;
 use crate::core::testing::{source_at, FakeLog, Fixture};
+use crate::core::Schemas;
 
 fn run(args: InitArgs, checkout: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let log = FakeLog::default();
@@ -10,6 +11,7 @@ fn run(args: InitArgs, checkout: &std::path::Path) -> Result<(), Box<dyn std::er
         checkout,
         &log,
         &source_at("percept-cli", checkout.to_str().unwrap()),
+        None,
     )
 }
 
@@ -272,8 +274,8 @@ fn init_writes_the_shipped_schemas() {
 
     run(init("claude-code"), fixture.path()).unwrap();
 
-    let schemas = mapstore::load_schemas(fixture.path()).unwrap();
-    let names: Vec<&str> = schemas.folded().map(|s| s.name()).collect();
+    let schemas = mapstore::load_schemas(fixture.path(), None).unwrap();
+    let names: Vec<&str> = schemas.folded().iter().map(|s| s.name()).collect();
     assert_eq!(names, ["concepts"]);
 }
 
@@ -283,8 +285,8 @@ fn init_creates_each_map_once() {
     let log = FakeLog::default();
     let source = source_at("percept-cli", fixture.path().to_str().unwrap());
 
-    super::run(init("codex"), fixture.path(), &log, &source).unwrap();
-    super::run(init("codex"), fixture.path(), &log, &source).unwrap();
+    super::run(init("codex"), fixture.path(), &log, &source, None).unwrap();
+    super::run(init("codex"), fixture.path(), &log, &source, None).unwrap();
 
     let events = log.load().unwrap();
     assert_eq!(events.len(), 1);
@@ -325,4 +327,18 @@ fn running_init_twice_leaves_the_file_unchanged() {
     let second = std::fs::read_to_string(temp.path().join(".codex/hooks.json")).unwrap();
 
     assert_eq!(first, second);
+}
+
+#[test]
+fn init_leaves_a_template_the_home_declares_globally_out_of_the_project() {
+    let fixture = Fixture::new();
+    let home = Fixture::new();
+    let (name, text) = mapstore::templates().into_iter().next().unwrap();
+    home.write(&format!(".percept/schemas/{name}.toml"), text);
+    let log = FakeLog::default();
+    let source = source_at("percept-cli", fixture.path().to_str().unwrap());
+
+    super::run(init("codex"), fixture.path(), &log, &source, Some(home.path())).unwrap();
+
+    assert!(!fixture.path().join(format!(".percept/schemas/{name}.toml")).exists());
 }

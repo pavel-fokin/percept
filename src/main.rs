@@ -121,7 +121,8 @@ fn hook_main(args: cli::hook::HookArgs) -> ! {
 fn hook_run(args: cli::hook::HookArgs) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let mut stdin = std::io::stdin().lock();
     let input = cli::hook::read(&mut stdin)?;
-    let checkout = root_for(Path::new(input.cwd()))?;
+    let home = home_dir();
+    let checkout = root_for(Path::new(input.cwd()), home.as_deref())?;
     let root = project_of(&checkout);
     let source = crate::core::Source {
         name: args.client,
@@ -129,7 +130,15 @@ fn hook_run(args: cli::hook::HookArgs) -> Result<serde_json::Value, Box<dyn std:
     };
     let log = open_log(&checkout)?;
     let me = log.me();
-    cli::hook::run(input, &source, &log, &sessions_dir(&checkout)?, &checkout, me)
+    cli::hook::run(
+        input,
+        &source,
+        &log,
+        &sessions_dir(&checkout)?,
+        &checkout,
+        home.as_deref(),
+        me,
+    )
 }
 
 /// Where `percept hook` keeps every checkout's turns, beside the log.
@@ -144,25 +153,30 @@ fn turn_cause(checkout: &Path, root: &Path) -> Result<Option<crate::core::EventI
     Ok(TurnState::latest_cause(&turn_dir(&sessions_dir(checkout)?, root))?)
 }
 
+/// `$HOME`, canonicalized - `None` when it is unset or does not exist.
+/// Where `root_for`'s walk stops and a global schema's map lives.
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .and_then(|home| home.canonicalize().ok())
+}
+
 /// The checkout `cwd` is in: the first ancestor of it
 /// holding a `.git` or `.percept` entry - a repository, or a directory
-/// percept has already rendered maps into. The search stops at `$HOME`
+/// percept has already rendered maps into. The search stops at `home`
 /// and at the filesystem root without matching either: walking a home
 /// directory scans every project under it, and on macOS the
 /// TCC-protected Desktop, Photos and Music, so a project sitting at
 /// `$HOME` itself is not supported - work from a subdirectory. Errors
-/// when nothing is found; the caller prints it and exits. cwd and
-/// `$HOME` are both canonicalized first, so a symlinked home directory
+/// when nothing is found; the caller prints it and exits. `cwd` is
+/// canonicalized, as `home_dir` is, so a symlinked home directory
 /// still stops the walk and two writers started from a symlinked path
 /// get the same root. `main` passes the process's own directory, or
 /// the client's under `percept hook`, since the process's own may be
 /// anywhere the client's shell happened to start it from.
-fn root_for(cwd: &Path) -> std::io::Result<PathBuf> {
+fn root_for(cwd: &Path, home: Option<&Path>) -> std::io::Result<PathBuf> {
     let cwd = cwd.canonicalize()?;
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .and_then(|home| home.canonicalize().ok());
-    discover_root(&cwd, home.as_deref()).ok_or_else(|| {
+    discover_root(&cwd, home).ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::NotFound,
             format!(
@@ -237,7 +251,8 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let checkout = match root_for(&cwd) {
+    let home = home_dir();
+    let checkout = match root_for(&cwd, home.as_deref()) {
         Ok(checkout) => checkout,
         Err(err) => {
             eprintln!("percept: {err}");
@@ -259,7 +274,7 @@ async fn main() {
                 EventsCommand::Show(args) => cli::show(args, &log),
             }
         }),
-        Some(Command::Maps { command }) => mapstore::load_schemas(&checkout).and_then(|schemas| {
+        Some(Command::Maps { command }) => mapstore::load_schemas(&checkout, home.as_deref()).and_then(|schemas| {
             let log = open_log(&checkout)?;
             let me = log.me();
             // Read by the write commands only: a read never opens the
@@ -290,10 +305,11 @@ async fn main() {
         }),
         #[cfg(feature = "lab")]
         Some(Command::Ask(args)) => {
-            lab::headless_turn(false, args.prompt, args.yes, cli_source, &checkout).await
+            lab::headless_turn(false, args.prompt, args.yes, cli_source, &checkout, home.as_deref())
+                .await
         }
         Some(Command::Init(args)) => open_log(&checkout)
-            .and_then(|log| cli::init::run(args, &checkout, &log, &cli_source)),
+            .and_then(|log| cli::init::run(args, &checkout, &log, &cli_source, home.as_deref())),
         Some(Command::Web) => match open_log(&checkout) {
             Ok(log) => server::run(std::sync::Arc::new(log), cli_source.clone()).await,
             Err(err) => Err(err),
@@ -306,10 +322,11 @@ async fn main() {
                     path: root,
                 },
                 &checkout,
+                home.as_deref(),
             )
             .await
         }
-        None => mapstore::load_schemas(&checkout)
+        None => mapstore::load_schemas(&checkout, home.as_deref())
             .and_then(|schemas| open_log(&checkout).and_then(|log| cli::start(&log, &schemas, &root))),
     };
 

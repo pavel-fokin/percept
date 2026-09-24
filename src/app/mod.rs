@@ -4,7 +4,8 @@ use std::sync::Arc;
 use context::{Context, Section, View, Window};
 
 use crate::core::{
-    Actor, Event, EventId, EventKind, HumanId, MapError, MapId, Payload, Schemas, Source,
+    fold_all, fold_named, map_created_at, map_root, Actor, Event, EventId, EventKind, HumanId, MapError, MapId,
+    Payload, Schemas, Source,
 };
 
 mod context;
@@ -274,6 +275,7 @@ fn normalize_created_maps(
     payloads: &mut Vec<Payload>,
     events: &[Event],
     source: &Source,
+    schemas: &dyn Schemas,
 ) -> Result<(), MapError> {
     let proposed: Vec<(MapId, String)> = payloads
         .iter()
@@ -283,7 +285,8 @@ fn normalize_created_maps(
         })
         .collect();
     for (map, schema) in proposed {
-        let Some(existing) = crate::core::map_id_for(&schema, own_events(events, source))? else {
+        let Some(existing) = crate::core::map_id_for(&schema, own_events(events, source, schemas))?
+        else {
             continue;
         };
         for payload in payloads.iter_mut() {
@@ -300,22 +303,27 @@ fn normalize_created_maps(
 /// every event that changes one of that path's maps from elsewhere -
 /// the slice `map_id_for` and `fold_all` fold over when checking
 /// whether a tool's commits fit the map they target.
-fn own_events<'a>(events: &'a [Event], source: &Source) -> Vec<&'a Event> {
-    let maps = path_maps(events, &source.path);
+fn own_events<'a>(events: &'a [Event], source: &Source, schemas: &dyn Schemas) -> Vec<&'a Event> {
+    let maps = path_maps(events, source, schemas);
     events
         .iter()
         .filter(|event| event.source().path == source.path || changes_one_of(event, &maps))
         .collect()
 }
 
-/// The maps whose `map.created` ran at `path` - a map's identity is
-/// its path's, while the events that change it may come from anywhere.
-fn path_maps(events: &[Event], path: &std::path::Path) -> HashSet<MapId> {
+/// The maps `source`'s project reads: each `map.created` written at its
+/// own schema's root - `source.path` for a project schema, `$HOME` for
+/// a global one. A map's identity is its root's, while the events that
+/// change it may come from anywhere.
+fn path_maps(events: &[Event], source: &Source, schemas: &dyn Schemas) -> HashSet<MapId> {
     events
         .iter()
-        .filter(|event| event.source().path == path)
         .filter_map(|event| match event.payload() {
-            Payload::MapCreated { map, .. } => Some(*map),
+            Payload::MapCreated { map, schema }
+                if event.source().path == map_root(schemas, schema, &source.path) =>
+            {
+                Some(*map)
+            }
             _ => None,
         })
         .collect()
@@ -401,7 +409,7 @@ pub struct App {
     /// The project's schemas - every one folded from the log, plus
     /// `code` - what a fold, a write, and an error message about an
     /// unknown map go through.
-    schemas: Arc<Schemas>,
+    schemas: Arc<dyn Schemas>,
     /// The tools, the policy and cap around them, the snapshot, the
     /// instructions, and the context - see `Harness`.
     harness: Harness,
@@ -432,18 +440,18 @@ impl App {
         chat: Arc<dyn crate::harness::Model>,
         catalog: Arc<dyn crate::harness::ModelCatalog>,
         log: Arc<dyn crate::core::EventLog>,
-        schemas: Arc<Schemas>,
+        schemas: Arc<dyn Schemas>,
         harness: Harness,
         source: Source,
         me: Option<HumanId>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let events = log.load()?;
-        let maps = path_maps(&events, &source.path);
+        let maps = path_maps(&events, &source, schemas.as_ref());
         let events: Vec<Event> = events
             .into_iter()
             .filter(|event| belongs_to_transcript(event, &source, &maps))
             .collect();
-        schemas.fold_all(&events)?;
+        fold_all(schemas.as_ref(), &events)?;
         let last_usage = last_model_called(&events);
         let reasoning_effort = chat.capabilities().default_reasoning_effort;
 
@@ -496,7 +504,7 @@ impl App {
         View {
             instructions: self.harness.instructions.as_deref(),
             events: &self.events,
-            schemas: &self.schemas,
+            schemas: self.schemas.as_ref(),
             turn_start: self.pending.as_ref().map(|turn| turn.start),
             context_window: capabilities.context_window,
             reasoning_effort: self.reasoning_effort,
@@ -538,17 +546,17 @@ impl App {
         let mut payloads = output.commits;
         let content = output.content;
         let batch = self.log.append_batch_computed(Box::new(move |events| {
-            normalize_created_maps(&mut payloads, &events, &source)?;
+            normalize_created_maps(&mut payloads, &events, &source, schemas.as_ref())?;
             let commits: Vec<Event> = payloads
                 .into_iter()
                 .map(|payload| match payload {
                     Payload::MapCreated { map, schema } => {
-                        Event::map_created(map, schema, source.clone())
+                        map_created_at(schemas.as_ref(), map, &schema, &source)
                     }
                     payload => Event::new(Actor::Agent, source.clone(), Some(called_id), payload),
                 })
                 .collect();
-            let own = own_events(&events, &source)
+            let own = own_events(&events, &source, schemas.as_ref())
                 .into_iter()
                 .chain(commits.iter());
             let touched: HashSet<MapId> =
@@ -562,7 +570,7 @@ impl App {
                     _ => None,
                 })
                 .collect();
-            let (mut accepted, content) = match schemas.fold_named(&names, own) {
+            let (mut accepted, content) = match fold_named(schemas.as_ref(), &names, own) {
                 Ok(_) => (commits, content),
                 Err(err) => (Vec::new(), err.to_string()),
             };

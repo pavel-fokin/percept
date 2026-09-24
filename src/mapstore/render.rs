@@ -29,7 +29,7 @@ pub fn markdown(map: &Map) -> String {
 /// reader about to record needs its shape most of all. No schemas at
 /// all prints `super::NO_SCHEMAS_HINT` under the frame instead, since
 /// the way in is `percept init`, not `record`.
-pub fn start(schemas: &Schemas, maps: &[Map]) -> String {
+pub fn start(schemas: &dyn Schemas, maps: &[Map]) -> String {
     let mut out = String::from(
         "percept keeps this project's maps, folded from its log. Read them\n\
          before you build. When a turn adds what a map's purpose asks for\n\
@@ -40,7 +40,7 @@ pub fn start(schemas: &Schemas, maps: &[Map]) -> String {
          <property> \"<value>\"\n    \
          EOF\n",
     );
-    if schemas.folded().next().is_none() {
+    if schemas.folded().is_empty() {
         let _ = write!(out, "\n{}\n", super::NO_SCHEMAS_HINT);
         return out;
     }
