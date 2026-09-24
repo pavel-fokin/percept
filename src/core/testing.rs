@@ -187,14 +187,15 @@ pub fn node_added_seq(kind: &str, name: &str, seq: u32) -> Event {
     )
 }
 
-/// `node_added`, from a path other than `/test` - for a test that
-/// folds one path's map and not another's.
+/// `node_added`, from a path other than `/test`, to a map named for
+/// that path - a node of another project's map, for a test that folds
+/// one project's map and not another's.
 pub fn node_added_at(path: &str, kind: &str, name: &str) -> Event {
     Event::new(
         Actor::Human(human()),
         source_at("test", path),
         None,
-        node_added_payload("debates", kind, name, BTreeMap::new(), vec![EventId::new()]),
+        node_added_payload(path, kind, name, BTreeMap::new(), vec![EventId::new()]),
     )
 }
 

@@ -165,9 +165,8 @@ fn format_lines(lines: (u32, u32)) -> String {
     format!("{}-{}", lines.0, lines.1)
 }
 
-/// `"from-to"` back to `Payload::FileCited.lines` - shared with
-/// `cli::publish`, which parses the same shape before it ever reaches
-/// `decode`. `from` must be at least 1 and no greater than `to`: a
+/// `"from-to"` back to `Payload::FileCited.lines` - shared with the
+/// CLI's `cites` lines, which carry the same shape. `from` must be at least 1 and no greater than `to`: a
 /// reversed or zero-based range names no lines a file has.
 pub fn parse_lines(s: &str) -> Result<(u32, u32), Error> {
     let (from, to) = s

@@ -129,7 +129,7 @@ pub(crate) fn is_binary(bytes: &[u8]) -> bool {
 /// Reads `path` as text, refusing a binary file - a NUL in the first
 /// 8 KiB - the same rule `read_file` reads by. Valid UTF-8 is kept as
 /// is; anything else is decoded lossily, so one invalid byte in an
-/// otherwise-text file doesn't fail the read. Shared by `cli::publish`'s
+/// otherwise-text file doesn't fail the read. Shared by `cli::build_file_cited`'s
 /// `file.cited` payload and `cli::hook`'s `changed since recorded`
 /// check, so the two sides of "does this citation still read" agree on
 /// what counts as text.
