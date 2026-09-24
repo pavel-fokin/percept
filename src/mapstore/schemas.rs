@@ -2,11 +2,12 @@
 //! `<project>/.percept/schemas/*.toml`. `core` stays serde-free, so
 //! the parsing lives here. `core` checks the resulting declaration. A
 //! project with no such directory, or none in it, declares no maps at
-//! all: `load` returns an empty `Schemas`, and `percept init <client>`
-//! is what gives a fresh checkout its first schema file, copied from
-//! the templates this binary embeds - see `templates`.
+//! all: `load` returns an empty `SchemaCatalog`, and `percept init
+//! <client>` is what gives a fresh checkout its first schema file,
+//! copied from the templates this binary embeds - see `templates`.
 
 use std::path::Path;
+use std::sync::Arc;
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer};
@@ -85,17 +86,38 @@ where
 /// Every other key names a property.
 const PREFIX_KEY: &str = "prefix";
 
+/// The `Schemas` port's concrete implementor: every schema
+/// `<project>/.percept/schemas` declares, folded once by `load`.
+pub struct SchemaCatalog {
+    schemas: Vec<Arc<Schema>>,
+}
+
+impl SchemaCatalog {
+    /// `folded`, each wrapped in `Arc` - the one full set every caller
+    /// builds from.
+    pub fn new(folded: Vec<Schema>) -> Self {
+        let schemas: Vec<Arc<Schema>> = folded.into_iter().map(Arc::new).collect();
+        Self { schemas }
+    }
+}
+
+impl Schemas for SchemaCatalog {
+    fn folded(&self) -> &[Arc<Schema>] {
+        &self.schemas
+    }
+}
+
 /// Every schema `<project>/.percept/schemas` declares, in the stable
 /// order `project_files` gives - empty when the directory is missing
 /// or holds no `.toml` file, so a project that has not run `percept
 /// init <client>` yet has no maps at all. Each error names the file it
 /// came from.
-pub fn load(project: &Path) -> Result<Schemas, Box<dyn std::error::Error>> {
+pub fn load(project: &Path) -> Result<SchemaCatalog, Box<dyn std::error::Error>> {
     let folded = project_files(project)?
         .into_iter()
         .map(|(stem, text)| parse(&stem, &text))
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(Schemas::new(folded))
+    Ok(SchemaCatalog::new(folded))
 }
 
 /// Every `*.toml` file directly under `<project>/.percept/schemas`,

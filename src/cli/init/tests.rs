@@ -2,6 +2,7 @@ use serde_json::json;
 
 use super::*;
 use crate::core::testing::{source_at, FakeLog, Fixture};
+use crate::core::Schemas;
 
 fn run(args: InitArgs, checkout: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
     let log = FakeLog::default();
@@ -273,7 +274,7 @@ fn init_writes_the_shipped_schemas() {
     run(init("claude-code"), fixture.path()).unwrap();
 
     let schemas = mapstore::load_schemas(fixture.path()).unwrap();
-    let names: Vec<&str> = schemas.folded().map(|s| s.name()).collect();
+    let names: Vec<&str> = schemas.folded().iter().map(|s| s.name()).collect();
     assert_eq!(names, ["concepts"]);
 }
 

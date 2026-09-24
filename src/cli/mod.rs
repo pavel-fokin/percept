@@ -419,7 +419,7 @@ enum Target {
 /// that only needs the map never has to name the discarded creation
 /// event `Snapshot::for_write` also returns.
 fn map_for(
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     name: &str,
     source: &crate::core::Source,
     log: &dyn EventLog,
@@ -558,14 +558,14 @@ fn per_path(
 }
 
 /// A bare `percept`: prints `start_text`.
-pub fn start(log: &dyn EventLog, schemas: &Schemas, project: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn start(log: &dyn EventLog, schemas: &dyn Schemas, project: &Path) -> Result<(), Box<dyn std::error::Error>> {
     print_text(&start_text(log, schemas, project)?)
 }
 
 /// The start screen - `mapstore::start` over every map of `project`,
 /// folded from one read of `log`. What a bare `percept` prints and
 /// what `hook` answers a coding client's `SessionStart` with.
-pub fn start_text(log: &dyn EventLog, schemas: &Schemas, project: &Path) -> Result<String, Box<dyn std::error::Error>> {
+pub fn start_text(log: &dyn EventLog, schemas: &dyn Schemas, project: &Path) -> Result<String, Box<dyn std::error::Error>> {
     let events = log.load()?;
     let maps = mapstore::fold_all_at(schemas, &events, project)?;
     Ok(mapstore::start(schemas, &maps))
@@ -577,7 +577,7 @@ pub fn start_text(log: &dyn EventLog, schemas: &Schemas, project: &Path) -> Resu
 pub fn maps_list(
     args: ListMapsArgs,
     log: &dyn EventLog,
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     project: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let events = log.load()?;
@@ -597,7 +597,7 @@ pub fn maps_list(
 pub fn maps_show(
     args: ShowMapArgs,
     log: &dyn EventLog,
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     root: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let events = log.load()?;
@@ -646,7 +646,7 @@ fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Err
 fn write(
     target: MapArgs,
     log: &dyn EventLog,
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
     cause: Option<EventId>,
@@ -667,7 +667,7 @@ fn write(
 pub fn maps_add_node(
     args: AddNodeArgs,
     log: &dyn EventLog,
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
     cause: Option<EventId>,
@@ -692,7 +692,7 @@ pub fn maps_add_node(
 pub fn maps_add_edge(
     args: EdgeArgs,
     log: &dyn EventLog,
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
     cause: Option<EventId>,
@@ -715,7 +715,7 @@ pub fn maps_add_edge(
 pub fn maps_remove_node(
     args: RemoveNodeArgs,
     log: &dyn EventLog,
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
     cause: Option<EventId>,
@@ -732,7 +732,7 @@ pub fn maps_remove_node(
 pub fn maps_remove_edge(
     args: EdgeArgs,
     log: &dyn EventLog,
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
     cause: Option<EventId>,
@@ -757,7 +757,7 @@ pub fn maps_remove_edge(
 pub fn maps_change_node(
     args: ChangeNodeArgs,
     log: &dyn EventLog,
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
     cause: Option<EventId>,
@@ -956,7 +956,7 @@ fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>
 pub fn maps_record(
     args: RecordArgs,
     log: &dyn EventLog,
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     source: &crate::core::Source,
     checkout: &Path,
     me: Option<crate::core::HumanId>,
@@ -983,7 +983,7 @@ fn record_document(
     document: &str,
     args: RecordArgs,
     log: &dyn EventLog,
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     source: &crate::core::Source,
     checkout: &Path,
     me: Option<crate::core::HumanId>,

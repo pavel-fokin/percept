@@ -41,7 +41,7 @@ pub fn paths(events: &[Event]) -> Vec<PathBuf> {
 /// reader that asks for one map by name sees an empty map rather than
 /// an error mid-session.
 pub fn fold_map_at(
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     name: &str,
     events: &[Event],
     path: &Path,
@@ -56,7 +56,7 @@ pub fn fold_map_at(
 /// each folded over every event in `events` - `fold_map_at`'s rule for
 /// all of `schemas` at once. A schema with no `map.created` at `path`
 /// is not a map yet, and is skipped.
-pub fn fold_all_at(schemas: &Schemas, events: &[Event], path: &Path) -> Result<Vec<Map>, MapError> {
+pub fn fold_all_at(schemas: &dyn Schemas, events: &[Event], path: &Path) -> Result<Vec<Map>, MapError> {
     let own: Vec<&Event> = of_path(events, path).collect();
     let mut maps = Vec::new();
     for schema in schemas.folded() {
@@ -71,7 +71,7 @@ pub fn fold_all_at(schemas: &Schemas, events: &[Event], path: &Path) -> Result<V
 /// `fold_map_at` over every event in `log`.
 pub fn fold_map(
     log: &dyn EventLog,
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     name: &str,
     path: &Path,
 ) -> Result<Map, Box<dyn std::error::Error>> {
@@ -82,19 +82,19 @@ pub fn fold_map(
 /// log at one path.
 pub struct LogMaps {
     log: Arc<dyn EventLog>,
-    schemas: Arc<Schemas>,
+    schemas: Arc<dyn Schemas>,
     path: PathBuf,
 }
 
 impl LogMaps {
-    pub fn new(log: Arc<dyn EventLog>, schemas: Arc<Schemas>, path: PathBuf) -> Self {
+    pub fn new(log: Arc<dyn EventLog>, schemas: Arc<dyn Schemas>, path: PathBuf) -> Self {
         Self { log, schemas, path }
     }
 }
 
 impl MapReader for LogMaps {
     fn read(&self, name: &str) -> Result<Map, Box<dyn std::error::Error>> {
-        fold_map(self.log.as_ref(), &self.schemas, name, &self.path)
+        fold_map(self.log.as_ref(), self.schemas.as_ref(), name, &self.path)
     }
 }
 
@@ -112,7 +112,7 @@ impl Snapshot {
     /// Called only inside an event-log computed append, so creation and
     /// the first mutation share one lock and one batch.
     pub fn for_write(
-        schemas: &Schemas,
+        schemas: &dyn Schemas,
         name: &str,
         source: &crate::core::Source,
         events: Vec<crate::core::Event>,
@@ -170,7 +170,7 @@ impl Snapshot {
 #[allow(clippy::too_many_arguments)]
 pub fn commit(
     log: &dyn EventLog,
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     name: &str,
     source: &crate::core::Source,
     sources: &[String],
@@ -204,7 +204,7 @@ pub fn commit(
 /// steps before it.
 pub fn commit_batch(
     log: &dyn EventLog,
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     name: &str,
     source: &crate::core::Source,
     build: impl FnOnce(&mut Snapshot) -> Result<Vec<crate::core::Event>, Box<dyn std::error::Error>>,
@@ -223,7 +223,7 @@ pub fn commit_batch(
 /// under one lock, so repeating the operation adds nothing.
 pub fn ensure_maps(
     log: &dyn EventLog,
-    schemas: &Schemas,
+    schemas: &dyn Schemas,
     source: &crate::core::Source,
 ) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
     let source = source.clone();

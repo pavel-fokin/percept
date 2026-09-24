@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::core::{map_id_for, EventLog, Map, Node};
+use crate::core::{map_id_for, EventLog, Map, Node, Schemas};
 use crate::mapstore;
 use crate::server::events::Error;
 use crate::store;
@@ -45,6 +45,7 @@ pub fn get(log: &dyn EventLog, id: &str, params: Params) -> Result<Value, Error>
     // pays the fold.
     let name = schemas
         .folded()
+        .iter()
         .find_map(|schema| match map_id_for(schema.name(), own.iter().copied()) {
             Ok(Some(found)) if found == id => Some(Ok(schema.name().to_string())),
             Ok(_) => None,

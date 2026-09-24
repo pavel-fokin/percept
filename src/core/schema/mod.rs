@@ -244,80 +244,70 @@ impl EdgeKind {
     }
 }
 
-/// The schemas a project has: every one, folded from the log, in one
-/// list. Built once at the entrypoint from the project's own TOML
-/// files; every fold, write, and error message goes through this, so
-/// no caller keeps its own list.
-pub struct Schemas {
-    schemas: Vec<Arc<Schema>>,
-}
-
-impl Schemas {
-    /// `folded`, each wrapped in `Arc` - the one full set every caller
-    /// builds from.
-    pub fn new(folded: Vec<Schema>) -> Self {
-        let schemas: Vec<Arc<Schema>> = folded.into_iter().map(Arc::new).collect();
-        Self { schemas }
-    }
+/// The schemas a project has: every one, folded from the log. A port -
+/// `mapstore::SchemaCatalog` is the concrete loader, reading a
+/// project's own TOML files; every fold, write, and error message
+/// about an unknown map goes through this, so no caller keeps its own
+/// list.
+pub trait Schemas: Send + Sync {
+    /// Every schema, in stored order.
+    fn folded(&self) -> &[Arc<Schema>];
 
     /// The schema `name` names, or the error every boundary that folds
     /// or writes a map by name reports.
-    pub fn find(&self, name: &str) -> Result<Arc<Schema>, MapError> {
-        self.schemas
+    fn find(&self, name: &str) -> Result<Arc<Schema>, MapError> {
+        self.folded()
             .iter()
             .find(|schema| schema.name == name)
             .cloned()
             .ok_or_else(|| MapError::UnknownMap {
                 name: name.to_string(),
-                maps: self.names_csv(),
+                maps: names_csv(self.folded()),
             })
     }
+}
 
-    /// Every schema, in stored order.
-    pub fn folded(&self) -> impl Iterator<Item = &Arc<Schema>> + '_ {
-        self.schemas.iter()
-    }
+/// Every created map `Map::fold` gives for `events`, in schema order.
+/// A schema with no `map.created` event is not a map yet. A free
+/// function, not a trait method: it takes a generic `events`
+/// parameter a dyn-safe trait cannot carry.
+pub fn fold_all<'a>(
+    schemas: &dyn Schemas,
+    events: impl IntoIterator<Item = &'a Event> + Clone,
+) -> Result<Vec<Map>, MapError> {
+    fold_matching(schemas, |_| true, events)
+}
 
-    /// Every created map `Map::fold` gives for `events`, in schema
-    /// order. A schema with no `map.created` event is not a map yet.
-    pub fn fold_all<'a>(
-        &self,
-        events: impl IntoIterator<Item = &'a Event> + Clone,
-    ) -> Result<Vec<Map>, MapError> {
-        self.fold_matching(|_| true, events)
-    }
+/// `fold_all`, restricted to the schemas named in `names` - what a
+/// batch of commits actually touches, so a caller checking that a
+/// batch fits its own map never refolds every other schema too.
+pub fn fold_named<'a>(
+    schemas: &dyn Schemas,
+    names: &HashSet<String>,
+    events: impl IntoIterator<Item = &'a Event> + Clone,
+) -> Result<Vec<Map>, MapError> {
+    fold_matching(schemas, |schema| names.contains(&schema.name), events)
+}
 
-    /// `fold_all`, restricted to the schemas named in `names` - what a
-    /// batch of commits actually touches, so a caller checking that a
-    /// batch fits its own map never refolds every other schema too.
-    pub fn fold_named<'a>(
-        &self,
-        names: &HashSet<String>,
-        events: impl IntoIterator<Item = &'a Event> + Clone,
-    ) -> Result<Vec<Map>, MapError> {
-        self.fold_matching(|schema| names.contains(&schema.name), events)
+fn fold_matching<'a>(
+    schemas: &dyn Schemas,
+    matches: impl Fn(&Schema) -> bool,
+    events: impl IntoIterator<Item = &'a Event> + Clone,
+) -> Result<Vec<Map>, MapError> {
+    let mut maps = Vec::new();
+    for schema in schemas.folded().iter().filter(|schema| matches(schema)) {
+        let Some(id) = super::map_id_for(&schema.name, events.clone())? else {
+            continue;
+        };
+        maps.push(Map::fold(id, schema.clone(), events.clone())?);
     }
+    Ok(maps)
+}
 
-    fn fold_matching<'a>(
-        &self,
-        matches: impl Fn(&Schema) -> bool,
-        events: impl IntoIterator<Item = &'a Event> + Clone,
-    ) -> Result<Vec<Map>, MapError> {
-        let mut maps = Vec::new();
-        for schema in self.folded().filter(|schema| matches(schema)) {
-            let Some(id) = super::map_id_for(&schema.name, events.clone())? else {
-                continue;
-            };
-            maps.push(Map::fold(id, schema.clone(), events.clone())?);
-        }
-        Ok(maps)
-    }
-
-    /// Every schema's name, in stored order, for an "expected one of"
-    /// error.
-    fn names_csv(&self) -> String {
-        csv_or_none(self.schemas.iter().map(|schema| schema.name.clone()))
-    }
+/// Every schema's name, in stored order, for an "expected one of"
+/// error.
+fn names_csv(schemas: &[Arc<Schema>]) -> String {
+    csv_or_none(schemas.iter().map(|schema| schema.name.clone()))
 }
 
 /// `items` joined by `, ` for an "expected one of" message - `none`

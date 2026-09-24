@@ -17,8 +17,9 @@ fn contents(messages: &[Message]) -> Vec<String> {
 
 /// A `Schemas` living for the whole test binary, so `View`'s borrow has
 /// something to point at without every test owning one.
-fn test_schemas() -> &'static Schemas {
-    static SCHEMAS: std::sync::OnceLock<Schemas> = std::sync::OnceLock::new();
+fn test_schemas() -> &'static dyn Schemas {
+    static SCHEMAS: std::sync::OnceLock<crate::core::testing::FakeSchemas> =
+        std::sync::OnceLock::new();
     SCHEMAS.get_or_init(schemas)
 }
 

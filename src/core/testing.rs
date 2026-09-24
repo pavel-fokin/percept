@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use crate::core::{
     Actor, EdgeKind, Event, EventId, EventLog, HumanId, MapId, NodeId, NodeKind, NodeRef, Payload,
@@ -368,10 +368,30 @@ pub fn chores() -> Schema {
     .expect("the chores test schema is valid")
 }
 
+/// A minimal `Schemas` fake - just the folded list, without touching a
+/// filesystem. `mapstore::SchemaCatalog` is production's implementor.
+pub struct FakeSchemas {
+    schemas: Vec<Arc<Schema>>,
+}
+
+impl FakeSchemas {
+    pub fn new(schemas: Vec<Schema>) -> Self {
+        Self {
+            schemas: schemas.into_iter().map(Arc::new).collect(),
+        }
+    }
+}
+
+impl Schemas for FakeSchemas {
+    fn folded(&self) -> &[Arc<Schema>] {
+        &self.schemas
+    }
+}
+
 /// The schemas a test project has: `debates` and `chores`, neither
 /// mirroring a built-in map, without touching a filesystem.
-pub fn schemas() -> Schemas {
-    Schemas::new(vec![debates(), chores()])
+pub fn schemas() -> FakeSchemas {
+    FakeSchemas::new(vec![debates(), chores()])
 }
 
 /// A `kind` edge from one node to another, both named by kind and

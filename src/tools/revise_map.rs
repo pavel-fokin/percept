@@ -13,12 +13,12 @@ use crate::mapstore::{NodeRefArgs, Snapshot};
 /// tool never writes the log itself.
 pub struct ReviseMap {
     log: Arc<dyn EventLog>,
-    schemas: Arc<Schemas>,
+    schemas: Arc<dyn Schemas>,
     source: Source,
 }
 
 impl ReviseMap {
-    pub fn new(log: Arc<dyn EventLog>, schemas: Arc<Schemas>, source: Source) -> Self {
+    pub fn new(log: Arc<dyn EventLog>, schemas: Arc<dyn Schemas>, source: Source) -> Self {
         Self { log, schemas, source }
     }
 }
@@ -264,7 +264,7 @@ impl Tool for ReviseMap {
             return Err("changes must not be empty".into());
         }
         let (created, mut snapshot) = Snapshot::for_write(
-            &self.schemas,
+            self.schemas.as_ref(),
             &args.map,
             &self.source,
             self.log.load()?,

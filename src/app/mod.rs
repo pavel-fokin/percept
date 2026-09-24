@@ -4,7 +4,8 @@ use std::sync::Arc;
 use context::{Context, Section, View, Window};
 
 use crate::core::{
-    Actor, Event, EventId, EventKind, HumanId, MapError, MapId, Payload, Schemas, Source,
+    fold_all, fold_named, Actor, Event, EventId, EventKind, HumanId, MapError, MapId, Payload,
+    Schemas, Source,
 };
 
 mod context;
@@ -401,7 +402,7 @@ pub struct App {
     /// The project's schemas - every one folded from the log, plus
     /// `code` - what a fold, a write, and an error message about an
     /// unknown map go through.
-    schemas: Arc<Schemas>,
+    schemas: Arc<dyn Schemas>,
     /// The tools, the policy and cap around them, the snapshot, the
     /// instructions, and the context - see `Harness`.
     harness: Harness,
@@ -432,7 +433,7 @@ impl App {
         chat: Arc<dyn crate::harness::Model>,
         catalog: Arc<dyn crate::harness::ModelCatalog>,
         log: Arc<dyn crate::core::EventLog>,
-        schemas: Arc<Schemas>,
+        schemas: Arc<dyn Schemas>,
         harness: Harness,
         source: Source,
         me: Option<HumanId>,
@@ -443,7 +444,7 @@ impl App {
             .into_iter()
             .filter(|event| belongs_to_transcript(event, &source, &maps))
             .collect();
-        schemas.fold_all(&events)?;
+        fold_all(schemas.as_ref(), &events)?;
         let last_usage = last_model_called(&events);
         let reasoning_effort = chat.capabilities().default_reasoning_effort;
 
@@ -496,7 +497,7 @@ impl App {
         View {
             instructions: self.harness.instructions.as_deref(),
             events: &self.events,
-            schemas: &self.schemas,
+            schemas: self.schemas.as_ref(),
             turn_start: self.pending.as_ref().map(|turn| turn.start),
             context_window: capabilities.context_window,
             reasoning_effort: self.reasoning_effort,
@@ -562,7 +563,7 @@ impl App {
                     _ => None,
                 })
                 .collect();
-            let (mut accepted, content) = match schemas.fold_named(&names, own) {
+            let (mut accepted, content) = match fold_named(schemas.as_ref(), &names, own) {
                 Ok(_) => (commits, content),
                 Err(err) => (Vec::new(), err.to_string()),
             };

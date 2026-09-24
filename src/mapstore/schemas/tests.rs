@@ -5,7 +5,7 @@ use crate::core::testing::Fixture;
 fn a_project_with_no_schemas_directory_has_no_maps() {
     let fixture = Fixture::new();
     let schemas = load(fixture.path()).unwrap();
-    let names: Vec<&str> = schemas.folded().map(|s| s.name()).collect();
+    let names: Vec<&str> = schemas.folded().iter().map(|s| s.name()).collect();
     assert!(names.is_empty(), "{names:?}");
 }
 
@@ -48,7 +48,7 @@ fn a_project_schema_of_a_new_name_is_added() {
 
     let schemas = load(fixture.path()).unwrap();
 
-    let names: Vec<&str> = schemas.folded().map(|s| s.name()).collect();
+    let names: Vec<&str> = schemas.folded().iter().map(|s| s.name()).collect();
     assert_eq!(names, ["glossary"]);
     let glossary = schemas.find("glossary").unwrap();
     assert!(glossary.node_kind("term").unwrap().property("meaning").is_some());
@@ -100,7 +100,7 @@ fn a_directory_named_dot_toml_is_ignored() {
 
     let schemas = load(fixture.path()).unwrap();
 
-    let names: Vec<&str> = schemas.folded().map(|s| s.name()).collect();
+    let names: Vec<&str> = schemas.folded().iter().map(|s| s.name()).collect();
     assert!(names.is_empty(), "{names:?}");
 }
 

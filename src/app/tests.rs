@@ -2,7 +2,7 @@ use super::*;
 use crate::core::testing::{
     content, edge_added, human, node_added, node_added_seq, schemas, source, usage, FakeLog,
 };
-use crate::core::{Actor, Payload};
+use crate::core::{fold_all, Actor, Payload};
 use crate::harness::testing::{FakeCatalog, FakeSnapshot, FakeTool, FixedPolicy, Scripted};
 use crate::harness::{Chunk, Verdict};
 
@@ -290,8 +290,7 @@ fn another_source_s_map_mutation_in_the_same_project_still_folds() {
     )
     .unwrap();
 
-    let debates = schemas()
-        .fold_all(app.events())
+    let debates = fold_all(&schemas(), app.events())
         .unwrap()
         .into_iter()
         .find(|map| map.schema().name() == "debates")
@@ -1028,7 +1027,7 @@ fn an_empty_map_is_still_sent_with_its_kinds() {
 
     let sent = model.last_request();
     // One message per map, the prompt, the time.
-    assert_eq!(sent.len(), 2 + schemas().folded().count());
+    assert_eq!(sent.len(), 2 + schemas().folded().len());
     assert!(sent[0].contains(
         "Node kinds: `topic`, `claim` (carries `why`, `summary`), `fact` \
          (carries `summary`, `when`), `verdict` (carries `why`)."
@@ -1209,7 +1208,7 @@ fn a_log_shorter_than_the_window_sends_all_of_it() {
     let _ = app.submit("now".to_string()).unwrap();
 
     // One message per map, three events, the prompt, the time.
-    assert_eq!(model.last_request().len(), 5 + schemas().folded().count());
+    assert_eq!(model.last_request().len(), 5 + schemas().folded().len());
 }
 
 #[test]
@@ -1227,7 +1226,7 @@ fn a_model_called_event_never_reaches_the_next_request() {
     // One message per map, "first", "ok", "second", the time - the
     // model.called event between "ok" and "second" is never one of
     // them.
-    assert_eq!(sent.len(), 4 + schemas().folded().count());
+    assert_eq!(sent.len(), 4 + schemas().folded().len());
     assert!(sent.contains(&"first".to_string()));
     assert!(sent.contains(&"ok".to_string()));
     assert!(sent.contains(&"second".to_string()));
@@ -1497,8 +1496,7 @@ fn a_node_written_to_this_path_s_map_from_another_path_joins_the_transcript_s_ma
     let replaces = edge_added("replaces", &own, &foreign);
     let (_, app) = seeded_app(vec![foreign, own, replaces], Vec::new());
 
-    let debates = schemas()
-        .fold_all(app.events())
+    let debates = fold_all(&schemas(), app.events())
         .unwrap()
         .into_iter()
         .find(|map| map.schema().name() == "debates")
