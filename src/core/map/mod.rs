@@ -492,11 +492,7 @@ impl Map {
     /// one error - a short id has nothing else to suggest instead of.
     fn resolve_short_id(&self, s: &str) -> Result<NodeId, MapError> {
         let unknown = || MapError::UnknownShortId(s.to_string());
-        let at = s.find(|c: char| c.is_ascii_digit()).filter(|&at| at > 0);
-        let (prefix, digits) = at.map(|at| s.split_at(at)).ok_or_else(unknown)?;
-        if !digits.chars().all(|c| c.is_ascii_digit()) {
-            return Err(unknown());
-        }
+        let (prefix, digits) = split_short_id(s).ok_or_else(unknown)?;
         let kind = self
             .schema
             .node_kinds()
@@ -702,6 +698,16 @@ pub fn map_of_mut(payload: &mut Payload) -> Option<&mut MapId> {
     }
 }
 
+
+/// `s` as a short id's two halves - a node kind's prefix and a
+/// sequence number - when it takes that form: a prefix of no digits,
+/// then digits alone. The form alone, so a schema's name can be
+/// refused for taking it before any map is folded.
+pub(super) fn split_short_id(s: &str) -> Option<(&str, &str)> {
+    let at = s.find(|c: char| c.is_ascii_digit()).filter(|&at| at > 0)?;
+    let (prefix, digits) = s.split_at(at);
+    digits.chars().all(|c| c.is_ascii_digit()).then_some((prefix, digits))
+}
 
 #[cfg(test)]
 mod tests;

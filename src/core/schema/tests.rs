@@ -218,3 +218,51 @@ fn a_topic_declares_no_properties() {
 fn an_undeclared_kind_is_absent() {
     assert!(debates().node_kind("glossary").is_none());
 }
+
+fn one_kind(name: &str, kind: NodeKind) -> Arc<Schema> {
+    Arc::new(Schema::new(name, "p", vec![kind], Vec::new()).unwrap())
+}
+
+#[test]
+fn a_node_kind_declared_by_two_schemas_is_refused() {
+    let schemas = [one_kind("ideas", node("concept", &[])), one_kind("concepts", node("concept", &[]))];
+
+    assert_eq!(
+        check_across(&schemas).unwrap_err().to_string(),
+        "ideas.toml and concepts.toml both declare node kind \"concept\"; a kind belongs to one map"
+    );
+}
+
+#[test]
+fn a_prefix_taken_in_two_schemas_is_refused_naming_a_free_one() {
+    let schemas = [one_kind("concepts", node("concept", &[])), one_kind("claims", node("claim", &[]))];
+
+    assert_eq!(
+        check_across(&schemas).unwrap_err().to_string(),
+        "claims.toml's \"claim\" takes the short id prefix \"c\", which concepts.toml already \
+         gives; set prefix = \"cl\" on \"claim\""
+    );
+}
+
+#[test]
+fn a_schema_named_like_a_short_id_is_refused() {
+    let schemas = [one_kind("c1", node("concept", &[]))];
+
+    assert_eq!(
+        check_across(&schemas).unwrap_err().to_string(),
+        "c1.toml is named like a short id; rename the file so `show c1` names the map, not a node"
+    );
+}
+
+#[test]
+fn an_edge_kind_may_repeat_across_schemas() {
+    let with_covers = |name: &str, kind: &str| {
+        Arc::new(
+            Schema::new(name, "p", vec![node(kind, &[])], vec![edge("covers", &[kind], &[kind])])
+                .unwrap(),
+        )
+    };
+    let schemas = [with_covers("concepts", "concept"), with_covers("topics", "topic")];
+
+    assert!(check_across(&schemas).is_ok());
+}

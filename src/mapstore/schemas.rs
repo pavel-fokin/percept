@@ -16,7 +16,7 @@ use std::sync::Arc;
 use indexmap::IndexMap;
 use serde::{Deserialize, Deserializer};
 
-use crate::core::{EdgeKind, NodeKind, Schema, Schemas};
+use crate::core::{check_across, EdgeKind, NodeKind, Schema, Schemas};
 
 include!(concat!(env!("OUT_DIR"), "/schema_templates.rs"));
 
@@ -114,7 +114,8 @@ impl Schemas for SchemaCatalog {
 /// `project_files` gives - none when a directory is missing or holds
 /// no `.toml` file. Each error names the file it came from. A schema
 /// declared under both is refused, naming both files: a schema is
-/// global or a project's, never both.
+/// global or a project's, never both. The loaded set then keeps
+/// `check_across`'s rules, across both levels together.
 pub fn load(project: &Path, home: Option<&Path>) -> Result<SchemaCatalog, Box<dyn std::error::Error>> {
     let global_files = match home {
         Some(home) => project_files(home)?,
@@ -139,6 +140,7 @@ pub fn load(project: &Path, home: Option<&Path>) -> Result<SchemaCatalog, Box<dy
         .chain(own_files)
         .map(|(stem, text)| parse(&stem, &text).map(Arc::new))
         .collect::<Result<Vec<_>, _>>()?;
+    check_across(&schemas)?;
     Ok(SchemaCatalog {
         schemas,
         home: home.map(Path::to_path_buf),

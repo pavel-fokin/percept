@@ -42,6 +42,21 @@ pub enum SchemaError {
         end: &'static str,
         kind: String,
     },
+    KindInTwoSchemas {
+        kind: String,
+        first: String,
+        second: String,
+    },
+    PrefixInTwoSchemas {
+        prefix: String,
+        first: String,
+        second: String,
+        kind: String,
+        fix: Option<String>,
+    },
+    NameIsShortId {
+        name: String,
+    },
 }
 
 impl fmt::Display for SchemaError {
@@ -93,6 +108,33 @@ impl fmt::Display for SchemaError {
             Self::UnknownEdgeEnd { edge, end, kind } => write!(
                 f,
                 "edge kind {edge:?}'s {end} names {kind:?}, which is not a declared node kind"
+            ),
+            Self::KindInTwoSchemas { kind, first, second } => write!(
+                f,
+                "{first}.toml and {second}.toml both declare node kind {kind:?}; a kind belongs \
+                 to one map"
+            ),
+            Self::PrefixInTwoSchemas {
+                prefix,
+                first,
+                second,
+                kind,
+                fix,
+            } => {
+                write!(
+                    f,
+                    "{second}.toml's {kind:?} takes the short id prefix {prefix:?}, which \
+                     {first}.toml already gives"
+                )?;
+                match fix {
+                    Some(fix) => write!(f, "; set prefix = {fix:?} on {kind:?}"),
+                    None => write!(f, "; set a prefix on {kind:?}"),
+                }
+            }
+            Self::NameIsShortId { name } => write!(
+                f,
+                "{name}.toml is named like a short id; rename the file so `show {name}` names \
+                 the map, not a node"
             ),
         }
     }

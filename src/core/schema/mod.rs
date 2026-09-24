@@ -276,6 +276,55 @@ pub trait Schemas: Send + Sync {
     }
 }
 
+/// The rules a project's schemas keep together, so a word a reader
+/// types names one thing across every map: no schema's name takes a
+/// short id's form, and no node kind, nor its short id prefix, is
+/// declared by two schemas. Within one schema `Schema::new` already
+/// holds the prefix rule. Edge kinds may repeat - an edge finds its
+/// map from its nodes.
+pub fn check_across(schemas: &[Arc<Schema>]) -> Result<(), SchemaError> {
+    if let Some(schema) = schemas.iter().find(|schema| super::map::split_short_id(&schema.name).is_some()) {
+        return Err(SchemaError::NameIsShortId {
+            name: schema.name.clone(),
+        });
+    }
+    let kinds: Vec<(&str, &NodeKind)> = schemas
+        .iter()
+        .flat_map(|schema| schema.node_kinds.iter().map(move |kind| (schema.name.as_str(), kind)))
+        .collect();
+    for (at, (second, kind)) in kinds.iter().enumerate() {
+        let earlier = &kinds[..at];
+        if let Some((first, _)) = earlier.iter().find(|(_, other)| other.kind == kind.kind) {
+            return Err(SchemaError::KindInTwoSchemas {
+                kind: kind.kind.clone(),
+                first: first.to_string(),
+                second: second.to_string(),
+            });
+        }
+        if let Some((first, _)) = earlier.iter().find(|(_, other)| other.prefix == kind.prefix) {
+            return Err(SchemaError::PrefixInTwoSchemas {
+                prefix: kind.prefix.clone(),
+                first: first.to_string(),
+                second: second.to_string(),
+                kind: kind.kind.clone(),
+                fix: free_prefix(&kind.kind, &kinds),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// The shortest longer start of `name`, lowercased, that no kind in
+/// `kinds` takes as its prefix - `cl` for `claim` beside `concept`.
+fn free_prefix(name: &str, kinds: &[(&str, &NodeKind)]) -> Option<String> {
+    let lower = name.to_lowercase();
+    let starts = lower.char_indices().skip(1).map(|(at, _)| &lower[..at]);
+    let free = starts
+        .chain([lower.as_str()])
+        .find(|prefix| kinds.iter().all(|(_, kind)| kind.prefix != *prefix));
+    free.map(str::to_string)
+}
+
 /// The root a map named `name` lives at: `schemas.global_root(name)`
 /// when `name` names a global schema, else `project`. Every identity
 /// lookup and every `map.created` goes through this, so "a schema's
