@@ -274,11 +274,12 @@ fn build_maps_shape() -> Result<MapShape, Box<dyn std::error::Error>> {
 fn build_app(
     source: crate::core::Source,
     checkout: &Path,
+    home: Option<&Path>,
 ) -> Result<App, Box<dyn std::error::Error>> {
     let opened = super::open_log(checkout)?;
     let me = opened.me();
     let log = Arc::new(opened);
-    let schemas = Arc::new(crate::mapstore::load_schemas(checkout)?);
+    let schemas = Arc::new(crate::mapstore::load_schemas(checkout, home)?);
     let catalog: Arc<dyn crate::harness::ModelCatalog> = Arc::new(build_catalog());
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;
@@ -324,8 +325,9 @@ pub async fn headless_turn(
     yes: bool,
     source: crate::core::Source,
     checkout: &Path,
+    home: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let app = build_app(source, checkout)?;
+    let app = build_app(source, checkout, home)?;
     let actor = if system {
         Actor::System
     } else {
@@ -337,8 +339,9 @@ pub async fn headless_turn(
 pub async fn try_main(
     source: crate::core::Source,
     checkout: &Path,
+    home: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let app = build_app(source, checkout)?;
+    let app = build_app(source, checkout, home)?;
 
     let mut terminal = ratatui::init();
     let mouse = match MouseCapture::enable() {

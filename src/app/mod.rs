@@ -4,8 +4,8 @@ use std::sync::Arc;
 use context::{Context, Section, View, Window};
 
 use crate::core::{
-    fold_all, fold_named, Actor, Event, EventId, EventKind, HumanId, MapError, MapId, Payload,
-    Schemas, Source,
+    fold_all, fold_named, map_root, Actor, Event, EventId, EventKind, HumanId, MapError, MapId,
+    Payload, Schemas, Source,
 };
 
 mod context;
@@ -275,6 +275,7 @@ fn normalize_created_maps(
     payloads: &mut Vec<Payload>,
     events: &[Event],
     source: &Source,
+    schemas: &dyn Schemas,
 ) -> Result<(), MapError> {
     let proposed: Vec<(MapId, String)> = payloads
         .iter()
@@ -284,7 +285,8 @@ fn normalize_created_maps(
         })
         .collect();
     for (map, schema) in proposed {
-        let Some(existing) = crate::core::map_id_for(&schema, own_events(events, source))? else {
+        let Some(existing) = crate::core::map_id_for(&schema, own_events(events, source, schemas))?
+        else {
             continue;
         };
         for payload in payloads.iter_mut() {
@@ -301,20 +303,27 @@ fn normalize_created_maps(
 /// every event that changes one of that path's maps from elsewhere -
 /// the slice `map_id_for` and `fold_all` fold over when checking
 /// whether a tool's commits fit the map they target.
-fn own_events<'a>(events: &'a [Event], source: &Source) -> Vec<&'a Event> {
-    let maps = path_maps(events, &source.path);
+fn own_events<'a>(events: &'a [Event], source: &Source, schemas: &dyn Schemas) -> Vec<&'a Event> {
+    let maps = path_maps(events, source, schemas);
     events
         .iter()
         .filter(|event| event.source().path == source.path || changes_one_of(event, &maps))
         .collect()
 }
 
-/// The maps whose `map.created` ran at `path` - a map's identity is
-/// its path's, while the events that change it may come from anywhere.
-fn path_maps(events: &[Event], path: &std::path::Path) -> HashSet<MapId> {
+/// The maps whose `map.created` ran at one of `schemas`' own roots for
+/// `source`'s project - `source.path` for a project schema, `$HOME`
+/// for a global one, via `map_root` - a map's identity is its root's,
+/// while the events that change it may come from anywhere.
+fn path_maps(events: &[Event], source: &Source, schemas: &dyn Schemas) -> HashSet<MapId> {
+    let roots: HashSet<&std::path::Path> = schemas
+        .folded()
+        .iter()
+        .map(|schema| map_root(schemas, schema.name(), &source.path))
+        .collect();
     events
         .iter()
-        .filter(|event| event.source().path == path)
+        .filter(|event| roots.contains(event.source().path.as_path()))
         .filter_map(|event| match event.payload() {
             Payload::MapCreated { map, .. } => Some(*map),
             _ => None,
@@ -439,7 +448,7 @@ impl App {
         me: Option<HumanId>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let events = log.load()?;
-        let maps = path_maps(&events, &source.path);
+        let maps = path_maps(&events, &source, schemas.as_ref());
         let events: Vec<Event> = events
             .into_iter()
             .filter(|event| belongs_to_transcript(event, &source, &maps))
@@ -539,17 +548,21 @@ impl App {
         let mut payloads = output.commits;
         let content = output.content;
         let batch = self.log.append_batch_computed(Box::new(move |events| {
-            normalize_created_maps(&mut payloads, &events, &source)?;
+            normalize_created_maps(&mut payloads, &events, &source, schemas.as_ref())?;
             let commits: Vec<Event> = payloads
                 .into_iter()
                 .map(|payload| match payload {
                     Payload::MapCreated { map, schema } => {
-                        Event::map_created(map, schema, source.clone())
+                        let root_source = Source {
+                            name: source.name.clone(),
+                            path: map_root(schemas.as_ref(), &schema, &source.path).to_path_buf(),
+                        };
+                        Event::map_created(map, schema, root_source)
                     }
                     payload => Event::new(Actor::Agent, source.clone(), Some(called_id), payload),
                 })
                 .collect();
-            let own = own_events(&events, &source)
+            let own = own_events(&events, &source, schemas.as_ref())
                 .into_iter()
                 .chain(commits.iter());
             let touched: HashSet<MapId> =

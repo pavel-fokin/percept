@@ -5,6 +5,7 @@
 //! against the schema it was folded with.
 
 use std::collections::HashSet;
+use std::path::Path;
 use std::sync::Arc;
 
 use super::{Event, Map, MapError};
@@ -250,8 +251,16 @@ impl EdgeKind {
 /// about an unknown map goes through this, so no caller keeps its own
 /// list.
 pub trait Schemas: Send + Sync {
-    /// Every schema, in stored order.
+    /// Every schema, in stored order - a global schema, one whose map
+    /// lives at `$HOME` rather than a project, sorts before every
+    /// project schema.
     fn folded(&self) -> &[Arc<Schema>];
+
+    /// `Some(home)` when `name` names a global schema - one loaded from
+    /// `$HOME/.percept/schemas`, whose map's identity lives at `home`
+    /// rather than at whatever project reads it. `None` for a project
+    /// schema, whose map lives at the project being read.
+    fn global_root(&self, name: &str) -> Option<&Path>;
 
     /// The schema `name` names, or the error every boundary that folds
     /// or writes a map by name reports.
@@ -265,6 +274,14 @@ pub trait Schemas: Send + Sync {
                 maps: names_csv(self.folded()),
             })
     }
+}
+
+/// The root a map named `name` lives at: `schemas.global_root(name)`
+/// when `name` names a global schema, else `project`. Every identity
+/// lookup and every `map.created` goes through this, so "a schema's
+/// map root" means one thing everywhere it is found or minted.
+pub fn map_root<'a>(schemas: &'a dyn Schemas, name: &str, project: &'a Path) -> &'a Path {
+    schemas.global_root(name).unwrap_or(project)
 }
 
 /// Every created map `Map::fold` gives for `events`, in schema order.

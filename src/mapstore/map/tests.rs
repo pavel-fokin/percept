@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::core::testing::{human, map_id, node_added_payload, schemas, source, source_at, FakeLog};
+use crate::core::testing::{
+    chores, debates, human, map_id, node_added_payload, schemas, source, source_at, FakeLog,
+    FakeSchemas, HOME,
+};
 use crate::core::{Actor, Change, Event, MapId, NodeId, NodeRef};
 use crate::shared::Timestamp;
 
@@ -202,6 +205,90 @@ fn fold_all_at_joins_a_node_written_from_another_path_by_the_map_id_it_names() {
 
     let debates = maps.into_iter().find(|map| map.schema().name() == "debates").unwrap();
     assert!(debates.find("verdict", "Rust").is_some());
+}
+
+#[test]
+fn a_global_schemas_map_written_from_two_project_paths_is_one_map() {
+    let log = FakeLog::default();
+    let global = FakeSchemas::with_global(vec![debates(), chores()], &["debates"], HOME);
+    let here = source_at("cli", "/here");
+    let there = source_at("cli", "/there");
+
+    commit(
+        &log,
+        &global,
+        "debates",
+        &here,
+        &[],
+        Actor::Human(human()),
+        None,
+        add_node("verdict", "Rust"),
+    )
+    .unwrap();
+    commit(
+        &log,
+        &global,
+        "debates",
+        &there,
+        &[],
+        Actor::Human(human()),
+        None,
+        add_node("verdict", "Go"),
+    )
+    .unwrap();
+
+    let here_map = fold_map(&log, &global, "debates", &here.path).unwrap();
+    let there_map = fold_map(&log, &global, "debates", &there.path).unwrap();
+    assert_eq!(here_map.id(), there_map.id());
+    assert!(here_map.find("verdict", "Rust").is_some());
+    assert!(here_map.find("verdict", "Go").is_some());
+}
+
+#[test]
+fn a_global_maps_created_event_carries_home_as_its_source_path() {
+    let log = FakeLog::default();
+    let global = FakeSchemas::with_global(vec![debates(), chores()], &["debates"], HOME);
+    let here = source_at("cli", "/here");
+
+    commit(
+        &log,
+        &global,
+        "debates",
+        &here,
+        &[],
+        Actor::Human(human()),
+        None,
+        add_node("verdict", "Rust"),
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    let Payload::MapCreated { .. } = events[0].payload() else {
+        panic!("expected map.created before the first mutation")
+    };
+    assert_eq!(events[0].source().path, PathBuf::from(HOME));
+    assert_eq!(events[0].source().name, "cli");
+}
+
+#[test]
+fn ensure_maps_mints_a_global_schemas_map_at_home() {
+    let log = FakeLog::default();
+    let global = FakeSchemas::with_global(vec![debates(), chores()], &["debates"], HOME);
+    let here = source_at("cli", "/here");
+
+    ensure_maps(&log, &global, &here).unwrap();
+
+    let events = log.load().unwrap();
+    let debates_created = events
+        .iter()
+        .find(|event| matches!(event.payload(), Payload::MapCreated { schema, .. } if schema == "debates"))
+        .unwrap();
+    let chores_created = events
+        .iter()
+        .find(|event| matches!(event.payload(), Payload::MapCreated { schema, .. } if schema == "chores"))
+        .unwrap();
+    assert_eq!(debates_created.source().path, PathBuf::from(HOME));
+    assert_eq!(chores_created.source().path, here.path);
 }
 
 #[test]

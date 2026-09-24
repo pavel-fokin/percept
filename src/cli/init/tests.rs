@@ -11,6 +11,7 @@ fn run(args: InitArgs, checkout: &std::path::Path) -> Result<(), Box<dyn std::er
         checkout,
         &log,
         &source_at("percept-cli", checkout.to_str().unwrap()),
+        None,
     )
 }
 
@@ -273,7 +274,7 @@ fn init_writes_the_shipped_schemas() {
 
     run(init("claude-code"), fixture.path()).unwrap();
 
-    let schemas = mapstore::load_schemas(fixture.path()).unwrap();
+    let schemas = mapstore::load_schemas(fixture.path(), None).unwrap();
     let names: Vec<&str> = schemas.folded().iter().map(|s| s.name()).collect();
     assert_eq!(names, ["concepts"]);
 }
@@ -284,8 +285,8 @@ fn init_creates_each_map_once() {
     let log = FakeLog::default();
     let source = source_at("percept-cli", fixture.path().to_str().unwrap());
 
-    super::run(init("codex"), fixture.path(), &log, &source).unwrap();
-    super::run(init("codex"), fixture.path(), &log, &source).unwrap();
+    super::run(init("codex"), fixture.path(), &log, &source, None).unwrap();
+    super::run(init("codex"), fixture.path(), &log, &source, None).unwrap();
 
     let events = log.load().unwrap();
     assert_eq!(events.len(), 1);

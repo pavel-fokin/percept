@@ -62,12 +62,15 @@ const CLIENTS: [Client; 2] = [
 ];
 
 /// Writes the shipped schema files and `args.client`'s config under
-/// `checkout`, printing one line naming what each did.
+/// `checkout`, printing one line naming what each did. `home`, when
+/// given, is where a global schema's map is minted - see
+/// `mapstore::load_schemas`.
 pub fn run(
     args: InitArgs,
     checkout: &Path,
     log: &dyn EventLog,
     source: &crate::core::Source,
+    home: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client = CLIENTS
         .iter()
@@ -81,7 +84,7 @@ pub fn run(
     for (name, text) in mapstore::templates() {
         write_schema(checkout, &name, text)?;
     }
-    let schemas = mapstore::load_schemas(checkout)?;
+    let schemas = mapstore::load_schemas(checkout, home)?;
     mapstore::ensure_maps(log, &schemas, source)?;
     let command = format!("percept hook {}", client.name);
     write_config(checkout, client.path, |root| {

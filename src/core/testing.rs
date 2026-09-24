@@ -3,7 +3,7 @@
 //! core port and nothing more.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -15,6 +15,10 @@ use crate::shared::Timestamp;
 
 /// The project root `source` stamps, for a test that compares paths.
 pub const ROOT: &str = "/test";
+
+/// A `$HOME` for a test that needs a global schema's root, distinct
+/// from `ROOT`.
+pub const HOME: &str = "/home";
 
 /// A stable map id for fixtures that still name maps by schema. The
 /// production path mints UUIDv7; tests restore this deterministic UUID
@@ -372,12 +376,25 @@ pub fn chores() -> Schema {
 /// filesystem. `mapstore::SchemaCatalog` is production's implementor.
 pub struct FakeSchemas {
     schemas: Vec<Arc<Schema>>,
+    globals: BTreeMap<String, PathBuf>,
 }
 
 impl FakeSchemas {
     pub fn new(schemas: Vec<Schema>) -> Self {
         Self {
             schemas: schemas.into_iter().map(Arc::new).collect(),
+            globals: BTreeMap::new(),
+        }
+    }
+
+    /// `new`, with each name in `names` marked global at `home` - a
+    /// test's stand-in for a schema `mapstore::SchemaCatalog` would have
+    /// loaded from `$HOME/.percept/schemas`.
+    pub fn with_global(schemas: Vec<Schema>, names: &[&str], home: &str) -> Self {
+        let globals = names.iter().map(|name| (name.to_string(), PathBuf::from(home))).collect();
+        Self {
+            schemas: schemas.into_iter().map(Arc::new).collect(),
+            globals,
         }
     }
 }
@@ -385,6 +402,10 @@ impl FakeSchemas {
 impl Schemas for FakeSchemas {
     fn folded(&self) -> &[Arc<Schema>] {
         &self.schemas
+    }
+
+    fn global_root(&self, name: &str) -> Option<&Path> {
+        self.globals.get(name).map(PathBuf::as_path)
     }
 }
 

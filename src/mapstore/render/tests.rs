@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use super::*;
-use crate::core::testing::{chores, debates, files, human, link, node_ref};
+use crate::core::testing::{chores, debates, files, human, link, node_ref, FakeSchemas, HOME};
 use crate::core::{Actor, EventId, Mutation};
 use crate::mapstore::SchemaCatalog;
 
@@ -468,6 +468,20 @@ fn the_start_screen_prints_a_declared_schema_with_no_map_yet_as_empty() {
 
     assert!(text.contains("\n# debates\n\nwhat a test needs from a question-and-answer map\n"), "{text}");
     assert!(text.ends_with("- `doubts` (verdict -> topic)\n\n(empty: nothing has been recorded here yet.)\n"), "{text}");
+}
+
+#[test]
+fn the_start_screen_prints_a_global_map_before_the_projects_own() {
+    // The order `mapstore::SchemaCatalog::load` folds in - a global
+    // schema first - this fake reproduces rather than derives, since it
+    // never touches a filesystem.
+    let schemas = FakeSchemas::with_global(vec![chores(), debates()], &["chores"], HOME);
+
+    let text = start(&schemas, &[]);
+
+    let chores_at = text.find("\n# chores\n").unwrap();
+    let debates_at = text.find("\n# debates\n").unwrap();
+    assert!(chores_at < debates_at, "{text}");
 }
 
 #[test]

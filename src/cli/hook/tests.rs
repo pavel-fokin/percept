@@ -95,12 +95,12 @@ impl Fixture {
     fn call_raw(&self, client: &str, raw: &str) -> Result<Value, Box<dyn std::error::Error>> {
         let mut cursor = Cursor::new(raw.as_bytes().to_vec());
         let input = read(&mut cursor)?;
-        let checkout = crate::root_for(Path::new(input.cwd()))?;
+        let checkout = crate::root_for(Path::new(input.cwd()), None)?;
         let source = Source {
             name: client.to_string(),
             path: crate::project_of(&checkout),
         };
-        run(input, &source, &self.log, &self.sessions, &checkout, self.me)
+        run(input, &source, &self.log, &self.sessions, &checkout, None, self.me)
     }
 
     /// The number of turn state files kept anywhere under

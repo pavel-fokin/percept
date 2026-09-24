@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::{
-    map_id_for, Actor, Change, Edge, Event, EventId, EventLog, Fragment, Map, MapError, MapId,
-    MapReader, Mutation, Node, NodeId, Payload, Schemas, Written,
+    map_id_for, map_root, Actor, Change, Edge, Event, EventId, EventLog, Fragment, Map, MapError,
+    MapId, MapReader, Mutation, Node, NodeId, Payload, Schemas, Written,
 };
 use crate::store::{ids, parse_event_id};
 
@@ -32,9 +32,10 @@ pub fn paths(events: &[Event]) -> Vec<PathBuf> {
 }
 
 /// The map `name` names: its identity comes from `events` whose
-/// source ran at `path`, but the fold itself runs over every event in
-/// `events`, so a node or edge written from another path still joins
-/// the map its `map` field names.
+/// source ran at its root - `path` for a project schema, `$HOME` for a
+/// global one, via `map_root` - but the fold itself runs over every
+/// event in `events`, so a node or edge written from another path
+/// still joins the map its `map` field names.
 /// A schema with no `map.created` event yet folds empty, under a
 /// placeholder identity nothing else refers to - the same "not a map
 /// yet" reading `Schemas::fold_all` gives a schema it skips, so a
@@ -47,19 +48,20 @@ pub fn fold_map_at(
     path: &Path,
 ) -> Result<Map, Box<dyn std::error::Error>> {
     let schema = schemas.find(name)?;
-    let own = of_path(events, path);
+    let own = of_path(events, map_root(schemas, name, path));
     let id = map_id_for(name, own)?.unwrap_or_else(MapId::new);
     Ok(Map::fold(id, schema, events)?)
 }
 
-/// Every map `path`'s `map.created` events name, in schema order,
-/// each folded over every event in `events` - `fold_map_at`'s rule for
-/// all of `schemas` at once. A schema with no `map.created` at `path`
-/// is not a map yet, and is skipped.
+/// Every map schemas' `map.created` events name, in schema order, each
+/// folded over every event in `events` - `fold_map_at`'s rule for all
+/// of `schemas` at once, each schema's identity found at its own root
+/// via `map_root`. A schema with no `map.created` at its root is not a
+/// map yet, and is skipped.
 pub fn fold_all_at(schemas: &dyn Schemas, events: &[Event], path: &Path) -> Result<Vec<Map>, MapError> {
-    let own: Vec<&Event> = of_path(events, path).collect();
     let mut maps = Vec::new();
     for schema in schemas.folded() {
+        let own: Vec<&Event> = of_path(events, map_root(schemas, schema.name(), path)).collect();
         let Some(id) = map_id_for(schema.name(), own.iter().copied())? else {
             continue;
         };
@@ -118,13 +120,18 @@ impl Snapshot {
         events: Vec<crate::core::Event>,
     ) -> Result<(Option<Event>, Self), Box<dyn std::error::Error>> {
         let schema = schemas.find(name)?;
-        let own = of_path(&events, &source.path);
+        let root = map_root(schemas, name, &source.path);
+        let own = of_path(&events, root);
         let existing = map_id_for(name, own)?;
         let (id, created) = match existing {
             Some(id) => (id, None),
             None => {
                 let id = crate::core::MapId::new();
-                (id, Some(Event::map_created(id, name.to_string(), source.clone())))
+                let root_source = crate::core::Source {
+                    name: source.name.clone(),
+                    path: root.to_path_buf(),
+                };
+                (id, Some(Event::map_created(id, name.to_string(), root_source)))
             }
         };
         let map = Map::fold(id, schema, &events)?;
@@ -228,14 +235,19 @@ pub fn ensure_maps(
 ) -> Result<Vec<Event>, Box<dyn std::error::Error>> {
     let source = source.clone();
     log.append_batch_computed(Box::new(move |events| {
-        let own: Vec<&Event> = of_path(&events, &source.path).collect();
         let mut created = Vec::new();
         for schema in schemas.folded() {
+            let root = map_root(schemas, schema.name(), &source.path);
+            let own: Vec<&Event> = of_path(&events, root).collect();
             if map_id_for(schema.name(), own.iter().copied())?.is_none() {
+                let root_source = crate::core::Source {
+                    name: source.name.clone(),
+                    path: root.to_path_buf(),
+                };
                 created.push(Event::map_created(
                     crate::core::MapId::new(),
                     schema.name().to_string(),
-                    source.clone(),
+                    root_source,
                 ));
             }
         }

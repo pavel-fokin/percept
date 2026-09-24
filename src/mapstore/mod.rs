@@ -4,12 +4,13 @@
 //! applies one change to it atomically, under the log's own lock;
 //! `encode_*` serialize a map or a fragment to JSON lines; `markdown`
 //! and `catalogue` render it to text for `maps show` and `maps list`.
-//! The tools that call these live in `src/tools`. `load_schemas` reads a
-//! project's schemas from `SCHEMAS_DIR` alone; `templates` is the
-//! shipped TOML `percept init <client>` copies there for a project
-//! that has none yet. A project with no
-//! schemas has no maps: `catalogue` and `start` print
-//! `NO_SCHEMAS_HINT` in place of their usual body.
+//! The tools that call these live in `src/tools`. `load_schemas` reads
+//! a project's schemas from `SCHEMAS_DIR`, and, when given a home
+//! directory, its global schemas from the same directory under
+//! `$HOME` first; `templates` is the shipped TOML `percept init
+//! <client>` copies there for a project that has none yet. A project
+//! with no schemas, project or global, has no maps: `catalogue` and
+//! `start` print `NO_SCHEMAS_HINT` in place of their usual body.
 
 // Reachability here is judged with the lab present: the lab build is
 // the one that sees every consumer, and `--all-features` clippy is

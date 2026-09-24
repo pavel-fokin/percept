@@ -1,6 +1,7 @@
 use super::*;
 use crate::core::testing::{
-    content, edge_added, human, node_added, node_added_seq, schemas, source, usage, FakeLog,
+    chores, content, debates, edge_added, human, node_added, node_added_seq, schemas, source,
+    source_at, usage, FakeLog, FakeSchemas, HOME,
 };
 use crate::core::{fold_all, Actor, Payload};
 use crate::harness::testing::{FakeCatalog, FakeSnapshot, FakeTool, FixedPolicy, Scripted};
@@ -1502,6 +1503,47 @@ fn a_node_written_to_this_path_s_map_from_another_path_joins_the_transcript_s_ma
         .find(|map| map.schema().name() == "debates")
         .unwrap();
     assert!(debates.find("verdict", "Go").is_some());
+}
+
+#[test]
+fn a_global_maps_created_at_home_joins_the_transcript_though_the_app_runs_at_its_own_path() {
+    let schemas: Arc<dyn Schemas> = Arc::new(FakeSchemas::with_global(vec![debates(), chores()], &["debates"], HOME));
+    let created = Event::map_created(
+        crate::core::testing::map_id("debates"),
+        "debates".to_string(),
+        source_at("init", HOME),
+    );
+    let node = Event::new(
+        Actor::Agent,
+        source_at("codex", HOME),
+        None,
+        crate::core::testing::node_added_payload(
+            "debates",
+            "verdict",
+            "Rust",
+            Default::default(),
+            Vec::new(),
+        ),
+    );
+    let log = Arc::new(FakeLog::seeded(vec![created, node]));
+
+    let app = App::new(
+        Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
+        log,
+        schemas.clone(),
+        Harness::new(Vec::new(), MapShape::Prompt),
+        source(SOURCE),
+        human(),
+    )
+    .unwrap();
+
+    let debates = fold_all(schemas.as_ref(), app.events())
+        .unwrap()
+        .into_iter()
+        .find(|map| map.schema().name() == "debates")
+        .unwrap();
+    assert!(debates.find("verdict", "Rust").is_some());
 }
 
 #[test]
