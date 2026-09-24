@@ -9,7 +9,7 @@
 //! fresh checkout its first schema file, copied from the templates
 //! this binary embeds - see `templates`.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -94,26 +94,9 @@ const PREFIX_KEY: &str = "prefix";
 /// `<project>/.percept/schemas` declare, folded once by `load`.
 pub struct SchemaCatalog {
     schemas: Vec<Arc<Schema>>,
-    /// A global schema's name to the home root its map lives at - see
-    /// `Schemas::global_root`.
-    globals: HashMap<String, PathBuf>,
-}
-
-impl SchemaCatalog {
-    /// `folded`, each wrapped in `Arc`, none of them global - the one
-    /// full set a caller with no home directory builds from. `load`
-    /// never calls this directly - even with no home, it still routes
-    /// through `with_globals`, so `new` is a test convenience, not a
-    /// second production path.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub fn new(folded: Vec<Schema>) -> Self {
-        Self::with_globals(folded, HashMap::new())
-    }
-
-    fn with_globals(folded: Vec<Schema>, globals: HashMap<String, PathBuf>) -> Self {
-        let schemas: Vec<Arc<Schema>> = folded.into_iter().map(Arc::new).collect();
-        Self { schemas, globals }
-    }
+    home: Option<PathBuf>,
+    /// The names of the schemas `home` declared.
+    globals: HashSet<String>,
 }
 
 impl Schemas for SchemaCatalog {
@@ -122,50 +105,45 @@ impl Schemas for SchemaCatalog {
     }
 
     fn global_root(&self, name: &str) -> Option<&Path> {
-        self.globals.get(name).map(PathBuf::as_path)
+        self.home.as_deref().filter(|_| self.globals.contains(name))
     }
 }
 
-/// Every schema `home` and `<project>/.percept/schemas` declare: a
-/// global schema first, in the stable order `project_files` gives for
-/// `home`, then a project schema the same way for `project` - empty
-/// when a directory is missing or holds no `.toml` file, so a project
-/// that has not run `percept init <client>` yet, with no global schema
-/// either, has no maps at all. Each error names the file it came from.
-/// A schema declared under both `home` and `project` is refused,
-/// naming both files: a schema is one level or the other, never both.
-pub fn load(
-    project: &Path,
-    home: Option<&Path>,
-) -> Result<SchemaCatalog, Box<dyn std::error::Error>> {
+/// Every schema `home` and `<project>/.percept/schemas` declare: the
+/// global ones first, then the project's, each in the stable order
+/// `project_files` gives - none when a directory is missing or holds
+/// no `.toml` file. Each error names the file it came from. A schema
+/// declared under both is refused, naming both files: a schema is
+/// global or a project's, never both.
+pub fn load(project: &Path, home: Option<&Path>) -> Result<SchemaCatalog, Box<dyn std::error::Error>> {
     let global_files = match home {
         Some(home) => project_files(home)?,
         None => Vec::new(),
     };
     let own_files = project_files(project)?;
-    if let Some(home) = home {
-        for (stem, _) in &global_files {
-            if own_files.iter().any(|(other, _)| other == stem) {
-                return Err(format!(
-                    "{stem}.toml is declared at both {} and {}; a schema is one or the other",
-                    home.join(SCHEMAS_DIR).join(format!("{stem}.toml")).display(),
-                    project.join(SCHEMAS_DIR).join(format!("{stem}.toml")).display(),
-                )
-                .into());
-            }
-        }
+    if let (Some(home), Some((stem, _))) = (
+        home,
+        global_files.iter().find(|(stem, _)| own_files.iter().any(|(other, _)| other == stem)),
+    ) {
+        return Err(format!(
+            "{stem}.toml is declared at both {} and {}; a schema is one or the other",
+            home.join(SCHEMAS_DIR).join(format!("{stem}.toml")).display(),
+            project.join(SCHEMAS_DIR).join(format!("{stem}.toml")).display(),
+        )
+        .into());
     }
 
-    let mut globals = HashMap::with_capacity(global_files.len());
-    let mut folded = Vec::with_capacity(global_files.len() + own_files.len());
-    for (stem, text) in global_files {
-        folded.push(parse(&stem, &text)?);
-        globals.insert(stem, home.expect("home given when global_files is non-empty").to_path_buf());
-    }
-    for (stem, text) in own_files {
-        folded.push(parse(&stem, &text)?);
-    }
-    Ok(SchemaCatalog::with_globals(folded, globals))
+    let globals = global_files.iter().map(|(stem, _)| stem.clone()).collect();
+    let schemas = global_files
+        .into_iter()
+        .chain(own_files)
+        .map(|(stem, text)| parse(&stem, &text).map(Arc::new))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(SchemaCatalog {
+        schemas,
+        home: home.map(Path::to_path_buf),
+        globals,
+    })
 }
 
 /// Every `*.toml` file directly under `<project>/.percept/schemas`,

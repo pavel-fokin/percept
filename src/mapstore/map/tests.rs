@@ -210,7 +210,7 @@ fn fold_all_at_joins_a_node_written_from_another_path_by_the_map_id_it_names() {
 #[test]
 fn a_global_schemas_map_written_from_two_project_paths_is_one_map() {
     let log = FakeLog::default();
-    let global = FakeSchemas::with_global(vec![debates(), chores()], &["debates"], HOME);
+    let global = FakeSchemas::with_global(vec![debates(), chores()], &["debates"]);
     let here = source_at("cli", "/here");
     let there = source_at("cli", "/there");
 
@@ -247,7 +247,7 @@ fn a_global_schemas_map_written_from_two_project_paths_is_one_map() {
 #[test]
 fn a_global_maps_created_event_carries_home_as_its_source_path() {
     let log = FakeLog::default();
-    let global = FakeSchemas::with_global(vec![debates(), chores()], &["debates"], HOME);
+    let global = FakeSchemas::with_global(vec![debates(), chores()], &["debates"]);
     let here = source_at("cli", "/here");
 
     commit(
@@ -273,7 +273,7 @@ fn a_global_maps_created_event_carries_home_as_its_source_path() {
 #[test]
 fn ensure_maps_mints_a_global_schemas_map_at_home() {
     let log = FakeLog::default();
-    let global = FakeSchemas::with_global(vec![debates(), chores()], &["debates"], HOME);
+    let global = FakeSchemas::with_global(vec![debates(), chores()], &["debates"]);
     let here = source_at("cli", "/here");
 
     ensure_maps(&log, &global, &here).unwrap();

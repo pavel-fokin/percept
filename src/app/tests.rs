@@ -1507,7 +1507,7 @@ fn a_node_written_to_this_path_s_map_from_another_path_joins_the_transcript_s_ma
 
 #[test]
 fn a_global_maps_created_at_home_joins_the_transcript_though_the_app_runs_at_its_own_path() {
-    let schemas: Arc<dyn Schemas> = Arc::new(FakeSchemas::with_global(vec![debates(), chores()], &["debates"], HOME));
+    let schemas: Arc<dyn Schemas> = Arc::new(FakeSchemas::with_global(vec![debates(), chores()], &["debates"]));
     let created = Event::map_created(
         crate::core::testing::map_id("debates"),
         "debates".to_string(),
@@ -1560,4 +1560,34 @@ fn a_tool_commit_that_reaches_a_node_written_from_another_path_is_accepted() {
         .events()
         .iter()
         .any(|event| matches!(event.payload(), Payload::EdgeAdded { .. })));
+}
+
+#[test]
+fn a_project_map_left_behind_by_a_schema_now_global_stays_out_of_the_transcript() {
+    let schemas: Arc<dyn Schemas> = Arc::new(FakeSchemas::with_global(vec![debates(), chores()], &["debates"]));
+    let left_behind = Event::map_created(MapId::new(), "debates".to_string(), source("init"));
+    let global = Event::map_created(
+        crate::core::testing::map_id("debates"),
+        "debates".to_string(),
+        source_at("init", HOME),
+    );
+    let log = Arc::new(FakeLog::seeded(vec![left_behind, global]));
+
+    let app = App::new(
+        Arc::new(Silent),
+        Arc::new(FakeCatalog::default()),
+        log,
+        schemas.clone(),
+        Harness::new(Vec::new(), MapShape::Prompt),
+        source(SOURCE),
+        human(),
+    )
+    .unwrap();
+
+    let debates = fold_all(schemas.as_ref(), app.events())
+        .unwrap()
+        .into_iter()
+        .find(|map| map.schema().name() == "debates")
+        .unwrap();
+    assert_eq!(debates.id(), crate::core::testing::map_id("debates"));
 }

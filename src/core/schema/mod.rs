@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
 
-use super::{Event, Map, MapError};
+use super::{Event, Map, MapError, MapId, Source};
 
 mod error;
 
@@ -284,10 +284,30 @@ pub fn map_root<'a>(schemas: &'a dyn Schemas, name: &str, project: &'a Path) -> 
     schemas.global_root(name).unwrap_or(project)
 }
 
+/// The map `name` names, if it has been created: its `map.created`
+/// among those of `events` written at the map's root.
+pub fn map_id_at<'a>(
+    schemas: &dyn Schemas,
+    name: &str,
+    events: impl IntoIterator<Item = &'a Event>,
+    project: &Path,
+) -> Result<Option<MapId>, MapError> {
+    let root = map_root(schemas, name, project);
+    super::map_id_for(name, events.into_iter().filter(|event| event.source().path == root))
+}
+
+/// A `map.created` for the map `name` names, written at its root under
+/// `source`'s name - how a map comes into being wherever it is minted.
+pub fn map_created_at(schemas: &dyn Schemas, id: MapId, name: &str, source: &Source) -> Event {
+    let root = Source {
+        name: source.name.clone(),
+        path: map_root(schemas, name, &source.path).to_path_buf(),
+    };
+    Event::map_created(id, name.to_string(), root)
+}
+
 /// Every created map `Map::fold` gives for `events`, in schema order.
-/// A schema with no `map.created` event is not a map yet. A free
-/// function, not a trait method: it takes a generic `events`
-/// parameter a dyn-safe trait cannot carry.
+/// A schema with no `map.created` event is not a map yet.
 pub fn fold_all<'a>(
     schemas: &dyn Schemas,
     events: impl IntoIterator<Item = &'a Event> + Clone,

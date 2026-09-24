@@ -372,29 +372,23 @@ pub fn chores() -> Schema {
     .expect("the chores test schema is valid")
 }
 
-/// A minimal `Schemas` fake - just the folded list, without touching a
-/// filesystem. `mapstore::SchemaCatalog` is production's implementor.
+/// A minimal `Schemas` fake - the list, and which of it is global -
+/// without touching a filesystem.
 pub struct FakeSchemas {
     schemas: Vec<Arc<Schema>>,
-    globals: BTreeMap<String, PathBuf>,
+    globals: Vec<String>,
 }
 
 impl FakeSchemas {
     pub fn new(schemas: Vec<Schema>) -> Self {
-        Self {
-            schemas: schemas.into_iter().map(Arc::new).collect(),
-            globals: BTreeMap::new(),
-        }
+        Self::with_global(schemas, &[])
     }
 
-    /// `new`, with each name in `names` marked global at `home` - a
-    /// test's stand-in for a schema `mapstore::SchemaCatalog` would have
-    /// loaded from `$HOME/.percept/schemas`.
-    pub fn with_global(schemas: Vec<Schema>, names: &[&str], home: &str) -> Self {
-        let globals = names.iter().map(|name| (name.to_string(), PathBuf::from(home))).collect();
+    /// `new`, with each name in `names` global, its map at `HOME`.
+    pub fn with_global(schemas: Vec<Schema>, names: &[&str]) -> Self {
         Self {
             schemas: schemas.into_iter().map(Arc::new).collect(),
-            globals,
+            globals: names.iter().map(|name| name.to_string()).collect(),
         }
     }
 }
@@ -405,7 +399,7 @@ impl Schemas for FakeSchemas {
     }
 
     fn global_root(&self, name: &str) -> Option<&Path> {
-        self.globals.get(name).map(PathBuf::as_path)
+        self.globals.iter().any(|global| global == name).then_some(Path::new(HOME))
     }
 }
 

@@ -154,9 +154,7 @@ fn turn_cause(checkout: &Path, root: &Path) -> Result<Option<crate::core::EventI
 }
 
 /// `$HOME`, canonicalized - `None` when it is unset or does not exist.
-/// Read once, here, and passed down to `root_for`'s walk and to every
-/// place that loads schemas, so a global schema's map is found and
-/// minted at the one root every caller agrees on.
+/// Where `root_for`'s walk stops and a global schema's map lives.
 fn home_dir() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -171,12 +169,11 @@ fn home_dir() -> Option<PathBuf> {
 /// TCC-protected Desktop, Photos and Music, so a project sitting at
 /// `$HOME` itself is not supported - work from a subdirectory. Errors
 /// when nothing is found; the caller prints it and exits. `cwd` is
-/// canonicalized first, so a symlinked home directory still stops the
-/// walk and two writers started from a symlinked path get the same
-/// root; `home` is `home_dir()`'s, already canonical. `main` passes
-/// the process's own directory, or the client's under `percept hook`,
-/// since the process's own may be anywhere the client's shell happened
-/// to start it from.
+/// canonicalized, as `home_dir` is, so a symlinked home directory
+/// still stops the walk and two writers started from a symlinked path
+/// get the same root. `main` passes the process's own directory, or
+/// the client's under `percept hook`, since the process's own may be
+/// anywhere the client's shell happened to start it from.
 fn root_for(cwd: &Path, home: Option<&Path>) -> std::io::Result<PathBuf> {
     let cwd = cwd.canonicalize()?;
     discover_root(&cwd, home).ok_or_else(|| {

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use context::{Context, Section, View, Window};
 
 use crate::core::{
-    fold_all, fold_named, map_root, Actor, Event, EventId, EventKind, HumanId, MapError, MapId,
+    fold_all, fold_named, map_created_at, map_root, Actor, Event, EventId, EventKind, HumanId, MapError, MapId,
     Payload, Schemas, Source,
 };
 
@@ -311,21 +311,19 @@ fn own_events<'a>(events: &'a [Event], source: &Source, schemas: &dyn Schemas) -
         .collect()
 }
 
-/// The maps whose `map.created` ran at one of `schemas`' own roots for
-/// `source`'s project - `source.path` for a project schema, `$HOME`
-/// for a global one, via `map_root` - a map's identity is its root's,
-/// while the events that change it may come from anywhere.
+/// The maps `source`'s project reads: each `map.created` written at its
+/// own schema's root - `source.path` for a project schema, `$HOME` for
+/// a global one. A map's identity is its root's, while the events that
+/// change it may come from anywhere.
 fn path_maps(events: &[Event], source: &Source, schemas: &dyn Schemas) -> HashSet<MapId> {
-    let roots: HashSet<&std::path::Path> = schemas
-        .folded()
-        .iter()
-        .map(|schema| map_root(schemas, schema.name(), &source.path))
-        .collect();
     events
         .iter()
-        .filter(|event| roots.contains(event.source().path.as_path()))
         .filter_map(|event| match event.payload() {
-            Payload::MapCreated { map, .. } => Some(*map),
+            Payload::MapCreated { map, schema }
+                if event.source().path == map_root(schemas, schema, &source.path) =>
+            {
+                Some(*map)
+            }
             _ => None,
         })
         .collect()
@@ -553,11 +551,7 @@ impl App {
                 .into_iter()
                 .map(|payload| match payload {
                     Payload::MapCreated { map, schema } => {
-                        let root_source = Source {
-                            name: source.name.clone(),
-                            path: map_root(schemas.as_ref(), &schema, &source.path).to_path_buf(),
-                        };
-                        Event::map_created(map, schema, root_source)
+                        map_created_at(schemas.as_ref(), map, &schema, &source)
                     }
                     payload => Event::new(Actor::Agent, source.clone(), Some(called_id), payload),
                 })

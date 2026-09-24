@@ -82,7 +82,7 @@ pub fn run(
             )
         })?;
     for (name, text) in mapstore::templates() {
-        write_schema(checkout, &name, text)?;
+        write_schema(checkout, home, &name, text)?;
     }
     let schemas = mapstore::load_schemas(checkout, home)?;
     mapstore::ensure_maps(log, &schemas, source)?;
@@ -94,12 +94,23 @@ pub fn run(
 
 /// Writes `.percept/schemas/<name>.toml` under `checkout` from `text`
 /// unless a file is already there, whatever it holds - a project's own
-/// schema is never overwritten. Prints `wrote <rel>` or `unchanged
-/// <rel>`, the same style `write_config` uses.
-fn write_schema(checkout: &Path, name: &str, text: &str) -> Result<(), Box<dyn std::error::Error>> {
+/// schema is never overwritten - or `home` declares it, since a schema
+/// is global or a project's, never both. Prints `wrote <rel>`,
+/// `unchanged <rel>`, or `global <rel>`, the same style
+/// `write_config` uses.
+fn write_schema(
+    checkout: &Path,
+    home: Option<&Path>,
+    name: &str,
+    text: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
     let rel = format!("{}/{name}.toml", mapstore::SCHEMAS_DIR);
     if checkout.join(&rel).exists() {
         println!("unchanged {rel}");
+        return Ok(());
+    }
+    if home.is_some_and(|home| home.join(&rel).exists()) {
+        println!("global {rel}");
         return Ok(());
     }
     write_new(checkout, &rel, text)

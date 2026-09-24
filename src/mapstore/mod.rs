@@ -29,8 +29,6 @@ pub use map::{
 };
 pub use render::{catalogue, heads, markdown, start};
 pub use schemas::{load as load_schemas, templates, SCHEMAS_DIR};
-#[allow(unused_imports)]
-pub use schemas::SchemaCatalog;
 
 /// Printed in place of `catalogue`'s and `start`'s usual body when a
 /// project has declared no schema at all.

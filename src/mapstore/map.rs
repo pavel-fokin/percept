@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::core::{
-    map_id_for, map_root, Actor, Change, Edge, Event, EventId, EventLog, Fragment, Map, MapError,
+    map_created_at, map_id_at, Actor, Change, Edge, Event, EventId, EventLog, Fragment, Map, MapError,
     MapId, MapReader, Mutation, Node, NodeId, Payload, Schemas, Written,
 };
 use crate::store::{ids, parse_event_id};
@@ -48,8 +48,7 @@ pub fn fold_map_at(
     path: &Path,
 ) -> Result<Map, Box<dyn std::error::Error>> {
     let schema = schemas.find(name)?;
-    let own = of_path(events, map_root(schemas, name, path));
-    let id = map_id_for(name, own)?.unwrap_or_else(MapId::new);
+    let id = map_id_at(schemas, name, events, path)?.unwrap_or_else(MapId::new);
     Ok(Map::fold(id, schema, events)?)
 }
 
@@ -61,8 +60,7 @@ pub fn fold_map_at(
 pub fn fold_all_at(schemas: &dyn Schemas, events: &[Event], path: &Path) -> Result<Vec<Map>, MapError> {
     let mut maps = Vec::new();
     for schema in schemas.folded() {
-        let own: Vec<&Event> = of_path(events, map_root(schemas, schema.name(), path)).collect();
-        let Some(id) = map_id_for(schema.name(), own.iter().copied())? else {
+        let Some(id) = map_id_at(schemas, schema.name(), events, path)? else {
             continue;
         };
         maps.push(Map::fold(id, schema.clone(), events)?);
@@ -120,18 +118,11 @@ impl Snapshot {
         events: Vec<crate::core::Event>,
     ) -> Result<(Option<Event>, Self), Box<dyn std::error::Error>> {
         let schema = schemas.find(name)?;
-        let root = map_root(schemas, name, &source.path);
-        let own = of_path(&events, root);
-        let existing = map_id_for(name, own)?;
-        let (id, created) = match existing {
+        let (id, created) = match map_id_at(schemas, name, &events, &source.path)? {
             Some(id) => (id, None),
             None => {
-                let id = crate::core::MapId::new();
-                let root_source = crate::core::Source {
-                    name: source.name.clone(),
-                    path: root.to_path_buf(),
-                };
-                (id, Some(Event::map_created(id, name.to_string(), root_source)))
+                let id = MapId::new();
+                (id, Some(map_created_at(schemas, id, name, source)))
             }
         };
         let map = Map::fold(id, schema, &events)?;
@@ -237,18 +228,8 @@ pub fn ensure_maps(
     log.append_batch_computed(Box::new(move |events| {
         let mut created = Vec::new();
         for schema in schemas.folded() {
-            let root = map_root(schemas, schema.name(), &source.path);
-            let own: Vec<&Event> = of_path(&events, root).collect();
-            if map_id_for(schema.name(), own.iter().copied())?.is_none() {
-                let root_source = crate::core::Source {
-                    name: source.name.clone(),
-                    path: root.to_path_buf(),
-                };
-                created.push(Event::map_created(
-                    crate::core::MapId::new(),
-                    schema.name().to_string(),
-                    root_source,
-                ));
+            if map_id_at(schemas, schema.name(), &events, &source.path)?.is_none() {
+                created.push(map_created_at(schemas, MapId::new(), schema.name(), &source));
             }
         }
         Ok(created)

@@ -328,3 +328,17 @@ fn running_init_twice_leaves_the_file_unchanged() {
 
     assert_eq!(first, second);
 }
+
+#[test]
+fn init_leaves_a_template_the_home_declares_globally_out_of_the_project() {
+    let fixture = Fixture::new();
+    let home = Fixture::new();
+    let (name, text) = mapstore::templates().into_iter().next().unwrap();
+    home.write(&format!(".percept/schemas/{name}.toml"), text);
+    let log = FakeLog::default();
+    let source = source_at("percept-cli", fixture.path().to_str().unwrap());
+
+    super::run(init("codex"), fixture.path(), &log, &source, Some(home.path())).unwrap();
+
+    assert!(!fixture.path().join(format!(".percept/schemas/{name}.toml")).exists());
+}
