@@ -28,7 +28,7 @@ pub use map::{
     fold_all_at, fold_map, fold_map_at, of_path, paths, properties_map, LogMaps, NodeRefArgs, Snapshot,
 };
 pub use render::{heads, markdown, start};
-pub use schemas::{load as load_schemas, templates, SCHEMAS_DIR};
+pub use schemas::{load as load_schemas, templates, GLOBAL_TEMPLATE, SCHEMAS_DIR};
 
 /// Printed in place of `start`'s usual body when a project has
 /// declared no schema at all.

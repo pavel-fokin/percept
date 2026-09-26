@@ -2,7 +2,8 @@
 //! its hooks call `percept hook <client>`, and, first, the project's
 //! schema files under `.percept/schemas/`, one per template
 //! `mapstore::templates` embeds, so a fresh checkout has a map to fold
-//! before its first session opens. Run from anywhere inside a
+//! before its first session opens. The global `projects` schema lands
+//! under `$HOME` instead, once, shared by every project. Run from anywhere inside a
 //! checkout; the files land at the checkout root `main` resolves.
 //!
 //! An existing file - a schema or the client's config - is never
@@ -85,6 +86,9 @@ pub fn run(
                 args.client
             )
         })?;
+    if let Some(home) = home {
+        write_global_schema(checkout, home)?;
+    }
     for (name, text) in mapstore::templates() {
         write_schema(checkout, home, &name, text)?;
     }
@@ -118,6 +122,24 @@ fn write_schema(
         return Ok(());
     }
     write_new(checkout, &rel, text)
+}
+
+/// Writes `mapstore::GLOBAL_TEMPLATE` under `home` unless a file is
+/// already there - never overwritten - or the checkout declares the
+/// same schema, which a global one would clash with. Prints `wrote
+/// ~/<rel>` or `unchanged ~/<rel>`.
+fn write_global_schema(checkout: &Path, home: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let (name, text) = mapstore::GLOBAL_TEMPLATE;
+    let rel = format!("{}/{name}.toml", mapstore::SCHEMAS_DIR);
+    if home.join(&rel).exists() || checkout.join(&rel).exists() {
+        println!("unchanged ~/{rel}");
+        return Ok(());
+    }
+    let path = home.join(&rel);
+    fs::create_dir_all(home.join(mapstore::SCHEMAS_DIR))?;
+    fs::write(&path, text)?;
+    println!("wrote ~/{rel}");
+    Ok(())
 }
 
 /// Writes `text` to `checkout/rel`, creating its directory, and prints

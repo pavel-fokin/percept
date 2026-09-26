@@ -34,6 +34,11 @@ pub fn templates() -> Vec<(String, &'static str)> {
         .collect()
 }
 
+/// The global schema template `percept init <client>` writes under
+/// `$HOME`, as `(<name>, <text>)`. It sits in `schemas/global/`, out of
+/// `build.rs`'s reach, so `templates` never copies it into a project.
+pub const GLOBAL_TEMPLATE: (&str, &str) = ("projects", include_str!("schemas/global/projects.toml"));
+
 /// Where a project's schema files live, under the project root
 /// `checkout_root` finds - what `load` reads and `init` writes.
 pub const SCHEMAS_DIR: &str = ".percept/schemas";

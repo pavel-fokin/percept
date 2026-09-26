@@ -1,0 +1,12 @@
+# The projects map: every project this machine works on, one node
+# each, shared by all of them. It lets a session in one project name
+# another and find where it lives.
+#
+# `root` is the project's checkout root, as a path. `about` says in
+# one line what the project is.
+
+purpose = "the projects on this machine, where each lives, and what each is"
+
+[nodes.project]
+root = ""
+about = ""
