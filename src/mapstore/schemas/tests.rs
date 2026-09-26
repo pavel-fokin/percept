@@ -248,7 +248,7 @@ fn a_global_schema_folds_before_a_project_schema() {
     );
     project.write(
         ".percept/schemas/aaa.toml",
-        "purpose = \"p\"\n\n[nodes.term]\n",
+        "purpose = \"p\"\n\n[nodes.item]\n",
     );
 
     let schemas = load(project.path(), Some(home.path())).unwrap();
@@ -267,7 +267,7 @@ fn a_global_schemas_root_is_home_a_project_schemas_is_none() {
     );
     project.write(
         ".percept/schemas/tasks.toml",
-        "purpose = \"p\"\n\n[nodes.term]\n",
+        "purpose = \"p\"\n\n[nodes.chore]\n",
     );
 
     let schemas = load(project.path(), Some(home.path())).unwrap();
@@ -307,4 +307,16 @@ fn a_rules_table_left_from_an_older_schema_is_refused() {
 
     assert!(err.contains("glossary.toml"), "{err}");
     assert!(err.contains("rules"), "{err}");
+}
+
+#[test]
+fn a_node_kind_a_global_schema_declares_is_refused_in_a_project_schema() {
+    let home = Fixture::new();
+    let project = Fixture::new();
+    home.write(".percept/schemas/ideas.toml", "purpose = \"p\"\n\n[nodes.concept]\n");
+    project.write(".percept/schemas/concepts.toml", "purpose = \"p\"\n\n[nodes.concept]\n");
+
+    let err = load(project.path(), Some(home.path())).err().unwrap().to_string();
+
+    assert!(err.starts_with("ideas.toml and concepts.toml both declare node kind \"concept\""), "{err}");
 }
