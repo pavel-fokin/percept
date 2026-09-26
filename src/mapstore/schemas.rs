@@ -121,7 +121,9 @@ pub fn load(project: &Path, home: Option<&Path>) -> Result<SchemaCatalog, Box<dy
         Some(home) => project_files(home)?,
         None => Vec::new(),
     };
-    let own_files = project_files(project)?;
+    // At `$HOME` itself there is no project level: its files are the
+    // global ones, already read.
+    let own_files = if home == Some(project) { Vec::new() } else { project_files(project)? };
     if let (Some(home), Some((stem, _))) = (
         home,
         global_files.iter().find(|(stem, _)| own_files.iter().any(|(other, _)| other == stem)),

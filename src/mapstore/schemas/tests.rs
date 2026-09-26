@@ -320,3 +320,15 @@ fn a_node_kind_a_global_schema_declares_is_refused_in_a_project_schema() {
 
     assert!(err.starts_with("ideas.toml and concepts.toml both declare node kind \"concept\""), "{err}");
 }
+
+#[test]
+fn at_home_itself_every_schema_is_global() {
+    let home = Fixture::new();
+    home.write(".percept/schemas/projects.toml", "purpose = \"p\"\n\n[nodes.project]\n");
+
+    let schemas = load(home.path(), Some(home.path())).unwrap();
+
+    let names: Vec<&str> = schemas.folded().iter().map(|s| s.name()).collect();
+    assert_eq!(names, ["projects"]);
+    assert_eq!(schemas.global_root("projects"), Some(home.path()));
+}

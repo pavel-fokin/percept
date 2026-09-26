@@ -163,12 +163,13 @@ fn home_dir() -> Option<PathBuf> {
 
 /// The checkout `cwd` is in: the first ancestor of it
 /// holding a `.git` or `.percept` entry - a repository, or a directory
-/// percept has already rendered maps into. The search stops at `home`
-/// and at the filesystem root without matching either: walking a home
-/// directory scans every project under it, and on macOS the
-/// TCC-protected Desktop, Photos and Music, so a project sitting at
-/// `$HOME` itself is not supported - work from a subdirectory. Errors
-/// when nothing is found; the caller prints it and exits. `cwd` is
+/// percept has already rendered maps into. The search stops at `home`,
+/// which is then the root itself: the outer level, where the global
+/// maps live, never a project - a marker at `$HOME` is ignored, since
+/// walking a home directory scans every project under it, and on macOS
+/// the TCC-protected Desktop, Photos and Music. Errors when the walk
+/// reaches the filesystem root with neither; the caller prints it and
+/// exits. `cwd` is
 /// canonicalized, as `home_dir` is, so a symlinked home directory
 /// still stops the walk and two writers started from a symlinked path
 /// get the same root. `main` passes the process's own directory, or
@@ -190,13 +191,13 @@ fn root_for(cwd: &Path, home: Option<&Path>) -> std::io::Result<PathBuf> {
 
 /// The walk `root_for` runs, split out so it takes cwd and `$HOME`
 /// as arguments; both are already canonical, so an ancestor reached
-/// through `parent()` is too. `None` when the search reaches `home` or
-/// the filesystem root before a marker.
+/// through `parent()` is too. `home` itself when the search reaches it
+/// before a marker; `None` when it reaches the filesystem root.
 fn discover_root(cwd: &Path, home: Option<&Path>) -> Option<PathBuf> {
     let mut dir = cwd;
     loop {
         if home == Some(dir) {
-            return None;
+            return Some(dir.to_path_buf());
         }
         if dir.join(".git").exists() || dir.join(".percept").exists() {
             return Some(dir.to_path_buf());
@@ -229,6 +230,18 @@ fn project_of(checkout: &Path) -> PathBuf {
         .unwrap_or_else(|| checkout.to_path_buf())
 }
 
+/// Whether `command` works on a checkout - its files or its config -
+/// and so has nothing to work on at `$HOME`, where the root is the
+/// home level itself.
+fn needs_project(command: &Option<Command>) -> bool {
+    match command {
+        Some(Command::Init(_)) => true,
+        #[cfg(feature = "lab")]
+        Some(Command::Ask(_) | Command::Code) => true,
+        _ => false,
+    }
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let cli = Cli::parse();
@@ -259,6 +272,10 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    if home.as_deref() == Some(checkout.as_path()) && needs_project(&cli.command) {
+        eprintln!("percept: {} is the home level, not a project; run this inside one", checkout.display());
+        std::process::exit(1);
+    }
     let root = project_of(&checkout);
     let cli_source = crate::core::Source {
         name: CLI_SOURCE_NAME.to_string(),
