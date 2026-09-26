@@ -374,7 +374,7 @@ pub fn find_event(
 
 /// One event by its wire id, as `encode` prints it, or with `content`
 /// sliced to `start..end` when either bound is given - the one path
-/// both the `read_event` tool and `events show` take, so an unknown id
+/// both the `read_event` tool and `show` take, so an unknown id
 /// or a range reads the same from a shell and from the model.
 pub fn read_event(
     log: &dyn crate::core::EventLog,

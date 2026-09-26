@@ -1,7 +1,6 @@
-//! A map's Markdown: `markdown` renders one map, `catalogue` a
-//! summary of several, `start` the start screen - the text powering
-//! `maps show`, `maps list`, and a bare `percept`, which a coding
-//! client's session also opens on.
+//! A map's Markdown: `markdown` renders one map, `start` the start
+//! screen - the text powering `show` and a bare `percept`, which a
+//! coding client's session also opens on.
 
 use std::collections::HashSet;
 use std::fmt::Write as _;
@@ -96,61 +95,10 @@ fn mixed_authors(map: &Map) -> bool {
     map.nodes().iter().any(agent) && !map.nodes().iter().all(agent)
 }
 
-/// `maps list`: one `##` section per map, in the order the
-/// caller folded them. Each names the map's purpose and size, lists its
-/// node and edge kinds, and shows one real node line and one real edge
-/// line so a reader sees the shape the JSONL takes and how an edge
-/// names its ends (`kind:name`). `maps` empty - a project with no
-/// schema declared - prints the header and `super::NO_SCHEMAS_HINT`
-/// alone.
-pub fn catalogue(maps: &[Map]) -> String {
-    if maps.is_empty() {
-        return format!("# maps\n\n{}\n", super::NO_SCHEMAS_HINT);
-    }
-
-    let mut out = String::from(
-        "# maps\n\nEvery map percept knows: what it makes cheap, how big it is, \
-         its node and edge kinds, and one line from it.\n",
-    );
-    for map in maps {
-        let schema = map.schema();
-        let _ = write!(
-            out,
-            "\n## {}\n\n{}\n\n{} nodes, {} edges.\n",
-            schema.name(),
-            schema.purpose(),
-            map.nodes().len(),
-            map.edges().len()
-        );
-        push_kind_labels(&mut out, "Node kinds", schema.node_kinds().iter().map(NodeKind::label));
-        push_kind_labels(&mut out, "Edge kinds", schema.edge_kinds().iter().map(EdgeKind::label));
-        push_example(&mut out, map);
-    }
-    out
-}
-
 fn push_kind_labels(out: &mut String, heading: &str, labels: impl Iterator<Item = String>) {
     let _ = write!(out, "\n{heading}:\n");
     for label in labels {
         let _ = writeln!(out, "- {label}");
-    }
-}
-
-/// The map's first node line and first edge line, verbatim JSONL, under
-/// an `Example` heading - or a note when the map holds none yet.
-fn push_example(out: &mut String, map: &Map) {
-    let node = map.nodes().first();
-    let edge = map.edges().first();
-    if node.is_none() && edge.is_none() {
-        out.push_str("\nExample: nothing recorded here yet.\n");
-        return;
-    }
-    out.push_str("\nExample node and edge:\n\n");
-    if let Some(node) = node {
-        let _ = writeln!(out, "    {}", super::map::encode_node(map, node, true));
-    }
-    if let Some(edge) = edge {
-        let _ = writeln!(out, "    {}", super::map::encode_edge(map, edge, true));
     }
 }
 

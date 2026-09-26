@@ -44,10 +44,11 @@ struct Client {
 /// The `Bash` patterns `percept init claude-code` allows without
 /// asking, so a session can read the log and its maps, and write to
 /// them, on its own.
-const CLAUDE_ALLOW: [&str; 4] = [
+const CLAUDE_ALLOW: [&str; 5] = [
     "Bash(percept add *)",
     "Bash(percept remove *)",
-    "Bash(percept maps *)",
+    "Bash(percept change *)",
+    "Bash(percept show *)",
     "Bash(percept events *)",
 ];
 

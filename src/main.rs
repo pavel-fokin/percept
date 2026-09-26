@@ -26,7 +26,7 @@ mod tools;
 mod tui;
 mod workspace;
 
-use cli::{Cli, Command, EventsCommand, MapsCommand};
+use cli::{Cli, Command, EventsCommand};
 use store::{turn_dir, Jsonl, TurnState};
 
 /// Names the directory percept keeps its state in - the event log, and
@@ -271,21 +271,6 @@ async fn main() {
             let me = log.me();
             match command {
                 EventsCommand::Search(args) => cli::search(args, &log, me),
-                EventsCommand::Show(args) => cli::show(args, &log),
-            }
-        }),
-        Some(Command::Maps { command }) => mapstore::load_schemas(&checkout, home.as_deref()).and_then(|schemas| {
-            let log = open_log(&checkout)?;
-            let me = log.me();
-            // Read by the write command only: a read never opens the
-            // turn directory.
-            let cause = || turn_cause(&checkout, &root);
-            match command {
-                MapsCommand::List(args) => cli::maps_list(args, &log, &schemas, &root),
-                MapsCommand::Show(args) => cli::maps_show(args, &log, &schemas, &root),
-                MapsCommand::ChangeNode(args) => {
-                    cli::maps_change_node(args, &log, &schemas, &cli_source, me, cause()?)
-                }
             }
         }),
         Some(Command::Add(args)) => mapstore::load_schemas(&checkout, home.as_deref()).and_then(|schemas| {
@@ -299,6 +284,16 @@ async fn main() {
             let me = log.me();
             let cause = turn_cause(&checkout, &root)?;
             cli::remove(args, &log, &schemas, &cli_source, me, cause)
+        }),
+        Some(Command::Change(args)) => mapstore::load_schemas(&checkout, home.as_deref()).and_then(|schemas| {
+            let log = open_log(&checkout)?;
+            let me = log.me();
+            let cause = turn_cause(&checkout, &root)?;
+            cli::change(args, &log, &schemas, &cli_source, me, cause)
+        }),
+        Some(Command::Show(args)) => mapstore::load_schemas(&checkout, home.as_deref()).and_then(|schemas| {
+            let log = open_log(&checkout)?;
+            cli::show(args, &log, &schemas, &root)
         }),
         #[cfg(feature = "lab")]
         Some(Command::Ask(args)) => {

@@ -1,9 +1,9 @@
 //! The command-line surface: `percept events search` queries the log,
-//! `percept events show` dereferences one event by id, `percept maps`
-//! folds a cognitive map from the log and prints it, `percept add` and
-//! `percept remove` write a node or an edge with no map name - the
-//! kind resolves it - `percept ask` runs one full turn -
-//! including the tool loop - and prints the reply, `percept hook
+//! `percept add` and `percept remove` write a node or an edge with no
+//! map name - the kind resolves it - `percept change` changes a node
+//! already in a map, `percept show` reads a map, a node, or an event,
+//! resolved by the shape of its argument, `percept ask` runs one full
+//! turn - including the tool loop - and prints the reply, `percept hook
 //! <client>` records one coding client's turn from
 //! the hook JSON it reads on stdin - see `hook` - and `percept init
 //! <client>` writes that client's project config so its hooks call
@@ -13,11 +13,11 @@
 //! same `AppService` turn policy `tui` does, just inline instead of over
 //! a channel.
 //!
-//! `search` and `show` are the query primitive a model composes with:
-//! every line is JSONL, for a caller piping into `jq`, never a table or
-//! prose. `search`'s default line shortens long strings in the payload,
-//! so a caller spends tokens on the whole of one deliberately, via
-//! `--full`, `show`, or `show --range` into one `content`.
+//! `events search` and `show` are the query primitive a model composes
+//! with: every line is JSONL, for a caller piping into `jq`, never a
+//! table or prose. `search`'s default line shortens long strings in the
+//! payload, so a caller spends tokens on the whole of one deliberately,
+//! via `--full`, `show`, or `show --range` into one `content`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Read, Write};
@@ -60,10 +60,10 @@ leave relevance to the caller.
 
 A bare `percept` prints the start screen: how to record, then this \
 project's maps whole - the same text a coding client reads when its \
-session opens. `events search` and `events show` query the log, `maps \
-list` and `maps show` print a cognitive map folded from it, `add` and \
+session opens. `events search` queries the log; `show` reads a map, a \
+node, or an event, resolved by the shape of its argument; `add` and \
 `remove` write a node or an edge with no map name - the kind resolves \
-it - and `maps change-node` changes one already there, `hook <client>` \
+it - and `change` changes one already there; `hook <client>` \
 records one coding client's turn from the hook JSON it reads on stdin, \
 and `init <client>` writes that client's project config to call it.")]
 pub struct Cli {
@@ -78,16 +78,21 @@ pub enum Command {
         #[command(subcommand)]
         command: EventsCommand,
     },
-    /// Read percept's maps - the cognitive ones folded from the log.
-    Maps {
-        #[command(subcommand)]
-        command: MapsCommand,
-    },
     /// Add a node or an edge - a document on stdin for several at once.
     /// The kind names the map; no write names one.
     Add(AddArgs),
     /// Remove a node or an edge - the inverse of `add`.
     Remove(RemoveArgs),
+    /// Change a node already in a map - a rename, a property, or both.
+    /// Every change is subject to the rank rule a removal has: a node
+    /// the user wrote, or last changed, takes no change from an agent.
+    /// Prints the node's short id and the map it landed in.
+    Change(ChangeArgs),
+    /// Read a map, a node, or an event, resolved by the shape of the
+    /// argument: a uuid is an event, a short id or `kind:name` a node
+    /// and its neighbours, anything else a map's name; with none, every
+    /// map, one line each.
+    Show(ShowArgs),
     /// Run one turn headlessly and print the reply.
     #[cfg(feature = "lab")]
     Ask(AskArgs),
@@ -104,81 +109,6 @@ pub enum Command {
     /// Open percept in a browser: an HTTP server on `127.0.0.1` serving
     /// the embedded page, until the process is killed.
     Web,
-}
-
-#[derive(Subcommand)]
-pub enum MapsCommand {
-    /// Every map with its purpose, size, and kinds; `--json` for one
-    /// object per line.
-    List(ListMapsArgs),
-    /// One map as Markdown; `--json` for its nodes, then its edges, one
-    /// object per line.
-    Show(ShowMapArgs),
-    /// Change a node already in a map - a rename, a property, or both.
-    /// Every change is subject to the rank rule a removal has: a node
-    /// the user wrote, or last changed, takes no change from an agent.
-    /// Prints the node's id.
-    ChangeNode(ChangeNodeArgs),
-}
-
-#[derive(Args)]
-pub struct ShowMapArgs {
-    /// The map's name, as `maps list` prints it.
-    map: String,
-    /// Print one JSON object per line - map, then node, then edge -
-    /// instead of the default Markdown.
-    #[arg(long)]
-    json: bool,
-    /// Repeatable. Keep only nodes of any of these kinds, and the edges
-    /// between them.
-    #[arg(long)]
-    kind: Vec<String>,
-    /// `kind:name` of a node, or the short id its map shows it as,
-    /// `d41`. Keep only it and its neighbourhood, reached along edges
-    /// in either direction.
-    #[arg(long, value_parser = non_blank)]
-    around: Option<String>,
-    /// How many edges out `--around` reaches; 0 is the node alone.
-    #[arg(long, default_value_t = 1, requires = "around")]
-    depth: usize,
-    /// Keep only what the map gained since this instant - an ISO-8601
-    /// timestamp, or `<N>d`, `<N>h`, `<N>m` back from now: the nodes
-    /// added since, and the ends of the edges added since.
-    #[arg(long, value_parser = |s: &str| moment("since", s))]
-    since: Option<Timestamp>,
-    /// Fold every path's events instead of only this one's, printing
-    /// one map per path. A node named with `--around` lives in one
-    /// path's map, so the two do not combine.
-    #[arg(long, conflicts_with = "around")]
-    all_paths: bool,
-}
-
-#[derive(Args)]
-pub struct ListMapsArgs {
-    /// Fold every path's events instead of only this one's, printing
-    /// one map per path.
-    #[arg(long)]
-    all_paths: bool,
-    /// Print one JSON object per line instead of the default Markdown
-    /// table.
-    #[arg(long)]
-    json: bool,
-}
-
-/// What every map change names: the map, and the events it was drawn
-/// from.
-#[derive(Args)]
-pub struct MapArgs {
-    /// The map's name, as `maps list` prints it.
-    map: String,
-    /// Repeatable. An event this fact was drawn from.
-    #[arg(long)]
-    source: Vec<String>,
-    /// Who is writing: `human` for a person at the terminal, `agent`
-    /// for a model recording on their behalf. The map shows the
-    /// difference.
-    #[arg(long, default_value = "human", value_parser = parse_actor_word)]
-    actor: String,
 }
 
 /// Checks `s` names an actor `store::parse_actor` knows, without
@@ -229,6 +159,22 @@ Examples:
   # An edge
   percept remove covers c1 c3")]
 pub struct RemoveArgs {
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<String>,
+}
+
+/// `percept change <node> ...`'s whole tail, taken raw the same way
+/// `AddArgs` is: the node to change, a short id or `kind:name`, then
+/// `--name` for a rename and a flag per property to set - see `change`.
+#[derive(Args)]
+#[command(after_help = "\
+Examples:
+  # A rename
+  percept change c3 --name \"Undo\"
+
+  # A property
+  percept change c3 --definition \"...; undo puts it back\"")]
+pub struct ChangeArgs {
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     args: Vec<String>,
 }
@@ -329,13 +275,26 @@ fn level_label(schemas: &dyn Schemas, map: &str) -> &'static str {
     }
 }
 
+/// `map` and the level its root names - `concepts (project)` - what a
+/// written node's line names beside its short id.
+fn map_level_label(schemas: &dyn Schemas, map: &str) -> String {
+    format!("{map} ({})", level_label(schemas, map))
+}
+
 /// The line a written node prints: its short id, then the map it
 /// landed in and the level its root names - `c3  concepts (project)`.
-/// What `add`'s node form prints alone, and what `add`'s document form
-/// prints ahead of each node line, so a reader always learns which map
-/// a bare kind resolved to.
+/// What `add`'s and `change`'s node forms print alone.
 fn node_written_line(schemas: &dyn Schemas, map: &str, short_id: &str) -> String {
-    format!("{short_id}  {map} ({})", level_label(schemas, map))
+    format!("{short_id}  {}", map_level_label(schemas, map))
+}
+
+/// The line `add`'s document form prints per node: the short id, the
+/// kind, and the quoted name, then the map it landed in and the level
+/// its root names - `c3 concept "Doc"  concepts (project)` - so a
+/// reader meets what the node is before which map a bare kind resolved
+/// to.
+fn document_node_line(schemas: &dyn Schemas, map: &str, short_id: &str, kind: &str, name: &str) -> String {
+    format!("{short_id} {kind} {}  {}", quote(name), map_level_label(schemas, map))
 }
 
 /// The error `add`/`remove` give a word no schema declares as a node
@@ -354,6 +313,13 @@ fn unknown_kind(schemas: &dyn Schemas, kind: &str) -> Box<dyn std::error::Error>
     format!("no map declares {kind:?}; kinds are {}", kinds.join(", ")).into()
 }
 
+/// The error `change`/`add`/`remove`'s edge form give a ref that
+/// resolves to no schema: a `kind:name` naming an unknown kind, or a
+/// short id no schema's prefix claims.
+fn unknown_node_ref(ref_: &str) -> Box<dyn std::error::Error> {
+    format!("{ref_:?} names no node kind or short id prefix any schema declares").into()
+}
+
 /// The one schema `from` and `to` both resolve to - by `kind:name` or
 /// by the short id each takes, via `schema_of_ref` - or the refusal an
 /// edge across two maps gives, naming both. What `add`/`remove` find
@@ -364,11 +330,8 @@ fn resolve_edge_map(
     from: &str,
     to: &str,
 ) -> Result<Arc<Schema>, Box<dyn std::error::Error>> {
-    let unknown = |ref_: &str| -> Box<dyn std::error::Error> {
-        format!("{ref_:?} names no node kind or short id prefix any schema declares").into()
-    };
-    let from_schema = schema_of_ref(schemas, from).ok_or_else(|| unknown(from))?;
-    let to_schema = schema_of_ref(schemas, to).ok_or_else(|| unknown(to))?;
+    let from_schema = schema_of_ref(schemas, from).ok_or_else(|| unknown_node_ref(from))?;
+    let to_schema = schema_of_ref(schemas, to).ok_or_else(|| unknown_node_ref(to))?;
     if from_schema.name() != to_schema.name() {
         return Err(format!(
             "{from:?} is in map {:?} but {to:?} is in map {:?}; an edge stays inside one map",
@@ -380,28 +343,10 @@ fn resolve_edge_map(
     Ok(from_schema)
 }
 
-#[derive(Args)]
-pub struct ChangeNodeArgs {
-    #[command(flatten)]
-    target: MapArgs,
-    /// `kind:name` of the node to change, or the short id its map
-    /// shows it as, `d41`.
-    #[arg(long, value_parser = non_blank)]
-    node: String,
-    /// A new name for the node.
-    #[arg(long)]
-    name: Option<String>,
-    /// Repeatable `key=value`.
-    #[arg(long = "prop", value_parser = parse_prop)]
-    prop: Vec<(String, String)>,
-}
-
 #[derive(Subcommand)]
 pub enum EventsCommand {
     /// Search events, one JSON object per line, oldest first.
     Search(SearchArgs),
-    /// Print one event by id.
-    Show(ShowArgs),
 }
 
 #[derive(Args, Default)]
@@ -458,13 +403,48 @@ pub struct SearchArgs {
     full: bool,
 }
 
-#[derive(Args)]
+/// `percept show [<arg>]` - resolved by the shape of `arg`, when there
+/// is one: a uuid an event, a short id or `kind:name` a node, anything
+/// else a map's name. With none, every map. Every flag below applies to
+/// some forms and not others - see `show` - and is refused, naming
+/// itself, on a form it doesn't fit.
+#[derive(Args, Default)]
+#[command(after_help = "\
+Examples:
+  # Every map, one line each
+  percept show
+
+  # A map whole
+  percept show concepts
+
+  # A node and its neighbours
+  percept show c3
+
+  # An event by id
+  percept show 018f2e1a-2b3c-7d4e-9f5a-6b7c8d9e0f1a")]
 pub struct ShowArgs {
-    id: String,
+    /// A uuid, a short id or `kind:name`, or a map's name.
+    arg: Option<String>,
+    /// Print one JSON object per line instead of the default Markdown -
+    /// a map or a node form only.
+    #[arg(long)]
+    json: bool,
+    /// Repeatable. Keep only nodes of any of these kinds, and the edges
+    /// between them - a map or a node form only.
+    #[arg(long)]
+    kind: Vec<String>,
+    /// How many edges out a node's neighbourhood reaches; 1 by default -
+    /// a node form only.
+    #[arg(long)]
+    depth: Option<usize>,
+    /// Keep only what the map gained since this instant - an ISO-8601
+    /// timestamp, or `<N>d`, `<N>h`, `<N>m` back from now - a map or a
+    /// node form only.
+    #[arg(long, value_parser = |s: &str| moment("since", s))]
+    since: Option<Timestamp>,
     /// A character range `START:END` into `payload.content`, `END`
     /// exclusive; omit `START` to begin at 0 and `END` to reach the end
-    /// of `content`, e.g. `400:`. Only event kinds that carry `content`
-    /// support a range.
+    /// of `content`, e.g. `400:` - an event form only.
     #[arg(long, value_parser = parse_range)]
     range: Option<(Option<usize>, Option<usize>)>,
 }
@@ -503,15 +483,6 @@ pub(crate) fn non_blank(s: &str) -> Result<String, String> {
         return Err("must not be blank".to_string());
     }
     Ok(s.to_string())
-}
-
-/// Parses `--prop key=value`, split on the first `=` so a value may
-/// carry one itself.
-fn parse_prop(s: &str) -> Result<(String, String), String> {
-    let (key, value) = s
-        .split_once('=')
-        .ok_or_else(|| format!("invalid --prop {s:?}, expected key=value"))?;
-    Ok((non_blank(key)?, value.to_string()))
 }
 
 /// `s` - `kind:name`, or the short id `map`'s own render shows it as -
@@ -652,35 +623,6 @@ fn print_text(text: &str) -> Result<(), Box<dyn std::error::Error>> {
     out.flush().or_else(stop_if_pipe_closed)
 }
 
-/// Runs `print` for each path `maps list` and `maps show` fold over:
-/// only `root` by default; with `--all-paths`, every distinct path in
-/// `events`, each under a marker naming it - a `path <path>` line in
-/// Markdown, a `{"path": ...}` line in JSON - since the maps of two
-/// paths look alike, short ids included.
-fn per_path(
-    all_paths: bool,
-    json: bool,
-    root: &Path,
-    events: &[crate::core::Event],
-    mut print: impl FnMut(&Path) -> Result<(), Box<dyn std::error::Error>>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if !all_paths {
-        return print(root);
-    }
-    for (i, path) in mapstore::paths(events).iter().enumerate() {
-        let marker = if json {
-            format!("{}\n", serde_json::json!({ "path": path }))
-        } else if i == 0 {
-            format!("path {}\n\n", path.display())
-        } else {
-            format!("\npath {}\n\n", path.display())
-        };
-        print_text(&marker)?;
-        print(path)?;
-    }
-    Ok(())
-}
-
 /// A bare `percept`: prints `start_text`.
 pub fn start(log: &dyn EventLog, schemas: &dyn Schemas, project: &Path) -> Result<(), Box<dyn std::error::Error>> {
     print_text(&start_text(log, schemas, project)?)
@@ -695,102 +637,12 @@ pub fn start_text(log: &dyn EventLog, schemas: &dyn Schemas, project: &Path) -> 
     Ok(mapstore::start(schemas, &maps))
 }
 
-/// Prints every map percept knows with its size: the log's maps, folded
-/// from one read of `log` at `project`'s path, or at every path with
-/// `--all-paths`.
-pub fn maps_list(
-    args: ListMapsArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    project: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let events = log.load()?;
-    per_path(args.all_paths, args.json, project, &events, |path| {
-        let maps = mapstore::fold_all_at(schemas, &events, path)?;
-        if args.json {
-            print_lines(maps.iter().map(mapstore::encode_map))
-        } else {
-            print_text(&mapstore::catalogue(&maps))
-        }
-    })
-}
-
-/// Prints the map `args.map` names, nodes then edges. `--around` cuts
-/// it to a neighbourhood first, then `--kind` cuts that to its kinds,
-/// so a node of another kind still counts as a step on the way.
-pub fn maps_show(
-    args: ShowMapArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    root: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let events = log.load()?;
-    per_path(args.all_paths, args.json, root, &events, |path| {
-        print_map(mapstore::fold_map_at(schemas, &args.map, &events, path)?, &args)
-    })
-}
-
-/// `maps_show`'s tail: cut `map` to `args`'s filters, then print it
-/// nodes-then-edges. `--since` runs after `--around`, so it reads as
-/// "what changed near this node".
-fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
-    // An empty map has nothing to resolve `--around` against - `select`'s
-    // own empty-map case skips it anyway, so a node named on one is not
-    // an error to report over "nothing recorded yet".
-    let around = if map.nodes().is_empty() {
-        None
-    } else {
-        args.around
-            .as_deref()
-            .map(|s| resolve_ref(&map, s))
-            .transpose()?
-    };
-    let selection = crate::core::Selection {
-        around: around.as_ref().map(|node| (node, args.depth)),
-        since: args.since,
-        kinds: &args.kind,
-        ..crate::core::Selection::default()
-    };
-    let fragment = map.select(&selection)?;
-    if !selection.is_whole() {
-        eprintln!("{}", mapstore::encode_fragment(&fragment));
-    }
-    if args.json {
-        print_lines(mapstore::encode_lines(fragment.map(), true))
-    } else {
-        print_text(&mapstore::markdown(fragment.map()))
-    }
-}
-
-/// One map change from the shell: `target`'s cited events resolved and
-/// `mutation` checked, applied, and committed as `target.actor`
-/// (`human` by default), caused by `cause`, all under `mapstore::commit`'s
-/// one lock. `me` resolves `human`/`user` to this log's own `HumanId`.
-/// Returns the payload, for `add-node` to print the minted id.
-fn write(
-    target: MapArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
-    mutation: impl FnOnce(Vec<EventId>) -> Mutation,
-) -> Result<Payload, Box<dyn std::error::Error>> {
-    let MapArgs {
-        map,
-        source: cited,
-        actor,
-    } = target;
-    let actor = store::parse_actor(&actor, me)?;
-    let event = mapstore::commit(log, schemas, &map, source, &cited, actor, cause, mutation)?;
-    Ok(event.payload().clone())
-}
-
-/// One write under `map`'s name, with no `MapArgs` to carry it:
+/// One write under `map`'s name, with no map name in the arguments:
 /// `write.actor` parsed against `me`, `write.source` resolved and
 /// threaded to `mutation`, caused by `write.causation` when given, else
-/// `default_cause` - `write`'s shape for `add` and `remove`, which
-/// resolve the map from the kind rather than reading it off a flag.
+/// `default_cause` - `commit_write`'s shape for `add`, `remove`, and
+/// `change`, which resolve the map from a node's schema rather than
+/// reading it off a flag.
 #[allow(clippy::too_many_arguments)]
 fn commit_write(
     map: &str,
@@ -998,35 +850,39 @@ fn remove_edge(
     .map(drop)
 }
 
-/// Changes a node already in a map - a rename, a property, or both -
-/// and prints the event id, the way `maps add-node` prints the node it
-/// minted.
-pub fn maps_change_node(
-    args: ChangeNodeArgs,
+/// `percept change <node> --name "<new>" --<property> "<value>" ...` -
+/// a rename, a property, or both, on a node already in a map, its map
+/// resolved from `node` through `schema_of_ref`, with no map name in
+/// the command. Same rank rule `remove` has: a node the user wrote, or
+/// last changed, takes no change from an agent. Prints the node's
+/// short id, its map, and the level - see `node_written_line`.
+pub fn change(
+    args: ChangeArgs,
     log: &dyn EventLog,
     schemas: &dyn Schemas,
     source: &crate::core::Source,
     me: Option<crate::core::HumanId>,
     cause: Option<EventId>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let ChangeNodeArgs {
-        target,
-        node,
-        name,
-        prop,
-    } = args;
-    let snapshot = map_for(schemas, &target.map, source, log)?;
-    let node = resolve_ref(snapshot.map(), &node)?;
-    let payload = write(target, log, schemas, source, me, cause, |sources| {
-        Mutation::ChangeNode {
-            node,
-            name,
-            properties: prop.into_iter().collect::<BTreeMap<_, _>>(),
-            sources,
-        }
+    let (positionals, write, mut properties) = parse_write_args(args.args)?;
+    let Some(node_ref) = positionals.first().cloned() else {
+        return Err("expected `<node> --name \"<new>\" --<property> \"<value>\" ...`".into());
+    };
+    if positionals.len() != 1 {
+        return Err(format!("expected `change {node_ref} ...` with no other positional").into());
+    }
+    let name = properties.remove("name");
+    let schema = schema_of_ref(schemas, &node_ref).ok_or_else(|| unknown_node_ref(&node_ref))?;
+    let map = schema.name().to_string();
+    let snapshot = map_for(schemas, &map, source, log)?;
+    let node = resolve_ref(snapshot.map(), &node_ref)?;
+    let payload = commit_write(&map, &write, log, schemas, source, me, cause, |sources| {
+        Mutation::ChangeNode { node, name, properties, sources }
     })?;
     if let Payload::NodeChanged { node, .. } = &payload {
-        println!("{}", node.as_uuid());
+        let folded = mapstore::fold_map(log, schemas, &map, &source.path)?;
+        let short_id = folded.short_id(*node).unwrap_or_default();
+        println!("{}", node_written_line(schemas, &map, &short_id));
     }
     Ok(())
 }
@@ -1409,8 +1265,7 @@ fn record_document(
             )),
             Payload::NodeAdded { node, kind, name, .. } => {
                 let short_id = map.short_id(*node).unwrap_or_default();
-                let line = node_written_line(schemas, &map_name, &short_id);
-                node_lines.push(format!("{line} {kind} {}", quote(name)));
+                node_lines.push(document_node_line(schemas, &map_name, &short_id, kind, name));
             }
             Payload::NodeChanged { node, name, .. } => {
                 let short_id = map.short_id(*node).unwrap_or_default();
@@ -1487,14 +1342,177 @@ fn parse_query(args: &SearchArgs, me: Option<crate::core::HumanId>) -> Result<Ev
     Ok(query)
 }
 
-/// Prints the one event `args.id` names. An id the log doesn't carry
-/// fails loudly rather than printing nothing, so an empty result never
-/// means "your id was wrong". With `--range`, prints `payload.content`
-/// sliced to it instead of the whole event.
-pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
+/// One map's summary line: its level, name, purpose, and size. What a
+/// bare `percept show` lists, one per schema, in `Schemas::folded`'s
+/// order - global maps first. A schema with no map yet still gets its
+/// line, sized zero: `fold_map_at` folds it against a placeholder
+/// identity nothing else refers to.
+fn map_summary_line(
+    schemas: &dyn Schemas,
+    schema: &Schema,
+    events: &[Event],
+    project: &Path,
+    json: bool,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let map = mapstore::fold_map_at(schemas, schema.name(), events, project)?;
+    let level = level_label(schemas, schema.name());
+    Ok(if json {
+        let mut line: serde_json::Value =
+            serde_json::from_str(&mapstore::encode_map(&map)).expect("encode_map produces JSON");
+        line["level"] = serde_json::Value::String(level.to_string());
+        line.to_string()
+    } else {
+        format!(
+            "{} ({level})  {} nodes, {} edges  {}",
+            schema.name(),
+            map.nodes().len(),
+            map.edges().len(),
+            schema.purpose(),
+        )
+    })
+}
+
+/// Every map's summary line, in schema order.
+fn map_summary_lines(
+    schemas: &dyn Schemas,
+    events: &[Event],
+    project: &Path,
+    json: bool,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    schemas
+        .folded()
+        .iter()
+        .map(|schema| map_summary_line(schemas, schema, events, project, json))
+        .collect()
+}
+
+/// `percept show` with no argument: every map, one line each.
+fn show_maps(
+    args: &ShowArgs,
+    log: &dyn EventLog,
+    schemas: &dyn Schemas,
+    project: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let events = log.load()?;
+    print_lines(map_summary_lines(schemas, &events, project, args.json)?.into_iter())
+}
+
+/// Prints the one event `arg` names, the way `events search --full`
+/// prints one. An id the log doesn't carry fails loudly rather than
+/// printing nothing, so an empty result never means "your id was
+/// wrong". With `--range`, prints `payload.content` sliced to it
+/// instead of the whole event.
+fn show_event(arg: &str, args: &ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
     let (start, end) = args.range.unwrap_or_default();
-    println!("{}", store::read_event(log, &args.id, start, end)?);
+    println!("{}", store::read_event(log, arg, start, end)?);
     Ok(())
+}
+
+/// `map`, cut to `selection` and printed nodes-then-edges - the tail
+/// `show_node` and `show_map` share. `--since` runs after `--around`,
+/// so it reads as "what changed near this node".
+fn print_selected(
+    map: Map,
+    selection: &crate::core::Selection,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fragment = map.select(selection)?;
+    if !selection.is_whole() {
+        eprintln!("{}", mapstore::encode_fragment(&fragment));
+    }
+    if json {
+        print_lines(mapstore::encode_lines(fragment.map(), true))
+    } else {
+        print_text(&mapstore::markdown(fragment.map()))
+    }
+}
+
+/// Prints `arg`'s node and its neighbourhood, `--depth` edges out,
+/// cut further by `--kind`/`--since` - today's `maps show <map>
+/// --around <node> --depth 1`, with the map found from the node
+/// through `schema_of_ref` rather than named on the command.
+fn show_node(
+    arg: &str,
+    args: &ShowArgs,
+    schema: Arc<Schema>,
+    log: &dyn EventLog,
+    schemas: &dyn Schemas,
+    project: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let map = mapstore::fold_map(log, schemas, schema.name(), project)?;
+    let around = resolve_ref(&map, arg)?;
+    let selection = crate::core::Selection {
+        around: Some((&around, args.depth.unwrap_or(1))),
+        since: args.since,
+        kinds: &args.kind,
+        ..crate::core::Selection::default()
+    };
+    print_selected(map, &selection, args.json)
+}
+
+/// Prints `schema`'s map whole, cut by `--kind`/`--since` when given -
+/// today's `maps show <map>` with no `--around`.
+fn show_map(
+    schema: Arc<Schema>,
+    args: &ShowArgs,
+    log: &dyn EventLog,
+    schemas: &dyn Schemas,
+    project: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let map = mapstore::fold_map(log, schemas, schema.name(), project)?;
+    let selection = crate::core::Selection {
+        since: args.since,
+        kinds: &args.kind,
+        ..crate::core::Selection::default()
+    };
+    print_selected(map, &selection, args.json)
+}
+
+/// The error a flag not meant for the form `show`'s argument resolved
+/// to gives, naming it - `--kind` on an event, `--range` on a map.
+fn refuse_flag(given: bool, flag: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if given {
+        Err(format!("--{flag} does not apply to this form of show").into())
+    } else {
+        Ok(())
+    }
+}
+
+/// `percept show [<arg>]` - resolved by the shape of `arg`: absent,
+/// every map (`show_maps`); a uuid, one event (`show_event`); a short
+/// id or `kind:name` `schema_of_ref` resolves, that node and its
+/// neighbours (`show_node`); anything else, the map that name finds
+/// (`show_map`) - the same unknown-map error every map lookup gives,
+/// naming every map declared. Each form refuses a flag that isn't its
+/// own, naming it.
+pub fn show(
+    args: ShowArgs,
+    log: &dyn EventLog,
+    schemas: &dyn Schemas,
+    project: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(arg) = args.arg.clone() else {
+        refuse_flag(!args.kind.is_empty(), "kind")?;
+        refuse_flag(args.depth.is_some(), "depth")?;
+        refuse_flag(args.since.is_some(), "since")?;
+        refuse_flag(args.range.is_some(), "range")?;
+        return show_maps(&args, log, schemas, project);
+    };
+    if uuid::Uuid::parse_str(&arg).is_ok() {
+        refuse_flag(args.json, "json")?;
+        refuse_flag(!args.kind.is_empty(), "kind")?;
+        refuse_flag(args.depth.is_some(), "depth")?;
+        refuse_flag(args.since.is_some(), "since")?;
+        return show_event(&arg, &args, log);
+    }
+    if let Some(schema) = schema_of_ref(schemas, &arg) {
+        refuse_flag(args.range.is_some(), "range")?;
+        return show_node(&arg, &args, schema, log, schemas, project);
+    }
+    let schema = schemas.find(&arg)?;
+    refuse_flag(args.range.is_some(), "range")?;
+    refuse_flag(args.depth.is_some(), "depth")?;
+    show_map(schema, &args, log, schemas, project)
 }
 
 pub mod hook;

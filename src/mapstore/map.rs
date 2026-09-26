@@ -1,6 +1,6 @@
 //! A cognitive map on the wire: folding one from the log, printing it
-//! as JSONL so `maps show` pipes into `jq` the way `events search`
-//! does, and revising it - a writer's `Mutation` checked against a
+//! as JSONL so `show` pipes into `jq` the way `events search` does,
+//! and revising it - a writer's `Mutation` checked against a
 //! `Snapshot` of the log and turned into the payload that records it.
 
 use std::collections::{BTreeSet, HashSet};
@@ -327,7 +327,7 @@ struct EdgeLine<'a> {
     stamp: Option<Stamp>,
 }
 
-/// One line naming a map and its size, for `maps list`.
+/// One line naming a map and its size, for a bare `show`.
 pub fn encode_map(map: &Map) -> String {
     serde_json::to_string(&MapLine {
         id: map.id().as_uuid().to_string(),
@@ -432,7 +432,7 @@ pub fn encode_fragment(fragment: &Fragment) -> String {
     .expect("FragmentLine always serializes")
 }
 
-/// A map as JSONL: every node, then every edge - the order `maps show`
+/// A map as JSONL: every node, then every edge - the order `show`
 /// prints and `read_map` returns. `stamped` is `false` only for
 /// `read_code`'s tree walk - see `Stamp::of`.
 pub fn encode_lines(map: &Map, stamped: bool) -> impl Iterator<Item = String> + '_ {

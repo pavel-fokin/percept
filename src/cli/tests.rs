@@ -1,10 +1,10 @@
 use super::*;
 use crate::core::testing::{
-    human, node_added, node_added_at, node_added_by, node_id, schemas, source, FakeLog,
-    FakeSchemas, Fixture, HOME, ROOT,
+    human, node_added, node_added_by, node_id, schemas, source, FakeLog, FakeSchemas, Fixture, HOME,
+    ROOT,
 };
 use crate::core::{Actor, EdgeKind, NodeKind, Payload};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// A minimal schema for a test that needs a map of its own, distinct
 /// from `debates`/`chores` - a `concept`, prefixed `c`, and a `relates`
@@ -26,7 +26,7 @@ fn projects_schema() -> Schema {
     Schema::new(
         "projects",
         "what a test needs from a global projects map",
-        vec![NodeKind::new("project", Vec::new()).unwrap()],
+        vec![NodeKind::new("project", vec![("root".to_string(), Vec::new())]).unwrap()],
         Vec::new(),
     )
     .unwrap()
@@ -35,6 +35,13 @@ fn projects_schema() -> Schema {
 /// `concepts_schema` and `projects_schema` together, `projects` global.
 fn concepts_and_projects() -> FakeSchemas {
     FakeSchemas::with_global(vec![concepts_schema(), projects_schema()], &["projects"])
+}
+
+/// `concepts_and_projects`, folded in the order the real loader always
+/// gives - a global schema first - for a test of `show`'s own listing
+/// order, which `FakeSchemas` otherwise keeps as constructed.
+fn projects_and_concepts() -> FakeSchemas {
+    FakeSchemas::with_global(vec![projects_schema(), concepts_schema()], &["projects"])
 }
 
 /// A `WriteArgs` a test doesn't otherwise care about: `human`, no
@@ -259,13 +266,13 @@ fn a_zero_preview_is_rejected_at_parse() {
 
 #[test]
 fn a_range_without_an_end_reaches_the_end_of_content() {
-    let ok = Cli::try_parse_from(["percept", "events", "show", "abc", "--range", "400:"]);
+    let ok = Cli::try_parse_from(["percept", "show", "abc", "--range", "400:"]);
     assert!(ok.is_ok());
 }
 
 #[test]
 fn a_range_without_a_start_begins_at_zero() {
-    let ok = Cli::try_parse_from(["percept", "events", "show", "abc", "--range", ":50"]);
+    let ok = Cli::try_parse_from(["percept", "show", "abc", "--range", ":50"]);
     assert!(ok.is_ok());
 }
 
@@ -277,20 +284,8 @@ fn preview_and_full_are_refused_together() {
 
 #[test]
 fn a_range_with_no_colon_is_rejected_at_parse() {
-    let bad = Cli::try_parse_from(["percept", "events", "show", "abc", "--range", "400"]);
+    let bad = Cli::try_parse_from(["percept", "show", "abc", "--range", "400"]);
     assert!(bad.is_err());
-}
-
-#[test]
-fn a_prop_splits_on_the_first_equals_sign() {
-    let (key, value) = parse_prop("summary=a=b").unwrap();
-    assert_eq!(key, "summary");
-    assert_eq!(value, "a=b");
-}
-
-#[test]
-fn a_prop_with_no_equals_sign_is_rejected() {
-    assert!(parse_prop("summary").is_err());
 }
 
 fn map_with_a_verdict() -> Map {
@@ -329,95 +324,120 @@ fn an_unknown_node_ref_is_rejected() {
 }
 
 #[test]
-fn maps_show_kind_is_repeatable() {
-    let cli = Cli::try_parse_from([
-        "percept",
-        "maps",
-        "show",
-        "debates",
-        "--kind",
-        "topic",
-        "--kind",
-        "verdict",
-    ])
-    .unwrap();
-    match cli.command {
-        Some(Command::Maps {
-            command: MapsCommand::Show(args),
-        }) => assert_eq!(args.kind, ["topic", "verdict"]),
-        _ => panic!("expected maps show"),
-    }
+fn show_kind_is_repeatable() {
+    let args = parse_show(["percept", "show", "debates", "--kind", "topic", "--kind", "verdict"]);
+    assert_eq!(args.kind, ["topic", "verdict"]);
 }
 
 #[test]
-fn maps_show_json_defaults_to_false() {
-    assert!(!parse_show(["percept", "maps", "show", "debates"]).json);
+fn show_json_defaults_to_false() {
+    assert!(!parse_show(["percept", "show", "debates"]).json);
 }
 
 #[test]
-fn maps_show_json_flag_sets_it() {
-    assert!(parse_show(["percept", "maps", "show", "debates", "--json"]).json);
+fn show_json_flag_sets_it() {
+    assert!(parse_show(["percept", "show", "debates", "--json"]).json);
 }
 
-fn parse_show<const N: usize>(argv: [&str; N]) -> ShowMapArgs {
+fn parse_show<const N: usize>(argv: [&str; N]) -> ShowArgs {
     match Cli::try_parse_from(argv).unwrap().command {
-        Some(Command::Maps {
-            command: MapsCommand::Show(args),
-        }) => args,
-        _ => panic!("expected maps show"),
+        Some(Command::Show(args)) => args,
+        _ => panic!("expected show"),
     }
 }
 
 #[test]
-fn all_paths_folds_every_distinct_path_while_the_default_folds_root() {
-    let events = [
-        node_added_at("/there", "verdict", "Go"),
-        node_added_at("/here", "verdict", "Rust"),
-    ];
-    let folded = |all_paths: bool| {
-        let mut seen = Vec::new();
-        per_path(all_paths, false, Path::new(ROOT), &events, |path| {
-            seen.push(path.to_path_buf());
-            Ok(())
-        })
+fn since_on_show_parses_like_events_search() {
+    let args = parse_show(["percept", "show", "debates", "--since", "1d"]);
+    assert!(args.since.is_some());
+    assert!(Cli::try_parse_from(["percept", "show", "debates", "--since", "soon"]).is_err());
+}
+
+#[test]
+fn depth_on_show_defaults_to_none_and_parses_when_given() {
+    assert!(parse_show(["percept", "show", "d41"]).depth.is_none());
+    assert_eq!(parse_show(["percept", "show", "d41", "--depth", "2"]).depth, Some(2));
+}
+
+#[test]
+fn bare_show_lists_a_global_map_before_a_project_map_with_its_level() {
+    let schemas = projects_and_concepts();
+
+    let lines = map_summary_lines(&schemas, &[], Path::new(ROOT), false).unwrap();
+
+    assert_eq!(lines.len(), 2);
+    assert!(lines[0].starts_with("projects"), "{}", lines[0]);
+    assert!(lines[0].contains("(~)"), "{}", lines[0]);
+    assert!(lines[1].starts_with("concepts"), "{}", lines[1]);
+    assert!(lines[1].contains("(project)"), "{}", lines[1]);
+}
+
+/// `ShowArgs` naming `arg`, every other flag at its default.
+fn show_args(arg: &str) -> ShowArgs {
+    ShowArgs { arg: Some(arg.to_string()), ..ShowArgs::default() }
+}
+
+#[test]
+fn show_of_a_node_prints_it_and_its_neighbour() {
+    let log = FakeLog::default();
+    let schemas = concepts_and_projects();
+    for tokens in [["concept", "Snapshot"], ["concept", "Undo"]] {
+        add(add_args(&tokens), &log, &schemas, &source("cli"), no_checkout(), human(), None).unwrap();
+    }
+    add(
+        add_args(&["relates", "c1", "c2"]),
+        &log,
+        &schemas,
+        &source("cli"),
+        no_checkout(),
+        human(),
+        None,
+    )
+    .unwrap();
+
+    // `show` resolves "c1" as a node - the write above already proved
+    // `add`'s own resolution works, so a successful call here proves
+    // `show` finds the same map with no name of its own.
+    show(show_args("c1"), &log, &schemas, Path::new(ROOT)).unwrap();
+
+    let map = mapstore::fold_map(&log, &schemas, "concepts", Path::new(ROOT)).unwrap();
+    let around = NodeRef { kind: "concept".to_string(), name: "Snapshot".to_string() };
+    let selection = crate::core::Selection { around: Some((&around, 1)), ..crate::core::Selection::default() };
+    let fragment = map.select(&selection).unwrap();
+    assert!(fragment.map().find("concept", "Snapshot").is_some());
+    assert!(fragment.map().find("concept", "Undo").is_some());
+}
+
+#[test]
+fn show_of_a_uuid_reads_the_event() {
+    let log = FakeLog::default();
+    let schemas = concepts_and_projects();
+    let seed = Event::message_received(Actor::Human(human()), "hi".to_string(), source("cli"), None);
+    log.append(&seed).unwrap();
+    let id = seed.id().as_uuid().to_string();
+
+    show(show_args(&id), &log, &schemas, Path::new(ROOT)).unwrap();
+}
+
+#[test]
+fn show_of_a_map_name_prints_the_map() {
+    let log = FakeLog::default();
+    let schemas = concepts_and_projects();
+    add(add_args(&["concept", "Snapshot"]), &log, &schemas, &source("cli"), no_checkout(), human(), None)
         .unwrap();
-        seen
-    };
 
-    assert_eq!(folded(false), vec![PathBuf::from(ROOT)]);
-    assert_eq!(folded(true), vec![PathBuf::from("/here"), PathBuf::from("/there")]);
+    show(show_args("concepts"), &log, &schemas, Path::new(ROOT)).unwrap();
 }
 
 #[test]
-fn depth_is_refused_without_around() {
-    let alone = Cli::try_parse_from(["percept", "maps", "show", "debates", "--depth", "2"]);
-    assert!(alone.is_err());
-    let with = Cli::try_parse_from([
-        "percept",
-        "maps",
-        "show",
-        "debates",
-        "--around",
-        "topic:Why?",
-        "--depth",
-        "2",
-    ]);
-    assert!(with.is_ok());
-}
+fn a_flag_that_does_not_fit_the_resolved_form_is_refused() {
+    let log = FakeLog::default();
+    let schemas = concepts_and_projects();
 
-#[test]
-fn since_on_maps_show_parses_like_events_search() {
-    let cli =
-        Cli::try_parse_from(["percept", "maps", "show", "debates", "--since", "1d"]).unwrap();
-    match cli.command {
-        Some(Command::Maps {
-            command: MapsCommand::Show(args),
-        }) => assert!(args.since.is_some()),
-        _ => panic!("expected maps show"),
-    }
-    assert!(
-        Cli::try_parse_from(["percept", "maps", "show", "debates", "--since", "soon"]).is_err()
-    );
+    let args = ShowArgs { depth: Some(2), ..ShowArgs::default() };
+    let err = show(args, &log, &schemas, Path::new(ROOT)).unwrap_err();
+
+    assert!(err.to_string().contains("--depth"), "{err}");
 }
 
 /// `AddArgs` from a bare word list - the shape `parse_write_args` reads.
@@ -548,6 +568,15 @@ fn node_written_line_names_the_maps_level() {
     let schemas = concepts_and_projects();
     assert_eq!(node_written_line(&schemas, "concepts", "c3"), "c3  concepts (project)");
     assert_eq!(node_written_line(&schemas, "projects", "p1"), "p1  projects (~)");
+}
+
+#[test]
+fn document_node_line_names_the_node_before_its_map() {
+    let schemas = concepts_and_projects();
+    assert_eq!(
+        document_node_line(&schemas, "concepts", "c3", "concept", "Doc"),
+        "c3 concept \"Doc\"  concepts (project)"
+    );
 }
 
 #[test]
@@ -694,28 +723,27 @@ fn remove_drops_a_node_and_an_edge() {
     assert!(map.find("concept", "Snapshot").is_none());
 }
 
-fn change_node_args(node: &str) -> ChangeNodeArgs {
-    ChangeNodeArgs {
-        target: MapArgs {
-            map: "debates".to_string(),
-            source: Vec::new(),
-            actor: "human".to_string(),
-        },
-        node: node.to_string(),
-        name: None,
-        prop: Vec::new(),
-    }
+/// `ChangeArgs` from a bare word list - the shape `parse_write_args`
+/// reads, the same as `add_args`/`remove_args`.
+fn change_args(tokens: &[&str]) -> ChangeArgs {
+    ChangeArgs { args: tokens.iter().map(|s| s.to_string()).collect() }
 }
 
 #[test]
-fn maps_change_node_with_prop_why_sets_the_nodes_why_property() {
+fn change_with_a_property_sets_the_nodes_why_property() {
     let added = node_added_by(Actor::Agent, "verdict", "Rust");
     let node = node_id(&added);
     let log = FakeLog::seeded(vec![map_created("debates"), added]);
 
-    let mut args = change_node_args("verdict:Rust");
-    args.prop = vec![("why".to_string(), "never proposed".to_string())];
-    maps_change_node(args, &log, &schemas(), &source("cli"), human(), None).unwrap();
+    change(
+        change_args(&["verdict:Rust", "--why", "never proposed"]),
+        &log,
+        &schemas(),
+        &source("cli"),
+        human(),
+        None,
+    )
+    .unwrap();
 
     let events = log.load().unwrap();
     match events[2].payload() {
@@ -733,11 +761,11 @@ fn maps_change_node_with_prop_why_sets_the_nodes_why_property() {
 }
 
 #[test]
-fn maps_change_node_refuses_a_node_the_map_does_not_hold() {
+fn change_refuses_a_node_the_map_does_not_hold() {
     let log = FakeLog::default();
 
-    let err = maps_change_node(
-        change_node_args("verdict:Rust"),
+    let err = change(
+        change_args(&["verdict:Rust", "--why", "never proposed"]),
         &log,
         &schemas(),
         &source("cli"),
@@ -752,17 +780,61 @@ fn maps_change_node_refuses_a_node_the_map_does_not_hold() {
 }
 
 #[test]
-fn maps_change_node_refuses_an_agent_s_property_change_of_a_node_a_human_wrote() {
+fn change_refuses_an_agents_property_change_of_a_node_a_human_wrote() {
     let added = node_added("claim", "wasm render");
     let log = FakeLog::seeded(vec![map_created("debates"), added]);
 
-    let mut args = change_node_args("claim:wasm render");
-    args.target.actor = "agent".to_string();
-    args.prop = vec![("why".to_string(), "faster paint".to_string())];
-    let err = maps_change_node(args, &log, &schemas(), &source("cli"), None, None).err().unwrap();
+    let err = change(
+        change_args(&["claim:wasm render", "--actor", "agent", "--why", "faster paint"]),
+        &log,
+        &schemas(),
+        &source("cli"),
+        None,
+        None,
+    )
+    .err()
+    .unwrap();
 
     assert!(err.to_string().contains("was written by"), "{err}");
     assert_eq!(log.load().unwrap().len(), 2);
+}
+
+#[test]
+fn change_of_a_node_in_a_global_map_lands_at_home() {
+    let log = FakeLog::default();
+    let schemas = concepts_and_projects();
+    add(
+        add_args(&["project", "percept"]),
+        &log,
+        &schemas,
+        &source("cli"),
+        no_checkout(),
+        human(),
+        None,
+    )
+    .unwrap();
+
+    change(
+        change_args(&["p1", "--root", "~/code/percept"]),
+        &log,
+        &schemas,
+        &source("cli"),
+        human(),
+        None,
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    assert!(events.iter().any(|event| matches!(event.payload(), Payload::NodeChanged { .. })));
+    // `change` found the map `add` already created at `HOME`, rather
+    // than minting a second one at `ROOT`: exactly one `map.created`
+    // event, rooted at `HOME`.
+    let created: Vec<&Event> = events
+        .iter()
+        .filter(|event| matches!(event.payload(), Payload::MapCreated { .. }))
+        .collect();
+    assert_eq!(created.len(), 1);
+    assert_eq!(created[0].source().path, Path::new(HOME));
 }
 
 #[test]
