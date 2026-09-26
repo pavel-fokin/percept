@@ -59,8 +59,8 @@ cd your-project
 percept init claude-code       # writes .percept/schemas and .claude/settings.json hooks
 claude                         # work as usual; prompts and replies are recorded
 
-percept events search --since 1h
-percept maps show decisions
+percept search --since 1h
+percept show
 ```
 
 `percept init codex` does the same for Codex. The [Coding
@@ -69,24 +69,24 @@ clients](#coding-clients) section says what the hooks capture.
 ## The log
 
 One file, `~/.percept/percept.jsonl`, holds every project. Each event
-names its source - the writer and the project root it ran in - and a
-read picks the current root by default, or every path in the log with
-`--all-paths`. Each line also carries the log's own id, kept in
-`log-id` beside the file, and its number in that log, so two logs can
-be merged later.
+names its source - the writer and the project root it ran in. Each
+line also carries the log's own id, kept in `log-id` beside the file,
+and its number in that log, so two logs can be merged later.
 
 ```sh
-percept events search --since 1d --type message.received
-percept events search --contains worktree --size 5
-percept events search --source codex
-percept events show <id>
-percept events show <id> --range 400:
+percept search --since 1d --type message.received
+percept search worktree --size 5
+percept search --source codex
+percept show <event-id>
+percept show <event-id> --range 400:
 ```
 
-Output is one JSON object per line, oldest first. A search line keeps
-a constant size, so looking is cheap; `--full`, `show`, or `show
---range` spends tokens on one event deliberately. percept never ranks,
-summarises, or answers. Relevance is the caller's judgement.
+`search` reads the level it runs in: inside a project, that project's
+events; in `~`, outside any project, the whole log. Output is one JSON
+object per line, oldest first. A search line keeps a constant size, so
+looking is cheap; `--full`, `show`, or `show --range` spends tokens on
+one event deliberately. percept never ranks, summarises, or answers.
+Relevance is the caller's judgement.
 
 ## Maps
 
@@ -94,58 +94,45 @@ A map is folded live from the log on every read. Nothing is rendered
 to a file.
 
 ```sh
-percept maps list
-percept maps show decisions
-percept maps show decisions --around 'question:Where does the event log live?'
-percept maps show decisions --since 1d
+percept show                   # every map, one line each
+percept show concepts          # one map whole
+percept show c3                # a node and its neighbours
+percept show concepts --since 1d
 ```
 
-The Markdown render of the decisions map lists each question with the
-decision that settles it now. Options and superseded decisions stay
-one hop away through `--around`. A cut reports on
-stderr how much of the map it left out.
-
-Writes go through the same binary. Every one cites the events it was
-drawn from and says who is writing, `user` or `model`:
+Writes name no map. The kind says which map a node belongs to, and an
+edge goes to the map of its two nodes. Every write says who is writing
+and can cite the events it was drawn from:
 
 ```sh
-percept maps add-node decisions --actor agent --kind decision --name "..." \
-  --prop why="..." --source <event-id>
-percept maps add-edge decisions --actor agent --kind resolves --from d42 --to q7
+percept add concept "Snapshot" --definition "the working tree saved under a prompt" \
+  --actor agent --source <event-id>
+percept add covers c1 c3
+percept change c3 --definition "...; undo puts it back"
+percept remove covers c1 c3
 
-percept maps record decisions --actor agent --source <event-id> <<'EOF'
-question "Where does the log live?"
-decision "one log under ~/.percept"
-  why "one variable also covers the binary"
-  resolves question
+percept add --actor agent --source <event-id> <<'EOF'
+concept "Snapshot"
+  definition "the working tree saved under a prompt"
+  covers c1
   cites src/main.rs:40-52
 EOF
 ```
 
-`record` takes a whole document: a node per line at the margin, with
-its properties, edges, and `cites` lines indented under it. A `cites`
-line publishes the named text as a `file.cited` event, so a later
-session can see whether the file still says what the claim rested on.
-
-A model's node carries a standing - `claimed`, `seen`, `confirmed`, or
-`disputed` - the fold derives from the human's own judgment, never from
-an edge:
-
-```sh
-percept maps confirm decisions d41
-percept maps dispute decisions d41 --why "never proposed"
-```
-
-`confirm` marks a node's claim right; `dispute` marks it wrong, with
-why. Both refuse a node the map does not hold and the human's own node,
-since a user-written node carries no standing to judge.
+A write prints the node's short id, its map, and the level it landed
+on: `c3  concepts (project)`. `add` with no kind takes a whole document:
+a node per line at the margin, with its properties, edges, and `cites`
+lines indented under it. A `cites` line publishes the named text as a
+`file.cited` event, so a later session can see whether the file still
+says what the claim rested on.
 
 A map's schema is a TOML file at `.percept/schemas/<name>.toml` naming
-its node and edge kinds and one line of purpose. `percept init`
-writes `decisions` there; a project with no schema files has no maps.
-The rules for a map -
-who may remove what, how a decision is corrected - are in
-[AGENTS.md](AGENTS.md).
+its node and edge kinds and one line of purpose. Schemas live at two
+levels: `~/.percept/schemas` declares global ones, whose maps every
+project shares, and a project's own `.percept/schemas` declares its
+own. A node kind and its short id prefix belong to one schema across
+both. `percept init` writes the shipped schemas into the project; a
+project with no schema files at either level has no maps.
 
 ## Coding clients
 
@@ -163,8 +150,8 @@ and per client only the files that point at it.
 `percept init <client>` writes the shipped schemas under
 `.percept/schemas`, leaving a file already there alone, and the
 client's hook entries into the checkout, merging into an existing
-file. For Claude Code it also allows `percept maps` and `percept
-events` without a permission prompt. Both files are committed in this repo. Open the client from
+file. For Claude Code it also allows `percept add`, `remove`,
+`change`, `show`, and `search` without a permission prompt. Both files are committed in this repo. Open the client from
 the checkout and trust the repository; in Codex, `/hooks` reviews the
 capture hooks. Restart a running session to load the configuration.
 
