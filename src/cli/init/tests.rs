@@ -280,7 +280,7 @@ fn init_writes_the_shipped_schemas() {
 
     run(init("claude-code"), fixture.path()).unwrap();
 
-    let schemas = mapstore::load_schemas(fixture.path(), None).unwrap();
+    let schemas = mapstore::load_schemas(Some(fixture.path()), None).unwrap();
     let names: Vec<&str> = schemas.folded().iter().map(|s| s.name()).collect();
     assert_eq!(names, ["concepts"]);
 }

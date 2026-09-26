@@ -47,7 +47,12 @@ fn projects_and_concepts() -> FakeSchemas {
 /// A `WriteArgs` a test doesn't otherwise care about: `human`, no
 /// sources, no explicit causation.
 fn write_args() -> WriteArgs {
-    WriteArgs::default()
+    WriteArgs {
+        actor: None,
+        source: Vec::new(),
+        causation: None,
+        properties: BTreeMap::new(),
+    }
 }
 
 /// `chores` alone, for a document test that resolves a bare short id:
@@ -398,16 +403,18 @@ fn show_of_a_node_prints_it_and_its_neighbour() {
     let log = FakeLog::default();
     let schemas = concepts_and_projects();
     for tokens in [["concept", "Snapshot"], ["concept", "Undo"]] {
-        add(add_args(&tokens), &log, &schemas, &source("cli"), no_checkout(), human(), None).unwrap();
+        add(
+            add_args(&tokens),
+            &Writer::new(&log, &schemas, &source("cli"), human(), None),
+            no_checkout(),
+            false,
+        ).unwrap();
     }
     add(
         add_args(&["relates", "c1", "c2"]),
-        &log,
-        &schemas,
-        &source("cli"),
+        &Writer::new(&log, &schemas, &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
@@ -439,7 +446,12 @@ fn show_of_a_uuid_reads_the_event() {
 fn show_of_a_map_name_prints_the_map() {
     let log = FakeLog::default();
     let schemas = concepts_and_projects();
-    add(add_args(&["concept", "Snapshot"]), &log, &schemas, &source("cli"), no_checkout(), human(), None)
+    add(
+        add_args(&["concept", "Snapshot"]),
+        &Writer::new(&log, &schemas, &source("cli"), human(), None),
+        no_checkout(),
+        false,
+    )
         .unwrap();
 
     show(show_args("concepts"), &log, &schemas, Path::new(ROOT)).unwrap();
@@ -483,20 +495,14 @@ fn add_and_remove_fail_on_a_kind_no_schema_declares() {
 
     let added = add(
         add_args(&["file", "src/main.rs"]),
-        &log,
-        &schemas(),
-        &cli_source,
+        &Writer::new(&log, &schemas(), &cli_source, human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     );
     let removed = remove(
         remove_args(&["file", "src/main.rs"]),
-        &log,
-        &schemas(),
-        &cli_source,
-        human(),
-        None,
+        &Writer::new(&log, &schemas(), &cli_source, human(), None),
+        false,
     );
 
     for result in [added, removed] {
@@ -507,16 +513,25 @@ fn add_and_remove_fail_on_a_kind_no_schema_declares() {
 }
 
 #[test]
+fn an_unknown_kind_with_no_schemas_at_the_home_level_points_to_global_schemas_not_init() {
+    let empty = FakeSchemas::new(Vec::new());
+
+    let err = unknown_kind(&empty, "concept", true).to_string();
+    assert!(err.contains("~/.percept/schemas"), "{err}");
+    assert!(!err.contains("percept init"), "{err}");
+
+    let err = unknown_kind(&empty, "concept", false).to_string();
+    assert!(err.contains("percept init"), "{err}");
+}
+
+#[test]
 fn add_commits_as_the_actor_given_and_defaults_to_human() {
     let log = FakeLog::default();
     add(
         add_args(&["topic", "Which?", "--actor", "agent"]),
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
     assert!(log.load().unwrap().last().unwrap().actor() == Actor::Agent);
@@ -524,12 +539,9 @@ fn add_commits_as_the_actor_given_and_defaults_to_human() {
     let log = FakeLog::default();
     add(
         add_args(&["topic", "Which too?"]),
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
     assert!(matches!(log.load().unwrap().last().unwrap().actor(), Actor::Human(_)));
@@ -542,12 +554,9 @@ fn add_carries_the_cause_it_is_given() {
 
     add(
         add_args(&["topic", "Which?"]),
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), Some(cause)),
         no_checkout(),
-        human(),
-        Some(cause),
+        false,
     )
     .unwrap();
 
@@ -566,33 +575,14 @@ fn an_explicit_causation_flag_wins_over_the_turns() {
 
     add(
         add_args(&["topic", "Which?", "--causation", &flag]),
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), Some(turns_cause)),
         no_checkout(),
-        human(),
-        Some(turns_cause),
+        false,
     )
     .unwrap();
 
     let events = log.load().unwrap();
     assert_eq!(events.last().unwrap().causation_id(), Some(explicit));
-}
-
-#[test]
-fn node_written_line_names_the_maps_level() {
-    let schemas = concepts_and_projects();
-    assert_eq!(node_written_line(&schemas, "concepts", "c3"), "c3  concepts (project)");
-    assert_eq!(node_written_line(&schemas, "projects", "p1"), "p1  projects (~)");
-}
-
-#[test]
-fn document_node_line_names_the_node_before_its_map() {
-    let schemas = concepts_and_projects();
-    assert_eq!(
-        document_node_line(&schemas, "concepts", "c3", "concept", "Doc"),
-        "c3 concept \"Doc\"  concepts (project)"
-    );
 }
 
 #[test]
@@ -602,12 +592,9 @@ fn a_node_added_to_a_global_schema_lands_at_home() {
 
     add(
         add_args(&["project", "percept"]),
-        &log,
-        &schemas,
-        &source("cli"),
+        &Writer::new(&log, &schemas, &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
@@ -626,12 +613,9 @@ fn a_node_added_to_a_project_schema_lands_at_the_project_root() {
 
     add(
         add_args(&["concept", "Snapshot"]),
-        &log,
-        &schemas,
-        &source("cli"),
+        &Writer::new(&log, &schemas, &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
@@ -648,17 +632,19 @@ fn an_edge_across_two_maps_is_refused_naming_both() {
     let log = FakeLog::default();
     let schemas = concepts_and_projects();
     for tokens in [["concept", "Snapshot"], ["project", "percept"]] {
-        add(add_args(&tokens), &log, &schemas, &source("cli"), no_checkout(), human(), None).unwrap();
+        add(
+            add_args(&tokens),
+            &Writer::new(&log, &schemas, &source("cli"), human(), None),
+            no_checkout(),
+            false,
+        ).unwrap();
     }
 
     let err = add(
         add_args(&["relates", "c1", "p1"]),
-        &log,
-        &schemas,
-        &source("cli"),
+        &Writer::new(&log, &schemas, &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .err()
     .unwrap();
@@ -672,17 +658,19 @@ fn an_edge_between_two_nodes_of_one_map_resolves_the_map_with_no_name() {
     let log = FakeLog::default();
     let schemas = concepts_and_projects();
     for tokens in [["concept", "Snapshot"], ["concept", "Undo"]] {
-        add(add_args(&tokens), &log, &schemas, &source("cli"), no_checkout(), human(), None).unwrap();
+        add(
+            add_args(&tokens),
+            &Writer::new(&log, &schemas, &source("cli"), human(), None),
+            no_checkout(),
+            false,
+        ).unwrap();
     }
 
     add(
         add_args(&["relates", "c1", "c2"]),
-        &log,
-        &schemas,
-        &source("cli"),
+        &Writer::new(&log, &schemas, &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
@@ -698,12 +686,9 @@ fn an_unknown_property_flag_is_refused() {
 
     let err = add(
         add_args(&["concept", "Snapshot", "--nonsense", "value"]),
-        &log,
-        &schemas,
-        &source("cli"),
+        &Writer::new(&log, &schemas, &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .err()
     .unwrap();
@@ -717,26 +702,63 @@ fn remove_drops_a_node_and_an_edge() {
     let log = FakeLog::default();
     let schemas = concepts_and_projects();
     for tokens in [["concept", "Snapshot"], ["concept", "Undo"]] {
-        add(add_args(&tokens), &log, &schemas, &source("cli"), no_checkout(), human(), None).unwrap();
+        add(
+            add_args(&tokens),
+            &Writer::new(&log, &schemas, &source("cli"), human(), None),
+            no_checkout(),
+            false,
+        ).unwrap();
     }
     add(
         add_args(&["relates", "c1", "c2"]),
-        &log,
-        &schemas,
-        &source("cli"),
+        &Writer::new(&log, &schemas, &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
-    remove(remove_args(&["relates", "c1", "c2"]), &log, &schemas, &source("cli"), human(), None).unwrap();
+    remove(
+        remove_args(&["relates", "c1", "c2"]),
+        &Writer::new(&log, &schemas, &source("cli"), human(), None),
+        false,
+    ).unwrap();
     let map = mapstore::fold_map(&log, &schemas, "concepts", Path::new(ROOT)).unwrap();
     assert!(map.edges().is_empty());
 
-    remove(remove_args(&["concept", "c1"]), &log, &schemas, &source("cli"), human(), None).unwrap();
+    remove(
+        remove_args(&["concept", "c1"]),
+        &Writer::new(&log, &schemas, &source("cli"), human(), None),
+        false,
+    ).unwrap();
     let map = mapstore::fold_map(&log, &schemas, "concepts", Path::new(ROOT)).unwrap();
     assert!(map.find("concept", "Snapshot").is_none());
+}
+
+#[test]
+fn remove_refuses_a_kind_that_resolves_to_a_different_node() {
+    let log = FakeLog::default();
+    let schemas = schemas();
+    add(
+        add_args(&["topic", "Rust?"]),
+        &Writer::new(&log, &schemas, &source("cli"), human(), None),
+        no_checkout(),
+        false,
+    )
+    .unwrap();
+
+    let err = remove(
+        remove_args(&["claim", "t1"]),
+        &Writer::new(&log, &schemas, &source("cli"), human(), None),
+        false,
+    )
+    .err()
+    .unwrap();
+
+    assert!(err.to_string().contains("\"t1\""), "{err}");
+    assert!(err.to_string().contains("topic"), "{err}");
+    assert!(err.to_string().contains("claim"), "{err}");
+    let map = mapstore::fold_map(&log, &schemas, "debates", Path::new(ROOT)).unwrap();
+    assert!(map.find("topic", "Rust?").is_some(), "the topic must survive the refused remove");
 }
 
 /// `ChangeArgs` from a bare word list - the shape `parse_write_args`
@@ -753,11 +775,7 @@ fn change_with_a_property_sets_the_nodes_why_property() {
 
     change(
         change_args(&["verdict:Rust", "--why", "never proposed"]),
-        &log,
-        &schemas(),
-        &source("cli"),
-        human(),
-        None,
+        &Writer::new(&log, &schemas(), &source("cli"), human(), None),
     )
     .unwrap();
 
@@ -782,11 +800,7 @@ fn change_refuses_a_node_the_map_does_not_hold() {
 
     let err = change(
         change_args(&["verdict:Rust", "--why", "never proposed"]),
-        &log,
-        &schemas(),
-        &source("cli"),
-        human(),
-        None,
+        &Writer::new(&log, &schemas(), &source("cli"), human(), None),
     )
     .err()
     .unwrap();
@@ -802,11 +816,7 @@ fn change_refuses_an_agents_property_change_of_a_node_a_human_wrote() {
 
     let err = change(
         change_args(&["claim:wasm render", "--actor", "agent", "--why", "faster paint"]),
-        &log,
-        &schemas(),
-        &source("cli"),
-        None,
-        None,
+        &Writer::new(&log, &schemas(), &source("cli"), None, None),
     )
     .err()
     .unwrap();
@@ -821,22 +831,15 @@ fn change_of_a_node_in_a_global_map_lands_at_home() {
     let schemas = concepts_and_projects();
     add(
         add_args(&["project", "percept"]),
-        &log,
-        &schemas,
-        &source("cli"),
+        &Writer::new(&log, &schemas, &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
     change(
         change_args(&["p1", "--root", "~/code/percept"]),
-        &log,
-        &schemas,
-        &source("cli"),
-        human(),
-        None,
+        &Writer::new(&log, &schemas, &source("cli"), human(), None),
     )
     .unwrap();
 
@@ -861,12 +864,9 @@ fn a_document_writes_its_nodes_and_edges_in_order() {
     record_document(
         document,
         write_args(),
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
@@ -891,12 +891,9 @@ fn a_record_takes_the_turns_cause_when_none_is_given() {
     record_document(
         document,
         write_args(),
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), Some(cause)),
         fixture.path(),
-        human(),
-        Some(cause),
+        false,
     )
     .unwrap();
 
@@ -921,12 +918,9 @@ fn an_explicit_causation_wins_over_the_turns() {
     record_document(
         document,
         args,
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), Some(turns_cause)),
         no_checkout(),
-        human(),
-        Some(turns_cause),
+        false,
     )
     .unwrap();
 
@@ -945,12 +939,9 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
     record_document(
         document,
         write_args(),
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), None),
         fixture.path(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
@@ -973,24 +964,18 @@ fn a_cites_line_under_a_short_id_reaches_the_node_it_names() {
     record_document(
         "topic \"Does record work?\"\n",
         write_args(),
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), None),
         fixture.path(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
     record_document(
         "t1\n  cites src/cli/mod.rs:1-3\n",
         write_args(),
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), None),
         fixture.path(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
@@ -1017,12 +1002,9 @@ fn a_ref_to_an_existing_short_id_resolves() {
     record_document(
         document,
         write_args(),
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
@@ -1038,12 +1020,9 @@ fn an_unknown_node_kind_fails_before_anything_is_written() {
     let err = record_document(
         document,
         write_args(),
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap_err();
     assert!(err.to_string().contains("riddle"), "{err}");
@@ -1057,12 +1036,9 @@ fn a_closed_list_property_left_unset_records_with_no_value() {
     record_document(
         document,
         write_args(),
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
@@ -1083,12 +1059,9 @@ fn a_bad_ref_names_its_line_number() {
     let err = record_document(
         document,
         write_args(),
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap_err();
     assert!(err.to_string().starts_with("line 4:"), "{err}");
@@ -1103,12 +1076,9 @@ fn a_duplicate_name_in_a_later_node_writes_nothing() {
     let err = record_document(
         document,
         write_args(),
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap_err();
     assert!(err.to_string().contains("already in the map"), "{err}");
@@ -1124,12 +1094,9 @@ fn a_source_id_the_log_lacks_writes_nothing() {
     let err = record_document(
         document,
         args,
-        &log,
-        &schemas(),
-        &source("cli"),
+        &Writer::new(&log, &schemas(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap_err();
     assert!(err.to_string().contains("no event with id"), "{err}");
@@ -1142,24 +1109,18 @@ fn a_short_id_document_changes_the_node_and_records_node_changed() {
     record_document(
         "chore \"cancel a turn\"\n  why \"Esc drops the session\"\n  state \"open\"\n",
         write_args(),
-        &log,
-        &chores_only(),
-        &source("cli"),
+        &Writer::new(&log, &chores_only(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
     record_document(
         "c1\n  state \"done\"\n  outcome \"1f1a9a9: done\"\n",
         write_args(),
-        &log,
-        &chores_only(),
-        &source("cli"),
+        &Writer::new(&log, &chores_only(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
@@ -1181,26 +1142,20 @@ fn a_change_block_carrying_only_an_edge_records_no_node_change() {
     record_document(
         "chore \"first\"\n  why \"it came up\"\n  state \"open\"\n",
         write_args(),
-        &log,
-        &chores_only(),
-        &source("cli"),
+        &Writer::new(&log, &chores_only(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
     let mut agent = write_args();
-    agent.actor = "agent".to_string();
+    agent.actor = Some("agent".to_string());
     record_document(
         "chore \"second\"\n  why \"it follows\"\n  state \"open\"\nc1\n  blocks c2\n",
         agent,
-        &log,
-        &chores_only(),
-        &source("cli"),
+        &Writer::new(&log, &chores_only(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
@@ -1226,12 +1181,9 @@ fn a_short_id_line_with_a_quoted_name_is_an_error() {
     let err = record_document(
         "c4 \"name\"\n",
         write_args(),
-        &log,
-        &chores_only(),
-        &source("cli"),
+        &Writer::new(&log, &chores_only(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap_err();
     assert!(err.to_string().starts_with("line 1:"), "{err}");
@@ -1243,12 +1195,9 @@ fn a_change_to_an_unknown_short_id_is_an_error() {
     let err = record_document(
         "c9\n  state \"done\"\n",
         write_args(),
-        &log,
-        &chores_only(),
-        &source("cli"),
+        &Writer::new(&log, &chores_only(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap_err();
     assert!(err.to_string().contains("c9"), "{err}");
@@ -1261,24 +1210,18 @@ fn a_record_why_line_under_a_change_block_sets_the_nodes_why_property() {
     record_document(
         "chore \"cancel a turn\"\n  why \"Esc drops the session\"\n  state \"open\"\n",
         write_args(),
-        &log,
-        &chores_only(),
-        &source("cli"),
+        &Writer::new(&log, &chores_only(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 
     record_document(
         "c1\n  why \"never proposed\"\n",
         write_args(),
-        &log,
-        &chores_only(),
-        &source("cli"),
+        &Writer::new(&log, &chores_only(), &source("cli"), human(), None),
         no_checkout(),
-        human(),
-        None,
+        false,
     )
     .unwrap();
 

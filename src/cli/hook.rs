@@ -157,7 +157,11 @@ pub fn run(
             // broken TOML still leaves the session on record: the
             // review page cuts "gained since" by the last one.
             log.append(&Event::session_started(source.clone()))?;
-            let schemas = crate::mapstore::load_schemas(checkout, home)?;
+            // `checkout` is the home level itself when a client's cwd
+            // is outside any project - `main::root_for`'s rule - and
+            // then it declares no project schema of its own.
+            let project = (home != Some(checkout)).then_some(checkout);
+            let schemas = crate::mapstore::load_schemas(project, home)?;
             Ok(json!({
                 "hookSpecificOutput": {
                     "hookEventName": "SessionStart",

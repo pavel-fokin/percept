@@ -23,7 +23,7 @@ fn a_chore_without_a_state_commits_with_none_written() {
     let log = FakeLog::default();
     let source = source("cli");
 
-    let event = commit(
+    let (event, _) = commit(
         &log,
         &schemas(),
         "chores",
@@ -51,7 +51,7 @@ fn a_claim_with_a_why_is_recorded() {
         sources,
     };
 
-    let event = commit(
+    let (event, _) = commit(
         &log,
         &schemas(),
         "debates",
@@ -71,7 +71,7 @@ fn commit_appends_the_event_that_records_the_mutation() {
     let log = FakeLog::default();
     let source = source("cli");
 
-    let event = commit(
+    let (event, _) = commit(
         &log,
         &schemas(),
         "debates",
@@ -296,7 +296,7 @@ fn a_map_summary_exposes_the_map_id() {
     let id = MapId::new();
     let map = Map::empty(id, crate::core::testing::debates());
 
-    let line: serde_json::Value = serde_json::from_str(&encode_map(&map)).unwrap();
+    let line: serde_json::Value = serde_json::from_str(&encode_map(&schemas(), &map)).unwrap();
 
     assert_eq!(line["id"], id.as_uuid().to_string());
 }
@@ -377,7 +377,7 @@ fn a_source_is_checked_against_the_loaded_log() {
     let log = FakeLog::seeded(vec![cited]);
     let unknown = Uuid::now_v7().to_string();
 
-    let ok = commit(
+    let (ok, _) = commit(
         &log,
         &schemas(),
         "debates",

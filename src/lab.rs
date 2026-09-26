@@ -279,7 +279,7 @@ fn build_app(
     let opened = super::open_log(checkout)?;
     let me = opened.me();
     let log = Arc::new(opened);
-    let schemas = Arc::new(crate::mapstore::load_schemas(checkout, home)?);
+    let schemas = Arc::new(crate::mapstore::load_schemas(Some(checkout), home)?);
     let catalog: Arc<dyn crate::harness::ModelCatalog> = Arc::new(build_catalog());
     let model = build_model(&*catalog)?;
     let map_shape = build_maps_shape()?;

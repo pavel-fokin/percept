@@ -27,8 +27,9 @@ use std::sync::Arc;
 use clap::{Args, Parser, Subcommand};
 
 use crate::core::{
-    cited_label, edge_kind_declared, schema_of_node_kind, schema_of_ref, Event, EventId, EventLog,
-    EventQuery, EventSearch, Map, Mutation, Node, NodeId, NodeRef, Payload, Schema, Schemas,
+    cited_label, edge_kind_declared, map_id_at, schema_of_node_kind, schema_of_ref, Event, EventId,
+    EventLog, EventQuery, EventSearch, Map, MapId, Mutation, Node, NodeId, NodeRef, Payload, Schema,
+    Schemas,
 };
 use crate::mapstore;
 use crate::shared::{parse_time, Timestamp};
@@ -178,41 +179,33 @@ pub struct ChangeArgs {
     args: Vec<String>,
 }
 
-/// `--actor`, `--source`, and `--causation` - the three flags every
-/// write takes, parsed out of `AddArgs`'s or `RemoveArgs`'s raw tail by
-/// `parse_write_args`.
+/// `--actor`, `--source`, and `--causation` - the three fixed flags
+/// every write takes - plus every other `--<name>` flag as a property,
+/// parsed out of `AddArgs`'s or `RemoveArgs`'s raw tail by
+/// `parse_write_args`. `actor` is `None` when the flag was never given,
+/// `"human"` at the point a write reads it.
 struct WriteArgs {
-    actor: String,
+    actor: Option<String>,
     source: Vec<String>,
     causation: Option<String>,
+    properties: BTreeMap<String, String>,
 }
-
-impl Default for WriteArgs {
-    fn default() -> Self {
-        Self {
-            actor: "human".to_string(),
-            source: Vec::new(),
-            causation: None,
-        }
-    }
-}
-
-/// `parse_write_args`'s result: the positionals, in order, the fixed
-/// flags, and every other `--<name>` flag as a property.
-type ParsedWriteArgs = (Vec<String>, WriteArgs, BTreeMap<String, String>);
 
 /// Splits `args` into its positionals, in order, and its flags:
 /// `--actor`, `--source` (repeatable), and `--causation` are fixed,
-/// read into a `WriteArgs`; any other `--<name>` is a property, read
-/// into `properties`. Each flag takes its value as the next token, or
-/// inline after `=`. A name given twice, fixed or not, is an error -
-/// `--source` aside, the one flag repetition means something.
-fn parse_write_args(args: Vec<String>) -> Result<ParsedWriteArgs, Box<dyn std::error::Error>> {
+/// read into the returned `WriteArgs`; any other `--<name>` is a
+/// property, read into `WriteArgs::properties`. Each flag takes its
+/// value as the next token, or inline after `=`. A name given twice,
+/// fixed or not, is an error - `--source` aside, the one flag
+/// repetition means something.
+fn parse_write_args(args: Vec<String>) -> Result<(Vec<String>, WriteArgs), Box<dyn std::error::Error>> {
     let mut positionals = Vec::new();
-    let mut write = WriteArgs::default();
-    let mut actor_given = false;
-    let mut causation_given = false;
-    let mut properties = BTreeMap::new();
+    let mut write = WriteArgs {
+        actor: None,
+        source: Vec::new(),
+        causation: None,
+        properties: BTreeMap::new(),
+    };
 
     let mut tokens = args.into_iter();
     while let Some(token) = tokens.next() {
@@ -232,28 +225,26 @@ fn parse_write_args(args: Vec<String>) -> Result<ParsedWriteArgs, Box<dyn std::e
         };
         match name.as_str() {
             "actor" => {
-                if actor_given {
+                if write.actor.is_some() {
                     return Err("--actor given twice".into());
                 }
-                write.actor = parse_actor_word(&value)?;
-                actor_given = true;
+                write.actor = Some(parse_actor_word(&value)?);
             }
             "source" => write.source.push(value),
             "causation" => {
-                if causation_given {
+                if write.causation.is_some() {
                     return Err("--causation given twice".into());
                 }
                 write.causation = Some(value);
-                causation_given = true;
             }
             other => {
-                if properties.insert(other.to_string(), value).is_some() {
+                if write.properties.insert(other.to_string(), value).is_some() {
                     return Err(format!("--{other} given twice").into());
                 }
             }
         }
     }
-    Ok((positionals, write, properties))
+    Ok((positionals, write))
 }
 
 /// The error every write gives properties it takes none of: an edge,
@@ -263,46 +254,18 @@ fn no_properties_expected(properties: &BTreeMap<String, String>) -> Box<dyn std:
     format!("this write takes no properties; found {}", names.join(", ")).into()
 }
 
-/// `~` for a global schema, whose map lives at `$HOME` rather than the
-/// project - `Schemas::global_root` says which - `project` otherwise.
-/// What a written node's line names beside its map.
-fn level_label(schemas: &dyn Schemas, map: &str) -> &'static str {
-    if schemas.global_root(map).is_some() {
-        "~"
-    } else {
-        "project"
-    }
-}
-
-/// `map` and the level its root names - `concepts (project)` - what a
-/// written node's line names beside its short id.
-fn map_level_label(schemas: &dyn Schemas, map: &str) -> String {
-    format!("{map} ({})", level_label(schemas, map))
-}
-
-/// The line a written node prints: its short id, then the map it
-/// landed in and the level its root names - `c3  concepts (project)`.
-/// What `add`'s and `change`'s node forms print alone.
-fn node_written_line(schemas: &dyn Schemas, map: &str, short_id: &str) -> String {
-    format!("{short_id}  {}", map_level_label(schemas, map))
-}
-
-/// The line `add`'s document form prints per node: the short id, the
-/// kind, and the quoted name, then the map it landed in and the level
-/// its root names - `c3 concept "Doc"  concepts (project)` - so a
-/// reader meets what the node is before which map a bare kind resolved
-/// to.
-fn document_node_line(schemas: &dyn Schemas, map: &str, short_id: &str, kind: &str, name: &str) -> String {
-    format!("{short_id} {kind} {}  {}", quote(name), map_level_label(schemas, map))
-}
-
 /// The error `add`/`remove` give a word no schema declares as a node
 /// or an edge kind: every kind declared, csv, or - with no schema
-/// loaded at all - the hint to run `percept init <client>`, the same
-/// onboarding a bare `percept` gives.
-fn unknown_kind(schemas: &dyn Schemas, kind: &str) -> Box<dyn std::error::Error> {
+/// loaded at all - the hint to run `percept init <client>`, the
+/// project's own onboarding, or - at the home level, where `init` is
+/// refused - where a global schema goes instead.
+fn unknown_kind(schemas: &dyn Schemas, kind: &str, at_home: bool) -> Box<dyn std::error::Error> {
     if schemas.folded().is_empty() {
-        return format!("no map declares {kind:?}; run percept init <client> to add one").into();
+        return if at_home {
+            format!("no map declares {kind:?}; global schemas go in ~/.percept/schemas, or run inside a project").into()
+        } else {
+            format!("no map declares {kind:?}; run percept init <client> to add one").into()
+        };
     }
     let kinds: Vec<&str> = schemas
         .folded()
@@ -632,32 +595,52 @@ pub fn start_text(log: &dyn EventLog, schemas: &dyn Schemas, project: &Path) -> 
     Ok(mapstore::start(schemas, &maps))
 }
 
-/// One write under `map`'s name, with no map name in the arguments:
-/// `write.actor` parsed against `me`, `write.source` resolved and
-/// threaded to `mutation`, caused by `write.causation` when given, else
-/// `default_cause` - `commit_write`'s shape for `add`, `remove`, and
-/// `change`, which resolve the map from a node's schema rather than
-/// reading it off a flag.
-#[allow(clippy::too_many_arguments)]
-fn commit_write(
-    map: &str,
-    write: &WriteArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-    default_cause: Option<EventId>,
-    mutation: impl FnOnce(Vec<EventId>) -> Mutation,
-) -> Result<Payload, Box<dyn std::error::Error>> {
-    let actor = store::parse_actor(&write.actor, me)?;
-    let causation = resolve_causation(write.causation.as_deref(), log, default_cause)?;
-    let event = mapstore::commit(log, schemas, map, source, &write.source, actor, causation, mutation)?;
-    Ok(event.payload().clone())
+/// What every write shares: the log and schemas it runs against, the
+/// source it stamps, the human it resolves `--actor human` to, and the
+/// cause a write takes when it names none of its own - one shared
+/// prelude `main` builds once for `add`, `remove`, and `change`.
+pub struct Writer<'a> {
+    pub log: &'a dyn EventLog,
+    pub schemas: &'a dyn Schemas,
+    pub source: &'a crate::core::Source,
+    pub me: Option<crate::core::HumanId>,
+    pub cause: Option<EventId>,
+}
+
+impl<'a> Writer<'a> {
+    pub fn new(
+        log: &'a dyn EventLog,
+        schemas: &'a dyn Schemas,
+        source: &'a crate::core::Source,
+        me: Option<crate::core::HumanId>,
+        cause: Option<EventId>,
+    ) -> Self {
+        Self { log, schemas, source, me, cause }
+    }
+
+    /// One write under `map`'s name, with no map name in the
+    /// arguments: `write.actor` parsed against `self.me`, defaulting to
+    /// `"human"`, `write.source` resolved and threaded to `mutation`,
+    /// caused by `write.causation` when given, else `self.cause`.
+    /// Alongside the payload, the short id a minted node took, when
+    /// `mutation` minted one.
+    fn commit_write(
+        &self,
+        map: &str,
+        write: &WriteArgs,
+        mutation: impl FnOnce(Vec<EventId>) -> Mutation,
+    ) -> Result<(Payload, Option<String>), Box<dyn std::error::Error>> {
+        let actor = store::parse_actor(write.actor.as_deref().unwrap_or("human"), self.me)?;
+        let causation = resolve_causation(write.causation.as_deref(), self.log, self.cause)?;
+        let (event, short_id) = mapstore::commit(
+            self.log, self.schemas, map, self.source, &write.source, actor, causation, mutation,
+        )?;
+        Ok((event.payload().clone(), short_id))
+    }
 }
 
 /// `write.causation`, resolved to a known event, when given - else
-/// `default`, the coding client turn's own cause. The same rule
-/// `maps record` always gave an explicit `--causation`.
+/// `default`, the coding client turn's own cause.
 fn resolve_causation(
     explicit: Option<&str>,
     log: &dyn EventLog,
@@ -666,102 +649,105 @@ fn resolve_causation(
     Ok(explicit.map(|id| known_event_id(id, log)).transpose()?.or(default))
 }
 
+/// What a kind on the command line resolves to: a node kind's schema,
+/// or bare word declaring an edge kind instead - `add`'s and `remove`'s
+/// shared dispatch, with no map name in the command.
+enum Kind {
+    Node(Arc<Schema>),
+    Edge,
+}
+
+/// Resolves `kind` to a `Kind`, or the `unknown_kind` refusal when no
+/// schema declares it as either.
+fn resolve_kind(schemas: &dyn Schemas, kind: &str, at_home: bool) -> Result<Kind, Box<dyn std::error::Error>> {
+    if let Some(schema) = schema_of_node_kind(schemas, kind) {
+        Ok(Kind::Node(schema))
+    } else if edge_kind_declared(schemas, kind) {
+        Ok(Kind::Edge)
+    } else {
+        Err(unknown_kind(schemas, kind, at_home))
+    }
+}
+
 /// `percept add <kind> ...` - a node, when `kind` names one; an edge,
 /// when it names one instead; a document on stdin, with no kind at
 /// all. See `AddArgs` for the raw tail `parse_write_args` splits, and
-/// `docs/cli.md` for the shape a session types.
+/// `docs/cli.md` for the shape a session types. `at_home` is whether
+/// this runs at the home level - see `unknown_kind`.
 pub fn add(
     args: AddArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
+    writer: &Writer,
     checkout: &Path,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
+    at_home: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (positionals, write, properties) = parse_write_args(args.args)?;
+    let (positionals, write) = parse_write_args(args.args)?;
     let Some(kind) = positionals.first().cloned() else {
-        if !properties.is_empty() {
-            return Err(no_properties_expected(&properties));
+        if !write.properties.is_empty() {
+            return Err(no_properties_expected(&write.properties));
         }
         let mut document = String::new();
         io::stdin().read_to_string(&mut document)?;
-        return record_document(&document, write, log, schemas, source, checkout, me, cause);
+        return record_document(&document, write, writer, checkout, at_home);
     };
 
-    if let Some(schema) = schema_of_node_kind(schemas, &kind) {
-        add_node(schema, kind, positionals, properties, write, log, schemas, source, me, cause)
-    } else if edge_kind_declared(schemas, &kind) {
-        add_edge(kind, positionals, properties, write, log, schemas, source, me, cause)
-    } else {
-        Err(unknown_kind(schemas, &kind))
+    match resolve_kind(writer.schemas, &kind, at_home)? {
+        Kind::Node(schema) => add_node(schema, kind, positionals, write, writer),
+        Kind::Edge => edge_write(kind, positionals, write, writer, |kind, from, to, sources| {
+            Mutation::AddEdge { kind, from, to, sources }
+        }),
     }
 }
 
 /// `add`'s node form: `kind "<name>" --<property> "<value>" ...`.
-/// Prints the minted node's short id, map, and level - see
-/// `node_written_line`.
-#[allow(clippy::too_many_arguments)]
+/// Prints the minted node's short id, map, and level.
 fn add_node(
     schema: Arc<Schema>,
     kind: String,
     positionals: Vec<String>,
-    properties: BTreeMap<String, String>,
     write: WriteArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
+    writer: &Writer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if positionals.len() != 2 {
         return Err(format!("expected `{kind} \"<name>\"`").into());
     }
     let name = positionals[1].clone();
     let map = schema.name().to_string();
-    let payload = commit_write(&map, &write, log, schemas, source, me, cause, |sources| {
+    let properties = write.properties.clone();
+    let (payload, short_id) = writer.commit_write(&map, &write, |sources| {
         Mutation::AddNode { kind, name, properties, sources }
     })?;
-    if let Payload::NodeAdded { node, .. } = &payload {
-        let folded = mapstore::fold_map(log, schemas, &map, &source.path)?;
-        let short_id = folded.short_id(*node).unwrap_or_default();
-        println!("{}", node_written_line(schemas, &map, &short_id));
+    if let Payload::NodeAdded { .. } = &payload {
+        println!("{}  {map} ({})", short_id.unwrap_or_default(), crate::core::level_label(writer.schemas, &map));
     }
     Ok(())
 }
 
-/// `add`'s edge form: `kind <from> <to>`, resolved against one fold of
-/// the map `resolve_edge_map` finds from `from` and `to`, taken before
-/// the write's own atomic commit re-folds it. An edge takes no
-/// properties.
-#[allow(clippy::too_many_arguments)]
-fn add_edge(
+/// `add`'s and `remove`'s edge form: `kind <from> <to>`, resolved
+/// against one fold of the map `resolve_edge_map` finds from `from` and
+/// `to`, taken before the write's own atomic commit re-folds it. An
+/// edge takes no properties.
+fn edge_write(
     kind: String,
     positionals: Vec<String>,
-    properties: BTreeMap<String, String>,
     write: WriteArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
+    writer: &Writer,
+    mutation: impl FnOnce(String, NodeRef, NodeRef, Vec<EventId>) -> Mutation,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if positionals.len() != 3 {
         return Err(format!("expected `{kind} <from> <to>`").into());
     }
-    if !properties.is_empty() {
-        return Err(no_properties_expected(&properties));
+    if !write.properties.is_empty() {
+        return Err(no_properties_expected(&write.properties));
     }
     let (from, to) = (positionals[1].clone(), positionals[2].clone());
-    let schema = resolve_edge_map(schemas, &from, &to)?;
+    let schema = resolve_edge_map(writer.schemas, &from, &to)?;
     let map = schema.name().to_string();
-    let snapshot = map_for(schemas, &map, source, log)?;
+    let snapshot = map_for(writer.schemas, &map, writer.source, writer.log)?;
     let from = resolve_ref(snapshot.map(), &from)?;
     let to = resolve_ref(snapshot.map(), &to)?;
-    commit_write(&map, &write, log, schemas, source, me, cause, |sources| {
-        Mutation::AddEdge { kind, from, to, sources }
-    })
-    .map(drop)
+    writer
+        .commit_write(&map, &write, |sources| mutation(kind, from, to, sources))
+        .map(drop)
 }
 
 /// `percept remove <kind> ...` - the inverse of `add`: a node, when
@@ -769,80 +755,50 @@ fn add_edge(
 /// form.
 pub fn remove(
     args: RemoveArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
+    writer: &Writer,
+    at_home: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let (positionals, write, properties) = parse_write_args(args.args)?;
-    if !properties.is_empty() {
-        return Err(no_properties_expected(&properties));
+    let (positionals, write) = parse_write_args(args.args)?;
+    if !write.properties.is_empty() {
+        return Err(no_properties_expected(&write.properties));
     }
     let Some(kind) = positionals.first().cloned() else {
         return Err("expected a node kind and a node, or an edge kind and two nodes".into());
     };
 
-    if let Some(schema) = schema_of_node_kind(schemas, &kind) {
-        remove_node(schema, kind, positionals, write, log, schemas, source, me, cause)
-    } else if edge_kind_declared(schemas, &kind) {
-        remove_edge(kind, positionals, write, log, schemas, source, me, cause)
-    } else {
-        Err(unknown_kind(schemas, &kind))
+    match resolve_kind(writer.schemas, &kind, at_home)? {
+        Kind::Node(schema) => remove_node(schema, kind, positionals, write, writer),
+        Kind::Edge => edge_write(kind, positionals, write, writer, |kind, from, to, sources| {
+            Mutation::RemoveEdge { kind, from, to, sources }
+        }),
     }
 }
 
 /// `remove`'s node form: `kind <node>`, dropping the edges that touch
-/// it too.
-#[allow(clippy::too_many_arguments)]
+/// it too. `node` must resolve to a node of `kind` itself: a short id
+/// names one kind alone, but another kind's schema may still declare
+/// it, so a kind that resolves to a different node's schema would
+/// otherwise silently remove that node instead.
 fn remove_node(
     schema: Arc<Schema>,
     kind: String,
     positionals: Vec<String>,
     write: WriteArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
+    writer: &Writer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if positionals.len() != 2 {
         return Err(format!("expected `{kind} <node>`").into());
     }
     let map = schema.name().to_string();
-    let snapshot = map_for(schemas, &map, source, log)?;
-    let node = resolve_ref(snapshot.map(), &positionals[1])?;
-    commit_write(&map, &write, log, schemas, source, me, cause, |sources| {
-        Mutation::RemoveNode { node, sources }
-    })
-    .map(drop)
-}
-
-/// `remove`'s edge form: `kind <from> <to>`.
-#[allow(clippy::too_many_arguments)]
-fn remove_edge(
-    kind: String,
-    positionals: Vec<String>,
-    write: WriteArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if positionals.len() != 3 {
-        return Err(format!("expected `{kind} <from> <to>`").into());
+    let snapshot = map_for(writer.schemas, &map, writer.source, writer.log)?;
+    let resolved = resolve_node(snapshot.map(), &positionals[1])?;
+    if resolved.kind != kind {
+        return Err(format!("{:?} names a {}, not a {kind}", positionals[1], resolved.kind).into());
     }
-    let (from, to) = (positionals[1].clone(), positionals[2].clone());
-    let schema = resolve_edge_map(schemas, &from, &to)?;
-    let map = schema.name().to_string();
-    let snapshot = map_for(schemas, &map, source, log)?;
-    let from = resolve_ref(snapshot.map(), &from)?;
-    let to = resolve_ref(snapshot.map(), &to)?;
-    commit_write(&map, &write, log, schemas, source, me, cause, |sources| {
-        Mutation::RemoveEdge { kind, from, to, sources }
-    })
-    .map(drop)
+    let node = NodeRef::from(resolved);
+    writer
+        .commit_write(&map, &write, |sources| Mutation::RemoveNode { node, sources })
+        .map(drop)
 }
 
 /// `percept change <node> --name "<new>" --<property> "<value>" ...` -
@@ -850,16 +806,12 @@ fn remove_edge(
 /// resolved from `node` through `schema_of_ref`, with no map name in
 /// the command. Same rank rule `remove` has: a node the user wrote, or
 /// last changed, takes no change from an agent. Prints the node's
-/// short id, its map, and the level - see `node_written_line`.
-pub fn change(
-    args: ChangeArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let (positionals, write, mut properties) = parse_write_args(args.args)?;
+/// short id, its map, and the level: a change never mints a node, so
+/// its short id comes from the snapshot taken before the write, not a
+/// refold after it.
+pub fn change(args: ChangeArgs, writer: &Writer) -> Result<(), Box<dyn std::error::Error>> {
+    let (positionals, write) = parse_write_args(args.args)?;
+    let mut properties = write.properties.clone();
     let Some(node_ref) = positionals.first().cloned() else {
         return Err("expected `<node> --name \"<new>\" --<property> \"<value>\" ...`".into());
     };
@@ -867,17 +819,17 @@ pub fn change(
         return Err(format!("expected `change {node_ref} ...` with no other positional").into());
     }
     let name = properties.remove("name");
-    let schema = schema_of_ref(schemas, &node_ref).ok_or_else(|| unknown_node_ref(&node_ref))?;
+    let schema = schema_of_ref(writer.schemas, &node_ref).ok_or_else(|| unknown_node_ref(&node_ref))?;
     let map = schema.name().to_string();
-    let snapshot = map_for(schemas, &map, source, log)?;
-    let node = resolve_ref(snapshot.map(), &node_ref)?;
-    let payload = commit_write(&map, &write, log, schemas, source, me, cause, |sources| {
+    let snapshot = map_for(writer.schemas, &map, writer.source, writer.log)?;
+    let standing = resolve_node(snapshot.map(), &node_ref)?;
+    let short_id = snapshot.map().short_id(standing.id).unwrap_or_default();
+    let node = NodeRef::from(standing);
+    let (payload, _) = writer.commit_write(&map, &write, |sources| {
         Mutation::ChangeNode { node, name, properties, sources }
     })?;
-    if let Payload::NodeChanged { node, .. } = &payload {
-        let folded = mapstore::fold_map(log, schemas, &map, &source.path)?;
-        let short_id = folded.short_id(*node).unwrap_or_default();
-        println!("{}", node_written_line(schemas, &map, &short_id));
+    if let Payload::NodeChanged { .. } = &payload {
+        println!("{short_id}  {map} ({})", crate::core::level_label(writer.schemas, &map));
     }
     Ok(())
 }
@@ -891,7 +843,7 @@ struct DocCite {
 
 /// One edge line under a node: its kind, and the ref its target names -
 /// a short id or a bare kind name, resolved once against the map
-/// `maps_record` loaded before any write.
+/// `record_document` loaded before any write.
 struct DocEdge {
     kind: String,
     target: String,
@@ -946,8 +898,8 @@ fn parse_quoted(s: &str) -> Option<String> {
 }
 
 /// The reverse of `parse_quoted` - `name`, quoted and with every `"`
-/// escaped, the way a node or edge line in `maps record`'s document
-/// grammar writes it.
+/// escaped, the way a node or edge line in `add`'s document grammar
+/// writes it.
 fn quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
@@ -983,7 +935,7 @@ fn split_cite_range(s: &str) -> Result<CiteRange, Box<dyn std::error::Error>> {
     Ok((path.to_string(), Some(store::parse_lines(range)?)))
 }
 
-/// Parses `maps record`'s document grammar: a node line at column 0,
+/// Parses `add`'s document grammar: a node line at column 0,
 /// either `<kind> "<name>"`, which adds a node, or a bare short id,
 /// `t4`, which starts a change to the node it names - each owns every
 /// indented line under it - a `<key> "<value>"` property (`name
@@ -1051,13 +1003,19 @@ fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>
 /// change block - `schema_of_node_kind` and `schema_of_ref`
 /// respectively, since a change block's `kind` field is a short id, not
 /// a node kind name.
-fn node_schema(schemas: &dyn Schemas, node: &DocNode) -> Result<Arc<Schema>, Box<dyn std::error::Error>> {
+fn node_schema(
+    schemas: &dyn Schemas,
+    node: &DocNode,
+    at_home: bool,
+) -> Result<Arc<Schema>, Box<dyn std::error::Error>> {
     let resolved = if node.is_change {
         schema_of_ref(schemas, &node.kind)
     } else {
         schema_of_node_kind(schemas, &node.kind)
     };
-    resolved.ok_or_else(|| unknown_kind(schemas, &node.kind)).map_err(|err| format!("line {}: {err}", node.line).into())
+    resolved
+        .ok_or_else(|| unknown_kind(schemas, &node.kind, at_home))
+        .map_err(|err| format!("line {}: {err}", node.line).into())
 }
 
 /// `add`'s document form: every node and edge a document on stdin
@@ -1074,25 +1032,21 @@ fn node_schema(schemas: &dyn Schemas, node: &DocNode) -> Result<Arc<Schema>, Box
 /// failure midway, whether a duplicate name, a missing `--source`, or a
 /// bad ref, leaves nothing written; the error names the node or line it
 /// reached.
-#[allow(clippy::too_many_arguments)]
 fn record_document(
     document: &str,
     write: WriteArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
+    writer: &Writer,
     checkout: &Path,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
+    at_home: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let nodes = parse_document(document)?;
     let Some(first) = nodes.first() else {
         return Ok(());
     };
     let total = nodes.len();
-    let map_schema = node_schema(schemas, first)?;
+    let map_schema = node_schema(writer.schemas, first, at_home)?;
     for node in &nodes[1..] {
-        let schema = node_schema(schemas, node)?;
+        let schema = node_schema(writer.schemas, node, at_home)?;
         if schema.name() != map_schema.name() {
             return Err(format!(
                 "line {}: this document already writes into {:?}; {:?} is in map {:?}",
@@ -1109,22 +1063,28 @@ fn record_document(
     let node_sources: Vec<EventId> = write
         .source
         .iter()
-        .map(|id| known_event_id(id, log))
+        .map(|id| known_event_id(id, writer.log))
         .collect::<Result<_, _>>()?;
-    let causation_id = resolve_causation(write.causation.as_deref(), log, cause)?;
+    let causation_id = resolve_causation(write.causation.as_deref(), writer.log, writer.cause)?;
     // Only opened when the document has a `cites` line to resolve - a
-    // document with none should still record against a `checkout` that
-    // does not exist, the way it always could.
+    // document with none still records against a `checkout` that does
+    // not exist.
     let workspace = if nodes.iter().any(|node| !node.cites.is_empty()) {
         Some(workspace::Workspace::new(checkout)?)
     } else {
         None
     };
 
-    let actor = store::parse_actor(&write.actor, me)?;
-    let batch_source = source.clone();
+    let actor = store::parse_actor(write.actor.as_deref().unwrap_or("human"), writer.me)?;
+    let batch_source = writer.source.clone();
+    let schemas = writer.schemas;
+    let map_level = format!("{map} ({})", crate::core::level_label(schemas, &map));
 
-    let events = mapstore::commit_batch(log, schemas, &map, source, move |snapshot| {
+    let mut node_lines: Vec<String> = Vec::new();
+    let mut edge_lines: Vec<String> = Vec::new();
+    let mut cited_lines: Vec<String> = Vec::new();
+
+    mapstore::commit_batch(writer.log, schemas, &map, writer.source, |snapshot| {
         let mut batch: Vec<Event> = Vec::new();
         let mut last_of_kind: HashMap<String, NodeId> = HashMap::new();
 
@@ -1152,6 +1112,9 @@ fn record_document(
                 let payload =
                     build_file_cited(workspace, &cite.path, cite.lines, None).map_err(context)?;
                 let event = Event::new(actor, batch_source.clone(), causation_id, payload);
+                if let Payload::FileCited { path, lines, .. } = event.payload() {
+                    cited_lines.push(format!("cited {} {}", event.id().as_uuid(), cited_label(path, *lines)));
+                }
                 sources.push(event.id());
                 batch.push(event);
             }
@@ -1202,6 +1165,20 @@ fn record_document(
                         Payload::NodeAdded { node, .. } | Payload::NodeChanged { node, .. } => *node,
                         _ => unreachable!("AddNode and ChangeNode yield a node payload"),
                     };
+                    let short_id = snapshot.map().short_id(node_id).unwrap_or_default();
+                    match &payload {
+                        Payload::NodeAdded { kind, name, .. } => {
+                            node_lines.push(format!("{short_id} {kind} {}  {map_level}", quote(name)));
+                        }
+                        Payload::NodeChanged { name, .. } => {
+                            let line = format!("{short_id}  {map_level}");
+                            node_lines.push(match name {
+                                Some(name) => format!("{line} changed to {}", quote(name)),
+                                None => format!("{line} changed"),
+                            });
+                        }
+                        _ => unreachable!("AddNode and ChangeNode yield a node payload"),
+                    }
                     batch.push(Event::new(actor, batch_source.clone(), causation_id, payload));
                     node_id
                 }
@@ -1239,45 +1216,17 @@ fn record_document(
                     sources: node_sources.clone(),
                 };
                 let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
+                if let Payload::EdgeAdded { kind, from, to, .. } = &payload {
+                    let from_short = snapshot.map().short_id(*from).unwrap_or_default();
+                    let to_short = snapshot.map().short_id(*to).unwrap_or_default();
+                    edge_lines.push(format!("{kind} {from_short} -> {to_short}"));
+                }
                 batch.push(Event::new(actor, batch_source.clone(), causation_id, payload));
             }
         }
 
         Ok(batch)
     })?;
-
-    let map_name = map;
-    let map = mapstore::fold_map(log, schemas, &map_name, &source.path)?;
-    let mut node_lines = Vec::new();
-    let mut edge_lines = Vec::new();
-    let mut cited_lines = Vec::new();
-    for event in &events {
-        match event.payload() {
-            Payload::FileCited { path, lines, .. } => cited_lines.push(format!(
-                "cited {} {}",
-                event.id().as_uuid(),
-                cited_label(path, *lines)
-            )),
-            Payload::NodeAdded { node, kind, name, .. } => {
-                let short_id = map.short_id(*node).unwrap_or_default();
-                node_lines.push(document_node_line(schemas, &map_name, &short_id, kind, name));
-            }
-            Payload::NodeChanged { node, name, .. } => {
-                let short_id = map.short_id(*node).unwrap_or_default();
-                let line = node_written_line(schemas, &map_name, &short_id);
-                match name {
-                    Some(name) => node_lines.push(format!("{line} changed to {}", quote(name))),
-                    None => node_lines.push(format!("{line} changed")),
-                }
-            }
-            Payload::EdgeAdded { kind, from, to, .. } => {
-                let from_short = map.short_id(*from).unwrap_or_default();
-                let to_short = map.short_id(*to).unwrap_or_default();
-                edge_lines.push(format!("{kind} {from_short} -> {to_short}"));
-            }
-            _ => {}
-        }
-    }
 
     print_lines(node_lines.into_iter().chain(edge_lines).chain(cited_lines))
 }
@@ -1348,22 +1297,22 @@ fn parse_query(
 /// identity nothing else refers to.
 fn map_summary_line(
     schemas: &dyn Schemas,
-    schema: &Schema,
+    schema: &Arc<Schema>,
     events: &[Event],
     project: &Path,
     json: bool,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let map = mapstore::fold_map_at(schemas, schema.name(), events, project)?;
-    let level = level_label(schemas, schema.name());
+    let map = match map_id_at(schemas, schema.name(), events, project)? {
+        Some(id) => Map::fold(id, schema.clone(), events)?,
+        None => Map::empty(MapId::new(), schema.clone()),
+    };
     Ok(if json {
-        let mut line: serde_json::Value =
-            serde_json::from_str(&mapstore::encode_map(&map)).expect("encode_map produces JSON");
-        line["level"] = serde_json::Value::String(level.to_string());
-        line.to_string()
+        mapstore::encode_map(schemas, &map)
     } else {
         format!(
-            "{} ({level})  {} nodes, {} edges  {}",
+            "{} ({})  {} nodes, {} edges  {}",
             schema.name(),
+            crate::core::level_label(schemas, schema.name()),
             map.nodes().len(),
             map.edges().len(),
             schema.purpose(),
@@ -1407,9 +1356,9 @@ fn show_event(arg: &str, args: &ShowArgs, log: &dyn EventLog) -> Result<(), Box<
     Ok(())
 }
 
-/// `map`, cut to `selection` and printed nodes-then-edges - the tail
-/// `show_node` and `show_map` share. `--since` runs after `--around`,
-/// so it reads as "what changed near this node".
+/// `map`, cut to `selection` and printed nodes-then-edges - `show_map`'s
+/// tail, whole or around one node. `--since` cuts what `--around`
+/// selected, so it reads as "what changed near this node".
 fn print_selected(
     map: Map,
     selection: &crate::core::Selection,
@@ -1426,40 +1375,23 @@ fn print_selected(
     }
 }
 
-/// Prints `arg`'s node and its neighbourhood, `--depth` edges out,
-/// cut further by `--kind`/`--since` - today's `maps show <map>
-/// --around <node> --depth 1`, with the map found from the node
-/// through `schema_of_ref` rather than named on the command.
-fn show_node(
-    arg: &str,
-    args: &ShowArgs,
-    schema: Arc<Schema>,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    project: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let map = mapstore::fold_map(log, schemas, schema.name(), project)?;
-    let around = resolve_ref(&map, arg)?;
-    let selection = crate::core::Selection {
-        around: Some((&around, args.depth.unwrap_or(1))),
-        since: args.since,
-        kinds: &args.kind,
-        ..crate::core::Selection::default()
-    };
-    print_selected(map, &selection, args.json)
-}
-
-/// Prints `schema`'s map whole, cut by `--kind`/`--since` when given -
-/// today's `maps show <map>` with no `--around`.
+/// Prints `schema`'s map, cut further by `--kind`/`--since` either way:
+/// whole, with `around` absent, or `around`'s node and its
+/// neighbourhood, `--depth` edges out, when it is given - the map found
+/// from the node through `schema_of_ref` rather than named on the
+/// command.
 fn show_map(
-    schema: Arc<Schema>,
     args: &ShowArgs,
+    schema: Arc<Schema>,
+    around: Option<&str>,
     log: &dyn EventLog,
     schemas: &dyn Schemas,
     project: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let map = mapstore::fold_map(log, schemas, schema.name(), project)?;
+    let around = around.map(|arg| resolve_ref(&map, arg)).transpose()?;
     let selection = crate::core::Selection {
+        around: around.as_ref().map(|node_ref| (node_ref, args.depth.unwrap_or(1))),
         since: args.since,
         kinds: &args.kind,
         ..crate::core::Selection::default()
@@ -1478,12 +1410,12 @@ fn refuse_flag(given: bool, flag: &str) -> Result<(), Box<dyn std::error::Error>
 }
 
 /// `percept show [<arg>]` - resolved by the shape of `arg`: absent,
-/// every map (`show_maps`); a uuid, one event (`show_event`); a short
-/// id or `kind:name` `schema_of_ref` resolves, that node and its
-/// neighbours (`show_node`); anything else, the map that name finds
-/// (`show_map`) - the same unknown-map error every map lookup gives,
-/// naming every map declared. Each form refuses a flag that isn't its
-/// own, naming it.
+/// every map (`show_maps`); an event id, that event (`show_event`); a
+/// short id or `kind:name` `schema_of_ref` resolves, that node and its
+/// neighbours; anything else, the map that name finds, whole - both the
+/// last two through `show_map` - the same unknown-map error every map
+/// lookup gives, naming every map declared. Each form refuses a flag
+/// that isn't its own, naming it.
 pub fn show(
     args: ShowArgs,
     log: &dyn EventLog,
@@ -1497,7 +1429,7 @@ pub fn show(
         refuse_flag(args.range.is_some(), "range")?;
         return show_maps(&args, log, schemas, project);
     };
-    if uuid::Uuid::parse_str(&arg).is_ok() {
+    if store::parse_event_id(&arg).is_ok() {
         refuse_flag(args.json, "json")?;
         refuse_flag(!args.kind.is_empty(), "kind")?;
         refuse_flag(args.depth.is_some(), "depth")?;
@@ -1506,12 +1438,12 @@ pub fn show(
     }
     if let Some(schema) = schema_of_ref(schemas, &arg) {
         refuse_flag(args.range.is_some(), "range")?;
-        return show_node(&arg, &args, schema, log, schemas, project);
+        return show_map(&args, schema, Some(&arg), log, schemas, project);
     }
     let schema = schemas.find(&arg)?;
     refuse_flag(args.range.is_some(), "range")?;
     refuse_flag(args.depth.is_some(), "depth")?;
-    show_map(schema, &args, log, schemas, project)
+    show_map(&args, schema, None, log, schemas, project)
 }
 
 pub mod hook;

@@ -39,7 +39,7 @@ pub fn get(log: &dyn EventLog, id: &str, params: Params) -> Result<Value, Error>
     }
 
     // The web view stays project-only: no home, so no global schema.
-    let schemas = mapstore::load_schemas(&root, None).map_err(|err| Error::Internal(err.to_string()))?;
+    let schemas = mapstore::load_schemas(Some(&root), None).map_err(|err| Error::Internal(err.to_string()))?;
     // `map_id_for` only scans `own` for the schema's `map.created` event,
     // far cheaper than folding a schema's whole map - so the schema `id`
     // names is found before anything is folded, and only that one map

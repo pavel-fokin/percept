@@ -4,7 +4,7 @@ use crate::core::testing::Fixture;
 #[test]
 fn a_project_with_no_schemas_directory_has_no_maps() {
     let fixture = Fixture::new();
-    let schemas = load(fixture.path(), None).unwrap();
+    let schemas = load(Some(fixture.path()), None).unwrap();
     let names: Vec<&str> = schemas.folded().iter().map(|s| s.name()).collect();
     assert!(names.is_empty(), "{names:?}");
 }
@@ -46,7 +46,7 @@ fn a_project_schema_of_a_new_name_is_added() {
          meaning = \"\"\n",
     );
 
-    let schemas = load(fixture.path(), None).unwrap();
+    let schemas = load(Some(fixture.path()), None).unwrap();
 
     let names: Vec<&str> = schemas.folded().iter().map(|s| s.name()).collect();
     assert_eq!(names, ["glossary"]);
@@ -59,7 +59,7 @@ fn a_toml_syntax_error_names_the_file() {
     let fixture = Fixture::new();
     fixture.write(".percept/schemas/broken.toml", "purpose = \"unterminated");
 
-    let err = load(fixture.path(), None).err().unwrap().to_string();
+    let err = load(Some(fixture.path()), None).err().unwrap().to_string();
 
     assert!(err.starts_with("broken.toml:"), "{err}");
     assert!(err.contains("line"), "{err}");
@@ -70,7 +70,7 @@ fn a_domain_schema_error_is_prefixed_with_the_file_name() {
     let fixture = Fixture::new();
     fixture.write(".percept/schemas/glossary.toml", "purpose = \"p\"\n");
 
-    let err = load(fixture.path(), None).err().unwrap().to_string();
+    let err = load(Some(fixture.path()), None).err().unwrap().to_string();
 
     assert_eq!(err, "glossary.toml: declares no node kinds");
 }
@@ -87,7 +87,7 @@ fn a_settles_key_is_an_unknown_field() {
          [nodes.term]\n",
     );
 
-    let err = load(fixture.path(), None).err().unwrap().to_string();
+    let err = load(Some(fixture.path()), None).err().unwrap().to_string();
 
     assert!(err.starts_with("glossary.toml:"), "{err}");
     assert!(err.contains("settles"), "{err}");
@@ -98,7 +98,7 @@ fn a_directory_named_dot_toml_is_ignored() {
     let fixture = Fixture::new();
     std::fs::create_dir_all(fixture.path().join(".percept/schemas/x.toml")).unwrap();
 
-    let schemas = load(fixture.path(), None).unwrap();
+    let schemas = load(Some(fixture.path()), None).unwrap();
 
     let names: Vec<&str> = schemas.folded().iter().map(|s| s.name()).collect();
     assert!(names.is_empty(), "{names:?}");
@@ -112,7 +112,7 @@ fn a_file_with_an_unknown_key_is_refused_naming_the_key() {
         "purpose = \"p\"\nheadline = [\"term\"]\n\n[nodes.term]\n",
     );
 
-    let err = load(fixture.path(), None).err().unwrap().to_string();
+    let err = load(Some(fixture.path()), None).err().unwrap().to_string();
 
     assert!(err.starts_with("glossary.toml:"), "{err}");
     assert!(err.contains("headline"), "{err}");
@@ -126,7 +126,7 @@ fn a_node_kind_with_no_prefix_defaults_to_its_first_letter() {
         "purpose = \"p\"\n\n[nodes.term]\n",
     );
 
-    let schemas = load(fixture.path(), None).unwrap();
+    let schemas = load(Some(fixture.path()), None).unwrap();
 
     let glossary = schemas.find("glossary").unwrap();
     assert_eq!(glossary.node_kind("term").unwrap().prefix(), "t");
@@ -140,7 +140,7 @@ fn a_node_kind_with_an_explicit_prefix_keeps_it() {
         "purpose = \"p\"\n\n[nodes.term]\nprefix = \"tm\"\n",
     );
 
-    let schemas = load(fixture.path(), None).unwrap();
+    let schemas = load(Some(fixture.path()), None).unwrap();
 
     let glossary = schemas.find("glossary").unwrap();
     assert_eq!(glossary.node_kind("term").unwrap().prefix(), "tm");
@@ -154,7 +154,7 @@ fn a_prefix_declared_as_a_list_is_refused() {
         "purpose = \"p\"\n\n[nodes.term]\nprefix = [\"t\", \"tm\"]\n",
     );
 
-    let err = load(fixture.path(), None).err().unwrap().to_string();
+    let err = load(Some(fixture.path()), None).err().unwrap().to_string();
 
     assert!(err.contains("\"prefix\""), "{err}");
     assert!(err.contains("must be a string"), "{err}");
@@ -168,7 +168,7 @@ fn a_closed_list_property_loads_onto_the_node_kind() {
         "purpose = \"p\"\n\n[nodes.term]\nstate = [\"open\", \"done\"]\n",
     );
 
-    let schemas = load(fixture.path(), None).unwrap();
+    let schemas = load(Some(fixture.path()), None).unwrap();
 
     let glossary = schemas.find("glossary").unwrap();
     assert_eq!(
@@ -186,7 +186,7 @@ fn an_edge_end_naming_a_list_loads_both_kinds() {
          [edges.relates]\nfrom = \"term\"\nto = [\"term\", \"acronym\"]\n",
     );
 
-    let schemas = load(fixture.path(), None).unwrap();
+    let schemas = load(Some(fixture.path()), None).unwrap();
 
     let glossary = schemas.find("glossary").unwrap();
     let relates = glossary.edge_kind("relates").unwrap();
@@ -202,7 +202,7 @@ fn an_edge_kind_with_an_unknown_key_is_refused() {
          [edges.relates]\nfrom = \"term\"\nto = \"term\"\nvia = \"link\"\n",
     );
 
-    let err = load(fixture.path(), None).err().unwrap().to_string();
+    let err = load(Some(fixture.path()), None).err().unwrap().to_string();
 
     assert!(err.starts_with("glossary.toml:"), "{err}");
     assert!(err.contains("via"), "{err}");
@@ -216,7 +216,7 @@ fn free_text_properties_load_onto_the_node_kind() {
         "purpose = \"p\"\n\n[nodes.term]\nnote = \"\"\nsummary = \"\"\n",
     );
 
-    let schemas = load(fixture.path(), None).unwrap();
+    let schemas = load(Some(fixture.path()), None).unwrap();
 
     let glossary = schemas.find("glossary").unwrap();
     let term = glossary.node_kind("term").unwrap();
@@ -232,7 +232,7 @@ fn a_free_property_written_with_text_is_refused() {
         "purpose = \"p\"\n\n[nodes.term]\nnote = \"what this explains\"\n",
     );
 
-    let err = load(fixture.path(), None).err().unwrap().to_string();
+    let err = load(Some(fixture.path()), None).err().unwrap().to_string();
 
     assert!(err.contains("note"), "{err}");
     assert!(err.contains("never read"), "{err}");
@@ -251,7 +251,7 @@ fn a_global_schema_folds_before_a_project_schema() {
         "purpose = \"p\"\n\n[nodes.item]\n",
     );
 
-    let schemas = load(project.path(), Some(home.path())).unwrap();
+    let schemas = load(Some(project.path()), Some(home.path())).unwrap();
 
     let names: Vec<&str> = schemas.folded().iter().map(|s| s.name()).collect();
     assert_eq!(names, ["zzz", "aaa"]);
@@ -270,7 +270,7 @@ fn a_global_schemas_root_is_home_a_project_schemas_is_none() {
         "purpose = \"p\"\n\n[nodes.chore]\n",
     );
 
-    let schemas = load(project.path(), Some(home.path())).unwrap();
+    let schemas = load(Some(project.path()), Some(home.path())).unwrap();
 
     assert_eq!(schemas.global_root("glossary"), Some(home.path()));
     assert_eq!(schemas.global_root("tasks"), None);
@@ -289,7 +289,7 @@ fn a_schema_declared_at_both_levels_is_refused_naming_both_files() {
         "purpose = \"p\"\n\n[nodes.term]\n",
     );
 
-    let err = load(project.path(), Some(home.path())).err().unwrap().to_string();
+    let err = load(Some(project.path()), Some(home.path())).err().unwrap().to_string();
 
     assert!(err.contains(&home.path().join(".percept/schemas/glossary.toml").to_string_lossy().to_string()), "{err}");
     assert!(err.contains(&project.path().join(".percept/schemas/glossary.toml").to_string_lossy().to_string()), "{err}");
@@ -303,7 +303,7 @@ fn a_rules_table_left_from_an_older_schema_is_refused() {
         "purpose = \"p\"\n\n[nodes.term]\n\n[rules]\n\"message.received\" = [\"a\"]\n",
     );
 
-    let err = load(fixture.path(), None).err().unwrap().to_string();
+    let err = load(Some(fixture.path()), None).err().unwrap().to_string();
 
     assert!(err.contains("glossary.toml"), "{err}");
     assert!(err.contains("rules"), "{err}");
@@ -316,7 +316,7 @@ fn a_node_kind_a_global_schema_declares_is_refused_in_a_project_schema() {
     home.write(".percept/schemas/ideas.toml", "purpose = \"p\"\n\n[nodes.concept]\n");
     project.write(".percept/schemas/concepts.toml", "purpose = \"p\"\n\n[nodes.concept]\n");
 
-    let err = load(project.path(), Some(home.path())).err().unwrap().to_string();
+    let err = load(Some(project.path()), Some(home.path())).err().unwrap().to_string();
 
     assert!(err.starts_with("ideas.toml and concepts.toml both declare node kind \"concept\""), "{err}");
 }
@@ -326,7 +326,7 @@ fn at_home_itself_every_schema_is_global() {
     let home = Fixture::new();
     home.write(".percept/schemas/projects.toml", "purpose = \"p\"\n\n[nodes.project]\n");
 
-    let schemas = load(home.path(), Some(home.path())).unwrap();
+    let schemas = load(None, Some(home.path())).unwrap();
 
     let names: Vec<&str> = schemas.folded().iter().map(|s| s.name()).collect();
     assert_eq!(names, ["projects"]);

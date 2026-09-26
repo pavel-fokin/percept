@@ -232,14 +232,46 @@ fn project_of(checkout: &Path) -> PathBuf {
 
 /// Whether `command` works on a checkout - its files or its config -
 /// and so has nothing to work on at `$HOME`, where the root is the
-/// home level itself.
-fn needs_project(command: &Option<Command>) -> bool {
+/// home level itself. Exhaustive over `Command`, so a command added
+/// later must say which it is.
+fn needs_project(command: &Command) -> bool {
     match command {
-        Some(Command::Init(_)) => true,
+        Command::Init(_) => true,
         #[cfg(feature = "lab")]
-        Some(Command::Ask(_) | Command::Code) => true,
-        _ => false,
+        Command::Ask(_) | Command::Code => true,
+        Command::Search(_) | Command::Add(_) | Command::Remove(_) | Command::Change(_)
+        | Command::Show(_) | Command::Web => false,
+        // `hook_main` exits before `main`'s own match is ever reached.
+        Command::Hook(_) => false,
     }
+}
+
+/// What `writer_context` builds: the schemas, the log opened under a
+/// checkout, the human it resolves `--actor human` to, and the coding
+/// client turn's own cause.
+type WriterContext = (
+    Box<dyn crate::core::Schemas>,
+    Jsonl,
+    Option<crate::core::HumanId>,
+    Option<crate::core::EventId>,
+);
+
+/// The pieces `add`, `remove`, and `change` each build a `cli::Writer`
+/// from: the schemas at `project` (`None` at the home level) and
+/// `home`, the log opened under `checkout`, the human it resolves
+/// `--actor human` to, and the coding client turn's own cause, when
+/// `checkout` is in one.
+fn writer_context(
+    checkout: &Path,
+    root: &Path,
+    project: Option<&Path>,
+    home: Option<&Path>,
+) -> Result<WriterContext, Box<dyn std::error::Error>> {
+    let schemas = mapstore::load_schemas(project, home)?;
+    let log = open_log(checkout)?;
+    let me = log.me();
+    let cause = turn_cause(checkout, root)?;
+    Ok((Box::new(schemas), log, me, cause))
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -272,11 +304,15 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    if home.as_deref() == Some(checkout.as_path()) && needs_project(&cli.command) {
-        eprintln!("percept: {} is the home level, not a project; run this inside one", checkout.display());
-        std::process::exit(1);
+    let at_home = home.as_deref() == Some(checkout.as_path());
+    if let Some(command) = &cli.command {
+        if at_home && needs_project(command) {
+            eprintln!("percept: {} is the home level, not a project; run this inside one", checkout.display());
+            std::process::exit(1);
+        }
     }
     let root = project_of(&checkout);
+    let project: Option<PathBuf> = (!at_home).then(|| root.clone());
     let cli_source = crate::core::Source {
         name: CLI_SOURCE_NAME.to_string(),
         path: root.clone(),
@@ -284,29 +320,23 @@ async fn main() {
     let result = match cli.command {
         // `hook_main` above exits before this match is ever reached.
         Some(Command::Hook(_)) => unreachable!(),
-        Some(Command::Search(args)) => open_log(&checkout).and_then(|log| {
-            let project = (home.as_deref() != Some(root.as_path())).then_some(root.as_path());
-            cli::search(args, &log, log.me(), project)
-        }),
-        Some(Command::Add(args)) => mapstore::load_schemas(&checkout, home.as_deref()).and_then(|schemas| {
-            let log = open_log(&checkout)?;
-            let me = log.me();
-            let cause = turn_cause(&checkout, &root)?;
-            cli::add(args, &log, &schemas, &cli_source, &checkout, me, cause)
-        }),
-        Some(Command::Remove(args)) => mapstore::load_schemas(&checkout, home.as_deref()).and_then(|schemas| {
-            let log = open_log(&checkout)?;
-            let me = log.me();
-            let cause = turn_cause(&checkout, &root)?;
-            cli::remove(args, &log, &schemas, &cli_source, me, cause)
-        }),
-        Some(Command::Change(args)) => mapstore::load_schemas(&checkout, home.as_deref()).and_then(|schemas| {
-            let log = open_log(&checkout)?;
-            let me = log.me();
-            let cause = turn_cause(&checkout, &root)?;
-            cli::change(args, &log, &schemas, &cli_source, me, cause)
-        }),
-        Some(Command::Show(args)) => mapstore::load_schemas(&checkout, home.as_deref()).and_then(|schemas| {
+        Some(Command::Search(args)) => {
+            open_log(&checkout).and_then(|log| cli::search(args, &log, log.me(), project.as_deref()))
+        }
+        Some(command @ (Command::Add(_) | Command::Remove(_) | Command::Change(_))) => {
+            writer_context(&checkout, &root, project.as_deref(), home.as_deref()).and_then(
+                |(schemas, log, me, cause)| {
+                    let writer = cli::Writer::new(&log, schemas.as_ref(), &cli_source, me, cause);
+                    match command {
+                        Command::Add(args) => cli::add(args, &writer, &checkout, at_home),
+                        Command::Remove(args) => cli::remove(args, &writer, at_home),
+                        Command::Change(args) => cli::change(args, &writer),
+                        _ => unreachable!(),
+                    }
+                },
+            )
+        }
+        Some(Command::Show(args)) => mapstore::load_schemas(project.as_deref(), home.as_deref()).and_then(|schemas| {
             let log = open_log(&checkout)?;
             cli::show(args, &log, &schemas, &root)
         }),
@@ -333,7 +363,7 @@ async fn main() {
             )
             .await
         }
-        None => mapstore::load_schemas(&checkout, home.as_deref())
+        None => mapstore::load_schemas(project.as_deref(), home.as_deref())
             .and_then(|schemas| open_log(&checkout).and_then(|log| cli::start(&log, &schemas, &root))),
     };
 

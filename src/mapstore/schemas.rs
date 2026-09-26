@@ -112,20 +112,26 @@ impl Schemas for SchemaCatalog {
 /// Every schema `home` and `<project>/.percept/schemas` declare: the
 /// global ones first, then the project's, each in the stable order
 /// `project_files` gives - none when a directory is missing or holds
-/// no `.toml` file. Each error names the file it came from. A schema
-/// declared under both is refused, naming both files: a schema is
-/// global or a project's, never both. The loaded set then keeps
-/// `check_across`'s rules, across both levels together.
-pub fn load(project: &Path, home: Option<&Path>) -> Result<SchemaCatalog, Box<dyn std::error::Error>> {
+/// no `.toml` file. `project` is `None` at the home level itself, where
+/// there is no project schema to read. Each error names the file it
+/// came from. A schema declared under both is refused, naming both
+/// files: a schema is global or a project's, never both. The loaded
+/// set then keeps `check_across`'s rules, across both levels together.
+pub fn load(
+    project: Option<&Path>,
+    home: Option<&Path>,
+) -> Result<SchemaCatalog, Box<dyn std::error::Error>> {
     let global_files = match home {
         Some(home) => project_files(home)?,
         None => Vec::new(),
     };
-    // At `$HOME` itself there is no project level: its files are the
-    // global ones, already read.
-    let own_files = if home == Some(project) { Vec::new() } else { project_files(project)? };
-    if let (Some(home), Some((stem, _))) = (
+    let own_files = match project {
+        Some(project) => project_files(project)?,
+        None => Vec::new(),
+    };
+    if let (Some(home), Some(project), Some((stem, _))) = (
         home,
+        project,
         global_files.iter().find(|(stem, _)| own_files.iter().any(|(other, _)| other == stem)),
     ) {
         return Err(format!(

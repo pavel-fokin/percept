@@ -88,7 +88,7 @@ pub fn run(
     for (name, text) in mapstore::templates() {
         write_schema(checkout, home, &name, text)?;
     }
-    let schemas = mapstore::load_schemas(checkout, home)?;
+    let schemas = mapstore::load_schemas(Some(checkout), home)?;
     mapstore::ensure_maps(log, &schemas, source)?;
     let command = format!("percept hook {}", client.name);
     write_config(checkout, client.path, |root| {

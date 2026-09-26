@@ -350,7 +350,7 @@ pub fn schema_of_ref(schemas: &dyn Schemas, s: &str) -> Option<Arc<Schema>> {
             schemas
                 .folded()
                 .iter()
-                .find(|schema| schema.node_kinds().iter().any(|kind| kind.prefix() == prefix))
+                .find(|schema| schema.node_kind_by_prefix(prefix).is_some())
                 .cloned()
         }
     }
@@ -369,6 +369,17 @@ pub fn edge_kind_declared(schemas: &dyn Schemas, kind: &str) -> bool {
 /// map root" means one thing everywhere it is found or minted.
 pub fn map_root<'a>(schemas: &'a dyn Schemas, name: &str, project: &'a Path) -> &'a Path {
     schemas.global_root(name).unwrap_or(project)
+}
+
+/// `~` for a global schema, whose map lives at `$HOME` rather than the
+/// project - `project` otherwise. What a written node's line and a
+/// bare `show`'s summary line each name beside a map.
+pub fn level_label(schemas: &dyn Schemas, name: &str) -> &'static str {
+    if schemas.global_root(name).is_some() {
+        "~"
+    } else {
+        "project"
+    }
 }
 
 /// The map `name` names, if it has been created: its `map.created`
@@ -507,6 +518,14 @@ impl Schema {
     /// The node kind `name` names, when the schema has it.
     pub fn node_kind(&self, name: &str) -> Option<&NodeKind> {
         self.node_kinds.iter().find(|k| k.kind == name)
+    }
+
+    /// The node kind whose short id prefix is `prefix`, when the schema
+    /// has one - what a short id's leading letters resolve to, either
+    /// against one schema (`Map::resolve_short_id`) or across every
+    /// schema declared (`schema_of_ref`).
+    pub fn node_kind_by_prefix(&self, prefix: &str) -> Option<&NodeKind> {
+        self.node_kinds.iter().find(|k| k.prefix() == prefix)
     }
 
     /// The edge kind `name` names, when the schema has it.
