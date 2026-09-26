@@ -1,4 +1,4 @@
-//! The command-line surface: `percept events search` queries the log,
+//! The command-line surface: `percept search` queries the log,
 //! `percept add` and `percept remove` write a node or an edge with no
 //! map name - the kind resolves it - `percept change` changes a node
 //! already in a map, `percept show` reads a map, a node, or an event,
@@ -13,7 +13,7 @@
 //! same `AppService` turn policy `tui` does, just inline instead of over
 //! a channel.
 //!
-//! `events search` and `show` are the query primitive a model composes
+//! `search` and `show` are the query primitive a model composes
 //! with: every line is JSONL, for a caller piping into `jq`, never a
 //! table or prose. `search`'s default line shortens long strings in the
 //! payload, so a caller spends tokens on the whole of one deliberately,
@@ -60,7 +60,7 @@ leave relevance to the caller.
 
 A bare `percept` prints the start screen: how to record, then this \
 project's maps whole - the same text a coding client reads when its \
-session opens. `events search` queries the log; `show` reads a map, a \
+session opens. `search` queries the log at this level; `show` reads a map, a \
 node, or an event, resolved by the shape of its argument; `add` and \
 `remove` write a node or an edge with no map name - the kind resolves \
 it - and `change` changes one already there; `hook <client>` \
@@ -73,11 +73,10 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Work with the event log directly.
-    Events {
-        #[command(subcommand)]
-        command: EventsCommand,
-    },
+    /// Search the log at this level - this project's events inside
+    /// one, every project's at `$HOME` - one JSON object per line,
+    /// oldest first.
+    Search(SearchArgs),
     /// Add a node or an edge - a document on stdin for several at once.
     /// The kind names the map; no write names one.
     Add(AddArgs),
@@ -343,31 +342,29 @@ fn resolve_edge_map(
     Ok(from_schema)
 }
 
-#[derive(Subcommand)]
-pub enum EventsCommand {
-    /// Search events, one JSON object per line, oldest first.
-    Search(SearchArgs),
-}
-
 #[derive(Args, Default)]
 #[command(after_help = "\
 Examples:
   # The 20 most recent events, printed oldest first
-  percept events search --size 20
+  percept search --size 20
 
   # What the model did in the last day
-  percept events search --since 1d --type tool.called
+  percept search --since 1d --type tool.called
 
   # Prompts and replies naming a deploy, 300 characters around each hit
-  percept events search --contains deploy --type message.received --preview 300
+  percept search deploy --type message.received --preview 300
 
   # The same, with full payloads
-  percept events search --contains deploy --type message.received --full
+  percept search deploy --type message.received --full
 
   # Two windows that tile with no gap or overlap
-  percept events search --since 2d --until 1d
-  percept events search --since 1d")]
+  percept search --since 2d --until 1d
+  percept search --since 1d")]
 pub struct SearchArgs {
+    /// An event whose payload carries any of these substrings,
+    /// case-insensitively, passes.
+    #[arg(value_parser = non_blank)]
+    text: Vec<String>,
     /// An ISO-8601 timestamp, or a relative shorthand measured back
     /// from now: `<N>d`, `<N>h`, `<N>m`. Inclusive.
     #[arg(long)]
@@ -385,16 +382,12 @@ pub struct SearchArgs {
     /// Repeatable. An event matching any of these types passes.
     #[arg(long = "type")]
     kind: Vec<String>,
-    /// Repeatable. An event whose payload carries any of these
-    /// substrings, case-insensitively, passes.
-    #[arg(long, value_parser = non_blank)]
-    contains: Vec<String>,
     /// Keep only the N most recent matching events. Output still runs
     /// oldest first.
     #[arg(long)]
     size: Option<usize>,
     /// How many characters of `content` a line keeps, cut around the
-    /// first `--contains` hit when there is one.
+    /// first text hit when there is one.
     #[arg(long, default_value_t = store::PREVIEW_CHARS, value_parser = at_least_one, conflicts_with = "full")]
     preview: usize,
     /// Print the whole wire event per line instead of the constant-size
@@ -581,14 +574,16 @@ fn known_event_id(
 }
 
 /// Searches `log` for events matching `args`, printing one JSON object
-/// per line in log order. `store` owns the wire shape; the CLI only
-/// builds the query and formats the result.
+/// per line in log order: `project`'s own events, or - with none, at
+/// the home level - every project's. `store` owns the wire shape; the
+/// CLI only builds the query and formats the result.
 pub fn search(
     args: SearchArgs,
     log: &dyn EventSearch,
     me: Option<crate::core::HumanId>,
+    project: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let query = parse_query(&args, me)?;
+    let query = parse_query(&args, me, project)?;
     let events = log.search(&query)?;
 
     print_lines(events.iter().map(|event| {
@@ -1302,7 +1297,11 @@ pub(super) fn stop_if_pipe_closed(e: io::Error) -> Result<(), Box<dyn std::error
 /// the value it is compared against. A filter naming something the log
 /// has no word for is an error here rather than a query that quietly
 /// matches nothing.
-fn parse_query(args: &SearchArgs, me: Option<crate::core::HumanId>) -> Result<EventQuery, String> {
+fn parse_query(
+    args: &SearchArgs,
+    me: Option<crate::core::HumanId>,
+    project: Option<&Path>,
+) -> Result<EventQuery, String> {
     let kinds = args
         .kind
         .iter()
@@ -1331,10 +1330,10 @@ fn parse_query(args: &SearchArgs, me: Option<crate::core::HumanId>) -> Result<Ev
         until,
         actors,
         sources: args.source.clone(),
+        roots: project.into_iter().map(Path::to_path_buf).collect(),
         kinds,
-        text: args.contains.clone(),
+        text: args.text.clone(),
         size: args.size,
-        ..Default::default()
     };
     if let Some((since, until)) = query.inverted_window() {
         return Err(format!("--since {since} is not before --until {until}"));
@@ -1397,7 +1396,7 @@ fn show_maps(
     print_lines(map_summary_lines(schemas, &events, project, args.json)?.into_iter())
 }
 
-/// Prints the one event `arg` names, the way `events search --full`
+/// Prints the one event `arg` names, the way `search --full`
 /// prints one. An id the log doesn't carry fails loudly rather than
 /// printing nothing, so an empty result never means "your id was
 /// wrong". With `--range`, prints `payload.content` sliced to it

@@ -202,7 +202,7 @@ fn an_unknown_type_filter_is_rejected_rather_than_matching_nothing() {
         kind: vec!["message.recieved".to_string()],
         ..Default::default()
     };
-    assert!(parse_query(&args, crate::core::testing::human()).is_err());
+    assert!(parse_query(&args, crate::core::testing::human(), None).is_err());
 }
 
 #[test]
@@ -211,14 +211,14 @@ fn every_flag_reaches_the_query_it_builds() {
         source: vec!["tui".to_string(), "cli".to_string()],
         actor: vec!["user".to_string()],
         kind: vec!["tool.called".to_string()],
-        contains: vec!["deploy".to_string()],
+        text: vec!["deploy".to_string()],
         size: Some(3),
         since: Some("1d".to_string()),
         ..Default::default()
     };
 
     let me = crate::core::testing::human();
-    let query = parse_query(&args, me).unwrap();
+    let query = parse_query(&args, me, None).unwrap();
 
     assert_eq!(query.sources, vec!["tui", "cli"]);
     assert!(query.actors == vec![crate::core::Actor::Human(me)]);
@@ -229,13 +229,29 @@ fn every_flag_reaches_the_query_it_builds() {
 }
 
 #[test]
+fn a_search_inside_a_project_keeps_to_its_events() {
+    let project = Path::new("/home/code/app");
+
+    let query = parse_query(&SearchArgs::default(), crate::core::testing::human(), Some(project)).unwrap();
+
+    assert_eq!(query.roots, vec![project.to_path_buf()]);
+}
+
+#[test]
+fn a_search_at_the_home_level_spans_every_project() {
+    let query = parse_query(&SearchArgs::default(), crate::core::testing::human(), None).unwrap();
+
+    assert!(query.roots.is_empty());
+}
+
+#[test]
 fn a_window_that_ends_before_it_starts_is_rejected() {
     let args = SearchArgs {
         since: Some("1h".to_string()),
         until: Some("2h".to_string()),
         ..Default::default()
     };
-    assert!(parse_query(&args, crate::core::testing::human()).is_err());
+    assert!(parse_query(&args, crate::core::testing::human(), None).is_err());
 }
 
 #[test]
@@ -244,23 +260,23 @@ fn an_unknown_actor_filter_is_rejected_rather_than_matching_nothing() {
         actor: vec!["User".to_string()],
         ..Default::default()
     };
-    assert!(parse_query(&args, crate::core::testing::human()).is_err());
+    assert!(parse_query(&args, crate::core::testing::human(), None).is_err());
 }
 
 #[test]
-fn a_blank_contains_value_is_rejected_at_parse() {
-    let ok = Cli::try_parse_from(["percept", "events", "search", "--contains", "deploy"]);
+fn a_blank_search_text_is_rejected_at_parse() {
+    let ok = Cli::try_parse_from(["percept", "search", "deploy"]);
     assert!(ok.is_ok());
 
-    let blank = Cli::try_parse_from(["percept", "events", "search", "--contains", " "]);
+    let blank = Cli::try_parse_from(["percept", "search", " "]);
     assert!(blank.is_err());
 }
 
 #[test]
 fn a_zero_preview_is_rejected_at_parse() {
-    let zero = Cli::try_parse_from(["percept", "events", "search", "--preview", "0"]);
+    let zero = Cli::try_parse_from(["percept", "search", "--preview", "0"]);
     assert!(zero.is_err());
-    let ok = Cli::try_parse_from(["percept", "events", "search", "--preview", "300"]);
+    let ok = Cli::try_parse_from(["percept", "search", "--preview", "300"]);
     assert!(ok.is_ok());
 }
 
@@ -278,7 +294,7 @@ fn a_range_without_a_start_begins_at_zero() {
 
 #[test]
 fn preview_and_full_are_refused_together() {
-    let both = Cli::try_parse_from(["percept", "events", "search", "--preview", "9", "--full"]);
+    let both = Cli::try_parse_from(["percept", "search", "--preview", "9", "--full"]);
     assert!(both.is_err());
 }
 

@@ -1,5 +1,5 @@
 //! A cognitive map on the wire: folding one from the log, printing it
-//! as JSONL so `show` pipes into `jq` the way `events search` does,
+//! as JSONL so `show` pipes into `jq` the way `search` does,
 //! and revising it - a writer's `Mutation` checked against a
 //! `Snapshot` of the log and turned into the payload that records it.
 

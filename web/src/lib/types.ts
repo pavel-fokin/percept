@@ -12,7 +12,7 @@ export interface Source {
   path: string;
 }
 
-/** One log entry, the shape `percept events search` prints - what
+/** One log entry, the shape `percept search` prints - what
  * `GET /api/events` returns one of, per element of `events`. */
 export interface Event {
   id: string;

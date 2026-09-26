@@ -26,7 +26,7 @@ mod tools;
 mod tui;
 mod workspace;
 
-use cli::{Cli, Command, EventsCommand};
+use cli::{Cli, Command};
 use store::{turn_dir, Jsonl, TurnState};
 
 /// Names the directory percept keeps its state in - the event log, and
@@ -284,11 +284,9 @@ async fn main() {
     let result = match cli.command {
         // `hook_main` above exits before this match is ever reached.
         Some(Command::Hook(_)) => unreachable!(),
-        Some(Command::Events { command }) => open_log(&checkout).and_then(|log| {
-            let me = log.me();
-            match command {
-                EventsCommand::Search(args) => cli::search(args, &log, me),
-            }
+        Some(Command::Search(args)) => open_log(&checkout).and_then(|log| {
+            let project = (home.as_deref() != Some(root.as_path())).then_some(root.as_path());
+            cli::search(args, &log, log.me(), project)
         }),
         Some(Command::Add(args)) => mapstore::load_schemas(&checkout, home.as_deref()).and_then(|schemas| {
             let log = open_log(&checkout)?;

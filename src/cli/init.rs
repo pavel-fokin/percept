@@ -49,7 +49,7 @@ const CLAUDE_ALLOW: [&str; 5] = [
     "Bash(percept remove *)",
     "Bash(percept change *)",
     "Bash(percept show *)",
-    "Bash(percept events *)",
+    "Bash(percept search *)",
 ];
 
 const CLIENTS: [Client; 2] = [

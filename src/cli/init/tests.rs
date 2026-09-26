@@ -56,7 +56,7 @@ fn writes_claude_code_from_nothing() {
             "Bash(percept remove *)",
             "Bash(percept change *)",
             "Bash(percept show *)",
-            "Bash(percept events *)",
+            "Bash(percept search *)",
         ])
     );
 }
