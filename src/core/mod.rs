@@ -29,5 +29,8 @@ pub use map::{
 };
 pub use map_reader::MapReader;
 #[allow(unused_imports)]
-pub use schema::{check_across, fold_all, fold_named, map_created_at, map_id_at, map_root, EdgeKind, NodeKind, Schema, SchemaError, Schemas};
+pub use schema::{
+    check_across, edge_kind_declared, fold_all, fold_named, map_created_at, map_id_at, map_root,
+    schema_of_node_kind, schema_of_ref, EdgeKind, NodeKind, Schema, SchemaError, Schemas,
+};
 pub use search::{EventQuery, EventSearch};

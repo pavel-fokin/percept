@@ -277,31 +277,28 @@ async fn main() {
         Some(Command::Maps { command }) => mapstore::load_schemas(&checkout, home.as_deref()).and_then(|schemas| {
             let log = open_log(&checkout)?;
             let me = log.me();
-            // Read by the write commands only: a read never opens the
+            // Read by the write command only: a read never opens the
             // turn directory.
             let cause = || turn_cause(&checkout, &root);
             match command {
                 MapsCommand::List(args) => cli::maps_list(args, &log, &schemas, &root),
                 MapsCommand::Show(args) => cli::maps_show(args, &log, &schemas, &root),
-                MapsCommand::AddNode(args) => {
-                    cli::maps_add_node(args, &log, &schemas, &cli_source, me, cause()?)
-                }
-                MapsCommand::AddEdge(args) => {
-                    cli::maps_add_edge(args, &log, &schemas, &cli_source, me, cause()?)
-                }
-                MapsCommand::RemoveNode(args) => {
-                    cli::maps_remove_node(args, &log, &schemas, &cli_source, me, cause()?)
-                }
-                MapsCommand::RemoveEdge(args) => {
-                    cli::maps_remove_edge(args, &log, &schemas, &cli_source, me, cause()?)
-                }
-                MapsCommand::Record(args) => {
-                    cli::maps_record(args, &log, &schemas, &cli_source, &checkout, me, cause()?)
-                }
                 MapsCommand::ChangeNode(args) => {
                     cli::maps_change_node(args, &log, &schemas, &cli_source, me, cause()?)
                 }
             }
+        }),
+        Some(Command::Add(args)) => mapstore::load_schemas(&checkout, home.as_deref()).and_then(|schemas| {
+            let log = open_log(&checkout)?;
+            let me = log.me();
+            let cause = turn_cause(&checkout, &root)?;
+            cli::add(args, &log, &schemas, &cli_source, &checkout, me, cause)
+        }),
+        Some(Command::Remove(args)) => mapstore::load_schemas(&checkout, home.as_deref()).and_then(|schemas| {
+            let log = open_log(&checkout)?;
+            let me = log.me();
+            let cause = turn_cause(&checkout, &root)?;
+            cli::remove(args, &log, &schemas, &cli_source, me, cause)
         }),
         #[cfg(feature = "lab")]
         Some(Command::Ask(args)) => {

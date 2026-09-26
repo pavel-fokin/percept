@@ -444,7 +444,7 @@ fn the_start_screen_frames_the_record_rule_before_the_maps() {
 
     let frame = text.split("\n# debates\n").next().unwrap();
     assert!(frame.contains("record it in the same turn"), "{text}");
-    assert!(frame.contains("percept maps record <map> --actor agent --source <event>"), "{text}");
+    assert!(frame.contains("percept add --actor agent --source <event>"), "{text}");
 }
 
 #[test]

@@ -325,6 +325,44 @@ fn free_prefix(name: &str, kinds: &[(&str, &NodeKind)]) -> Option<String> {
     free.map(str::to_string)
 }
 
+/// The schema declaring node kind `kind` - unique across every loaded
+/// schema, since `check_across` refuses two that would. `None` when no
+/// schema declares it. What `add`/`remove` resolve a node kind to its
+/// one map through, with no map name in the command.
+pub fn schema_of_node_kind(schemas: &dyn Schemas, kind: &str) -> Option<Arc<Schema>> {
+    schemas
+        .folded()
+        .iter()
+        .find(|schema| schema.node_kind(kind).is_some())
+        .cloned()
+}
+
+/// The schema a node ref names: `kind:name` by its kind, or the short
+/// id `s` takes by the node kind prefix it starts with. `None` when
+/// neither resolves - an unknown kind, or a prefix no schema declares.
+/// What `add covers c1 c3` resolves each end's map through, before
+/// checking the two agree.
+pub fn schema_of_ref(schemas: &dyn Schemas, s: &str) -> Option<Arc<Schema>> {
+    match s.split_once(':') {
+        Some((kind, _)) => schema_of_node_kind(schemas, kind),
+        None => {
+            let (prefix, _) = super::map::split_short_id(s)?;
+            schemas
+                .folded()
+                .iter()
+                .find(|schema| schema.node_kinds().iter().any(|kind| kind.prefix() == prefix))
+                .cloned()
+        }
+    }
+}
+
+/// Whether any schema declares `kind` as an edge kind - edge kinds may
+/// repeat across schemas, so this only says the word is known, not
+/// which map it belongs to.
+pub fn edge_kind_declared(schemas: &dyn Schemas, kind: &str) -> bool {
+    schemas.folded().iter().any(|schema| schema.edge_kind(kind).is_some())
+}
+
 /// The root a map named `name` lives at: `schemas.global_root(name)`
 /// when `name` names a global schema, else `project`. Every identity
 /// lookup and every `map.created` goes through this, so "a schema's

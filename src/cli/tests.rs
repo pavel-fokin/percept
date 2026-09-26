@@ -1,10 +1,57 @@
 use super::*;
 use crate::core::testing::{
-    human, node_added, node_added_at, node_added_by, node_id, schemas, source, FakeLog, Fixture,
-    ROOT,
+    human, node_added, node_added_at, node_added_by, node_id, schemas, source, FakeLog,
+    FakeSchemas, Fixture, HOME, ROOT,
 };
-use crate::core::{Actor, Payload};
+use crate::core::{Actor, EdgeKind, NodeKind, Payload};
 use std::path::{Path, PathBuf};
+
+/// A minimal schema for a test that needs a map of its own, distinct
+/// from `debates`/`chores` - a `concept`, prefixed `c`, and a `relates`
+/// edge between two of them.
+fn concepts_schema() -> Schema {
+    Schema::new(
+        "concepts",
+        "what a test needs from a concepts map",
+        vec![NodeKind::new("concept", vec![("definition".to_string(), Vec::new())]).unwrap()],
+        vec![EdgeKind::new("relates", vec!["concept".to_string()], vec!["concept".to_string()]).unwrap()],
+    )
+    .unwrap()
+}
+
+/// A minimal global schema, prefixed `p` - distinct from `concepts_schema`
+/// so an edge across the two is unambiguous, and global so a test can
+/// tell its map lands at `HOME`.
+fn projects_schema() -> Schema {
+    Schema::new(
+        "projects",
+        "what a test needs from a global projects map",
+        vec![NodeKind::new("project", Vec::new()).unwrap()],
+        Vec::new(),
+    )
+    .unwrap()
+}
+
+/// `concepts_schema` and `projects_schema` together, `projects` global.
+fn concepts_and_projects() -> FakeSchemas {
+    FakeSchemas::with_global(vec![concepts_schema(), projects_schema()], &["projects"])
+}
+
+/// A `WriteArgs` a test doesn't otherwise care about: `human`, no
+/// sources, no explicit causation.
+fn write_args() -> WriteArgs {
+    WriteArgs::default()
+}
+
+/// `chores` alone, for a document test that resolves a bare short id:
+/// the combined `schemas()` fixture gives `debates`'s `claim` and
+/// `chores`'s own `chore` the same default prefix, `c`, since it never
+/// runs through the `check_across` a real project's schemas do - this
+/// sidesteps that clash rather than relying on which of the two a
+/// lookup happens to find first.
+fn chores_only() -> FakeSchemas {
+    FakeSchemas::new(vec![crate::core::testing::chores()])
+}
 
 /// The checkout most tests never read from - only a `cites` line does.
 fn no_checkout() -> &'static Path {
@@ -373,123 +420,278 @@ fn since_on_maps_show_parses_like_events_search() {
     );
 }
 
+/// `AddArgs` from a bare word list - the shape `parse_write_args` reads.
+fn add_args(tokens: &[&str]) -> AddArgs {
+    AddArgs { args: tokens.iter().map(|s| s.to_string()).collect() }
+}
+
+/// `RemoveArgs`, the same way as `add_args`.
+fn remove_args(tokens: &[&str]) -> RemoveArgs {
+    RemoveArgs { args: tokens.iter().map(|s| s.to_string()).collect() }
+}
+
 #[test]
-fn every_write_verb_fails_on_a_map_name_no_schema_declares() {
+fn add_captures_its_whole_tail_including_flags() {
+    let cli =
+        Cli::try_parse_from(["percept", "add", "concept", "Snapshot", "--definition", "x"]).unwrap();
+    let Some(Command::Add(args)) = cli.command else {
+        panic!("expected add")
+    };
+    assert_eq!(args.args, vec!["concept", "Snapshot", "--definition", "x"]);
+}
+
+#[test]
+fn add_and_remove_fail_on_a_kind_no_schema_declares() {
     let log = FakeLog::default();
-    let target = || MapArgs {
-        map: "code".to_string(),
-        source: Vec::new(),
-        actor: "human".to_string(),
-    };
-
     let cli_source = source("cli");
-    let add_node = maps_add_node(
-        AddNodeArgs {
-            target: target(),
-            kind: "file".to_string(),
-            name: "src/main.rs".to_string(),
-            prop: Vec::new(),
-        },
-        &log,
-        &schemas(),
-        &cli_source,
-        human(),
-        None,
-    );
-    let remove_node = maps_remove_node(
-        RemoveNodeArgs {
-            target: target(),
-            node: "file:src/main.rs".to_string(),
-        },
-        &log,
-        &schemas(),
-        &cli_source,
-        human(),
-        None,
-    );
-    let edge_args = || EdgeArgs {
-        target: target(),
-        kind: "imports".to_string(),
-        from: "file:src/main.rs".to_string(),
-        to: "file:src/app/mod.rs".to_string(),
-    };
-    let add_edge = maps_add_edge(edge_args(), &log, &schemas(), &cli_source, human(), None);
-    let remove_edge = maps_remove_edge(edge_args(), &log, &schemas(), &cli_source, human(), None);
 
-    for result in [add_node, remove_node, add_edge, remove_edge] {
+    let added = add(
+        add_args(&["file", "src/main.rs"]),
+        &log,
+        &schemas(),
+        &cli_source,
+        no_checkout(),
+        human(),
+        None,
+    );
+    let removed = remove(
+        remove_args(&["file", "src/main.rs"]),
+        &log,
+        &schemas(),
+        &cli_source,
+        human(),
+        None,
+    );
+
+    for result in [added, removed] {
         let err = result.err().unwrap();
-        assert!(err.to_string().starts_with("no map named \"code\""), "{err}");
+        assert!(err.to_string().starts_with("no map declares \"file\""), "{err}");
     }
     assert!(log.load().unwrap().is_empty());
 }
 
 #[test]
-fn a_map_write_commits_as_the_actor_given_and_defaults_to_human() {
+fn add_commits_as_the_actor_given_and_defaults_to_human() {
     let log = FakeLog::default();
-    let cli = Cli::try_parse_from([
-        "percept",
-        "maps",
-        "add-node",
-        "debates",
-        "--actor",
-        "model",
-        "--kind",
-        "topic",
-        "--name",
-        "Which?",
-    ])
+    add(
+        add_args(&["topic", "Which?", "--actor", "agent"]),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+        None,
+    )
     .unwrap();
-    let Some(Command::Maps {
-        command: MapsCommand::AddNode(args),
-    }) = cli.command
-    else {
-        panic!("expected maps add-node")
-    };
-    assert_eq!(args.target.actor, "model");
+    assert!(log.load().unwrap().last().unwrap().actor() == Actor::Agent);
 
-    maps_add_node(args, &log, &schemas(), &source("cli"), human(), None).unwrap();
-
-    let events = log.load().unwrap();
-    assert!(events.last().unwrap().actor() == Actor::Agent);
-    let default = Cli::try_parse_from([
-        "percept",
-        "maps",
-        "add-node",
-        "debates",
-        "--kind",
-        "topic",
-        "--name",
-        "Which?",
-    ])
+    let log = FakeLog::default();
+    add(
+        add_args(&["topic", "Which too?"]),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+        None,
+    )
     .unwrap();
-    let Some(Command::Maps {
-        command: MapsCommand::AddNode(args),
-    }) = default.command
-    else {
-        panic!("expected maps add-node")
-    };
-    assert_eq!(args.target.actor, "human");
+    assert!(matches!(log.load().unwrap().last().unwrap().actor(), Actor::Human(_)));
 }
 
 #[test]
-fn maps_add_node_carries_the_cause_it_is_given() {
+fn add_carries_the_cause_it_is_given() {
     let log = FakeLog::default();
     let cause = crate::core::EventId::new();
-    let args = AddNodeArgs {
-        target: MapArgs {
-            map: "debates".to_string(),
-            source: Vec::new(),
-            actor: "human".to_string(),
-        },
-        kind: "topic".to_string(),
-        name: "Which?".to_string(),
-        prop: Vec::new(),
-    };
 
-    maps_add_node(args, &log, &schemas(), &source("cli"), human(), Some(cause)).unwrap();
+    add(
+        add_args(&["topic", "Which?"]),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+        Some(cause),
+    )
+    .unwrap();
 
     let events = log.load().unwrap();
     assert_eq!(events.last().unwrap().causation_id(), Some(cause));
+}
+
+#[test]
+fn an_explicit_causation_flag_wins_over_the_turns() {
+    let log = FakeLog::default();
+    let turns_cause = crate::core::EventId::new();
+    let seed = Event::message_received(Actor::Human(human()), "hi".to_string(), source("cli"), None);
+    let explicit = seed.id();
+    log.append(&seed).unwrap();
+    let flag = explicit.as_uuid().to_string();
+
+    add(
+        add_args(&["topic", "Which?", "--causation", &flag]),
+        &log,
+        &schemas(),
+        &source("cli"),
+        no_checkout(),
+        human(),
+        Some(turns_cause),
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    assert_eq!(events.last().unwrap().causation_id(), Some(explicit));
+}
+
+#[test]
+fn node_written_line_names_the_maps_level() {
+    let schemas = concepts_and_projects();
+    assert_eq!(node_written_line(&schemas, "concepts", "c3"), "c3  concepts (project)");
+    assert_eq!(node_written_line(&schemas, "projects", "p1"), "p1  projects (~)");
+}
+
+#[test]
+fn a_node_added_to_a_global_schema_lands_at_home() {
+    let log = FakeLog::default();
+    let schemas = concepts_and_projects();
+
+    add(
+        add_args(&["project", "percept"]),
+        &log,
+        &schemas,
+        &source("cli"),
+        no_checkout(),
+        human(),
+        None,
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    let created = events
+        .iter()
+        .find(|event| matches!(event.payload(), Payload::MapCreated { .. }))
+        .expect("a first write to a map creates it");
+    assert_eq!(created.source().path, Path::new(HOME));
+}
+
+#[test]
+fn a_node_added_to_a_project_schema_lands_at_the_project_root() {
+    let log = FakeLog::default();
+    let schemas = concepts_and_projects();
+
+    add(
+        add_args(&["concept", "Snapshot"]),
+        &log,
+        &schemas,
+        &source("cli"),
+        no_checkout(),
+        human(),
+        None,
+    )
+    .unwrap();
+
+    let events = log.load().unwrap();
+    let created = events
+        .iter()
+        .find(|event| matches!(event.payload(), Payload::MapCreated { .. }))
+        .expect("a first write to a map creates it");
+    assert_eq!(created.source().path, Path::new(ROOT));
+}
+
+#[test]
+fn an_edge_across_two_maps_is_refused_naming_both() {
+    let log = FakeLog::default();
+    let schemas = concepts_and_projects();
+    for tokens in [["concept", "Snapshot"], ["project", "percept"]] {
+        add(add_args(&tokens), &log, &schemas, &source("cli"), no_checkout(), human(), None).unwrap();
+    }
+
+    let err = add(
+        add_args(&["relates", "c1", "p1"]),
+        &log,
+        &schemas,
+        &source("cli"),
+        no_checkout(),
+        human(),
+        None,
+    )
+    .err()
+    .unwrap();
+
+    assert!(err.to_string().contains("concepts"), "{err}");
+    assert!(err.to_string().contains("projects"), "{err}");
+}
+
+#[test]
+fn an_edge_between_two_nodes_of_one_map_resolves_the_map_with_no_name() {
+    let log = FakeLog::default();
+    let schemas = concepts_and_projects();
+    for tokens in [["concept", "Snapshot"], ["concept", "Undo"]] {
+        add(add_args(&tokens), &log, &schemas, &source("cli"), no_checkout(), human(), None).unwrap();
+    }
+
+    add(
+        add_args(&["relates", "c1", "c2"]),
+        &log,
+        &schemas,
+        &source("cli"),
+        no_checkout(),
+        human(),
+        None,
+    )
+    .unwrap();
+
+    let map = mapstore::fold_map(&log, &schemas, "concepts", Path::new(ROOT)).unwrap();
+    assert_eq!(map.edges().len(), 1);
+    assert_eq!(map.edges()[0].kind, "relates");
+}
+
+#[test]
+fn an_unknown_property_flag_is_refused() {
+    let log = FakeLog::default();
+    let schemas = concepts_and_projects();
+
+    let err = add(
+        add_args(&["concept", "Snapshot", "--nonsense", "value"]),
+        &log,
+        &schemas,
+        &source("cli"),
+        no_checkout(),
+        human(),
+        None,
+    )
+    .err()
+    .unwrap();
+
+    assert!(err.to_string().contains("nonsense"), "{err}");
+    assert!(log.load().unwrap().is_empty());
+}
+
+#[test]
+fn remove_drops_a_node_and_an_edge() {
+    let log = FakeLog::default();
+    let schemas = concepts_and_projects();
+    for tokens in [["concept", "Snapshot"], ["concept", "Undo"]] {
+        add(add_args(&tokens), &log, &schemas, &source("cli"), no_checkout(), human(), None).unwrap();
+    }
+    add(
+        add_args(&["relates", "c1", "c2"]),
+        &log,
+        &schemas,
+        &source("cli"),
+        no_checkout(),
+        human(),
+        None,
+    )
+    .unwrap();
+
+    remove(remove_args(&["relates", "c1", "c2"]), &log, &schemas, &source("cli"), human(), None).unwrap();
+    let map = mapstore::fold_map(&log, &schemas, "concepts", Path::new(ROOT)).unwrap();
+    assert!(map.edges().is_empty());
+
+    remove(remove_args(&["concept", "c1"]), &log, &schemas, &source("cli"), human(), None).unwrap();
+    let map = mapstore::fold_map(&log, &schemas, "concepts", Path::new(ROOT)).unwrap();
+    assert!(map.find("concept", "Snapshot").is_none());
 }
 
 fn change_node_args(node: &str) -> ChangeNodeArgs {
@@ -563,15 +765,6 @@ fn maps_change_node_refuses_an_agent_s_property_change_of_a_node_a_human_wrote()
     assert_eq!(log.load().unwrap().len(), 2);
 }
 
-fn record_args(map: &str) -> RecordArgs {
-    RecordArgs {
-        map: map.to_string(),
-        source: Vec::new(),
-        actor: "human".to_string(),
-        causation: None,
-    }
-}
-
 #[test]
 fn a_document_writes_its_nodes_and_edges_in_order() {
     let log = FakeLog::default();
@@ -579,7 +772,7 @@ fn a_document_writes_its_nodes_and_edges_in_order() {
                      topic \"Does record work?\"\n  settles verdict\n";
     record_document(
         document,
-        record_args("debates"),
+        write_args(),
         &log,
         &schemas(),
         &source("cli"),
@@ -609,7 +802,7 @@ fn a_record_takes_the_turns_cause_when_none_is_given() {
 
     record_document(
         document,
-        record_args("debates"),
+        write_args(),
         &log,
         &schemas(),
         &source("cli"),
@@ -633,7 +826,7 @@ fn an_explicit_causation_wins_over_the_turns() {
     let seed = Event::message_received(Actor::Human(human()), "hi".to_string(), source("cli"), None);
     let explicit = seed.id();
     log.append(&seed).unwrap();
-    let mut args = record_args("debates");
+    let mut args = write_args();
     args.causation = Some(explicit.as_uuid().to_string());
     let document = "topic \"Does record work?\"\n";
 
@@ -663,7 +856,7 @@ fn a_cites_line_publishes_a_file_cited_event_and_cites_it() {
                      topic \"Does record work?\"\n  settles verdict\n";
     record_document(
         document,
-        record_args("debates"),
+        write_args(),
         &log,
         &schemas(),
         &source("cli"),
@@ -691,7 +884,7 @@ fn a_cites_line_under_a_short_id_reaches_the_node_it_names() {
     let log = FakeLog::default();
     record_document(
         "topic \"Does record work?\"\n",
-        record_args("debates"),
+        write_args(),
         &log,
         &schemas(),
         &source("cli"),
@@ -703,7 +896,7 @@ fn a_cites_line_under_a_short_id_reaches_the_node_it_names() {
 
     record_document(
         "t1\n  cites src/cli/mod.rs:1-3\n",
-        record_args("debates"),
+        write_args(),
         &log,
         &schemas(),
         &source("cli"),
@@ -735,7 +928,7 @@ fn a_ref_to_an_existing_short_id_resolves() {
     let document = "verdict \"yes\"\n  why \"it ran\"\n  doubts t1\n";
     record_document(
         document,
-        record_args("debates"),
+        write_args(),
         &log,
         &schemas(),
         &source("cli"),
@@ -756,7 +949,7 @@ fn an_unknown_node_kind_fails_before_anything_is_written() {
     let document = "riddle \"what?\"\n";
     let err = record_document(
         document,
-        record_args("debates"),
+        write_args(),
         &log,
         &schemas(),
         &source("cli"),
@@ -775,7 +968,7 @@ fn a_closed_list_property_left_unset_records_with_no_value() {
     let document = "chore \"cancel a turn\"\n  why \"Esc drops the session\"\n";
     record_document(
         document,
-        record_args("chores"),
+        write_args(),
         &log,
         &schemas(),
         &source("cli"),
@@ -801,7 +994,7 @@ fn a_bad_ref_names_its_line_number() {
                      verdict \"yes\"\n  why \"it ran\"\n  settles t9\n";
     let err = record_document(
         document,
-        record_args("debates"),
+        write_args(),
         &log,
         &schemas(),
         &source("cli"),
@@ -821,7 +1014,7 @@ fn a_duplicate_name_in_a_later_node_writes_nothing() {
                      topic \"Does record work?\"\n";
     let err = record_document(
         document,
-        record_args("debates"),
+        write_args(),
         &log,
         &schemas(),
         &source("cli"),
@@ -838,7 +1031,7 @@ fn a_duplicate_name_in_a_later_node_writes_nothing() {
 fn a_source_id_the_log_lacks_writes_nothing() {
     let log = FakeLog::default();
     let document = "topic \"Does record work?\"\n";
-    let mut args = record_args("debates");
+    let mut args = write_args();
     args.source = vec![crate::core::EventId::new().as_uuid().to_string()];
     let err = record_document(
         document,
@@ -860,9 +1053,9 @@ fn a_short_id_document_changes_the_node_and_records_node_changed() {
     let log = FakeLog::default();
     record_document(
         "chore \"cancel a turn\"\n  why \"Esc drops the session\"\n  state \"open\"\n",
-        record_args("chores"),
+        write_args(),
         &log,
-        &schemas(),
+        &chores_only(),
         &source("cli"),
         no_checkout(),
         human(),
@@ -872,9 +1065,9 @@ fn a_short_id_document_changes_the_node_and_records_node_changed() {
 
     record_document(
         "c1\n  state \"done\"\n  outcome \"1f1a9a9: done\"\n",
-        record_args("chores"),
+        write_args(),
         &log,
-        &schemas(),
+        &chores_only(),
         &source("cli"),
         no_checkout(),
         human(),
@@ -888,7 +1081,7 @@ fn a_short_id_document_changes_the_node_and_records_node_changed() {
         Payload::NodeChanged { .. }
     ));
 
-    let map = mapstore::fold_map(&log, &schemas(), "chores", Path::new(ROOT)).unwrap();
+    let map = mapstore::fold_map(&log, &chores_only(), "chores", Path::new(ROOT)).unwrap();
     let chore = map.find("chore", "cancel a turn").unwrap();
     assert_eq!(chore.properties.get("state").unwrap(), "done");
     assert_eq!(chore.properties.get("outcome").unwrap(), "1f1a9a9: done");
@@ -899,9 +1092,9 @@ fn a_change_block_carrying_only_an_edge_records_no_node_change() {
     let log = FakeLog::default();
     record_document(
         "chore \"first\"\n  why \"it came up\"\n  state \"open\"\n",
-        record_args("chores"),
+        write_args(),
         &log,
-        &schemas(),
+        &chores_only(),
         &source("cli"),
         no_checkout(),
         human(),
@@ -909,13 +1102,13 @@ fn a_change_block_carrying_only_an_edge_records_no_node_change() {
     )
     .unwrap();
 
-    let mut agent = record_args("chores");
+    let mut agent = write_args();
     agent.actor = "agent".to_string();
     record_document(
         "chore \"second\"\n  why \"it follows\"\n  state \"open\"\nc1\n  blocks c2\n",
         agent,
         &log,
-        &schemas(),
+        &chores_only(),
         &source("cli"),
         no_checkout(),
         human(),
@@ -931,7 +1124,7 @@ fn a_change_block_carrying_only_an_edge_records_no_node_change() {
         "an edge under a short id changed nothing about the node it names"
     );
 
-    let map = mapstore::fold_map(&log, &schemas(), "chores", Path::new(ROOT)).unwrap();
+    let map = mapstore::fold_map(&log, &chores_only(), "chores", Path::new(ROOT)).unwrap();
     let first = map.find("chore", "first").unwrap();
     let children = map.children(first.id);
     assert_eq!(children.len(), 1);
@@ -944,9 +1137,9 @@ fn a_short_id_line_with_a_quoted_name_is_an_error() {
     let log = FakeLog::default();
     let err = record_document(
         "c4 \"name\"\n",
-        record_args("chores"),
+        write_args(),
         &log,
-        &schemas(),
+        &chores_only(),
         &source("cli"),
         no_checkout(),
         human(),
@@ -961,9 +1154,9 @@ fn a_change_to_an_unknown_short_id_is_an_error() {
     let log = FakeLog::default();
     let err = record_document(
         "c9\n  state \"done\"\n",
-        record_args("chores"),
+        write_args(),
         &log,
-        &schemas(),
+        &chores_only(),
         &source("cli"),
         no_checkout(),
         human(),
@@ -979,9 +1172,9 @@ fn a_record_why_line_under_a_change_block_sets_the_nodes_why_property() {
     let log = FakeLog::default();
     record_document(
         "chore \"cancel a turn\"\n  why \"Esc drops the session\"\n  state \"open\"\n",
-        record_args("chores"),
+        write_args(),
         &log,
-        &schemas(),
+        &chores_only(),
         &source("cli"),
         no_checkout(),
         human(),
@@ -991,9 +1184,9 @@ fn a_record_why_line_under_a_change_block_sets_the_nodes_why_property() {
 
     record_document(
         "c1\n  why \"never proposed\"\n",
-        record_args("chores"),
+        write_args(),
         &log,
-        &schemas(),
+        &chores_only(),
         &source("cli"),
         no_checkout(),
         human(),
@@ -1009,7 +1202,7 @@ fn a_record_why_line_under_a_change_block_sets_the_nodes_why_property() {
         _ => panic!("expected NodeChanged"),
     }
 
-    let map = mapstore::fold_map(&log, &schemas(), "chores", Path::new(ROOT)).unwrap();
+    let map = mapstore::fold_map(&log, &chores_only(), "chores", Path::new(ROOT)).unwrap();
     let chore = map.find("chore", "cancel a turn").unwrap();
     assert_eq!(chore.properties.get("why").unwrap(), "never proposed");
 }

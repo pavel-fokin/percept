@@ -35,7 +35,7 @@ pub fn start(schemas: &dyn Schemas, maps: &[Map]) -> String {
          before you build. When a turn adds what a map's purpose asks for\n\
          and the map lacks, record it in the same turn, citing the prompt's\n\
          event from the `percept event` line:\n\n    \
-         percept maps record <map> --actor agent --source <event> <<'EOF'\n    \
+         percept add --actor agent --source <event> <<'EOF'\n    \
          <kind> \"<name>\"\n      \
          <property> \"<value>\"\n    \
          EOF\n",
