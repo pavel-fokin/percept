@@ -1,6 +1,6 @@
 //! A cognitive map on the wire: folding one from the log, printing it
-//! as JSONL so `maps show` pipes into `jq` the way `events search`
-//! does, and revising it - a writer's `Mutation` checked against a
+//! as JSONL so `show` pipes into `jq` the way `search` does,
+//! and revising it - a writer's `Mutation` checked against a
 //! `Snapshot` of the log and turned into the payload that records it.
 
 use std::collections::{BTreeSet, HashSet};
@@ -164,7 +164,9 @@ impl Snapshot {
 /// returns is appended before any other writer's own computed append
 /// call can run. Two writers each loading the log on their own could
 /// both count the same kind's existing nodes and mint the same short
-/// id; this is the seam that stops them.
+/// id; this is the seam that stops them. Alongside the event, gives the
+/// short id a node the mutation minted took, so a caller that only
+/// needs to print it never refolds the map to look it up again.
 #[allow(clippy::too_many_arguments)]
 pub fn commit(
     log: &dyn EventLog,
@@ -175,19 +177,25 @@ pub fn commit(
     actor: Actor,
     causation: Option<EventId>,
     mutation: impl FnOnce(Vec<EventId>) -> Mutation,
-) -> Result<crate::core::Event, Box<dyn std::error::Error>> {
+) -> Result<(crate::core::Event, Option<String>), Box<dyn std::error::Error>> {
     let (name, source) = (name.to_string(), source.clone());
+    let mut minted_short_id = None;
+    let short_id = &mut minted_short_id;
     let batch = log.append_batch_computed(Box::new(move |events| {
         let (created, mut snapshot) = Snapshot::for_write(schemas, &name, &source, events)?;
         let sources = snapshot.resolve(sources)?;
         let payload = snapshot.apply(mutation(sources), actor)?;
+        if let Payload::NodeAdded { node, .. } = &payload {
+            *short_id = snapshot.map().short_id(*node);
+        }
         let changed = crate::core::Event::new(actor, source, causation, payload);
         Ok(created.into_iter().chain(std::iter::once(changed)).collect())
     }))?;
-    batch
+    let event = batch
         .last()
         .cloned()
-        .ok_or_else(|| "map write produced no event".into())
+        .ok_or_else(|| -> Box<dyn std::error::Error> { "map write produced no event".into() })?;
+    Ok((event, minted_short_id))
 }
 
 /// One batch of changes to the map `name` names, folded at `source`'s
@@ -243,6 +251,7 @@ struct MapLine<'a> {
     purpose: &'a str,
     nodes: usize,
     edges: usize,
+    level: &'static str,
 }
 
 /// Who added a node or edge and when. Absent on a line the caller asked
@@ -327,14 +336,15 @@ struct EdgeLine<'a> {
     stamp: Option<Stamp>,
 }
 
-/// One line naming a map and its size, for `maps list`.
-pub fn encode_map(map: &Map) -> String {
+/// One line naming a map, its level, and its size, for a bare `show`.
+pub fn encode_map(schemas: &dyn Schemas, map: &Map) -> String {
     serde_json::to_string(&MapLine {
         id: map.id().as_uuid().to_string(),
         map: map.schema().name(),
         purpose: map.schema().purpose(),
         nodes: map.nodes().len(),
         edges: map.edges().len(),
+        level: crate::core::level_label(schemas, map.schema().name()),
     })
     .expect("MapLine always serializes")
 }
@@ -432,7 +442,7 @@ pub fn encode_fragment(fragment: &Fragment) -> String {
     .expect("FragmentLine always serializes")
 }
 
-/// A map as JSONL: every node, then every edge - the order `maps show`
+/// A map as JSONL: every node, then every edge - the order `show`
 /// prints and `read_map` returns. `stamped` is `false` only for
 /// `read_code`'s tree walk - see `Stamp::of`.
 pub fn encode_lines(map: &Map, stamped: bool) -> impl Iterator<Item = String> + '_ {

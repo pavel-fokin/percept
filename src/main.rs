@@ -26,7 +26,7 @@ mod tools;
 mod tui;
 mod workspace;
 
-use cli::{Cli, Command, EventsCommand, MapsCommand};
+use cli::{Cli, Command};
 use store::{turn_dir, Jsonl, TurnState};
 
 /// Names the directory percept keeps its state in - the event log, and
@@ -163,12 +163,13 @@ fn home_dir() -> Option<PathBuf> {
 
 /// The checkout `cwd` is in: the first ancestor of it
 /// holding a `.git` or `.percept` entry - a repository, or a directory
-/// percept has already rendered maps into. The search stops at `home`
-/// and at the filesystem root without matching either: walking a home
-/// directory scans every project under it, and on macOS the
-/// TCC-protected Desktop, Photos and Music, so a project sitting at
-/// `$HOME` itself is not supported - work from a subdirectory. Errors
-/// when nothing is found; the caller prints it and exits. `cwd` is
+/// percept has already rendered maps into. The search stops at `home`,
+/// which is then the root itself: the outer level, where the global
+/// maps live, never a project - a marker at `$HOME` is ignored, since
+/// walking a home directory scans every project under it, and on macOS
+/// the TCC-protected Desktop, Photos and Music. Errors when the walk
+/// reaches the filesystem root with neither; the caller prints it and
+/// exits. `cwd` is
 /// canonicalized, as `home_dir` is, so a symlinked home directory
 /// still stops the walk and two writers started from a symlinked path
 /// get the same root. `main` passes the process's own directory, or
@@ -190,13 +191,13 @@ fn root_for(cwd: &Path, home: Option<&Path>) -> std::io::Result<PathBuf> {
 
 /// The walk `root_for` runs, split out so it takes cwd and `$HOME`
 /// as arguments; both are already canonical, so an ancestor reached
-/// through `parent()` is too. `None` when the search reaches `home` or
-/// the filesystem root before a marker.
+/// through `parent()` is too. `home` itself when the search reaches it
+/// before a marker; `None` when it reaches the filesystem root.
 fn discover_root(cwd: &Path, home: Option<&Path>) -> Option<PathBuf> {
     let mut dir = cwd;
     loop {
         if home == Some(dir) {
-            return None;
+            return Some(dir.to_path_buf());
         }
         if dir.join(".git").exists() || dir.join(".percept").exists() {
             return Some(dir.to_path_buf());
@@ -229,6 +230,50 @@ fn project_of(checkout: &Path) -> PathBuf {
         .unwrap_or_else(|| checkout.to_path_buf())
 }
 
+/// Whether `command` works on a checkout - its files or its config -
+/// and so has nothing to work on at `$HOME`, where the root is the
+/// home level itself. Exhaustive over `Command`, so a command added
+/// later must say which it is.
+fn needs_project(command: &Command) -> bool {
+    match command {
+        Command::Init(_) => true,
+        #[cfg(feature = "lab")]
+        Command::Ask(_) | Command::Code => true,
+        Command::Search(_) | Command::Add(_) | Command::Remove(_) | Command::Change(_)
+        | Command::Show(_) | Command::Web => false,
+        // `hook_main` exits before `main`'s own match is ever reached.
+        Command::Hook(_) => false,
+    }
+}
+
+/// What `writer_context` builds: the schemas, the log opened under a
+/// checkout, the human it resolves `--actor human` to, and the coding
+/// client turn's own cause.
+type WriterContext = (
+    Box<dyn crate::core::Schemas>,
+    Jsonl,
+    Option<crate::core::HumanId>,
+    Option<crate::core::EventId>,
+);
+
+/// The pieces `add`, `remove`, and `change` each build a `cli::Writer`
+/// from: the schemas at `project` (`None` at the home level) and
+/// `home`, the log opened under `checkout`, the human it resolves
+/// `--actor human` to, and the coding client turn's own cause, when
+/// `checkout` is in one.
+fn writer_context(
+    checkout: &Path,
+    root: &Path,
+    project: Option<&Path>,
+    home: Option<&Path>,
+) -> Result<WriterContext, Box<dyn std::error::Error>> {
+    let schemas = mapstore::load_schemas(project, home)?;
+    let log = open_log(checkout)?;
+    let me = log.me();
+    let cause = turn_cause(checkout, root)?;
+    Ok((Box::new(schemas), log, me, cause))
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let cli = Cli::parse();
@@ -259,7 +304,15 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    let at_home = home.as_deref() == Some(checkout.as_path());
+    if let Some(command) = &cli.command {
+        if at_home && needs_project(command) {
+            eprintln!("percept: {} is the home level, not a project; run this inside one", checkout.display());
+            std::process::exit(1);
+        }
+    }
     let root = project_of(&checkout);
+    let project: Option<PathBuf> = (!at_home).then(|| root.clone());
     let cli_source = crate::core::Source {
         name: CLI_SOURCE_NAME.to_string(),
         path: root.clone(),
@@ -267,41 +320,25 @@ async fn main() {
     let result = match cli.command {
         // `hook_main` above exits before this match is ever reached.
         Some(Command::Hook(_)) => unreachable!(),
-        Some(Command::Events { command }) => open_log(&checkout).and_then(|log| {
-            let me = log.me();
-            match command {
-                EventsCommand::Search(args) => cli::search(args, &log, me),
-                EventsCommand::Show(args) => cli::show(args, &log),
-            }
-        }),
-        Some(Command::Maps { command }) => mapstore::load_schemas(&checkout, home.as_deref()).and_then(|schemas| {
+        Some(Command::Search(args)) => {
+            open_log(&checkout).and_then(|log| cli::search(args, &log, log.me(), project.as_deref()))
+        }
+        Some(command @ (Command::Add(_) | Command::Remove(_) | Command::Change(_))) => {
+            writer_context(&checkout, &root, project.as_deref(), home.as_deref()).and_then(
+                |(schemas, log, me, cause)| {
+                    let writer = cli::Writer::new(&log, schemas.as_ref(), &cli_source, me, cause);
+                    match command {
+                        Command::Add(args) => cli::add(args, &writer, &checkout, at_home),
+                        Command::Remove(args) => cli::remove(args, &writer, at_home),
+                        Command::Change(args) => cli::change(args, &writer),
+                        _ => unreachable!(),
+                    }
+                },
+            )
+        }
+        Some(Command::Show(args)) => mapstore::load_schemas(project.as_deref(), home.as_deref()).and_then(|schemas| {
             let log = open_log(&checkout)?;
-            let me = log.me();
-            // Read by the write commands only: a read never opens the
-            // turn directory.
-            let cause = || turn_cause(&checkout, &root);
-            match command {
-                MapsCommand::List(args) => cli::maps_list(args, &log, &schemas, &root),
-                MapsCommand::Show(args) => cli::maps_show(args, &log, &schemas, &root),
-                MapsCommand::AddNode(args) => {
-                    cli::maps_add_node(args, &log, &schemas, &cli_source, me, cause()?)
-                }
-                MapsCommand::AddEdge(args) => {
-                    cli::maps_add_edge(args, &log, &schemas, &cli_source, me, cause()?)
-                }
-                MapsCommand::RemoveNode(args) => {
-                    cli::maps_remove_node(args, &log, &schemas, &cli_source, me, cause()?)
-                }
-                MapsCommand::RemoveEdge(args) => {
-                    cli::maps_remove_edge(args, &log, &schemas, &cli_source, me, cause()?)
-                }
-                MapsCommand::Record(args) => {
-                    cli::maps_record(args, &log, &schemas, &cli_source, &checkout, me, cause()?)
-                }
-                MapsCommand::ChangeNode(args) => {
-                    cli::maps_change_node(args, &log, &schemas, &cli_source, me, cause()?)
-                }
-            }
+            cli::show(args, &log, &schemas, &root)
         }),
         #[cfg(feature = "lab")]
         Some(Command::Ask(args)) => {
@@ -326,7 +363,7 @@ async fn main() {
             )
             .await
         }
-        None => mapstore::load_schemas(&checkout, home.as_deref())
+        None => mapstore::load_schemas(project.as_deref(), home.as_deref())
             .and_then(|schemas| open_log(&checkout).and_then(|log| cli::start(&log, &schemas, &root))),
     };
 

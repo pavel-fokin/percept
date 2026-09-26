@@ -392,59 +392,12 @@ fn a_schema_with_no_edges_gives_every_node_its_own_section() {
 }
 
 #[test]
-fn the_catalogue_gives_each_map_a_section_listing_its_kinds() {
-    let mut map = Map::empty(crate::core::testing::map_id("debates"), debates());
-    add(&mut map, "topic", "Where does the log live?", None, None, &[], Actor::Human(human()));
-
-    let text = catalogue(std::slice::from_ref(&map));
-
-    assert!(text.starts_with("# maps\n"));
-    assert!(text.contains("## debates\n"));
-    assert!(text.contains(debates().purpose()));
-    assert!(text.contains("1 nodes, 0 edges.\n"));
-    assert!(text.contains(
-        "- `backs` (claim -> fact)\n- `settles` (topic -> verdict)"
-    ));
-    assert!(text.contains("\nExample node and edge:\n\n    {\"node\":"));
-    assert!(text.contains("\"name\":\"Where does the log live?\""));
-}
-
-#[test]
-fn the_catalogue_lists_a_kinds_one_carried_property() {
-    let text = catalogue(&[Map::empty(crate::core::testing::map_id("debates"), debates())]);
-
-    assert!(text.contains("\n- `verdict` (carries `why`)\n"), "{text}");
-}
-
-#[test]
-fn the_catalogue_names_a_kinds_carried_properties() {
-    let text = catalogue(&[Map::empty(crate::core::testing::map_id("debates"), debates())]);
-
-    assert!(text.contains("- `claim` (carries `why`, `summary`)"), "{text}");
-}
-
-#[test]
-fn the_catalogue_of_no_maps_prints_the_no_schemas_hint() {
-    let text = catalogue(&[]);
-
-    assert_eq!(text, format!("# maps\n\n{}\n", crate::mapstore::NO_SCHEMAS_HINT));
-}
-
-#[test]
-fn the_catalogue_lists_a_package_kind_with_no_properties() {
-    let text = catalogue(&[Map::empty(crate::core::testing::map_id("files"), files())]);
-
-    assert!(text.contains("- `package`\n"));
-    assert!(text.contains("\nExample: nothing recorded here yet.\n"));
-}
-
-#[test]
 fn the_start_screen_frames_the_record_rule_before_the_maps() {
     let text = start(&FakeSchemas::new(vec![debates()]), &[]);
 
     let frame = text.split("\n# debates\n").next().unwrap();
     assert!(frame.contains("record it in the same turn"), "{text}");
-    assert!(frame.contains("percept maps record <map> --actor agent --source <event>"), "{text}");
+    assert!(frame.contains("percept add --actor agent --source <event>"), "{text}");
 }
 
 #[test]

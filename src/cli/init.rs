@@ -41,11 +41,15 @@ struct Client {
     allow: &'static [&'static str],
 }
 
-/// The two `Bash` patterns `percept init claude-code` allows without
-/// asking, so a session can read the log and its maps on its own.
-const CLAUDE_ALLOW: [&str; 2] = [
-    "Bash(percept maps *)",
-    "Bash(percept events *)",
+/// The `Bash` patterns `percept init claude-code` allows without
+/// asking, so a session can read the log and its maps, and write to
+/// them, on its own.
+const CLAUDE_ALLOW: [&str; 5] = [
+    "Bash(percept add *)",
+    "Bash(percept remove *)",
+    "Bash(percept change *)",
+    "Bash(percept show *)",
+    "Bash(percept search *)",
 ];
 
 const CLIENTS: [Client; 2] = [
@@ -84,7 +88,7 @@ pub fn run(
     for (name, text) in mapstore::templates() {
         write_schema(checkout, home, &name, text)?;
     }
-    let schemas = mapstore::load_schemas(checkout, home)?;
+    let schemas = mapstore::load_schemas(Some(checkout), home)?;
     mapstore::ensure_maps(log, &schemas, source)?;
     let command = format!("percept hook {}", client.name);
     write_config(checkout, client.path, |root| {

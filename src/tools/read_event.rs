@@ -7,7 +7,7 @@ use crate::harness::{Tool, ToolOutput, ToolSpec};
 use crate::store::read_event;
 
 /// The `read_event` tool: fetches one event by id and prints it as
-/// `events show` does. With `start` and/or `end`, it returns
+/// `show` does. With `start` and/or `end`, it returns
 /// `payload.content` sliced to that character range instead - the
 /// model's way to read past a search result's cut preview without
 /// pulling the whole log into its window.
@@ -24,7 +24,7 @@ impl ReadEvent {
 const NAME: &str = "read_event";
 
 const DESCRIPTION: &str = "Read one event by id, the same JSON line \
-    `events show` prints. Give `start` and/or `end` - a character range \
+    `show` prints. Give `start` and/or `end` - a character range \
     into `payload.content`, `end` exclusive - to read a slice instead \
     of the whole event; the result then carries `preview.len`, the \
     whole content's length. Only event kinds that carry `content` \

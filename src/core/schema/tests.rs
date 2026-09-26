@@ -255,6 +255,29 @@ fn a_schema_named_like_a_short_id_is_refused() {
 }
 
 #[test]
+fn schema_of_node_kind_finds_the_schema_declaring_it() {
+    let schemas = schemas();
+    assert_eq!(schema_of_node_kind(&schemas, "chore").unwrap().name(), "chores");
+    assert!(schema_of_node_kind(&schemas, "riddle").is_none());
+}
+
+#[test]
+fn schema_of_ref_resolves_a_kind_name_pair_or_a_short_id() {
+    let schemas = FakeSchemas::new(vec![debates()]);
+    assert_eq!(schema_of_ref(&schemas, "topic:Why?").unwrap().name(), "debates");
+    assert_eq!(schema_of_ref(&schemas, "t1").unwrap().name(), "debates");
+    assert!(schema_of_ref(&schemas, "z1").is_none());
+    assert!(schema_of_ref(&schemas, "riddle:what?").is_none());
+}
+
+#[test]
+fn edge_kind_declared_finds_it_in_any_schema() {
+    let schemas = schemas();
+    assert!(edge_kind_declared(&schemas, "settles"));
+    assert!(!edge_kind_declared(&schemas, "nonsense"));
+}
+
+#[test]
 fn an_edge_kind_may_repeat_across_schemas() {
     let with_covers = |name: &str, kind: &str| {
         Arc::new(

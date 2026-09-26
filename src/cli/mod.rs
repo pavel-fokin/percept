@@ -1,9 +1,9 @@
-//! The command-line surface: `percept events search` queries the log,
-//! `percept events show` dereferences one event by id, `percept maps`
-//! folds a cognitive map from the log and prints it - `maps reflect`
-//! opens a reflection on one, printing the event id an agent then
-//! cites for what it records - `percept ask` runs one full turn -
-//! including the tool loop - and prints the reply, `percept hook
+//! The command-line surface: `percept search` queries the log,
+//! `percept add` and `percept remove` write a node or an edge with no
+//! map name - the kind resolves it - `percept change` changes a node
+//! already in a map, `percept show` reads a map, a node, or an event,
+//! resolved by the shape of its argument, `percept ask` runs one full
+//! turn - including the tool loop - and prints the reply, `percept hook
 //! <client>` records one coding client's turn from
 //! the hook JSON it reads on stdin - see `hook` - and `percept init
 //! <client>` writes that client's project config so its hooks call
@@ -13,21 +13,23 @@
 //! same `AppService` turn policy `tui` does, just inline instead of over
 //! a channel.
 //!
-//! `search` and `show` are the query primitive a model composes with:
-//! every line is JSONL, for a caller piping into `jq`, never a table or
-//! prose. `search`'s default line shortens long strings in the payload,
-//! so a caller spends tokens on the whole of one deliberately, via
-//! `--full`, `show`, or `show --range` into one `content`.
+//! `search` and `show` are the query primitive a model composes
+//! with: every line is JSONL, for a caller piping into `jq`, never a
+//! table or prose. `search`'s default line shortens long strings in the
+//! payload, so a caller spends tokens on the whole of one deliberately,
+//! via `--full`, `show`, or `show --range` into one `content`.
 
 use std::collections::{BTreeMap, HashMap};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use clap::{Args, Parser, Subcommand};
 
 use crate::core::{
-    cited_label, Event, EventId, EventLog, EventQuery, EventSearch, Map, Mutation, Node, NodeId,
-    NodeRef, Payload, Schemas,
+    cited_label, edge_kind_declared, map_id_at, schema_of_node_kind, schema_of_ref, Event, EventId,
+    EventLog, EventQuery, EventSearch, Map, MapId, Mutation, Node, NodeId, NodeRef, Payload, Schema,
+    Schemas,
 };
 use crate::mapstore;
 use crate::shared::{parse_time, Timestamp};
@@ -59,11 +61,12 @@ leave relevance to the caller.
 
 A bare `percept` prints the start screen: how to record, then this \
 project's maps whole - the same text a coding client reads when its \
-session opens. `events search` and `events show` query the log, `maps \
-list` and `maps show` print a cognitive map folded from it, `maps \
-record` and `maps change-node` change one, `hook <client>` records one \
-coding client's turn from the hook JSON it reads on stdin, and `init \
-<client>` writes that client's project config to call it.")]
+session opens. `search` queries the log at this level; `show` reads a map, a \
+node, or an event, resolved by the shape of its argument; `add` and \
+`remove` write a node or an edge with no map name - the kind resolves \
+it - and `change` changes one already there; `hook <client>` \
+records one coding client's turn from the hook JSON it reads on stdin, \
+and `init <client>` writes that client's project config to call it.")]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -71,16 +74,25 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    /// Work with the event log directly.
-    Events {
-        #[command(subcommand)]
-        command: EventsCommand,
-    },
-    /// Read percept's maps - the cognitive ones folded from the log.
-    Maps {
-        #[command(subcommand)]
-        command: MapsCommand,
-    },
+    /// Search the log at this level - this project's events inside
+    /// one, every project's at `$HOME` - one JSON object per line,
+    /// oldest first.
+    Search(SearchArgs),
+    /// Add a node or an edge - a document on stdin for several at once.
+    /// The kind names the map; no write names one.
+    Add(AddArgs),
+    /// Remove a node or an edge - the inverse of `add`.
+    Remove(RemoveArgs),
+    /// Change a node already in a map - a rename, a property, or both.
+    /// Every change is subject to the rank rule a removal has: a node
+    /// the user wrote, or last changed, takes no change from an agent.
+    /// Prints the node's short id and the map it landed in.
+    Change(ChangeArgs),
+    /// Read a map, a node, or an event, resolved by the shape of the
+    /// argument: a uuid is an event, a short id or `kind:name` a node
+    /// and its neighbours, anything else a map's name; with none, every
+    /// map, one line each.
+    Show(ShowArgs),
     /// Run one turn headlessly and print the reply.
     #[cfg(feature = "lab")]
     Ask(AskArgs),
@@ -99,95 +111,6 @@ pub enum Command {
     Web,
 }
 
-#[derive(Subcommand)]
-pub enum MapsCommand {
-    /// Every map with its purpose, size, and kinds; `--json` for one
-    /// object per line.
-    List(ListMapsArgs),
-    /// One map as Markdown; `--json` for its nodes, then its edges, one
-    /// object per line.
-    Show(ShowMapArgs),
-    /// Add a node to a map. Prints the minted node id.
-    AddNode(AddNodeArgs),
-    /// Add an edge between two nodes already in a map.
-    AddEdge(EdgeArgs),
-    /// Remove a node from a map, dropping the edges that touch it.
-    RemoveNode(RemoveNodeArgs),
-    /// Remove an edge from a map.
-    RemoveEdge(EdgeArgs),
-    /// Add several nodes and edges from a document on stdin, or change
-    /// one already in the map - a margin line naming a short id, `t4`,
-    /// starts a change block: `state "done"` under it sets a property,
-    /// `name "..."` renames it. Prints one line per node or change, then
-    /// one per edge, then one per `cites` line.
-    Record(RecordArgs),
-    /// Change a node already in a map - a rename, a property, or both.
-    /// Every change is subject to the rank rule a removal has: a node
-    /// the user wrote, or last changed, takes no change from an agent.
-    /// Prints the node's id.
-    ChangeNode(ChangeNodeArgs),
-}
-
-#[derive(Args)]
-pub struct ShowMapArgs {
-    /// The map's name, as `maps list` prints it.
-    map: String,
-    /// Print one JSON object per line - map, then node, then edge -
-    /// instead of the default Markdown.
-    #[arg(long)]
-    json: bool,
-    /// Repeatable. Keep only nodes of any of these kinds, and the edges
-    /// between them.
-    #[arg(long)]
-    kind: Vec<String>,
-    /// `kind:name` of a node, or the short id its map shows it as,
-    /// `d41`. Keep only it and its neighbourhood, reached along edges
-    /// in either direction.
-    #[arg(long, value_parser = non_blank)]
-    around: Option<String>,
-    /// How many edges out `--around` reaches; 0 is the node alone.
-    #[arg(long, default_value_t = 1, requires = "around")]
-    depth: usize,
-    /// Keep only what the map gained since this instant - an ISO-8601
-    /// timestamp, or `<N>d`, `<N>h`, `<N>m` back from now: the nodes
-    /// added since, and the ends of the edges added since.
-    #[arg(long, value_parser = |s: &str| moment("since", s))]
-    since: Option<Timestamp>,
-    /// Fold every path's events instead of only this one's, printing
-    /// one map per path. A node named with `--around` lives in one
-    /// path's map, so the two do not combine.
-    #[arg(long, conflicts_with = "around")]
-    all_paths: bool,
-}
-
-#[derive(Args)]
-pub struct ListMapsArgs {
-    /// Fold every path's events instead of only this one's, printing
-    /// one map per path.
-    #[arg(long)]
-    all_paths: bool,
-    /// Print one JSON object per line instead of the default Markdown
-    /// table.
-    #[arg(long)]
-    json: bool,
-}
-
-/// What every map change names: the map, and the events it was drawn
-/// from.
-#[derive(Args)]
-pub struct MapArgs {
-    /// The map's name, as `maps list` prints it.
-    map: String,
-    /// Repeatable. An event this fact was drawn from.
-    #[arg(long)]
-    source: Vec<String>,
-    /// Who is writing: `human` for a person at the terminal, `agent`
-    /// for a model recording on their behalf. The map shows the
-    /// difference.
-    #[arg(long, default_value = "human", value_parser = parse_actor_word)]
-    actor: String,
-}
-
 /// Checks `s` names an actor `store::parse_actor` knows, without
 /// resolving it yet - the human's id isn't known until the log is
 /// open, well after clap has parsed the command line.
@@ -198,107 +121,213 @@ fn parse_actor_word(s: &str) -> Result<String, String> {
     }
 }
 
+/// `percept add <kind> ...`'s whole tail, taken raw: a node kind then
+/// its quoted name, an edge kind then the two nodes it joins, or
+/// nothing, to read a document from stdin - see `add`. Captured raw
+/// rather than declared on clap, since a property's name comes from
+/// the schemas at runtime: `parse_write_args` splits it into the
+/// positionals and the `--actor`/`--source`/`--causation`/property
+/// flags among them.
 #[derive(Args)]
-pub struct AddNodeArgs {
-    #[command(flatten)]
-    target: MapArgs,
-    #[arg(long)]
-    kind: String,
-    #[arg(long)]
-    name: String,
-    /// Repeatable `key=value`.
-    #[arg(long = "prop", value_parser = parse_prop)]
-    prop: Vec<(String, String)>,
+#[command(after_help = "\
+Examples:
+  # A node: a node kind, its name, then a flag per property
+  percept add concept \"Snapshot\" --definition \"the working tree saved under a prompt\"
+
+  # An edge: an edge kind, then the two nodes it joins
+  percept add covers c1 c3
+
+  # Several nodes and edges at once, from a document on stdin
+  percept add --actor agent --source <event> <<'EOF'
+  concept \"Snapshot\"
+    definition \"the working tree saved under a prompt\"
+  EOF")]
+pub struct AddArgs {
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<String>,
 }
 
+/// `percept remove <kind> ...`'s whole tail, taken raw the same way
+/// `AddArgs` is: a node kind then the node to remove, or an edge kind
+/// then the two nodes it joins - see `remove`.
 #[derive(Args)]
-pub struct RemoveNodeArgs {
-    #[command(flatten)]
-    target: MapArgs,
-    /// `kind:name` of the node to remove, or the short id its map
-    /// shows it as, `d41`.
-    #[arg(long, value_parser = non_blank)]
-    node: String,
+#[command(after_help = "\
+Examples:
+  # A node
+  percept remove concept c3
+
+  # An edge
+  percept remove covers c1 c3")]
+pub struct RemoveArgs {
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<String>,
 }
 
-/// An edge to add or remove - the same three things name it either way.
+/// `percept change <node> ...`'s whole tail, taken raw the same way
+/// `AddArgs` is: the node to change, a short id or `kind:name`, then
+/// `--name` for a rename and a flag per property to set - see `change`.
 #[derive(Args)]
-pub struct EdgeArgs {
-    #[command(flatten)]
-    target: MapArgs,
-    #[arg(long)]
-    kind: String,
-    /// `kind:name` of the node the edge starts at, or the short id its
-    /// map shows it as, `d41`.
-    #[arg(long, value_parser = non_blank)]
-    from: String,
-    /// `kind:name` of the node the edge points to, or its short id.
-    #[arg(long, value_parser = non_blank)]
-    to: String,
+#[command(after_help = "\
+Examples:
+  # A rename
+  percept change c3 --name \"Undo\"
+
+  # A property
+  percept change c3 --definition \"...; undo puts it back\"")]
+pub struct ChangeArgs {
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<String>,
 }
 
-#[derive(Args)]
-pub struct RecordArgs {
-    /// The map's name, as `maps list` prints it.
-    map: String,
-    /// Repeatable. An event this fact was drawn from. Added to every
-    /// node's and every edge's sources, alongside a node's own `cites`.
-    #[arg(long)]
+/// `--actor`, `--source`, and `--causation` - the three fixed flags
+/// every write takes - plus every other `--<name>` flag as a property,
+/// parsed out of `AddArgs`'s or `RemoveArgs`'s raw tail by
+/// `parse_write_args`. `actor` is `None` when the flag was never given,
+/// `"human"` at the point a write reads it.
+struct WriteArgs {
+    actor: Option<String>,
     source: Vec<String>,
-    /// Who is writing: `human` for a person at the terminal, `agent`
-    /// for a model recording on their behalf.
-    #[arg(long, default_value = "human", value_parser = parse_actor_word)]
-    actor: String,
-    /// The id of the event this record follows from - every event it
-    /// writes names it. Defaults to the prompt of the coding client's
-    /// turn this command runs in, when there is one.
-    #[arg(long)]
     causation: Option<String>,
+    properties: BTreeMap<String, String>,
 }
 
-#[derive(Args)]
-pub struct ChangeNodeArgs {
-    #[command(flatten)]
-    target: MapArgs,
-    /// `kind:name` of the node to change, or the short id its map
-    /// shows it as, `d41`.
-    #[arg(long, value_parser = non_blank)]
-    node: String,
-    /// A new name for the node.
-    #[arg(long)]
-    name: Option<String>,
-    /// Repeatable `key=value`.
-    #[arg(long = "prop", value_parser = parse_prop)]
-    prop: Vec<(String, String)>,
+/// Splits `args` into its positionals, in order, and its flags:
+/// `--actor`, `--source` (repeatable), and `--causation` are fixed,
+/// read into the returned `WriteArgs`; any other `--<name>` is a
+/// property, read into `WriteArgs::properties`. Each flag takes its
+/// value as the next token, or inline after `=`. A name given twice,
+/// fixed or not, is an error - `--source` aside, the one flag
+/// repetition means something.
+fn parse_write_args(args: Vec<String>) -> Result<(Vec<String>, WriteArgs), Box<dyn std::error::Error>> {
+    let mut positionals = Vec::new();
+    let mut write = WriteArgs {
+        actor: None,
+        source: Vec::new(),
+        causation: None,
+        properties: BTreeMap::new(),
+    };
+
+    let mut tokens = args.into_iter();
+    while let Some(token) = tokens.next() {
+        let Some(rest) = token.strip_prefix("--") else {
+            positionals.push(token);
+            continue;
+        };
+        let (name, inline) = match rest.split_once('=') {
+            Some((name, value)) => (name.to_string(), Some(value.to_string())),
+            None => (rest.to_string(), None),
+        };
+        let value = match inline {
+            Some(value) => value,
+            None => tokens
+                .next()
+                .ok_or_else(|| format!("--{name} needs a value"))?,
+        };
+        match name.as_str() {
+            "actor" => {
+                if write.actor.is_some() {
+                    return Err("--actor given twice".into());
+                }
+                write.actor = Some(parse_actor_word(&value)?);
+            }
+            "source" => write.source.push(value),
+            "causation" => {
+                if write.causation.is_some() {
+                    return Err("--causation given twice".into());
+                }
+                write.causation = Some(value);
+            }
+            other => {
+                if write.properties.insert(other.to_string(), value).is_some() {
+                    return Err(format!("--{other} given twice").into());
+                }
+            }
+        }
+    }
+    Ok((positionals, write))
 }
 
-#[derive(Subcommand)]
-pub enum EventsCommand {
-    /// Search events, one JSON object per line, oldest first.
-    Search(SearchArgs),
-    /// Print one event by id.
-    Show(ShowArgs),
+/// The error every write gives properties it takes none of: an edge,
+/// or a document naming no kind on the command line at all.
+fn no_properties_expected(properties: &BTreeMap<String, String>) -> Box<dyn std::error::Error> {
+    let names: Vec<String> = properties.keys().map(|name| format!("--{name}")).collect();
+    format!("this write takes no properties; found {}", names.join(", ")).into()
+}
+
+/// The error `add`/`remove` give a word no schema declares as a node
+/// or an edge kind: every kind declared, csv, or - with no schema
+/// loaded at all - the hint to run `percept init <client>`, the
+/// project's own onboarding, or - at the home level, where `init` is
+/// refused - where a global schema goes instead.
+fn unknown_kind(schemas: &dyn Schemas, kind: &str, at_home: bool) -> Box<dyn std::error::Error> {
+    if schemas.folded().is_empty() {
+        return if at_home {
+            format!("no map declares {kind:?}; global schemas go in ~/.percept/schemas, or run inside a project").into()
+        } else {
+            format!("no map declares {kind:?}; run percept init <client> to add one").into()
+        };
+    }
+    let kinds: Vec<&str> = schemas
+        .folded()
+        .iter()
+        .flat_map(|schema| schema.node_kind_names().chain(schema.edge_kind_names()))
+        .collect();
+    format!("no map declares {kind:?}; kinds are {}", kinds.join(", ")).into()
+}
+
+/// The error `change`/`add`/`remove`'s edge form give a ref that
+/// resolves to no schema: a `kind:name` naming an unknown kind, or a
+/// short id no schema's prefix claims.
+fn unknown_node_ref(ref_: &str) -> Box<dyn std::error::Error> {
+    format!("{ref_:?} names no node kind or short id prefix any schema declares").into()
+}
+
+/// The one schema `from` and `to` both resolve to - by `kind:name` or
+/// by the short id each takes, via `schema_of_ref` - or the refusal an
+/// edge across two maps gives, naming both. What `add`/`remove` find
+/// an edge's map through, with no map name in the command: an edge
+/// kind may repeat across schemas, so it says nothing on its own.
+fn resolve_edge_map(
+    schemas: &dyn Schemas,
+    from: &str,
+    to: &str,
+) -> Result<Arc<Schema>, Box<dyn std::error::Error>> {
+    let from_schema = schema_of_ref(schemas, from).ok_or_else(|| unknown_node_ref(from))?;
+    let to_schema = schema_of_ref(schemas, to).ok_or_else(|| unknown_node_ref(to))?;
+    if from_schema.name() != to_schema.name() {
+        return Err(format!(
+            "{from:?} is in map {:?} but {to:?} is in map {:?}; an edge stays inside one map",
+            from_schema.name(),
+            to_schema.name()
+        )
+        .into());
+    }
+    Ok(from_schema)
 }
 
 #[derive(Args, Default)]
 #[command(after_help = "\
 Examples:
   # The 20 most recent events, printed oldest first
-  percept events search --size 20
+  percept search --size 20
 
   # What the model did in the last day
-  percept events search --since 1d --type tool.called
+  percept search --since 1d --type tool.called
 
   # Prompts and replies naming a deploy, 300 characters around each hit
-  percept events search --contains deploy --type message.received --preview 300
+  percept search deploy --type message.received --preview 300
 
   # The same, with full payloads
-  percept events search --contains deploy --type message.received --full
+  percept search deploy --type message.received --full
 
   # Two windows that tile with no gap or overlap
-  percept events search --since 2d --until 1d
-  percept events search --since 1d")]
+  percept search --since 2d --until 1d
+  percept search --since 1d")]
 pub struct SearchArgs {
+    /// An event whose payload carries any of these substrings,
+    /// case-insensitively, passes.
+    #[arg(value_parser = non_blank)]
+    text: Vec<String>,
     /// An ISO-8601 timestamp, or a relative shorthand measured back
     /// from now: `<N>d`, `<N>h`, `<N>m`. Inclusive.
     #[arg(long)]
@@ -316,16 +345,12 @@ pub struct SearchArgs {
     /// Repeatable. An event matching any of these types passes.
     #[arg(long = "type")]
     kind: Vec<String>,
-    /// Repeatable. An event whose payload carries any of these
-    /// substrings, case-insensitively, passes.
-    #[arg(long, value_parser = non_blank)]
-    contains: Vec<String>,
     /// Keep only the N most recent matching events. Output still runs
     /// oldest first.
     #[arg(long)]
     size: Option<usize>,
     /// How many characters of `content` a line keeps, cut around the
-    /// first `--contains` hit when there is one.
+    /// first text hit when there is one.
     #[arg(long, default_value_t = store::PREVIEW_CHARS, value_parser = at_least_one, conflicts_with = "full")]
     preview: usize,
     /// Print the whole wire event per line instead of the constant-size
@@ -334,13 +359,48 @@ pub struct SearchArgs {
     full: bool,
 }
 
-#[derive(Args)]
+/// `percept show [<arg>]` - resolved by the shape of `arg`, when there
+/// is one: a uuid an event, a short id or `kind:name` a node, anything
+/// else a map's name. With none, every map. Every flag below applies to
+/// some forms and not others - see `show` - and is refused, naming
+/// itself, on a form it doesn't fit.
+#[derive(Args, Default)]
+#[command(after_help = "\
+Examples:
+  # Every map, one line each
+  percept show
+
+  # A map whole
+  percept show concepts
+
+  # A node and its neighbours
+  percept show c3
+
+  # An event by id
+  percept show 018f2e1a-2b3c-7d4e-9f5a-6b7c8d9e0f1a")]
 pub struct ShowArgs {
-    id: String,
+    /// A uuid, a short id or `kind:name`, or a map's name.
+    arg: Option<String>,
+    /// Print one JSON object per line instead of the default Markdown -
+    /// a map or a node form only.
+    #[arg(long)]
+    json: bool,
+    /// Repeatable. Keep only nodes of any of these kinds, and the edges
+    /// between them - a map or a node form only.
+    #[arg(long)]
+    kind: Vec<String>,
+    /// How many edges out a node's neighbourhood reaches; 1 by default -
+    /// a node form only.
+    #[arg(long)]
+    depth: Option<usize>,
+    /// Keep only what the map gained since this instant - an ISO-8601
+    /// timestamp, or `<N>d`, `<N>h`, `<N>m` back from now - a map or a
+    /// node form only.
+    #[arg(long, value_parser = |s: &str| moment("since", s))]
+    since: Option<Timestamp>,
     /// A character range `START:END` into `payload.content`, `END`
     /// exclusive; omit `START` to begin at 0 and `END` to reach the end
-    /// of `content`, e.g. `400:`. Only event kinds that carry `content`
-    /// support a range.
+    /// of `content`, e.g. `400:` - an event form only.
     #[arg(long, value_parser = parse_range)]
     range: Option<(Option<usize>, Option<usize>)>,
 }
@@ -379,15 +439,6 @@ pub(crate) fn non_blank(s: &str) -> Result<String, String> {
         return Err("must not be blank".to_string());
     }
     Ok(s.to_string())
-}
-
-/// Parses `--prop key=value`, split on the first `=` so a value may
-/// carry one itself.
-fn parse_prop(s: &str) -> Result<(String, String), String> {
-    let (key, value) = s
-        .split_once('=')
-        .ok_or_else(|| format!("invalid --prop {s:?}, expected key=value"))?;
-    Ok((non_blank(key)?, value.to_string()))
 }
 
 /// `s` - `kind:name`, or the short id `map`'s own render shows it as -
@@ -486,14 +537,16 @@ fn known_event_id(
 }
 
 /// Searches `log` for events matching `args`, printing one JSON object
-/// per line in log order. `store` owns the wire shape; the CLI only
-/// builds the query and formats the result.
+/// per line in log order: `project`'s own events, or - with none, at
+/// the home level - every project's. `store` owns the wire shape; the
+/// CLI only builds the query and formats the result.
 pub fn search(
     args: SearchArgs,
     log: &dyn EventSearch,
     me: Option<crate::core::HumanId>,
+    project: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let query = parse_query(&args, me)?;
+    let query = parse_query(&args, me, project)?;
     let events = log.search(&query)?;
 
     print_lines(events.iter().map(|event| {
@@ -528,35 +581,6 @@ fn print_text(text: &str) -> Result<(), Box<dyn std::error::Error>> {
     out.flush().or_else(stop_if_pipe_closed)
 }
 
-/// Runs `print` for each path `maps list` and `maps show` fold over:
-/// only `root` by default; with `--all-paths`, every distinct path in
-/// `events`, each under a marker naming it - a `path <path>` line in
-/// Markdown, a `{"path": ...}` line in JSON - since the maps of two
-/// paths look alike, short ids included.
-fn per_path(
-    all_paths: bool,
-    json: bool,
-    root: &Path,
-    events: &[crate::core::Event],
-    mut print: impl FnMut(&Path) -> Result<(), Box<dyn std::error::Error>>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    if !all_paths {
-        return print(root);
-    }
-    for (i, path) in mapstore::paths(events).iter().enumerate() {
-        let marker = if json {
-            format!("{}\n", serde_json::json!({ "path": path }))
-        } else if i == 0 {
-            format!("path {}\n\n", path.display())
-        } else {
-            format!("\npath {}\n\n", path.display())
-        };
-        print_text(&marker)?;
-        print(path)?;
-    }
-    Ok(())
-}
-
 /// A bare `percept`: prints `start_text`.
 pub fn start(log: &dyn EventLog, schemas: &dyn Schemas, project: &Path) -> Result<(), Box<dyn std::error::Error>> {
     print_text(&start_text(log, schemas, project)?)
@@ -571,215 +595,241 @@ pub fn start_text(log: &dyn EventLog, schemas: &dyn Schemas, project: &Path) -> 
     Ok(mapstore::start(schemas, &maps))
 }
 
-/// Prints every map percept knows with its size: the log's maps, folded
-/// from one read of `log` at `project`'s path, or at every path with
-/// `--all-paths`.
-pub fn maps_list(
-    args: ListMapsArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    project: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let events = log.load()?;
-    per_path(args.all_paths, args.json, project, &events, |path| {
-        let maps = mapstore::fold_all_at(schemas, &events, path)?;
-        if args.json {
-            print_lines(maps.iter().map(mapstore::encode_map))
-        } else {
-            print_text(&mapstore::catalogue(&maps))
-        }
-    })
+/// What every write shares: the log and schemas it runs against, the
+/// source it stamps, the human it resolves `--actor human` to, and the
+/// cause a write takes when it names none of its own - one shared
+/// prelude `main` builds once for `add`, `remove`, and `change`.
+pub struct Writer<'a> {
+    pub log: &'a dyn EventLog,
+    pub schemas: &'a dyn Schemas,
+    pub source: &'a crate::core::Source,
+    pub me: Option<crate::core::HumanId>,
+    pub cause: Option<EventId>,
 }
 
-/// Prints the map `args.map` names, nodes then edges. `--around` cuts
-/// it to a neighbourhood first, then `--kind` cuts that to its kinds,
-/// so a node of another kind still counts as a step on the way.
-pub fn maps_show(
-    args: ShowMapArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    root: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let events = log.load()?;
-    per_path(args.all_paths, args.json, root, &events, |path| {
-        print_map(mapstore::fold_map_at(schemas, &args.map, &events, path)?, &args)
-    })
-}
-
-/// `maps_show`'s tail: cut `map` to `args`'s filters, then print it
-/// nodes-then-edges. `--since` runs after `--around`, so it reads as
-/// "what changed near this node".
-fn print_map(map: Map, args: &ShowMapArgs) -> Result<(), Box<dyn std::error::Error>> {
-    // An empty map has nothing to resolve `--around` against - `select`'s
-    // own empty-map case skips it anyway, so a node named on one is not
-    // an error to report over "nothing recorded yet".
-    let around = if map.nodes().is_empty() {
-        None
-    } else {
-        args.around
-            .as_deref()
-            .map(|s| resolve_ref(&map, s))
-            .transpose()?
-    };
-    let selection = crate::core::Selection {
-        around: around.as_ref().map(|node| (node, args.depth)),
-        since: args.since,
-        kinds: &args.kind,
-        ..crate::core::Selection::default()
-    };
-    let fragment = map.select(&selection)?;
-    if !selection.is_whole() {
-        eprintln!("{}", mapstore::encode_fragment(&fragment));
+impl<'a> Writer<'a> {
+    pub fn new(
+        log: &'a dyn EventLog,
+        schemas: &'a dyn Schemas,
+        source: &'a crate::core::Source,
+        me: Option<crate::core::HumanId>,
+        cause: Option<EventId>,
+    ) -> Self {
+        Self { log, schemas, source, me, cause }
     }
-    if args.json {
-        print_lines(mapstore::encode_lines(fragment.map(), true))
-    } else {
-        print_text(&mapstore::markdown(fragment.map()))
+
+    /// One write under `map`'s name, with no map name in the
+    /// arguments: `write.actor` parsed against `self.me`, defaulting to
+    /// `"human"`, `write.source` resolved and threaded to `mutation`,
+    /// caused by `write.causation` when given, else `self.cause`.
+    /// Alongside the payload, the short id a minted node took, when
+    /// `mutation` minted one.
+    fn commit_write(
+        &self,
+        map: &str,
+        write: &WriteArgs,
+        mutation: impl FnOnce(Vec<EventId>) -> Mutation,
+    ) -> Result<(Payload, Option<String>), Box<dyn std::error::Error>> {
+        let actor = store::parse_actor(write.actor.as_deref().unwrap_or("human"), self.me)?;
+        let causation = resolve_causation(write.causation.as_deref(), self.log, self.cause)?;
+        let (event, short_id) = mapstore::commit(
+            self.log, self.schemas, map, self.source, &write.source, actor, causation, mutation,
+        )?;
+        Ok((event.payload().clone(), short_id))
     }
 }
 
-/// One map change from the shell: `target`'s cited events resolved and
-/// `mutation` checked, applied, and committed as `target.actor`
-/// (`human` by default), caused by `cause`, all under `mapstore::commit`'s
-/// one lock. `me` resolves `human`/`user` to this log's own `HumanId`.
-/// Returns the payload, for `add-node` to print the minted id.
-fn write(
-    target: MapArgs,
+/// `write.causation`, resolved to a known event, when given - else
+/// `default`, the coding client turn's own cause.
+fn resolve_causation(
+    explicit: Option<&str>,
     log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
-    mutation: impl FnOnce(Vec<EventId>) -> Mutation,
-) -> Result<Payload, Box<dyn std::error::Error>> {
-    let MapArgs {
-        map,
-        source: cited,
-        actor,
-    } = target;
-    let actor = store::parse_actor(&actor, me)?;
-    let event = mapstore::commit(log, schemas, &map, source, &cited, actor, cause, mutation)?;
-    Ok(event.payload().clone())
+    default: Option<EventId>,
+) -> Result<Option<EventId>, Box<dyn std::error::Error>> {
+    Ok(explicit.map(|id| known_event_id(id, log)).transpose()?.or(default))
 }
 
-/// Adds a node to a map and prints its minted id, so a shell script can
-/// capture it.
-pub fn maps_add_node(
-    args: AddNodeArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
+/// What a kind on the command line resolves to: a node kind's schema,
+/// or bare word declaring an edge kind instead - `add`'s and `remove`'s
+/// shared dispatch, with no map name in the command.
+enum Kind {
+    Node(Arc<Schema>),
+    Edge,
+}
+
+/// Resolves `kind` to a `Kind`, or the `unknown_kind` refusal when no
+/// schema declares it as either.
+fn resolve_kind(schemas: &dyn Schemas, kind: &str, at_home: bool) -> Result<Kind, Box<dyn std::error::Error>> {
+    if let Some(schema) = schema_of_node_kind(schemas, kind) {
+        Ok(Kind::Node(schema))
+    } else if edge_kind_declared(schemas, kind) {
+        Ok(Kind::Edge)
+    } else {
+        Err(unknown_kind(schemas, kind, at_home))
+    }
+}
+
+/// `percept add <kind> ...` - a node, when `kind` names one; an edge,
+/// when it names one instead; a document on stdin, with no kind at
+/// all. See `AddArgs` for the raw tail `parse_write_args` splits, and
+/// `docs/cli.md` for the shape a session types. `at_home` is whether
+/// this runs at the home level - see `unknown_kind`.
+pub fn add(
+    args: AddArgs,
+    writer: &Writer,
+    checkout: &Path,
+    at_home: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let payload = write(args.target, log, schemas, source, me, cause, |sources| {
-        Mutation::AddNode {
-            kind: args.kind,
-            name: args.name,
-            properties: args.prop.into_iter().collect::<BTreeMap<_, _>>(),
-            sources,
+    let (positionals, write) = parse_write_args(args.args)?;
+    let Some(kind) = positionals.first().cloned() else {
+        if !write.properties.is_empty() {
+            return Err(no_properties_expected(&write.properties));
         }
+        let mut document = String::new();
+        io::stdin().read_to_string(&mut document)?;
+        return record_document(&document, write, writer, checkout, at_home);
+    };
+
+    match resolve_kind(writer.schemas, &kind, at_home)? {
+        Kind::Node(schema) => add_node(schema, kind, positionals, write, writer),
+        Kind::Edge => edge_write(kind, positionals, write, writer, |kind, from, to, sources| {
+            Mutation::AddEdge { kind, from, to, sources }
+        }),
+    }
+}
+
+/// `add`'s node form: `kind "<name>" --<property> "<value>" ...`.
+/// Prints the minted node's short id, map, and level.
+fn add_node(
+    schema: Arc<Schema>,
+    kind: String,
+    positionals: Vec<String>,
+    write: WriteArgs,
+    writer: &Writer,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if positionals.len() != 2 {
+        return Err(format!("expected `{kind} \"<name>\"`").into());
+    }
+    let name = positionals[1].clone();
+    let map = schema.name().to_string();
+    let properties = write.properties.clone();
+    let (payload, short_id) = writer.commit_write(&map, &write, |sources| {
+        Mutation::AddNode { kind, name, properties, sources }
     })?;
-    if let Payload::NodeAdded { node, .. } = &payload {
-        println!("{}", node.as_uuid());
+    if let Payload::NodeAdded { .. } = &payload {
+        println!("{}  {map} ({})", short_id.unwrap_or_default(), crate::core::level_label(writer.schemas, &map));
     }
     Ok(())
 }
 
-/// Adds an edge between two nodes already in a map. `--from` and `--to`
-/// are resolved against one fold of the map, taken before the write's
-/// own atomic commit re-folds it.
-pub fn maps_add_edge(
-    args: EdgeArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
+/// `add`'s and `remove`'s edge form: `kind <from> <to>`, resolved
+/// against one fold of the map `resolve_edge_map` finds from `from` and
+/// `to`, taken before the write's own atomic commit re-folds it. An
+/// edge takes no properties.
+fn edge_write(
+    kind: String,
+    positionals: Vec<String>,
+    write: WriteArgs,
+    writer: &Writer,
+    mutation: impl FnOnce(String, NodeRef, NodeRef, Vec<EventId>) -> Mutation,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let snapshot = map_for(schemas, &args.target.map, source, log)?;
-    let from = resolve_ref(snapshot.map(), &args.from)?;
-    let to = resolve_ref(snapshot.map(), &args.to)?;
-    write(args.target, log, schemas, source, me, cause, |sources| {
-        Mutation::AddEdge {
-            kind: args.kind,
-            from,
-            to,
-            sources,
-        }
-    })
-    .map(drop)
+    if positionals.len() != 3 {
+        return Err(format!("expected `{kind} <from> <to>`").into());
+    }
+    if !write.properties.is_empty() {
+        return Err(no_properties_expected(&write.properties));
+    }
+    let (from, to) = (positionals[1].clone(), positionals[2].clone());
+    let schema = resolve_edge_map(writer.schemas, &from, &to)?;
+    let map = schema.name().to_string();
+    let snapshot = map_for(writer.schemas, &map, writer.source, writer.log)?;
+    let from = resolve_ref(snapshot.map(), &from)?;
+    let to = resolve_ref(snapshot.map(), &to)?;
+    writer
+        .commit_write(&map, &write, |sources| mutation(kind, from, to, sources))
+        .map(drop)
 }
 
-/// Removes a node from a map, dropping the edges that touch it.
-pub fn maps_remove_node(
-    args: RemoveNodeArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
+/// `percept remove <kind> ...` - the inverse of `add`: a node, when
+/// `kind` names one; an edge, when it names one instead. No document
+/// form.
+pub fn remove(
+    args: RemoveArgs,
+    writer: &Writer,
+    at_home: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let snapshot = map_for(schemas, &args.target.map, source, log)?;
-    let node = resolve_ref(snapshot.map(), &args.node)?;
-    write(args.target, log, schemas, source, me, cause, |sources| {
-        Mutation::RemoveNode { node, sources }
-    })
-    .map(drop)
+    let (positionals, write) = parse_write_args(args.args)?;
+    if !write.properties.is_empty() {
+        return Err(no_properties_expected(&write.properties));
+    }
+    let Some(kind) = positionals.first().cloned() else {
+        return Err("expected a node kind and a node, or an edge kind and two nodes".into());
+    };
+
+    match resolve_kind(writer.schemas, &kind, at_home)? {
+        Kind::Node(schema) => remove_node(schema, kind, positionals, write, writer),
+        Kind::Edge => edge_write(kind, positionals, write, writer, |kind, from, to, sources| {
+            Mutation::RemoveEdge { kind, from, to, sources }
+        }),
+    }
 }
 
-/// Removes an edge from a map.
-pub fn maps_remove_edge(
-    args: EdgeArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
+/// `remove`'s node form: `kind <node>`, dropping the edges that touch
+/// it too. `node` must resolve to a node of `kind` itself: a short id
+/// names one kind alone, but another kind's schema may still declare
+/// it, so a kind that resolves to a different node's schema would
+/// otherwise silently remove that node instead.
+fn remove_node(
+    schema: Arc<Schema>,
+    kind: String,
+    positionals: Vec<String>,
+    write: WriteArgs,
+    writer: &Writer,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let snapshot = map_for(schemas, &args.target.map, source, log)?;
-    let from = resolve_ref(snapshot.map(), &args.from)?;
-    let to = resolve_ref(snapshot.map(), &args.to)?;
-    write(args.target, log, schemas, source, me, cause, |sources| {
-        Mutation::RemoveEdge {
-            kind: args.kind,
-            from,
-            to,
-            sources,
-        }
-    })
-    .map(drop)
+    if positionals.len() != 2 {
+        return Err(format!("expected `{kind} <node>`").into());
+    }
+    let map = schema.name().to_string();
+    let snapshot = map_for(writer.schemas, &map, writer.source, writer.log)?;
+    let resolved = resolve_node(snapshot.map(), &positionals[1])?;
+    if resolved.kind != kind {
+        return Err(format!("{:?} names a {}, not a {kind}", positionals[1], resolved.kind).into());
+    }
+    let node = NodeRef::from(resolved);
+    writer
+        .commit_write(&map, &write, |sources| Mutation::RemoveNode { node, sources })
+        .map(drop)
 }
 
-/// Changes a node already in a map - a rename, a property, or both -
-/// and prints the event id, the way `maps add-node` prints the node it
-/// minted.
-pub fn maps_change_node(
-    args: ChangeNodeArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let ChangeNodeArgs {
-        target,
-        node,
-        name,
-        prop,
-    } = args;
-    let snapshot = map_for(schemas, &target.map, source, log)?;
-    let node = resolve_ref(snapshot.map(), &node)?;
-    let payload = write(target, log, schemas, source, me, cause, |sources| {
-        Mutation::ChangeNode {
-            node,
-            name,
-            properties: prop.into_iter().collect::<BTreeMap<_, _>>(),
-            sources,
-        }
+/// `percept change <node> --name "<new>" --<property> "<value>" ...` -
+/// a rename, a property, or both, on a node already in a map, its map
+/// resolved from `node` through `schema_of_ref`, with no map name in
+/// the command. Same rank rule `remove` has: a node the user wrote, or
+/// last changed, takes no change from an agent. Prints the node's
+/// short id, its map, and the level: a change never mints a node, so
+/// its short id comes from the snapshot taken before the write, not a
+/// refold after it.
+pub fn change(args: ChangeArgs, writer: &Writer) -> Result<(), Box<dyn std::error::Error>> {
+    let (positionals, write) = parse_write_args(args.args)?;
+    let mut properties = write.properties.clone();
+    let Some(node_ref) = positionals.first().cloned() else {
+        return Err("expected `<node> --name \"<new>\" --<property> \"<value>\" ...`".into());
+    };
+    if positionals.len() != 1 {
+        return Err(format!("expected `change {node_ref} ...` with no other positional").into());
+    }
+    let name = properties.remove("name");
+    let schema = schema_of_ref(writer.schemas, &node_ref).ok_or_else(|| unknown_node_ref(&node_ref))?;
+    let map = schema.name().to_string();
+    let snapshot = map_for(writer.schemas, &map, writer.source, writer.log)?;
+    let standing = resolve_node(snapshot.map(), &node_ref)?;
+    let short_id = snapshot.map().short_id(standing.id).unwrap_or_default();
+    let node = NodeRef::from(standing);
+    let (payload, _) = writer.commit_write(&map, &write, |sources| {
+        Mutation::ChangeNode { node, name, properties, sources }
     })?;
-    if let Payload::NodeChanged { node, .. } = &payload {
-        println!("{}", node.as_uuid());
+    if let Payload::NodeChanged { .. } = &payload {
+        println!("{short_id}  {map} ({})", crate::core::level_label(writer.schemas, &map));
     }
     Ok(())
 }
@@ -793,7 +843,7 @@ struct DocCite {
 
 /// One edge line under a node: its kind, and the ref its target names -
 /// a short id or a bare kind name, resolved once against the map
-/// `maps_record` loaded before any write.
+/// `record_document` loaded before any write.
 struct DocEdge {
     kind: String,
     target: String,
@@ -848,8 +898,8 @@ fn parse_quoted(s: &str) -> Option<String> {
 }
 
 /// The reverse of `parse_quoted` - `name`, quoted and with every `"`
-/// escaped, the way a node or edge line in `maps record`'s document
-/// grammar writes it.
+/// escaped, the way a node or edge line in `add`'s document grammar
+/// writes it.
 fn quote(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
@@ -885,7 +935,7 @@ fn split_cite_range(s: &str) -> Result<CiteRange, Box<dyn std::error::Error>> {
     Ok((path.to_string(), Some(store::parse_lines(range)?)))
 }
 
-/// Parses `maps record`'s document grammar: a node line at column 0,
+/// Parses `add`'s document grammar: a node line at column 0,
 /// either `<kind> "<name>"`, which adds a node, or a bare short id,
 /// `t4`, which starts a change to the node it names - each owns every
 /// indented line under it - a `<key> "<value>"` property (`name
@@ -948,75 +998,93 @@ fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>
     Ok(nodes)
 }
 
-/// Adds every node and edge a document on stdin declares to `args.map`,
-/// publishing a `file.cited` event for each `cites` line and folding its
-/// id into that node's sources. Reads the document, then hands it to
-/// `record_document`, which does the work `maps record`'s tests reach
-/// directly, without stdin between them.
-pub fn maps_record(
-    args: RecordArgs,
-    log: &dyn EventLog,
+/// The schema a document's node line resolves to: `node.kind` by its
+/// node kind, for a fresh node; the short id `node.kind` holds, for a
+/// change block - `schema_of_node_kind` and `schema_of_ref`
+/// respectively, since a change block's `kind` field is a short id, not
+/// a node kind name.
+fn node_schema(
     schemas: &dyn Schemas,
-    source: &crate::core::Source,
-    checkout: &Path,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut document = String::new();
-    io::stdin().read_to_string(&mut document)?;
-    record_document(&document, args, log, schemas, source, checkout, me, cause)
+    node: &DocNode,
+    at_home: bool,
+) -> Result<Arc<Schema>, Box<dyn std::error::Error>> {
+    let resolved = if node.is_change {
+        schema_of_ref(schemas, &node.kind)
+    } else {
+        schema_of_node_kind(schemas, &node.kind)
+    };
+    resolved
+        .ok_or_else(|| unknown_kind(schemas, &node.kind, at_home))
+        .map_err(|err| format!("line {}: {err}", node.line).into())
 }
 
-/// `maps_record`'s work, given the document text rather than reading it
-/// from stdin. Every node and edge is checked and applied to one
-/// in-memory fold of `args.map` - `Map::apply` enforces known kinds,
-/// required properties, duplicate names, and known edge kinds, so this
-/// only resolves an edge's ref, live, against the map as it stands at
-/// that line: a bare kind name to the last node of that kind this
-/// document declared above it, anything else through
-/// `Map::resolve_str`. Nothing is appended until every node and edge
-/// has passed, in one batch under the log's lock, so a failure midway,
-/// whether a duplicate name, a missing `--source`, or a bad ref, leaves
-/// nothing written; the error names the node or line it reached.
-#[allow(clippy::too_many_arguments)]
+/// `add`'s document form: every node and edge a document on stdin
+/// declares, written to the one map its first line resolves to - see
+/// `node_schema`. A later line resolving to another map is refused,
+/// naming both, before anything is written. Every node and edge is then
+/// checked and applied to one in-memory fold of that map -
+/// `Map::apply` enforces known kinds, required properties, duplicate
+/// names, and known edge kinds, so this only resolves an edge's ref,
+/// live, against the map as it stands at that line: a bare kind name to
+/// the last node of that kind this document declared above it, anything
+/// else through `Map::resolve_str`. Nothing is appended until every
+/// node and edge has passed, in one batch under the log's lock, so a
+/// failure midway, whether a duplicate name, a missing `--source`, or a
+/// bad ref, leaves nothing written; the error names the node or line it
+/// reached.
 fn record_document(
     document: &str,
-    args: RecordArgs,
-    log: &dyn EventLog,
-    schemas: &dyn Schemas,
-    source: &crate::core::Source,
+    write: WriteArgs,
+    writer: &Writer,
     checkout: &Path,
-    me: Option<crate::core::HumanId>,
-    cause: Option<EventId>,
+    at_home: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let nodes = parse_document(document)?;
+    let Some(first) = nodes.first() else {
+        return Ok(());
+    };
     let total = nodes.len();
+    let map_schema = node_schema(writer.schemas, first, at_home)?;
+    for node in &nodes[1..] {
+        let schema = node_schema(writer.schemas, node, at_home)?;
+        if schema.name() != map_schema.name() {
+            return Err(format!(
+                "line {}: this document already writes into {:?}; {:?} is in map {:?}",
+                node.line,
+                map_schema.name(),
+                node.kind,
+                schema.name()
+            )
+            .into());
+        }
+    }
+    let map = map_schema.name().to_string();
 
-    let node_sources: Vec<EventId> = args
+    let node_sources: Vec<EventId> = write
         .source
         .iter()
-        .map(|id| known_event_id(id, log))
+        .map(|id| known_event_id(id, writer.log))
         .collect::<Result<_, _>>()?;
-    let causation_id = args
-        .causation
-        .as_deref()
-        .map(|id| known_event_id(id, log))
-        .transpose()?
-        .or(cause);
+    let causation_id = resolve_causation(write.causation.as_deref(), writer.log, writer.cause)?;
     // Only opened when the document has a `cites` line to resolve - a
-    // document with none should still record against a `checkout` that
-    // does not exist, the way it always could.
+    // document with none still records against a `checkout` that does
+    // not exist.
     let workspace = if nodes.iter().any(|node| !node.cites.is_empty()) {
         Some(workspace::Workspace::new(checkout)?)
     } else {
         None
     };
 
-    let RecordArgs { map, actor, .. } = args;
-    let actor = store::parse_actor(&actor, me)?;
-    let batch_source = source.clone();
+    let actor = store::parse_actor(write.actor.as_deref().unwrap_or("human"), writer.me)?;
+    let batch_source = writer.source.clone();
+    let schemas = writer.schemas;
+    let map_level = format!("{map} ({})", crate::core::level_label(schemas, &map));
 
-    let events = mapstore::commit_batch(log, schemas, &map, source, move |snapshot| {
+    let mut node_lines: Vec<String> = Vec::new();
+    let mut edge_lines: Vec<String> = Vec::new();
+    let mut cited_lines: Vec<String> = Vec::new();
+
+    mapstore::commit_batch(writer.log, schemas, &map, writer.source, |snapshot| {
         let mut batch: Vec<Event> = Vec::new();
         let mut last_of_kind: HashMap<String, NodeId> = HashMap::new();
 
@@ -1044,6 +1112,9 @@ fn record_document(
                 let payload =
                     build_file_cited(workspace, &cite.path, cite.lines, None).map_err(context)?;
                 let event = Event::new(actor, batch_source.clone(), causation_id, payload);
+                if let Payload::FileCited { path, lines, .. } = event.payload() {
+                    cited_lines.push(format!("cited {} {}", event.id().as_uuid(), cited_label(path, *lines)));
+                }
                 sources.push(event.id());
                 batch.push(event);
             }
@@ -1094,6 +1165,20 @@ fn record_document(
                         Payload::NodeAdded { node, .. } | Payload::NodeChanged { node, .. } => *node,
                         _ => unreachable!("AddNode and ChangeNode yield a node payload"),
                     };
+                    let short_id = snapshot.map().short_id(node_id).unwrap_or_default();
+                    match &payload {
+                        Payload::NodeAdded { kind, name, .. } => {
+                            node_lines.push(format!("{short_id} {kind} {}  {map_level}", quote(name)));
+                        }
+                        Payload::NodeChanged { name, .. } => {
+                            let line = format!("{short_id}  {map_level}");
+                            node_lines.push(match name {
+                                Some(name) => format!("{line} changed to {}", quote(name)),
+                                None => format!("{line} changed"),
+                            });
+                        }
+                        _ => unreachable!("AddNode and ChangeNode yield a node payload"),
+                    }
                     batch.push(Event::new(actor, batch_source.clone(), causation_id, payload));
                     node_id
                 }
@@ -1131,43 +1216,17 @@ fn record_document(
                     sources: node_sources.clone(),
                 };
                 let payload = snapshot.apply(mutation, actor).map_err(|err| context(err.into()))?;
+                if let Payload::EdgeAdded { kind, from, to, .. } = &payload {
+                    let from_short = snapshot.map().short_id(*from).unwrap_or_default();
+                    let to_short = snapshot.map().short_id(*to).unwrap_or_default();
+                    edge_lines.push(format!("{kind} {from_short} -> {to_short}"));
+                }
                 batch.push(Event::new(actor, batch_source.clone(), causation_id, payload));
             }
         }
 
         Ok(batch)
     })?;
-
-    let map = mapstore::fold_map(log, schemas, &map, &source.path)?;
-    let mut node_lines = Vec::new();
-    let mut edge_lines = Vec::new();
-    let mut cited_lines = Vec::new();
-    for event in &events {
-        match event.payload() {
-            Payload::FileCited { path, lines, .. } => cited_lines.push(format!(
-                "cited {} {}",
-                event.id().as_uuid(),
-                cited_label(path, *lines)
-            )),
-            Payload::NodeAdded { node, kind, name, .. } => {
-                let short_id = map.short_id(*node).unwrap_or_default();
-                node_lines.push(format!("{short_id} {kind} {}", quote(name)));
-            }
-            Payload::NodeChanged { node, name, .. } => {
-                let short_id = map.short_id(*node).unwrap_or_default();
-                match name {
-                    Some(name) => node_lines.push(format!("{short_id} changed to {}", quote(name))),
-                    None => node_lines.push(format!("{short_id} changed")),
-                }
-            }
-            Payload::EdgeAdded { kind, from, to, .. } => {
-                let from_short = map.short_id(*from).unwrap_or_default();
-                let to_short = map.short_id(*to).unwrap_or_default();
-                edge_lines.push(format!("{kind} {from_short} -> {to_short}"));
-            }
-            _ => {}
-        }
-    }
 
     print_lines(node_lines.into_iter().chain(edge_lines).chain(cited_lines))
 }
@@ -1187,7 +1246,11 @@ pub(super) fn stop_if_pipe_closed(e: io::Error) -> Result<(), Box<dyn std::error
 /// the value it is compared against. A filter naming something the log
 /// has no word for is an error here rather than a query that quietly
 /// matches nothing.
-fn parse_query(args: &SearchArgs, me: Option<crate::core::HumanId>) -> Result<EventQuery, String> {
+fn parse_query(
+    args: &SearchArgs,
+    me: Option<crate::core::HumanId>,
+    project: Option<&Path>,
+) -> Result<EventQuery, String> {
     let kinds = args
         .kind
         .iter()
@@ -1216,10 +1279,10 @@ fn parse_query(args: &SearchArgs, me: Option<crate::core::HumanId>) -> Result<Ev
         until,
         actors,
         sources: args.source.clone(),
+        roots: project.into_iter().map(Path::to_path_buf).collect(),
         kinds,
-        text: args.contains.clone(),
+        text: args.text.clone(),
         size: args.size,
-        ..Default::default()
     };
     if let Some((since, until)) = query.inverted_window() {
         return Err(format!("--since {since} is not before --until {until}"));
@@ -1227,14 +1290,160 @@ fn parse_query(args: &SearchArgs, me: Option<crate::core::HumanId>) -> Result<Ev
     Ok(query)
 }
 
-/// Prints the one event `args.id` names. An id the log doesn't carry
-/// fails loudly rather than printing nothing, so an empty result never
-/// means "your id was wrong". With `--range`, prints `payload.content`
-/// sliced to it instead of the whole event.
-pub fn show(args: ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
+/// One map's summary line: its level, name, purpose, and size. What a
+/// bare `percept show` lists, one per schema, in `Schemas::folded`'s
+/// order - global maps first. A schema with no map yet still gets its
+/// line, sized zero: `fold_map_at` folds it against a placeholder
+/// identity nothing else refers to.
+fn map_summary_line(
+    schemas: &dyn Schemas,
+    schema: &Arc<Schema>,
+    events: &[Event],
+    project: &Path,
+    json: bool,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let map = match map_id_at(schemas, schema.name(), events, project)? {
+        Some(id) => Map::fold(id, schema.clone(), events)?,
+        None => Map::empty(MapId::new(), schema.clone()),
+    };
+    Ok(if json {
+        mapstore::encode_map(schemas, &map)
+    } else {
+        format!(
+            "{} ({})  {} nodes, {} edges  {}",
+            schema.name(),
+            crate::core::level_label(schemas, schema.name()),
+            map.nodes().len(),
+            map.edges().len(),
+            schema.purpose(),
+        )
+    })
+}
+
+/// Every map's summary line, in schema order.
+fn map_summary_lines(
+    schemas: &dyn Schemas,
+    events: &[Event],
+    project: &Path,
+    json: bool,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    schemas
+        .folded()
+        .iter()
+        .map(|schema| map_summary_line(schemas, schema, events, project, json))
+        .collect()
+}
+
+/// `percept show` with no argument: every map, one line each.
+fn show_maps(
+    args: &ShowArgs,
+    log: &dyn EventLog,
+    schemas: &dyn Schemas,
+    project: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let events = log.load()?;
+    print_lines(map_summary_lines(schemas, &events, project, args.json)?.into_iter())
+}
+
+/// Prints the one event `arg` names, the way `search --full`
+/// prints one. An id the log doesn't carry fails loudly rather than
+/// printing nothing, so an empty result never means "your id was
+/// wrong". With `--range`, prints `payload.content` sliced to it
+/// instead of the whole event.
+fn show_event(arg: &str, args: &ShowArgs, log: &dyn EventLog) -> Result<(), Box<dyn std::error::Error>> {
     let (start, end) = args.range.unwrap_or_default();
-    println!("{}", store::read_event(log, &args.id, start, end)?);
+    println!("{}", store::read_event(log, arg, start, end)?);
     Ok(())
+}
+
+/// `map`, cut to `selection` and printed nodes-then-edges - `show_map`'s
+/// tail, whole or around one node. `--since` cuts what `--around`
+/// selected, so it reads as "what changed near this node".
+fn print_selected(
+    map: Map,
+    selection: &crate::core::Selection,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fragment = map.select(selection)?;
+    if !selection.is_whole() {
+        eprintln!("{}", mapstore::encode_fragment(&fragment));
+    }
+    if json {
+        print_lines(mapstore::encode_lines(fragment.map(), true))
+    } else {
+        print_text(&mapstore::markdown(fragment.map()))
+    }
+}
+
+/// Prints `schema`'s map, cut further by `--kind`/`--since` either way:
+/// whole, with `around` absent, or `around`'s node and its
+/// neighbourhood, `--depth` edges out, when it is given - the map found
+/// from the node through `schema_of_ref` rather than named on the
+/// command.
+fn show_map(
+    args: &ShowArgs,
+    schema: Arc<Schema>,
+    around: Option<&str>,
+    log: &dyn EventLog,
+    schemas: &dyn Schemas,
+    project: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let map = mapstore::fold_map(log, schemas, schema.name(), project)?;
+    let around = around.map(|arg| resolve_ref(&map, arg)).transpose()?;
+    let selection = crate::core::Selection {
+        around: around.as_ref().map(|node_ref| (node_ref, args.depth.unwrap_or(1))),
+        since: args.since,
+        kinds: &args.kind,
+        ..crate::core::Selection::default()
+    };
+    print_selected(map, &selection, args.json)
+}
+
+/// The error a flag not meant for the form `show`'s argument resolved
+/// to gives, naming it - `--kind` on an event, `--range` on a map.
+fn refuse_flag(given: bool, flag: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if given {
+        Err(format!("--{flag} does not apply to this form of show").into())
+    } else {
+        Ok(())
+    }
+}
+
+/// `percept show [<arg>]` - resolved by the shape of `arg`: absent,
+/// every map (`show_maps`); an event id, that event (`show_event`); a
+/// short id or `kind:name` `schema_of_ref` resolves, that node and its
+/// neighbours; anything else, the map that name finds, whole - both the
+/// last two through `show_map` - the same unknown-map error every map
+/// lookup gives, naming every map declared. Each form refuses a flag
+/// that isn't its own, naming it.
+pub fn show(
+    args: ShowArgs,
+    log: &dyn EventLog,
+    schemas: &dyn Schemas,
+    project: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(arg) = args.arg.clone() else {
+        refuse_flag(!args.kind.is_empty(), "kind")?;
+        refuse_flag(args.depth.is_some(), "depth")?;
+        refuse_flag(args.since.is_some(), "since")?;
+        refuse_flag(args.range.is_some(), "range")?;
+        return show_maps(&args, log, schemas, project);
+    };
+    if store::parse_event_id(&arg).is_ok() {
+        refuse_flag(args.json, "json")?;
+        refuse_flag(!args.kind.is_empty(), "kind")?;
+        refuse_flag(args.depth.is_some(), "depth")?;
+        refuse_flag(args.since.is_some(), "since")?;
+        return show_event(&arg, &args, log);
+    }
+    if let Some(schema) = schema_of_ref(schemas, &arg) {
+        refuse_flag(args.range.is_some(), "range")?;
+        return show_map(&args, schema, Some(&arg), log, schemas, project);
+    }
+    let schema = schemas.find(&arg)?;
+    refuse_flag(args.range.is_some(), "range")?;
+    refuse_flag(args.depth.is_some(), "depth")?;
+    show_map(&args, schema, None, log, schemas, project)
 }
 
 pub mod hook;

@@ -493,12 +493,7 @@ impl Map {
     fn resolve_short_id(&self, s: &str) -> Result<NodeId, MapError> {
         let unknown = || MapError::UnknownShortId(s.to_string());
         let (prefix, digits) = split_short_id(s).ok_or_else(unknown)?;
-        let kind = self
-            .schema
-            .node_kinds()
-            .iter()
-            .find(|kind| kind.prefix() == prefix)
-            .ok_or_else(unknown)?;
+        let kind = self.schema.node_kind_by_prefix(prefix).ok_or_else(unknown)?;
         let seq: u32 = digits.parse().map_err(|_| unknown())?;
         self.by_seq
             .get(&(kind.kind().to_string(), seq))

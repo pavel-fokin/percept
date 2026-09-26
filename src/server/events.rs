@@ -1,7 +1,7 @@
 //! `GET /api/events` and `GET /api/events/{id}` - the web view's own cut
 //! of the log, not a general query: it folds a `tool.resulted` into the
 //! `tool.called` that caused it, so it is never a row, whatever the
-//! filter asks for. `percept events search` is the general query over
+//! filter asks for. `percept search` is the general query over
 //! the same log; a caller here asking for `type=tool.resulted` gets no
 //! rows, and that is this route's rule, not a bug. Scoped to
 //! `AppState.source.path` always: `roots` is set by the handler, never
@@ -117,8 +117,8 @@ pub fn get(log: &dyn EventLog, id: &str, root: &std::path::Path) -> Result<Value
 
 /// `params` as an `EventQuery` scoped to `root`, and the `preview` size
 /// a row's `content` is cut to - the same parsing `cli::parse_query`
-/// does over `SearchArgs`, since both build the query `percept events
-/// search` already defines.
+/// does over `SearchArgs`, since both build the query `percept search`
+/// already defines.
 fn parse(params: Params, root: PathBuf) -> Result<(EventQuery, EventQuery, usize, usize), String> {
     let kinds = match params.kind.as_deref() {
         Some(s) if !s.is_empty() => s

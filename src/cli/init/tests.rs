@@ -51,7 +51,13 @@ fn writes_claude_code_from_nothing() {
     );
     assert_eq!(
         root["permissions"]["allow"],
-        json!(["Bash(percept maps *)", "Bash(percept events *)"])
+        json!([
+            "Bash(percept add *)",
+            "Bash(percept remove *)",
+            "Bash(percept change *)",
+            "Bash(percept show *)",
+            "Bash(percept search *)",
+        ])
     );
 }
 
@@ -100,7 +106,7 @@ fn does_not_duplicate_an_existing_allow_entry() {
 
     let merged = claude_code(existing.clone(), "percept hook claude-code");
 
-    assert_eq!(merged["permissions"]["allow"].as_array().unwrap().len(), 2);
+    assert_eq!(merged["permissions"]["allow"].as_array().unwrap().len(), 5);
 }
 
 #[test]
@@ -274,7 +280,7 @@ fn init_writes_the_shipped_schemas() {
 
     run(init("claude-code"), fixture.path()).unwrap();
 
-    let schemas = mapstore::load_schemas(fixture.path(), None).unwrap();
+    let schemas = mapstore::load_schemas(Some(fixture.path()), None).unwrap();
     let names: Vec<&str> = schemas.folded().iter().map(|s| s.name()).collect();
     assert_eq!(names, ["concepts"]);
 }

@@ -379,7 +379,7 @@ fn a_session_start_answers_the_client_the_start_screen() {
     let output = &output["hookSpecificOutput"];
     assert_eq!(output["hookEventName"], "SessionStart");
     let context = output["additionalContext"].as_str().unwrap();
-    assert!(context.contains("percept maps record <map>"), "{context}");
+    assert!(context.contains("percept add"), "{context}");
     assert!(context.contains("\n# debates\n\nwhat a hook test needs\n"), "{context}");
 }
 
