@@ -76,7 +76,7 @@ fn body(map: &Map, root: &std::path::Path) -> Value {
                 "id": short_id(map, node),
                 "node": node.id.as_uuid().to_string(),
                 "kind": node.kind,
-                "name": node.name,
+                "title": node.title,
                 "properties": properties_json(map, node),
             })
         })
@@ -116,13 +116,13 @@ fn properties_json(map: &Map, node: &Node) -> Value {
     Value::Object(properties)
 }
 
-/// `node`'s short id, or the `kind:name` form when the map minted none -
+/// `node`'s short id, or the `kind:title` form when the map minted none -
 /// the same fallback `mapstore::map::node_ref` gives an edge's ends,
 /// duplicated here since that helper is private to its module and this
 /// route's edge shape - naming short ids on both ends, no `stamp` -
 /// differs deliberately from `mapstore`'s own.
 fn short_id(map: &Map, node: &Node) -> String {
-    map.short_id(node.id).unwrap_or_else(|| format!("{}:{}", node.kind, node.name))
+    map.short_id(node.id).unwrap_or_else(|| format!("{}:{}", node.kind, node.title))
 }
 
 #[cfg(test)]

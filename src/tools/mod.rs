@@ -88,7 +88,7 @@ pub(crate) fn read_selection(
                 let node = map.node(id).expect("resolve returns a live node's id");
                 Ok(NodeRef {
                     kind: node.kind.clone(),
-                    name: node.name.clone(),
+                    title: node.title.clone(),
                 })
             })
             .transpose()?

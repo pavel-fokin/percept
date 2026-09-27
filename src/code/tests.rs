@@ -113,7 +113,7 @@ fn two_files_importing_the_same_crate_share_one_package_node() {
     let packages: Vec<_> = map
         .nodes()
         .iter()
-        .filter(|node| node.kind == "package" && node.name == "clap")
+        .filter(|node| node.kind == "package" && node.title == "clap")
         .collect();
     assert_eq!(packages.len(), 1);
     assert!(has_edge(
@@ -193,7 +193,7 @@ fn a_cfg_gated_duplicate_name_skips_rather_than_fails() {
     let symbols: Vec<_> = map
         .nodes()
         .iter()
-        .filter(|node| node.kind == "function" && node.name == "src/main.rs::greet")
+        .filter(|node| node.kind == "function" && node.title == "src/main.rs::greet")
         .collect();
     assert_eq!(symbols.len(), 1);
 }

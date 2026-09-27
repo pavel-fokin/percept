@@ -202,15 +202,15 @@ fn push_changed(out: &mut String, node: &Node, indent: &str) {
     }
 }
 
-/// A node's short id and quoted name, marked `(agent)` when `mark` is
+/// A node's short id and quoted title, marked `(agent)` when `mark` is
 /// set and the model wrote it - `Actor::Human` and `Actor::System` are
 /// never marked. The short id is the same `d41` `--around`,
 /// `--from`/`--to`, and a bare short id in `revise_map`'s arguments
 /// all resolve.
 fn marked_name(map: &Map, node: &Node, mark: bool) -> String {
     let mut label = match map.short_id(node.id) {
-        Some(id) => format!("{id} {:?}", node.name),
-        None => format!("{:?}", node.name),
+        Some(id) => format!("{id} {:?}", node.title),
+        None => format!("{:?}", node.title),
     };
     if mark && matches!(node.added().actor, Actor::Agent) {
         label.push_str(" (agent)");

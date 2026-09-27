@@ -223,7 +223,7 @@ async fn api_maps_answers_for_the_named_project_root_not_the_servers_own() {
             map: crate::core::testing::map_id("decisions"),
             node: crate::core::NodeId::new(),
             kind: "concept".to_string(),
-            name: "the rule".to_string(),
+            title: "the rule".to_string(),
             properties: Default::default(),
             sources: Vec::new(),
             seq: 1,

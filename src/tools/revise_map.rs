@@ -36,7 +36,7 @@ const DESCRIPTION: &str = "Record into a named map what you have judged \
     map records what the log shows, so search for the events first, \
     even when what you are recording is in front of you. Read the map \
     first, from the conversation or with read_map, and do not add a \
-    node that is already there; a node is named by its kind and name, \
+    node that is already there; a node is named by its kind and title, \
     not by an id you choose. Correct a settled node by adding the new \
     one and an edge to the old, rather than removing the old: a node \
     the user wrote, or last changed, cannot be renamed, changed, or \
@@ -44,7 +44,7 @@ const DESCRIPTION: &str = "Record into a named map what you have judged \
 
 /// JSON Schema for `run`'s `arguments`. A string, not a `Value` - the
 /// domain's `ToolSpec` is serde-free, so the provider parses this. The
-/// node reference object - the `kind` and `name` a writer knows a node
+/// node reference object - the `kind` and `title` a writer knows a node
 /// by - is written out for each of `from` and `to` rather than shared
 /// by a `$ref`, so no provider has to resolve one.
 const PARAMETERS: &str = r#"{
@@ -61,11 +61,11 @@ const PARAMETERS: &str = r#"{
             "properties": {
               "op": {"const": "add_node"},
               "kind": {"type": "string"},
-              "name": {"type": "string"},
+              "title": {"type": "string"},
               "properties": {"type": "object", "additionalProperties": {"type": "string"}},
               "sources": {"type": "array", "items": {"type": "string"}, "minItems": 1, "description": "event ids the judgement came from; at least one"}
             },
-            "required": ["op", "kind", "name", "sources"],
+            "required": ["op", "kind", "title", "sources"],
             "additionalProperties": false
           },
           {
@@ -73,18 +73,18 @@ const PARAMETERS: &str = r#"{
             "properties": {
               "op": {"const": "change_node"},
               "node": {
-                "description": "the node to change: {kind, name}, or the short id its map shows it as, e.g. d41",
+                "description": "the node to change: {kind, title}, or the short id its map shows it as, e.g. d41",
                 "oneOf": [
                   {
                     "type": "object",
-                    "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
-                    "required": ["kind", "name"],
+                    "properties": {"kind": {"type": "string"}, "title": {"type": "string"}},
+                    "required": ["kind", "title"],
                     "additionalProperties": false
                   },
                   {"type": "string"}
                 ]
               },
-              "name": {"type": "string", "description": "a rename, if any"},
+              "title": {"type": "string", "description": "a rename, if any"},
               "properties": {"type": "object", "additionalProperties": {"type": "string"}, "description": "merged into the node's own; a key given here replaces that key alone"},
               "sources": {"type": "array", "items": {"type": "string"}, "description": "event ids the judgement came from"}
             },
@@ -96,12 +96,12 @@ const PARAMETERS: &str = r#"{
             "properties": {
               "op": {"const": "remove_node"},
               "node": {
-                "description": "the node to remove: {kind, name}, or the short id its map shows it as, e.g. d41",
+                "description": "the node to remove: {kind, title}, or the short id its map shows it as, e.g. d41",
                 "oneOf": [
                   {
                     "type": "object",
-                    "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
-                    "required": ["kind", "name"],
+                    "properties": {"kind": {"type": "string"}, "title": {"type": "string"}},
+                    "required": ["kind", "title"],
                     "additionalProperties": false
                   },
                   {"type": "string"}
@@ -118,24 +118,24 @@ const PARAMETERS: &str = r#"{
               "op": {"const": "add_edge"},
               "kind": {"type": "string"},
               "from": {
-                "description": "{kind, name}, or the short id its map shows it as, e.g. d41",
+                "description": "{kind, title}, or the short id its map shows it as, e.g. d41",
                 "oneOf": [
                   {
                     "type": "object",
-                    "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
-                    "required": ["kind", "name"],
+                    "properties": {"kind": {"type": "string"}, "title": {"type": "string"}},
+                    "required": ["kind", "title"],
                     "additionalProperties": false
                   },
                   {"type": "string"}
                 ]
               },
               "to": {
-                "description": "{kind, name}, or the short id its map shows it as, e.g. d41",
+                "description": "{kind, title}, or the short id its map shows it as, e.g. d41",
                 "oneOf": [
                   {
                     "type": "object",
-                    "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
-                    "required": ["kind", "name"],
+                    "properties": {"kind": {"type": "string"}, "title": {"type": "string"}},
+                    "required": ["kind", "title"],
                     "additionalProperties": false
                   },
                   {"type": "string"}
@@ -152,24 +152,24 @@ const PARAMETERS: &str = r#"{
               "op": {"const": "remove_edge"},
               "kind": {"type": "string"},
               "from": {
-                "description": "{kind, name}, or the short id its map shows it as, e.g. d41",
+                "description": "{kind, title}, or the short id its map shows it as, e.g. d41",
                 "oneOf": [
                   {
                     "type": "object",
-                    "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
-                    "required": ["kind", "name"],
+                    "properties": {"kind": {"type": "string"}, "title": {"type": "string"}},
+                    "required": ["kind", "title"],
                     "additionalProperties": false
                   },
                   {"type": "string"}
                 ]
               },
               "to": {
-                "description": "{kind, name}, or the short id its map shows it as, e.g. d41",
+                "description": "{kind, title}, or the short id its map shows it as, e.g. d41",
                 "oneOf": [
                   {
                     "type": "object",
-                    "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
-                    "required": ["kind", "name"],
+                    "properties": {"kind": {"type": "string"}, "title": {"type": "string"}},
+                    "required": ["kind", "title"],
                     "additionalProperties": false
                   },
                   {"type": "string"}
@@ -196,7 +196,7 @@ const PARAMETERS: &str = r#"{
 enum ChangeArgs {
     AddNode {
         kind: String,
-        name: String,
+        title: String,
         #[serde(default)]
         properties: BTreeMap<String, String>,
         #[serde(default)]
@@ -204,7 +204,7 @@ enum ChangeArgs {
     },
     ChangeNode {
         node: NodeRefArgs,
-        name: Option<String>,
+        title: Option<String>,
         #[serde(default)]
         properties: BTreeMap<String, String>,
         #[serde(default)]
@@ -298,15 +298,15 @@ fn apply(
     let (mutation, line) = match change {
         ChangeArgs::AddNode {
             kind,
-            name,
+            title,
             properties,
             sources,
         } => {
-            cited(&sources, format_args!("{kind} {name:?}"))?;
-            let line = format!("added {kind} {name:?}");
+            cited(&sources, format_args!("{kind} {title:?}"))?;
+            let line = format!("added {kind} {title:?}");
             let mutation = Mutation::AddNode {
                 kind,
-                name,
+                title,
                 properties,
                 sources: snapshot.resolve(&sources)?,
             };
@@ -314,19 +314,19 @@ fn apply(
         }
         ChangeArgs::ChangeNode {
             node,
-            name,
+            title,
             properties,
             sources,
         } => {
             let node = node_ref(snapshot.map(), node)?;
             cited(&sources, format_args!("{node}"))?;
-            let line = match &name {
-                Some(new_name) => format!("changed {node} to {new_name:?}"),
+            let line = match &title {
+                Some(new_title) => format!("changed {node} to {new_title:?}"),
                 None => format!("changed {node}"),
             };
             let mutation = Mutation::ChangeNode {
                 node,
-                name,
+                title,
                 properties,
                 sources: snapshot.resolve(&sources)?,
             };
@@ -386,8 +386,8 @@ fn apply(
     Ok((line, payload))
 }
 
-/// Resolves `args` - `{kind, name}` or a short id - against `map` to
-/// the `kind:name` a `Mutation` takes, the way the CLI's own `--from`,
+/// Resolves `args` - `{kind, title}` or a short id - against `map` to
+/// the `kind:title` a `Mutation` takes, the way the CLI's own `--from`,
 /// `--to`, and node arguments do.
 fn node_ref(map: &Map, args: NodeRefArgs) -> Result<NodeRef, Box<dyn std::error::Error>> {
     let id = args.resolve(map)?;

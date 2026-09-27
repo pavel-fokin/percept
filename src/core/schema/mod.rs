@@ -337,7 +337,7 @@ pub fn schema_of_node_kind(schemas: &dyn Schemas, kind: &str) -> Option<Arc<Sche
         .cloned()
 }
 
-/// The schema a node ref names: `kind:name` by its kind, or the short
+/// The schema a node ref names: `kind:title` by its kind, or the short
 /// id `s` takes by the node kind prefix it starts with. `None` when
 /// neither resolves - an unknown kind, or a prefix no schema declares.
 /// What `add covers c1 c3` resolves each end's map through, before

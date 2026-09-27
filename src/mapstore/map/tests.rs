@@ -8,11 +8,11 @@ use crate::core::testing::{
 use crate::core::{Actor, Change, Event, MapId, NodeId, NodeRef};
 use crate::shared::Timestamp;
 
-fn add_node(kind: &str, name: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
-    let (kind, name) = (kind.to_string(), name.to_string());
+fn add_node(kind: &str, title: &str) -> impl FnOnce(Vec<EventId>) -> Mutation {
+    let (kind, title) = (kind.to_string(), title.to_string());
     move |sources| Mutation::AddNode {
         kind,
-        name,
+        title,
         properties: BTreeMap::new(),
         sources,
     }
@@ -46,7 +46,7 @@ fn a_claim_with_a_why_is_recorded() {
     let source = source("cli");
     let mutation = |sources| Mutation::AddNode {
         kind: "claim".to_string(),
-        name: "SQLite".to_string(),
+        title: "SQLite".to_string(),
         properties: BTreeMap::from([("why".to_string(), "one more dependency".to_string())]),
         sources,
     };
@@ -83,7 +83,7 @@ fn commit_appends_the_event_that_records_the_mutation() {
     )
     .unwrap();
 
-    assert!(matches!(event.payload(), Payload::NodeAdded { name, .. } if name == "Rust"));
+    assert!(matches!(event.payload(), Payload::NodeAdded { title, .. } if title == "Rust"));
     let events = log.load().unwrap();
     let Payload::MapCreated { map, schema } = events[0].payload() else {
         panic!("expected map.created before the first mutation")
@@ -425,7 +425,7 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
     let node = Node {
         id: NodeId::new(),
         kind: "fact".to_string(),
-        name: "Built both".to_string(),
+        title: "Built both".to_string(),
         properties: BTreeMap::from([("summary".to_string(), "side by side".to_string())]),
         sources: vec![EventId::new()],
         history: vec![
@@ -445,7 +445,7 @@ fn a_node_line_carries_its_id_sources_actor_and_time() {
 
     assert_eq!(line["node"], node.id.as_uuid().to_string());
     assert_eq!(line["kind"], "fact");
-    assert_eq!(line["name"], "Built both");
+    assert_eq!(line["title"], "Built both");
     assert_eq!(line["properties"]["summary"], "side by side");
     assert_eq!(line["sources"][0], node.sources[0].as_uuid().to_string());
     assert_eq!(line["actor"]["kind"], "human");
@@ -460,7 +460,7 @@ fn a_node_line_carries_its_short_id() {
     map.apply(
         Mutation::AddNode {
             kind: "fact".to_string(),
-            name: "Built both".to_string(),
+            title: "Built both".to_string(),
             properties: BTreeMap::new(),
             sources: Vec::new(),
         },
@@ -475,16 +475,16 @@ fn a_node_line_carries_its_short_id() {
 }
 
 #[test]
-fn an_edge_line_names_its_ends_as_kind_and_name() {
+fn an_edge_line_names_its_ends_as_kind_and_title() {
     let mut map = Map::empty(
         crate::core::testing::map_id("files"),
         crate::core::testing::files(),
     );
-    for (kind, name) in [("file", "src/main.rs"), ("package", "clap")] {
+    for (kind, title) in [("file", "src/main.rs"), ("package", "clap")] {
         map.apply(
             Mutation::AddNode {
                 kind: kind.to_string(),
-                name: name.to_string(),
+                title: title.to_string(),
                 properties: BTreeMap::new(),
                 sources: Vec::new(),
             },
@@ -497,11 +497,11 @@ fn an_edge_line_names_its_ends_as_kind_and_name() {
             kind: "imports".to_string(),
             from: NodeRef {
                 kind: "file".to_string(),
-                name: "src/main.rs".to_string(),
+                title: "src/main.rs".to_string(),
             },
             to: NodeRef {
                 kind: "package".to_string(),
-                name: "clap".to_string(),
+                title: "clap".to_string(),
             },
             sources: Vec::new(),
         },
@@ -523,7 +523,7 @@ fn map_with_a_verdict() -> Map {
     map.apply(
         Mutation::AddNode {
             kind: "verdict".to_string(),
-            name: "Rust over Go".to_string(),
+            title: "Rust over Go".to_string(),
             properties: BTreeMap::new(),
             sources: Vec::new(),
         },
@@ -534,14 +534,14 @@ fn map_with_a_verdict() -> Map {
 }
 
 #[test]
-fn node_ref_args_resolves_a_kind_and_name_object() {
+fn node_ref_args_resolves_a_kind_and_title_object() {
     let map = map_with_a_verdict();
     let args: NodeRefArgs =
-        serde_json::from_str(r#"{"kind":"verdict","name":"Rust over Go"}"#).unwrap();
+        serde_json::from_str(r#"{"kind":"verdict","title":"Rust over Go"}"#).unwrap();
 
     let node = args.resolve(&map).unwrap();
 
-    assert_eq!(map.node(node).unwrap().name, "Rust over Go");
+    assert_eq!(map.node(node).unwrap().title, "Rust over Go");
 }
 
 #[test]
@@ -551,22 +551,22 @@ fn node_ref_args_resolves_a_bare_short_id_string() {
 
     let node = args.resolve(&map).unwrap();
 
-    assert_eq!(map.node(node).unwrap().name, "Rust over Go");
+    assert_eq!(map.node(node).unwrap().title, "Rust over Go");
 }
 
 #[test]
-fn node_ref_args_resolves_a_bare_kind_colon_name_string_too() {
+fn node_ref_args_resolves_a_bare_kind_colon_title_string_too() {
     let map = map_with_a_verdict();
     let args: NodeRefArgs = serde_json::from_str(r#""verdict:Rust over Go""#).unwrap();
 
     let node = args.resolve(&map).unwrap();
 
-    assert_eq!(map.node(node).unwrap().name, "Rust over Go");
+    assert_eq!(map.node(node).unwrap().title, "Rust over Go");
 }
 
 #[test]
 fn node_ref_args_object_form_rejects_a_field_neither_shape_has() {
     let result: Result<NodeRefArgs, _> = serde_json::from_str(r#"{"kind":"verdict"}"#);
 
-    assert!(result.is_err(), "name is required and cannot default");
+    assert!(result.is_err(), "title is required and cannot default");
 }

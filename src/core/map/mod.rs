@@ -58,14 +58,14 @@ pub fn map_id_for<'a>(
     Ok(found)
 }
 
-/// One node of a map. `name` is unique within its map and kind, so a
+/// One node of a map. `title` is unique within its map and kind, so a
 /// writer can point at a node by what it is called; `id` is what
 /// history keeps.
 #[derive(Clone)]
 pub struct Node {
     pub id: NodeId,
     pub kind: String,
-    pub name: String,
+    pub title: String,
     pub properties: BTreeMap<String, String>,
     pub sources: Vec<EventId>,
     /// Every write that reached this node, in log order, the addition
@@ -77,10 +77,10 @@ pub struct Node {
     pub seq: u32,
 }
 
-/// A node as a writer names it: kind and quoted name, never the id.
+/// A node as a writer names it: kind and quoted title, never the id.
 impl fmt::Display for Node {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {:?}", self.kind, self.name)
+        write!(f, "{} {:?}", self.kind, self.title)
     }
 }
 
@@ -138,26 +138,26 @@ impl Written for Edge {
     }
 }
 
-/// Points at a node the way a writer knows it - by kind and name -
+/// Points at a node the way a writer knows it - by kind and title -
 /// rather than by id.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NodeRef {
     pub kind: String,
-    pub name: String,
+    pub title: String,
 }
 
 impl From<&Node> for NodeRef {
     fn from(node: &Node) -> Self {
         Self {
             kind: node.kind.clone(),
-            name: node.name.clone(),
+            title: node.title.clone(),
         }
     }
 }
 
 impl fmt::Display for NodeRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{} {:?}", self.kind, self.name)
+        write!(f, "{} {:?}", self.kind, self.title)
     }
 }
 
@@ -214,13 +214,13 @@ impl Fragment {
 pub enum Mutation {
     AddNode {
         kind: String,
-        name: String,
+        title: String,
         properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
     },
     ChangeNode {
         node: NodeRef,
-        name: Option<String>,
+        title: Option<String>,
         properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
     },
@@ -267,14 +267,14 @@ pub struct Map {
     nodes: Vec<Node>,
     edges: Vec<Edge>,
     // Indexes over `nodes` and `edges`, kept in step by `replay`, so a
-    // lookup by id, by name, or by edge is a hash rather than a scan:
+    // lookup by id, by title, or by edge is a hash rather than a scan:
     // every `apply` looks up its ends, and a code map applies tens of
     // thousands of them.
     by_id: HashMap<NodeId, usize>,
-    by_name: HashMap<(String, String), NodeId>,
+    by_title: HashMap<(String, String), NodeId>,
     // A node's short id, by kind and its minted number - what
     // `resolve_str` looks a short id up in, kept in step wherever
-    // `by_name` is.
+    // `by_title` is.
     by_seq: HashMap<(String, u32), NodeId>,
     // The next short id number `next_seq` mints per kind. Tracked apart
     // from `nodes`, and never rolled back on a `NodeRemoved`: a short
@@ -292,9 +292,9 @@ impl Map {
 
     fn from_parts(id: MapId, schema: Arc<Schema>, nodes: Vec<Node>, edges: Vec<Edge>) -> Self {
         let by_id = nodes.iter().enumerate().map(|(i, n)| (n.id, i)).collect();
-        let by_name = nodes
+        let by_title = nodes
             .iter()
-            .map(|n| ((n.kind.clone(), n.name.clone()), n.id))
+            .map(|n| ((n.kind.clone(), n.title.clone()), n.id))
             .collect();
         let by_seq = nodes
             .iter()
@@ -315,7 +315,7 @@ impl Map {
             nodes,
             edges,
             by_id,
-            by_name,
+            by_title,
             by_seq,
             next_seq_by_kind,
             edge_keys,
@@ -399,8 +399,8 @@ impl Map {
         self.by_id.get(&id).map(|&i| &self.nodes[i])
     }
 
-    pub fn find(&self, kind: &str, name: &str) -> Option<&Node> {
-        let id = self.by_name.get(&(kind.to_string(), name.to_string()))?;
+    pub fn find(&self, kind: &str, title: &str) -> Option<&Node> {
+        let id = self.by_title.get(&(kind.to_string(), title.to_string()))?;
         self.node(*id)
     }
 
@@ -473,13 +473,13 @@ impl Map {
     }
 
     /// Resolves `s` to a node id, either way a writer may name one:
-    /// `kind:name`, or the short id this map's own render shows it as.
+    /// `kind:title`, or the short id this map's own render shows it as.
     /// A short id never contains `:`, so the two forms cannot collide.
     pub fn resolve_str(&self, s: &str) -> Result<NodeId, MapError> {
         match s.split_once(':') {
-            Some((kind, name)) => self.resolve(NodeRef {
+            Some((kind, title)) => self.resolve(NodeRef {
                 kind: kind.to_string(),
-                name: name.to_string(),
+                title: title.to_string(),
             }),
             None => self.resolve_short_id(s),
         }
@@ -631,8 +631,8 @@ impl Map {
 }
 
 /// The map as text for a model to read: one line per node, then one
-/// per edge, nodes named by kind and name - the way a writer refers to
-/// them - never by id. Names and property values are quoted, so a
+/// per edge, nodes named by kind and title - the way a writer refers to
+/// them - never by id. Titles and property values are quoted, so a
 /// newline inside one stays inside its line. Empty for an empty map.
 impl fmt::Display for Map {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -659,18 +659,18 @@ impl Map {
     }
 }
 
-/// A name split into the parts that make node names comparable: path
+/// A title split into the parts that make node titles comparable: path
 /// components, `::`-separated symbol parts, and words. Empty parts drop
 /// out, so `src/providers/mod.rs` yields `src`, `providers`, `mod.rs`.
-fn segments(name: &str) -> impl Iterator<Item = &str> {
-    name.split(|c: char| c == '/' || c == ':' || c.is_whitespace())
+fn segments(title: &str) -> impl Iterator<Item = &str> {
+    title.split(|c: char| c == '/' || c == ':' || c.is_whitespace())
         .filter(|part| !part.is_empty())
 }
 
-/// Whether a name reads as a path or a symbol rather than prose - a
+/// Whether a title reads as a path or a symbol rather than prose - a
 /// `/` or a `::` in it - so a single shared segment is a real hint.
-fn is_path_like(name: &str) -> bool {
-    name.contains('/') || name.contains("::")
+fn is_path_like(title: &str) -> bool {
+    title.contains('/') || title.contains("::")
 }
 
 /// Which map a payload changes, if it changes one.

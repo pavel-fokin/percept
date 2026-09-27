@@ -89,7 +89,7 @@ pub enum Command {
     /// Prints the node's short id and the map it landed in.
     Change(ChangeArgs),
     /// Read a map, a node, or an event, resolved by the shape of the
-    /// argument: a uuid is an event, a short id or `kind:name` a node
+    /// argument: a uuid is an event, a short id or `kind:title` a node
     /// and its neighbours, anything else a map's name; with none, every
     /// map, one line each.
     Show(ShowArgs),
@@ -122,7 +122,7 @@ fn parse_actor_word(s: &str) -> Result<String, String> {
 }
 
 /// `percept add <kind> ...`'s whole tail, taken raw: a node kind then
-/// its quoted name, an edge kind then the two nodes it joins, or
+/// its quoted title, an edge kind then the two nodes it joins, or
 /// nothing, to read a document from stdin - see `add`. Captured raw
 /// rather than declared on clap, since a property's name comes from
 /// the schemas at runtime: `parse_write_args` splits it into the
@@ -131,7 +131,7 @@ fn parse_actor_word(s: &str) -> Result<String, String> {
 #[derive(Args)]
 #[command(after_help = "\
 Examples:
-  # A node: a node kind, its name, then a flag per property
+  # A node: a node kind, its title, then a flag per property
   percept add concept \"Snapshot\" --definition \"the working tree saved under a prompt\"
 
   # An edge: an edge kind, then the two nodes it joins
@@ -164,13 +164,13 @@ pub struct RemoveArgs {
 }
 
 /// `percept change <node> ...`'s whole tail, taken raw the same way
-/// `AddArgs` is: the node to change, a short id or `kind:name`, then
-/// `--name` for a rename and a flag per property to set - see `change`.
+/// `AddArgs` is: the node to change, a short id or `kind:title`, then
+/// `--title` for a rename and a flag per property to set - see `change`.
 #[derive(Args)]
 #[command(after_help = "\
 Examples:
   # A rename
-  percept change c3 --name \"Undo\"
+  percept change c3 --title \"Undo\"
 
   # A property
   percept change c3 --definition \"...; undo puts it back\"")]
@@ -276,13 +276,13 @@ fn unknown_kind(schemas: &dyn Schemas, kind: &str, at_home: bool) -> Box<dyn std
 }
 
 /// The error `change`/`add`/`remove`'s edge form give a ref that
-/// resolves to no schema: a `kind:name` naming an unknown kind, or a
+/// resolves to no schema: a `kind:title` naming an unknown kind, or a
 /// short id no schema's prefix claims.
 fn unknown_node_ref(ref_: &str) -> Box<dyn std::error::Error> {
     format!("{ref_:?} names no node kind or short id prefix any schema declares").into()
 }
 
-/// The one schema `from` and `to` both resolve to - by `kind:name` or
+/// The one schema `from` and `to` both resolve to - by `kind:title` or
 /// by the short id each takes, via `schema_of_ref` - or the refusal an
 /// edge across two maps gives, naming both. What `add`/`remove` find
 /// an edge's map through, with no map name in the command: an edge
@@ -360,7 +360,7 @@ pub struct SearchArgs {
 }
 
 /// `percept show [<arg>]` - resolved by the shape of `arg`, when there
-/// is one: a uuid an event, a short id or `kind:name` a node, anything
+/// is one: a uuid an event, a short id or `kind:title` a node, anything
 /// else a map's name. With none, every map. Every flag below applies to
 /// some forms and not others - see `show` - and is refused, naming
 /// itself, on a form it doesn't fit.
@@ -379,7 +379,7 @@ Examples:
   # An event by id
   percept show 018f2e1a-2b3c-7d4e-9f5a-6b7c8d9e0f1a")]
 pub struct ShowArgs {
-    /// A uuid, a short id or `kind:name`, or a map's name.
+    /// A uuid, a short id or `kind:title`, or a map's name.
     arg: Option<String>,
     /// Print one JSON object per line instead of the default Markdown -
     /// a map or a node form only.
@@ -441,11 +441,11 @@ pub(crate) fn non_blank(s: &str) -> Result<String, String> {
     Ok(s.to_string())
 }
 
-/// `s` - `kind:name`, or the short id `map`'s own render shows it as -
-/// resolved to the canonical `kind:name` a `Mutation` takes.
+/// `s` - `kind:title`, or the short id `map`'s own render shows it as -
+/// resolved to the canonical `kind:title` a `Mutation` takes.
 /// `Map::apply` resolves it again, against whatever the log holds by
 /// the time the commit under its lock runs; the gap between this fold
-/// and that one is the same one a plain `kind:name` reference always
+/// and that one is the same one a plain `kind:title` reference always
 /// lived with.
 fn resolve_ref(map: &Map, s: &str) -> Result<NodeRef, Box<dyn std::error::Error>> {
     Ok(NodeRef::from(resolve_node(map, s)?))
@@ -698,7 +698,7 @@ pub fn add(
     }
 }
 
-/// `add`'s node form: `kind "<name>" --<property> "<value>" ...`.
+/// `add`'s node form: `kind "<title>" --<property> "<value>" ...`.
 /// Prints the minted node's short id, map, and level.
 fn add_node(
     schema: Arc<Schema>,
@@ -708,13 +708,13 @@ fn add_node(
     writer: &Writer,
 ) -> Result<(), Box<dyn std::error::Error>> {
     if positionals.len() != 2 {
-        return Err(format!("expected `{kind} \"<name>\"`").into());
+        return Err(format!("expected `{kind} \"<title>\"`").into());
     }
-    let name = positionals[1].clone();
+    let title = positionals[1].clone();
     let map = schema.name().to_string();
     let properties = write.properties.clone();
     let (payload, short_id) = writer.commit_write(&map, &write, |sources| {
-        Mutation::AddNode { kind, name, properties, sources }
+        Mutation::AddNode { kind, title, properties, sources }
     })?;
     if let Payload::NodeAdded { .. } = &payload {
         println!("{}  {map} ({})", short_id.unwrap_or_default(), crate::core::level_label(writer.schemas, &map));
@@ -801,7 +801,7 @@ fn remove_node(
         .map(drop)
 }
 
-/// `percept change <node> --name "<new>" --<property> "<value>" ...` -
+/// `percept change <node> --title "<new>" --<property> "<value>" ...` -
 /// a rename, a property, or both, on a node already in a map, its map
 /// resolved from `node` through `schema_of_ref`, with no map name in
 /// the command. Same rank rule `remove` has: a node the user wrote, or
@@ -813,12 +813,12 @@ pub fn change(args: ChangeArgs, writer: &Writer) -> Result<(), Box<dyn std::erro
     let (positionals, write) = parse_write_args(args.args)?;
     let mut properties = write.properties.clone();
     let Some(node_ref) = positionals.first().cloned() else {
-        return Err("expected `<node> --name \"<new>\" --<property> \"<value>\" ...`".into());
+        return Err("expected `<node> --title \"<new>\" --<property> \"<value>\" ...`".into());
     };
     if positionals.len() != 1 {
         return Err(format!("expected `change {node_ref} ...` with no other positional").into());
     }
-    let name = properties.remove("name");
+    let title = properties.remove("title");
     let schema = schema_of_ref(writer.schemas, &node_ref).ok_or_else(|| unknown_node_ref(&node_ref))?;
     let map = schema.name().to_string();
     let snapshot = map_for(writer.schemas, &map, writer.source, writer.log)?;
@@ -826,7 +826,7 @@ pub fn change(args: ChangeArgs, writer: &Writer) -> Result<(), Box<dyn std::erro
     let short_id = snapshot.map().short_id(standing.id).unwrap_or_default();
     let node = NodeRef::from(standing);
     let (payload, _) = writer.commit_write(&map, &write, |sources| {
-        Mutation::ChangeNode { node, name, properties, sources }
+        Mutation::ChangeNode { node, title, properties, sources }
     })?;
     if let Payload::NodeChanged { .. } = &payload {
         println!("{short_id}  {map} ({})", crate::core::level_label(writer.schemas, &map));
@@ -851,12 +851,12 @@ struct DocEdge {
 }
 
 /// One node a document names, with what is declared under it - a fresh
-/// node (`kind` its node kind, `name` its name) or, when `is_change` is
-/// set, a change to one already in the map (`kind` its short id,
-/// `name` unused).
+/// node (`kind` its node kind, `title` its title) or, when `is_change`
+/// is set, a change to one already in the map (`kind` its short id,
+/// `title` unused).
 struct DocNode {
     kind: String,
-    name: String,
+    title: String,
     is_change: bool,
     properties: BTreeMap<String, String>,
     edges: Vec<DocEdge>,
@@ -936,9 +936,9 @@ fn split_cite_range(s: &str) -> Result<CiteRange, Box<dyn std::error::Error>> {
 }
 
 /// Parses `add`'s document grammar: a node line at column 0,
-/// either `<kind> "<name>"`, which adds a node, or a bare short id,
+/// either `<kind> "<title>"`, which adds a node, or a bare short id,
 /// `t4`, which starts a change to the node it names - each owns every
-/// indented line under it - a `<key> "<value>"` property (`name
+/// indented line under it - a `<key> "<value>"` property (`title
 /// "<value>"` is a rename, only meaningful under a change), an `<edge
 /// kind> <ref>`, or a `cites <path>[:<from>-<to>]` - until the next
 /// node line or the document's end. A blank line is ignored; anything
@@ -955,17 +955,17 @@ fn parse_document(text: &str) -> Result<Vec<DocNode>, Box<dyn std::error::Error>
                 Some((word, rest)) => (word.to_string(), rest),
                 None => (raw.trim().to_string(), ""),
             };
-            let (kind, name, is_change) = if rest.is_empty() {
+            let (kind, title, is_change) = if rest.is_empty() {
                 (word, String::new(), true)
             } else {
-                let name = parse_quoted(rest).ok_or_else(|| {
-                    format!("line {line}: expected `<kind> \"<name>\"`, or a short id alone")
+                let title = parse_quoted(rest).ok_or_else(|| {
+                    format!("line {line}: expected `<kind> \"<title>\"`, or a short id alone")
                 })?;
-                (word, name, false)
+                (word, title, false)
             };
             nodes.push(DocNode {
                 kind,
-                name,
+                title,
                 is_change,
                 properties: BTreeMap::new(),
                 edges: Vec::new(),
@@ -1097,7 +1097,7 @@ fn record_document(
                     node.line,
                     i + 1,
                     node.kind,
-                    node.name
+                    node.title
                 )
             };
             let context = |err: Box<dyn std::error::Error>| -> Box<dyn std::error::Error> {
@@ -1119,16 +1119,16 @@ fn record_document(
                 batch.push(event);
             }
 
-            // Either arm yields the kind and name the node has once it
+            // Either arm yields the kind and title the node has once it
             // lands, so one tail applies both.
             let cited = !node.cites.is_empty();
-            let (target, kind, name) = if node.is_change {
+            let (target, kind, title) = if node.is_change {
                 let standing = resolve_node(snapshot.map(), &node.kind).map_err(context)?;
-                let (kind, old_name, standing) =
-                    (standing.kind.clone(), standing.name.clone(), standing.id);
+                let (kind, old_title, standing) =
+                    (standing.kind.clone(), standing.title.clone(), standing.id);
                 let mut properties = node.properties;
-                let rename = properties.remove("name");
-                let name = rename.clone().unwrap_or_else(|| old_name.clone());
+                let rename = properties.remove("title");
+                let title = rename.clone().unwrap_or_else(|| old_title.clone());
                 // A block naming a short id and nothing but edges leaves
                 // the node alone: the edges under it are their own
                 // writes, and the document's own `--source` is about
@@ -1140,22 +1140,22 @@ fn record_document(
                     Target::Written(Mutation::ChangeNode {
                         node: NodeRef {
                             kind: kind.clone(),
-                            name: old_name,
+                            title: old_title,
                         },
-                        name: rename,
+                        title: rename,
                         properties,
                         sources,
                     })
                 };
-                (target, kind, name)
+                (target, kind, title)
             } else {
                 let mutation = Mutation::AddNode {
                     kind: node.kind.clone(),
-                    name: node.name.clone(),
+                    title: node.title.clone(),
                     properties: node.properties,
                     sources,
                 };
-                (Target::Written(mutation), node.kind, node.name)
+                (Target::Written(mutation), node.kind, node.title)
             };
             let node_id = match target {
                 Target::Written(mutation) => {
@@ -1167,13 +1167,13 @@ fn record_document(
                     };
                     let short_id = snapshot.map().short_id(node_id).unwrap_or_default();
                     match &payload {
-                        Payload::NodeAdded { kind, name, .. } => {
-                            node_lines.push(format!("{short_id} {kind} {}  {map_level}", quote(name)));
+                        Payload::NodeAdded { kind, title, .. } => {
+                            node_lines.push(format!("{short_id} {kind} {}  {map_level}", quote(title)));
                         }
-                        Payload::NodeChanged { name, .. } => {
+                        Payload::NodeChanged { title, .. } => {
                             let line = format!("{short_id}  {map_level}");
-                            node_lines.push(match name {
-                                Some(name) => format!("{line} changed to {}", quote(name)),
+                            node_lines.push(match title {
+                                Some(title) => format!("{line} changed to {}", quote(title)),
                                 None => format!("{line} changed"),
                             });
                         }
@@ -1185,7 +1185,7 @@ fn record_document(
                 Target::Standing(node_id) => node_id,
             };
             last_of_kind.insert(kind.clone(), node_id);
-            let from_ref = NodeRef { kind, name };
+            let from_ref = NodeRef { kind, title };
 
             for edge in node.edges {
                 let to_id = if snapshot.map().schema().node_kind(&edge.target).is_some() {
@@ -1207,7 +1207,7 @@ fn record_document(
                     .expect("resolve_str and last_of_kind name a live node");
                 let to_ref = NodeRef {
                     kind: to_node.kind.clone(),
-                    name: to_node.name.clone(),
+                    title: to_node.title.clone(),
                 };
                 let mutation = Mutation::AddEdge {
                     kind: edge.kind,
@@ -1411,7 +1411,7 @@ fn refuse_flag(given: bool, flag: &str) -> Result<(), Box<dyn std::error::Error>
 
 /// `percept show [<arg>]` - resolved by the shape of `arg`: absent,
 /// every map (`show_maps`); an event id, that event (`show_event`); a
-/// short id or `kind:name` `schema_of_ref` resolves, that node and its
+/// short id or `kind:title` `schema_of_ref` resolves, that node and its
 /// neighbours; anything else, the map that name finds, whole - both the
 /// last two through `show_map` - the same unknown-map error every map
 /// lookup gives, naming every map declared. Each form refuses a flag

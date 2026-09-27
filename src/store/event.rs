@@ -95,20 +95,20 @@ struct NodeAddedBody {
     map: String,
     node: String,
     kind: String,
-    name: String,
+    title: String,
     properties: BTreeMap<String, String>,
     sources: Vec<String>,
     seq: u32,
 }
 
-/// `Payload::NodeChanged` on the wire. `name` is present only on a
+/// `Payload::NodeChanged` on the wire. `title` is present only on a
 /// rename.
 #[derive(Serialize, Deserialize)]
 struct NodeChangedBody {
     map: String,
     node: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    name: Option<String>,
+    title: Option<String>,
     properties: BTreeMap<String, String>,
     sources: Vec<String>,
 }
@@ -492,7 +492,7 @@ impl From<&crate::core::Event> for Event {
                 map,
                 node,
                 kind,
-                name,
+                title,
                 properties,
                 sources,
                 seq,
@@ -500,7 +500,7 @@ impl From<&crate::core::Event> for Event {
                 map: map.as_uuid().to_string(),
                 node: node.as_uuid().to_string(),
                 kind: kind.clone(),
-                name: name.clone(),
+                title: title.clone(),
                 properties: properties.clone(),
                 sources: ids(sources),
                 seq: *seq,
@@ -509,13 +509,13 @@ impl From<&crate::core::Event> for Event {
             Payload::NodeChanged {
                 map,
                 node,
-                name,
+                title,
                 properties,
                 sources,
             } => serde_json::to_value(NodeChangedBody {
                 map: map.as_uuid().to_string(),
                 node: node.as_uuid().to_string(),
-                name: name.clone(),
+                title: title.clone(),
                 properties: properties.clone(),
                 sources: ids(sources),
             })
@@ -664,7 +664,7 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
                 map: parse_map_id(&body.map)?,
                 node: parse_node_id(&body.node)?,
                 kind: body.kind,
-                name: body.name,
+                title: body.title,
                 properties: body.properties,
                 sources: parse_event_ids(body.sources)?,
                 seq: body.seq,
@@ -676,7 +676,7 @@ fn decode_payload(kind: &str, payload: Value) -> Result<Payload, Error> {
             Ok(Payload::NodeChanged {
                 map: parse_map_id(&body.map)?,
                 node: parse_node_id(&body.node)?,
-                name: body.name,
+                title: body.title,
                 properties: body.properties,
                 sources: parse_event_ids(body.sources)?,
             })

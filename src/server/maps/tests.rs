@@ -34,7 +34,7 @@ fn source_at(path: &Path) -> Source {
     }
 }
 
-fn node_added(path: &Path, kind: &str, name: &str) -> (Event, NodeId) {
+fn node_added(path: &Path, kind: &str, title: &str) -> (Event, NodeId) {
     let node = NodeId::new();
     let event = Event::new(
         Actor::Human(human()),
@@ -44,7 +44,7 @@ fn node_added(path: &Path, kind: &str, name: &str) -> (Event, NodeId) {
             map: crate::core::testing::map_id("decisions"),
             node,
             kind: kind.to_string(),
-            name: name.to_string(),
+            title: title.to_string(),
             properties: BTreeMap::new(),
             sources: Vec::new(),
             seq: 1,

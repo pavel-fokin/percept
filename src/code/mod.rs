@@ -86,7 +86,7 @@ pub fn build(root: &Path) -> Result<Map, MapError> {
         map.apply(
             Mutation::AddNode {
                 kind: "file".to_string(),
-                name: file.clone(),
+                title: file.clone(),
                 properties: BTreeMap::from([("language".to_string(), "rust".to_string())]),
                 sources: Vec::new(),
             },
@@ -111,18 +111,18 @@ pub fn build(root: &Path) -> Result<Map, MapError> {
 
         let this = NodeRef {
             kind: "file".to_string(),
-            name: file.clone(),
+            title: file.clone(),
         };
 
         for symbol in symbols {
             let node = NodeRef {
                 kind: symbol.kind.to_string(),
-                name: format!("{file}::{}", symbol.path.join("::")),
+                title: format!("{file}::{}", symbol.path.join("::")),
             };
             map.apply(
                 Mutation::AddNode {
                     kind: node.kind.clone(),
-                    name: node.name.clone(),
+                    title: node.title.clone(),
                     properties: BTreeMap::from([
                         ("public".to_string(), symbol.public.to_string()),
                         ("line".to_string(), symbol.line.to_string()),
@@ -159,14 +159,14 @@ pub fn build(root: &Path) -> Result<Map, MapError> {
                 Target::File(name) if name == *file => continue,
                 Target::File(name) => NodeRef {
                     kind: "file".to_string(),
-                    name,
+                    title: name,
                 },
                 Target::Package(name) => {
                     if packages.insert(name.clone()) {
                         map.apply(
                             Mutation::AddNode {
                                 kind: "package".to_string(),
-                                name: name.clone(),
+                                title: name.clone(),
                                 properties: BTreeMap::new(),
                                 sources: Vec::new(),
                             },
@@ -175,7 +175,7 @@ pub fn build(root: &Path) -> Result<Map, MapError> {
                     }
                     NodeRef {
                         kind: "package".to_string(),
-                        name,
+                        title: name,
                     }
                 }
             };

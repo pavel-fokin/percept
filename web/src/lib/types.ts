@@ -85,7 +85,7 @@ export interface MapNode {
   id: string;
   node: string;
   kind: string;
-  name: string;
+  title: string;
   properties: Record<string, string>;
 }
 

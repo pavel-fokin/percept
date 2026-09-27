@@ -22,7 +22,7 @@ export function SelectedCard({ view, wideClassName }: { view: MapViewState; wide
   return wide ? (
     <div className={wideClassName}>{card}</div>
   ) : (
-    <Sheet onClose={close} label={outline.byId.get(selected)?.name ?? ""}>
+    <Sheet onClose={close} label={outline.byId.get(selected)?.title ?? ""}>
       {card}
     </Sheet>
   );

@@ -47,7 +47,7 @@ export default function Board() {
       const position = positions.get(node.id);
       if (!position) return [];
       const kindIndex = outline.multi ? (outline.kindIndex.get(node.kind) ?? 0) : null;
-      return [{ id: node.id, type: "board", position, data: { label: node.name, kindIndex } }];
+      return [{ id: node.id, type: "board", position, data: { label: node.title, kindIndex } }];
     });
     const edges = map.edges.map(
       (edge, index): Edge => ({

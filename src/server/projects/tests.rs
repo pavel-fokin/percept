@@ -15,14 +15,14 @@ fn source_at(name: &str, path: &Path) -> Source {
     }
 }
 
-fn node_added(path: &Path, name: &str) -> Event {
-    node_added_seq(path, name, 1)
+fn node_added(path: &Path, title: &str) -> Event {
+    node_added_seq(path, title, 1)
 }
 
 /// `node_added`, numbered `seq` - for a test that adds more than one
 /// `concept` node under the same path, where each needs the number
 /// `apply` would have minted for it.
-fn node_added_seq(path: &Path, name: &str, seq: u32) -> Event {
+fn node_added_seq(path: &Path, title: &str, seq: u32) -> Event {
     Event::new(
         Actor::Human(human()),
         source_at("agent", path),
@@ -31,7 +31,7 @@ fn node_added_seq(path: &Path, name: &str, seq: u32) -> Event {
             map: crate::core::testing::map_id("decisions"),
             node: NodeId::new(),
             kind: "concept".to_string(),
-            name: name.to_string(),
+            title: title.to_string(),
             properties: BTreeMap::new(),
             sources: Vec::new(),
             seq,

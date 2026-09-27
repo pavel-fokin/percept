@@ -291,22 +291,23 @@ fn event_lines(
         // A map change shows dimmed too - it's context the model built,
         // not dialogue.
         Payload::NodeAdded {
-            map, kind, name, ..
+            map, kind, title, ..
         } => tool_lines(
             chat,
-            &format!("{}: added {kind} {name:?}", map_label(map_names, map)),
+            &format!("{}: added {kind} {title:?}", map_label(map_names, map)),
             width,
         ),
         Payload::NodeChanged {
-            map, node, name, ..
+            map, node, title, ..
         } => tool_lines(
             chat,
             &format!(
                 "{}: changed node {}{}",
                 map_label(map_names, map),
                 node.as_uuid(),
-                name.as_deref()
-                    .map(|name| format!(" -> {name:?}"))
+                title
+                    .as_deref()
+                    .map(|title| format!(" -> {title:?}"))
                     .unwrap_or_default()
             ),
             width,

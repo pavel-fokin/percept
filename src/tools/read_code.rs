@@ -45,8 +45,8 @@ const PARAMETERS: &str = r#"{
       "oneOf": [
         {
           "type": "object",
-          "properties": {"kind": {"type": "string"}, "name": {"type": "string"}},
-          "required": ["kind", "name"],
+          "properties": {"kind": {"type": "string"}, "title": {"type": "string"}},
+          "required": ["kind", "title"],
           "additionalProperties": false
         },
         {"type": "string", "description": "a short id like fn3, as this map's own nodes are shown"}

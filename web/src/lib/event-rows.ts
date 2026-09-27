@@ -157,7 +157,7 @@ export function contentOf(event: Event): Content {
     case "node.added":
     case "node.changed":
     case "node.removed":
-      return { text: stringField(payload, "name") || stringField(payload, "node"), variant: "plain" };
+      return { text: stringField(payload, "title") || stringField(payload, "node"), variant: "plain" };
     // An edge's ends are node ids, and resolving them to names needs the
     // map this view does not fold. The kind is the part a reader can use
     // without it; both ends are one tap away in the row's own panel.

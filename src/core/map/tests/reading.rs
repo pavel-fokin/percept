@@ -76,7 +76,7 @@ fn roots_are_the_nodes_no_edge_reaches() {
     )
     .unwrap();
 
-    let names: Vec<&str> = map.roots().map(|node| node.name.as_str()).collect();
+    let names: Vec<&str> = map.roots().map(|node| node.title.as_str()).collect();
 
     assert_eq!(names, ["a"]);
 }
@@ -98,7 +98,7 @@ fn a_node_with_two_parents_is_not_a_root() {
     )
     .unwrap();
 
-    let mut names: Vec<&str> = map.roots().map(|node| node.name.as_str()).collect();
+    let mut names: Vec<&str> = map.roots().map(|node| node.title.as_str()).collect();
     names.sort_unstable();
 
     assert_eq!(names, ["a", "b"]);
@@ -110,7 +110,7 @@ fn a_node_no_edge_touches_is_its_own_root() {
     map.apply(add_chore("alone"), Actor::Human(human()))
         .unwrap();
 
-    let names: Vec<&str> = map.roots().map(|node| node.name.as_str()).collect();
+    let names: Vec<&str> = map.roots().map(|node| node.title.as_str()).collect();
 
     assert_eq!(names, ["alone"]);
 }
@@ -142,7 +142,7 @@ fn a_map_reads_as_one_line_per_node_then_per_edge() {
     map.apply(
         Mutation::AddNode {
             kind: "fact".to_string(),
-            name: "Built both".to_string(),
+            title: "Built both".to_string(),
             properties: BTreeMap::from([
                 ("summary".to_string(), "side by\nside".to_string()),
                 ("when".to_string(), "August".to_string()),

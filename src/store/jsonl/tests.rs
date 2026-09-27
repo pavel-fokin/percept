@@ -248,7 +248,7 @@ fn mint(events: Vec<crate::core::Event>, kind: &str) -> Result<crate::core::Even
             map: crate::core::testing::map_id("decisions"),
             node: NodeId::new(),
             kind: kind.to_string(),
-            name: format!("mint {seq}"),
+            title: format!("mint {seq}"),
             properties: BTreeMap::new(),
             sources: Vec::new(),
             seq,
