@@ -151,7 +151,7 @@ function Row({
   register: (id: string, el: HTMLDivElement | null) => void;
 }) {
   const node = outline.byId.get(entry.id);
-  const name = node?.name ?? entry.id;
+  const name = node?.title ?? entry.id;
   const lead = entry.depth * INDENT + LEAD;
 
   if ("ref" in entry) {

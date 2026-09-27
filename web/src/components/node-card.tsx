@@ -76,12 +76,12 @@ export default function NodeCard({
             {crumbs.map((crumbId) => (
               <span key={crumbId} className="flex items-center gap-1">
                 <button type="button" onClick={() => onSelect(crumbId)} className="min-h-11 hover:text-accent">
-                  {outline.byId.get(crumbId)?.name ?? crumbId}
+                  {outline.byId.get(crumbId)?.title ?? crumbId}
                 </button>
                 <span aria-hidden="true">&#8250;</span>
               </span>
             ))}
-            <span className="text-muted">{node.name}</span>
+            <span className="text-muted">{node.title}</span>
           </>
         ) : (
           <span>heads the map</span>
@@ -98,7 +98,7 @@ export default function NodeCard({
               onClick={() => onSelect(otherId)}
               className="min-h-11 text-muted hover:text-accent"
             >
-              {outline.byId.get(otherId)?.name ?? otherId}
+              {outline.byId.get(otherId)?.title ?? otherId}
             </button>
           ))}
         </div>
@@ -120,7 +120,7 @@ export default function NodeCard({
         </button>
       </div>
 
-      <h2 className="mt-1 font-serif text-[1.375rem] font-medium leading-snug text-ink">{node.name}</h2>
+      <h2 className="mt-1 font-serif text-[1.375rem] font-medium leading-snug text-ink">{node.title}</h2>
 
       {Object.keys(node.properties).length > 0 && (
         <dl className="mt-3 grid gap-2.5">
@@ -158,7 +158,7 @@ export default function NodeCard({
                             className="size-3 shrink-0 text-faint"
                           />
                         )}
-                        <span className="min-w-0 flex-1">{target?.name ?? edge.to}</span>
+                        <span className="min-w-0 flex-1">{target?.title ?? edge.to}</span>
                       </button>
                     </li>
                   );
