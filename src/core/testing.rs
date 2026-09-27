@@ -72,10 +72,10 @@ pub fn human() -> Option<HumanId> {
     Some(HumanId::new())
 }
 
-pub fn node_ref(kind: &str, name: &str) -> NodeRef {
+pub fn node_ref(kind: &str, title: &str) -> NodeRef {
     NodeRef {
         kind: kind.to_string(),
-        name: name.to_string(),
+        title: title.to_string(),
     }
 }
 
@@ -169,50 +169,50 @@ pub fn usage() -> Usage {
 
 /// A node on the debates map, written by the user and cited from one
 /// event, for tests that need a map with something in it.
-pub fn node_added(kind: &str, name: &str) -> Event {
-    node_added_by(Actor::Human(human()), kind, name)
+pub fn node_added(kind: &str, title: &str) -> Event {
+    node_added_by(Actor::Human(human()), kind, title)
 }
 
 /// `node_added`, committed as `actor` - for a test about who wrote a
 /// node.
-pub fn node_added_by(actor: Actor, kind: &str, name: &str) -> Event {
-    node_added_citing(actor, kind, name, vec![EventId::new()])
+pub fn node_added_by(actor: Actor, kind: &str, title: &str) -> Event {
+    node_added_citing(actor, kind, title, vec![EventId::new()])
 }
 
 /// `node_added`, numbered `seq` - for a test whose debates map holds
 /// more than one node of `kind`, where each needs the number `apply`
 /// would have minted for it: `1`, then `2`, and so on.
-pub fn node_added_seq(kind: &str, name: &str, seq: u32) -> Event {
+pub fn node_added_seq(kind: &str, title: &str, seq: u32) -> Event {
     Event::new(
         Actor::Human(human()),
         source("test"),
         None,
-        node_added_payload_seq("debates", kind, name, BTreeMap::new(), vec![EventId::new()], seq),
+        node_added_payload_seq("debates", kind, title, BTreeMap::new(), vec![EventId::new()], seq),
     )
 }
 
 /// `node_added`, from a path other than `/test`, to a map named for
 /// that path - a node of another project's map, for a test that folds
 /// one project's map and not another's.
-pub fn node_added_at(path: &str, kind: &str, name: &str) -> Event {
+pub fn node_added_at(path: &str, kind: &str, title: &str) -> Event {
     Event::new(
         Actor::Human(human()),
         source_at("test", path),
         None,
-        node_added_payload(path, kind, name, BTreeMap::new(), vec![EventId::new()]),
+        node_added_payload(path, kind, title, BTreeMap::new(), vec![EventId::new()]),
     )
 }
 
 /// The `NodeAdded` payload every `node_added*` builder composes: `map`,
-/// `kind`, `name`, `properties`, and the `sources` it cites.
+/// `kind`, `title`, `properties`, and the `sources` it cites.
 pub fn node_added_payload(
     map: &str,
     kind: &str,
-    name: &str,
+    title: &str,
     properties: BTreeMap<String, String>,
     sources: Vec<EventId>,
 ) -> Payload {
-    node_added_payload_seq(map, kind, name, properties, sources, 1)
+    node_added_payload_seq(map, kind, title, properties, sources, 1)
 }
 
 /// `node_added_payload`, numbered `seq` - for a test whose map holds
@@ -221,7 +221,7 @@ pub fn node_added_payload(
 pub fn node_added_payload_seq(
     map: &str,
     kind: &str,
-    name: &str,
+    title: &str,
     properties: BTreeMap<String, String>,
     sources: Vec<EventId>,
     seq: u32,
@@ -230,7 +230,7 @@ pub fn node_added_payload_seq(
         map: map_id(map),
         node: NodeId::new(),
         kind: kind.to_string(),
-        name: name.to_string(),
+        title: title.to_string(),
         properties,
         sources,
         seq,
@@ -240,12 +240,12 @@ pub fn node_added_payload_seq(
 /// A `node.added` event on the debates map, citing `sources` - for a
 /// test that points a row at events of its own choosing, rather than
 /// the fresh id `node_added_by` mints for one no event answers to.
-pub fn node_added_citing(actor: Actor, kind: &str, name: &str, sources: Vec<EventId>) -> Event {
+pub fn node_added_citing(actor: Actor, kind: &str, title: &str, sources: Vec<EventId>) -> Event {
     Event::new(
         actor,
         source("test"),
         None,
-        node_added_payload("debates", kind, name, BTreeMap::new(), sources),
+        node_added_payload("debates", kind, title, BTreeMap::new(), sources),
     )
 }
 

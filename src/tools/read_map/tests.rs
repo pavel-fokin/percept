@@ -97,7 +97,7 @@ fn read(args: &str) -> Result<Vec<serde_json::Value>, Box<dyn std::error::Error>
 
 #[test]
 fn a_read_opens_with_the_schema_then_the_counts_then_the_nodes_then_the_edges() {
-    let rows = read(r#"{"map":"debates","around":{"kind":"topic","name":"Where?"}}"#).unwrap();
+    let rows = read(r#"{"map":"debates","around":{"kind":"topic","title":"Where?"}}"#).unwrap();
 
     assert_eq!(rows[0]["schema"], "debates");
     assert_eq!(rows[1]["shown_nodes"], 3);
@@ -148,7 +148,7 @@ fn depth_without_around_is_a_whole_read_not_a_wasted_call() {
 #[test]
 fn around_on_an_empty_map_still_says_nothing_is_recorded() {
     let out = tool(FakeLog::default())
-        .run(r#"{"map":"debates","around":{"kind":"topic","name":"Where?"}}"#)
+        .run(r#"{"map":"debates","around":{"kind":"topic","title":"Where?"}}"#)
         .unwrap();
 
     assert!(out.content.contains("nothing has been recorded"));

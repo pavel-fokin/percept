@@ -13,7 +13,7 @@ use crate::core::{Actor, EventId, MapId};
 /// the rule and the value that broke it. `apply` checks a mutation
 /// before it becomes an event, so a stored event that breaks a rule
 /// means a race between writers or a hand-edited log. Edge ends are
-/// carried as labels - kind and name - the way a reader knows them.
+/// carried as labels - kind and title - the way a reader knows them.
 #[derive(Debug, PartialEq, Eq)]
 pub enum MapError {
     UnknownMap {
@@ -37,7 +37,7 @@ pub enum MapError {
         kinds: String,
         kind: String,
     },
-    /// A name that is blank would be a node nobody can point at.
+    /// A title that is blank would be a node nobody can point at.
     BlankName,
     /// A change naming no rename, no property, and no source the node
     /// does not already cite: nothing would land, and it would still
@@ -45,7 +45,7 @@ pub enum MapError {
     EmptyChange,
     DuplicateNode {
         kind: String,
-        name: String,
+        title: String,
     },
     /// A property whose value is not among the values its kind declares
     /// for it. Write-only: checked by `Map::apply` on `AddNode` and
@@ -78,8 +78,8 @@ pub enum MapError {
     },
     NoSuchNode {
         node: NodeRef,
-        /// Nodes of the same kind whose name overlaps `node.name`, as
-        /// `kind:name` a reader can paste back. Empty when none do.
+        /// Nodes of the same kind whose title overlaps `node.title`, as
+        /// `kind:title` a reader can paste back. Empty when none do.
         suggestions: Vec<String>,
     },
     /// A stored event names a node id the fold never saw.
@@ -135,13 +135,13 @@ impl fmt::Display for MapError {
                 f,
                 "no edge kind {kind:?} in map {map:?}; kinds are {kinds}"
             ),
-            Self::BlankName => write!(f, "a node's name must not be blank"),
+            Self::BlankName => write!(f, "a node's title must not be blank"),
             Self::EmptyChange => write!(
                 f,
                 "a change must name a rename, a property, or a source the node does not already cite"
             ),
-            Self::DuplicateNode { kind, name } => {
-                write!(f, "{kind} {name:?} is already in the map")
+            Self::DuplicateNode { kind, title } => {
+                write!(f, "{kind} {title:?} is already in the map")
             }
             Self::UnknownProperty {
                 kind,

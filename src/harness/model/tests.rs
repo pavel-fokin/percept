@@ -60,7 +60,7 @@ fn a_map_change_is_filtered_out_while_a_neighbouring_message_survives() {
                 map: crate::core::testing::map_id("decisions"),
                 node,
                 kind: "evidence".to_string(),
-                name: "Both built in parallel".to_string(),
+                title: "Both built in parallel".to_string(),
                 properties: BTreeMap::new(),
                 sources: vec![EventId::new()],
                 seq: 1,

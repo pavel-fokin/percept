@@ -16,7 +16,7 @@ fn fold_uses_map_identity_not_schema_name() {
             map: kept,
             node: NodeId::new(),
             kind: "verdict".to_string(),
-            name: "kept".to_string(),
+            title: "kept".to_string(),
             properties: BTreeMap::new(),
             sources: Vec::new(),
             seq: 1,
@@ -25,7 +25,7 @@ fn fold_uses_map_identity_not_schema_name() {
             map: other,
             node: NodeId::new(),
             kind: "verdict".to_string(),
-            name: "other".to_string(),
+            title: "other".to_string(),
             properties: BTreeMap::new(),
             sources: Vec::new(),
             seq: 1,
@@ -86,7 +86,7 @@ fn fold_stamps_a_node_with_its_events_actor_and_time() {
             map: crate::core::testing::map_id("debates"),
             node: NodeId::new(),
             kind: "claim".to_string(),
-            name: "Rust".to_string(),
+            title: "Rust".to_string(),
             properties: BTreeMap::new(),
             sources: Vec::new(),
             seq: 1,
@@ -224,7 +224,7 @@ fn a_name_is_unique_within_its_kind_only() {
         rejected_with(err, twice_id),
         MapError::DuplicateNode {
             kind: "claim".to_string(),
-            name: "Rust".to_string()
+            title: "Rust".to_string()
         }
     );
 }

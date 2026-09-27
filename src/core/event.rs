@@ -126,7 +126,7 @@ pub enum Payload {
         map: MapId,
         node: NodeId,
         kind: String,
-        name: String,
+        title: String,
         properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
         seq: u32,
@@ -134,14 +134,14 @@ pub enum Payload {
     /// A node changed in place: a rename, a property merge, or both -
     /// how a task is closed, dropped, reopened, or reworded. A decision
     /// is never corrected this way: it gets a successor with a
-    /// `supersedes` edge. `name` is `Some` only on a rename;
+    /// `supersedes` edge. `title` is `Some` only on a rename;
     /// `properties` are merged into the node's own, last write wins, a
     /// key present here replacing that key alone; `sources` join the
     /// node's.
     NodeChanged {
         map: MapId,
         node: NodeId,
-        name: Option<String>,
+        title: Option<String>,
         properties: BTreeMap<String, String>,
         sources: Vec<EventId>,
     },

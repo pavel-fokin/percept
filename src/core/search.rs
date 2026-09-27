@@ -28,7 +28,7 @@ pub struct EventQuery {
     /// it as a substring, case-insensitively; an event passes when any
     /// term does. Payload strings are `content`, `tool`, and
     /// `arguments`, on map creation its id and schema, on a map change
-    /// `map`, `kind`, `name`, `reason`, and property values, and on a
+    /// `map`, `kind`, `title`, `reason`, and property values, and on a
     /// `model.called` event its `model` name.
     /// The envelope is not searched, since `actor` and `source` already
     /// have filters. A blank term is contained by everything, so a
@@ -126,20 +126,20 @@ fn carries(payload: &Payload, term: &str) -> bool {
         Payload::NodeAdded {
             map,
             kind,
-            name,
+            title,
             properties,
             ..
         } => {
             has(&map.as_uuid().to_string())
                 || has(kind)
-                || has(name)
+                || has(title)
                 || properties.values().any(|v| has(v))
         }
         Payload::NodeChanged {
-            map, name, properties, ..
+            map, title, properties, ..
         } => {
             has(&map.as_uuid().to_string())
-                || name.as_deref().is_some_and(has)
+                || title.as_deref().is_some_and(has)
                 || properties.values().any(|v| has(v))
         }
         Payload::NodeRemoved { map, .. } => has(&map.as_uuid().to_string()),

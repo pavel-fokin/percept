@@ -10,7 +10,7 @@ use crate::core::{Actor, EventId, Mutation};
 fn add(
     map: &mut Map,
     kind: &str,
-    name: &str,
+    title: &str,
     why: Option<&str>,
     state: Option<&str>,
     sources: &[EventId],
@@ -25,7 +25,7 @@ fn add(
     map.apply(
         Mutation::AddNode {
             kind: kind.to_string(),
-            name: name.to_string(),
+            title: title.to_string(),
             properties,
             sources: sources.to_vec(),
         },
@@ -36,11 +36,11 @@ fn add(
 
 /// Changes a node already in `map`, merging `properties` into its own,
 /// as `actor`.
-fn change(map: &mut Map, kind: &str, name: &str, properties: BTreeMap<String, String>, actor: Actor) {
+fn change(map: &mut Map, kind: &str, title: &str, properties: BTreeMap<String, String>, actor: Actor) {
     map.apply(
         Mutation::ChangeNode {
-            node: node_ref(kind, name),
-            name: None,
+            node: node_ref(kind, title),
+            title: None,
             properties,
             sources: Vec::new(),
         },
@@ -326,7 +326,7 @@ fn a_file_heads_its_section_and_the_symbols_it_contains_nest_under_it() {
     map.apply(
         Mutation::AddNode {
             kind: "function".to_string(),
-            name: "main".to_string(),
+            title: "main".to_string(),
             properties: BTreeMap::from([("returns".to_string(), "()".to_string())]),
             sources: Vec::new(),
         },

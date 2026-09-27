@@ -61,7 +61,7 @@ impl Map {
         let payload = match mutation {
             Mutation::AddNode {
                 kind,
-                name,
+                title,
                 properties,
                 sources,
             } => {
@@ -73,20 +73,20 @@ impl Map {
                     node: NodeId::new(),
                     seq: self.next_seq(&kind),
                     kind,
-                    name,
+                    title,
                     properties,
                     sources,
                 }
             }
             Mutation::ChangeNode {
                 node,
-                name,
+                title,
                 properties,
                 sources,
             } => {
                 let node_id = self.resolve(node)?;
                 let existing = self.node(node_id).expect("resolve returns a live node's id");
-                if name.is_none()
+                if title.is_none()
                     && properties.is_empty()
                     && sources.iter().all(|source| existing.sources.contains(source))
                 {
@@ -99,7 +99,7 @@ impl Map {
                 Payload::NodeChanged {
                     map,
                     node: node_id,
-                    name,
+                    title,
                     properties,
                     sources,
                 }
@@ -170,24 +170,24 @@ impl Map {
             Payload::NodeAdded {
                 node,
                 kind,
-                name,
+                title,
                 properties,
                 sources,
                 seq,
                 ..
             } => {
                 self.check_node_kind(kind)?;
-                self.check_name(kind, name, None)?;
+                self.check_title(kind, title, None)?;
                 let seq = *seq;
                 let next = self.next_seq_by_kind.entry(kind.clone()).or_insert(1);
                 *next = (*next).max(seq + 1);
                 self.by_id.insert(*node, self.nodes.len());
-                self.by_name.insert((kind.clone(), name.clone()), *node);
+                self.by_title.insert((kind.clone(), title.clone()), *node);
                 self.by_seq.insert((kind.clone(), seq), *node);
                 self.nodes.push(Node {
                     id: *node,
                     kind: kind.clone(),
-                    name: name.clone(),
+                    title: title.clone(),
                     properties: properties.clone(),
                     sources: sources.clone(),
                     history: vec![Change { actor, at }],
@@ -196,19 +196,19 @@ impl Map {
             }
             Payload::NodeChanged {
                 node,
-                name,
+                title,
                 properties,
                 sources,
                 ..
             } => {
                 let index = *self.by_id.get(node).ok_or(MapError::NoSuchNodeId(*node))?;
                 let kind = self.nodes[index].kind.clone();
-                if let Some(new_name) = name {
-                    self.check_name(&kind, new_name, Some(*node))?;
-                    let old_name = self.nodes[index].name.clone();
-                    self.by_name.remove(&(kind.clone(), old_name));
-                    self.by_name.insert((kind.clone(), new_name.clone()), *node);
-                    self.nodes[index].name = new_name.clone();
+                if let Some(new_title) = title {
+                    self.check_title(&kind, new_title, Some(*node))?;
+                    let old_title = self.nodes[index].title.clone();
+                    self.by_title.remove(&(kind.clone(), old_title));
+                    self.by_title.insert((kind.clone(), new_title.clone()), *node);
+                    self.nodes[index].title = new_title.clone();
                 }
                 for (key, value) in properties {
                     self.nodes[index].properties.insert(key.clone(), value.clone());
@@ -222,9 +222,9 @@ impl Map {
             }
             Payload::NodeRemoved { node, .. } => {
                 let removed = self.node(*node).ok_or(MapError::NoSuchNodeId(*node))?;
-                let key = (removed.kind.clone(), removed.name.clone());
+                let key = (removed.kind.clone(), removed.title.clone());
                 let seq_key = (removed.kind.clone(), removed.seq);
-                self.by_name.remove(&key);
+                self.by_title.remove(&key);
                 self.by_seq.remove(&seq_key);
                 self.nodes.retain(|n| n.id != *node);
                 self.by_id = self
@@ -281,7 +281,7 @@ impl Map {
     }
 
     pub(super) fn resolve(&self, node: NodeRef) -> Result<NodeId, MapError> {
-        match self.find(&node.kind, &node.name) {
+        match self.find(&node.kind, &node.title) {
             Some(n) => Ok(n.id),
             None => {
                 let suggestions = self.suggestions_for(&node);
@@ -290,14 +290,14 @@ impl Map {
         }
     }
 
-    /// Up to five nodes to retry with, each named `kind:name`, most
-    /// name-overlap first. The same-kind pass wants two shared `/`,
+    /// Up to five nodes to retry with, each named `kind:title`, most
+    /// title-overlap first. The same-kind pass wants two shared `/`,
     /// `::`, or whitespace segments: one shared word is noise in a
-    /// prose name - every `decision` shares "the" - and a weak hint in
+    /// prose title - every `decision` shares "the" - and a weak hint in
     /// a path. When it finds nothing, a cross-kind pass runs, since a
     /// wrong kind is how `package:providers` misses a real
     /// `file:src/providers/...`; there one shared segment is enough,
-    /// but only when a name has a `/` or `::` in it, so a path or
+    /// but only when a title has a `/` or `::` in it, so a path or
     /// symbol lookup crosses kinds while a prose one stays silent.
     fn suggestions_for(&self, node: &NodeRef) -> Vec<String> {
         let same_kind =
@@ -305,7 +305,7 @@ impl Map {
         if !same_kind.is_empty() {
             return same_kind;
         }
-        let query_is_path = is_path_like(&node.name);
+        let query_is_path = is_path_like(&node.title);
         self.suggestions_matching(
             node,
             |_| true,
@@ -315,31 +315,31 @@ impl Map {
         )
     }
 
-    /// Nodes `keep` admits whose name shares segments with `node`'s
-    /// that `strong` accepts, given the candidate's name and the count
-    /// shared; scored by overlap, five at most, each named `kind:name`.
+    /// Nodes `keep` admits whose title shares segments with `node`'s
+    /// that `strong` accepts, given the candidate's title and the count
+    /// shared; scored by overlap, five at most, each named `kind:title`.
     fn suggestions_matching(
         &self,
         node: &NodeRef,
         keep: impl Fn(&Node) -> bool,
         strong: impl Fn(&str, usize) -> bool,
     ) -> Vec<String> {
-        let wanted: HashSet<&str> = segments(&node.name).collect();
+        let wanted: HashSet<&str> = segments(&node.title).collect();
         let mut scored: Vec<(usize, &Node)> = self
             .nodes
             .iter()
             .filter(|n| keep(n))
             .filter_map(|n| {
-                let have: HashSet<&str> = segments(&n.name).collect();
+                let have: HashSet<&str> = segments(&n.title).collect();
                 let shared = wanted.intersection(&have).count();
-                strong(&n.name, shared).then_some((shared, n))
+                strong(&n.title, shared).then_some((shared, n))
             })
             .collect();
-        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.name.cmp(&b.1.name)));
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.title.cmp(&b.1.title)));
         scored
             .into_iter()
             .take(5)
-            .map(|(_, n)| format!("{}:{}", n.kind, n.name))
+            .map(|(_, n)| format!("{}:{}", n.kind, n.title))
             .collect()
     }
 
@@ -448,20 +448,20 @@ impl Map {
         Ok(())
     }
 
-    /// Refuses a blank `name`, or one another node of `kind` holds -
-    /// `except` being the node itself when a rename keeps its name.
+    /// Refuses a blank `title`, or one another node of `kind` holds -
+    /// `except` being the node itself when a rename keeps its title.
     /// The one rule `NodeAdded` and a `NodeChanged` rename share.
-    fn check_name(&self, kind: &str, name: &str, except: Option<NodeId>) -> Result<(), MapError> {
-        if name.trim().is_empty() {
+    fn check_title(&self, kind: &str, title: &str, except: Option<NodeId>) -> Result<(), MapError> {
+        if title.trim().is_empty() {
             return Err(MapError::BlankName);
         }
         if self
-            .find(kind, name)
+            .find(kind, title)
             .is_some_and(|holder| Some(holder.id) != except)
         {
             return Err(MapError::DuplicateNode {
                 kind: kind.to_string(),
-                name: name.to_string(),
+                title: title.to_string(),
             });
         }
         Ok(())

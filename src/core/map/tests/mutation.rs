@@ -147,7 +147,7 @@ fn a_rename_to_a_taken_name_is_refused() {
         err,
         MapError::DuplicateNode {
             kind: "chore".to_string(),
-            name: "b".to_string(),
+            title: "b".to_string(),
         }
     );
 }
@@ -165,7 +165,7 @@ fn a_value_off_the_closed_list_is_refused_on_add_and_on_change() {
         .apply(
             Mutation::AddNode {
                 kind: "chore".to_string(),
-                name: "a".to_string(),
+                title: "a".to_string(),
                 properties: BTreeMap::from([
                     ("why".to_string(), "because".to_string()),
                     ("state".to_string(), "urgent".to_string()),
@@ -218,7 +218,7 @@ fn an_undeclared_property_is_refused_on_add() {
         .apply(
             Mutation::AddNode {
                 kind: "claim".to_string(),
-                name: "Rust".to_string(),
+                title: "Rust".to_string(),
                 properties: BTreeMap::from([
                     ("why".to_string(), "because".to_string()),
                     ("notes".to_string(), "a stray property".to_string()),
@@ -279,7 +279,7 @@ fn a_required_property_and_a_declared_one_are_accepted() {
     map.apply(
         Mutation::AddNode {
             kind: "claim".to_string(),
-            name: "Rust".to_string(),
+            title: "Rust".to_string(),
             properties: BTreeMap::from([
                 ("why".to_string(), "because".to_string()),
                 ("summary".to_string(), "fast".to_string()),
@@ -514,7 +514,7 @@ fn an_agent_may_not_cite_a_source_onto_a_node_the_human_wrote() {
         .apply(
             Mutation::ChangeNode {
                 node: node_ref("verdict", "Rust"),
-                name: None,
+                title: None,
                 properties: BTreeMap::new(),
                 sources: vec![EventId::new()],
             },
@@ -575,7 +575,7 @@ fn a_change_citing_only_a_source_the_node_already_has_is_refused() {
     map.apply(
         Mutation::ChangeNode {
             node: node_ref("verdict", "Rust"),
-            name: None,
+            title: None,
             properties: BTreeMap::new(),
             sources: vec![drawn_from],
         },
@@ -587,7 +587,7 @@ fn a_change_citing_only_a_source_the_node_already_has_is_refused() {
         .apply(
             Mutation::ChangeNode {
                 node: node_ref("verdict", "Rust"),
-                name: None,
+                title: None,
                 properties: BTreeMap::new(),
                 sources: vec![drawn_from],
             },
@@ -609,7 +609,7 @@ fn a_change_carrying_only_sources_joins_them_to_the_node() {
     map.apply(
         Mutation::ChangeNode {
             node: node_ref("verdict", "Rust"),
-            name: None,
+            title: None,
             properties: BTreeMap::new(),
             sources: vec![drawn_from],
         },
@@ -642,7 +642,7 @@ fn adding_a_node_of_a_kind_with_a_closed_list_and_no_value_writes_none() {
     map.apply(
         Mutation::AddNode {
             kind: "chore".to_string(),
-            name: "a".to_string(),
+            title: "a".to_string(),
             properties: BTreeMap::from([("why".to_string(), "because".to_string())]),
             sources: Vec::new(),
         },

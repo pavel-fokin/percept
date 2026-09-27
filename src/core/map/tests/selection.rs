@@ -27,7 +27,7 @@ fn since_keeps_what_was_added_from_that_instant_and_what_it_attached_to() {
 
     let cut = map.since(at);
 
-    let mut names: Vec<&str> = cut.nodes().iter().map(|node| node.name.as_str()).collect();
+    let mut names: Vec<&str> = cut.nodes().iter().map(|node| node.title.as_str()).collect();
     names.sort_unstable();
     assert_eq!(names, ["Rust", "Which language?"]);
     assert_eq!(cut.edges().len(), 1);
@@ -50,7 +50,7 @@ fn since_leaves_out_an_edge_older_than_the_instant_between_kept_nodes() {
 
     let cut = map.since(at);
 
-    let names: Vec<&str> = cut.nodes().iter().map(|node| node.name.as_str()).collect();
+    let names: Vec<&str> = cut.nodes().iter().map(|node| node.title.as_str()).collect();
     assert_eq!(names, ["Rust"]);
     assert!(cut.edges().is_empty());
 }
@@ -118,7 +118,7 @@ fn around_follows_edges_both_ways_one_step_per_depth() {
     let one = map
         .around(&node_ref("topic", "Which language?"), 1)
         .unwrap();
-    let names: Vec<&str> = one.nodes().iter().map(|n| n.name.as_str()).collect();
+    let names: Vec<&str> = one.nodes().iter().map(|n| n.title.as_str()).collect();
     assert_eq!(names, ["Which language?", "Rust over Go", "Go"]);
     assert_eq!(one.edges().len(), 2);
 
@@ -207,7 +207,7 @@ fn select_walks_around_before_it_keeps_kinds() {
         .map()
         .nodes()
         .iter()
-        .map(|n| n.name.as_str())
+        .map(|n| n.title.as_str())
         .collect();
     assert_eq!(
         names,

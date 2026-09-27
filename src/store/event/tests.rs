@@ -454,7 +454,7 @@ fn node_added_round_trips_through_json() {
             map: crate::core::testing::map_id("decisions"),
             node,
             kind: "evidence".to_string(),
-            name: "Both built in parallel".to_string(),
+            title: "Both built in parallel".to_string(),
             properties: properties.clone(),
             sources: vec![cited],
             seq: 3,
@@ -472,7 +472,7 @@ fn node_added_round_trips_through_json() {
             map,
             node: restored_node,
             kind,
-            name,
+            title,
             properties: restored_properties,
             sources,
             seq,
@@ -480,7 +480,7 @@ fn node_added_round_trips_through_json() {
             assert_eq!(*map, crate::core::testing::map_id("decisions"));
             assert!(*restored_node == node);
             assert_eq!(kind, "evidence");
-            assert_eq!(name, "Both built in parallel");
+            assert_eq!(title, "Both built in parallel");
             assert_eq!(*restored_properties, properties);
             assert!(sources == &vec![cited]);
             assert_eq!(*seq, 3);
@@ -496,7 +496,7 @@ fn a_node_added_line_with_no_seq_is_a_bad_line() {
         "map": crate::core::testing::map_id("decisions").as_uuid().to_string(),
         "node": node.as_uuid().to_string(),
         "kind": "evidence",
-        "name": "x",
+        "title": "x",
         "properties": {},
         "sources": [],
     });
@@ -523,7 +523,7 @@ fn node_changed_round_trips_through_json() {
         Payload::NodeChanged {
             map: crate::core::testing::map_id("tasks"),
             node,
-            name: Some("cancel a turn cleanly".to_string()),
+            title: Some("cancel a turn cleanly".to_string()),
             properties: properties.clone(),
             sources: Vec::new(),
         },
@@ -532,20 +532,20 @@ fn node_changed_round_trips_through_json() {
     let json = serde_json::to_string(&Event::from(&original)).unwrap();
     let wire: Event = serde_json::from_str(&json).unwrap();
     assert_eq!(wire.kind, "node.changed");
-    assert_eq!(wire.payload["name"], "cancel a turn cleanly");
+    assert_eq!(wire.payload["title"], "cancel a turn cleanly");
     let restored = crate::store::from_wire(wire).unwrap();
 
     match restored.payload() {
         Payload::NodeChanged {
             map,
             node: restored_node,
-            name,
+            title,
             properties: restored_properties,
             sources,
         } => {
             assert_eq!(*map, crate::core::testing::map_id("tasks"));
             assert!(*restored_node == node);
-            assert_eq!(name.as_deref(), Some("cancel a turn cleanly"));
+            assert_eq!(title.as_deref(), Some("cancel a turn cleanly"));
             assert_eq!(*restored_properties, properties);
             assert!(sources.is_empty());
         }
@@ -565,7 +565,7 @@ fn a_node_changed_line_with_no_name_decodes_to_none() {
 
     let payload = decode_payload("node.changed", json).unwrap();
 
-    assert!(matches!(payload, Payload::NodeChanged { name: None, .. }));
+    assert!(matches!(payload, Payload::NodeChanged { title: None, .. }));
 }
 
 #[test]
@@ -693,7 +693,7 @@ fn a_malformed_source_in_a_node_added_payload_is_an_error() {
         "map": crate::core::testing::map_id("decisions").as_uuid().to_string(),
         "node": NodeId::new().as_uuid().to_string(),
         "kind": "evidence",
-        "name": "x",
+        "title": "x",
         "properties": {},
         "sources": ["not-a-uuid"],
         "seq": 1,
@@ -718,7 +718,7 @@ fn a_map_events_summary_carries_no_preview() {
             map: crate::core::testing::map_id("decisions"),
             node: NodeId::new(),
             kind: "evidence".to_string(),
-            name: "Both built in parallel".to_string(),
+            title: "Both built in parallel".to_string(),
             properties: BTreeMap::new(),
             sources: Vec::new(),
             seq: 1,
@@ -727,7 +727,7 @@ fn a_map_events_summary_carries_no_preview() {
 
     let line: Value = serde_json::from_str(&summarize(&event, None, PREVIEW_CHARS)).unwrap();
     assert!(line.get("preview").is_none());
-    assert_eq!(line["payload"]["name"], "Both built in parallel");
+    assert_eq!(line["payload"]["title"], "Both built in parallel");
 }
 
 #[test]

@@ -14,22 +14,22 @@ fn committed(payload: Payload) -> Event {
 /// A `node.added` event, numbered `1` - every call site here adds at
 /// most one node of its kind to its map, so the mint order `apply`
 /// would use collapses to that one number.
-fn node_added(map: &str, node: NodeId, kind: &str, name: &str) -> Event {
-    node_added_seq(map, node, kind, name, 1)
+fn node_added(map: &str, node: NodeId, kind: &str, title: &str) -> Event {
+    node_added_seq(map, node, kind, title, 1)
 }
 
 /// `node_added`, numbered `seq` - for a test whose map holds more than
 /// one node of a kind, where each needs the number `apply` would have
 /// minted for it: `1`, then `2`, and so on.
-fn node_added_seq(map: &str, node: NodeId, kind: &str, name: &str, seq: u32) -> Event {
-    node_added_with_properties(map, node, kind, name, BTreeMap::new(), seq)
+fn node_added_seq(map: &str, node: NodeId, kind: &str, title: &str, seq: u32) -> Event {
+    node_added_with_properties(map, node, kind, title, BTreeMap::new(), seq)
 }
 
 fn node_added_with_properties(
     map: &str,
     node: NodeId,
     kind: &str,
-    name: &str,
+    title: &str,
     properties: BTreeMap<String, String>,
     seq: u32,
 ) -> Event {
@@ -37,7 +37,7 @@ fn node_added_with_properties(
         map: crate::core::testing::map_id(map),
         node,
         kind: kind.to_string(),
-        name: name.to_string(),
+        title: title.to_string(),
         properties,
         sources: Vec::new(),
         seq,
@@ -57,13 +57,13 @@ fn edge_added(map: &str, kind: &str, from: NodeId, to: NodeId) -> Event {
 fn node_changed(
     map: &str,
     node: NodeId,
-    name: Option<&str>,
+    title: Option<&str>,
     properties: BTreeMap<String, String>,
 ) -> Event {
     committed(Payload::NodeChanged {
         map: crate::core::testing::map_id(map),
         node,
-        name: name.map(str::to_string),
+        title: title.map(str::to_string),
         properties,
         sources: Vec::new(),
     })
@@ -90,17 +90,17 @@ fn rust_over_go() -> ([NodeId; 3], Vec<Event>) {
     (ids, events)
 }
 
-fn node_ref(kind: &str, name: &str) -> NodeRef {
+fn node_ref(kind: &str, title: &str) -> NodeRef {
     NodeRef {
         kind: kind.to_string(),
-        name: name.to_string(),
+        title: title.to_string(),
     }
 }
 
-fn add_node(kind: &str, name: &str) -> Mutation {
+fn add_node(kind: &str, title: &str) -> Mutation {
     Mutation::AddNode {
         kind: kind.to_string(),
-        name: name.to_string(),
+        title: title.to_string(),
         properties: BTreeMap::new(),
         sources: Vec::new(),
     }
@@ -109,16 +109,16 @@ fn add_node(kind: &str, name: &str) -> Mutation {
 /// A `topic` node - `topic` carries no states, so `add_node` alone
 /// would do; kept as its own helper so a caller reads `add_topic`
 /// beside `add_claim` and `add_chore`.
-fn add_topic(name: &str) -> Mutation {
-    add_node("topic", name)
+fn add_topic(title: &str) -> Mutation {
+    add_node("topic", title)
 }
 
 /// A `claim` node with a `why` set, though its kind, carrying only
 /// free-text properties, requires none.
-fn add_claim(name: &str) -> Mutation {
+fn add_claim(title: &str) -> Mutation {
     Mutation::AddNode {
         kind: "claim".to_string(),
-        name: name.to_string(),
+        title: title.to_string(),
         properties: BTreeMap::from([("why".to_string(), "because".to_string())]),
         sources: Vec::new(),
     }
@@ -135,10 +135,10 @@ fn add_edge(kind: &str, from: NodeRef, to: NodeRef) -> Mutation {
 
 /// A `chore` node with a `why` set and the `state` `Map::apply`
 /// requires on add for any kind whose closed list is `state`.
-fn add_chore(name: &str) -> Mutation {
+fn add_chore(title: &str) -> Mutation {
     Mutation::AddNode {
         kind: "chore".to_string(),
-        name: name.to_string(),
+        title: title.to_string(),
         properties: BTreeMap::from([
             ("why".to_string(), "because".to_string()),
             ("state".to_string(), "open".to_string()),
@@ -149,13 +149,13 @@ fn add_chore(name: &str) -> Mutation {
 
 fn change_node(
     kind: &str,
-    name: &str,
+    title: &str,
     rename: Option<&str>,
     properties: BTreeMap<String, String>,
 ) -> Mutation {
     Mutation::ChangeNode {
-        node: node_ref(kind, name),
-        name: rename.map(str::to_string),
+        node: node_ref(kind, title),
+        title: rename.map(str::to_string),
         properties,
         sources: Vec::new(),
     }

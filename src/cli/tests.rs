@@ -314,7 +314,7 @@ fn map_with_a_verdict() -> Map {
     map.apply(
         Mutation::AddNode {
             kind: "verdict".to_string(),
-            name: "Rust over Go".to_string(),
+            title: "Rust over Go".to_string(),
             properties: Default::default(),
             sources: Vec::new(),
         },
@@ -328,14 +328,14 @@ fn map_with_a_verdict() -> Map {
 fn a_node_ref_splits_on_the_first_colon() {
     let node = resolve_ref(&map_with_a_verdict(), "verdict:Rust over Go").unwrap();
     assert_eq!(node.kind, "verdict");
-    assert_eq!(node.name, "Rust over Go");
+    assert_eq!(node.title, "Rust over Go");
 }
 
 #[test]
 fn a_node_ref_resolves_by_its_short_id_too() {
     let node = resolve_ref(&map_with_a_verdict(), "v1").unwrap();
     assert_eq!(node.kind, "verdict");
-    assert_eq!(node.name, "Rust over Go");
+    assert_eq!(node.title, "Rust over Go");
 }
 
 #[test]
@@ -424,7 +424,7 @@ fn show_of_a_node_prints_it_and_its_neighbour() {
     show(show_args("c1"), &log, &schemas, Path::new(ROOT)).unwrap();
 
     let map = mapstore::fold_map(&log, &schemas, "concepts", Path::new(ROOT)).unwrap();
-    let around = NodeRef { kind: "concept".to_string(), name: "Snapshot".to_string() };
+    let around = NodeRef { kind: "concept".to_string(), title: "Snapshot".to_string() };
     let selection = crate::core::Selection { around: Some((&around, 1)), ..crate::core::Selection::default() };
     let fragment = map.select(&selection).unwrap();
     assert!(fragment.map().find("concept", "Snapshot").is_some());
@@ -1172,7 +1172,7 @@ fn a_change_block_carrying_only_an_edge_records_no_node_change() {
     let children = map.children(first.id);
     assert_eq!(children.len(), 1);
     assert_eq!(children[0].0, "blocks");
-    assert_eq!(children[0].1.name, "second");
+    assert_eq!(children[0].1.title, "second");
 }
 
 #[test]

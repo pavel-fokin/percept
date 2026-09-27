@@ -305,10 +305,10 @@ struct NodeLine<'a> {
     /// This node's short id - its kind's prefix and the number minted
     /// for it, `d41` - the form `--around`, `--from`/`--to`, and a
     /// short id in `revise_map`'s arguments all resolve, alongside
-    /// `kind:name`.
+    /// `kind:title`.
     id: String,
     kind: &'a str,
-    name: &'a str,
+    title: &'a str,
     /// `Map::properties`, in schema-declared order - a closed list's
     /// default among them when the node carries none of its own - as
     /// an `IndexMap`, so it serializes as a JSON object in that same
@@ -451,25 +451,25 @@ pub fn encode_lines(map: &Map, stamped: bool) -> impl Iterator<Item = String> + 
     nodes.chain(edges)
 }
 
-/// A node the way a tool call names it - `{kind, name}`, matching
+/// A node the way a tool call names it - `{kind, title}`, matching
 /// `NodeRef`, or a bare short id string, `d41`, the way this map's own
 /// render shows a node. Untagged: which JSON shape the caller sent
 /// decides the match. Its own type since the domain stays serde-free.
 #[derive(Deserialize)]
 #[serde(untagged)]
 pub enum NodeRefArgs {
-    Named { kind: String, name: String },
+    Named { kind: String, title: String },
     ShortId(String),
 }
 
 impl NodeRefArgs {
     /// Resolves this reference against `map` to the node id it names.
-    /// `{kind, name}` and a short id both go through `Map::resolve_str`,
-    /// so a `kind:name` string typed straight into a bare short id's
+    /// `{kind, title}` and a short id both go through `Map::resolve_str`,
+    /// so a `kind:title` string typed straight into a bare short id's
     /// place still works the way it always has.
     pub fn resolve(self, map: &Map) -> Result<NodeId, MapError> {
         let s = match self {
-            Self::Named { kind, name } => format!("{kind}:{name}"),
+            Self::Named { kind, title } => format!("{kind}:{title}"),
             Self::ShortId(s) => s,
         };
         map.resolve_str(&s)
@@ -481,7 +481,7 @@ pub fn encode_node(map: &Map, node: &Node, stamped: bool) -> String {
         node: node.id.as_uuid().to_string(),
         id: map.short_id(node.id).unwrap_or_default(),
         kind: &node.kind,
-        name: &node.name,
+        title: &node.title,
         properties: properties_map(map, node),
         sources: ids(&node.sources),
         stamp: NodeStamp::of(node, stamped),
@@ -489,7 +489,7 @@ pub fn encode_node(map: &Map, node: &Node, stamped: bool) -> String {
     .expect("NodeLine always serializes")
 }
 
-/// One line per edge, its ends named `kind:name` - the way `--around`
+/// One line per edge, its ends named `kind:title` - the way `--around`
 /// and `--from` take a node - so the line reads on its own instead of
 /// through a join on the node lines above it.
 pub fn encode_edge(map: &Map, edge: &Edge, stamped: bool) -> String {
@@ -505,7 +505,7 @@ pub fn encode_edge(map: &Map, edge: &Edge, stamped: bool) -> String {
 
 fn node_ref(map: &Map, id: NodeId) -> String {
     let node = map.node(id).expect("an edge's ends are nodes of its map");
-    format!("{}:{}", node.kind, node.name)
+    format!("{}:{}", node.kind, node.title)
 }
 
 #[cfg(test)]
