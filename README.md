@@ -131,8 +131,9 @@ its node and edge kinds and one line of purpose. Schemas live at two
 levels: `~/.percept/schemas` declares global ones, whose maps every
 project shares, and a project's own `.percept/schemas` declares its
 own. A node kind and its short id prefix belong to one schema across
-both. `percept init` writes the shipped schemas into the project; a
-project with no schema files at either level has no maps.
+both. `percept init` writes the shipped schemas into the project, and
+a global `projects` schema into `~/.percept/schemas` if none is there;
+a project with no schema files at either level has no maps.
 
 ## Coding clients
 

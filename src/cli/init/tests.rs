@@ -348,3 +348,46 @@ fn init_leaves_a_template_the_home_declares_globally_out_of_the_project() {
 
     assert!(!fixture.path().join(format!(".percept/schemas/{name}.toml")).exists());
 }
+
+fn run_with_home(checkout: &std::path::Path, home: &std::path::Path) {
+    let log = FakeLog::default();
+    let source = source_at("percept-cli", checkout.to_str().unwrap());
+    super::run(init("codex"), checkout, &log, &source, Some(home)).unwrap();
+}
+
+#[test]
+fn init_writes_the_projects_schema_under_home() {
+    let fixture = Fixture::new();
+    let home = Fixture::new();
+
+    run_with_home(fixture.path(), home.path());
+
+    let schemas = mapstore::load_schemas(None, Some(home.path())).unwrap();
+    let names: Vec<&str> = schemas.folded().iter().map(|s| s.name()).collect();
+    assert_eq!(names, ["projects"]);
+    assert!(!fixture.path().join(".percept/schemas/projects.toml").exists());
+}
+
+#[test]
+fn init_keeps_an_existing_home_projects_schema() {
+    let fixture = Fixture::new();
+    let home = Fixture::new();
+    let mine = "purpose = \"mine\"\n\n[nodes.project]\n";
+    home.write(".percept/schemas/projects.toml", mine);
+
+    run_with_home(fixture.path(), home.path());
+
+    let text = std::fs::read_to_string(home.path().join(".percept/schemas/projects.toml")).unwrap();
+    assert_eq!(text, mine);
+}
+
+#[test]
+fn init_leaves_home_alone_when_the_project_declares_projects() {
+    let fixture = Fixture::new();
+    let home = Fixture::new();
+    fixture.write(".percept/schemas/projects.toml", "purpose = \"p\"\n\n[nodes.item]\n");
+
+    run_with_home(fixture.path(), home.path());
+
+    assert!(!home.path().join(".percept/schemas/projects.toml").exists());
+}
