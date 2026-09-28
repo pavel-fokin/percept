@@ -1026,3 +1026,35 @@ fn every_kind_names_round_trip_through_the_store_parser() {
         assert!(parse_kind(kind.name()).unwrap() == kind);
     }
 }
+
+#[test]
+fn a_node_added_written_before_the_rename_reads_its_name_as_the_title() {
+    let payload = serde_json::json!({
+        "map": MapId::new().as_uuid().to_string(),
+        "node": NodeId::new().as_uuid().to_string(),
+        "kind": "concept",
+        "name": "event",
+        "properties": {},
+        "sources": [],
+        "seq": 1,
+    });
+
+    let decoded = decode_payload("node.added", payload).unwrap();
+
+    assert!(matches!(decoded, Payload::NodeAdded { title, .. } if title == "event"));
+}
+
+#[test]
+fn a_node_changed_written_before_the_rename_reads_its_name_as_the_title() {
+    let payload = serde_json::json!({
+        "map": MapId::new().as_uuid().to_string(),
+        "node": NodeId::new().as_uuid().to_string(),
+        "name": "event",
+        "properties": {},
+        "sources": [],
+    });
+
+    let decoded = decode_payload("node.changed", payload).unwrap();
+
+    assert!(matches!(decoded, Payload::NodeChanged { title: Some(title), .. } if title == "event"));
+}

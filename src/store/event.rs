@@ -95,6 +95,8 @@ struct NodeAddedBody {
     map: String,
     node: String,
     kind: String,
+    // Logs written before the rename carry `name`.
+    #[serde(alias = "name")]
     title: String,
     properties: BTreeMap<String, String>,
     sources: Vec<String>,
@@ -107,7 +109,7 @@ struct NodeAddedBody {
 struct NodeChangedBody {
     map: String,
     node: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, alias = "name", skip_serializing_if = "Option::is_none")]
     title: Option<String>,
     properties: BTreeMap<String, String>,
     sources: Vec<String>,
