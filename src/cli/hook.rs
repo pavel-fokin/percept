@@ -3,10 +3,9 @@
 //! the same log every other subcommand appends to. Never fails the
 //! client's turn: `main` catches every error here, prints it to
 //! stderr as `percept hook: <error>`, and still prints `{}` to
-//! stdout. Two events are answered with more than `{}`: a
-//! `SessionStart` with the start screen a bare `percept` prints, so
-//! the model opens on this project's maps and the rule for recording,
-//! and a `UserPromptSubmit` with the prompt's event id.
+//! stdout. Every event answers `{}`: a coding client's own safeguards
+//! reject instructions injected through a hook's context, so the
+//! record is the only effect a hook call has.
 //!
 //! Reading and validating the input (`read`) is split from acting on
 //! it (`run`): `main` needs the client's own `cwd` before it can find
@@ -131,18 +130,14 @@ pub fn read(input: &mut dyn Read) -> Result<HookInput, Box<dyn std::error::Error
 }
 
 /// Appends the events `input`'s event implies to `log` under `source`,
-/// and returns the JSON object the client expects back on stdout -
-/// `{}` unless the event asks for something. `sessions_dir` holds one
-/// directory per checkout root, created if missing; `checkout` is
-/// where a `SessionStart` loads the project's schemas from, and `home`
-/// where it loads any global schema from, when there is one.
+/// and returns `{}`, the JSON object every event answers the client.
+/// `sessions_dir` holds one directory per checkout root, created if
+/// missing.
 pub fn run(
     input: HookInput,
     source: &Source,
     log: &dyn EventLog,
     sessions_dir: &Path,
-    checkout: &Path,
-    home: Option<&Path>,
     me: Option<crate::core::HumanId>,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let dir = turn_dir(sessions_dir, &source.path);
@@ -153,21 +148,8 @@ pub fn run(
         HookEvent::SessionStart {} => {
             // A session opens with no turn, whatever a killed one left.
             TurnState::unpoint(&dir)?;
-            // The marker goes in before the schemas are read, so a
-            // broken TOML still leaves the session on record: the
-            // review page cuts "gained since" by the last one.
             log.append(&Event::session_started(source.clone()))?;
-            // `checkout` is the home level itself when a client's cwd
-            // is outside any project - `main::root_for`'s rule - and
-            // then it declares no project schema of its own.
-            let project = (home != Some(checkout)).then_some(checkout);
-            let schemas = crate::mapstore::load_schemas(project, home)?;
-            Ok(json!({
-                "hookSpecificOutput": {
-                    "hookEventName": "SessionStart",
-                    "additionalContext": super::start_text(log, &schemas, &source.path)?,
-                }
-            }))
+            Ok(json!({}))
         }
         HookEvent::UserPromptSubmit { prompt } => {
             submit_prompt(prompt, source, log, &mut state, &dir, me)
@@ -241,11 +223,9 @@ fn framed(text: &str, tag: &str) -> bool {
 /// `UserPromptSubmit`: clears the turn's previous cause before doing
 /// anything else, so a prompt that then fails to commit never leaves a
 /// later event citing the wrong one. Records the prompt as
-/// `message.received` from whoever `prompt_actor` says wrote it,
+/// `message.received` from whoever `prompt_actor` says wrote it, and
 /// stores its id as the turn's cause and as the checkout's open turn
-/// under `dir`, and returns the client's expected `additionalContext`:
-/// the event's id alone, since a model reads it off that line to pass
-/// as `--source`.
+/// under `dir`.
 fn submit_prompt(
     prompt: String,
     source: &Source,
@@ -262,14 +242,7 @@ fn submit_prompt(
     state.set(id)?;
     TurnState::point(dir, id)?;
 
-    let context = format!("percept event {}", id.as_uuid());
-
-    Ok(json!({
-        "hookSpecificOutput": {
-            "hookEventName": "UserPromptSubmit",
-            "additionalContext": context,
-        }
-    }))
+    Ok(json!({}))
 }
 
 /// `PostToolUse`: records the call, caused by the turn's prompt, then

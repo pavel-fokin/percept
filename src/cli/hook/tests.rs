@@ -5,27 +5,12 @@ use serde_json::json;
 use tempfile::TempDir;
 
 use super::*;
-use crate::core::testing::{content, human, map_id, FakeLog};
+use crate::core::testing::{content, human, FakeLog};
 use crate::core::{HumanId, Payload};
-
-/// The one map a hook test's project declares: `debates`, with a
-/// `topic` node kind and nothing else - a mini schema of this
-/// fixture's own, so no test here rests on a shipped template.
-const DEBATES_TOML: &str = "purpose = \"what a hook test needs\"\n\
-                            [nodes.topic]\n";
-
-fn write_debates_schema(root: &Path) {
-    let dir = root.join(".percept/schemas");
-    std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("debates.toml"), DEBATES_TOML).unwrap();
-}
 
 /// A checkout `run` can discover a root in - a `.percept` marker is
 /// enough, so a test needs no `git init` - plus the sessions directory
-/// and log `run` is given. A `SessionStart` loads schemas from this
-/// same root, exactly as production does, so this fixture writes its
-/// own `debates` schema there; `with_extra_schema` adds another beside
-/// it.
+/// and log `run` is given.
 struct Fixture {
     _temp: TempDir,
     root: PathBuf,
@@ -44,45 +29,21 @@ impl Fixture {
         // that compares an event's source path must compare the same
         // canonical form.
         let root = root.canonicalize().unwrap();
-        write_debates_schema(&root);
-        let created = Event::map_created(
-            map_id("debates"),
-            "debates".to_string(),
-            Source { name: "percept".to_string(), path: root.clone() },
-        );
         Self {
             sessions: temp.path().join("storage/hook-sessions"),
             root,
-            log: FakeLog::seeded(vec![created]),
+            log: FakeLog::seeded(vec![]),
             me: human(),
             _temp: temp,
         }
     }
 
-    /// Writes `<root>/.percept/schemas/<name>.toml` beside `debates`.
-    fn with_extra_schema(self, name: &str, toml: &str) -> Self {
-        let dir = self.root.join(".percept/schemas");
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(format!("{name}.toml")), toml).unwrap();
-        self
-    }
-
     /// Another project, so a test can tell one checkout's cause from
-    /// another's - with the same `debates` schema `new` gives this
-    /// fixture's own root.
+    /// another's.
     fn other_root(&self) -> PathBuf {
         let other = self._temp.path().join("second checkout");
         std::fs::create_dir_all(other.join(".percept")).unwrap();
-        let other = other.canonicalize().unwrap();
-        write_debates_schema(&other);
-        self.log
-            .append(&Event::map_created(
-                map_id("debates"),
-                "debates".to_string(),
-                Source { name: "percept".to_string(), path: other.clone() },
-            ))
-            .unwrap();
-        other
+        other.canonicalize().unwrap()
     }
 
     fn call(&self, client: &str, body: Value) -> Result<Value, Box<dyn std::error::Error>> {
@@ -100,7 +61,7 @@ impl Fixture {
             name: client.to_string(),
             path: crate::project_of(&checkout),
         };
-        run(input, &source, &self.log, &self.sessions, &checkout, None, self.me)
+        run(input, &source, &self.log, &self.sessions, self.me)
     }
 
     /// The number of turn state files kept anywhere under
@@ -153,27 +114,18 @@ impl Fixture {
         turn: &str,
         text: &str,
     ) -> String {
-        let output = self
-            .call(
-                client,
-                json!({
-                    "hook_event_name": "UserPromptSubmit",
-                    "cwd": root.to_str().unwrap(),
-                    "session_id": session,
-                    "turn_id": turn,
-                    "prompt": text,
-                }),
-            )
-            .unwrap();
-        output["hookSpecificOutput"]["additionalContext"]
-            .as_str()
-            .unwrap()
-            .lines()
-            .next()
-            .unwrap()
-            .strip_prefix("percept event ")
-            .unwrap()
-            .to_string()
+        self.call(
+            client,
+            json!({
+                "hook_event_name": "UserPromptSubmit",
+                "cwd": root.to_str().unwrap(),
+                "session_id": session,
+                "turn_id": turn,
+                "prompt": text,
+            }),
+        )
+        .unwrap();
+        self.events().pop().unwrap().id().as_uuid().to_string()
     }
 
     /// `stop_at`, against this fixture's own root.
@@ -223,14 +175,8 @@ impl Fixture {
     }
 
     fn events(&self) -> Vec<crate::core::Event> {
-        self.log
-            .load()
-            .unwrap()
-            .into_iter()
-            .filter(|event| !matches!(event.payload(), Payload::MapCreated { .. }))
-            .collect()
+        self.log.load().unwrap()
     }
-
 }
 
 fn merge(base: &mut Value, extra: Value) {
@@ -283,16 +229,6 @@ fn every_hook_event_names_itself_after_deserializing() {
 }
 
 #[test]
-fn a_broken_project_schema_does_not_stop_the_hook() {
-    let fixture = Fixture::new().with_extra_schema("broken", "not valid toml");
-
-    let id = fixture.prompt("codex", "session", "", "hello");
-
-    assert_eq!(fixture.events().len(), 1);
-    assert_eq!(fixture.events()[0].id().as_uuid().to_string(), id);
-}
-
-#[test]
 fn prompt_context_names_the_committed_event() {
     let fixture = Fixture::new();
     let id = fixture.prompt("codex", "session", "", "hello");
@@ -302,6 +238,25 @@ fn prompt_context_names_the_committed_event() {
     assert_eq!(events[0].id().as_uuid().to_string(), id);
     assert_eq!(content(&events[0]), "hello");
     assert!(matches!(events[0].actor(), Actor::Human(_)));
+}
+
+#[test]
+fn a_user_prompt_submit_answers_an_empty_object() {
+    let fixture = Fixture::new();
+
+    let output = fixture
+        .call(
+            "codex",
+            json!({
+                "hook_event_name": "UserPromptSubmit",
+                "cwd": fixture.root.to_str().unwrap(),
+                "session_id": "session",
+                "prompt": "hello",
+            }),
+        )
+        .unwrap();
+
+    assert_eq!(output, json!({}));
 }
 
 #[test]
@@ -371,35 +326,12 @@ fn a_session_start_records_one_marker_from_the_system() {
 }
 
 #[test]
-fn a_session_start_answers_the_client_the_start_screen() {
+fn a_session_start_answers_an_empty_object() {
     let fixture = Fixture::new();
 
     let output = fixture.session_start("codex");
 
-    let output = &output["hookSpecificOutput"];
-    assert_eq!(output["hookEventName"], "SessionStart");
-    let context = output["additionalContext"].as_str().unwrap();
-    assert!(context.contains("percept add"), "{context}");
-    assert!(context.contains("\n# debates\n\nwhat a hook test needs\n"), "{context}");
-}
-
-#[test]
-fn a_session_start_with_a_broken_schema_still_records_its_marker() {
-    let fixture = Fixture::new().with_extra_schema("broken", "not valid toml");
-
-    let result = fixture.call(
-        "codex",
-        json!({
-            "hook_event_name": "SessionStart",
-            "cwd": fixture.root.to_str().unwrap(),
-            "session_id": "session",
-        }),
-    );
-
-    assert!(result.is_err());
-    let events = fixture.events();
-    assert_eq!(events.len(), 1);
-    assert!(matches!(events[0].payload(), Payload::SessionStarted));
+    assert_eq!(output, json!({}));
 }
 
 #[test]
@@ -409,27 +341,6 @@ fn a_returning_session_records_its_own_marker() {
     fixture.session_start("codex");
 
     assert_eq!(fixture.events().len(), 2);
-}
-
-#[test]
-fn a_prompts_context_is_the_event_id_alone() {
-    let fixture = Fixture::new();
-
-    let output = fixture
-        .call(
-            "codex",
-            json!({
-                "hook_event_name": "UserPromptSubmit",
-                "cwd": fixture.root.to_str().unwrap(),
-                "session_id": "session",
-                "prompt": "hello",
-            }),
-        )
-        .unwrap();
-
-    let context = output["hookSpecificOutput"]["additionalContext"].as_str().unwrap();
-    let prompt = fixture.events().pop().unwrap();
-    assert_eq!(context, format!("percept event {}", prompt.id().as_uuid()));
 }
 
 #[test]
