@@ -18,38 +18,29 @@ pub fn markdown(map: &Map) -> String {
     out
 }
 
-/// The start screen: what a bare `percept` prints and what a coding
-/// client reads at a session's start, so the two see one text. A
-/// frame first - the rule for recording and the shape of the command -
-/// then every schema in `schemas` whole: its heading, purpose, kinds,
-/// and the body of its map in `maps` as `markdown` prints it. A schema
-/// whose map `maps` lacks - declared, nothing recorded under it yet,
-/// so no `map.created` names it - prints the empty notice, since a
-/// reader about to record needs its shape most of all. No schemas at
-/// all prints `super::NO_SCHEMAS_HINT` under the frame instead, since
-/// the way in is `percept init`, not `record`.
+/// The start screen: what a bare `percept` prints - every schema in
+/// `schemas` whole: its heading, purpose, kinds, and the body of its
+/// map in `maps` as `markdown` prints it. A schema whose map `maps`
+/// lacks - declared, nothing recorded under it yet, so no
+/// `map.created` names it - prints the empty notice, since a reader
+/// about to record needs its shape most of all. No schemas at all
+/// prints `super::NO_SCHEMAS_HINT` instead, since the way in is
+/// `percept init`.
 pub fn start(schemas: &dyn Schemas, maps: &[Map]) -> String {
-    let mut out = String::from(
-        "percept keeps this project's maps, folded from its log. Read them\n\
-         before you build. When a turn adds what a map's purpose asks for\n\
-         and the map lacks, record it in the same turn, citing the prompt's\n\
-         event from the `percept event` line:\n\n    \
-         percept add --actor agent --source <event> <<'EOF'\n    \
-         <kind> \"<name>\"\n      \
-         <property> \"<value>\"\n    \
-         EOF\n",
-    );
     if schemas.folded().is_empty() {
-        let _ = write!(out, "\n{}\n", super::NO_SCHEMAS_HINT);
-        return out;
+        return format!("{}\n", super::NO_SCHEMAS_HINT);
     }
+    let mut out = String::new();
     for schema in schemas.folded() {
         let map = maps.iter().find(|map| map.schema().name() == schema.name());
         let heading = match map {
             Some(map) => heading(map),
             None => format!("# {}\n", schema.name()),
         };
-        let _ = write!(out, "\n{heading}\n{}\n", schema.purpose());
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        let _ = write!(out, "{heading}\n{}\n", schema.purpose());
         push_kind_labels(&mut out, "Node kinds", schema.node_kinds().iter().map(NodeKind::label));
         push_kind_labels(&mut out, "Edge kinds", schema.edge_kinds().iter().map(EdgeKind::label));
         match map {

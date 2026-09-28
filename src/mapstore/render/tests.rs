@@ -392,12 +392,10 @@ fn a_schema_with_no_edges_gives_every_node_its_own_section() {
 }
 
 #[test]
-fn the_start_screen_frames_the_record_rule_before_the_maps() {
+fn the_start_screen_opens_on_its_first_map() {
     let text = start(&FakeSchemas::new(vec![debates()]), &[]);
 
-    let frame = text.split("\n# debates\n").next().unwrap();
-    assert!(frame.contains("record it in the same turn"), "{text}");
-    assert!(frame.contains("percept add --actor agent --source <event>"), "{text}");
+    assert!(text.starts_with("# debates\n"), "{text}");
 }
 
 #[test]
@@ -407,7 +405,7 @@ fn the_start_screen_prints_each_map_whole_under_its_purpose_and_kinds() {
 
     let text = start(&FakeSchemas::new(vec![debates()]), std::slice::from_ref(&map));
 
-    let section = text.split("\n# debates\n\n").nth(1).unwrap();
+    let section = text.strip_prefix("# debates\n\n").unwrap();
     assert!(section.starts_with(debates().purpose()), "{text}");
     assert!(section.contains("\nNode kinds:\n- `topic`\n"), "{text}");
     assert!(section.contains("\nEdge kinds:\n- `about` (topic -> claim)\n"), "{text}");
@@ -418,7 +416,7 @@ fn the_start_screen_prints_each_map_whole_under_its_purpose_and_kinds() {
 fn the_start_screen_prints_a_declared_schema_with_no_map_yet_as_empty() {
     let text = start(&FakeSchemas::new(vec![debates()]), &[]);
 
-    assert!(text.contains("\n# debates\n\nwhat a test needs from a question-and-answer map\n"), "{text}");
+    assert!(text.starts_with("# debates\n\nwhat a test needs from a question-and-answer map\n"), "{text}");
     assert!(text.ends_with("- `doubts` (verdict -> topic)\n\n(empty: nothing has been recorded here yet.)\n"), "{text}");
 }
 
@@ -431,7 +429,7 @@ fn the_start_screen_prints_a_global_map_before_the_projects_own() {
 
     let text = start(&schemas, &[]);
 
-    let chores_at = text.find("\n# chores\n").unwrap();
+    let chores_at = text.find("# chores\n").unwrap();
     let debates_at = text.find("\n# debates\n").unwrap();
     assert!(chores_at < debates_at, "{text}");
 }
@@ -440,6 +438,5 @@ fn the_start_screen_prints_a_global_map_before_the_projects_own() {
 fn the_start_screen_of_no_schemas_prints_the_no_schemas_hint() {
     let text = start(&FakeSchemas::new(Vec::new()), &[]);
 
-    assert!(text.ends_with(&format!("\n{}\n", crate::mapstore::NO_SCHEMAS_HINT)), "{text}");
-    assert!(!text.contains("# "), "{text}");
+    assert_eq!(text, format!("{}\n", crate::mapstore::NO_SCHEMAS_HINT));
 }
