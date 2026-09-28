@@ -59,9 +59,8 @@ by every project; each event names the project it came from. It never \
 ranks, summarises, or answers: its job is to make looking cheap and \
 leave relevance to the caller.
 
-A bare `percept` prints the start screen: how to record, then this \
-project's maps whole - the same text a coding client reads when its \
-session opens. `search` queries the log at this level; `show` reads a map, a \
+A bare `percept` prints the start screen: this project's maps whole. \
+`search` queries the log at this level; `show` reads a map, a \
 node, or an event, resolved by the shape of its argument; `add` and \
 `remove` write a node or an edge with no map name - the kind resolves \
 it - and `change` changes one already there; `hook <client>` \
@@ -587,8 +586,7 @@ pub fn start(log: &dyn EventLog, schemas: &dyn Schemas, project: &Path) -> Resul
 }
 
 /// The start screen - `mapstore::start` over every map of `project`,
-/// folded from one read of `log`. What a bare `percept` prints and
-/// what `hook` answers a coding client's `SessionStart` with.
+/// folded from one read of `log`. What a bare `percept` prints.
 pub fn start_text(log: &dyn EventLog, schemas: &dyn Schemas, project: &Path) -> Result<String, Box<dyn std::error::Error>> {
     let events = log.load()?;
     let maps = mapstore::fold_all_at(schemas, &events, project)?;
