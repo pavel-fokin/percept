@@ -4,6 +4,8 @@ use std::error::Error;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 
+use tokio::io::AsyncWriteExt;
+
 use crate::core::{Event, EventStore};
 
 pub struct JsonlStore {
@@ -32,6 +34,29 @@ impl EventStore for JsonlStore {
             })
             .collect()
     }
+
+    async fn append(&self, event: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let mut line = serde_json::to_string(event)?;
+        line.push('\n');
+        let path = &self.path;
+        let write = async {
+            if let Some(dir) = path.parent() {
+                tokio::fs::create_dir_all(dir).await?;
+            }
+            let mut file = tokio::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+                .await?;
+            // One write call, so concurrent appends do not interleave.
+            file.write_all(line.as_bytes()).await?;
+            // tokio buffers the write; flush surfaces its error.
+            file.flush().await
+        };
+        write
+            .await
+            .map_err(|error| format!("{}: {error}", path.display()).into())
+    }
 }
 
 #[cfg(test)]
@@ -41,6 +66,7 @@ mod tests {
 
     use super::*;
     use crate::core::EventId;
+    use serde_json::json;
 
     struct TempFile(PathBuf);
 
@@ -86,16 +112,41 @@ mod tests {
     #[tokio::test]
     async fn reads_one_event_per_line() {
         let file = TempFile::new();
-        let ids: Vec<EventId> = (0..3).map(|_| EventId::new()).collect();
-        let text: String = ids
+        let events: Vec<Event> = (0..3).map(|_| Event::new(json!({}))).collect();
+        let ids: Vec<EventId> = events.iter().map(|e| e.id).collect();
+        let text: String = events
             .iter()
-            .map(|id| serde_json::to_string(&Event { id: *id }).unwrap() + "\n")
+            .map(|event| serde_json::to_string(event).unwrap() + "\n")
             .collect();
         file.write(&text);
 
         let events = file.store().all().await.unwrap();
 
         assert_eq!(events.iter().map(|e| e.id).collect::<Vec<_>>(), ids);
+    }
+
+    #[tokio::test]
+    async fn append_creates_the_file_and_round_trips() {
+        let file = TempFile::new();
+        let store = file.store();
+        for payload in [json!({"a": 1}), json!([2])] {
+            store.append(&Event::new(payload)).await.unwrap();
+        }
+
+        let events = store.all().await.unwrap();
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].payload, json!({"a": 1}));
+        assert_eq!(events[1].payload, json!([2]));
+    }
+
+    #[tokio::test]
+    async fn append_creates_a_missing_directory() {
+        let dir = TempFile::new();
+        let nested = JsonlStore::new(dir.0.join("sub").join("log.jsonl"));
+        nested.append(&Event::new(json!(null))).await.unwrap();
+        assert_eq!(nested.all().await.unwrap().len(), 1);
+        let _ = fs::remove_dir_all(&dir.0);
     }
 
     #[tokio::test]
