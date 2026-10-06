@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::marker::PhantomData;
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
 /// A UUIDv7 that identifies one entity of type `T`.
@@ -60,6 +61,21 @@ impl<T> fmt::Debug for Id<T> {
     }
 }
 
+impl<T> Serialize for Id<T> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.uuid.serialize(serializer)
+    }
+}
+
+impl<'de, T> Deserialize<'de> for Id<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            uuid: Uuid::deserialize(deserializer)?,
+            entity: PhantomData,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,5 +89,16 @@ mod tests {
 
         assert_ne!(first, second);
         assert!(first < second);
+    }
+
+    #[test]
+    fn id_round_trips_through_json_as_a_uuid_string() {
+        let id = Id::<Entity>::new();
+
+        let json = serde_json::to_string(&id).unwrap();
+        let back: Id<Entity> = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(json, format!("\"{}\"", id.uuid));
+        assert_eq!(back, id);
     }
 }
