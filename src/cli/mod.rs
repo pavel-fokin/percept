@@ -2,11 +2,11 @@
 
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand};
 use tokio::io::AsyncReadExt;
 
 use crate::app::AppService;
-use crate::core::{Client, EventStore};
+use crate::core::EventStore;
 
 /// Records what coding agents do.
 #[derive(Parser)]
@@ -19,22 +19,10 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Records a hook payload read from stdin.
-    Hook { client: ClientArg },
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-enum ClientArg {
-    Claude,
-    Codex,
-}
-
-impl From<ClientArg> for Client {
-    fn from(arg: ClientArg) -> Self {
-        match arg {
-            ClientArg::Claude => Client::Claude,
-            ClientArg::Codex => Client::Codex,
-        }
-    }
+    Hook {
+        #[arg(value_parser = ["claude", "codex"])]
+        client: String,
+    },
 }
 
 pub async fn run<S: EventStore>(service: &AppService<S>) -> ExitCode {
@@ -48,7 +36,7 @@ pub async fn run<S: EventStore>(service: &AppService<S>) -> ExitCode {
     };
     let result = match cli.command {
         None => status(service).await,
-        Some(Command::Hook { client }) => hook(service, client.into()).await,
+        Some(Command::Hook { client }) => hook(service, client).await,
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -66,7 +54,7 @@ async fn status<S: EventStore>(service: &AppService<S>) -> Result<()> {
     Ok(())
 }
 
-async fn hook<S: EventStore>(service: &AppService<S>, client: Client) -> Result<()> {
+async fn hook<S: EventStore>(service: &AppService<S>, client: String) -> Result<()> {
     let mut input = String::new();
     tokio::io::stdin().read_to_string(&mut input).await?;
     service.record(client, serde_json::from_str(&input)?).await

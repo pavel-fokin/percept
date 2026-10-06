@@ -8,18 +8,21 @@ use crate::shared::Id;
 
 pub type EventId = Id<Event>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Client {
-    Claude,
-    Codex,
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct Event {
     pub id: EventId,
-    pub client: Client,
+    pub client: String,
     pub payload: serde_json::Value,
+}
+
+impl Event {
+    pub fn new(client: String, payload: serde_json::Value) -> Self {
+        Self {
+            id: EventId::new(),
+            client,
+            payload,
+        }
+    }
 }
 
 pub trait EventStore {
