@@ -14,5 +14,6 @@ pub struct Event {
 }
 
 pub trait EventStore {
-    fn all(&self) -> Result<Vec<Event>, Box<dyn Error>>;
+    fn all(&self)
+        -> impl Future<Output = Result<Vec<Event>, Box<dyn Error + Send + Sync>>> + Send;
 }

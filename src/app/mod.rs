@@ -4,17 +4,17 @@ use std::error::Error;
 
 use crate::core::EventStore;
 
-pub struct AppService {
-    store: Box<dyn EventStore>,
+pub struct AppService<S: EventStore> {
+    store: S,
 }
 
-impl AppService {
-    pub fn new(store: Box<dyn EventStore>) -> Self {
+impl<S: EventStore> AppService<S> {
+    pub fn new(store: S) -> Self {
         Self { store }
     }
 
-    pub fn event_count(&self) -> Result<usize, Box<dyn Error>> {
-        Ok(self.store.all()?.len())
+    pub async fn event_count(&self) -> Result<usize, Box<dyn Error + Send + Sync>> {
+        Ok(self.store.all().await?.len())
     }
 }
 
@@ -27,7 +27,7 @@ mod tests {
     struct Fixed(usize);
 
     impl EventStore for Fixed {
-        fn all(&self) -> Result<Vec<Event>, Box<dyn Error>> {
+        async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
             Ok((0..self.0).map(|_| Event { id: Id::new() }).collect())
         }
     }
@@ -35,18 +35,18 @@ mod tests {
     struct Broken;
 
     impl EventStore for Broken {
-        fn all(&self) -> Result<Vec<Event>, Box<dyn Error>> {
+        async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
             Err("boom".into())
         }
     }
 
-    #[test]
-    fn counts_the_stored_events() {
-        assert_eq!(AppService::new(Box::new(Fixed(3))).event_count().unwrap(), 3);
+    #[tokio::test]
+    async fn counts_the_stored_events() {
+        assert_eq!(AppService::new(Fixed(3)).event_count().await.unwrap(), 3);
     }
 
-    #[test]
-    fn passes_store_errors_through() {
-        assert!(AppService::new(Box::new(Broken)).event_count().is_err());
+    #[tokio::test]
+    async fn passes_store_errors_through() {
+        assert!(AppService::new(Broken).event_count().await.is_err());
     }
 }

@@ -1,7 +1,6 @@
 //! Infrastructure layer: stores and queries Events as JSONL.
 
 use std::error::Error;
-use std::fs;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 
@@ -18,8 +17,8 @@ impl JsonlStore {
 }
 
 impl EventStore for JsonlStore {
-    fn all(&self) -> Result<Vec<Event>, Box<dyn Error>> {
-        let text = match fs::read_to_string(&self.path) {
+    async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
+        let text = match tokio::fs::read_to_string(&self.path).await {
             Ok(text) => text,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
             Err(error) => return Err(format!("{}: {error}", self.path.display()).into()),
@@ -37,6 +36,7 @@ impl EventStore for JsonlStore {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
@@ -70,21 +70,21 @@ mod tests {
         }
     }
 
-    #[test]
-    fn missing_file_has_no_events() {
+    #[tokio::test]
+    async fn missing_file_has_no_events() {
         let file = TempFile::new();
-        assert_eq!(file.store().all().unwrap().len(), 0);
+        assert_eq!(file.store().all().await.unwrap().len(), 0);
     }
 
-    #[test]
-    fn empty_file_has_no_events() {
+    #[tokio::test]
+    async fn empty_file_has_no_events() {
         let file = TempFile::new();
         file.write("");
-        assert_eq!(file.store().all().unwrap().len(), 0);
+        assert_eq!(file.store().all().await.unwrap().len(), 0);
     }
 
-    #[test]
-    fn reads_one_event_per_line() {
+    #[tokio::test]
+    async fn reads_one_event_per_line() {
         let file = TempFile::new();
         let ids: Vec<EventId> = (0..3).map(|_| EventId::new()).collect();
         let text: String = ids
@@ -93,15 +93,15 @@ mod tests {
             .collect();
         file.write(&text);
 
-        let events = file.store().all().unwrap();
+        let events = file.store().all().await.unwrap();
 
         assert_eq!(events.iter().map(|e| e.id).collect::<Vec<_>>(), ids);
     }
 
-    #[test]
-    fn malformed_line_is_an_error() {
+    #[tokio::test]
+    async fn malformed_line_is_an_error() {
         let file = TempFile::new();
         file.write("not json\n");
-        assert!(file.store().all().is_err());
+        assert!(file.store().all().await.is_err());
     }
 }

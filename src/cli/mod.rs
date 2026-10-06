@@ -3,9 +3,10 @@
 use std::process::ExitCode;
 
 use crate::app::AppService;
+use crate::core::EventStore;
 
-pub fn run(service: &AppService) -> ExitCode {
-    match service.event_count() {
+pub async fn run<S: EventStore>(service: &AppService<S>) -> ExitCode {
+    match service.event_count().await {
         Ok(count) => {
             println!("percept • {}", status_line(count));
             ExitCode::SUCCESS
