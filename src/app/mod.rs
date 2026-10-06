@@ -4,12 +4,12 @@ use std::error::Error;
 
 use crate::core::EventStore;
 
-pub struct AppService<S> {
-    store: S,
+pub struct AppService {
+    store: Box<dyn EventStore>,
 }
 
-impl<S: EventStore> AppService<S> {
-    pub fn new(store: S) -> Self {
+impl AppService {
+    pub fn new(store: Box<dyn EventStore>) -> Self {
         Self { store }
     }
 
@@ -42,11 +42,11 @@ mod tests {
 
     #[test]
     fn counts_the_stored_events() {
-        assert_eq!(AppService::new(Fixed(3)).event_count().unwrap(), 3);
+        assert_eq!(AppService::new(Box::new(Fixed(3))).event_count().unwrap(), 3);
     }
 
     #[test]
     fn passes_store_errors_through() {
-        assert!(AppService::new(Broken).event_count().is_err());
+        assert!(AppService::new(Box::new(Broken)).event_count().is_err());
     }
 }

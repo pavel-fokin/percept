@@ -4,13 +4,16 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::marker::PhantomData;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// A UUIDv7 that identifies one entity of type `T`.
+#[derive(Serialize, Deserialize)]
+#[serde(transparent, bound = "")]
 pub struct Id<T> {
     uuid: Uuid,
     // `fn() -> T` keeps `Id<T>` Send, Sync and Copy whatever `T` is.
+    #[serde(skip)]
     entity: PhantomData<fn() -> T>,
 }
 
@@ -57,21 +60,6 @@ impl<T> Ord for Id<T> {
 impl<T> fmt::Debug for Id<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Id({})", self.uuid)
-    }
-}
-
-impl<T> Serialize for Id<T> {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.uuid.serialize(serializer)
-    }
-}
-
-impl<'de, T> Deserialize<'de> for Id<T> {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        Ok(Self {
-            uuid: Uuid::deserialize(deserializer)?,
-            entity: PhantomData,
-        })
     }
 }
 

@@ -40,9 +40,8 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
-    use crate::shared::Id;
+    use crate::core::EventId;
 
-    /// A unique temp path that is removed on drop.
     struct TempFile(PathBuf);
 
     impl TempFile {
@@ -87,12 +86,12 @@ mod tests {
     #[test]
     fn reads_one_event_per_line() {
         let file = TempFile::new();
-        let ids: Vec<Id<Event>> = (0..3).map(|_| Id::new()).collect();
-        let lines: Vec<String> = ids
+        let ids: Vec<EventId> = (0..3).map(|_| EventId::new()).collect();
+        let text: String = ids
             .iter()
-            .map(|id| serde_json::to_string(&Event { id: *id }).unwrap())
+            .map(|id| serde_json::to_string(&Event { id: *id }).unwrap() + "\n")
             .collect();
-        file.write(&(lines.join("\n") + "\n"));
+        file.write(&text);
 
         let events = file.store().all().unwrap();
 

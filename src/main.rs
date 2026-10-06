@@ -15,5 +15,5 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let store = JsonlStore::new(home.join(".percept").join("percept.jsonl"));
-    cli::run(&AppService::new(store))
+    cli::run(&AppService::new(Box::new(store)))
 }
