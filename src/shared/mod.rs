@@ -8,15 +8,14 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use uuid::Uuid;
 
 /// A UUIDv7 that identifies one entity of type `T`.
-#[cfg_attr(not(test), expect(dead_code, reason = "core has no entity yet"))]
 pub struct Id<T> {
     uuid: Uuid,
     // `fn() -> T` keeps `Id<T>` Send, Sync and Copy whatever `T` is.
     entity: PhantomData<fn() -> T>,
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "core has no entity yet"))]
 impl<T> Id<T> {
+    #[cfg_attr(not(test), expect(dead_code, reason = "nothing records an Event yet"))]
     pub fn new() -> Self {
         Self {
             uuid: Uuid::now_v7(),
