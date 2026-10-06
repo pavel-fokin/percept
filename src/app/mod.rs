@@ -1,6 +1,9 @@
 //! Application layer: `AppService` runs use cases over the domain.
 
+mod git;
+
 use std::error::Error;
+use std::path::{Path, PathBuf};
 
 use crate::core::EventStore;
 
@@ -16,6 +19,11 @@ impl<S: EventStore> AppService<S> {
     pub async fn event_count(&self) -> Result<usize, Box<dyn Error + Send + Sync>> {
         Ok(self.store.all().await?.len())
     }
+}
+
+/// The git repo root containing `dir`, else `dir` itself.
+pub async fn source_path(dir: &Path) -> PathBuf {
+    git::repo_root(dir).await.unwrap_or_else(|| dir.to_path_buf())
 }
 
 #[cfg(test)]

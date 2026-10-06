@@ -15,6 +15,13 @@ async fn main() -> ExitCode {
         eprintln!("percept: cannot find the home directory");
         return ExitCode::FAILURE;
     };
+    let current_dir = match std::env::current_dir() {
+        Ok(dir) => dir,
+        Err(error) => {
+            eprintln!("percept: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
     let store = JsonlStore::new(home.join(".percept").join("percept.jsonl"));
-    cli::run(&AppService::new(store)).await
+    cli::run(&AppService::new(store), &current_dir, &home).await
 }
