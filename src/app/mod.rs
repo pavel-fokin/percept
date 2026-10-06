@@ -2,7 +2,7 @@
 
 use std::error::Error;
 
-use crate::core::EventStore;
+use crate::core::{Client, Event, EventId, EventStore};
 
 pub struct AppService<S: EventStore> {
     store: S,
@@ -16,19 +16,39 @@ impl<S: EventStore> AppService<S> {
     pub async fn event_count(&self) -> Result<usize, Box<dyn Error + Send + Sync>> {
         Ok(self.store.all().await?.len())
     }
+
+    pub async fn record(
+        &self,
+        client: Client,
+        payload: serde_json::Value,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        let event = Event {
+            id: EventId::new(),
+            client,
+            payload,
+        };
+        self.store.append(&event).await
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::Event;
-    use crate::shared::Id;
+    use std::sync::Mutex;
+
+    use serde_json::json;
 
     struct Fixed(usize);
 
     impl EventStore for Fixed {
         async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
-            Ok((0..self.0).map(|_| Event { id: Id::new() }).collect())
+            Ok((0..self.0)
+                .map(|_| Event { id: EventId::new(), client: Client::Claude, payload: json!({}) })
+                .collect())
+        }
+
+        async fn append(&self, _: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {
+            unimplemented!()
         }
     }
 
@@ -37,6 +57,24 @@ mod tests {
     impl EventStore for Broken {
         async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
             Err("boom".into())
+        }
+
+        async fn append(&self, _: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {
+            Err("boom".into())
+        }
+    }
+
+    #[derive(Default)]
+    struct Recording(Mutex<Vec<(Client, serde_json::Value)>>);
+
+    impl EventStore for &Recording {
+        async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
+            unimplemented!()
+        }
+
+        async fn append(&self, event: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {
+            self.0.lock().unwrap().push((event.client, event.payload.clone()));
+            Ok(())
         }
     }
 
@@ -48,5 +86,21 @@ mod tests {
     #[tokio::test]
     async fn passes_store_errors_through() {
         assert!(AppService::new(Broken).event_count().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn record_appends_an_event_with_the_payload() {
+        let store = Recording::default();
+        AppService::new(&store)
+            .record(Client::Codex, json!({"a": 1}))
+            .await
+            .unwrap();
+        assert_eq!(*store.0.lock().unwrap(), vec![(Client::Codex, json!({"a": 1}))]);
+    }
+
+    #[tokio::test]
+    async fn record_passes_store_errors_through() {
+        let result = AppService::new(Broken).record(Client::Claude, json!({})).await;
+        assert!(result.is_err());
     }
 }

@@ -18,7 +18,6 @@ pub struct Id<T> {
 }
 
 impl<T> Id<T> {
-    #[cfg_attr(not(test), expect(dead_code, reason = "nothing records an Event yet"))]
     pub fn new() -> Self {
         Self {
             uuid: Uuid::now_v7(),
