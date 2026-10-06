@@ -33,6 +33,23 @@ skips it.
   rename, a doc edit - skips both. The main agent does one inline
   review pass instead. The two passes are for diffs with logic in them.
 
+## Architecture
+
+The crate follows domain-driven design in five layers. Each is one
+module under `src/`, entered through `src/<layer>/mod.rs`, whose doc
+comment states its role. The layout stays flat until a layer outgrows
+one level.
+
+A layer imports only the layers to its right:
+
+- `cli` → `app` → `core` → `shared`
+- `eventstore` → `core` → `shared`
+
+`core` defines the store trait and `eventstore` implements it.
+`main.rs` wires `eventstore` into `app`.
+
+Names carry no layer suffix or prefix: `Event`, not `EventEntity`.
+
 ## Code Quality
 
 Entity IDs use UUIDv7, each wrapped in a type specific to that entity,
@@ -50,6 +67,16 @@ Rust's type system rather than writing defensive checks around it.
 
 Use conventional commit messages under 72 chars. Skip the body -- subject
 line only. One commit per issue.
+
+Work happens on a branch. Check which one is checked out before the
+first commit - a status snapshot from the start of a session can be
+stale - and switch to main before branching, never onto another feature
+branch, so a PR carries only its own commits. Name a branch
+`<type>/<branch-name>`, `type` one of `feat`, `fix`, `chore`, `docs`, `refactor`,
+matching the issue's own kind. Merging into main is the user's call,
+not the agent's - hand back a reviewed branch and stop there. The same
+holds for pushing: before it, propose a PR title for the user to
+confirm or change.
 
 ## Writing
 
