@@ -48,6 +48,9 @@ A layer imports only the layers to its right:
 `core` defines the store trait and `eventstore` implements it.
 `main.rs` wires `eventstore` into `app`.
 
+I/O is async on tokio. A trait method that does I/O returns
+`impl Future<Output = …> + Send`, and async code never makes a blocking call.
+
 Names carry no layer suffix or prefix: `Event`, not `EventEntity`.
 
 ## Code Quality

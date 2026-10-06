@@ -4,18 +4,21 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::marker::PhantomData;
 
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// A UUIDv7 that identifies one entity of type `T`.
-#[cfg_attr(not(test), expect(dead_code, reason = "core has no entity yet"))]
+#[derive(Serialize, Deserialize)]
+#[serde(transparent, bound = "")]
 pub struct Id<T> {
     uuid: Uuid,
     // `fn() -> T` keeps `Id<T>` Send, Sync and Copy whatever `T` is.
+    #[serde(skip)]
     entity: PhantomData<fn() -> T>,
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "core has no entity yet"))]
 impl<T> Id<T> {
+    #[cfg_attr(not(test), expect(dead_code, reason = "nothing records an Event yet"))]
     pub fn new() -> Self {
         Self {
             uuid: Uuid::now_v7(),
@@ -73,5 +76,16 @@ mod tests {
 
         assert_ne!(first, second);
         assert!(first < second);
+    }
+
+    #[test]
+    fn id_round_trips_through_json_as_a_uuid_string() {
+        let id = Id::<Entity>::new();
+
+        let json = serde_json::to_string(&id).unwrap();
+        let back: Id<Entity> = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(json, format!("\"{}\"", id.uuid));
+        assert_eq!(back, id);
     }
 }
