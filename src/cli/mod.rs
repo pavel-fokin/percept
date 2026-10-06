@@ -2,10 +2,18 @@
 
 use std::process::ExitCode;
 
+use clap::Parser;
+
 use crate::app::AppService;
 use crate::core::EventStore;
 
+/// Records what coding agents do.
+#[derive(Parser)]
+#[command(version)]
+struct Cli {}
+
 pub async fn run<S: EventStore>(service: &AppService<S>) -> ExitCode {
+    Cli::parse();
     match service.event_count().await {
         Ok(count) => {
             println!("percept • {}", status_line(count));
