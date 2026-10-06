@@ -19,10 +19,9 @@ impl<S: EventStore> AppService<S> {
 
     pub async fn record(
         &self,
-        client: String,
         payload: serde_json::Value,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.store.append(&Event::new(client, payload)).await
+        self.store.append(&Event::new(payload)).await
     }
 }
 
@@ -37,7 +36,7 @@ mod tests {
 
     impl EventStore for Fixed {
         async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
-            Ok((0..self.0).map(|_| Event::new("claude".into(), json!({}))).collect())
+            Ok((0..self.0).map(|_| Event::new(json!({}))).collect())
         }
 
         async fn append(&self, _: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -58,7 +57,7 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct Recording(Mutex<Vec<(String, serde_json::Value)>>);
+    struct Recording(Mutex<Vec<serde_json::Value>>);
 
     impl EventStore for &Recording {
         async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
@@ -66,7 +65,7 @@ mod tests {
         }
 
         async fn append(&self, event: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {
-            self.0.lock().unwrap().push((event.client.clone(), event.payload.clone()));
+            self.0.lock().unwrap().push(event.payload.clone());
             Ok(())
         }
     }
@@ -84,16 +83,12 @@ mod tests {
     #[tokio::test]
     async fn record_appends_an_event_with_the_payload() {
         let store = Recording::default();
-        AppService::new(&store)
-            .record("codex".into(), json!({"a": 1}))
-            .await
-            .unwrap();
-        assert_eq!(*store.0.lock().unwrap(), vec![("codex".to_string(), json!({"a": 1}))]);
+        AppService::new(&store).record(json!({"a": 1})).await.unwrap();
+        assert_eq!(*store.0.lock().unwrap(), vec![json!({"a": 1})]);
     }
 
     #[tokio::test]
     async fn record_passes_store_errors_through() {
-        let result = AppService::new(Broken).record("claude".into(), json!({})).await;
-        assert!(result.is_err());
+        assert!(AppService::new(Broken).record(json!({})).await.is_err());
     }
 }

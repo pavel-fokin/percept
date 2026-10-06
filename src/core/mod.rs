@@ -11,15 +11,13 @@ pub type EventId = Id<Event>;
 #[derive(Serialize, Deserialize)]
 pub struct Event {
     pub id: EventId,
-    pub client: String,
     pub payload: serde_json::Value,
 }
 
 impl Event {
-    pub fn new(client: String, payload: serde_json::Value) -> Self {
+    pub fn new(payload: serde_json::Value) -> Self {
         Self {
             id: EventId::new(),
-            client,
             payload,
         }
     }

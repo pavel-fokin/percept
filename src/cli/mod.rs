@@ -36,7 +36,7 @@ pub async fn run<S: EventStore>(service: &AppService<S>) -> ExitCode {
     };
     let result = match cli.command {
         None => status(service).await,
-        Some(Command::Hook { client }) => hook(service, client).await,
+        Some(Command::Hook { .. }) => hook(service).await,
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -54,10 +54,10 @@ async fn status<S: EventStore>(service: &AppService<S>) -> Result<()> {
     Ok(())
 }
 
-async fn hook<S: EventStore>(service: &AppService<S>, client: String) -> Result<()> {
+async fn hook<S: EventStore>(service: &AppService<S>) -> Result<()> {
     let mut input = String::new();
     tokio::io::stdin().read_to_string(&mut input).await?;
-    service.record(client, serde_json::from_str(&input)?).await
+    service.record(serde_json::from_str(&input)?).await
 }
 
 fn status_line(count: usize) -> String {
