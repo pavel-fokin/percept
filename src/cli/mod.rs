@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use tokio::io::AsyncReadExt;
 
 use crate::app::AppService;
-use crate::core::EventStore;
+use crate::core::{Actor, EventStore};
 
 /// Records what coding agents do.
 #[derive(Parser)]
@@ -57,7 +57,19 @@ async fn status<S: EventStore>(service: &AppService<S>) -> Result<()> {
 async fn hook<S: EventStore>(service: &AppService<S>) -> Result<()> {
     let mut input = String::new();
     tokio::io::stdin().read_to_string(&mut input).await?;
-    service.record(serde_json::from_str(&input)?).await
+    let payload: serde_json::Value = serde_json::from_str(&input)?;
+    let name = payload["hook_event_name"].as_str();
+    service.record(actor_of(name)?, payload).await
+}
+
+fn actor_of(hook_event_name: Option<&str>) -> Result<Actor> {
+    match hook_event_name {
+        Some("UserPromptSubmit") => Ok(Actor::Human),
+        Some("PostToolUse" | "SubagentStop" | "Stop") => Ok(Actor::Agent),
+        Some("SessionStart") => Ok(Actor::System),
+        Some(name) => Err(format!("unknown hook_event_name: {name}").into()),
+        None => Err("missing hook_event_name".into()),
+    }
 }
 
 fn status_line(count: usize) -> String {
@@ -71,6 +83,25 @@ fn status_line(count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hook_event_names_map_to_actors() {
+        for (name, actor) in [
+            ("UserPromptSubmit", Actor::Human),
+            ("PostToolUse", Actor::Agent),
+            ("SubagentStop", Actor::Agent),
+            ("Stop", Actor::Agent),
+            ("SessionStart", Actor::System),
+        ] {
+            assert_eq!(actor_of(Some(name)).unwrap(), actor);
+        }
+    }
+
+    #[test]
+    fn unknown_or_missing_hook_event_name_is_an_error() {
+        assert!(actor_of(Some("PreToolUse")).is_err());
+        assert!(actor_of(None).is_err());
+    }
 
     #[test]
     fn status_line_phrasings() {
