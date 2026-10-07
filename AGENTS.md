@@ -53,6 +53,14 @@ I/O is async on tokio. A trait method that does I/O returns
 
 Names carry no layer suffix or prefix: `Event`, not `EventEntity`.
 
+Keep layering strict: core must not depend on client or app concepts. Do not add fields or enums the user didn't ask for.
+
+## Design principles
+
+Prefer a minimal core and plain, standard data structures (e.g., plain graph + adjacency-list traversal, standard forest model) over special-case rules, heuristics, or hand-rolled constraints.
+
+When behavior changes, remove the old logic cleanly. Do not preserve legacy paths or squeeze new behavior into old structures unless asked.
+
 ## Code Quality
 
 Entity IDs use UUIDv7, each wrapped in a type specific to that entity,
@@ -65,6 +73,12 @@ non-obvious business logic, or a "why" the code can't show.
 Keep it simple. Don't make a thing optional when the compiler can
 enforce it. A boolean defaults to false, never to optional. Trust
 Rust's type system rather than writing defensive checks around it.
+
+Split any block of code into steps, one blank line between them. A step
+is a few lines with one purpose: build the input, do the I/O, shape the
+result. A reader should see the steps from the layout, before reading
+any line. A test splits into arrange, act, assert. A block of three or
+four lines stays whole.
 
 ## Git
 
