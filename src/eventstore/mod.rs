@@ -38,21 +38,25 @@ impl EventStore for JsonlStore {
     async fn append(&self, event: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {
         let mut line = serde_json::to_string(event)?;
         line.push('\n');
+
         let path = &self.path;
         let write = async {
             if let Some(dir) = path.parent() {
                 tokio::fs::create_dir_all(dir).await?;
             }
+
             let mut file = tokio::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(path)
                 .await?;
+
             // One write call, so concurrent appends do not interleave.
             file.write_all(line.as_bytes()).await?;
             // tokio buffers the write; flush surfaces its error.
             file.flush().await
         };
+
         write
             .await
             .map_err(|error| format!("{}: {error}", path.display()).into())
