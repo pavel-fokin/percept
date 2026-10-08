@@ -3,3 +3,7 @@
 .codex/hooks.json
 /target
 scripts/install.sh
+/web/dist/*
+!/web/dist/.gitkeep
+/web/node_modules/
+/web/tsconfig.tsbuildinfo
