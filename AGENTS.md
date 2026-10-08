@@ -35,14 +35,14 @@ skips it.
 
 ## Architecture
 
-The crate follows domain-driven design in five layers. Each is one
+The crate follows domain-driven design in six layers. Each is one
 module under `src/`, entered through `src/<layer>/mod.rs`, whose doc
 comment states its role. The layout stays flat until a layer outgrows
 one level.
 
 A layer imports only the layers to its right:
 
-- `cli` → `app` → `core` → `shared`
+- `cli` → `server` → `app` → `core` → `shared`
 - `eventstore` → `core` → `shared`
 
 `core` defines the store trait and `eventstore` implements it.
