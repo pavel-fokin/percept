@@ -1,12 +1,14 @@
 //! Presentation layer: the command-line interface.
 
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 use tokio::io::AsyncReadExt;
 
 use crate::app::AppService;
 use crate::core::{Actor, EventStore};
+use crate::server;
 
 /// Records what coding agents do.
 #[derive(Parser)]
@@ -23,9 +25,11 @@ enum Command {
         #[arg(value_parser = ["claude", "codex"])]
         client: String,
     },
+    /// Serves the page in the browser.
+    Ui,
 }
 
-pub async fn run<S: EventStore>(service: &AppService<S>) -> ExitCode {
+pub async fn run<S: EventStore + Send + Sync + 'static>(service: Arc<AppService<S>>) -> ExitCode {
     // clap exits 2 on a usage error, and exit 2 blocks the agent's action.
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
@@ -35,8 +39,9 @@ pub async fn run<S: EventStore>(service: &AppService<S>) -> ExitCode {
         }
     };
     let result = match cli.command {
-        None => status(service).await,
-        Some(Command::Hook { .. }) => hook(service).await,
+        None => status(&service).await,
+        Some(Command::Hook { .. }) => hook(&service).await,
+        Some(Command::Ui) => server::serve(service).await,
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
