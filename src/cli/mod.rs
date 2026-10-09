@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
 use tokio::io::AsyncReadExt;
 
 use crate::app::AppService;
-use crate::core::{Actor, Event, EventStore};
+use crate::core::{Actor, Event, EventStore, SessionId, SessionKey};
 use crate::server;
 
 /// Records what coding agents do.
@@ -63,23 +63,34 @@ async fn hook<S: EventStore>(service: &AppService<S>) -> Result<()> {
     let mut input = String::new();
     tokio::io::stdin().read_to_string(&mut input).await?;
     let raw: serde_json::Value = serde_json::from_str(&input)?;
-    service.record(event_from_hook(raw)?).await
+    let (key, event) = event_from_hook(raw)?;
+    service.record(key, event).await
 }
 
-fn event_from_hook(raw: serde_json::Value) -> Result<Event> {
+/// Makes the hook's event once its session is known.
+type EventBuilder = Box<dyn FnOnce(SessionId) -> Event>;
+
+fn event_from_hook(raw: serde_json::Value) -> Result<(SessionKey, EventBuilder)> {
+    let key = SessionKey::new(text(&raw, "session_id")?);
+
     let name = raw["hook_event_name"].as_str();
-    let event = match name {
-        Some("UserPromptSubmit") => Event::message(Actor::Human, &text(&raw, "prompt")?, raw),
-        Some("Stop" | "SubagentStop") => {
-            Event::message(Actor::Agent, &text(&raw, "last_assistant_message")?, raw)
+    let event: EventBuilder = match name {
+        Some("UserPromptSubmit") => {
+            let content = text(&raw, "prompt")?;
+            Box::new(move |s| Event::message(s, Actor::Human, &content, raw))
         }
-        Some("PostToolUse") => Event::tool_used(raw),
-        Some("SessionStart") => Event::session_started(raw),
-        Some("SessionEnd") => Event::session_stopped(raw),
+        Some("Stop" | "SubagentStop") => {
+            let content = text(&raw, "last_assistant_message")?;
+            Box::new(move |s| Event::message(s, Actor::Agent, &content, raw))
+        }
+        Some("PostToolUse") => Box::new(move |s| Event::tool_used(s, raw)),
+        Some("SessionStart") => Box::new(move |s| Event::session_started(s, raw)),
+        Some("SessionEnd") => Box::new(move |s| Event::session_stopped(s, raw)),
         Some(name) => return Err(format!("unknown hook_event_name: {name}").into()),
         None => return Err("missing hook_event_name".into()),
     };
-    Ok(event)
+
+    Ok((key, event))
 }
 
 fn text(raw: &serde_json::Value, field: &str) -> Result<String> {
@@ -103,78 +114,92 @@ mod tests {
     use crate::core::Kind;
     use serde_json::json;
 
+    fn build(raw: serde_json::Value) -> (SessionKey, SessionId, Event) {
+        let (key, event) = event_from_hook(raw).unwrap();
+        let session = SessionId::new();
+        (key, session, event(session))
+    }
+
     #[test]
     fn user_prompt_is_a_human_message() {
-        let raw = json!({"hook_event_name": "UserPromptSubmit", "prompt": "hi"});
+        let raw = json!({"hook_event_name": "UserPromptSubmit", "prompt": "hi", "session_id": "a"});
 
-        let event = event_from_hook(raw.clone()).unwrap();
+        let (key, session, event) = build(raw.clone());
 
+        assert_eq!(key, SessionKey::new("a".into()));
+        assert_eq!(event.session, session);
         assert_eq!(event.actor, Actor::Human);
         assert_eq!(event.kind, Kind::Message);
         assert_eq!(event.payload, json!({"content": "hi"}));
-        assert_eq!(event.raw, raw);
+        assert_eq!(event.raw, Some(raw));
     }
 
     #[test]
     fn stops_are_agent_messages() {
         for name in ["Stop", "SubagentStop"] {
-            let raw = json!({"hook_event_name": name, "last_assistant_message": "done"});
+            let raw = json!({"hook_event_name": name, "last_assistant_message": "done", "session_id": "a"});
 
-            let event = event_from_hook(raw.clone()).unwrap();
+            let (_, _, event) = build(raw.clone());
 
             assert_eq!(event.actor, Actor::Agent);
             assert_eq!(event.kind, Kind::Message);
             assert_eq!(event.payload, json!({"content": "done"}));
-            assert_eq!(event.raw, raw);
+            assert_eq!(event.raw, Some(raw));
         }
     }
 
     #[test]
     fn post_tool_use_is_a_tool_used_event() {
-        let raw = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash"});
+        let raw = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "session_id": "a"});
 
-        let event = event_from_hook(raw.clone()).unwrap();
+        let (_, _, event) = build(raw.clone());
 
         assert_eq!(event.actor, Actor::Agent);
         assert_eq!(event.kind, Kind::ToolUsed);
         assert_eq!(event.payload, json!({}));
-        assert_eq!(event.raw, raw);
+        assert_eq!(event.raw, Some(raw));
     }
 
     #[test]
     fn session_start_is_a_session_started_event() {
-        let raw = json!({"hook_event_name": "SessionStart"});
+        let raw = json!({"hook_event_name": "SessionStart", "session_id": "a"});
 
-        let event = event_from_hook(raw.clone()).unwrap();
+        let (_, _, event) = build(raw.clone());
 
         assert_eq!(event.actor, Actor::System);
         assert_eq!(event.kind, Kind::SessionStarted);
         assert_eq!(event.payload, json!({}));
-        assert_eq!(event.raw, raw);
+        assert_eq!(event.raw, Some(raw));
     }
 
     #[test]
     fn session_end_is_a_session_stopped_event() {
-        let raw = json!({"hook_event_name": "SessionEnd"});
+        let raw = json!({"hook_event_name": "SessionEnd", "session_id": "a"});
 
-        let event = event_from_hook(raw.clone()).unwrap();
+        let (_, _, event) = build(raw.clone());
 
         assert_eq!(event.actor, Actor::System);
         assert_eq!(event.kind, Kind::SessionStopped);
         assert_eq!(event.payload, json!({}));
-        assert_eq!(event.raw, raw);
+        assert_eq!(event.raw, Some(raw));
     }
 
     #[test]
     fn unknown_or_missing_hook_event_name_is_an_error() {
-        assert!(event_from_hook(json!({"hook_event_name": "PreToolUse"})).is_err());
-        assert!(event_from_hook(json!({})).is_err());
+        assert!(event_from_hook(json!({"hook_event_name": "PreToolUse", "session_id": "a"})).is_err());
+        assert!(event_from_hook(json!({"session_id": "a"})).is_err());
+    }
+
+    #[test]
+    fn missing_or_non_string_session_id_is_an_error() {
+        assert!(event_from_hook(json!({"hook_event_name": "PostToolUse"})).is_err());
+        assert!(event_from_hook(json!({"hook_event_name": "PostToolUse", "session_id": 1})).is_err());
     }
 
     #[test]
     fn missing_or_non_string_content_is_an_error() {
-        assert!(event_from_hook(json!({"hook_event_name": "UserPromptSubmit"})).is_err());
-        assert!(event_from_hook(json!({"hook_event_name": "Stop", "last_assistant_message": 1})).is_err());
+        assert!(event_from_hook(json!({"hook_event_name": "UserPromptSubmit", "session_id": "a"})).is_err());
+        assert!(event_from_hook(json!({"hook_event_name": "Stop", "last_assistant_message": 1, "session_id": "a"})).is_err());
     }
 
     #[test]
