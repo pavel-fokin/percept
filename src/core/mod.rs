@@ -24,6 +24,7 @@ pub enum Kind {
     Message,
     ToolUsed,
     SessionStarted,
+    SessionStopped,
 }
 
 /// `payload` holds the kind's domain data; `raw` is the hook input, unchanged.
@@ -47,6 +48,10 @@ impl Event {
 
     pub fn session_started(raw: serde_json::Value) -> Self {
         Self::build(Actor::System, Kind::SessionStarted, json!({}), raw)
+    }
+
+    pub fn session_stopped(raw: serde_json::Value) -> Self {
+        Self::build(Actor::System, Kind::SessionStopped, json!({}), raw)
     }
 
     fn build(
@@ -106,6 +111,16 @@ mod tests {
         assert_eq!(event.kind, Kind::SessionStarted);
         assert_eq!(event.payload, json!({}));
         assert_eq!(event.raw, json!({"r": 3}));
+    }
+
+    #[test]
+    fn session_stopped_is_a_system_event_with_an_empty_payload() {
+        let event = Event::session_stopped(json!({"r": 4}));
+
+        assert_eq!(event.actor, Actor::System);
+        assert_eq!(event.kind, Kind::SessionStopped);
+        assert_eq!(event.payload, json!({}));
+        assert_eq!(event.raw, json!({"r": 4}));
     }
 
     #[test]

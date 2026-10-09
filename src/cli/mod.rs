@@ -75,6 +75,7 @@ fn event_from_hook(raw: serde_json::Value) -> Result<Event> {
         }
         Some("PostToolUse") => Event::tool_used(raw),
         Some("SessionStart") => Event::session_started(raw),
+        Some("SessionEnd") => Event::session_stopped(raw),
         Some(name) => return Err(format!("unknown hook_event_name: {name}").into()),
         None => return Err("missing hook_event_name".into()),
     };
@@ -148,6 +149,18 @@ mod tests {
 
         assert_eq!(event.actor, Actor::System);
         assert_eq!(event.kind, Kind::SessionStarted);
+        assert_eq!(event.payload, json!({}));
+        assert_eq!(event.raw, raw);
+    }
+
+    #[test]
+    fn session_end_is_a_session_stopped_event() {
+        let raw = json!({"hook_event_name": "SessionEnd"});
+
+        let event = event_from_hook(raw.clone()).unwrap();
+
+        assert_eq!(event.actor, Actor::System);
+        assert_eq!(event.kind, Kind::SessionStopped);
         assert_eq!(event.payload, json!({}));
         assert_eq!(event.raw, raw);
     }
