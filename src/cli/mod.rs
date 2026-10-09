@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
 use tokio::io::AsyncReadExt;
 
 use crate::app::AppService;
-use crate::core::{Actor, EventStore};
+use crate::core::{Actor, Event, EventStore};
 use crate::server;
 
 /// Records what coding agents do.
@@ -62,19 +62,30 @@ async fn status<S: EventStore>(service: &AppService<S>) -> Result<()> {
 async fn hook<S: EventStore>(service: &AppService<S>) -> Result<()> {
     let mut input = String::new();
     tokio::io::stdin().read_to_string(&mut input).await?;
-    let payload: serde_json::Value = serde_json::from_str(&input)?;
-    let name = payload["hook_event_name"].as_str();
-    service.record(actor_of(name)?, payload).await
+    let raw: serde_json::Value = serde_json::from_str(&input)?;
+    service.record(event_from_hook(raw)?).await
 }
 
-fn actor_of(hook_event_name: Option<&str>) -> Result<Actor> {
-    match hook_event_name {
-        Some("UserPromptSubmit") => Ok(Actor::Human),
-        Some("PostToolUse" | "SubagentStop" | "Stop") => Ok(Actor::Agent),
-        Some("SessionStart") => Ok(Actor::System),
-        Some(name) => Err(format!("unknown hook_event_name: {name}").into()),
-        None => Err("missing hook_event_name".into()),
-    }
+fn event_from_hook(raw: serde_json::Value) -> Result<Event> {
+    let name = raw["hook_event_name"].as_str();
+    let event = match name {
+        Some("UserPromptSubmit") => Event::message(Actor::Human, &text(&raw, "prompt")?, raw),
+        Some("Stop" | "SubagentStop") => {
+            Event::message(Actor::Agent, &text(&raw, "last_assistant_message")?, raw)
+        }
+        Some("PostToolUse") => Event::tool_used(raw),
+        Some("SessionStart") => Event::session_started(raw),
+        Some(name) => return Err(format!("unknown hook_event_name: {name}").into()),
+        None => return Err("missing hook_event_name".into()),
+    };
+    Ok(event)
+}
+
+fn text(raw: &serde_json::Value, field: &str) -> Result<String> {
+    raw[field]
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| format!("missing {field}").into())
 }
 
 fn status_line(count: usize) -> String {
@@ -88,24 +99,69 @@ fn status_line(count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::Kind;
+    use serde_json::json;
 
     #[test]
-    fn hook_event_names_map_to_actors() {
-        for (name, actor) in [
-            ("UserPromptSubmit", Actor::Human),
-            ("PostToolUse", Actor::Agent),
-            ("SubagentStop", Actor::Agent),
-            ("Stop", Actor::Agent),
-            ("SessionStart", Actor::System),
-        ] {
-            assert_eq!(actor_of(Some(name)).unwrap(), actor);
+    fn user_prompt_is_a_human_message() {
+        let raw = json!({"hook_event_name": "UserPromptSubmit", "prompt": "hi"});
+
+        let event = event_from_hook(raw.clone()).unwrap();
+
+        assert_eq!(event.actor, Actor::Human);
+        assert_eq!(event.kind, Kind::Message);
+        assert_eq!(event.payload, json!({"content": "hi"}));
+        assert_eq!(event.raw, raw);
+    }
+
+    #[test]
+    fn stops_are_agent_messages() {
+        for name in ["Stop", "SubagentStop"] {
+            let raw = json!({"hook_event_name": name, "last_assistant_message": "done"});
+
+            let event = event_from_hook(raw.clone()).unwrap();
+
+            assert_eq!(event.actor, Actor::Agent);
+            assert_eq!(event.kind, Kind::Message);
+            assert_eq!(event.payload, json!({"content": "done"}));
+            assert_eq!(event.raw, raw);
         }
     }
 
     #[test]
+    fn post_tool_use_is_a_tool_used_event() {
+        let raw = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash"});
+
+        let event = event_from_hook(raw.clone()).unwrap();
+
+        assert_eq!(event.actor, Actor::Agent);
+        assert_eq!(event.kind, Kind::ToolUsed);
+        assert_eq!(event.payload, json!({}));
+        assert_eq!(event.raw, raw);
+    }
+
+    #[test]
+    fn session_start_is_a_session_started_event() {
+        let raw = json!({"hook_event_name": "SessionStart"});
+
+        let event = event_from_hook(raw.clone()).unwrap();
+
+        assert_eq!(event.actor, Actor::System);
+        assert_eq!(event.kind, Kind::SessionStarted);
+        assert_eq!(event.payload, json!({}));
+        assert_eq!(event.raw, raw);
+    }
+
+    #[test]
     fn unknown_or_missing_hook_event_name_is_an_error() {
-        assert!(actor_of(Some("PreToolUse")).is_err());
-        assert!(actor_of(None).is_err());
+        assert!(event_from_hook(json!({"hook_event_name": "PreToolUse"})).is_err());
+        assert!(event_from_hook(json!({})).is_err());
+    }
+
+    #[test]
+    fn missing_or_non_string_content_is_an_error() {
+        assert!(event_from_hook(json!({"hook_event_name": "UserPromptSubmit"})).is_err());
+        assert!(event_from_hook(json!({"hook_event_name": "Stop", "last_assistant_message": 1})).is_err());
     }
 
     #[test]
