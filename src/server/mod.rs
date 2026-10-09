@@ -67,13 +67,13 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::{Actor, Event};
+    use crate::core::Event;
 
     struct Fixed(usize);
 
     impl EventStore for Fixed {
         async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
-            Ok((0..self.0).map(|_| Event::new(Actor::System, json!({}))).collect())
+            Ok((0..self.0).map(|_| Event::session_started(json!({}))).collect())
         }
 
         async fn append(&self, _: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {

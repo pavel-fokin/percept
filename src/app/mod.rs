@@ -2,7 +2,7 @@
 
 use std::error::Error;
 
-use crate::core::{Actor, Event, EventStore};
+use crate::core::{Event, EventStore};
 
 pub struct AppService<S: EventStore> {
     store: S,
@@ -17,18 +17,15 @@ impl<S: EventStore> AppService<S> {
         Ok(self.store.all().await?.len())
     }
 
-    pub async fn record(
-        &self,
-        actor: Actor,
-        payload: serde_json::Value,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
-        self.store.append(&Event::new(actor, payload)).await
+    pub async fn record(&self, event: Event) -> Result<(), Box<dyn Error + Send + Sync>> {
+        self.store.append(&event).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::{Actor, Kind};
     use std::sync::Mutex;
 
     use serde_json::json;
@@ -37,7 +34,7 @@ mod tests {
 
     impl EventStore for Fixed {
         async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
-            Ok((0..self.0).map(|_| Event::new(Actor::System, json!({}))).collect())
+            Ok((0..self.0).map(|_| Event::session_started(json!({}))).collect())
         }
 
         async fn append(&self, _: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -58,7 +55,7 @@ mod tests {
     }
 
     #[derive(Default)]
-    struct Recording(Mutex<Vec<(Actor, serde_json::Value)>>);
+    struct Recording(Mutex<Vec<(Actor, Kind, serde_json::Value)>>);
 
     impl EventStore for &Recording {
         async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
@@ -66,7 +63,7 @@ mod tests {
         }
 
         async fn append(&self, event: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {
-            self.0.lock().unwrap().push((event.actor, event.payload.clone()));
+            self.0.lock().unwrap().push((event.actor, event.kind, event.payload.clone()));
             Ok(())
         }
     }
@@ -82,20 +79,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn record_appends_an_event_with_the_actor_and_payload() {
+    async fn record_appends_the_event() {
         let store = Recording::default();
+
         AppService::new(&store)
-            .record(Actor::Human, json!({"a": 1}))
+            .record(Event::message(Actor::Human, "hi", json!({})))
             .await
             .unwrap();
+
         assert_eq!(
             *store.0.lock().unwrap(),
-            vec![(Actor::Human, json!({"a": 1}))]
+            vec![(Actor::Human, Kind::Message, json!({"content": "hi"}))]
         );
     }
 
     #[tokio::test]
     async fn record_passes_store_errors_through() {
-        assert!(AppService::new(Broken).record(Actor::Agent, json!({})).await.is_err());
+        assert!(AppService::new(Broken).record(Event::tool_used(json!({}))).await.is_err());
     }
 }

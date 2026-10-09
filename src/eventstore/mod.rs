@@ -69,7 +69,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
-    use crate::core::{Actor, EventId};
+    use crate::core::{Actor, EventId, Kind};
     use serde_json::json;
 
     struct TempFile(PathBuf);
@@ -116,7 +116,7 @@ mod tests {
     #[tokio::test]
     async fn reads_one_event_per_line() {
         let file = TempFile::new();
-        let events: Vec<Event> = (0..3).map(|_| Event::new(Actor::Agent, json!({}))).collect();
+        let events: Vec<Event> = (0..3).map(|_| Event::tool_used(json!({}))).collect();
         let ids: Vec<EventId> = events.iter().map(|e| e.id).collect();
         let text: String = events
             .iter()
@@ -133,24 +133,32 @@ mod tests {
     async fn append_creates_the_file_and_round_trips() {
         let file = TempFile::new();
         let store = file.store();
-        for (actor, payload) in [(Actor::Human, json!({"a": 1})), (Actor::System, json!([2]))] {
-            store.append(&Event::new(actor, payload)).await.unwrap();
-        }
+        store
+            .append(&Event::message(Actor::Human, "hi", json!({"a": 1})))
+            .await
+            .unwrap();
+        store
+            .append(&Event::session_started(json!({"b": 2})))
+            .await
+            .unwrap();
 
         let events = store.all().await.unwrap();
 
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].actor, Actor::Human);
-        assert_eq!(events[0].payload, json!({"a": 1}));
+        assert_eq!(events[0].kind, Kind::Message);
+        assert_eq!(events[0].payload, json!({"content": "hi"}));
+        assert_eq!(events[0].raw, json!({"a": 1}));
         assert_eq!(events[1].actor, Actor::System);
-        assert_eq!(events[1].payload, json!([2]));
+        assert_eq!(events[1].kind, Kind::SessionStarted);
+        assert_eq!(events[1].raw, json!({"b": 2}));
     }
 
     #[tokio::test]
     async fn append_creates_a_missing_directory() {
         let dir = TempFile::new();
         let nested = JsonlStore::new(dir.0.join("sub").join("log.jsonl"));
-        nested.append(&Event::new(Actor::Agent, json!(null))).await.unwrap();
+        nested.append(&Event::tool_used(json!(null))).await.unwrap();
         assert_eq!(nested.all().await.unwrap().len(), 1);
         let _ = fs::remove_dir_all(&dir.0);
     }
