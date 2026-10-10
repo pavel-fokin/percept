@@ -1,13 +1,6 @@
 import { Link, useLoaderData, useRouteError } from "react-router";
-import { describe, getData } from "./api";
-import { absolute, relative } from "./format";
-
-export type Session = {
-  id: string;
-  key: string;
-  title: string | null;
-  created_at: string;
-};
+import { describe, getData, type Session } from "./api";
+import { full, relative } from "./format";
 
 const README = "https://github.com/pavel-fokin/percept#readme";
 
@@ -16,16 +9,18 @@ export function loadSessions() {
 }
 
 export function Sessions() {
-  const sessions = useLoaderData<Session[]>();
+  const sessions = useLoaderData<typeof loadSessions>();
 
   if (sessions.length === 0) return <EmptyState />;
+
+  const now = new Date();
 
   return (
     <>
       <h2 className="pt-6 pb-2 text-sm font-semibold text-muted">Sessions</h2>
       <ul>
         {sessions.map((session) => (
-          <SessionRow key={session.id} session={session} />
+          <SessionRow key={session.id} session={session} now={now} />
         ))}
       </ul>
     </>
@@ -36,7 +31,7 @@ export function SessionsError() {
   return <p className="pt-6">Failed to load sessions: {describe(useRouteError())}</p>;
 }
 
-function SessionRow({ session }: { session: Session }) {
+function SessionRow({ session, now }: { session: Session; now: Date }) {
   const started = new Date(session.created_at);
 
   return (
@@ -54,10 +49,10 @@ function SessionRow({ session }: { session: Session }) {
         </span>
         <time
           dateTime={session.created_at}
-          title={absolute(started)}
+          title={full.format(started)}
           className="flex-none text-xs whitespace-nowrap text-muted tabular-nums"
         >
-          {relative(started, new Date())}
+          {relative(started, now)}
         </time>
       </Link>
     </li>

@@ -1,19 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { isRouteErrorResponse, Link, LoaderFunctionArgs, useLoaderData, useRouteError } from "react-router";
-import { describe, getData } from "./api";
-import { absolute, time } from "./format";
-import type { Session } from "./Sessions";
+import { describe, getData, type Event, type Session } from "./api";
+import { full, time } from "./format";
 
-type Event = {
-  id: string;
-  actor: "human" | "agent" | "system";
-  kind: "SessionCreated" | "SessionStarted" | "SessionStopped" | "Message" | "ToolUsed";
-  payload: Record<string, unknown>;
-  created_at: string;
-};
-
+// `divided` marks a new exchange: a human turn after the first one.
 type Block =
-  | { type: "turn"; actor: "human" | "agent"; events: Event[] }
+  | { type: "turn"; actor: "human" | "agent"; events: Event[]; divided: boolean }
   | { type: "system"; event: Event };
 
 export async function loadSession({ params }: LoaderFunctionArgs) {
@@ -24,22 +16,23 @@ export async function loadSession({ params }: LoaderFunctionArgs) {
   return { session, events };
 }
 
-// A turn is a run of consecutive events by one actor. ToolUsed counts as the agent's.
+// A turn is a run of consecutive events by one actor; system events stand alone.
 function turns(events: Event[]) {
   const blocks: Block[] = [];
+  let humanTurns = 0;
 
   for (const event of events) {
     if (event.kind === "SessionCreated") continue;
 
-    if (event.kind === "SessionStarted" || event.kind === "SessionStopped") {
+    if (event.actor === "system") {
       blocks.push({ type: "system", event });
       continue;
     }
 
-    const actor = event.kind === "Message" && event.actor === "human" ? "human" : "agent";
+    const { actor } = event;
     const last = blocks.at(-1);
     if (last?.type === "turn" && last.actor === actor) last.events.push(event);
-    else blocks.push({ type: "turn", actor, events: [event] });
+    else blocks.push({ type: "turn", actor, events: [event], divided: actor === "human" && humanTurns++ > 0 });
   }
 
   return blocks;
@@ -47,10 +40,13 @@ function turns(events: Event[]) {
 
 export function SessionPage() {
   const { session, events } = useLoaderData<typeof loadSession>();
+  const blocks = useMemo(() => turns(events), [events]);
   const [open, setOpen] = useState<string>();
-  const toggle = (id: string) => setOpen((current) => (current === id ? undefined : id));
-
-  let humans = 0;
+  // A click that ends a text selection is for copying, not for the time.
+  const toggle = (id: string) => {
+    if (getSelection()?.toString()) return;
+    setOpen((current) => (current === id ? undefined : id));
+  };
 
   return (
     <>
@@ -72,11 +68,11 @@ export function SessionPage() {
           {session.title ?? session.key}
         </h2>
         <time dateTime={session.created_at} className="text-xs text-muted">
-          {absolute(new Date(session.created_at))}
+          {full.format(new Date(session.created_at))}
         </time>
       </header>
       <div className="grid gap-6 pt-6 pb-10">
-        {turns(events).map((block) => {
+        {blocks.map((block) => {
           if (block.type === "system") {
             const { event } = block;
             return (
@@ -93,21 +89,20 @@ export function SessionPage() {
           }
 
           const id = block.events[0].id;
-          const exchange = block.actor === "human" && humans++ > 0;
 
           return (
             <section
               key={id}
               data-open={open === id || undefined}
               onClick={() => toggle(id)}
-              className={`group grid cursor-default gap-2 ${exchange ? "border-t border-border pt-6" : ""}`}
+              className={`group grid cursor-default gap-2 ${block.divided ? "border-t border-border pt-6" : ""}`}
             >
               <div className="flex items-baseline justify-between gap-4">
                 <span className="font-semibold">{block.actor === "human" ? "You" : "Agent"}</span>
                 <Time iso={block.events[0].created_at} />
               </div>
               {block.events.map((event, i) => (
-                <Item key={event.id} event={event} spaced={i > 0 && !(event.kind === "ToolUsed" && block.events[i - 1].kind === "ToolUsed")} />
+                <Item key={event.id} event={event} previous={block.events[i - 1]} />
               ))}
             </section>
           );
@@ -128,8 +123,10 @@ function Time({ iso }: { iso: string }) {
   );
 }
 
-function Item({ event, spaced }: { event: Event; spaced: boolean }) {
-  const margin = spaced ? "mt-2" : "";
+// Tool lines stack tight; a message keeps a gap from whatever comes before or after it.
+function Item({ event, previous }: { event: Event; previous?: Event }) {
+  const stacked = event.kind === "ToolUsed" && previous?.kind === "ToolUsed";
+  const margin = previous && !stacked ? "mt-2" : "";
 
   if (event.kind === "Message") {
     return (
@@ -145,7 +142,7 @@ function Item({ event, spaced }: { event: Event; spaced: boolean }) {
 export function SessionError() {
   const error = useRouteError();
 
-  if (isRouteErrorResponse(error) && error.status === 404) {
+  if (isRouteErrorResponse(error) && (error.status === 404 || error.status === 400)) {
     return (
       <p className="pt-6">
         Session not found.{" "}

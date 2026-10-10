@@ -14,7 +14,7 @@ use serde_json::json;
 use tokio::net::TcpListener;
 
 use crate::app::AppService;
-use crate::core::{Actor, Event, EventId, EventStore, Kind, SessionId};
+use crate::core::{Actor, EventId, EventStore, Kind, SessionId};
 
 const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 
@@ -88,18 +88,6 @@ struct EventView {
     created_at: jiff::Timestamp,
 }
 
-impl From<Event> for EventView {
-    fn from(e: Event) -> Self {
-        Self {
-            id: e.id,
-            actor: e.actor,
-            kind: e.kind,
-            payload: e.payload,
-            created_at: e.created_at,
-        }
-    }
-}
-
 async fn session_events<S: EventStore + Send + Sync + 'static>(
     State(service): State<Arc<AppService<S>>>,
     Path(id): Path<SessionId>,
@@ -110,7 +98,7 @@ async fn session_events<S: EventStore + Send + Sync + 'static>(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?
         .into_iter()
-        .map(EventView::from)
+        .map(|e| EventView { id: e.id, actor: e.actor, kind: e.kind, payload: e.payload, created_at: e.created_at })
         .collect();
     Ok(Json(json!({ "data": events })))
 }
@@ -160,6 +148,10 @@ mod tests {
         }
     }
 
+    fn json_body(response: &str) -> serde_json::Value {
+        serde_json::from_str(response.rsplit("\r\n\r\n").next().unwrap()).unwrap()
+    }
+
     async fn get_response(path: &str) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -187,7 +179,7 @@ mod tests {
         let response = get_response("/api/sessions").await;
 
         assert!(response.starts_with("HTTP/1.1 200"));
-        let body: serde_json::Value = serde_json::from_str(response.rsplit("\r\n\r\n").next().unwrap()).unwrap();
+        let body = json_body(&response);
         let data = body["data"].as_array().unwrap();
         assert_eq!(data.len(), 1);
         assert_eq!(data[0]["key"], "k");
@@ -200,7 +192,7 @@ mod tests {
         let response = get_response(&format!("/api/sessions/{SESSION}")).await;
 
         assert!(response.starts_with("HTTP/1.1 200"));
-        let body: serde_json::Value = serde_json::from_str(response.rsplit("\r\n\r\n").next().unwrap()).unwrap();
+        let body = json_body(&response);
         assert_eq!(body["data"]["id"], SESSION);
         assert_eq!(body["data"]["key"], "k");
     }
@@ -210,7 +202,7 @@ mod tests {
         let response = get_response(&format!("/api/sessions/{SESSION}/events")).await;
 
         assert!(response.starts_with("HTTP/1.1 200"));
-        let body: serde_json::Value = serde_json::from_str(response.rsplit("\r\n\r\n").next().unwrap()).unwrap();
+        let body = json_body(&response);
         let data = body["data"].as_array().unwrap();
         assert_eq!(data.len(), 3);
         assert_eq!(data[0]["kind"], "SessionCreated");

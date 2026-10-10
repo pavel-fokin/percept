@@ -1,10 +1,6 @@
 export const time = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" });
 const day = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
-const full = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "medium" });
-
-export function absolute(date: Date) {
-  return full.format(date);
-}
+export const full = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "medium" });
 
 export function relative(date: Date, now: Date) {
   const minutes = Math.floor((now.getTime() - date.getTime()) / 60_000);

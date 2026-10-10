@@ -24,13 +24,14 @@ impl<S: EventStore> AppService<S> {
 
         let mut titles: BTreeMap<SessionId, &str> = BTreeMap::new();
         for e in events.iter().filter(|e| e.kind == Kind::Message && e.actor == Actor::Human) {
-            if let Some(content) = e.payload["content"].as_str() {
+            if let Some(content) = e.payload["content"].as_str().filter(|c| !c.trim().is_empty()) {
                 titles.entry(e.session).or_insert(content);
             }
         }
 
-        let mut sessions = events
+        events
             .iter()
+            .rev()
             .filter(|e| e.kind == Kind::SessionCreated)
             .map(|e| {
                 let key = e.payload["key"].as_str().ok_or("SessionCreated without a key")?;
@@ -41,10 +42,7 @@ impl<S: EventStore> AppService<S> {
                     title: titles.get(&e.session).map(|t| t.to_string()),
                 })
             })
-            .collect::<Result<Vec<_>, Box<dyn Error + Send + Sync>>>()?;
-        sessions.reverse();
-
-        Ok(sessions)
+            .collect()
     }
 
     pub async fn session(&self, id: SessionId) -> Result<Option<Session>, Box<dyn Error + Send + Sync>> {
@@ -55,8 +53,8 @@ impl<S: EventStore> AppService<S> {
     pub async fn session_events(&self, id: SessionId) -> Result<Option<Vec<Event>>, Box<dyn Error + Send + Sync>> {
         let events: Vec<Event> = self.store.all().await?.into_iter().filter(|e| e.session == id).collect();
 
-        // Every session starts with its SessionCreated event, so no events means no session.
-        Ok(if events.is_empty() { None } else { Some(events) })
+        let exists = events.iter().any(|e| e.kind == Kind::SessionCreated);
+        Ok(exists.then_some(events))
     }
 
     /// Appends the event to the session the key names, creating the session first if it is new.
@@ -236,6 +234,18 @@ mod tests {
         service.record(key("a"), |s| Event::message(s, Actor::Agent, "agent", json!({}))).await.unwrap();
         service.record(key("a"), |s| Event::message(s, Actor::Human, "first", json!({}))).await.unwrap();
         service.record(key("a"), |s| Event::message(s, Actor::Human, "second", json!({}))).await.unwrap();
+
+        let sessions = service.sessions().await.unwrap();
+
+        assert_eq!(sessions[0].title.as_deref(), Some("first"));
+    }
+
+    #[tokio::test]
+    async fn title_skips_empty_human_messages() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        service.record(key("a"), |s| Event::message(s, Actor::Human, " ", json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::message(s, Actor::Human, "first", json!({}))).await.unwrap();
 
         let sessions = service.sessions().await.unwrap();
 
