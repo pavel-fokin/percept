@@ -29,6 +29,8 @@
 }
 
 @theme {
+  --color-*: initial;
+
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
@@ -41,23 +43,49 @@
   --color-border: var(--border);
 }
 
+/* The scales stay out of @theme: a utility for a step would not follow the theme. */
 :root {
-  --bg: #0e1114;
-  --surface: #161a1e;
-  --text: #e2e6ea;
-  --muted: #b2b9c1;
-  --accent: #7fa4ea;
-  --border: #252a30;
+  --graphite-50: #f9fafb;
+  --graphite-100: #f2f4f5;
+  --graphite-200: #e5e8eb;
+  --graphite-300: #d4d8dc;
+  --graphite-400: #b2b8bf;
+  --graphite-500: #80878e;
+  --graphite-600: #525960;
+  --graphite-700: #3b4047;
+  --graphite-800: #25292f;
+  --graphite-900: #161a1e;
+  --graphite-950: #0e1114;
+
+  /* Only 400 (dark) and 600 (light) are in use, as the accent. */
+  --ink-50: #f2f7ff;
+  --ink-100: #e5efff;
+  --ink-200: #cedffd;
+  --ink-300: #a8c5f9;
+  --ink-400: #7fa4ea;
+  --ink-500: #4e78c7;
+  --ink-600: #2b4880;
+  --ink-700: #1e3663;
+  --ink-800: #15284b;
+  --ink-900: #0c1a34;
+  --ink-950: #060f21;
+
+  --bg: var(--graphite-950);
+  --surface: var(--graphite-900);
+  --text: var(--graphite-200);
+  --muted: var(--graphite-400);
+  --accent: var(--ink-400);
+  --border: var(--graphite-800);
   color-scheme: dark;
 }
 
 :root[data-theme="light"] {
-  --bg: #f2f3f5;
-  --surface: #e5e8eb;
-  --text: #111417;
-  --muted: #51585f;
-  --accent: #26487f;
-  --border: #d3d8dd;
+  --bg: var(--graphite-100);
+  --surface: var(--graphite-200);
+  --text: var(--graphite-950);
+  --muted: var(--graphite-600);
+  --accent: var(--ink-600);
+  --border: var(--graphite-300);
   color-scheme: light;
 }
 
