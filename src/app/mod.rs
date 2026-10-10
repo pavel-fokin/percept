@@ -171,9 +171,9 @@ mod tests {
     async fn sessions_are_the_created_events_newest_first() {
         let store = Memory::default();
         let service = AppService::new(&store);
-        service.record(key("a"), |s| Event::tool_used(s, json!({}))).await.unwrap();
-        service.record(key("b"), |s| Event::tool_used(s, json!({}))).await.unwrap();
-        service.record(key("a"), |s| Event::tool_used(s, json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
+        service.record(key("b"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
 
         let sessions = service.sessions().await.unwrap();
 
@@ -230,9 +230,9 @@ mod tests {
         let store = Memory::default();
         let service = AppService::new(&store);
 
-        service.record(key("a"), |s| Event::tool_used(s, json!({}))).await.unwrap();
-        service.record(key("a"), |s| Event::tool_used(s, json!({}))).await.unwrap();
-        service.record(key("b"), |s| Event::tool_used(s, json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
+        service.record(key("b"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
 
         let events = store.0.lock().unwrap();
         let kinds: Vec<Kind> = events.iter().map(|e| e.kind).collect();
@@ -254,7 +254,7 @@ mod tests {
     #[tokio::test]
     async fn record_passes_store_errors_through() {
         let result = AppService::new(Broken)
-            .record(key("a"), |s| Event::tool_used(s, json!({})))
+            .record(key("a"), |s| Event::tool_used(s, "Bash", json!({})))
             .await;
 
         assert!(result.is_err());

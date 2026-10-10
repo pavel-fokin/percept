@@ -88,8 +88,8 @@ impl Event {
         Self::build(session, actor, Kind::Message, json!({ "content": content }), Some(raw))
     }
 
-    pub fn tool_used(session: SessionId, raw: serde_json::Value) -> Self {
-        Self::build(session, Actor::Agent, Kind::ToolUsed, json!({}), Some(raw))
+    pub fn tool_used(session: SessionId, tool: &str, raw: serde_json::Value) -> Self {
+        Self::build(session, Actor::Agent, Kind::ToolUsed, json!({ "tool": tool }), Some(raw))
     }
 
     pub fn session_started(session: SessionId, raw: serde_json::Value) -> Self {
@@ -166,15 +166,15 @@ mod tests {
     }
 
     #[test]
-    fn tool_used_is_an_agent_event_with_an_empty_payload() {
+    fn tool_used_is_an_agent_event_carrying_the_tool() {
         let session = SessionId::new();
 
-        let event = Event::tool_used(session, json!({"r": 2}));
+        let event = Event::tool_used(session, "Bash", json!({"r": 2}));
 
         assert_eq!(event.session, session);
         assert_eq!(event.actor, Actor::Agent);
         assert_eq!(event.kind, Kind::ToolUsed);
-        assert_eq!(event.payload, json!({}));
+        assert_eq!(event.payload, json!({"tool": "Bash"}));
         assert_eq!(event.raw, Some(json!({"r": 2})));
     }
 
