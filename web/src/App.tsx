@@ -6,12 +6,12 @@ const README = "https://github.com/pavel-fokin/percept#readme";
 
 export default function App() {
   return (
-    <div className="mx-auto max-w-5xl px-4">
+    <>
       <Header />
-      <main className="py-8">
+      <main className="mx-auto box-content max-w-3xl px-4 py-8">
         <Sessions />
       </main>
-    </div>
+    </>
   );
 }
 
@@ -56,7 +56,7 @@ function EmptyState() {
 
 function Header() {
   return (
-    <header className="flex items-center justify-between border-b border-border py-4">
+    <header className="flex items-center justify-between border-b border-border p-4 md:px-6">
       <h1 className="font-mono text-xl font-medium tracking-tight">
         percept<span className="text-accent">.</span>
       </h1>
