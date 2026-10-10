@@ -10,9 +10,9 @@ export default function App() {
     fetch("/api/status")
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json() as Promise<Status>;
+        return res.json() as Promise<{ data: Status }>;
       })
-      .then(setStatus)
+      .then((body) => setStatus(body.data))
       .catch((e: Error) => setError(e.message));
   }, []);
 

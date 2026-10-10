@@ -49,7 +49,7 @@ async fn status<S: EventStore + Send + Sync + 'static>(
         .event_count()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(json!({ "events": events })))
+    Ok(Json(json!({ "data": { "events": events } })))
 }
 
 async fn fallback(uri: Uri) -> Response {
@@ -112,7 +112,7 @@ mod tests {
         let response = get_response("/api/status").await;
 
         assert!(response.starts_with("HTTP/1.1 200"));
-        assert!(response.ends_with(r#"{"events":3}"#));
+        assert!(response.ends_with(r#"{"data":{"events":3}}"#));
     }
 
     #[tokio::test]
