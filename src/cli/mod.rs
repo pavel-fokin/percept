@@ -83,7 +83,10 @@ fn event_from_hook(raw: serde_json::Value) -> Result<(SessionKey, EventBuilder)>
             let content = text(&raw, "last_assistant_message")?;
             Box::new(move |s| Event::message(s, Actor::Agent, &content, raw))
         }
-        Some("PostToolUse") => Box::new(move |s| Event::tool_used(s, raw)),
+        Some("PostToolUse") => {
+            let tool = text(&raw, "tool_name")?;
+            Box::new(move |s| Event::tool_used(s, &tool, raw))
+        }
         Some("SessionStart") => Box::new(move |s| Event::session_started(s, raw)),
         Some("SessionEnd") => Box::new(move |s| Event::session_stopped(s, raw)),
         Some(name) => return Err(format!("unknown hook_event_name: {name}").into()),
@@ -156,7 +159,7 @@ mod tests {
 
         assert_eq!(event.actor, Actor::Agent);
         assert_eq!(event.kind, Kind::ToolUsed);
-        assert_eq!(event.payload, json!({}));
+        assert_eq!(event.payload, json!({"tool": "Bash"}));
         assert_eq!(event.raw, Some(raw));
     }
 
@@ -200,6 +203,11 @@ mod tests {
     fn missing_or_non_string_content_is_an_error() {
         assert!(event_from_hook(json!({"hook_event_name": "UserPromptSubmit", "session_id": "a"})).is_err());
         assert!(event_from_hook(json!({"hook_event_name": "Stop", "last_assistant_message": 1, "session_id": "a"})).is_err());
+    }
+
+    #[test]
+    fn missing_tool_name_is_an_error() {
+        assert!(event_from_hook(json!({"hook_event_name": "PostToolUse", "session_id": "a"})).is_err());
     }
 
     #[test]

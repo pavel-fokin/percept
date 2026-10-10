@@ -1,64 +1,27 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { Link, Outlet, ScrollRestoration } from "react-router";
 
 type Theme = "light" | "dark";
 
-const README = "https://github.com/pavel-fokin/percept#readme";
-
 export default function App() {
   return (
-    <div className="mx-auto max-w-5xl px-4">
+    <>
       <Header />
-      <main className="py-8">
-        <Sessions />
+      <main className="mx-auto box-content max-w-3xl px-4">
+        <Outlet />
       </main>
-    </div>
-  );
-}
-
-function Sessions() {
-  const [sessions, setSessions] = useState<unknown[]>();
-  const [error, setError] = useState<string>();
-
-  useEffect(() => {
-    fetch("/api/sessions")
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json() as Promise<{ data: unknown[] }>;
-      })
-      .then((body) => setSessions(body.data))
-      .catch((e: Error) => setError(e.message));
-  }, []);
-
-  if (error) return <p>Failed to load sessions: {error}</p>;
-  if (!sessions) return null;
-  if (sessions.length === 0) return <EmptyState />;
-
-  return (
-    <p className="text-muted">
-      {sessions.length} {sessions.length === 1 ? "session" : "sessions"}
-    </p>
-  );
-}
-
-function EmptyState() {
-  return (
-    <section className="grid justify-items-center gap-3 py-16 text-center">
-      <h2 className="text-2xl font-semibold text-balance">No sessions yet</h2>
-      <p className="max-w-[36ch] text-muted">
-        Sessions appear here once a coding client sends its first hook event.
-      </p>
-      <a href={README} className="mt-2 underline decoration-muted underline-offset-3 hover:decoration-text">
-        Set up a client
-      </a>
-    </section>
+      <ScrollRestoration />
+    </>
   );
 }
 
 function Header() {
   return (
-    <header className="flex items-center justify-between border-b border-border py-4">
+    <header className="flex items-center justify-between border-b border-border p-4 md:px-6">
       <h1 className="font-mono text-xl font-medium tracking-tight">
-        percept<span className="text-accent">.</span>
+        <Link to="/">
+          percept<span className="text-accent">.</span>
+        </Link>
       </h1>
       <ThemeSwitch />
     </header>
