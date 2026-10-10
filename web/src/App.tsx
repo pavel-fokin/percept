@@ -43,7 +43,7 @@ function Sessions() {
 function EmptyState() {
   return (
     <section className="grid justify-items-center gap-3 py-16 text-center">
-      <h1 className="text-2xl font-semibold text-balance">No sessions yet</h1>
+      <h2 className="text-2xl font-semibold text-balance">No sessions yet</h2>
       <p className="max-w-[36ch] text-muted">
         Sessions appear here once a coding client sends its first hook event.
       </p>
@@ -57,9 +57,9 @@ function EmptyState() {
 function Header() {
   return (
     <header className="flex items-center justify-between border-b border-border py-4">
-      <span className="font-mono text-xl font-medium tracking-tight">
+      <h1 className="font-mono text-xl font-medium tracking-tight">
         percept<span className="text-accent">.</span>
-      </span>
+      </h1>
       <ThemeSwitch />
     </header>
   );
