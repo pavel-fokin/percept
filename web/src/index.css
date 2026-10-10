@@ -1,1 +1,92 @@
 @import "tailwindcss";
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-weight: 400;
+  font-display: swap;
+  src: url("@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-weight: 600;
+  font-display: swap;
+  src: url("@fontsource/ibm-plex-sans/files/ibm-plex-sans-latin-600-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 400;
+  font-display: swap;
+  src: url("@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-weight: 500;
+  font-display: swap;
+  src: url("@fontsource/ibm-plex-mono/files/ibm-plex-mono-latin-500-normal.woff2") format("woff2");
+}
+
+@theme {
+  --color-*: initial;
+
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+
+  --color-bg: var(--graphite-950);
+  --color-surface: var(--graphite-900);
+  --color-text: var(--graphite-200);
+  --color-muted: var(--graphite-400);
+  /* The wordmark dot only. Links, buttons and focus stay monochrome. */
+  --color-accent: var(--ink-400);
+  --color-border: var(--graphite-800);
+}
+
+:root[data-theme="light"] {
+  --color-bg: var(--graphite-100);
+  --color-surface: var(--graphite-200);
+  --color-text: var(--graphite-950);
+  --color-muted: var(--graphite-600);
+  --color-accent: var(--ink-600);
+  --color-border: var(--graphite-300);
+  color-scheme: light;
+}
+
+/* The scales stay out of @theme: a utility for a step would not follow the theme. */
+:root {
+  --graphite-50: #f9fafb;
+  --graphite-100: #f2f4f5;
+  --graphite-200: #e5e8eb;
+  --graphite-300: #d4d8dc;
+  --graphite-400: #b2b8bf;
+  --graphite-500: #80878e;
+  --graphite-600: #525960;
+  --graphite-700: #3b4047;
+  --graphite-800: #25292f;
+  --graphite-900: #161a1e;
+  --graphite-950: #0e1114;
+
+  /* Only 400 (dark) and 600 (light) are in use, as the accent. */
+  --ink-50: #f2f7ff;
+  --ink-100: #e5efff;
+  --ink-200: #cedffd;
+  --ink-300: #a8c5f9;
+  --ink-400: #7fa4ea;
+  --ink-500: #4e78c7;
+  --ink-600: #2b4880;
+  --ink-700: #1e3663;
+  --ink-800: #15284b;
+  --ink-900: #0c1a34;
+  --ink-950: #060f21;
+
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-bg font-sans text-text;
+}
+
+:focus-visible {
+  @apply outline-2 outline-offset-2 outline-text;
+}
