@@ -1,19 +1,20 @@
 import { useEffect, useState } from "react";
 
-type Status = { events: number };
 type Theme = "light" | "dark";
 
+const README = "https://github.com/pavel-fokin/percept#readme";
+
 export default function App() {
-  const [status, setStatus] = useState<Status>();
+  const [sessions, setSessions] = useState<unknown[]>();
   const [error, setError] = useState<string>();
 
   useEffect(() => {
-    fetch("/api/status")
+    fetch("/api/sessions")
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json() as Promise<{ data: Status }>;
+        return res.json() as Promise<{ data: unknown[] }>;
       })
-      .then((body) => setStatus(body.data))
+      .then((body) => setSessions(body.data))
       .catch((e: Error) => setError(e.message));
   }, []);
 
@@ -22,14 +23,30 @@ export default function App() {
       <Header />
       <main className="py-8">
         {error ? (
-          <p>Failed to load status: {error}</p>
-        ) : status ? (
-          <p>{status.events} events</p>
-        ) : (
-          <p className="text-muted">Loading...</p>
-        )}
+          <p>Failed to load sessions: {error}</p>
+        ) : sessions?.length === 0 ? (
+          <EmptyState />
+        ) : sessions ? (
+          <p className="text-muted">
+            {sessions.length} {sessions.length === 1 ? "session" : "sessions"}
+          </p>
+        ) : null}
       </main>
     </div>
+  );
+}
+
+function EmptyState() {
+  return (
+    <section className="grid justify-items-center gap-3 py-16 text-center">
+      <h1 className="text-2xl font-semibold text-balance">No sessions yet</h1>
+      <p className="max-w-[36ch] text-muted">
+        Sessions appear here once a coding client sends its first hook event.
+      </p>
+      <a href={README} className="mt-2 text-accent underline underline-offset-3">
+        Set up a client
+      </a>
+    </section>
   );
 }
 
