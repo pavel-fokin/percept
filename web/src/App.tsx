@@ -43,7 +43,7 @@ function EmptyState() {
       <p className="max-w-[36ch] text-muted">
         Sessions appear here once a coding client sends its first hook event.
       </p>
-      <a href={README} className="mt-2 text-accent underline underline-offset-3">
+      <a href={README} className="mt-2 underline decoration-muted underline-offset-3 hover:decoration-text">
         Set up a client
       </a>
     </section>
@@ -97,7 +97,7 @@ function ThemeButton(props: {
       aria-label={props.label}
       aria-pressed={props.pressed}
       onClick={props.onClick}
-      className="cursor-pointer rounded px-2.5 py-1.5 text-muted aria-pressed:bg-surface aria-pressed:text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+      className="cursor-pointer rounded px-2.5 py-1.5 text-muted aria-pressed:bg-surface aria-pressed:text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-text"
     >
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="size-3.5">
         {props.children}
