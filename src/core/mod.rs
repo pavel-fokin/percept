@@ -16,6 +16,8 @@ pub struct Session {
     pub id: SessionId,
     pub key: SessionKey,
     pub created_at: Timestamp,
+    /// The first thing the human said, if they said anything.
+    pub title: Option<String>,
 }
 
 pub type SessionId = Id<Session>;

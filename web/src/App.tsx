@@ -2,6 +2,13 @@ import { useEffect, useState } from "react";
 
 type Theme = "light" | "dark";
 
+type Session = {
+  id: string;
+  key: string;
+  title: string | null;
+  created_at: string;
+};
+
 const README = "https://github.com/pavel-fokin/percept#readme";
 
 export default function App() {
@@ -16,14 +23,14 @@ export default function App() {
 }
 
 function Sessions() {
-  const [sessions, setSessions] = useState<unknown[]>();
+  const [sessions, setSessions] = useState<Session[]>();
   const [error, setError] = useState<string>();
 
   useEffect(() => {
     fetch("/api/sessions")
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json() as Promise<{ data: unknown[] }>;
+        return res.json() as Promise<{ data: Session[] }>;
       })
       .then((body) => setSessions(body.data))
       .catch((e: Error) => setError(e.message));
@@ -34,10 +41,66 @@ function Sessions() {
   if (sessions.length === 0) return <EmptyState />;
 
   return (
-    <p className="text-muted">
-      {sessions.length} {sessions.length === 1 ? "session" : "sessions"}
-    </p>
+    <>
+      <h2 className="pt-6 pb-2 text-sm font-semibold text-muted">Sessions</h2>
+      <ul>
+        {sessions.map((session) => (
+          <SessionRow key={session.id} session={session} />
+        ))}
+      </ul>
+    </>
   );
+}
+
+function SessionRow({ session }: { session: Session }) {
+  const started = new Date(session.created_at);
+
+  return (
+    <li className="border-t border-border first:border-t-0 has-[>a:hover]:border-transparent [li:has(>a:hover)+&]:border-transparent">
+      <a
+        href={`/sessions/${session.id}`}
+        className="-mx-3 flex min-h-11 flex-col gap-0.5 rounded-md p-3 hover:bg-surface focus-visible:bg-surface md:flex-row md:items-baseline md:gap-6"
+      >
+        <span
+          className={`min-w-0 flex-1 line-clamp-2 text-base md:line-clamp-1 md:text-sm ${
+            session.title ? "" : "font-mono text-muted"
+          }`}
+        >
+          {session.title ?? session.key}
+        </span>
+        <time
+          dateTime={session.created_at}
+          title={absolute(started)}
+          className="flex-none text-xs whitespace-nowrap text-muted tabular-nums"
+        >
+          {relative(started, new Date())}
+        </time>
+      </a>
+    </li>
+  );
+}
+
+const time = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit" });
+const day = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short" });
+const full = new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "medium" });
+
+function absolute(date: Date) {
+  return full.format(date);
+}
+
+function relative(date: Date, now: Date) {
+  const minutes = Math.floor((now.getTime() - date.getTime()) / 60_000);
+  if (minutes < 60) return `${Math.max(minutes, 0)} min ago`;
+  if (minutes < 360) return `${Math.floor(minutes / 60)} h ago`;
+
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (date >= midnight) return `Today, ${time.format(date)}`;
+
+  const yesterday = new Date(midnight);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date >= yesterday) return `Yesterday, ${time.format(date)}`;
+
+  return day.format(date);
 }
 
 function EmptyState() {

@@ -1,8 +1,9 @@
 //! Application layer: `AppService` runs use cases over the domain.
 
+use std::collections::BTreeMap;
 use std::error::Error;
 
-use crate::core::{Event, EventStore, Kind, Session, SessionId, SessionKey};
+use crate::core::{Actor, Event, EventStore, Kind, Session, SessionId, SessionKey};
 
 pub struct AppService<S: EventStore> {
     store: S,
@@ -17,12 +18,19 @@ impl<S: EventStore> AppService<S> {
         Ok(self.store.all().await?.len())
     }
 
-    /// Sessions in log order, oldest first.
+    /// Sessions newest first.
     pub async fn sessions(&self) -> Result<Vec<Session>, Box<dyn Error + Send + Sync>> {
-        self.store
-            .all()
-            .await?
-            .into_iter()
+        let events = self.store.all().await?;
+
+        let mut titles: BTreeMap<SessionId, &str> = BTreeMap::new();
+        for e in events.iter().filter(|e| e.kind == Kind::Message && e.actor == Actor::Human) {
+            if let Some(content) = e.payload["content"].as_str() {
+                titles.entry(e.session).or_insert(content);
+            }
+        }
+
+        let mut sessions = events
+            .iter()
             .filter(|e| e.kind == Kind::SessionCreated)
             .map(|e| {
                 let key = e.payload["key"].as_str().ok_or("SessionCreated without a key")?;
@@ -30,9 +38,13 @@ impl<S: EventStore> AppService<S> {
                     id: e.session,
                     key: SessionKey::new(key.into()),
                     created_at: e.created_at,
+                    title: titles.get(&e.session).map(|t| t.to_string()),
                 })
             })
-            .collect()
+            .collect::<Result<Vec<_>, Box<dyn Error + Send + Sync>>>()?;
+        sessions.reverse();
+
+        Ok(sessions)
     }
 
     /// Appends the event to the session the key names, creating the session first if it is new.
@@ -60,7 +72,6 @@ impl<S: EventStore> AppService<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Actor, Kind};
     use std::sync::Mutex;
 
     use serde_json::json;
@@ -157,7 +168,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sessions_are_the_created_events_in_log_order() {
+    async fn sessions_are_the_created_events_newest_first() {
         let store = Memory::default();
         let service = AppService::new(&store);
         service.record(key("a"), |s| Event::tool_used(s, json!({}))).await.unwrap();
@@ -168,8 +179,32 @@ mod tests {
 
         let events = store.0.lock().unwrap();
         let found: Vec<(SessionId, &str)> = sessions.iter().map(|s| (s.id, s.key.as_str())).collect();
-        assert_eq!(found, vec![(events[0].session, "a"), (events[2].session, "b")]);
-        assert_eq!(sessions[0].created_at, events[0].created_at);
+        assert_eq!(found, vec![(events[2].session, "b"), (events[0].session, "a")]);
+        assert_eq!(sessions[1].created_at, events[0].created_at);
+    }
+
+    #[tokio::test]
+    async fn title_is_the_first_human_message() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        service.record(key("a"), |s| Event::message(s, Actor::Agent, "agent", json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::message(s, Actor::Human, "first", json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::message(s, Actor::Human, "second", json!({}))).await.unwrap();
+
+        let sessions = service.sessions().await.unwrap();
+
+        assert_eq!(sessions[0].title.as_deref(), Some("first"));
+    }
+
+    #[tokio::test]
+    async fn title_is_none_without_a_human_message() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        service.record(key("a"), |s| Event::message(s, Actor::Agent, "agent", json!({}))).await.unwrap();
+
+        let sessions = service.sessions().await.unwrap();
+
+        assert_eq!(sessions[0].title, None);
     }
 
     #[tokio::test]
