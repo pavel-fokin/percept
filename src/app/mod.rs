@@ -26,7 +26,11 @@ impl<S: EventStore> AppService<S> {
             .filter(|e| e.kind == Kind::SessionCreated)
             .map(|e| {
                 let key = e.payload["key"].as_str().ok_or("SessionCreated without a key")?;
-                Ok(Session { id: e.session, key: SessionKey::new(key.into()) })
+                Ok(Session {
+                    id: e.session,
+                    key: SessionKey::new(key.into()),
+                    created_at: e.created_at,
+                })
             })
             .collect()
     }
@@ -165,6 +169,7 @@ mod tests {
         let events = store.0.lock().unwrap();
         let found: Vec<(SessionId, &str)> = sessions.iter().map(|s| (s.id, s.key.as_str())).collect();
         assert_eq!(found, vec![(events[0].session, "a"), (events[2].session, "b")]);
+        assert_eq!(sessions[0].created_at, events[0].created_at);
     }
 
     #[tokio::test]

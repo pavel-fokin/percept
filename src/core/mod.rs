@@ -2,6 +2,7 @@
 
 use std::error::Error;
 
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -14,6 +15,7 @@ pub type EventId = Id<Event>;
 pub struct Session {
     pub id: SessionId,
     pub key: SessionKey,
+    pub created_at: Timestamp,
 }
 
 pub type SessionId = Id<Session>;
@@ -61,6 +63,7 @@ pub struct Event {
     pub kind: Kind,
     pub payload: serde_json::Value,
     pub raw: Option<serde_json::Value>,
+    pub created_at: Timestamp,
 }
 
 impl Event {
@@ -109,6 +112,7 @@ impl Event {
             kind,
             payload,
             raw,
+            created_at: Timestamp::now(),
         }
     }
 }
