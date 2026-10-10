@@ -53,7 +53,7 @@ function EmptyState() {
 function Header() {
   return (
     <header className="flex items-center justify-between border-b border-border py-4">
-      <span className="text-xl font-semibold tracking-tight">
+      <span className="font-mono text-xl font-medium tracking-tight">
         percept<span className="text-accent">.</span>
       </span>
       <ThemeSwitch />
