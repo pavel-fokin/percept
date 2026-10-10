@@ -2,7 +2,7 @@
 
 use std::error::Error;
 
-use crate::core::{Event, EventStore, SessionId, SessionKey};
+use crate::core::{Event, EventStore, Kind, Session, SessionId, SessionKey};
 
 pub struct AppService<S: EventStore> {
     store: S,
@@ -15,6 +15,20 @@ impl<S: EventStore> AppService<S> {
 
     pub async fn event_count(&self) -> Result<usize, Box<dyn Error + Send + Sync>> {
         Ok(self.store.all().await?.len())
+    }
+
+    /// Sessions in log order, oldest first.
+    pub async fn sessions(&self) -> Result<Vec<Session>, Box<dyn Error + Send + Sync>> {
+        self.store
+            .all()
+            .await?
+            .into_iter()
+            .filter(|e| e.kind == Kind::SessionCreated)
+            .map(|e| {
+                let key = e.payload["key"].as_str().ok_or("SessionCreated without a key")?;
+                Ok(Session { id: e.session, key: SessionKey::new(key.into()) })
+            })
+            .collect()
     }
 
     /// Appends the event to the session the key names, creating the session first if it is new.
@@ -112,7 +126,8 @@ mod tests {
         }
 
         async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
-            unimplemented!()
+            let events = self.0.lock().unwrap();
+            events.iter().map(|e| Ok(serde_json::from_value(serde_json::to_value(e)?)?)).collect()
         }
 
         async fn append(&self, event: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -134,6 +149,22 @@ mod tests {
     #[tokio::test]
     async fn passes_store_errors_through() {
         assert!(AppService::new(Broken).event_count().await.is_err());
+        assert!(AppService::new(Broken).sessions().await.is_err());
+    }
+
+    #[tokio::test]
+    async fn sessions_are_the_created_events_in_log_order() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        service.record(key("a"), |s| Event::tool_used(s, json!({}))).await.unwrap();
+        service.record(key("b"), |s| Event::tool_used(s, json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::tool_used(s, json!({}))).await.unwrap();
+
+        let sessions = service.sessions().await.unwrap();
+
+        let events = store.0.lock().unwrap();
+        let found: Vec<(SessionId, &str)> = sessions.iter().map(|s| (s.id, s.key.as_str())).collect();
+        assert_eq!(found, vec![(events[0].session, "a"), (events[2].session, "b")]);
     }
 
     #[tokio::test]

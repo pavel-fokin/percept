@@ -38,6 +38,7 @@ where
 {
     Router::new()
         .route("/api/status", get(status))
+        .route("/api/sessions", get(sessions))
         .fallback(fallback)
         .with_state(service)
 }
@@ -50,6 +51,16 @@ async fn status<S: EventStore + Send + Sync + 'static>(
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(Json(json!({ "data": { "events": events } })))
+}
+
+async fn sessions<S: EventStore + Send + Sync + 'static>(
+    State(service): State<Arc<AppService<S>>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let sessions = service
+        .sessions()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(json!({ "data": sessions })))
 }
 
 async fn fallback(uri: Uri) -> Response {
@@ -83,9 +94,10 @@ mod tests {
         }
 
         async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
-            Ok((0..self.0)
-                .map(|_| Event::session_started(SessionId::new(), json!({})))
-                .collect())
+            let created = Event::session_created(SessionKey::new("k".into()));
+            let session = created.session;
+            let started = (1..self.0).map(move |_| Event::session_started(session, json!({})));
+            Ok(std::iter::once(created).chain(started).collect())
         }
 
         async fn append(&self, _: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -113,6 +125,19 @@ mod tests {
 
         assert!(response.starts_with("HTTP/1.1 200"));
         assert!(response.ends_with(r#"{"data":{"events":3}}"#));
+    }
+
+    #[tokio::test]
+    async fn sessions_returns_id_and_key_per_session() {
+        let response = get_response("/api/sessions").await;
+
+        assert!(response.starts_with("HTTP/1.1 200"));
+        let body: serde_json::Value = serde_json::from_str(response.rsplit("\r\n\r\n").next().unwrap()).unwrap();
+        let data = body["data"].as_array().unwrap();
+        assert_eq!(data.len(), 1);
+        assert_eq!(data[0]["key"], "k");
+        assert_eq!(data[0].as_object().unwrap().len(), 2);
+        assert!(data[0]["id"].is_string());
     }
 
     #[tokio::test]
