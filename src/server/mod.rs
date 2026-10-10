@@ -67,13 +67,25 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::Event;
+    use crate::core::{Event, SessionId, SessionKey};
 
     struct Fixed(usize);
 
     impl EventStore for Fixed {
+        type Lock = ();
+
+        async fn lock(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+            unimplemented!()
+        }
+
+        async fn session(&self, _: &SessionKey) -> Result<Option<SessionId>, Box<dyn Error + Send + Sync>> {
+            unimplemented!()
+        }
+
         async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
-            Ok((0..self.0).map(|_| Event::session_started(json!({}))).collect())
+            Ok((0..self.0)
+                .map(|_| Event::session_started(SessionId::new(), json!({})))
+                .collect())
         }
 
         async fn append(&self, _: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {

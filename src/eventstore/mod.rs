@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use tokio::io::AsyncWriteExt;
 
-use crate::core::{Event, EventStore};
+use crate::core::{Event, EventStore, Kind, SessionId, SessionKey};
 
 pub struct JsonlStore {
     path: PathBuf,
@@ -18,7 +18,55 @@ impl JsonlStore {
     }
 }
 
+/// Holds the advisory lock; closing the file on drop releases it.
+pub struct Lock {
+    _file: std::fs::File,
+}
+
 impl EventStore for JsonlStore {
+    type Lock = Lock;
+
+    async fn lock(&self) -> Result<Lock, Box<dyn Error + Send + Sync>> {
+        let mut name = self.path.clone().into_os_string();
+        name.push(".lock");
+        let path = PathBuf::from(name);
+
+        let acquire = move || -> std::io::Result<std::fs::File> {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(false)
+                .open(&path)?;
+            file.lock()?;
+
+            Ok(file)
+        };
+
+        let file = tokio::task::spawn_blocking(acquire)
+            .await?
+            .map_err(|error| format!("{}.lock: {error}", self.path.display()))?;
+
+        Ok(Lock { _file: file })
+    }
+
+    async fn session(
+        &self,
+        key: &SessionKey,
+    ) -> Result<Option<SessionId>, Box<dyn Error + Send + Sync>> {
+        let session = self
+            .all()
+            .await?
+            .into_iter()
+            .find(|e| e.kind == Kind::SessionCreated && e.payload["key"] == key.as_str())
+            .map(|e| e.session);
+
+        Ok(session)
+    }
+
     async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
         let text = match tokio::fs::read_to_string(&self.path).await {
             Ok(text) => text,
@@ -69,7 +117,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
-    use crate::core::{Actor, EventId, Kind};
+    use crate::core::{Actor, EventId};
     use serde_json::json;
 
     struct TempFile(PathBuf);
@@ -116,7 +164,7 @@ mod tests {
     #[tokio::test]
     async fn reads_one_event_per_line() {
         let file = TempFile::new();
-        let events: Vec<Event> = (0..3).map(|_| Event::tool_used(json!({}))).collect();
+        let events: Vec<Event> = (0..3).map(|_| Event::tool_used(SessionId::new(), json!({}))).collect();
         let ids: Vec<EventId> = events.iter().map(|e| e.id).collect();
         let text: String = events
             .iter()
@@ -134,11 +182,11 @@ mod tests {
         let file = TempFile::new();
         let store = file.store();
         store
-            .append(&Event::message(Actor::Human, "hi", json!({"a": 1})))
+            .append(&Event::message(SessionId::new(), Actor::Human, "hi", json!({"a": 1})))
             .await
             .unwrap();
         store
-            .append(&Event::session_started(json!({"b": 2})))
+            .append(&Event::session_started(SessionId::new(), json!({"b": 2})))
             .await
             .unwrap();
 
@@ -148,19 +196,48 @@ mod tests {
         assert_eq!(events[0].actor, Actor::Human);
         assert_eq!(events[0].kind, Kind::Message);
         assert_eq!(events[0].payload, json!({"content": "hi"}));
-        assert_eq!(events[0].raw, json!({"a": 1}));
+        assert_eq!(events[0].raw, Some(json!({"a": 1})));
         assert_eq!(events[1].actor, Actor::System);
         assert_eq!(events[1].kind, Kind::SessionStarted);
-        assert_eq!(events[1].raw, json!({"b": 2}));
+        assert_eq!(events[1].raw, Some(json!({"b": 2})));
     }
 
     #[tokio::test]
     async fn append_creates_a_missing_directory() {
         let dir = TempFile::new();
         let nested = JsonlStore::new(dir.0.join("sub").join("log.jsonl"));
-        nested.append(&Event::tool_used(json!(null))).await.unwrap();
+        nested.append(&Event::tool_used(SessionId::new(), json!(null))).await.unwrap();
         assert_eq!(nested.all().await.unwrap().len(), 1);
         let _ = fs::remove_dir_all(&dir.0);
+    }
+
+    #[tokio::test]
+    async fn session_finds_a_created_session_and_none_for_an_unknown_key() {
+        let file = TempFile::new();
+        let store = file.store();
+        let created = Event::session_created(SessionKey::new("a".into()));
+        let session = created.session;
+        store.append(&created).await.unwrap();
+
+        let found = store.session(&SessionKey::new("a".into())).await.unwrap();
+        let unknown = store.session(&SessionKey::new("b".into())).await.unwrap();
+
+        assert_eq!(found, Some(session));
+        assert_eq!(unknown, None);
+    }
+
+    #[tokio::test]
+    async fn lock_creates_a_sibling_lock_file_and_can_be_retaken_after_drop() {
+        let file = TempFile::new();
+        let store = file.store();
+        let lock_path = PathBuf::from(format!("{}.lock", file.0.display()));
+
+        drop(store.lock().await.unwrap());
+        let again = store.lock().await;
+
+        assert!(lock_path.exists());
+        assert!(again.is_ok());
+        let _ = fs::remove_file(lock_path);
     }
 
     #[tokio::test]
