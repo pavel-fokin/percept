@@ -34,13 +34,23 @@
   --font-sans: "IBM Plex Sans", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 
-  --color-bg: var(--bg);
-  --color-surface: var(--surface);
-  --color-text: var(--text);
-  --color-muted: var(--muted);
+  --color-bg: var(--graphite-950);
+  --color-surface: var(--graphite-900);
+  --color-text: var(--graphite-200);
+  --color-muted: var(--graphite-400);
   /* The wordmark dot only. Links, buttons and focus stay monochrome. */
-  --color-accent: var(--accent);
-  --color-border: var(--border);
+  --color-accent: var(--ink-400);
+  --color-border: var(--graphite-800);
+}
+
+:root[data-theme="light"] {
+  --color-bg: var(--graphite-100);
+  --color-surface: var(--graphite-200);
+  --color-text: var(--graphite-950);
+  --color-muted: var(--graphite-600);
+  --color-accent: var(--ink-600);
+  --color-border: var(--graphite-300);
+  color-scheme: light;
 }
 
 /* The scales stay out of @theme: a utility for a step would not follow the theme. */
@@ -70,25 +80,13 @@
   --ink-900: #0c1a34;
   --ink-950: #060f21;
 
-  --bg: var(--graphite-950);
-  --surface: var(--graphite-900);
-  --text: var(--graphite-200);
-  --muted: var(--graphite-400);
-  --accent: var(--ink-400);
-  --border: var(--graphite-800);
   color-scheme: dark;
-}
-
-:root[data-theme="light"] {
-  --bg: var(--graphite-100);
-  --surface: var(--graphite-200);
-  --text: var(--graphite-950);
-  --muted: var(--graphite-600);
-  --accent: var(--ink-600);
-  --border: var(--graphite-300);
-  color-scheme: light;
 }
 
 body {
   @apply bg-bg font-sans text-text;
+}
+
+:focus-visible {
+  @apply outline-2 outline-offset-2 outline-text;
 }
