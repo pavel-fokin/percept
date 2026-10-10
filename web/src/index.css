@@ -36,6 +36,7 @@
   --color-surface: var(--surface);
   --color-text: var(--text);
   --color-muted: var(--muted);
+  /* The wordmark dot only. Links, buttons and focus stay monochrome. */
   --color-accent: var(--accent);
   --color-border: var(--border);
 }
