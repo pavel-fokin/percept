@@ -9,13 +9,17 @@ use crate::shared::Id;
 
 pub type EventId = Id<Event>;
 
-/// Marker for `SessionId`.
-pub struct Session;
+/// A conversation with a coding client, created by a `SessionCreated` event.
+#[derive(Serialize)]
+pub struct Session {
+    pub id: SessionId,
+    pub key: SessionKey,
+}
 
 pub type SessionId = Id<Session>;
 
 /// The client's own session identifier, as the client sent it.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SessionKey(String);
 
 impl SessionKey {
