@@ -4,16 +4,17 @@ use std::error::Error;
 use std::process::Command;
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
+use serde::Serialize;
 use serde_json::json;
 use tokio::net::TcpListener;
 
 use crate::app::AppService;
-use crate::core::EventStore;
+use crate::core::{Actor, Event, EventId, EventStore, Kind, SessionId};
 
 const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 
@@ -39,6 +40,8 @@ where
     Router::new()
         .route("/api/status", get(status))
         .route("/api/sessions", get(sessions))
+        .route("/api/sessions/{id}", get(session))
+        .route("/api/sessions/{id}/events", get(session_events))
         .fallback(fallback)
         .with_state(service)
 }
@@ -63,6 +66,55 @@ async fn sessions<S: EventStore + Send + Sync + 'static>(
     Ok(Json(json!({ "data": sessions })))
 }
 
+async fn session<S: EventStore + Send + Sync + 'static>(
+    State(service): State<Arc<AppService<S>>>,
+    Path(id): Path<SessionId>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let session = service
+        .session(id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+    Ok(Json(json!({ "data": session })))
+}
+
+/// An event as the page reads it: the hook input stays in the log.
+#[derive(Serialize)]
+struct EventView {
+    id: EventId,
+    actor: Actor,
+    kind: Kind,
+    payload: serde_json::Value,
+    created_at: jiff::Timestamp,
+}
+
+impl From<Event> for EventView {
+    fn from(e: Event) -> Self {
+        Self {
+            id: e.id,
+            actor: e.actor,
+            kind: e.kind,
+            payload: e.payload,
+            created_at: e.created_at,
+        }
+    }
+}
+
+async fn session_events<S: EventStore + Send + Sync + 'static>(
+    State(service): State<Arc<AppService<S>>>,
+    Path(id): Path<SessionId>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let events: Vec<EventView> = service
+        .session_events(id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?
+        .into_iter()
+        .map(EventView::from)
+        .collect();
+    Ok(Json(json!({ "data": events })))
+}
+
 async fn fallback(uri: Uri) -> Response {
     let path = uri.path();
     if path == "/api" || path.starts_with("/api/") {
@@ -80,6 +132,8 @@ mod tests {
 
     use crate::core::{Event, SessionId, SessionKey};
 
+    const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
+
     struct Fixed(usize);
 
     impl EventStore for Fixed {
@@ -94,7 +148,8 @@ mod tests {
         }
 
         async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
-            let created = Event::session_created(SessionKey::new("k".into()));
+            let mut created = Event::session_created(SessionKey::new("k".into()));
+            created.session = serde_json::from_value(json!(SESSION))?;
             let session = created.session;
             let started = (1..self.0).map(move |_| Event::session_started(session, json!({})));
             Ok(std::iter::once(created).chain(started).collect())
@@ -138,6 +193,40 @@ mod tests {
         assert_eq!(data[0]["key"], "k");
         assert_eq!(data[0].as_object().unwrap().len(), 4);
         assert!(data[0]["id"].is_string());
+    }
+
+    #[tokio::test]
+    async fn session_returns_one_session() {
+        let response = get_response(&format!("/api/sessions/{SESSION}")).await;
+
+        assert!(response.starts_with("HTTP/1.1 200"));
+        let body: serde_json::Value = serde_json::from_str(response.rsplit("\r\n\r\n").next().unwrap()).unwrap();
+        assert_eq!(body["data"]["id"], SESSION);
+        assert_eq!(body["data"]["key"], "k");
+    }
+
+    #[tokio::test]
+    async fn session_events_omit_raw() {
+        let response = get_response(&format!("/api/sessions/{SESSION}/events")).await;
+
+        assert!(response.starts_with("HTTP/1.1 200"));
+        let body: serde_json::Value = serde_json::from_str(response.rsplit("\r\n\r\n").next().unwrap()).unwrap();
+        let data = body["data"].as_array().unwrap();
+        assert_eq!(data.len(), 3);
+        assert_eq!(data[0]["kind"], "SessionCreated");
+        assert_eq!(data[1]["kind"], "SessionStarted");
+        assert_eq!(data[1]["actor"], "system");
+        let mut fields: Vec<&String> = data[1].as_object().unwrap().keys().collect();
+        fields.sort();
+        assert_eq!(fields, ["actor", "created_at", "id", "kind", "payload"]);
+    }
+
+    #[tokio::test]
+    async fn unknown_session_is_not_found() {
+        let unknown = "0190a0a0-0000-7000-8000-000000000002";
+
+        assert!(get_response(&format!("/api/sessions/{unknown}")).await.starts_with("HTTP/1.1 404"));
+        assert!(get_response(&format!("/api/sessions/{unknown}/events")).await.starts_with("HTTP/1.1 404"));
     }
 
     #[tokio::test]
