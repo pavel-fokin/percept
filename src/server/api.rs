@@ -64,7 +64,7 @@ pub(super) async fn session_events<S: EventStore + Send + Sync + 'static>(
         .map(|e| EventView {
             id: e.id,
             actor: e.actor,
-            kind: e.payload.kind(),
+            kind: e.payload.kind().name(),
             payload: view_payload(&e.payload),
             created_at: e.created_at,
         })

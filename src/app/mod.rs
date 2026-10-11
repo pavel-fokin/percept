@@ -95,6 +95,8 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    use crate::core::Kind;
+
     use serde_json::json;
 
     struct Fixed(usize);
@@ -236,8 +238,8 @@ mod tests {
 
         let events = service.session_events(id).await.unwrap().unwrap();
 
-        let kinds: Vec<&str> = events.iter().map(|e| e.payload.kind()).collect();
-        assert_eq!(kinds, vec!["session.created", "message", "tool.used"]);
+        let kinds: Vec<Kind> = events.iter().map(|e| e.payload.kind()).collect();
+        assert_eq!(kinds, vec![Kind::SessionCreated, Kind::Message, Kind::ToolUsed]);
         assert!(service.session_events(SessionId::new()).await.unwrap().is_none());
     }
 
@@ -306,10 +308,10 @@ mod tests {
         service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", json!({}))).await.unwrap();
 
         let events = store.0.lock().unwrap();
-        let kinds: Vec<&str> = events.iter().map(|e| e.payload.kind()).collect();
+        let kinds: Vec<Kind> = events.iter().map(|e| e.payload.kind()).collect();
         assert_eq!(
             kinds,
-            vec!["session.created", "tool.used", "tool.used", "session.created", "tool.used"]
+            vec![Kind::SessionCreated, Kind::ToolUsed, Kind::ToolUsed, Kind::SessionCreated, Kind::ToolUsed]
         );
         assert_eq!(events[1].payload.session(), events[0].payload.session());
         assert_eq!(events[2].payload.session(), events[0].payload.session());

@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::io::AsyncWriteExt;
 
-use crate::core::{Actor, ClientSessionId, Event, EventId, EventStore, Payload, SessionId, Source};
+use crate::core::{Actor, ClientSessionId, Event, EventId, EventStore, Kind, Payload, SessionId, Source};
 
 pub struct JsonlStore {
     path: PathBuf,
@@ -51,7 +51,7 @@ impl From<&Event> for EventLine {
             id: event.id,
             source: event.source.clone(),
             actor: event.actor,
-            kind: event.payload.kind().into(),
+            kind: event.payload.kind().name().into(),
             payload,
             raw: event.raw.clone(),
             created_at: event.created_at,
@@ -63,17 +63,18 @@ impl TryFrom<EventLine> for Event {
     type Error = Box<dyn Error + Send + Sync>;
 
     fn try_from(line: EventLine) -> Result<Self, Self::Error> {
+        let kind = Kind::from_name(&line.kind).ok_or_else(|| format!("unknown event kind {:?}", line.kind))?;
+
         let p = &line.payload;
-        let payload = match line.kind.as_str() {
-            "session.created" => Payload::SessionCreated {
+        let payload = match kind {
+            Kind::SessionCreated => Payload::SessionCreated {
                 session: field(p, "session")?,
                 client_session_id: ClientSessionId::new(field(p, "client_session_id")?),
             },
-            "session.started" => Payload::SessionStarted { session: field(p, "session")? },
-            "session.stopped" => Payload::SessionStopped { session: field(p, "session")? },
-            "message" => Payload::Message { session: field(p, "session")?, content: field(p, "content")? },
-            "tool.used" => Payload::ToolUsed { session: field(p, "session")?, tool: field(p, "tool")? },
-            kind => return Err(format!("unknown event kind {kind:?}").into()),
+            Kind::SessionStarted => Payload::SessionStarted { session: field(p, "session")? },
+            Kind::SessionStopped => Payload::SessionStopped { session: field(p, "session")? },
+            Kind::Message => Payload::Message { session: field(p, "session")?, content: field(p, "content")? },
+            Kind::ToolUsed => Payload::ToolUsed { session: field(p, "session")?, tool: field(p, "tool")? },
         };
 
         Ok(Event {
@@ -276,10 +277,10 @@ mod tests {
 
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].actor, Actor::Human);
-        assert_eq!(events[0].payload.kind(), "message");
+        assert_eq!(events[0].payload.kind(), Kind::Message);
         assert_eq!(events[0].raw, Some(json!({"a": 1})));
         assert_eq!(events[1].actor, Actor::System);
-        assert_eq!(events[1].payload.kind(), "session.started");
+        assert_eq!(events[1].payload.kind(), Kind::SessionStarted);
         assert_eq!(events[1].raw, Some(json!({"b": 2})));
     }
 

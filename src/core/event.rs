@@ -31,6 +31,39 @@ impl Source {
     }
 }
 
+/// What kind of thing happened. Its name is how the kind is written down.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Kind {
+    SessionCreated,
+    SessionStarted,
+    SessionStopped,
+    Message,
+    ToolUsed,
+}
+
+impl Kind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::SessionCreated => "session.created",
+            Self::SessionStarted => "session.started",
+            Self::SessionStopped => "session.stopped",
+            Self::Message => "message",
+            Self::ToolUsed => "tool.used",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "session.created" => Some(Self::SessionCreated),
+            "session.started" => Some(Self::SessionStarted),
+            "session.stopped" => Some(Self::SessionStopped),
+            "message" => Some(Self::Message),
+            "tool.used" => Some(Self::ToolUsed),
+            _ => None,
+        }
+    }
+}
+
 /// What happened, with the data that kind of event carries.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Payload {
@@ -42,13 +75,13 @@ pub enum Payload {
 }
 
 impl Payload {
-    pub fn kind(&self) -> &'static str {
+    pub fn kind(&self) -> Kind {
         match self {
-            Self::SessionCreated { .. } => "session.created",
-            Self::SessionStarted { .. } => "session.started",
-            Self::SessionStopped { .. } => "session.stopped",
-            Self::Message { .. } => "message",
-            Self::ToolUsed { .. } => "tool.used",
+            Self::SessionCreated { .. } => Kind::SessionCreated,
+            Self::SessionStarted { .. } => Kind::SessionStarted,
+            Self::SessionStopped { .. } => Kind::SessionStopped,
+            Self::Message { .. } => Kind::Message,
+            Self::ToolUsed { .. } => Kind::ToolUsed,
         }
     }
 
@@ -125,7 +158,7 @@ mod tests {
         let event = Event::session_created(Source::fixture(), SessionId::new(), ClientSessionId::new("a".into()));
 
         assert_eq!(event.actor, Actor::System);
-        assert_eq!(event.payload.kind(), "session.created");
+        assert_eq!(event.payload.kind(), Kind::SessionCreated);
         assert!(matches!(
             &event.payload,
             Payload::SessionCreated { client_session_id, .. } if client_session_id.as_str() == "a"
@@ -181,16 +214,26 @@ mod tests {
     fn every_payload_names_its_kind_and_session() {
         let session = SessionId::new();
         let payloads = [
-            (Payload::SessionCreated { session, client_session_id: ClientSessionId::new("a".into()) }, "session.created"),
-            (Payload::SessionStarted { session }, "session.started"),
-            (Payload::SessionStopped { session }, "session.stopped"),
-            (Payload::Message { session, content: "hi".into() }, "message"),
-            (Payload::ToolUsed { session, tool: "Bash".into() }, "tool.used"),
+            (Payload::SessionCreated { session, client_session_id: ClientSessionId::new("a".into()) }, Kind::SessionCreated),
+            (Payload::SessionStarted { session }, Kind::SessionStarted),
+            (Payload::SessionStopped { session }, Kind::SessionStopped),
+            (Payload::Message { session, content: "hi".into() }, Kind::Message),
+            (Payload::ToolUsed { session, tool: "Bash".into() }, Kind::ToolUsed),
         ];
 
         for (payload, kind) in payloads {
             assert_eq!(payload.kind(), kind);
             assert_eq!(payload.session(), session);
         }
+    }
+
+    #[test]
+    fn every_kind_is_found_by_its_name() {
+        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed];
+
+        for kind in kinds {
+            assert_eq!(Kind::from_name(kind.name()), Some(kind));
+        }
+        assert_eq!(Kind::from_name("bogus"), None);
     }
 }
