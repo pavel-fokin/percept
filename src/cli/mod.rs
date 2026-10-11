@@ -6,8 +6,8 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 use tokio::io::AsyncReadExt;
 
-use crate::app::AppService;
-use crate::core::{Actor, ClientSessionId, Event, EventStore, SessionId};
+use crate::app::{AppService, source_path};
+use crate::core::{Actor, ClientSessionId, Event, EventStore, SessionId, Source};
 use crate::server;
 
 /// Records what coding agents do.
@@ -40,7 +40,7 @@ pub async fn run<S: EventStore + Send + Sync + 'static>(service: Arc<AppService<
     };
     let result = match cli.command {
         None => status(&service).await,
-        Some(Command::Hook { .. }) => hook(&service).await,
+        Some(Command::Hook { client }) => hook(&service, client).await,
         Some(Command::Ui) => server::serve(service).await,
     };
     match result {
@@ -59,16 +59,18 @@ async fn status<S: EventStore>(service: &AppService<S>) -> Result<()> {
     Ok(())
 }
 
-async fn hook<S: EventStore>(service: &AppService<S>) -> Result<()> {
+async fn hook<S: EventStore>(service: &AppService<S>, client: String) -> Result<()> {
     let mut input = String::new();
     tokio::io::stdin().read_to_string(&mut input).await?;
     let raw: serde_json::Value = serde_json::from_str(&input)?;
     let (client_session_id, event) = event_from_hook(raw)?;
-    service.record(client_session_id, event).await
+    let source = Source { client, path: source_path(&std::env::current_dir()?).await };
+
+    service.record(client_session_id, source, event).await
 }
 
 /// Makes the hook's event once its session is known.
-type EventBuilder = Box<dyn FnOnce(SessionId) -> Event>;
+type EventBuilder = Box<dyn FnOnce(Source, SessionId) -> Event>;
 
 fn event_from_hook(raw: serde_json::Value) -> Result<(ClientSessionId, EventBuilder)> {
     let client_session_id = ClientSessionId::new(text(&raw, "session_id")?);
@@ -77,18 +79,18 @@ fn event_from_hook(raw: serde_json::Value) -> Result<(ClientSessionId, EventBuil
     let event: EventBuilder = match name {
         Some("UserPromptSubmit") => {
             let content = text(&raw, "prompt")?;
-            Box::new(move |s| Event::message(s, Actor::Human, &content, raw))
+            Box::new(move |source, s| Event::message(source, s, Actor::Human, &content, raw))
         }
         Some("Stop" | "SubagentStop") => {
             let content = text(&raw, "last_assistant_message")?;
-            Box::new(move |s| Event::message(s, Actor::Agent, &content, raw))
+            Box::new(move |source, s| Event::message(source, s, Actor::Agent, &content, raw))
         }
         Some("PostToolUse") => {
             let tool = text(&raw, "tool_name")?;
-            Box::new(move |s| Event::tool_used(s, &tool, raw))
+            Box::new(move |source, s| Event::tool_used(source, s, &tool, raw))
         }
-        Some("SessionStart") => Box::new(move |s| Event::session_started(s, raw)),
-        Some("SessionEnd") => Box::new(move |s| Event::session_stopped(s, raw)),
+        Some("SessionStart") => Box::new(move |source, s| Event::session_started(source, s, raw)),
+        Some("SessionEnd") => Box::new(move |source, s| Event::session_stopped(source, s, raw)),
         Some(name) => return Err(format!("unknown hook_event_name: {name}").into()),
         None => return Err("missing hook_event_name".into()),
     };
@@ -120,7 +122,7 @@ mod tests {
     fn build(raw: serde_json::Value) -> (ClientSessionId, SessionId, Event) {
         let (client_session_id, event) = event_from_hook(raw).unwrap();
         let session = SessionId::new();
-        (client_session_id, session, event(session))
+        (client_session_id, session, event(Source::fixture(), session))
     }
 
     #[test]

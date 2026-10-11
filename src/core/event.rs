@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +15,20 @@ pub enum Actor {
     Human,
     Agent,
     System,
+}
+
+/// Where an event came from: the coding client and the folder it ran in.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Source {
+    pub client: String,
+    pub path: PathBuf,
+}
+
+#[cfg(test)]
+impl Source {
+    pub fn fixture() -> Self {
+        Self { client: "claude".into(), path: "/repo".into() }
+    }
 }
 
 /// What happened, with the data that kind of event carries.
@@ -51,6 +67,7 @@ impl Payload {
 #[derive(Debug, Clone)]
 pub struct Event {
     pub id: EventId,
+    pub source: Source,
     pub actor: Actor,
     pub payload: Payload,
     pub raw: Option<serde_json::Value>,
@@ -58,37 +75,38 @@ pub struct Event {
 }
 
 impl Event {
-    pub fn session_created(client_session_id: ClientSessionId) -> Self {
-        let session = SessionId::new();
-        Self::build(Actor::System, Payload::SessionCreated { session, client_session_id }, None)
+    pub fn session_created(source: Source, session: SessionId, client_session_id: ClientSessionId) -> Self {
+        Self::build(source, Actor::System, Payload::SessionCreated { session, client_session_id }, None)
     }
 
     pub fn message(
+        source: Source,
         session: SessionId,
         actor: Actor,
         content: &str,
         raw: serde_json::Value,
     ) -> Self {
         let payload = Payload::Message { session, content: content.into() };
-        Self::build(actor, payload, Some(raw))
+        Self::build(source, actor, payload, Some(raw))
     }
 
-    pub fn tool_used(session: SessionId, tool: &str, raw: serde_json::Value) -> Self {
+    pub fn tool_used(source: Source, session: SessionId, tool: &str, raw: serde_json::Value) -> Self {
         let payload = Payload::ToolUsed { session, tool: tool.into() };
-        Self::build(Actor::Agent, payload, Some(raw))
+        Self::build(source, Actor::Agent, payload, Some(raw))
     }
 
-    pub fn session_started(session: SessionId, raw: serde_json::Value) -> Self {
-        Self::build(Actor::System, Payload::SessionStarted { session }, Some(raw))
+    pub fn session_started(source: Source, session: SessionId, raw: serde_json::Value) -> Self {
+        Self::build(source, Actor::System, Payload::SessionStarted { session }, Some(raw))
     }
 
-    pub fn session_stopped(session: SessionId, raw: serde_json::Value) -> Self {
-        Self::build(Actor::System, Payload::SessionStopped { session }, Some(raw))
+    pub fn session_stopped(source: Source, session: SessionId, raw: serde_json::Value) -> Self {
+        Self::build(source, Actor::System, Payload::SessionStopped { session }, Some(raw))
     }
 
-    fn build(actor: Actor, payload: Payload, raw: Option<serde_json::Value>) -> Self {
+    fn build(source: Source, actor: Actor, payload: Payload, raw: Option<serde_json::Value>) -> Self {
         Self {
             id: EventId::new(),
+            source,
             actor,
             payload,
             raw,
@@ -104,7 +122,7 @@ mod tests {
 
     #[test]
     fn session_created_is_a_system_event_carrying_the_client_session_id() {
-        let event = Event::session_created(ClientSessionId::new("a".into()));
+        let event = Event::session_created(Source::fixture(), SessionId::new(), ClientSessionId::new("a".into()));
 
         assert_eq!(event.actor, Actor::System);
         assert_eq!(event.payload.kind(), "session.created");
@@ -119,7 +137,7 @@ mod tests {
     fn message_carries_the_session_actor_and_content() {
         let session = SessionId::new();
 
-        let event = Event::message(session, Actor::Human, "hi", json!({"r": 1}));
+        let event = Event::message(Source::fixture(), session, Actor::Human, "hi", json!({"r": 1}));
 
         assert_eq!(event.actor, Actor::Human);
         assert_eq!(event.payload, Payload::Message { session, content: "hi".into() });
@@ -130,7 +148,7 @@ mod tests {
     fn tool_used_is_an_agent_event_carrying_the_tool() {
         let session = SessionId::new();
 
-        let event = Event::tool_used(session, "Bash", json!({"r": 2}));
+        let event = Event::tool_used(Source::fixture(), session, "Bash", json!({"r": 2}));
 
         assert_eq!(event.actor, Actor::Agent);
         assert_eq!(event.payload, Payload::ToolUsed { session, tool: "Bash".into() });
@@ -141,7 +159,7 @@ mod tests {
     fn session_started_is_a_system_event() {
         let session = SessionId::new();
 
-        let event = Event::session_started(session, json!({"r": 3}));
+        let event = Event::session_started(Source::fixture(), session, json!({"r": 3}));
 
         assert_eq!(event.actor, Actor::System);
         assert_eq!(event.payload, Payload::SessionStarted { session });
@@ -152,7 +170,7 @@ mod tests {
     fn session_stopped_is_a_system_event() {
         let session = SessionId::new();
 
-        let event = Event::session_stopped(session, json!({"r": 4}));
+        let event = Event::session_stopped(Source::fixture(), session, json!({"r": 4}));
 
         assert_eq!(event.actor, Actor::System);
         assert_eq!(event.payload, Payload::SessionStopped { session });

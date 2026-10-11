@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::io::AsyncWriteExt;
 
-use crate::core::{Actor, ClientSessionId, Event, EventId, EventStore, Payload, SessionId};
+use crate::core::{Actor, ClientSessionId, Event, EventId, EventStore, Payload, SessionId, Source};
 
 pub struct JsonlStore {
     path: PathBuf,
@@ -26,6 +26,7 @@ impl JsonlStore {
 #[derive(Serialize, Deserialize)]
 struct EventLine {
     id: EventId,
+    source: Source,
     actor: Actor,
     kind: String,
     payload: serde_json::Value,
@@ -48,6 +49,7 @@ impl From<&Event> for EventLine {
 
         Self {
             id: event.id,
+            source: event.source.clone(),
             actor: event.actor,
             kind: event.payload.kind().into(),
             payload,
@@ -62,21 +64,21 @@ impl TryFrom<EventLine> for Event {
 
     fn try_from(line: EventLine) -> Result<Self, Self::Error> {
         let p = &line.payload;
-        let session = field(p, "session")?;
         let payload = match line.kind.as_str() {
             "session.created" => Payload::SessionCreated {
-                session,
+                session: field(p, "session")?,
                 client_session_id: ClientSessionId::new(field(p, "client_session_id")?),
             },
-            "session.started" => Payload::SessionStarted { session },
-            "session.stopped" => Payload::SessionStopped { session },
-            "message" => Payload::Message { session, content: field(p, "content")? },
-            "tool.used" => Payload::ToolUsed { session, tool: field(p, "tool")? },
+            "session.started" => Payload::SessionStarted { session: field(p, "session")? },
+            "session.stopped" => Payload::SessionStopped { session: field(p, "session")? },
+            "message" => Payload::Message { session: field(p, "session")?, content: field(p, "content")? },
+            "tool.used" => Payload::ToolUsed { session: field(p, "session")?, tool: field(p, "tool")? },
             kind => return Err(format!("unknown event kind {kind:?}").into()),
         };
 
         Ok(Event {
             id: line.id,
+            source: line.source,
             actor: line.actor,
             payload,
             raw: line.raw,
@@ -155,11 +157,8 @@ impl EventStore for JsonlStore {
         text.lines()
             .enumerate()
             .map(|(index, line)| {
-                let parse = |line| -> Result<Event, Box<dyn Error + Send + Sync>> {
-                    let line: EventLine = serde_json::from_str(line)?;
-                    line.try_into()
-                };
-                parse(line).map_err(|error| {
+                let event = serde_json::from_str::<EventLine>(line).map_err(Into::into).and_then(Event::try_from);
+                event.map_err(|error| {
                     format!("{}:{}: {error}", self.path.display(), index + 1).into()
                 })
             })
@@ -247,7 +246,7 @@ mod tests {
     #[tokio::test]
     async fn reads_one_event_per_line() {
         let file = TempFile::new();
-        let events: Vec<Event> = (0..3).map(|_| Event::tool_used(SessionId::new(), "Bash", json!({}))).collect();
+        let events: Vec<Event> = (0..3).map(|_| Event::tool_used(Source::fixture(), SessionId::new(), "Bash", json!({}))).collect();
         let ids: Vec<EventId> = events.iter().map(|e| e.id).collect();
         let text: String = events
             .iter()
@@ -265,11 +264,11 @@ mod tests {
         let file = TempFile::new();
         let store = file.store();
         store
-            .append(&Event::message(SessionId::new(), Actor::Human, "hi", json!({"a": 1})))
+            .append(&Event::message(Source::fixture(), SessionId::new(), Actor::Human, "hi", json!({"a": 1})))
             .await
             .unwrap();
         store
-            .append(&Event::session_started(SessionId::new(), json!({"b": 2})))
+            .append(&Event::session_started(Source::fixture(), SessionId::new(), json!({"b": 2})))
             .await
             .unwrap();
 
@@ -288,7 +287,7 @@ mod tests {
     async fn append_creates_a_missing_directory() {
         let dir = TempFile::new();
         let nested = JsonlStore::new(dir.0.join("sub").join("log.jsonl"));
-        nested.append(&Event::tool_used(SessionId::new(), "Bash", json!(null))).await.unwrap();
+        nested.append(&Event::tool_used(Source::fixture(), SessionId::new(), "Bash", json!(null))).await.unwrap();
         assert_eq!(nested.all().await.unwrap().len(), 1);
         let _ = fs::remove_dir_all(&dir.0);
     }
@@ -297,7 +296,7 @@ mod tests {
     async fn session_finds_a_created_session_and_none_for_an_unknown_client_session_id() {
         let file = TempFile::new();
         let store = file.store();
-        let created = Event::session_created(ClientSessionId::new("a".into()));
+        let created = Event::session_created(Source::fixture(), SessionId::new(), ClientSessionId::new("a".into()));
         let session = created.payload.session();
         store.append(&created).await.unwrap();
 
@@ -327,11 +326,11 @@ mod tests {
         let session = SessionId::new();
         let raw = json!({"r": 1});
         let events = [
-            Event::session_created(ClientSessionId::new("a".into())),
-            Event::session_started(session, raw.clone()),
-            Event::session_stopped(session, raw.clone()),
-            Event::message(session, Actor::Human, "hi", raw.clone()),
-            Event::tool_used(session, "Bash", raw),
+            Event::session_created(Source::fixture(), session, ClientSessionId::new("a".into())),
+            Event::session_started(Source::fixture(), session, raw.clone()),
+            Event::session_stopped(Source::fixture(), session, raw.clone()),
+            Event::message(Source::fixture(), session, Actor::Human, "hi", raw.clone()),
+            Event::tool_used(Source::fixture(), session, "Bash", raw),
         ];
 
         for event in events {
@@ -340,6 +339,7 @@ mod tests {
             let back = Event::try_from(line).unwrap();
 
             assert_eq!(back.id, event.id);
+            assert_eq!(back.source, event.source);
             assert_eq!(back.actor, event.actor);
             assert_eq!(back.payload, event.payload);
             assert_eq!(back.raw, event.raw);
@@ -350,10 +350,11 @@ mod tests {
     #[test]
     fn a_line_has_a_kind_and_a_payload_naming_the_session() {
         let session = SessionId::new();
-        let event = Event::message(session, Actor::Human, "hi", json!({"r": 1}));
+        let event = Event::message(Source::fixture(), session, Actor::Human, "hi", json!({"r": 1}));
 
         let line = serde_json::to_value(EventLine::from(&event)).unwrap();
 
+        assert_eq!(line["source"], json!({"client": "claude", "path": "/repo"}));
         assert_eq!(line["actor"], "human");
         assert_eq!(line["kind"], "message");
         assert_eq!(line["payload"], json!({"session": session, "content": "hi"}));
@@ -362,7 +363,7 @@ mod tests {
 
     #[test]
     fn unknown_kind_is_an_error() {
-        let event = Event::message(SessionId::new(), Actor::Human, "hi", json!({}));
+        let event = Event::message(Source::fixture(), SessionId::new(), Actor::Human, "hi", json!({}));
         let mut line = EventLine::from(&event);
         line.kind = "bogus".into();
 
