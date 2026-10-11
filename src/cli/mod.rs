@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
 use tokio::io::AsyncReadExt;
 
 use crate::app::AppService;
-use crate::core::{Actor, Event, EventStore, SessionId, SessionKey};
+use crate::core::{Actor, ClientSessionId, Event, EventStore, SessionId};
 use crate::server;
 
 /// Records what coding agents do.
@@ -63,15 +63,15 @@ async fn hook<S: EventStore>(service: &AppService<S>) -> Result<()> {
     let mut input = String::new();
     tokio::io::stdin().read_to_string(&mut input).await?;
     let raw: serde_json::Value = serde_json::from_str(&input)?;
-    let (key, event) = event_from_hook(raw)?;
-    service.record(key, event).await
+    let (client_session_id, event) = event_from_hook(raw)?;
+    service.record(client_session_id, event).await
 }
 
 /// Makes the hook's event once its session is known.
 type EventBuilder = Box<dyn FnOnce(SessionId) -> Event>;
 
-fn event_from_hook(raw: serde_json::Value) -> Result<(SessionKey, EventBuilder)> {
-    let key = SessionKey::new(text(&raw, "session_id")?);
+fn event_from_hook(raw: serde_json::Value) -> Result<(ClientSessionId, EventBuilder)> {
+    let client_session_id = ClientSessionId::new(text(&raw, "session_id")?);
 
     let name = raw["hook_event_name"].as_str();
     let event: EventBuilder = match name {
@@ -93,7 +93,7 @@ fn event_from_hook(raw: serde_json::Value) -> Result<(SessionKey, EventBuilder)>
         None => return Err("missing hook_event_name".into()),
     };
 
-    Ok((key, event))
+    Ok((client_session_id, event))
 }
 
 fn text(raw: &serde_json::Value, field: &str) -> Result<String> {
@@ -117,19 +117,19 @@ mod tests {
     use crate::core::Kind;
     use serde_json::json;
 
-    fn build(raw: serde_json::Value) -> (SessionKey, SessionId, Event) {
-        let (key, event) = event_from_hook(raw).unwrap();
+    fn build(raw: serde_json::Value) -> (ClientSessionId, SessionId, Event) {
+        let (client_session_id, event) = event_from_hook(raw).unwrap();
         let session = SessionId::new();
-        (key, session, event(session))
+        (client_session_id, session, event(session))
     }
 
     #[test]
     fn user_prompt_is_a_human_message() {
         let raw = json!({"hook_event_name": "UserPromptSubmit", "prompt": "hi", "session_id": "a"});
 
-        let (key, session, event) = build(raw.clone());
+        let (client_session_id, session, event) = build(raw.clone());
 
-        assert_eq!(key, SessionKey::new("a".into()));
+        assert_eq!(client_session_id, ClientSessionId::new("a".into()));
         assert_eq!(event.session, session);
         assert_eq!(event.actor, Actor::Human);
         assert_eq!(event.kind, Kind::Message);

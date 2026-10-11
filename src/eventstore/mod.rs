@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use tokio::io::AsyncWriteExt;
 
-use crate::core::{Event, EventStore, Kind, SessionId, SessionKey};
+use crate::core::{ClientSessionId, Event, EventStore, Kind, SessionId};
 
 pub struct JsonlStore {
     path: PathBuf,
@@ -55,13 +55,16 @@ impl EventStore for JsonlStore {
 
     async fn session(
         &self,
-        key: &SessionKey,
+        client_session_id: &ClientSessionId,
     ) -> Result<Option<SessionId>, Box<dyn Error + Send + Sync>> {
         let session = self
             .all()
             .await?
             .into_iter()
-            .find(|e| e.kind == Kind::SessionCreated && e.payload["key"] == key.as_str())
+            .find(|e| {
+                e.kind == Kind::SessionCreated
+                    && e.payload["client_session_id"] == client_session_id.as_str()
+            })
             .map(|e| e.session);
 
         Ok(session)
@@ -212,15 +215,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn session_finds_a_created_session_and_none_for_an_unknown_key() {
+    async fn session_finds_a_created_session_and_none_for_an_unknown_client_session_id() {
         let file = TempFile::new();
         let store = file.store();
-        let created = Event::session_created(SessionKey::new("a".into()));
+        let created = Event::session_created(ClientSessionId::new("a".into()));
         let session = created.session;
         store.append(&created).await.unwrap();
 
-        let found = store.session(&SessionKey::new("a".into())).await.unwrap();
-        let unknown = store.session(&SessionKey::new("b".into())).await.unwrap();
+        let found = store.session(&ClientSessionId::new("a".into())).await.unwrap();
+        let unknown = store.session(&ClientSessionId::new("b".into())).await.unwrap();
 
         assert_eq!(found, Some(session));
         assert_eq!(unknown, None);

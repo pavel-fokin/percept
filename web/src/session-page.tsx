@@ -65,7 +65,7 @@ export function SessionPage() {
             session.title ? "text-lg font-semibold" : "font-mono text-sm break-all text-muted"
           }`}
         >
-          {session.title ?? session.key}
+          {session.title ?? session.client_session_id}
         </h2>
         <time dateTime={session.created_at} className="text-xs text-muted">
           {full.format(new Date(session.created_at))}
