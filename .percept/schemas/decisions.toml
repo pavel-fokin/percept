@@ -1,0 +1,41 @@
+purpose = "what this project decided, why, and what it rejected"
+
+instructions = """
+Code shows what was built. This map keeps why, and shows the user
+what the agent decided while they were not looking.
+
+A decision is an option chosen over another. Add it when either holds:
+
+- The user settled it, and a later reader of the code, without this
+  node, would likely choose differently.
+- The agent settled it, and the user would have wanted to be asked:
+  anything they live with, such as a name, path, flag, default,
+  visible behaviour, or what was left out of scope.
+
+Leave out a detail that follows from a decision already on the map.
+
+Do not add every edit or a task. A detail that only refines a decision, such as its
+name, path, or form, goes in that decision's `why`, unless a different
+`by` settled it.
+
+The title is a short handle for the decision, six words or fewer,
+since an edge names its nodes by title. `why` says what was decided
+and the reason. `rejected` names the options turned down and why, or
+stays out when none was weighed.
+
+`by` says who settled it. `user` when the user proposed or chose it,
+or replied to this decision itself. `agent` otherwise, including when
+the user moved on without answering it.
+
+A decision is never changed. A later decision that reverses or
+narrows it points to it with `supersedes`.
+"""
+
+[nodes.decision]
+why = ""
+rejected = ""
+by = ""
+
+[edges.supersedes]
+from = "decision"
+to = "decision"
