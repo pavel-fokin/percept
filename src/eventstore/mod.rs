@@ -164,7 +164,7 @@ mod tests {
     #[tokio::test]
     async fn reads_one_event_per_line() {
         let file = TempFile::new();
-        let events: Vec<Event> = (0..3).map(|_| Event::tool_used(SessionId::new(), json!({}))).collect();
+        let events: Vec<Event> = (0..3).map(|_| Event::tool_used(SessionId::new(), "Bash", json!({}))).collect();
         let ids: Vec<EventId> = events.iter().map(|e| e.id).collect();
         let text: String = events
             .iter()
@@ -206,7 +206,7 @@ mod tests {
     async fn append_creates_a_missing_directory() {
         let dir = TempFile::new();
         let nested = JsonlStore::new(dir.0.join("sub").join("log.jsonl"));
-        nested.append(&Event::tool_used(SessionId::new(), json!(null))).await.unwrap();
+        nested.append(&Event::tool_used(SessionId::new(), "Bash", json!(null))).await.unwrap();
         assert_eq!(nested.all().await.unwrap().len(), 1);
         let _ = fs::remove_dir_all(&dir.0);
     }

@@ -1,8 +1,9 @@
 //! Application layer: `AppService` runs use cases over the domain.
 
+use std::collections::BTreeMap;
 use std::error::Error;
 
-use crate::core::{Event, EventStore, Kind, Session, SessionId, SessionKey};
+use crate::core::{Actor, Event, EventStore, Kind, Session, SessionId, SessionKey};
 
 pub struct AppService<S: EventStore> {
     store: S,
@@ -17,18 +18,43 @@ impl<S: EventStore> AppService<S> {
         Ok(self.store.all().await?.len())
     }
 
-    /// Sessions in log order, oldest first.
+    /// Sessions newest first.
     pub async fn sessions(&self) -> Result<Vec<Session>, Box<dyn Error + Send + Sync>> {
-        self.store
-            .all()
-            .await?
-            .into_iter()
+        let events = self.store.all().await?;
+
+        let mut titles: BTreeMap<SessionId, &str> = BTreeMap::new();
+        for e in events.iter().filter(|e| e.kind == Kind::Message && e.actor == Actor::Human) {
+            if let Some(content) = e.payload["content"].as_str().filter(|c| !c.trim().is_empty()) {
+                titles.entry(e.session).or_insert(content);
+            }
+        }
+
+        events
+            .iter()
+            .rev()
             .filter(|e| e.kind == Kind::SessionCreated)
             .map(|e| {
                 let key = e.payload["key"].as_str().ok_or("SessionCreated without a key")?;
-                Ok(Session { id: e.session, key: SessionKey::new(key.into()) })
+                Ok(Session {
+                    id: e.session,
+                    key: SessionKey::new(key.into()),
+                    created_at: e.created_at,
+                    title: titles.get(&e.session).map(|t| t.to_string()),
+                })
             })
             .collect()
+    }
+
+    pub async fn session(&self, id: SessionId) -> Result<Option<Session>, Box<dyn Error + Send + Sync>> {
+        Ok(self.sessions().await?.into_iter().find(|s| s.id == id))
+    }
+
+    /// The session's events in log order, or `None` if the session does not exist.
+    pub async fn session_events(&self, id: SessionId) -> Result<Option<Vec<Event>>, Box<dyn Error + Send + Sync>> {
+        let events: Vec<Event> = self.store.all().await?.into_iter().filter(|e| e.session == id).collect();
+
+        let exists = events.iter().any(|e| e.kind == Kind::SessionCreated);
+        Ok(exists.then_some(events))
     }
 
     /// Appends the event to the session the key names, creating the session first if it is new.
@@ -56,7 +82,6 @@ impl<S: EventStore> AppService<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Actor, Kind};
     use std::sync::Mutex;
 
     use serde_json::json;
@@ -150,21 +175,92 @@ mod tests {
     async fn passes_store_errors_through() {
         assert!(AppService::new(Broken).event_count().await.is_err());
         assert!(AppService::new(Broken).sessions().await.is_err());
+        assert!(AppService::new(Broken).session(SessionId::new()).await.is_err());
+        assert!(AppService::new(Broken).session_events(SessionId::new()).await.is_err());
     }
 
     #[tokio::test]
-    async fn sessions_are_the_created_events_in_log_order() {
+    async fn sessions_are_the_created_events_newest_first() {
         let store = Memory::default();
         let service = AppService::new(&store);
-        service.record(key("a"), |s| Event::tool_used(s, json!({}))).await.unwrap();
-        service.record(key("b"), |s| Event::tool_used(s, json!({}))).await.unwrap();
-        service.record(key("a"), |s| Event::tool_used(s, json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
+        service.record(key("b"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
 
         let sessions = service.sessions().await.unwrap();
 
         let events = store.0.lock().unwrap();
         let found: Vec<(SessionId, &str)> = sessions.iter().map(|s| (s.id, s.key.as_str())).collect();
-        assert_eq!(found, vec![(events[0].session, "a"), (events[2].session, "b")]);
+        assert_eq!(found, vec![(events[2].session, "b"), (events[0].session, "a")]);
+        assert_eq!(sessions[1].created_at, events[0].created_at);
+    }
+
+    #[tokio::test]
+    async fn session_finds_one_session_by_id() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        service.record(key("a"), |s| Event::message(s, Actor::Human, "hi", json!({}))).await.unwrap();
+        service.record(key("b"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
+        let id = store.0.lock().unwrap()[0].session;
+
+        let found = service.session(id).await.unwrap().unwrap();
+
+        assert_eq!(found.id, id);
+        assert_eq!(found.key.as_str(), "a");
+        assert_eq!(found.title.as_deref(), Some("hi"));
+        assert!(service.session(SessionId::new()).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn session_events_are_the_sessions_own_in_log_order() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        service.record(key("a"), |s| Event::message(s, Actor::Human, "hi", json!({}))).await.unwrap();
+        service.record(key("b"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::tool_used(s, "Read", json!({}))).await.unwrap();
+        let id = store.0.lock().unwrap()[0].session;
+
+        let events = service.session_events(id).await.unwrap().unwrap();
+
+        let kinds: Vec<Kind> = events.iter().map(|e| e.kind).collect();
+        assert_eq!(kinds, vec![Kind::SessionCreated, Kind::Message, Kind::ToolUsed]);
+        assert!(service.session_events(SessionId::new()).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn title_is_the_first_human_message() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        service.record(key("a"), |s| Event::message(s, Actor::Agent, "agent", json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::message(s, Actor::Human, "first", json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::message(s, Actor::Human, "second", json!({}))).await.unwrap();
+
+        let sessions = service.sessions().await.unwrap();
+
+        assert_eq!(sessions[0].title.as_deref(), Some("first"));
+    }
+
+    #[tokio::test]
+    async fn title_skips_empty_human_messages() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        service.record(key("a"), |s| Event::message(s, Actor::Human, " ", json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::message(s, Actor::Human, "first", json!({}))).await.unwrap();
+
+        let sessions = service.sessions().await.unwrap();
+
+        assert_eq!(sessions[0].title.as_deref(), Some("first"));
+    }
+
+    #[tokio::test]
+    async fn title_is_none_without_a_human_message() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        service.record(key("a"), |s| Event::message(s, Actor::Agent, "agent", json!({}))).await.unwrap();
+
+        let sessions = service.sessions().await.unwrap();
+
+        assert_eq!(sessions[0].title, None);
     }
 
     #[tokio::test]
@@ -190,9 +286,9 @@ mod tests {
         let store = Memory::default();
         let service = AppService::new(&store);
 
-        service.record(key("a"), |s| Event::tool_used(s, json!({}))).await.unwrap();
-        service.record(key("a"), |s| Event::tool_used(s, json!({}))).await.unwrap();
-        service.record(key("b"), |s| Event::tool_used(s, json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
+        service.record(key("a"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
+        service.record(key("b"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
 
         let events = store.0.lock().unwrap();
         let kinds: Vec<Kind> = events.iter().map(|e| e.kind).collect();
@@ -214,7 +310,7 @@ mod tests {
     #[tokio::test]
     async fn record_passes_store_errors_through() {
         let result = AppService::new(Broken)
-            .record(key("a"), |s| Event::tool_used(s, json!({})))
+            .record(key("a"), |s| Event::tool_used(s, "Bash", json!({})))
             .await;
 
         assert!(result.is_err());

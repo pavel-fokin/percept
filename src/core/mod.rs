@@ -2,6 +2,7 @@
 
 use std::error::Error;
 
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -14,6 +15,9 @@ pub type EventId = Id<Event>;
 pub struct Session {
     pub id: SessionId,
     pub key: SessionKey,
+    pub created_at: Timestamp,
+    /// The first non-empty thing the human said, if they said anything.
+    pub title: Option<String>,
 }
 
 pub type SessionId = Id<Session>;
@@ -61,6 +65,7 @@ pub struct Event {
     pub kind: Kind,
     pub payload: serde_json::Value,
     pub raw: Option<serde_json::Value>,
+    pub created_at: Timestamp,
 }
 
 impl Event {
@@ -83,8 +88,8 @@ impl Event {
         Self::build(session, actor, Kind::Message, json!({ "content": content }), Some(raw))
     }
 
-    pub fn tool_used(session: SessionId, raw: serde_json::Value) -> Self {
-        Self::build(session, Actor::Agent, Kind::ToolUsed, json!({}), Some(raw))
+    pub fn tool_used(session: SessionId, tool: &str, raw: serde_json::Value) -> Self {
+        Self::build(session, Actor::Agent, Kind::ToolUsed, json!({ "tool": tool }), Some(raw))
     }
 
     pub fn session_started(session: SessionId, raw: serde_json::Value) -> Self {
@@ -109,6 +114,7 @@ impl Event {
             kind,
             payload,
             raw,
+            created_at: Timestamp::now(),
         }
     }
 }
@@ -160,15 +166,15 @@ mod tests {
     }
 
     #[test]
-    fn tool_used_is_an_agent_event_with_an_empty_payload() {
+    fn tool_used_is_an_agent_event_carrying_the_tool() {
         let session = SessionId::new();
 
-        let event = Event::tool_used(session, json!({"r": 2}));
+        let event = Event::tool_used(session, "Bash", json!({"r": 2}));
 
         assert_eq!(event.session, session);
         assert_eq!(event.actor, Actor::Agent);
         assert_eq!(event.kind, Kind::ToolUsed);
-        assert_eq!(event.payload, json!({}));
+        assert_eq!(event.payload, json!({"tool": "Bash"}));
         assert_eq!(event.raw, Some(json!({"r": 2})));
     }
 
