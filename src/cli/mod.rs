@@ -27,8 +27,10 @@ enum Command {
     },
     /// Creates a map of the given kind in the current project.
     Create { kind: String, title: String },
-    /// Lists the current project's maps.
-    Show,
+    /// Adds a node to a map: `add <map> <kind> <title>`.
+    Add { args: Vec<String> },
+    /// Lists the current project's maps, or one map's nodes.
+    Show { map: Option<String> },
     /// Serves the page in the browser.
     Ui,
 }
@@ -46,7 +48,8 @@ pub async fn run<S: EventStore + Send + Sync + 'static>(service: Arc<AppService<
         None => status(&service).await,
         Some(Command::Hook { client }) => hook(&service, client).await,
         Some(Command::Create { kind, title }) => create(&service, &kind, &title).await,
-        Some(Command::Show) => show(&service).await,
+        Some(Command::Add { args }) => add(&service, &args).await,
+        Some(Command::Show { map }) => show(&service, map.as_deref()).await,
         Some(Command::Ui) => server::serve(service).await,
     };
     match result {
@@ -82,14 +85,46 @@ async fn create<S: EventStore>(service: &AppService<S>, kind: &str, title: &str)
     service.create_map(source, actor, kind, title).await
 }
 
-async fn show<S: EventStore>(service: &AppService<S>) -> Result<()> {
+async fn add<S: EventStore>(service: &AppService<S>, args: &[String]) -> Result<()> {
+    let [map, kind, title] = args else {
+        return match args.len() {
+            4 => Err("edges are not supported yet".into()),
+            _ => Err("usage: percept add <map> <kind> <title>".into()),
+        };
+    };
+    let (actor, client) = writer(env_flag("CLAUDECODE"), env_flag("CODEX_SESSION_ID"))?;
+    let source = Source { client: client.into(), path: source_path(&std::env::current_dir()?).await };
+
+    service.add_node(source, actor, map, kind, title).await
+}
+
+async fn show<S: EventStore>(service: &AppService<S>, map: Option<&str>) -> Result<()> {
     let project = source_path(&std::env::current_dir()?).await;
 
-    for map in service.maps(&project).await? {
-        println!("{}  {}", map.kind, map.title);
+    match map {
+        Some(kind) => {
+            let map = service.map(&project, kind).await?;
+            println!("{}  {}\n", map.kind, map.title);
+            for node in service.nodes(map.id).await? {
+                println!("{}  {}", node.kind, node.title);
+            }
+        }
+        None => {
+            for map in service.maps(&project).await? {
+                let count = service.nodes(map.id).await?.len();
+                println!("{}  {}  {}", map.kind, map.title, node_count(count));
+            }
+        }
     }
 
     Ok(())
+}
+
+fn node_count(count: usize) -> String {
+    match count {
+        1 => "1 node".to_string(),
+        n => format!("{n} nodes"),
+    }
 }
 
 fn env_flag(name: &str) -> Option<String> {
@@ -251,6 +286,13 @@ mod tests {
         assert_eq!(writer(None, set()).unwrap(), (Actor::Agent, "codex"));
         assert_eq!(writer(None, None).unwrap(), (Actor::Human, "percept-cli"));
         assert!(writer(set(), set()).is_err());
+    }
+
+    #[test]
+    fn node_count_phrasings() {
+        assert_eq!(node_count(0), "0 nodes");
+        assert_eq!(node_count(1), "1 node");
+        assert_eq!(node_count(2), "2 nodes");
     }
 
     #[test]

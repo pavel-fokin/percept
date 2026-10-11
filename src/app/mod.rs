@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
-use crate::core::{Actor, ClientSessionId, Event, EventStore, Map, MapId, Payload, Session, SessionId, Source};
+use crate::core::{Actor, ClientSessionId, Event, EventStore, Map, MapId, Node, NodeId, Payload, Session, SessionId, Source};
 
 mod git;
 
@@ -91,12 +91,55 @@ impl<S: EventStore> AppService<S> {
             .into_iter()
             .filter(|e| e.source.path == project)
             .filter_map(|e| match e.payload {
-                Payload::MapCreated { kind, title, .. } => Some(Map { kind, title }),
+                Payload::MapCreated { map, kind, title } => Some(Map { id: map, kind, title }),
                 _ => None,
             })
             .collect();
 
         Ok(maps)
+    }
+
+    /// The project's map of the given kind, or an error if it has none.
+    pub async fn map(&self, project: &Path, kind: &str) -> Result<Map, Box<dyn Error + Send + Sync>> {
+        let found = self.maps(project).await?.into_iter().find(|m| m.kind == kind);
+
+        found.ok_or_else(|| format!("this project has no {kind} map").into())
+    }
+
+    /// The map's nodes in log order.
+    pub async fn nodes(&self, map: MapId) -> Result<Vec<Node>, Box<dyn Error + Send + Sync>> {
+        let nodes = self
+            .store
+            .all()
+            .await?
+            .into_iter()
+            .filter_map(|e| match e.payload {
+                Payload::NodeAdded { map: id, kind, title, .. } if id == map => Some(Node { kind, title }),
+                _ => None,
+            })
+            .collect();
+
+        Ok(nodes)
+    }
+
+    /// Records a new node on the project's map of the given kind. A title is unique within its map.
+    pub async fn add_node(
+        &self,
+        source: Source,
+        actor: Actor,
+        map_kind: &str,
+        kind: &str,
+        title: &str,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // Held until return, so parallel adds cannot both pass the check.
+        let _lock = self.store.lock().await?;
+
+        let map = self.map(&source.path, map_kind).await?;
+        if self.nodes(map.id).await?.iter().any(|n| n.title == title) {
+            return Err(format!("the {map_kind} map already has a node titled {title:?}").into());
+        }
+
+        self.store.append(&Event::node_added(source, actor, map.id, NodeId::new(), kind, title)).await
     }
 
     /// Appends the event to the session the client's session id names, creating the session first if it is new.
@@ -398,6 +441,52 @@ mod tests {
 
         let found: Vec<(&str, &str)> = maps.iter().map(|m| (m.kind.as_str(), m.title.as_str())).collect();
         assert_eq!(found, vec![("decisions", "A"), ("tasks", "C")]);
+    }
+
+    #[tokio::test]
+    async fn add_node_to_a_missing_map_is_an_error() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        service.create_map(Source::fixture(), Actor::Human, "decisions", "A").await.unwrap();
+
+        let result = service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T").await;
+
+        assert!(result.is_err());
+        assert_eq!(store.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_node_title_is_unique_within_its_map_but_not_across_maps() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        service.create_map(Source::fixture(), Actor::Human, "decisions", "A").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "tasks", "B").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Why?").await.unwrap();
+
+        let same_map = service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "Why?").await;
+        let other_map = service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "Why?").await;
+
+        assert!(same_map.is_err());
+        assert!(other_map.is_ok());
+        assert_eq!(store.0.lock().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn nodes_are_the_maps_own_in_log_order() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        service.create_map(Source::fixture(), Actor::Human, "decisions", "A").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "tasks", "B").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Agent, "decisions", "option", "O").await.unwrap();
+        let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
+
+        let nodes = service.nodes(map.id).await.unwrap();
+
+        let found: Vec<(&str, &str)> = nodes.iter().map(|n| (n.kind.as_str(), n.title.as_str())).collect();
+        assert_eq!(found, vec![("question", "Q"), ("option", "O")]);
+        assert!(service.map(&Source::fixture().path, "nope").await.is_err());
     }
 
     #[tokio::test]

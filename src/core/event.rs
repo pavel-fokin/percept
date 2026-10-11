@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use super::{ClientSessionId, MapId, SessionId};
+use super::{ClientSessionId, MapId, NodeId, SessionId};
 use crate::shared::Id;
 
 pub type EventId = Id<Event>;
@@ -40,6 +40,7 @@ pub enum Kind {
     Message,
     ToolUsed,
     MapCreated,
+    NodeAdded,
 }
 
 impl Kind {
@@ -51,6 +52,7 @@ impl Kind {
             Self::Message => "message",
             Self::ToolUsed => "tool.used",
             Self::MapCreated => "map.created",
+            Self::NodeAdded => "node.added",
         }
     }
 
@@ -62,6 +64,7 @@ impl Kind {
             "message" => Some(Self::Message),
             "tool.used" => Some(Self::ToolUsed),
             "map.created" => Some(Self::MapCreated),
+            "node.added" => Some(Self::NodeAdded),
             _ => None,
         }
     }
@@ -76,6 +79,7 @@ pub enum Payload {
     Message { session: SessionId, content: String },
     ToolUsed { session: SessionId, tool: String },
     MapCreated { map: MapId, kind: String, title: String },
+    NodeAdded { map: MapId, node: NodeId, kind: String, title: String },
 }
 
 impl Payload {
@@ -87,6 +91,7 @@ impl Payload {
             Self::Message { .. } => Kind::Message,
             Self::ToolUsed { .. } => Kind::ToolUsed,
             Self::MapCreated { .. } => Kind::MapCreated,
+            Self::NodeAdded { .. } => Kind::NodeAdded,
         }
     }
 
@@ -97,7 +102,7 @@ impl Payload {
             | Self::SessionStopped { session }
             | Self::Message { session, .. }
             | Self::ToolUsed { session, .. } => Some(*session),
-            Self::MapCreated { .. } => None,
+            Self::MapCreated { .. } | Self::NodeAdded { .. } => None,
         }
     }
 }
@@ -144,6 +149,11 @@ impl Event {
 
     pub fn map_created(source: Source, actor: Actor, map: MapId, kind: &str, title: &str) -> Self {
         let payload = Payload::MapCreated { map, kind: kind.into(), title: title.into() };
+        Self::build(source, actor, payload, None)
+    }
+
+    pub fn node_added(source: Source, actor: Actor, map: MapId, node: NodeId, kind: &str, title: &str) -> Self {
+        let payload = Payload::NodeAdded { map, node, kind: kind.into(), title: title.into() };
         Self::build(source, actor, payload, None)
     }
 
@@ -252,8 +262,21 @@ mod tests {
     }
 
     #[test]
+    fn node_added_carries_the_actor_and_has_no_session() {
+        let (map, node) = (MapId::new(), NodeId::new());
+
+        let event = Event::node_added(Source::fixture(), Actor::Agent, map, node, "question", "Why?");
+
+        assert_eq!(event.actor, Actor::Agent);
+        assert_eq!(event.payload.kind(), Kind::NodeAdded);
+        assert_eq!(event.payload, Payload::NodeAdded { map, node, kind: "question".into(), title: "Why?".into() });
+        assert_eq!(event.payload.session(), None);
+        assert_eq!(event.raw, None);
+    }
+
+    #[test]
     fn every_kind_is_found_by_its_name() {
-        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed, Kind::MapCreated];
+        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed, Kind::MapCreated, Kind::NodeAdded];
 
         for kind in kinds {
             assert_eq!(Kind::from_name(kind.name()), Some(kind));
