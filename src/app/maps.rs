@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::Path;
 
@@ -18,10 +19,8 @@ impl<S: EventStore> AppService<S> {
         source: Source,
         actor: Actor,
         kind: &str,
-        title: &str,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         not_blank("kind", kind)?;
-        not_blank("title", title)?;
 
         // Held until return, so parallel creates cannot both pass the check.
         let _lock = self.store.lock().await?;
@@ -31,7 +30,7 @@ impl<S: EventStore> AppService<S> {
             return Err(format!("this project already has a {kind} map").into());
         }
 
-        self.store.append(&Event::map_created(source, actor, MapId::new(), kind, title)).await
+        self.store.append(&Event::map_created(source, actor, MapId::new(), kind)).await
     }
 
     /// The project's maps in log order.
@@ -54,7 +53,9 @@ impl<S: EventStore> AppService<S> {
             .await?
             .into_iter()
             .filter_map(|e| match e.payload {
-                Payload::NodeAdded { map: id, node, kind, title } if id == map => Some(Node { id: node, kind, title }),
+                Payload::NodeAdded { map: id, node, kind, title, properties } if id == map => {
+                    Some(Node { id: node, kind, title, properties })
+                }
                 _ => None,
             })
             .collect();
@@ -141,6 +142,7 @@ impl<S: EventStore> AppService<S> {
         map_kind: &str,
         kind: &str,
         title: &str,
+        properties: BTreeMap<String, String>,
     ) -> Result<(), Box<dyn Error + Send + Sync>> {
         not_blank("kind", kind)?;
         not_blank("title", title)?;
@@ -153,7 +155,7 @@ impl<S: EventStore> AppService<S> {
             return Err(format!("the {map_kind} map already has a node titled {title:?}").into());
         }
 
-        self.store.append(&Event::node_added(source, actor, map.id, NodeId::new(), kind, title)).await
+        self.store.append(&Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties)).await
     }
 }
 
@@ -171,7 +173,7 @@ fn project_maps(events: &[Event], project: &Path) -> Vec<Map> {
         .iter()
         .filter(|e| e.source.path == project)
         .filter_map(|e| match &e.payload {
-            Payload::MapCreated { map, kind, title } => Some(Map { id: *map, kind: kind.clone(), title: title.clone() }),
+            Payload::MapCreated { map, kind } => Some(Map { id: *map, kind: kind.clone() }),
             _ => None,
         })
         .collect()
@@ -187,10 +189,10 @@ mod tests {
         let store = Memory::default();
         let service = AppService::new(&store);
         let other = Source { client: "claude".into(), path: "/other".into() };
-        service.create_map(Source::fixture(), Actor::Human, "decisions", "A").await.unwrap();
-        service.create_map(other, Actor::Human, "decisions", "B").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        service.create_map(other, Actor::Human, "decisions").await.unwrap();
 
-        let again = service.create_map(Source::fixture(), Actor::Agent, "decisions", "C").await;
+        let again = service.create_map(Source::fixture(), Actor::Agent, "decisions").await;
 
         assert!(again.is_err());
         assert_eq!(store.0.lock().unwrap().len(), 2);
@@ -201,37 +203,51 @@ mod tests {
         let store = Memory::default();
         let service = AppService::new(&store);
         let other = Source { client: "claude".into(), path: "/other".into() };
-        service.create_map(Source::fixture(), Actor::Human, "decisions", "A").await.unwrap();
-        service.create_map(other, Actor::Human, "tasks", "B").await.unwrap();
-        service.create_map(Source::fixture(), Actor::Human, "tasks", "C").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        service.create_map(other, Actor::Human, "tasks").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "tasks").await.unwrap();
 
         let maps = service.maps(&Source::fixture().path).await.unwrap();
 
-        let found: Vec<(&str, &str)> = maps.iter().map(|m| (m.kind.as_str(), m.title.as_str())).collect();
-        assert_eq!(found, vec![("decisions", "A"), ("tasks", "C")]);
+        let found: Vec<&str> = maps.iter().map(|m| m.kind.as_str()).collect();
+        assert_eq!(found, vec!["decisions", "tasks"]);
     }
 
     #[tokio::test]
     async fn add_node_to_a_missing_map_is_an_error() {
         let store = Memory::default();
         let service = AppService::new(&store);
-        service.create_map(Source::fixture(), Actor::Human, "decisions", "A").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
 
-        let result = service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T").await;
+        let result = service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default()).await;
 
         assert!(result.is_err());
         assert_eq!(store.0.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]
+    async fn add_node_records_its_properties() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        service.create_map(Source::fixture(), Actor::Human, "concepts").await.unwrap();
+        let properties = BTreeMap::from([("definition".to_string(), "One log.".to_string())]);
+
+        service.add_node(Source::fixture(), Actor::Human, "concepts", "concept", "Event log", properties.clone()).await.unwrap();
+
+        let map = service.map(&Source::fixture().path, "concepts").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        assert_eq!(nodes[0].properties, properties);
+    }
+
+    #[tokio::test]
     async fn blank_kinds_and_titles_are_errors() {
         let store = Memory::default();
         let service = AppService::new(&store);
-        service.create_map(Source::fixture(), Actor::Human, "decisions", "A").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default()).await.unwrap();
 
-        let map = service.create_map(Source::fixture(), Actor::Human, " ", "B").await;
-        let node = service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "").await;
+        let map = service.create_map(Source::fixture(), Actor::Human, " ").await;
+        let node = service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "", Default::default()).await;
         let edge = service.add_edge(Source::fixture(), Actor::Human, "decisions", "Q", "", "Q").await;
 
         assert!(map.is_err());
@@ -244,9 +260,9 @@ mod tests {
     async fn a_repeated_edge_is_an_error() {
         let store = Memory::default();
         let service = AppService::new(&store);
-        service.create_map(Source::fixture(), Actor::Human, "decisions", "A").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default()).await.unwrap();
         service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
 
         let again = service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await;
@@ -260,12 +276,12 @@ mod tests {
     async fn a_node_title_is_unique_within_its_map_but_not_across_maps() {
         let store = Memory::default();
         let service = AppService::new(&store);
-        service.create_map(Source::fixture(), Actor::Human, "decisions", "A").await.unwrap();
-        service.create_map(Source::fixture(), Actor::Human, "tasks", "B").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Why?").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "tasks").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Why?", Default::default()).await.unwrap();
 
-        let same_map = service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "Why?").await;
-        let other_map = service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "Why?").await;
+        let same_map = service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "Why?", Default::default()).await;
+        let other_map = service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "Why?", Default::default()).await;
 
         assert!(same_map.is_err());
         assert!(other_map.is_ok());
@@ -276,11 +292,11 @@ mod tests {
     async fn nodes_are_the_maps_own_in_log_order() {
         let store = Memory::default();
         let service = AppService::new(&store);
-        service.create_map(Source::fixture(), Actor::Human, "decisions", "A").await.unwrap();
-        service.create_map(Source::fixture(), Actor::Human, "tasks", "B").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Agent, "decisions", "option", "O").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "tasks").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Agent, "decisions", "option", "O", Default::default()).await.unwrap();
         let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
 
         let nodes = service.nodes(map.id).await.unwrap();
@@ -294,9 +310,9 @@ mod tests {
     async fn an_edge_links_two_titled_nodes_and_a_missing_title_is_an_error() {
         let store = Memory::default();
         let service = AppService::new(&store);
-        service.create_map(Source::fixture(), Actor::Human, "decisions", "A").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default()).await.unwrap();
 
         let missing_to = service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "nope").await;
         let missing_from = service.add_edge(Source::fixture(), Actor::Human, "decisions", "nope", "answers", "Q").await;
@@ -313,10 +329,10 @@ mod tests {
     async fn edges_are_the_maps_own_in_log_order_and_name_node_ids() {
         let store = Memory::default();
         let service = AppService::new(&store);
-        service.create_map(Source::fixture(), Actor::Human, "decisions", "A").await.unwrap();
-        service.create_map(Source::fixture(), Actor::Human, "tasks", "B").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "tasks").await.unwrap();
         for (map, title) in [("decisions", "Q"), ("decisions", "O"), ("tasks", "T"), ("tasks", "U")] {
-            service.add_node(Source::fixture(), Actor::Human, map, "n", title).await.unwrap();
+            service.add_node(Source::fixture(), Actor::Human, map, "n", title, Default::default()).await.unwrap();
         }
         service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
         service.add_edge(Source::fixture(), Actor::Human, "tasks", "T", "blocks", "U").await.unwrap();
@@ -334,11 +350,11 @@ mod tests {
     async fn map_summaries_count_each_maps_nodes_and_edges() {
         let store = Memory::default();
         let service = AppService::new(&store);
-        service.create_map(Source::fixture(), Actor::Human, "decisions", "A").await.unwrap();
-        service.create_map(Source::fixture(), Actor::Human, "tasks", "B").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "tasks").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default()).await.unwrap();
         service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
 
         let summaries = service.map_summaries(&Source::fixture().path).await.unwrap();
@@ -349,7 +365,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_map_passes_store_errors_through() {
-        let result = AppService::new(Broken).create_map(Source::fixture(), Actor::Human, "decisions", "A").await;
+        let result = AppService::new(Broken).create_map(Source::fixture(), Actor::Human, "decisions").await;
 
         assert!(result.is_err());
     }

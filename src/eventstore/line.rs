@@ -30,9 +30,9 @@ impl From<&Event> for EventLine {
             }
             Payload::Message { session, content } => json!({ "session": session, "content": content }),
             Payload::ToolUsed { session, tool } => json!({ "session": session, "tool": tool }),
-            Payload::MapCreated { map, kind, title } => json!({ "map": map, "kind": kind, "title": title }),
-            Payload::NodeAdded { map, node, kind, title } => {
-                json!({ "map": map, "node": node, "kind": kind, "title": title })
+            Payload::MapCreated { map, kind } => json!({ "map": map, "kind": kind }),
+            Payload::NodeAdded { map, node, kind, title, properties } => {
+                json!({ "map": map, "node": node, "kind": kind, "title": title, "properties": properties })
             }
             Payload::EdgeAdded { map, kind, from, to } => {
                 json!({ "map": map, "kind": kind, "from": from, "to": to })
@@ -70,13 +70,13 @@ impl TryFrom<EventLine> for Event {
             Kind::MapCreated => Payload::MapCreated {
                 map: field(p, "map")?,
                 kind: field(p, "kind")?,
-                title: field(p, "title")?,
             },
             Kind::NodeAdded => Payload::NodeAdded {
                 map: field(p, "map")?,
                 node: field(p, "node")?,
                 kind: field(p, "kind")?,
                 title: field(p, "title")?,
+                properties: if p.get("properties").is_some() { field(p, "properties")? } else { Default::default() },
             },
             Kind::EdgeAdded => Payload::EdgeAdded {
                 map: field(p, "map")?,
@@ -107,6 +107,8 @@ fn field<T: DeserializeOwned>(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use crate::core::{MapId, NodeId, SessionId};
 
@@ -120,8 +122,8 @@ mod tests {
             Event::session_stopped(Source::fixture(), session, raw.clone()),
             Event::message(Source::fixture(), session, Actor::Human, "hi", raw.clone()),
             Event::tool_used(Source::fixture(), session, "Bash", raw),
-            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), "decisions", "Event model"),
-            Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?"),
+            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), "decisions"),
+            Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())])),
             Event::edge_added(Source::fixture(), Actor::Agent, MapId::new(), "answers", NodeId::new(), NodeId::new()),
         ];
 
@@ -137,6 +139,30 @@ mod tests {
             assert_eq!(back.raw, event.raw);
             assert_eq!(back.created_at, event.created_at);
         }
+    }
+
+    #[test]
+    fn a_node_line_without_properties_reads_as_empty() {
+        let (map, node) = (MapId::new(), NodeId::new());
+        let event = Event::node_added(Source::fixture(), Actor::Agent, map, node, "question", "Why?", BTreeMap::new());
+        let mut line = EventLine::from(&event);
+        line.payload = json!({ "map": map, "node": node, "kind": "question", "title": "Why?" });
+
+        let back = Event::try_from(line).unwrap();
+
+        assert_eq!(back.payload, event.payload);
+    }
+
+    #[test]
+    fn a_legacy_map_line_with_a_title_still_reads() {
+        let map = MapId::new();
+        let event = Event::map_created(Source::fixture(), Actor::Human, map, "decisions");
+        let mut line = EventLine::from(&event);
+        line.payload = json!({ "map": map, "kind": "decisions", "title": "Event model" });
+
+        let back = Event::try_from(line).unwrap();
+
+        assert_eq!(back.payload, event.payload);
     }
 
     #[test]

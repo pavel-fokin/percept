@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use jiff::Timestamp;
@@ -81,8 +82,8 @@ pub enum Payload {
     SessionStopped { session: SessionId },
     Message { session: SessionId, content: String },
     ToolUsed { session: SessionId, tool: String },
-    MapCreated { map: MapId, kind: String, title: String },
-    NodeAdded { map: MapId, node: NodeId, kind: String, title: String },
+    MapCreated { map: MapId, kind: String },
+    NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String> },
     EdgeAdded { map: MapId, kind: String, from: NodeId, to: NodeId },
 }
 
@@ -152,13 +153,21 @@ impl Event {
         Self::build(source, Actor::System, Payload::SessionStopped { session }, Some(raw))
     }
 
-    pub fn map_created(source: Source, actor: Actor, map: MapId, kind: &str, title: &str) -> Self {
-        let payload = Payload::MapCreated { map, kind: kind.into(), title: title.into() };
+    pub fn map_created(source: Source, actor: Actor, map: MapId, kind: &str) -> Self {
+        let payload = Payload::MapCreated { map, kind: kind.into() };
         Self::build(source, actor, payload, None)
     }
 
-    pub fn node_added(source: Source, actor: Actor, map: MapId, node: NodeId, kind: &str, title: &str) -> Self {
-        let payload = Payload::NodeAdded { map, node, kind: kind.into(), title: title.into() };
+    pub fn node_added(
+        source: Source,
+        actor: Actor,
+        map: MapId,
+        node: NodeId,
+        kind: &str,
+        title: &str,
+        properties: BTreeMap<String, String>,
+    ) -> Self {
+        let payload = Payload::NodeAdded { map, node, kind: kind.into(), title: title.into(), properties };
         Self::build(source, actor, payload, None)
     }
 
@@ -262,11 +271,11 @@ mod tests {
     fn map_created_carries_the_actor_and_has_no_session() {
         let map = MapId::new();
 
-        let event = Event::map_created(Source::fixture(), Actor::Human, map, "decisions", "Event model");
+        let event = Event::map_created(Source::fixture(), Actor::Human, map, "decisions");
 
         assert_eq!(event.actor, Actor::Human);
         assert_eq!(event.payload.kind(), Kind::MapCreated);
-        assert_eq!(event.payload, Payload::MapCreated { map, kind: "decisions".into(), title: "Event model".into() });
+        assert_eq!(event.payload, Payload::MapCreated { map, kind: "decisions".into() });
         assert_eq!(event.payload.session(), None);
         assert_eq!(event.raw, None);
     }
@@ -275,11 +284,13 @@ mod tests {
     fn node_added_carries_the_actor_and_has_no_session() {
         let (map, node) = (MapId::new(), NodeId::new());
 
-        let event = Event::node_added(Source::fixture(), Actor::Agent, map, node, "question", "Why?");
+        let properties = BTreeMap::from([("definition".to_string(), "D".to_string())]);
+
+        let event = Event::node_added(Source::fixture(), Actor::Agent, map, node, "question", "Why?", properties.clone());
 
         assert_eq!(event.actor, Actor::Agent);
         assert_eq!(event.payload.kind(), Kind::NodeAdded);
-        assert_eq!(event.payload, Payload::NodeAdded { map, node, kind: "question".into(), title: "Why?".into() });
+        assert_eq!(event.payload, Payload::NodeAdded { map, node, kind: "question".into(), title: "Why?".into(), properties });
         assert_eq!(event.payload.session(), None);
         assert_eq!(event.raw, None);
     }
