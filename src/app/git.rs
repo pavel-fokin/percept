@@ -1,10 +1,15 @@
-//! Finds the git repository a folder belongs to.
+//! Finds the project path: the git repository a folder belongs to.
 
 use std::path::{Path, PathBuf};
 
+/// The git repo root containing `dir`, else `dir` itself.
+pub async fn source_path(dir: &Path) -> PathBuf {
+    repo_root(dir).await.unwrap_or_else(|| dir.to_path_buf())
+}
+
 /// The nearest folder at or above `start` that holds a `.git` directory or
 /// file, or `None` outside any repository. A worktree's `.git` is a file.
-pub async fn repo_root(start: &Path) -> Option<PathBuf> {
+async fn repo_root(start: &Path) -> Option<PathBuf> {
     for folder in start.ancestors() {
         if tokio::fs::try_exists(folder.join(".git")).await.unwrap_or(false) {
             return Some(folder.to_path_buf());
