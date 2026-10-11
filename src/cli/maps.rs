@@ -11,17 +11,47 @@ pub(super) async fn create<S: EventStore>(service: &AppService<S>, kind: &str, t
 }
 
 pub(super) async fn add<S: EventStore>(service: &AppService<S>, args: &[String]) -> Result<()> {
-    match args {
+    let (positionals, properties) = split_add(args)?;
+
+    match positionals {
         [map, kind, title] => {
             let (actor, source) = cli_writer().await?;
-            service.add_node(source, actor, map, kind, title).await
+            service.add_node(source, actor, map, kind, title, properties).await
         }
         [map, from, kind, to] => {
             let (actor, source) = cli_writer().await?;
             service.add_edge(source, actor, map, from, kind, to).await
         }
-        _ => Err("usage: percept add <map> <kind> <title> | percept add <map> <from> <kind> <to>".into()),
+        _ => Err("usage: percept add <map> <kind> <title> [--key value ...] | percept add <map> <from> <kind> <to>".into()),
     }
+}
+
+/// Splits `add` arguments into positionals and properties. Only a node takes properties.
+fn split_add(args: &[String]) -> Result<(&[String], BTreeMap<String, String>)> {
+    let (positionals, pairs) = args.split_at(args.iter().position(|a| a.starts_with("--")).unwrap_or(args.len()));
+    let properties = properties(pairs)?;
+
+    if positionals.len() == 4 && !properties.is_empty() {
+        return Err("an edge takes no properties".into());
+    }
+
+    Ok((positionals, properties))
+}
+
+/// Reads `--key value` pairs. A value may start with `-`.
+fn properties(pairs: &[String]) -> Result<BTreeMap<String, String>> {
+    let mut properties = BTreeMap::new();
+
+    for pair in pairs.chunks(2) {
+        let key = pair[0].strip_prefix("--").filter(|key| !key.is_empty()).ok_or("a property key is empty or lacks its --")?;
+        let value = pair.get(1).ok_or_else(|| format!("--{key} has no value"))?;
+
+        if properties.insert(key.to_string(), value.clone()).is_some() {
+            return Err(format!("--{key} is given more than once").into());
+        }
+    }
+
+    Ok(properties)
 }
 
 async fn cli_writer() -> Result<(Actor, Source)> {
@@ -47,6 +77,9 @@ pub(super) async fn show<S: EventStore>(service: &AppService<S>, map: Option<&st
             }
             for node in &nodes {
                 println!("{}  {}", node.kind, node.title);
+                for (key, value) in &node.properties {
+                    println!("  {key}: {value}");
+                }
             }
 
             let titles: BTreeMap<_, _> = nodes.iter().map(|n| (n.id, n.title.as_str())).collect();
@@ -109,6 +142,49 @@ mod tests {
         assert_eq!(writer(None, set()).unwrap(), (Actor::Agent, "codex"));
         assert_eq!(writer(None, None).unwrap(), (Actor::Human, "percept-cli"));
         assert!(writer(set(), set()).is_err());
+    }
+
+    fn strings(args: &[&str]) -> Vec<String> {
+        args.iter().map(|a| a.to_string()).collect()
+    }
+
+    #[test]
+    fn properties_are_key_value_pairs() {
+        let found = properties(&strings(&["--definition", "One log.", "--note", "-x"])).unwrap();
+
+        assert_eq!(found.len(), 2);
+        assert_eq!(found["definition"], "One log.");
+        assert_eq!(found["note"], "-x");
+        assert!(properties(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_property_without_a_value_is_an_error() {
+        assert!(properties(&strings(&["--definition"])).is_err());
+        assert!(properties(&strings(&["--a", "1", "--b"])).is_err());
+    }
+
+    #[test]
+    fn a_repeated_property_key_is_an_error() {
+        assert!(properties(&strings(&["--a", "1", "--a", "2"])).is_err());
+    }
+
+    #[test]
+    fn an_empty_property_key_is_an_error() {
+        assert!(properties(&strings(&["--", "1"])).is_err());
+    }
+
+    #[test]
+    fn properties_on_an_edge_are_an_error() {
+        let edge_args = strings(&["m", "a", "k", "b", "--definition", "x"]);
+        let node_args = strings(&["m", "k", "T", "--definition", "x"]);
+
+        let edge = split_add(&edge_args);
+        let node = split_add(&node_args).unwrap();
+
+        assert!(edge.is_err());
+        assert_eq!(node.0.len(), 3);
+        assert_eq!(node.1["definition"], "x");
     }
 
     #[test]

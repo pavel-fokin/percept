@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use crate::shared::Id;
 
 pub type MapId = Id<Map>;
@@ -15,6 +17,7 @@ pub struct Node {
     pub id: NodeId,
     pub kind: String,
     pub title: String,
+    pub properties: BTreeMap<String, String>,
 }
 
 /// A directed link between two nodes of a map, added by an `EdgeAdded` event.
