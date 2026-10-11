@@ -1,6 +1,7 @@
+use std::path::PathBuf;
+
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
 use super::{ClientSessionId, SessionId};
 use crate::shared::Id;
@@ -16,73 +17,130 @@ pub enum Actor {
     System,
 }
 
-/// What an event means, whichever client produced it.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// Where an event came from: the coding client and the folder it ran in.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Source {
+    pub client: String,
+    pub path: PathBuf,
+}
+
+#[cfg(test)]
+impl Source {
+    pub fn fixture() -> Self {
+        Self { client: "claude".into(), path: "/repo".into() }
+    }
+}
+
+/// What kind of thing happened. Its name is how the kind is written down.
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Kind {
-    Message,
-    ToolUsed,
     SessionCreated,
     SessionStarted,
     SessionStopped,
+    Message,
+    ToolUsed,
 }
 
-/// `payload` holds the kind's domain data; `raw` is the hook input, unchanged.
-/// Events percept makes itself have no `raw`.
-#[derive(Serialize, Deserialize)]
+impl Kind {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::SessionCreated => "session.created",
+            Self::SessionStarted => "session.started",
+            Self::SessionStopped => "session.stopped",
+            Self::Message => "message",
+            Self::ToolUsed => "tool.used",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "session.created" => Some(Self::SessionCreated),
+            "session.started" => Some(Self::SessionStarted),
+            "session.stopped" => Some(Self::SessionStopped),
+            "message" => Some(Self::Message),
+            "tool.used" => Some(Self::ToolUsed),
+            _ => None,
+        }
+    }
+}
+
+/// What happened, with the data that kind of event carries.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Payload {
+    SessionCreated { session: SessionId, client_session_id: ClientSessionId },
+    SessionStarted { session: SessionId },
+    SessionStopped { session: SessionId },
+    Message { session: SessionId, content: String },
+    ToolUsed { session: SessionId, tool: String },
+}
+
+impl Payload {
+    pub fn kind(&self) -> Kind {
+        match self {
+            Self::SessionCreated { .. } => Kind::SessionCreated,
+            Self::SessionStarted { .. } => Kind::SessionStarted,
+            Self::SessionStopped { .. } => Kind::SessionStopped,
+            Self::Message { .. } => Kind::Message,
+            Self::ToolUsed { .. } => Kind::ToolUsed,
+        }
+    }
+
+    pub fn session(&self) -> SessionId {
+        match self {
+            Self::SessionCreated { session, .. }
+            | Self::SessionStarted { session }
+            | Self::SessionStopped { session }
+            | Self::Message { session, .. }
+            | Self::ToolUsed { session, .. } => *session,
+        }
+    }
+}
+
+/// `raw` is the hook input, unchanged. Events percept makes itself have no `raw`.
+#[derive(Debug, Clone)]
 pub struct Event {
     pub id: EventId,
-    pub session: SessionId,
+    pub source: Source,
     pub actor: Actor,
-    pub kind: Kind,
-    pub payload: serde_json::Value,
+    pub payload: Payload,
     pub raw: Option<serde_json::Value>,
     pub created_at: Timestamp,
 }
 
 impl Event {
-    pub fn session_created(client_session_id: ClientSessionId) -> Self {
-        Self::build(
-            SessionId::new(),
-            Actor::System,
-            Kind::SessionCreated,
-            json!({ "client_session_id": client_session_id.as_str() }),
-            None,
-        )
+    pub fn session_created(source: Source, session: SessionId, client_session_id: ClientSessionId) -> Self {
+        Self::build(source, Actor::System, Payload::SessionCreated { session, client_session_id }, None)
     }
 
     pub fn message(
+        source: Source,
         session: SessionId,
         actor: Actor,
         content: &str,
         raw: serde_json::Value,
     ) -> Self {
-        Self::build(session, actor, Kind::Message, json!({ "content": content }), Some(raw))
+        let payload = Payload::Message { session, content: content.into() };
+        Self::build(source, actor, payload, Some(raw))
     }
 
-    pub fn tool_used(session: SessionId, tool: &str, raw: serde_json::Value) -> Self {
-        Self::build(session, Actor::Agent, Kind::ToolUsed, json!({ "tool": tool }), Some(raw))
+    pub fn tool_used(source: Source, session: SessionId, tool: &str, raw: serde_json::Value) -> Self {
+        let payload = Payload::ToolUsed { session, tool: tool.into() };
+        Self::build(source, Actor::Agent, payload, Some(raw))
     }
 
-    pub fn session_started(session: SessionId, raw: serde_json::Value) -> Self {
-        Self::build(session, Actor::System, Kind::SessionStarted, json!({}), Some(raw))
+    pub fn session_started(source: Source, session: SessionId, raw: serde_json::Value) -> Self {
+        Self::build(source, Actor::System, Payload::SessionStarted { session }, Some(raw))
     }
 
-    pub fn session_stopped(session: SessionId, raw: serde_json::Value) -> Self {
-        Self::build(session, Actor::System, Kind::SessionStopped, json!({}), Some(raw))
+    pub fn session_stopped(source: Source, session: SessionId, raw: serde_json::Value) -> Self {
+        Self::build(source, Actor::System, Payload::SessionStopped { session }, Some(raw))
     }
 
-    fn build(
-        session: SessionId,
-        actor: Actor,
-        kind: Kind,
-        payload: serde_json::Value,
-        raw: Option<serde_json::Value>,
-    ) -> Self {
+    fn build(source: Source, actor: Actor, payload: Payload, raw: Option<serde_json::Value>) -> Self {
         Self {
             id: EventId::new(),
-            session,
+            source,
             actor,
-            kind,
             payload,
             raw,
             created_at: Timestamp::now(),
@@ -93,14 +151,18 @@ impl Event {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn session_created_is_a_system_event_carrying_the_client_session_id() {
-        let event = Event::session_created(ClientSessionId::new("a".into()));
+        let event = Event::session_created(Source::fixture(), SessionId::new(), ClientSessionId::new("a".into()));
 
         assert_eq!(event.actor, Actor::System);
-        assert_eq!(event.kind, Kind::SessionCreated);
-        assert_eq!(event.payload, json!({"client_session_id": "a"}));
+        assert_eq!(event.payload.kind(), Kind::SessionCreated);
+        assert!(matches!(
+            &event.payload,
+            Payload::SessionCreated { client_session_id, .. } if client_session_id.as_str() == "a"
+        ));
         assert_eq!(event.raw, None);
     }
 
@@ -108,12 +170,10 @@ mod tests {
     fn message_carries_the_session_actor_and_content() {
         let session = SessionId::new();
 
-        let event = Event::message(session, Actor::Human, "hi", json!({"r": 1}));
+        let event = Event::message(Source::fixture(), session, Actor::Human, "hi", json!({"r": 1}));
 
-        assert_eq!(event.session, session);
         assert_eq!(event.actor, Actor::Human);
-        assert_eq!(event.kind, Kind::Message);
-        assert_eq!(event.payload, json!({"content": "hi"}));
+        assert_eq!(event.payload, Payload::Message { session, content: "hi".into() });
         assert_eq!(event.raw, Some(json!({"r": 1})));
     }
 
@@ -121,51 +181,59 @@ mod tests {
     fn tool_used_is_an_agent_event_carrying_the_tool() {
         let session = SessionId::new();
 
-        let event = Event::tool_used(session, "Bash", json!({"r": 2}));
+        let event = Event::tool_used(Source::fixture(), session, "Bash", json!({"r": 2}));
 
-        assert_eq!(event.session, session);
         assert_eq!(event.actor, Actor::Agent);
-        assert_eq!(event.kind, Kind::ToolUsed);
-        assert_eq!(event.payload, json!({"tool": "Bash"}));
+        assert_eq!(event.payload, Payload::ToolUsed { session, tool: "Bash".into() });
         assert_eq!(event.raw, Some(json!({"r": 2})));
     }
 
     #[test]
-    fn session_started_is_a_system_event_with_an_empty_payload() {
+    fn session_started_is_a_system_event() {
         let session = SessionId::new();
 
-        let event = Event::session_started(session, json!({"r": 3}));
+        let event = Event::session_started(Source::fixture(), session, json!({"r": 3}));
 
-        assert_eq!(event.session, session);
         assert_eq!(event.actor, Actor::System);
-        assert_eq!(event.kind, Kind::SessionStarted);
-        assert_eq!(event.payload, json!({}));
+        assert_eq!(event.payload, Payload::SessionStarted { session });
         assert_eq!(event.raw, Some(json!({"r": 3})));
     }
 
     #[test]
-    fn session_stopped_is_a_system_event_with_an_empty_payload() {
+    fn session_stopped_is_a_system_event() {
         let session = SessionId::new();
 
-        let event = Event::session_stopped(session, json!({"r": 4}));
+        let event = Event::session_stopped(Source::fixture(), session, json!({"r": 4}));
 
-        assert_eq!(event.session, session);
         assert_eq!(event.actor, Actor::System);
-        assert_eq!(event.kind, Kind::SessionStopped);
-        assert_eq!(event.payload, json!({}));
+        assert_eq!(event.payload, Payload::SessionStopped { session });
         assert_eq!(event.raw, Some(json!({"r": 4})));
     }
 
     #[test]
-    fn serializes_as_a_flat_line() {
-        let event = Event::message(SessionId::new(), Actor::Human, "hi", json!({"r": 1}));
+    fn every_payload_names_its_kind_and_session() {
+        let session = SessionId::new();
+        let payloads = [
+            (Payload::SessionCreated { session, client_session_id: ClientSessionId::new("a".into()) }, Kind::SessionCreated),
+            (Payload::SessionStarted { session }, Kind::SessionStarted),
+            (Payload::SessionStopped { session }, Kind::SessionStopped),
+            (Payload::Message { session, content: "hi".into() }, Kind::Message),
+            (Payload::ToolUsed { session, tool: "Bash".into() }, Kind::ToolUsed),
+        ];
 
-        let line = serde_json::to_value(&event).unwrap();
+        for (payload, kind) in payloads {
+            assert_eq!(payload.kind(), kind);
+            assert_eq!(payload.session(), session);
+        }
+    }
 
-        assert_eq!(line["session"], serde_json::to_value(event.session).unwrap());
-        assert_eq!(line["actor"], "human");
-        assert_eq!(line["kind"], "Message");
-        assert_eq!(line["payload"], json!({"content": "hi"}));
-        assert_eq!(line["raw"], json!({"r": 1}));
+    #[test]
+    fn every_kind_is_found_by_its_name() {
+        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed];
+
+        for kind in kinds {
+            assert_eq!(Kind::from_name(kind.name()), Some(kind));
+        }
+        assert_eq!(Kind::from_name("bogus"), None);
     }
 }

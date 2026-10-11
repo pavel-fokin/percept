@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use crate::app::AppService;
-use crate::core::{Actor, EventId, EventStore, Kind, SessionId};
+use crate::core::{Actor, EventId, EventStore, Payload, SessionId};
 
 pub(super) async fn status<S: EventStore + Send + Sync + 'static>(
     State(service): State<Arc<AppService<S>>>,
@@ -46,7 +46,7 @@ pub(super) async fn session<S: EventStore + Send + Sync + 'static>(
 struct EventView {
     id: EventId,
     actor: Actor,
-    kind: Kind,
+    kind: &'static str,
     payload: serde_json::Value,
     created_at: jiff::Timestamp,
 }
@@ -61,7 +61,21 @@ pub(super) async fn session_events<S: EventStore + Send + Sync + 'static>(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?
         .into_iter()
-        .map(|e| EventView { id: e.id, actor: e.actor, kind: e.kind, payload: e.payload, created_at: e.created_at })
+        .map(|e| EventView {
+            id: e.id,
+            actor: e.actor,
+            kind: e.payload.kind().name(),
+            payload: view_payload(&e.payload),
+            created_at: e.created_at,
+        })
         .collect();
     Ok(Json(json!({ "data": events })))
+}
+
+fn view_payload(payload: &Payload) -> serde_json::Value {
+    match payload {
+        Payload::Message { content, .. } => json!({ "content": content }),
+        Payload::ToolUsed { tool, .. } => json!({ "tool": tool }),
+        Payload::SessionCreated { .. } | Payload::SessionStarted { .. } | Payload::SessionStopped { .. } => json!({}),
+    }
 }

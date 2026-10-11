@@ -4,6 +4,6 @@ mod event;
 mod session;
 mod store;
 
-pub use event::{Actor, Event, EventId, Kind};
+pub use event::{Actor, Event, EventId, Kind, Payload, Source};
 pub use session::{ClientSessionId, Session, SessionId};
 pub use store::EventStore;

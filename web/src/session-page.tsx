@@ -22,7 +22,7 @@ function turns(events: Event[]) {
   let humanTurns = 0;
 
   for (const event of events) {
-    if (event.kind === "SessionCreated") continue;
+    if (event.kind === "session.created") continue;
 
     if (event.actor === "system") {
       blocks.push({ type: "system", event });
@@ -82,7 +82,7 @@ export function SessionPage() {
                 onClick={() => toggle(event.id)}
                 className="group flex cursor-default items-baseline justify-between gap-4 text-xs text-muted"
               >
-                <p>{event.kind === "SessionStarted" ? "Session started" : "Session stopped"}</p>
+                <p>{event.kind === "session.started" ? "Session started" : "Session stopped"}</p>
                 <Time iso={event.created_at} />
               </div>
             );
@@ -125,10 +125,10 @@ function Time({ iso }: { iso: string }) {
 
 // Tool lines stack tight; a message keeps a gap from whatever comes before or after it.
 function Item({ event, previous }: { event: Event; previous?: Event }) {
-  const stacked = event.kind === "ToolUsed" && previous?.kind === "ToolUsed";
+  const stacked = event.kind === "tool.used" && previous?.kind === "tool.used";
   const margin = previous && !stacked ? "mt-2" : "";
 
-  if (event.kind === "Message") {
+  if (event.kind === "message") {
     return (
       <p className={`max-w-[68ch] text-base leading-6 break-words whitespace-pre-wrap md:text-sm ${margin}`}>
         {event.payload.content as string}
