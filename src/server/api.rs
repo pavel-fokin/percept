@@ -76,6 +76,11 @@ fn view_payload(payload: &Payload) -> serde_json::Value {
     match payload {
         Payload::Message { content, .. } => json!({ "content": content }),
         Payload::ToolUsed { tool, .. } => json!({ "tool": tool }),
-        Payload::SessionCreated { .. } | Payload::SessionStarted { .. } | Payload::SessionStopped { .. } => json!({}),
+        Payload::SessionCreated { .. }
+        | Payload::SessionStarted { .. }
+        | Payload::SessionStopped { .. }
+        | Payload::MapCreated { .. }
+        | Payload::NodeAdded { .. }
+        | Payload::EdgeAdded { .. } => json!({}),
     }
 }
