@@ -41,6 +41,7 @@ pub enum Kind {
     ToolUsed,
     MapCreated,
     NodeAdded,
+    EdgeAdded,
 }
 
 impl Kind {
@@ -53,6 +54,7 @@ impl Kind {
             Self::ToolUsed => "tool.used",
             Self::MapCreated => "map.created",
             Self::NodeAdded => "node.added",
+            Self::EdgeAdded => "edge.added",
         }
     }
 
@@ -65,6 +67,7 @@ impl Kind {
             "tool.used" => Some(Self::ToolUsed),
             "map.created" => Some(Self::MapCreated),
             "node.added" => Some(Self::NodeAdded),
+            "edge.added" => Some(Self::EdgeAdded),
             _ => None,
         }
     }
@@ -80,6 +83,7 @@ pub enum Payload {
     ToolUsed { session: SessionId, tool: String },
     MapCreated { map: MapId, kind: String, title: String },
     NodeAdded { map: MapId, node: NodeId, kind: String, title: String },
+    EdgeAdded { map: MapId, kind: String, from: NodeId, to: NodeId },
 }
 
 impl Payload {
@@ -92,6 +96,7 @@ impl Payload {
             Self::ToolUsed { .. } => Kind::ToolUsed,
             Self::MapCreated { .. } => Kind::MapCreated,
             Self::NodeAdded { .. } => Kind::NodeAdded,
+            Self::EdgeAdded { .. } => Kind::EdgeAdded,
         }
     }
 
@@ -102,7 +107,7 @@ impl Payload {
             | Self::SessionStopped { session }
             | Self::Message { session, .. }
             | Self::ToolUsed { session, .. } => Some(*session),
-            Self::MapCreated { .. } | Self::NodeAdded { .. } => None,
+            Self::MapCreated { .. } | Self::NodeAdded { .. } | Self::EdgeAdded { .. } => None,
         }
     }
 }
@@ -154,6 +159,11 @@ impl Event {
 
     pub fn node_added(source: Source, actor: Actor, map: MapId, node: NodeId, kind: &str, title: &str) -> Self {
         let payload = Payload::NodeAdded { map, node, kind: kind.into(), title: title.into() };
+        Self::build(source, actor, payload, None)
+    }
+
+    pub fn edge_added(source: Source, actor: Actor, map: MapId, kind: &str, from: NodeId, to: NodeId) -> Self {
+        let payload = Payload::EdgeAdded { map, kind: kind.into(), from, to };
         Self::build(source, actor, payload, None)
     }
 
@@ -275,8 +285,21 @@ mod tests {
     }
 
     #[test]
+    fn edge_added_carries_the_actor_and_has_no_session() {
+        let (map, from, to) = (MapId::new(), NodeId::new(), NodeId::new());
+
+        let event = Event::edge_added(Source::fixture(), Actor::Agent, map, "answers", from, to);
+
+        assert_eq!(event.actor, Actor::Agent);
+        assert_eq!(event.payload.kind(), Kind::EdgeAdded);
+        assert_eq!(event.payload, Payload::EdgeAdded { map, kind: "answers".into(), from, to });
+        assert_eq!(event.payload.session(), None);
+        assert_eq!(event.raw, None);
+    }
+
+    #[test]
     fn every_kind_is_found_by_its_name() {
-        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed, Kind::MapCreated, Kind::NodeAdded];
+        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed, Kind::MapCreated, Kind::NodeAdded, Kind::EdgeAdded];
 
         for kind in kinds {
             assert_eq!(Kind::from_name(kind.name()), Some(kind));

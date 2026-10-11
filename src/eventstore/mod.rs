@@ -49,6 +49,9 @@ impl From<&Event> for EventLine {
             Payload::NodeAdded { map, node, kind, title } => {
                 json!({ "map": map, "node": node, "kind": kind, "title": title })
             }
+            Payload::EdgeAdded { map, kind, from, to } => {
+                json!({ "map": map, "kind": kind, "from": from, "to": to })
+            }
         };
 
         Self {
@@ -89,6 +92,12 @@ impl TryFrom<EventLine> for Event {
                 node: field(p, "node")?,
                 kind: field(p, "kind")?,
                 title: field(p, "title")?,
+            },
+            Kind::EdgeAdded => Payload::EdgeAdded {
+                map: field(p, "map")?,
+                kind: field(p, "kind")?,
+                from: field(p, "from")?,
+                to: field(p, "to")?,
             },
         };
 
@@ -349,6 +358,7 @@ mod tests {
             Event::tool_used(Source::fixture(), session, "Bash", raw),
             Event::map_created(Source::fixture(), Actor::Human, MapId::new(), "decisions", "Event model"),
             Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?"),
+            Event::edge_added(Source::fixture(), Actor::Agent, MapId::new(), "answers", NodeId::new(), NodeId::new()),
         ];
 
         for event in events {

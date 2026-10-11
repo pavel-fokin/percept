@@ -80,6 +80,7 @@ fn view_payload(payload: &Payload) -> serde_json::Value {
         | Payload::SessionStarted { .. }
         | Payload::SessionStopped { .. }
         | Payload::MapCreated { .. }
-        | Payload::NodeAdded { .. } => json!({}),
+        | Payload::NodeAdded { .. }
+        | Payload::EdgeAdded { .. } => json!({}),
     }
 }

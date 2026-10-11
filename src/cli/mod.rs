@@ -6,6 +6,8 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 use tokio::io::AsyncReadExt;
 
+use std::collections::BTreeMap;
+
 use crate::app::{AppService, source_path};
 use crate::core::{Actor, ClientSessionId, Event, EventStore, SessionId, Source};
 use crate::server;
@@ -26,10 +28,18 @@ enum Command {
         client: String,
     },
     /// Creates a map of the given kind in the current project.
-    Create { kind: String, title: String },
-    /// Adds a node to a map: `add <map> <kind> <title>`.
-    Add { args: Vec<String> },
-    /// Lists the current project's maps, or one map's nodes.
+    Create {
+        #[arg(allow_hyphen_values = true)]
+        kind: String,
+        #[arg(allow_hyphen_values = true)]
+        title: String,
+    },
+    /// Adds a node, `add <map> <kind> <title>`, or an edge, `add <map> <from> <kind> <to>`.
+    Add {
+        #[arg(allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Lists the current project's maps, or one map's nodes and edges.
     Show { map: Option<String> },
     /// Serves the page in the browser.
     Ui,
@@ -79,23 +89,30 @@ async fn hook<S: EventStore>(service: &AppService<S>, client: String) -> Result<
 }
 
 async fn create<S: EventStore>(service: &AppService<S>, kind: &str, title: &str) -> Result<()> {
-    let (actor, client) = writer(env_flag("CLAUDECODE"), env_flag("CODEX_SESSION_ID"))?;
-    let source = Source { client: client.into(), path: source_path(&std::env::current_dir()?).await };
+    let (actor, source) = cli_writer().await?;
 
     service.create_map(source, actor, kind, title).await
 }
 
 async fn add<S: EventStore>(service: &AppService<S>, args: &[String]) -> Result<()> {
-    let [map, kind, title] = args else {
-        return match args.len() {
-            4 => Err("edges are not supported yet".into()),
-            _ => Err("usage: percept add <map> <kind> <title>".into()),
-        };
-    };
+    match args {
+        [map, kind, title] => {
+            let (actor, source) = cli_writer().await?;
+            service.add_node(source, actor, map, kind, title).await
+        }
+        [map, from, kind, to] => {
+            let (actor, source) = cli_writer().await?;
+            service.add_edge(source, actor, map, from, kind, to).await
+        }
+        _ => Err("usage: percept add <map> <kind> <title> | percept add <map> <from> <kind> <to>".into()),
+    }
+}
+
+async fn cli_writer() -> Result<(Actor, Source)> {
     let (actor, client) = writer(env_flag("CLAUDECODE"), env_flag("CODEX_SESSION_ID"))?;
     let source = Source { client: client.into(), path: source_path(&std::env::current_dir()?).await };
 
-    service.add_node(source, actor, map, kind, title).await
+    Ok((actor, source))
 }
 
 async fn show<S: EventStore>(service: &AppService<S>, map: Option<&str>) -> Result<()> {
@@ -104,15 +121,30 @@ async fn show<S: EventStore>(service: &AppService<S>, map: Option<&str>) -> Resu
     match map {
         Some(kind) => {
             let map = service.map(&project, kind).await?;
-            println!("{}  {}\n", map.kind, map.title);
-            for node in service.nodes(map.id).await? {
+            let nodes = service.nodes(map.id).await?;
+            let edges = service.edges(map.id).await?;
+
+            println!("{}  {}", map.kind, map.title);
+
+            if !nodes.is_empty() {
+                println!();
+            }
+            for node in &nodes {
                 println!("{}  {}", node.kind, node.title);
+            }
+
+            let titles: BTreeMap<_, _> = nodes.iter().map(|n| (n.id, n.title.as_str())).collect();
+            let title = |id| titles.get(&id).copied().ok_or("an edge names a node that is not in its map");
+            if !edges.is_empty() {
+                println!();
+            }
+            for edge in edges {
+                println!("\"{}\"  {}  \"{}\"", title(edge.from)?, edge.kind, title(edge.to)?);
             }
         }
         None => {
-            for map in service.maps(&project).await? {
-                let count = service.nodes(map.id).await?.len();
-                println!("{}  {}  {}", map.kind, map.title, node_count(count));
+            for s in service.map_summaries(&project).await? {
+                println!("{}  {}  {}, {}", s.map.kind, s.map.title, node_count(s.nodes), edge_count(s.edges));
             }
         }
     }
@@ -124,6 +156,13 @@ fn node_count(count: usize) -> String {
     match count {
         1 => "1 node".to_string(),
         n => format!("{n} nodes"),
+    }
+}
+
+fn edge_count(count: usize) -> String {
+    match count {
+        1 => "1 edge".to_string(),
+        n => format!("{n} edges"),
     }
 }
 
@@ -293,6 +332,13 @@ mod tests {
         assert_eq!(node_count(0), "0 nodes");
         assert_eq!(node_count(1), "1 node");
         assert_eq!(node_count(2), "2 nodes");
+    }
+
+    #[test]
+    fn edge_count_phrasings() {
+        assert_eq!(edge_count(0), "0 edges");
+        assert_eq!(edge_count(1), "1 edge");
+        assert_eq!(edge_count(2), "2 edges");
     }
 
     #[test]
