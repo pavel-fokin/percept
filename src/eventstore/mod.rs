@@ -45,6 +45,7 @@ impl From<&Event> for EventLine {
             }
             Payload::Message { session, content } => json!({ "session": session, "content": content }),
             Payload::ToolUsed { session, tool } => json!({ "session": session, "tool": tool }),
+            Payload::MapCreated { map, kind, title } => json!({ "map": map, "kind": kind, "title": title }),
         };
 
         Self {
@@ -75,6 +76,11 @@ impl TryFrom<EventLine> for Event {
             Kind::SessionStopped => Payload::SessionStopped { session: field(p, "session")? },
             Kind::Message => Payload::Message { session: field(p, "session")?, content: field(p, "content")? },
             Kind::ToolUsed => Payload::ToolUsed { session: field(p, "session")?, tool: field(p, "tool")? },
+            Kind::MapCreated => Payload::MapCreated {
+                map: field(p, "map")?,
+                kind: field(p, "kind")?,
+                title: field(p, "title")?,
+            },
         };
 
         Ok(Event {
@@ -200,7 +206,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
-    use crate::core::{Actor, EventId};
+    use crate::core::{Actor, EventId, MapId};
     use serde_json::json;
 
     struct TempFile(PathBuf);
@@ -298,7 +304,7 @@ mod tests {
         let file = TempFile::new();
         let store = file.store();
         let created = Event::session_created(Source::fixture(), SessionId::new(), ClientSessionId::new("a".into()));
-        let session = created.payload.session();
+        let session = created.payload.session().unwrap();
         store.append(&created).await.unwrap();
 
         let found = store.session(&ClientSessionId::new("a".into())).await.unwrap();
@@ -332,6 +338,7 @@ mod tests {
             Event::session_stopped(Source::fixture(), session, raw.clone()),
             Event::message(Source::fixture(), session, Actor::Human, "hi", raw.clone()),
             Event::tool_used(Source::fixture(), session, "Bash", raw),
+            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), "decisions", "Event model"),
         ];
 
         for event in events {

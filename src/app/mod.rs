@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::error::Error;
 use std::path::{Path, PathBuf};
 
-use crate::core::{Actor, ClientSessionId, Event, EventStore, Payload, Session, SessionId, Source};
+use crate::core::{Actor, ClientSessionId, Event, EventStore, Map, MapId, Payload, Session, SessionId, Source};
 
 mod git;
 
@@ -57,10 +57,46 @@ impl<S: EventStore> AppService<S> {
 
     /// The session's events in log order, or `None` if the session does not exist.
     pub async fn session_events(&self, id: SessionId) -> Result<Option<Vec<Event>>, Box<dyn Error + Send + Sync>> {
-        let events: Vec<Event> = self.store.all().await?.into_iter().filter(|e| e.payload.session() == id).collect();
+        let events: Vec<Event> = self.store.all().await?.into_iter().filter(|e| e.payload.session() == Some(id)).collect();
 
         let exists = events.iter().any(|e| matches!(e.payload, Payload::SessionCreated { .. }));
         Ok(exists.then_some(events))
+    }
+
+    /// Records a new map. A project holds at most one map of each kind.
+    pub async fn create_map(
+        &self,
+        source: Source,
+        actor: Actor,
+        kind: &str,
+        title: &str,
+    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // Held until return, so parallel creates cannot both pass the check.
+        let _lock = self.store.lock().await?;
+
+        let taken = self.maps(&source.path).await?.iter().any(|m| m.kind == kind);
+        if taken {
+            return Err(format!("this project already has a {kind} map").into());
+        }
+
+        self.store.append(&Event::map_created(source, actor, MapId::new(), kind, title)).await
+    }
+
+    /// The project's maps in log order.
+    pub async fn maps(&self, project: &Path) -> Result<Vec<Map>, Box<dyn Error + Send + Sync>> {
+        let maps = self
+            .store
+            .all()
+            .await?
+            .into_iter()
+            .filter(|e| e.source.path == project)
+            .filter_map(|e| match e.payload {
+                Payload::MapCreated { kind, title, .. } => Some(Map { kind, title }),
+                _ => None,
+            })
+            .collect();
+
+        Ok(maps)
     }
 
     /// Appends the event to the session the client's session id names, creating the session first if it is new.
@@ -207,7 +243,7 @@ mod tests {
 
         let events = store.0.lock().unwrap();
         let found: Vec<(SessionId, &str)> = sessions.iter().map(|s| (s.id, s.client_session_id.as_str())).collect();
-        assert_eq!(found, vec![(events[2].payload.session(), "b"), (events[0].payload.session(), "a")]);
+        assert_eq!(found, vec![(events[2].payload.session().unwrap(), "b"), (events[0].payload.session().unwrap(), "a")]);
         assert_eq!(sessions[1].created_at, events[0].created_at);
     }
 
@@ -217,7 +253,7 @@ mod tests {
         let service = AppService::new(&store);
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Human, "hi", json!({}))).await.unwrap();
         service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", json!({}))).await.unwrap();
-        let id = store.0.lock().unwrap()[0].payload.session();
+        let id = store.0.lock().unwrap()[0].payload.session().unwrap();
 
         let found = service.session(id).await.unwrap().unwrap();
 
@@ -234,7 +270,7 @@ mod tests {
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Human, "hi", json!({}))).await.unwrap();
         service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", json!({}))).await.unwrap();
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Read", json!({}))).await.unwrap();
-        let id = store.0.lock().unwrap()[0].payload.session();
+        let id = store.0.lock().unwrap()[0].payload.session().unwrap();
 
         let events = service.session_events(id).await.unwrap().unwrap();
 
@@ -333,6 +369,42 @@ mod tests {
         assert_eq!(events[1].source, source);
         assert!(events[0].id <= events[1].id);
         assert!(events[0].created_at <= events[1].created_at);
+    }
+
+    #[tokio::test]
+    async fn the_same_map_kind_can_be_created_in_two_projects_but_not_twice_in_one() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        let other = Source { client: "claude".into(), path: "/other".into() };
+        service.create_map(Source::fixture(), Actor::Human, "decisions", "A").await.unwrap();
+        service.create_map(other, Actor::Human, "decisions", "B").await.unwrap();
+
+        let again = service.create_map(Source::fixture(), Actor::Agent, "decisions", "C").await;
+
+        assert!(again.is_err());
+        assert_eq!(store.0.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn maps_are_the_current_projects_in_log_order() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        let other = Source { client: "claude".into(), path: "/other".into() };
+        service.create_map(Source::fixture(), Actor::Human, "decisions", "A").await.unwrap();
+        service.create_map(other, Actor::Human, "tasks", "B").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "tasks", "C").await.unwrap();
+
+        let maps = service.maps(&Source::fixture().path).await.unwrap();
+
+        let found: Vec<(&str, &str)> = maps.iter().map(|m| (m.kind.as_str(), m.title.as_str())).collect();
+        assert_eq!(found, vec![("decisions", "A"), ("tasks", "C")]);
+    }
+
+    #[tokio::test]
+    async fn create_map_passes_store_errors_through() {
+        let result = AppService::new(Broken).create_map(Source::fixture(), Actor::Human, "decisions", "A").await;
+
+        assert!(result.is_err());
     }
 
     #[tokio::test]

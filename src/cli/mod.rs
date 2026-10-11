@@ -25,6 +25,10 @@ enum Command {
         #[arg(value_parser = ["claude", "codex"])]
         client: String,
     },
+    /// Creates a map of the given kind in the current project.
+    Create { kind: String, title: String },
+    /// Lists the current project's maps.
+    Show,
     /// Serves the page in the browser.
     Ui,
 }
@@ -41,6 +45,8 @@ pub async fn run<S: EventStore + Send + Sync + 'static>(service: Arc<AppService<
     let result = match cli.command {
         None => status(&service).await,
         Some(Command::Hook { client }) => hook(&service, client).await,
+        Some(Command::Create { kind, title }) => create(&service, &kind, &title).await,
+        Some(Command::Show) => show(&service).await,
         Some(Command::Ui) => server::serve(service).await,
     };
     match result {
@@ -67,6 +73,37 @@ async fn hook<S: EventStore>(service: &AppService<S>, client: String) -> Result<
     let source = Source { client, path: source_path(&std::env::current_dir()?).await };
 
     service.record(client_session_id, source, event).await
+}
+
+async fn create<S: EventStore>(service: &AppService<S>, kind: &str, title: &str) -> Result<()> {
+    let (actor, client) = writer(env_flag("CLAUDECODE"), env_flag("CODEX_SESSION_ID"))?;
+    let source = Source { client: client.into(), path: source_path(&std::env::current_dir()?).await };
+
+    service.create_map(source, actor, kind, title).await
+}
+
+async fn show<S: EventStore>(service: &AppService<S>) -> Result<()> {
+    let project = source_path(&std::env::current_dir()?).await;
+
+    for map in service.maps(&project).await? {
+        println!("{}  {}", map.kind, map.title);
+    }
+
+    Ok(())
+}
+
+fn env_flag(name: &str) -> Option<String> {
+    std::env::var(name).ok()
+}
+
+/// Who is running the CLI, from the values of `CLAUDECODE` and `CODEX_SESSION_ID`.
+fn writer(claudecode: Option<String>, codex_session_id: Option<String>) -> Result<(Actor, &'static str)> {
+    match (claudecode.as_deref() == Some("1"), codex_session_id.is_some()) {
+        (true, true) => Err("both CLAUDECODE and CODEX_SESSION_ID are set".into()),
+        (true, false) => Ok((Actor::Agent, "claude")),
+        (false, true) => Ok((Actor::Agent, "codex")),
+        (false, false) => Ok((Actor::Human, "percept-cli")),
+    }
 }
 
 /// Makes the hook's event once its session is known.
@@ -204,6 +241,16 @@ mod tests {
     #[test]
     fn missing_tool_name_is_an_error() {
         assert!(event_from_hook(json!({"hook_event_name": "PostToolUse", "session_id": "a"})).is_err());
+    }
+
+    #[test]
+    fn writer_follows_the_client_environment() {
+        let set = || Some("1".to_string());
+
+        assert_eq!(writer(set(), None).unwrap(), (Actor::Agent, "claude"));
+        assert_eq!(writer(None, set()).unwrap(), (Actor::Agent, "codex"));
+        assert_eq!(writer(None, None).unwrap(), (Actor::Human, "percept-cli"));
+        assert!(writer(set(), set()).is_err());
     }
 
     #[test]

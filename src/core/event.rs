@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use super::{ClientSessionId, SessionId};
+use super::{ClientSessionId, MapId, SessionId};
 use crate::shared::Id;
 
 pub type EventId = Id<Event>;
@@ -39,6 +39,7 @@ pub enum Kind {
     SessionStopped,
     Message,
     ToolUsed,
+    MapCreated,
 }
 
 impl Kind {
@@ -49,6 +50,7 @@ impl Kind {
             Self::SessionStopped => "session.stopped",
             Self::Message => "message",
             Self::ToolUsed => "tool.used",
+            Self::MapCreated => "map.created",
         }
     }
 
@@ -59,6 +61,7 @@ impl Kind {
             "session.stopped" => Some(Self::SessionStopped),
             "message" => Some(Self::Message),
             "tool.used" => Some(Self::ToolUsed),
+            "map.created" => Some(Self::MapCreated),
             _ => None,
         }
     }
@@ -72,6 +75,7 @@ pub enum Payload {
     SessionStopped { session: SessionId },
     Message { session: SessionId, content: String },
     ToolUsed { session: SessionId, tool: String },
+    MapCreated { map: MapId, kind: String, title: String },
 }
 
 impl Payload {
@@ -82,16 +86,18 @@ impl Payload {
             Self::SessionStopped { .. } => Kind::SessionStopped,
             Self::Message { .. } => Kind::Message,
             Self::ToolUsed { .. } => Kind::ToolUsed,
+            Self::MapCreated { .. } => Kind::MapCreated,
         }
     }
 
-    pub fn session(&self) -> SessionId {
+    pub fn session(&self) -> Option<SessionId> {
         match self {
             Self::SessionCreated { session, .. }
             | Self::SessionStarted { session }
             | Self::SessionStopped { session }
             | Self::Message { session, .. }
-            | Self::ToolUsed { session, .. } => *session,
+            | Self::ToolUsed { session, .. } => Some(*session),
+            Self::MapCreated { .. } => None,
         }
     }
 }
@@ -134,6 +140,11 @@ impl Event {
 
     pub fn session_stopped(source: Source, session: SessionId, raw: serde_json::Value) -> Self {
         Self::build(source, Actor::System, Payload::SessionStopped { session }, Some(raw))
+    }
+
+    pub fn map_created(source: Source, actor: Actor, map: MapId, kind: &str, title: &str) -> Self {
+        let payload = Payload::MapCreated { map, kind: kind.into(), title: title.into() };
+        Self::build(source, actor, payload, None)
     }
 
     fn build(source: Source, actor: Actor, payload: Payload, raw: Option<serde_json::Value>) -> Self {
@@ -223,13 +234,26 @@ mod tests {
 
         for (payload, kind) in payloads {
             assert_eq!(payload.kind(), kind);
-            assert_eq!(payload.session(), session);
+            assert_eq!(payload.session(), Some(session));
         }
     }
 
     #[test]
+    fn map_created_carries_the_actor_and_has_no_session() {
+        let map = MapId::new();
+
+        let event = Event::map_created(Source::fixture(), Actor::Human, map, "decisions", "Event model");
+
+        assert_eq!(event.actor, Actor::Human);
+        assert_eq!(event.payload.kind(), Kind::MapCreated);
+        assert_eq!(event.payload, Payload::MapCreated { map, kind: "decisions".into(), title: "Event model".into() });
+        assert_eq!(event.payload.session(), None);
+        assert_eq!(event.raw, None);
+    }
+
+    #[test]
     fn every_kind_is_found_by_its_name() {
-        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed];
+        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed, Kind::MapCreated];
 
         for kind in kinds {
             assert_eq!(Kind::from_name(kind.name()), Some(kind));
