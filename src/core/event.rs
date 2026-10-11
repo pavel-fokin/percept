@@ -82,7 +82,7 @@ pub enum Payload {
     SessionStopped { session: SessionId },
     Message { session: SessionId, content: String },
     ToolUsed { session: SessionId, tool: String },
-    MapCreated { map: MapId, kind: String, title: String },
+    MapCreated { map: MapId, kind: String },
     NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String> },
     EdgeAdded { map: MapId, kind: String, from: NodeId, to: NodeId },
 }
@@ -153,8 +153,8 @@ impl Event {
         Self::build(source, Actor::System, Payload::SessionStopped { session }, Some(raw))
     }
 
-    pub fn map_created(source: Source, actor: Actor, map: MapId, kind: &str, title: &str) -> Self {
-        let payload = Payload::MapCreated { map, kind: kind.into(), title: title.into() };
+    pub fn map_created(source: Source, actor: Actor, map: MapId, kind: &str) -> Self {
+        let payload = Payload::MapCreated { map, kind: kind.into() };
         Self::build(source, actor, payload, None)
     }
 
@@ -271,11 +271,11 @@ mod tests {
     fn map_created_carries_the_actor_and_has_no_session() {
         let map = MapId::new();
 
-        let event = Event::map_created(Source::fixture(), Actor::Human, map, "decisions", "Event model");
+        let event = Event::map_created(Source::fixture(), Actor::Human, map, "decisions");
 
         assert_eq!(event.actor, Actor::Human);
         assert_eq!(event.payload.kind(), Kind::MapCreated);
-        assert_eq!(event.payload, Payload::MapCreated { map, kind: "decisions".into(), title: "Event model".into() });
+        assert_eq!(event.payload, Payload::MapCreated { map, kind: "decisions".into() });
         assert_eq!(event.payload.session(), None);
         assert_eq!(event.raw, None);
     }

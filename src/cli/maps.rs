@@ -4,10 +4,10 @@ use super::Result;
 use crate::app::{AppService, source_path};
 use crate::core::{Actor, EventStore, Source};
 
-pub(super) async fn create<S: EventStore>(service: &AppService<S>, kind: &str, title: &str) -> Result<()> {
+pub(super) async fn create<S: EventStore>(service: &AppService<S>, kind: &str) -> Result<()> {
     let (actor, source) = cli_writer().await?;
 
-    service.create_map(source, actor, kind, title).await
+    service.create_map(source, actor, kind).await
 }
 
 pub(super) async fn add<S: EventStore>(service: &AppService<S>, args: &[String]) -> Result<()> {
@@ -70,7 +70,7 @@ pub(super) async fn show<S: EventStore>(service: &AppService<S>, map: Option<&st
             let nodes = service.nodes(map.id).await?;
             let edges = service.edges(map.id).await?;
 
-            println!("{}  {}", map.kind, map.title);
+            println!("{}", map.kind);
 
             if !nodes.is_empty() {
                 println!();
@@ -93,7 +93,7 @@ pub(super) async fn show<S: EventStore>(service: &AppService<S>, map: Option<&st
         }
         None => {
             for s in service.map_summaries(&project).await? {
-                println!("{}  {}  {}, {}", s.map.kind, s.map.title, node_count(s.nodes), edge_count(s.edges));
+                println!("{}  {}, {}", s.map.kind, node_count(s.nodes), edge_count(s.edges));
             }
         }
     }

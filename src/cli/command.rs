@@ -29,8 +29,6 @@ enum Command {
     Create {
         #[arg(allow_hyphen_values = true)]
         kind: String,
-        #[arg(allow_hyphen_values = true)]
-        title: String,
     },
     /// Adds a node, `add <map> <kind> <title>`, or an edge, `add <map> <from> <kind> <to>`.
     Add {
@@ -55,7 +53,7 @@ pub async fn run<S: EventStore + Send + Sync + 'static>(service: Arc<AppService<
     let result = match cli.command {
         None => status(&service).await,
         Some(Command::Hook { client }) => hook(&service, client).await,
-        Some(Command::Create { kind, title }) => create(&service, &kind, &title).await,
+        Some(Command::Create { kind }) => create(&service, &kind).await,
         Some(Command::Add { args }) => add(&service, &args).await,
         Some(Command::Show { map }) => show(&service, map.as_deref()).await,
         Some(Command::Ui) => server::serve(service).await,

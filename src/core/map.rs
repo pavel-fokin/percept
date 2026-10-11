@@ -9,7 +9,6 @@ pub type NodeId = Id<Node>;
 pub struct Map {
     pub id: MapId,
     pub kind: String,
-    pub title: String,
 }
 
 /// One item on a map, added by a `NodeAdded` event.
