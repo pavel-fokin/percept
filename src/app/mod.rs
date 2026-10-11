@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 
-use crate::core::{Actor, ClientSessionId, Event, EventStore, Kind, Session, SessionId};
+use crate::core::{Actor, ClientSessionId, Event, EventStore, Payload, Session, SessionId};
 
 pub struct AppService<S: EventStore> {
     store: S,
@@ -23,28 +23,29 @@ impl<S: EventStore> AppService<S> {
         let events = self.store.all().await?;
 
         let mut titles: BTreeMap<SessionId, &str> = BTreeMap::new();
-        for e in events.iter().filter(|e| e.kind == Kind::Message && e.actor == Actor::Human) {
-            if let Some(content) = e.payload["content"].as_str().filter(|c| !c.trim().is_empty()) {
-                titles.entry(e.session).or_insert(content);
+        for e in events.iter().filter(|e| e.actor == Actor::Human) {
+            if let Payload::Message { session, content } = &e.payload
+                && !content.trim().is_empty()
+            {
+                titles.entry(*session).or_insert(content);
             }
         }
 
-        events
+        let sessions = events
             .iter()
             .rev()
-            .filter(|e| e.kind == Kind::SessionCreated)
-            .map(|e| {
-                let id = e.payload["client_session_id"]
-                    .as_str()
-                    .ok_or("SessionCreated without a client_session_id")?;
-                Ok(Session {
-                    id: e.session,
-                    client_session_id: ClientSessionId::new(id.into()),
+            .filter_map(|e| match &e.payload {
+                Payload::SessionCreated { session, client_session_id } => Some(Session {
+                    id: *session,
+                    client_session_id: client_session_id.clone(),
                     created_at: e.created_at,
-                    title: titles.get(&e.session).map(|t| t.to_string()),
-                })
+                    title: titles.get(session).map(|t| t.to_string()),
+                }),
+                _ => None,
             })
-            .collect()
+            .collect();
+
+        Ok(sessions)
     }
 
     pub async fn session(&self, id: SessionId) -> Result<Option<Session>, Box<dyn Error + Send + Sync>> {
@@ -53,9 +54,9 @@ impl<S: EventStore> AppService<S> {
 
     /// The session's events in log order, or `None` if the session does not exist.
     pub async fn session_events(&self, id: SessionId) -> Result<Option<Vec<Event>>, Box<dyn Error + Send + Sync>> {
-        let events: Vec<Event> = self.store.all().await?.into_iter().filter(|e| e.session == id).collect();
+        let events: Vec<Event> = self.store.all().await?.into_iter().filter(|e| e.payload.session() == id).collect();
 
-        let exists = events.iter().any(|e| e.kind == Kind::SessionCreated);
+        let exists = events.iter().any(|e| matches!(e.payload, Payload::SessionCreated { .. }));
         Ok(exists.then_some(events))
     }
 
@@ -73,7 +74,7 @@ impl<S: EventStore> AppService<S> {
             None => {
                 let created = Event::session_created(client_session_id);
                 self.store.append(&created).await?;
-                created.session
+                created.payload.session()
             }
         };
 
@@ -148,21 +149,21 @@ mod tests {
             let events = self.0.lock().unwrap();
             Ok(events
                 .iter()
-                .find(|e| {
-                    e.kind == Kind::SessionCreated
-                        && e.payload["client_session_id"] == client_session_id.as_str()
-                })
-                .map(|e| e.session))
+                .find_map(|e| match &e.payload {
+                    Payload::SessionCreated { session, client_session_id: id } if id == client_session_id => {
+                        Some(*session)
+                    }
+                    _ => None,
+                }))
         }
 
         async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
             let events = self.0.lock().unwrap();
-            events.iter().map(|e| Ok(serde_json::from_value(serde_json::to_value(e)?)?)).collect()
+            Ok(events.clone())
         }
 
         async fn append(&self, event: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {
-            let line = serde_json::to_string(event)?;
-            self.0.lock().unwrap().push(serde_json::from_str(&line)?);
+            self.0.lock().unwrap().push(event.clone());
             Ok(())
         }
     }
@@ -196,7 +197,7 @@ mod tests {
 
         let events = store.0.lock().unwrap();
         let found: Vec<(SessionId, &str)> = sessions.iter().map(|s| (s.id, s.client_session_id.as_str())).collect();
-        assert_eq!(found, vec![(events[2].session, "b"), (events[0].session, "a")]);
+        assert_eq!(found, vec![(events[2].payload.session(), "b"), (events[0].payload.session(), "a")]);
         assert_eq!(sessions[1].created_at, events[0].created_at);
     }
 
@@ -206,7 +207,7 @@ mod tests {
         let service = AppService::new(&store);
         service.record(client_session_id("a"), |s| Event::message(s, Actor::Human, "hi", json!({}))).await.unwrap();
         service.record(client_session_id("b"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
-        let id = store.0.lock().unwrap()[0].session;
+        let id = store.0.lock().unwrap()[0].payload.session();
 
         let found = service.session(id).await.unwrap().unwrap();
 
@@ -223,12 +224,12 @@ mod tests {
         service.record(client_session_id("a"), |s| Event::message(s, Actor::Human, "hi", json!({}))).await.unwrap();
         service.record(client_session_id("b"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
         service.record(client_session_id("a"), |s| Event::tool_used(s, "Read", json!({}))).await.unwrap();
-        let id = store.0.lock().unwrap()[0].session;
+        let id = store.0.lock().unwrap()[0].payload.session();
 
         let events = service.session_events(id).await.unwrap().unwrap();
 
-        let kinds: Vec<Kind> = events.iter().map(|e| e.kind).collect();
-        assert_eq!(kinds, vec![Kind::SessionCreated, Kind::Message, Kind::ToolUsed]);
+        let kinds: Vec<&str> = events.iter().map(|e| e.payload.kind()).collect();
+        assert_eq!(kinds, vec!["session.created", "message", "tool.used"]);
         assert!(service.session_events(SessionId::new()).await.unwrap().is_none());
     }
 
@@ -279,11 +280,12 @@ mod tests {
 
         let events = store.0.lock().unwrap();
         assert_eq!(events.len(), 2);
-        assert_eq!(events[0].kind, Kind::SessionCreated);
-        assert_eq!(events[0].payload, json!({"client_session_id": "a"}));
-        assert_eq!(events[1].kind, Kind::Message);
-        assert_eq!(events[1].payload, json!({"content": "hi"}));
-        assert_eq!(events[1].session, events[0].session);
+        assert!(matches!(
+            &events[0].payload,
+            Payload::SessionCreated { client_session_id, .. } if client_session_id.as_str() == "a"
+        ));
+        assert!(matches!(&events[1].payload, Payload::Message { content, .. } if content == "hi"));
+        assert_eq!(events[1].payload.session(), events[0].payload.session());
     }
 
     #[tokio::test]
@@ -296,20 +298,14 @@ mod tests {
         service.record(client_session_id("b"), |s| Event::tool_used(s, "Bash", json!({}))).await.unwrap();
 
         let events = store.0.lock().unwrap();
-        let kinds: Vec<Kind> = events.iter().map(|e| e.kind).collect();
+        let kinds: Vec<&str> = events.iter().map(|e| e.payload.kind()).collect();
         assert_eq!(
             kinds,
-            vec![
-                Kind::SessionCreated,
-                Kind::ToolUsed,
-                Kind::ToolUsed,
-                Kind::SessionCreated,
-                Kind::ToolUsed
-            ]
+            vec!["session.created", "tool.used", "tool.used", "session.created", "tool.used"]
         );
-        assert_eq!(events[1].session, events[0].session);
-        assert_eq!(events[2].session, events[0].session);
-        assert_ne!(events[4].session, events[0].session);
+        assert_eq!(events[1].payload.session(), events[0].payload.session());
+        assert_eq!(events[2].payload.session(), events[0].payload.session());
+        assert_ne!(events[4].payload.session(), events[0].payload.session());
     }
 
     #[tokio::test]

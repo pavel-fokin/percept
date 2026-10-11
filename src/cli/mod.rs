@@ -114,7 +114,7 @@ fn status_line(count: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::Kind;
+    use crate::core::Payload;
     use serde_json::json;
 
     fn build(raw: serde_json::Value) -> (ClientSessionId, SessionId, Event) {
@@ -130,10 +130,8 @@ mod tests {
         let (client_session_id, session, event) = build(raw.clone());
 
         assert_eq!(client_session_id, ClientSessionId::new("a".into()));
-        assert_eq!(event.session, session);
         assert_eq!(event.actor, Actor::Human);
-        assert_eq!(event.kind, Kind::Message);
-        assert_eq!(event.payload, json!({"content": "hi"}));
+        assert_eq!(event.payload, Payload::Message { session, content: "hi".into() });
         assert_eq!(event.raw, Some(raw));
     }
 
@@ -142,11 +140,10 @@ mod tests {
         for name in ["Stop", "SubagentStop"] {
             let raw = json!({"hook_event_name": name, "last_assistant_message": "done", "session_id": "a"});
 
-            let (_, _, event) = build(raw.clone());
+            let (_, session, event) = build(raw.clone());
 
             assert_eq!(event.actor, Actor::Agent);
-            assert_eq!(event.kind, Kind::Message);
-            assert_eq!(event.payload, json!({"content": "done"}));
+            assert_eq!(event.payload, Payload::Message { session, content: "done".into() });
             assert_eq!(event.raw, Some(raw));
         }
     }
@@ -155,11 +152,10 @@ mod tests {
     fn post_tool_use_is_a_tool_used_event() {
         let raw = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "session_id": "a"});
 
-        let (_, _, event) = build(raw.clone());
+        let (_, session, event) = build(raw.clone());
 
         assert_eq!(event.actor, Actor::Agent);
-        assert_eq!(event.kind, Kind::ToolUsed);
-        assert_eq!(event.payload, json!({"tool": "Bash"}));
+        assert_eq!(event.payload, Payload::ToolUsed { session, tool: "Bash".into() });
         assert_eq!(event.raw, Some(raw));
     }
 
@@ -167,11 +163,10 @@ mod tests {
     fn session_start_is_a_session_started_event() {
         let raw = json!({"hook_event_name": "SessionStart", "session_id": "a"});
 
-        let (_, _, event) = build(raw.clone());
+        let (_, session, event) = build(raw.clone());
 
         assert_eq!(event.actor, Actor::System);
-        assert_eq!(event.kind, Kind::SessionStarted);
-        assert_eq!(event.payload, json!({}));
+        assert_eq!(event.payload, Payload::SessionStarted { session });
         assert_eq!(event.raw, Some(raw));
     }
 
@@ -179,11 +174,10 @@ mod tests {
     fn session_end_is_a_session_stopped_event() {
         let raw = json!({"hook_event_name": "SessionEnd", "session_id": "a"});
 
-        let (_, _, event) = build(raw.clone());
+        let (_, session, event) = build(raw.clone());
 
         assert_eq!(event.actor, Actor::System);
-        assert_eq!(event.kind, Kind::SessionStopped);
-        assert_eq!(event.payload, json!({}));
+        assert_eq!(event.payload, Payload::SessionStopped { session });
         assert_eq!(event.raw, Some(raw));
     }
 

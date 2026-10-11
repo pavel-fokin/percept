@@ -10,7 +10,7 @@ export type Session = {
 export type Event = {
   id: string;
   actor: "human" | "agent" | "system";
-  kind: "SessionCreated" | "SessionStarted" | "SessionStopped" | "Message" | "ToolUsed";
+  kind: "session.created" | "session.started" | "session.stopped" | "message" | "tool.used";
   payload: Record<string, unknown>;
   created_at: string;
 };

@@ -61,7 +61,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::{ClientSessionId, Event, SessionId};
+    use crate::core::{ClientSessionId, Event, Payload, SessionId};
 
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
 
@@ -79,9 +79,9 @@ mod tests {
         }
 
         async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
+            let session: SessionId = serde_json::from_value(json!(SESSION))?;
             let mut created = Event::session_created(ClientSessionId::new("k".into()));
-            created.session = serde_json::from_value(json!(SESSION))?;
-            let session = created.session;
+            created.payload = Payload::SessionCreated { session, client_session_id: ClientSessionId::new("k".into()) };
             let started = (1..self.0).map(move |_| Event::session_started(session, json!({})));
             Ok(std::iter::once(created).chain(started).collect())
         }
@@ -148,8 +148,8 @@ mod tests {
         let body = json_body(&response);
         let data = body["data"].as_array().unwrap();
         assert_eq!(data.len(), 3);
-        assert_eq!(data[0]["kind"], "SessionCreated");
-        assert_eq!(data[1]["kind"], "SessionStarted");
+        assert_eq!(data[0]["kind"], "session.created");
+        assert_eq!(data[1]["kind"], "session.started");
         assert_eq!(data[1]["actor"], "system");
         let mut fields: Vec<&String> = data[1].as_object().unwrap().keys().collect();
         fields.sort();
