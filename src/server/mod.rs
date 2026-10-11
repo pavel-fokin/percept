@@ -4,17 +4,16 @@ use std::error::Error;
 use std::process::Command;
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
 use axum::http::{StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
-use axum::{Json, Router};
-use serde::Serialize;
-use serde_json::json;
+use axum::Router;
 use tokio::net::TcpListener;
 
 use crate::app::AppService;
-use crate::core::{Actor, EventId, EventStore, Kind, SessionId};
+use crate::core::EventStore;
+
+mod api;
 
 const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 
@@ -38,69 +37,12 @@ where
     S: EventStore + Send + Sync + 'static,
 {
     Router::new()
-        .route("/api/status", get(status))
-        .route("/api/sessions", get(sessions))
-        .route("/api/sessions/{id}", get(session))
-        .route("/api/sessions/{id}/events", get(session_events))
+        .route("/api/status", get(api::status))
+        .route("/api/sessions", get(api::sessions))
+        .route("/api/sessions/{id}", get(api::session))
+        .route("/api/sessions/{id}/events", get(api::session_events))
         .fallback(fallback)
         .with_state(service)
-}
-
-async fn status<S: EventStore + Send + Sync + 'static>(
-    State(service): State<Arc<AppService<S>>>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let events = service
-        .event_count()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(json!({ "data": { "events": events } })))
-}
-
-async fn sessions<S: EventStore + Send + Sync + 'static>(
-    State(service): State<Arc<AppService<S>>>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let sessions = service
-        .sessions()
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    Ok(Json(json!({ "data": sessions })))
-}
-
-async fn session<S: EventStore + Send + Sync + 'static>(
-    State(service): State<Arc<AppService<S>>>,
-    Path(id): Path<SessionId>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let session = service
-        .session(id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?;
-    Ok(Json(json!({ "data": session })))
-}
-
-/// An event as the page reads it: the hook input stays in the log.
-#[derive(Serialize)]
-struct EventView {
-    id: EventId,
-    actor: Actor,
-    kind: Kind,
-    payload: serde_json::Value,
-    created_at: jiff::Timestamp,
-}
-
-async fn session_events<S: EventStore + Send + Sync + 'static>(
-    State(service): State<Arc<AppService<S>>>,
-    Path(id): Path<SessionId>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
-    let events: Vec<EventView> = service
-        .session_events(id)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::NOT_FOUND)?
-        .into_iter()
-        .map(|e| EventView { id: e.id, actor: e.actor, kind: e.kind, payload: e.payload, created_at: e.created_at })
-        .collect();
-    Ok(Json(json!({ "data": events })))
 }
 
 async fn fallback(uri: Uri) -> Response {
@@ -115,6 +57,7 @@ async fn fallback(uri: Uri) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
