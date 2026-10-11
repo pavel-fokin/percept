@@ -45,7 +45,7 @@ function SessionRow({ session, now }: { session: Session; now: Date }) {
             session.title ? "" : "font-mono text-muted"
           }`}
         >
-          {session.title ?? session.key}
+          {session.title ?? session.client_session_id}
         </span>
         <time
           dateTime={session.created_at}

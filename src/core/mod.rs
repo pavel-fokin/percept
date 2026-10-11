@@ -14,7 +14,7 @@ pub type EventId = Id<Event>;
 #[derive(Serialize)]
 pub struct Session {
     pub id: SessionId,
-    pub key: SessionKey,
+    pub client_session_id: ClientSessionId,
     pub created_at: Timestamp,
     /// The first non-empty thing the human said, if they said anything.
     pub title: Option<String>,
@@ -24,11 +24,11 @@ pub type SessionId = Id<Session>;
 
 /// The client's own session identifier, as the client sent it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct SessionKey(String);
+pub struct ClientSessionId(String);
 
-impl SessionKey {
-    pub fn new(key: String) -> Self {
-        Self(key)
+impl ClientSessionId {
+    pub fn new(id: String) -> Self {
+        Self(id)
     }
 
     pub fn as_str(&self) -> &str {
@@ -69,12 +69,12 @@ pub struct Event {
 }
 
 impl Event {
-    pub fn session_created(key: SessionKey) -> Self {
+    pub fn session_created(client_session_id: ClientSessionId) -> Self {
         Self::build(
             SessionId::new(),
             Actor::System,
             Kind::SessionCreated,
-            json!({ "key": key.as_str() }),
+            json!({ "client_session_id": client_session_id.as_str() }),
             None,
         )
     }
@@ -127,7 +127,7 @@ pub trait EventStore {
 
     fn session(
         &self,
-        key: &SessionKey,
+        client_session_id: &ClientSessionId,
     ) -> impl Future<Output = Result<Option<SessionId>, Box<dyn Error + Send + Sync>>> + Send;
 
     fn all(&self) -> impl Future<Output = Result<Vec<Event>, Box<dyn Error + Send + Sync>>> + Send;
@@ -143,12 +143,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn session_created_is_a_system_event_carrying_the_key() {
-        let event = Event::session_created(SessionKey::new("a".into()));
+    fn session_created_is_a_system_event_carrying_the_client_session_id() {
+        let event = Event::session_created(ClientSessionId::new("a".into()));
 
         assert_eq!(event.actor, Actor::System);
         assert_eq!(event.kind, Kind::SessionCreated);
-        assert_eq!(event.payload, json!({"key": "a"}));
+        assert_eq!(event.payload, json!({"client_session_id": "a"}));
         assert_eq!(event.raw, None);
     }
 

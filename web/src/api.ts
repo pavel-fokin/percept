@@ -2,7 +2,7 @@ import { isRouteErrorResponse } from "react-router";
 
 export type Session = {
   id: string;
-  key: string;
+  client_session_id: string;
   title: string | null;
   created_at: string;
 };

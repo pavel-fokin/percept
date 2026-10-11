@@ -118,7 +118,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::{Event, SessionId, SessionKey};
+    use crate::core::{ClientSessionId, Event, SessionId};
 
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
 
@@ -131,12 +131,12 @@ mod tests {
             unimplemented!()
         }
 
-        async fn session(&self, _: &SessionKey) -> Result<Option<SessionId>, Box<dyn Error + Send + Sync>> {
+        async fn session(&self, _: &ClientSessionId) -> Result<Option<SessionId>, Box<dyn Error + Send + Sync>> {
             unimplemented!()
         }
 
         async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
-            let mut created = Event::session_created(SessionKey::new("k".into()));
+            let mut created = Event::session_created(ClientSessionId::new("k".into()));
             created.session = serde_json::from_value(json!(SESSION))?;
             let session = created.session;
             let started = (1..self.0).map(move |_| Event::session_started(session, json!({})));
@@ -175,14 +175,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sessions_returns_id_and_key_per_session() {
+    async fn sessions_returns_id_and_client_session_id_per_session() {
         let response = get_response("/api/sessions").await;
 
         assert!(response.starts_with("HTTP/1.1 200"));
         let body = json_body(&response);
         let data = body["data"].as_array().unwrap();
         assert_eq!(data.len(), 1);
-        assert_eq!(data[0]["key"], "k");
+        assert_eq!(data[0]["client_session_id"], "k");
         assert_eq!(data[0].as_object().unwrap().len(), 4);
         assert!(data[0]["id"].is_string());
     }
@@ -194,7 +194,7 @@ mod tests {
         assert!(response.starts_with("HTTP/1.1 200"));
         let body = json_body(&response);
         assert_eq!(body["data"]["id"], SESSION);
-        assert_eq!(body["data"]["key"], "k");
+        assert_eq!(body["data"]["client_session_id"], "k");
     }
 
     #[tokio::test]
