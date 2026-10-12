@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { isRouteErrorResponse, Link, LoaderFunctionArgs, useLoaderData, useRouteError } from "react-router";
 import { describe, getData, type Event, type Session } from "../api";
+import { textLink } from "../components/ui/text-link";
 import { full, time } from "../format";
 
 // `divided` marks a new exchange: a human turn after the first one.
@@ -146,8 +147,8 @@ export function SessionError() {
     return (
       <p className="pt-6">
         Session not found.{" "}
-        <Link to="/" className="underline decoration-muted underline-offset-3 hover:decoration-text">
-          Back to sessions
+        <Link to="/" className={textLink}>
+          All paths
         </Link>
       </p>
     );

@@ -1,14 +1,17 @@
+use std::path::PathBuf;
+
 use jiff::Timestamp;
 use serde::Serialize;
 
 use crate::shared::Id;
 
 /// A conversation with a coding client, created by a `SessionCreated` event.
-#[derive(Serialize)]
 pub struct Session {
     pub id: SessionId,
     pub client_session_id: ClientSessionId,
     pub created_at: Timestamp,
+    /// Where the client ran, from the `source` of the `SessionCreated` event.
+    pub path: PathBuf,
     /// The first non-empty thing the human said, if they said anything.
     pub title: Option<String>,
 }

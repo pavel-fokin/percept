@@ -5,6 +5,7 @@ export type Session = {
   client_session_id: string;
   title: string | null;
   created_at: string;
+  path: string;
 };
 
 export type Event = {
