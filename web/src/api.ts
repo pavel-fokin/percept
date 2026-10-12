@@ -8,6 +8,13 @@ export type Session = {
   path: string;
 };
 
+export type MapSummary = {
+  id: string;
+  kind: string;
+  path: string;
+  nodes: number;
+};
+
 export type Event = {
   id: string;
   actor: "human" | "agent" | "system";

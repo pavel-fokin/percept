@@ -8,7 +8,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use super::Api;
-use crate::core::{Actor, ClientSessionId, EventId, EventStore, Payload, Session, SessionId};
+use crate::core::{Actor, ClientSessionId, EventId, EventStore, MapId, Payload, Session, SessionId};
 
 pub(super) async fn status<S: EventStore + Send + Sync + 'static>(
     State(api): State<Arc<Api<S>>>,
@@ -45,6 +45,35 @@ pub(super) async fn session<S: EventStore + Send + Sync + 'static>(
         .ok_or(StatusCode::NOT_FOUND)?;
     let session = SessionView::new(session, &api.home);
     Ok(Json(json!({ "data": session })))
+}
+
+pub(super) async fn maps<S: EventStore + Send + Sync + 'static>(
+    State(api): State<Arc<Api<S>>>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let summaries = api
+        .service
+        .all_map_summaries()
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let maps: Vec<MapView> = summaries
+        .into_iter()
+        .map(|s| MapView {
+            id: s.map.id,
+            kind: s.map.kind,
+            path: display_path(&s.map.path, &api.home),
+            nodes: s.nodes,
+        })
+        .collect();
+    Ok(Json(json!({ "data": maps })))
+}
+
+/// A map as the page reads it, with its path as a human sees it.
+#[derive(Serialize)]
+struct MapView {
+    id: MapId,
+    kind: String,
+    path: String,
+    nodes: usize,
 }
 
 /// A session as the page reads it, with its path as a human sees it.
