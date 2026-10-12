@@ -38,7 +38,14 @@ enum Command {
     /// Lists the current project's maps, or one map's nodes and edges.
     Show { map: Option<String> },
     /// Serves the page in the browser.
-    Ui,
+    Ui {
+        /// Port to serve on; 0 picks a free one.
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+        /// Serves without opening the browser.
+        #[arg(long)]
+        no_open: bool,
+    },
 }
 
 pub async fn run<S: EventStore + Send + Sync + 'static>(service: Arc<AppService<S>>) -> ExitCode {
@@ -56,7 +63,7 @@ pub async fn run<S: EventStore + Send + Sync + 'static>(service: Arc<AppService<
         Some(Command::Create { kind }) => create(&service, &kind).await,
         Some(Command::Add { args }) => add(&service, &args).await,
         Some(Command::Show { map }) => show(&service, map.as_deref()).await,
-        Some(Command::Ui) => server::serve(service).await,
+        Some(Command::Ui { port, no_open }) => server::serve(service, port, !no_open).await,
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,

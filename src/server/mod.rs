@@ -17,16 +17,18 @@ mod api;
 
 const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 
-pub async fn serve<S>(service: Arc<AppService<S>>) -> Result<(), Box<dyn Error + Send + Sync>>
+pub async fn serve<S>(service: Arc<AppService<S>>, port: u16, open: bool) -> Result<(), Box<dyn Error + Send + Sync>>
 where
     S: EventStore + Send + Sync + 'static,
 {
-    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let listener = TcpListener::bind(("127.0.0.1", port)).await?;
     let url = format!("http://{}", listener.local_addr()?);
     println!("percept • {url}");
 
-    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
-    let _ = Command::new(opener).arg(&url).spawn();
+    if open {
+        let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        let _ = Command::new(opener).arg(&url).spawn();
+    }
 
     axum::serve(listener, router(service)).await?;
     Ok(())
