@@ -2,8 +2,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router";
 import App from "./app";
-import { loadSession, SessionError, SessionPage } from "./session-page";
-import { loadSessions, Sessions, SessionsError } from "./sessions";
+import { loadSession, SessionError, SessionPage } from "./pages/session";
+import { loadSessions, Sessions, SessionsError } from "./pages/sessions";
 import "./index.css";
 
 const router = createBrowserRouter([
