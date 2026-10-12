@@ -6,4 +6,5 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 export default defineConfig({
   plugins: [react(), tailwindcss(), viteSingleFile()],
   build: { emptyOutDir: false },
+  server: { proxy: { "/api": "http://127.0.0.1:7700" } },
 });
