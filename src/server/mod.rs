@@ -1,6 +1,7 @@
 //! Server layer: serves the embedded page and its JSON API over HTTP.
 
 use std::error::Error;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 
@@ -17,7 +18,7 @@ mod api;
 
 const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 
-pub async fn serve<S>(service: Arc<AppService<S>>, port: u16, open: bool) -> Result<(), Box<dyn Error + Send + Sync>>
+pub async fn serve<S>(service: Arc<AppService<S>>, home: PathBuf, port: u16, open: bool) -> Result<(), Box<dyn Error + Send + Sync>>
 where
     S: EventStore + Send + Sync + 'static,
 {
@@ -30,11 +31,17 @@ where
         let _ = Command::new(opener).arg(&url).spawn();
     }
 
-    axum::serve(listener, router(service)).await?;
+    axum::serve(listener, router(service, home)).await?;
     Ok(())
 }
 
-fn router<S>(service: Arc<AppService<S>>) -> Router
+/// What the handlers read: the use cases, and the home that paths are shown under.
+struct Api<S: EventStore> {
+    service: Arc<AppService<S>>,
+    home: PathBuf,
+}
+
+fn router<S>(service: Arc<AppService<S>>, home: PathBuf) -> Router
 where
     S: EventStore + Send + Sync + 'static,
 {
@@ -44,7 +51,7 @@ where
         .route("/api/sessions/{id}", get(api::session))
         .route("/api/sessions/{id}/events", get(api::session_events))
         .fallback(fallback)
-        .with_state(service)
+        .with_state(Arc::new(Api { service, home }))
 }
 
 async fn fallback(uri: Uri) -> Response {
@@ -99,7 +106,7 @@ mod tests {
     async fn get_response(path: &str) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = router(Arc::new(AppService::new(Fixed(3))));
+        let app = router(Arc::new(AppService::new(Fixed(3))), "/Users/me".into());
         tokio::spawn(async move { axum::serve(listener, app).await });
 
         let mut stream = TcpStream::connect(addr).await.unwrap();
@@ -127,7 +134,8 @@ mod tests {
         let data = body["data"].as_array().unwrap();
         assert_eq!(data.len(), 1);
         assert_eq!(data[0]["client_session_id"], "k");
-        assert_eq!(data[0].as_object().unwrap().len(), 4);
+        assert_eq!(data[0].as_object().unwrap().len(), 5);
+        assert_eq!(data[0]["path"], "/repo");
         assert!(data[0]["id"].is_string());
     }
 

@@ -18,5 +18,5 @@ async fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let store = JsonlStore::new(home.join(".percept").join("percept.jsonl"));
-    cli::run(Arc::new(AppService::new(store))).await
+    cli::run(Arc::new(AppService::new(store)), home).await
 }

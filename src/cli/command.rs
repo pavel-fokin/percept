@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
@@ -48,7 +49,7 @@ enum Command {
     },
 }
 
-pub async fn run<S: EventStore + Send + Sync + 'static>(service: Arc<AppService<S>>) -> ExitCode {
+pub async fn run<S: EventStore + Send + Sync + 'static>(service: Arc<AppService<S>>, home: PathBuf) -> ExitCode {
     // clap exits 2 on a usage error, and exit 2 blocks the agent's action.
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
@@ -63,7 +64,7 @@ pub async fn run<S: EventStore + Send + Sync + 'static>(service: Arc<AppService<
         Some(Command::Create { kind }) => create(&service, &kind).await,
         Some(Command::Add { args }) => add(&service, &args).await,
         Some(Command::Show { map }) => show(&service, map.as_deref()).await,
-        Some(Command::Ui { port, no_open }) => server::serve(service, port, !no_open).await,
+        Some(Command::Ui { port, no_open }) => server::serve(service, home, port, !no_open).await,
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
