@@ -15,6 +15,28 @@ export type MapSummary = {
   nodes: number;
 };
 
+export type MapNode = {
+  id: string;
+  kind: string;
+  title: string;
+  properties: Record<string, string>;
+  created_at: string;
+};
+
+export type MapEdge = {
+  kind: string;
+  from: string;
+  to: string;
+};
+
+export type MapDetail = {
+  id: string;
+  kind: string;
+  path: string;
+  nodes: MapNode[];
+  edges: MapEdge[];
+};
+
 export type Event = {
   id: string;
   actor: "human" | "agent" | "system";

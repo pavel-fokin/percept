@@ -1,10 +1,8 @@
 import { Link } from "react-router";
 import type { Session } from "../api";
-import { full, relative } from "../format";
+import { RelativeTime } from "./relative-time";
 
 export function SessionRow({ session, now }: { session: Session; now: Date }) {
-  const started = new Date(session.created_at);
-
   return (
     <li className="border-t border-border first:border-t-0 has-[>a:hover]:border-transparent [li:has(>a:hover)+&]:border-transparent">
       <Link
@@ -18,13 +16,7 @@ export function SessionRow({ session, now }: { session: Session; now: Date }) {
         >
           {session.title ?? session.client_session_id}
         </span>
-        <time
-          dateTime={session.created_at}
-          title={full.format(started)}
-          className="flex-none text-xs whitespace-nowrap text-muted tabular-nums"
-        >
-          {relative(started, now)}
-        </time>
+        <RelativeTime at={session.created_at} now={now} />
       </Link>
     </li>
   );

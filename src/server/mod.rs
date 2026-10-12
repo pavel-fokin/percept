@@ -51,6 +51,7 @@ where
         .route("/api/sessions/{id}", get(api::session))
         .route("/api/sessions/{id}/events", get(api::session_events))
         .route("/api/maps", get(api::maps))
+        .route("/api/maps/{id}", get(api::map))
         .fallback(fallback)
         .with_state(Arc::new(Api { service, home }))
 }
@@ -74,6 +75,7 @@ mod tests {
     use crate::core::{Actor, ClientSessionId, Event, MapId, NodeId, SessionId, Source};
 
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
+    const MAP: &str = "0190a0a0-0000-7000-8000-000000000003";
 
     struct Fixed(usize);
 
@@ -92,7 +94,7 @@ mod tests {
             let session: SessionId = serde_json::from_value(json!(SESSION))?;
             let created = Event::session_created(Source::fixture(), session, ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
-            let map = MapId::new();
+            let map: MapId = serde_json::from_value(json!(MAP))?;
             let map_created = Event::map_created(Source::fixture(), Actor::Human, map, "decisions");
             let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default());
             Ok(std::iter::once(created).chain(started).chain([map_created, node]).collect())
@@ -156,6 +158,29 @@ mod tests {
         assert_eq!(data[0]["path"], "/repo");
         assert_eq!(data[0]["nodes"], 1);
         assert!(data[0]["id"].is_string());
+    }
+
+    #[tokio::test]
+    async fn map_returns_the_whole_map() {
+        let response = get_response(&format!("/api/maps/{MAP}")).await;
+
+        assert!(response.starts_with("HTTP/1.1 200"));
+        let data = &json_body(&response)["data"];
+        assert_eq!(data["id"], MAP);
+        assert_eq!(data["kind"], "decisions");
+        assert_eq!(data["path"], "/repo");
+        assert_eq!(data["nodes"].as_array().unwrap().len(), 1);
+        assert_eq!(data["nodes"][0]["title"], "Q");
+        assert_eq!(data["nodes"][0]["properties"], json!({}));
+        assert!(data["nodes"][0]["created_at"].is_string());
+        assert_eq!(data["edges"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn unknown_map_is_not_found() {
+        let unknown = "0190a0a0-0000-7000-8000-000000000002";
+
+        assert!(get_response(&format!("/api/maps/{unknown}")).await.starts_with("HTTP/1.1 404"));
     }
 
     #[tokio::test]

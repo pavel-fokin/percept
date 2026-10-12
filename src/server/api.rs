@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path as FsPath;
 use std::sync::Arc;
 
@@ -8,7 +9,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use super::Api;
-use crate::core::{Actor, ClientSessionId, EventId, EventStore, MapId, Payload, Session, SessionId};
+use crate::core::{Actor, ClientSessionId, EventId, EventStore, MapId, NodeId, Payload, Session, SessionId};
 
 pub(super) async fn status<S: EventStore + Send + Sync + 'static>(
     State(api): State<Arc<Api<S>>>,
@@ -55,6 +56,7 @@ pub(super) async fn maps<S: EventStore + Send + Sync + 'static>(
         .all_map_summaries()
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
     let maps: Vec<MapView> = summaries
         .into_iter()
         .map(|s| MapView {
@@ -64,7 +66,40 @@ pub(super) async fn maps<S: EventStore + Send + Sync + 'static>(
             nodes: s.nodes,
         })
         .collect();
+
     Ok(Json(json!({ "data": maps })))
+}
+
+pub(super) async fn map<S: EventStore + Send + Sync + 'static>(
+    State(api): State<Arc<Api<S>>>,
+    Path(id): Path<MapId>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    let detail = api
+        .service
+        .map_detail(id)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::NOT_FOUND)?;
+
+    let map = MapDetailView {
+        id: detail.map.id,
+        kind: detail.map.kind,
+        path: display_path(&detail.map.path, &api.home),
+        nodes: detail
+            .nodes
+            .into_iter()
+            .map(|n| NodeView {
+                id: n.id,
+                kind: n.kind,
+                title: n.title,
+                properties: n.properties,
+                created_at: n.created_at,
+            })
+            .collect(),
+        edges: detail.edges.into_iter().map(|e| EdgeView { kind: e.kind, from: e.from, to: e.to }).collect(),
+    };
+
+    Ok(Json(json!({ "data": map })))
 }
 
 /// A map as the page reads it, with its path as a human sees it.
@@ -74,6 +109,32 @@ struct MapView {
     kind: String,
     path: String,
     nodes: usize,
+}
+
+/// A whole map as the page reads it, with its path as a human sees it.
+#[derive(Serialize)]
+struct MapDetailView {
+    id: MapId,
+    kind: String,
+    path: String,
+    nodes: Vec<NodeView>,
+    edges: Vec<EdgeView>,
+}
+
+#[derive(Serialize)]
+struct NodeView {
+    id: NodeId,
+    kind: String,
+    title: String,
+    properties: BTreeMap<String, String>,
+    created_at: jiff::Timestamp,
+}
+
+#[derive(Serialize)]
+struct EdgeView {
+    kind: String,
+    from: NodeId,
+    to: NodeId,
 }
 
 /// A session as the page reads it, with its path as a human sees it.

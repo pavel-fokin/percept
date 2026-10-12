@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { isRouteErrorResponse, Link, LoaderFunctionArgs, useLoaderData, useRouteError } from "react-router";
-import { describe, getData, type Event, type Session } from "../api";
-import { textLink } from "../components/ui/text-link";
+import { Link, LoaderFunctionArgs, useLoaderData } from "react-router";
+import { getData, type Event, type Session } from "../api";
+import { RouteError } from "../components/route-error";
 import { full, time } from "../format";
 
 // `divided` marks a new exchange: a human turn after the first one.
@@ -141,18 +141,5 @@ function Item({ event, previous }: { event: Event; previous?: Event }) {
 }
 
 export function SessionError() {
-  const error = useRouteError();
-
-  if (isRouteErrorResponse(error) && (error.status === 404 || error.status === 400)) {
-    return (
-      <p className="pt-6">
-        Session not found.{" "}
-        <Link to="/" className={textLink}>
-          All paths
-        </Link>
-      </p>
-    );
-  }
-
-  return <p className="pt-6">Failed to load session: {describe(error)}</p>;
+  return <RouteError notFound="Session not found." failed="session" />;
 }

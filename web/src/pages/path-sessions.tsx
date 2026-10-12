@@ -1,7 +1,7 @@
-import { isRouteErrorResponse, Link, useLoaderData, useRouteError, type LoaderFunctionArgs } from "react-router";
-import { describe, getData, type Session } from "../api";
+import { useLoaderData, type LoaderFunctionArgs } from "react-router";
+import { getData, type Session } from "../api";
+import { RouteError } from "../components/route-error";
 import { SessionRow } from "../components/session-row";
-import { textLink } from "../components/ui/text-link";
 import { urlPath } from "../paths";
 
 export async function loadPathSessions({ params }: LoaderFunctionArgs) {
@@ -31,18 +31,5 @@ export function PathSessions() {
 }
 
 export function PathSessionsError() {
-  const error = useRouteError();
-
-  if (isRouteErrorResponse(error) && error.status === 404) {
-    return (
-      <p className="pt-6">
-        No sessions recorded at this path.{" "}
-        <Link to="/" className={textLink}>
-          All paths
-        </Link>
-      </p>
-    );
-  }
-
-  return <p className="pt-6">Failed to load sessions: {describe(error)}</p>;
+  return <RouteError notFound="No sessions recorded at this path." failed="sessions" />;
 }
