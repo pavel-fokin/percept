@@ -4,7 +4,7 @@ import { createBrowserRouter, RouterProvider } from "react-router";
 import App from "./app";
 import { loadPathSessions, PathSessions, PathSessionsError } from "./pages/path-sessions";
 import { loadSession, SessionError, SessionPage } from "./pages/session";
-import { loadSessions, Sessions, SessionsError } from "./pages/sessions";
+import { loadStart, Start, StartError } from "./pages/start";
 import "./index.css";
 
 const router = createBrowserRouter([
@@ -12,7 +12,7 @@ const router = createBrowserRouter([
     Component: App,
     HydrateFallback: () => null,
     children: [
-      { index: true, loader: loadSessions, Component: Sessions, ErrorBoundary: SessionsError },
+      { index: true, loader: loadStart, Component: Start, ErrorBoundary: StartError },
       { path: "p/*", loader: loadPathSessions, Component: PathSessions, ErrorBoundary: PathSessionsError },
       { path: "sessions/:id", loader: loadSession, Component: SessionPage, ErrorBoundary: SessionError },
     ],
