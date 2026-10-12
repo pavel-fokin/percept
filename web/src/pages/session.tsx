@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { isRouteErrorResponse, Link, LoaderFunctionArgs, useLoaderData, useRouteError } from "react-router";
-import { describe, getData, type Event, type Session } from "./api";
-import { full, time } from "./format";
+import { describe, getData, type Event, type Session } from "../api";
+import { full, time } from "../format";
 
 // `divided` marks a new exchange: a human turn after the first one.
 type Block =

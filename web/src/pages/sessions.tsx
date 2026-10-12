@@ -1,6 +1,6 @@
 import { Link, useLoaderData, useRouteError } from "react-router";
-import { describe, getData, type Session } from "./api";
-import { full, relative } from "./format";
+import { describe, getData, type Session } from "../api";
+import { full, relative } from "../format";
 
 const README = "https://github.com/pavel-fokin/percept#readme";
 
