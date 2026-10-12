@@ -50,6 +50,8 @@ where
         .route("/api/sessions", get(api::sessions))
         .route("/api/sessions/{id}", get(api::session))
         .route("/api/sessions/{id}/events", get(api::session_events))
+        .route("/api/maps", get(api::maps))
+        .route("/api/maps/{id}", get(api::map))
         .fallback(fallback)
         .with_state(Arc::new(Api { service, home }))
 }
@@ -70,9 +72,10 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::{ClientSessionId, Event, SessionId, Source};
+    use crate::core::{Actor, ClientSessionId, Event, MapId, NodeId, SessionId, Source};
 
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
+    const MAP: &str = "0190a0a0-0000-7000-8000-000000000003";
 
     struct Fixed(usize);
 
@@ -91,7 +94,10 @@ mod tests {
             let session: SessionId = serde_json::from_value(json!(SESSION))?;
             let created = Event::session_created(Source::fixture(), session, ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
-            Ok(std::iter::once(created).chain(started).collect())
+            let map: MapId = serde_json::from_value(json!(MAP))?;
+            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, "decisions");
+            let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default());
+            Ok(std::iter::once(created).chain(started).chain([map_created, node]).collect())
         }
 
         async fn append(&self, _: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {
@@ -122,7 +128,7 @@ mod tests {
         let response = get_response("/api/status").await;
 
         assert!(response.starts_with("HTTP/1.1 200"));
-        assert!(response.ends_with(r#"{"data":{"events":3}}"#));
+        assert!(response.ends_with(r#"{"data":{"events":5}}"#));
     }
 
     #[tokio::test]
@@ -137,6 +143,44 @@ mod tests {
         assert_eq!(data[0].as_object().unwrap().len(), 5);
         assert_eq!(data[0]["path"], "/repo");
         assert!(data[0]["id"].is_string());
+    }
+
+    #[tokio::test]
+    async fn maps_returns_every_map_with_its_path_and_node_count() {
+        let response = get_response("/api/maps").await;
+
+        assert!(response.starts_with("HTTP/1.1 200"));
+        let body = json_body(&response);
+        let data = body["data"].as_array().unwrap();
+        assert_eq!(data.len(), 1);
+        assert_eq!(data[0].as_object().unwrap().len(), 4);
+        assert_eq!(data[0]["kind"], "decisions");
+        assert_eq!(data[0]["path"], "/repo");
+        assert_eq!(data[0]["nodes"], 1);
+        assert!(data[0]["id"].is_string());
+    }
+
+    #[tokio::test]
+    async fn map_returns_the_whole_map() {
+        let response = get_response(&format!("/api/maps/{MAP}")).await;
+
+        assert!(response.starts_with("HTTP/1.1 200"));
+        let data = &json_body(&response)["data"];
+        assert_eq!(data["id"], MAP);
+        assert_eq!(data["kind"], "decisions");
+        assert_eq!(data["path"], "/repo");
+        assert_eq!(data["nodes"].as_array().unwrap().len(), 1);
+        assert_eq!(data["nodes"][0]["title"], "Q");
+        assert_eq!(data["nodes"][0]["properties"], json!({}));
+        assert!(data["nodes"][0]["created_at"].is_string());
+        assert_eq!(data["edges"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn unknown_map_is_not_found() {
+        let unknown = "0190a0a0-0000-7000-8000-000000000002";
+
+        assert!(get_response(&format!("/api/maps/{unknown}")).await.starts_with("HTTP/1.1 404"));
     }
 
     #[tokio::test]

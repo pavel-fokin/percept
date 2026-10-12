@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use crate::shared::Id;
 
@@ -9,6 +10,7 @@ pub type NodeId = Id<Node>;
 pub struct Map {
     pub id: MapId,
     pub kind: String,
+    pub path: PathBuf,
 }
 
 /// One item on a map, added by a `NodeAdded` event.
@@ -17,6 +19,7 @@ pub struct Node {
     pub kind: String,
     pub title: String,
     pub properties: BTreeMap<String, String>,
+    pub created_at: jiff::Timestamp,
 }
 
 /// A directed link between two nodes of a map, added by an `EdgeAdded` event.

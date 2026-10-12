@@ -1,32 +1,46 @@
 import { Link, useLoaderData, useRouteError } from "react-router";
-import { describe, getData, type Session } from "../api";
+import { describe, getData, type MapSummary, type Session } from "../api";
 import { textLink } from "../components/ui/text-link";
 import { pathUrl } from "../paths";
 
 const README = "https://github.com/pavel-fokin/percept#readme";
 
-/** One group per path, in order of each path's newest session. */
+type PathGroup = { path: string; maps: MapSummary[]; sessions: number };
+
+/** One group per path, in order of each path's newest session; paths with only maps come last. */
 export async function loadStart() {
-  const sessions = await getData<Session[]>("/api/sessions");
+  const [sessions, maps] = await Promise.all([
+    getData<Session[]>("/api/sessions"),
+    getData<MapSummary[]>("/api/maps"),
+  ]);
 
-  const counts = new Map<string, number>();
-  for (const session of sessions) counts.set(session.path, (counts.get(session.path) ?? 0) + 1);
+  const groups = new Map<string, PathGroup>();
+  const group = (path: string) => {
+    if (!groups.has(path)) groups.set(path, { path, maps: [], sessions: 0 });
+    return groups.get(path)!;
+  };
 
-  return [...counts].map(([path, count]) => ({ path, count }));
+  for (const session of sessions) group(session.path).sessions += 1;
+  for (const map of maps) group(map.path).maps.push(map);
+
+  return [...groups.values()];
 }
 
 export function Start() {
-  const paths = useLoaderData<typeof loadStart>();
+  const groups = useLoaderData<typeof loadStart>();
 
-  if (paths.length === 0) return <EmptyState />;
+  if (groups.length === 0) return <EmptyState />;
 
   return (
     <ul className="pt-2">
-      {paths.map(({ path, count }) => (
+      {groups.map(({ path, maps, sessions }) => (
         <li key={path} className="border-t border-border py-4 first:border-t-0">
           <h2 className="font-mono text-sm">{path}</h2>
-          <div className="mt-1 flex gap-6">
-            <Counter to={pathUrl(path)} label="sessions" count={count} />
+          <div className="mt-1 flex flex-wrap gap-x-6 gap-y-1">
+            {maps.map((map) => (
+              <Counter key={map.id} to={`/maps/${map.id}`} label={map.kind} count={map.nodes} />
+            ))}
+            {sessions > 0 && <Counter to={pathUrl(path)} label="sessions" count={sessions} />}
           </div>
         </li>
       ))}

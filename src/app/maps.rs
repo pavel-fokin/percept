@@ -12,6 +12,13 @@ pub struct MapSummary {
     pub edges: usize,
 }
 
+/// A map with its nodes, newest first, and its edges in log order.
+pub struct MapDetail {
+    pub map: Map,
+    pub nodes: Vec<Node>,
+    pub edges: Vec<Edge>,
+}
+
 impl<S: EventStore> AppService<S> {
     /// Records a new map. A project holds at most one map of each kind.
     pub async fn create_map(
@@ -35,7 +42,7 @@ impl<S: EventStore> AppService<S> {
 
     /// The project's maps in log order.
     pub async fn maps(&self, project: &Path) -> Result<Vec<Map>, Box<dyn Error + Send + Sync>> {
-        Ok(project_maps(&self.store.all().await?, project))
+        Ok(all_maps(&self.store.all().await?).into_iter().filter(|m| m.path == project).collect())
     }
 
     /// The project's map of the given kind, or an error if it has none.
@@ -47,27 +54,22 @@ impl<S: EventStore> AppService<S> {
 
     /// The map's nodes in log order.
     pub async fn nodes(&self, map: MapId) -> Result<Vec<Node>, Box<dyn Error + Send + Sync>> {
-        let nodes = self
-            .store
-            .all()
-            .await?
-            .into_iter()
-            .filter_map(|e| match e.payload {
-                Payload::NodeAdded { map: id, node, kind, title, properties } if id == map => {
-                    Some(Node { id: node, kind, title, properties })
-                }
-                _ => None,
-            })
-            .collect();
-
-        Ok(nodes)
+        Ok(map_nodes(&self.store.all().await?, map))
     }
 
     /// The project's maps in log order, each with its node and edge counts, from one read of the log.
     pub async fn map_summaries(&self, project: &Path) -> Result<Vec<MapSummary>, Box<dyn Error + Send + Sync>> {
+        let mut summaries = self.all_map_summaries().await?;
+        summaries.retain(|s| s.map.path == project);
+
+        Ok(summaries)
+    }
+
+    /// Every map across all projects in log order, each with its node and edge counts, from one read of the log.
+    pub async fn all_map_summaries(&self) -> Result<Vec<MapSummary>, Box<dyn Error + Send + Sync>> {
         let events = self.store.all().await?;
 
-        let mut summaries: Vec<MapSummary> = project_maps(&events, project)
+        let mut summaries: Vec<MapSummary> = all_maps(&events)
             .into_iter()
             .map(|map| MapSummary { map, nodes: 0, edges: 0 })
             .collect();
@@ -83,20 +85,23 @@ impl<S: EventStore> AppService<S> {
         Ok(summaries)
     }
 
+    /// The map with the given id, its nodes newest first and its edges in log order, from one read of the log.
+    pub async fn map_detail(&self, id: MapId) -> Result<Option<MapDetail>, Box<dyn Error + Send + Sync>> {
+        let events = self.store.all().await?;
+
+        let Some(map) = all_maps(&events).into_iter().find(|m| m.id == id) else {
+            return Ok(None);
+        };
+
+        let mut nodes = map_nodes(&events, id);
+        nodes.reverse();
+
+        Ok(Some(MapDetail { map, nodes, edges: map_edges(&events, id) }))
+    }
+
     /// The map's edges in log order.
     pub async fn edges(&self, map: MapId) -> Result<Vec<Edge>, Box<dyn Error + Send + Sync>> {
-        let edges = self
-            .store
-            .all()
-            .await?
-            .into_iter()
-            .filter_map(|e| match e.payload {
-                Payload::EdgeAdded { map: id, kind, from, to } if id == map => Some(Edge { kind, from, to }),
-                _ => None,
-            })
-            .collect();
-
-        Ok(edges)
+        Ok(map_edges(&self.store.all().await?, map))
     }
 
     /// Records a new edge on the project's map of the given kind, between the nodes with these titles.
@@ -167,13 +172,37 @@ fn not_blank(name: &str, value: &str) -> Result<(), Box<dyn Error + Send + Sync>
     Ok(())
 }
 
-/// The project's maps in log order.
-fn project_maps(events: &[Event], project: &Path) -> Vec<Map> {
+fn all_maps(events: &[Event]) -> Vec<Map> {
     events
         .iter()
-        .filter(|e| e.source.path == project)
         .filter_map(|e| match &e.payload {
-            Payload::MapCreated { map, kind } => Some(Map { id: *map, kind: kind.clone() }),
+            Payload::MapCreated { map, kind } => Some(Map { id: *map, kind: kind.clone(), path: e.source.path.clone() }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn map_nodes(events: &[Event], map: MapId) -> Vec<Node> {
+    events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            Payload::NodeAdded { map: id, node, kind, title, properties } if *id == map => Some(Node {
+                id: *node,
+                kind: kind.clone(),
+                title: title.clone(),
+                properties: properties.clone(),
+                created_at: e.created_at,
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
+fn map_edges(events: &[Event], map: MapId) -> Vec<Edge> {
+    events
+        .iter()
+        .filter_map(|e| match &e.payload {
+            Payload::EdgeAdded { map: id, kind, from, to } if *id == map => Some(Edge { kind: kind.clone(), from: *from, to: *to }),
             _ => None,
         })
         .collect()
@@ -361,6 +390,53 @@ mod tests {
 
         let found: Vec<(&str, usize, usize)> = summaries.iter().map(|s| (s.map.kind.as_str(), s.nodes, s.edges)).collect();
         assert_eq!(found, vec![("decisions", 2, 1), ("tasks", 1, 0)]);
+    }
+
+    #[tokio::test]
+    async fn all_map_summaries_span_projects_and_carry_each_maps_path() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        let other = Source { client: "claude".into(), path: "/other".into() };
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        service.create_map(other.clone(), Actor::Human, "tasks").await.unwrap();
+        service.add_node(other, Actor::Human, "tasks", "task", "T", Default::default()).await.unwrap();
+
+        let summaries = service.all_map_summaries().await.unwrap();
+
+        let found: Vec<(&str, &Path, usize)> = summaries.iter().map(|s| (s.map.kind.as_str(), s.map.path.as_path(), s.nodes)).collect();
+        assert_eq!(found, vec![("decisions", Source::fixture().path.as_path(), 0), ("tasks", Path::new("/other"), 1)]);
+    }
+
+    #[tokio::test]
+    async fn map_detail_has_nodes_newest_first_and_edges_in_log_order() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        service.create_map(Source::fixture(), Actor::Human, "tasks").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default()).await.unwrap();
+        service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
+        let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
+
+        let detail = service.map_detail(map.id).await.unwrap().unwrap();
+
+        let titles: Vec<&str> = detail.nodes.iter().map(|n| n.title.as_str()).collect();
+        assert_eq!(titles, vec!["O", "Q"]);
+        let edges: Vec<(&str, NodeId, NodeId)> = detail.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
+        assert_eq!(edges, vec![("answers", detail.nodes[0].id, detail.nodes[1].id)]);
+        assert_eq!(detail.map.kind, "decisions");
+    }
+
+    #[tokio::test]
+    async fn map_detail_of_an_unknown_id_is_none() {
+        let store = Memory::default();
+        let service = AppService::new(&store);
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+
+        let detail = service.map_detail(MapId::new()).await.unwrap();
+
+        assert!(detail.is_none());
     }
 
     #[tokio::test]
