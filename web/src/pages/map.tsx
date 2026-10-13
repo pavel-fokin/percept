@@ -1,4 +1,5 @@
 import { getData, type MapDetail, type MapNode } from "../api";
+import { BackLink } from "../components/back-link";
 import { RouteError } from "../components/route-error";
 import { byDay, full, withChangedTimes } from "../format";
 
@@ -14,13 +15,11 @@ export function MapPage({ map }: { map: MapDetail }) {
 
   return (
     <>
-      <div className="mt-8 sm:mt-10">
-        <p className="font-mono text-[13px] wrap-anywhere text-muted">{map.path}</p>
-        <h1 className="mt-1.5 flex items-baseline gap-2.5 text-2xl font-semibold tracking-tight capitalize sm:text-[26px]">
-          {map.kind}
-          <span className="text-[17px] font-normal tracking-normal text-muted tabular-nums">{map.nodes.length}</span>
-        </h1>
-      </div>
+      <h1 className="mt-8 sm:mt-10">
+        <BackLink to="/" path={map.path} collection={map.kind}>
+          <span className="tabular-nums"> · {map.nodes.length}</span>
+        </BackLink>
+      </h1>
 
       {map.nodes.length > 0 ? (
         <div className="mt-8 grid gap-8 sm:mt-10 sm:gap-10">

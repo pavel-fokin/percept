@@ -1,6 +1,6 @@
 import { useMemo, type ReactNode } from "react";
-import { Link } from "react-router";
 import { getData, type Event, type Session } from "../api";
+import { BackLink } from "../components/back-link";
 import { Markdown } from "../components/markdown";
 import { RouteError } from "../components/route-error";
 import { dayTime, full, time } from "../format";
@@ -64,24 +64,16 @@ export function SessionPage({ session, events }: { session: Session; events: Eve
 
   return (
     <>
-      <div className="mt-8 flex flex-wrap gap-x-2 text-sm text-muted sm:mt-10">
-        <nav aria-label="Breadcrumb" className="flex flex-wrap items-baseline gap-x-2">
-          <span className="font-mono text-[13px] wrap-anywhere">{session.path}</span>
-          <span aria-hidden>/</span>
-          <Link to={sessionsUrl(session.path)} className="-my-3 inline-flex min-h-11 items-center hover:text-text">
-            sessions
-          </Link>
-        </nav>
-        <span aria-hidden>/</span>
-        <h1 className="font-medium text-text">
-          <time dateTime={session.created_at} title={full.format(new Date(session.created_at))}>
-            {dayTime.format(new Date(session.created_at))}
-          </time>
-        </h1>
-        <span>
-          · {prompts} {prompts === 1 ? "exchange" : "exchanges"}
-        </span>
-      </div>
+      <nav aria-label="Breadcrumb" className="mt-8 sm:mt-10">
+        <BackLink to={sessionsUrl(session.path)} path={session.path} collection="sessions" />
+      </nav>
+      <h1 className="mt-1.5 text-sm font-normal text-muted">
+        started{" "}
+        <time dateTime={session.created_at} title={full.format(new Date(session.created_at))} className="text-text">
+          {dayTime.format(new Date(session.created_at))}
+        </time>{" "}
+        · {prompts} {prompts === 1 ? "exchange" : "exchanges"}
+      </h1>
 
       <div className="mt-12 grid gap-16 sm:mt-14 sm:gap-20">
         {list.map((exchange) => (

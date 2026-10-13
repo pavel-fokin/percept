@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import { getData, type Session } from "../api";
+import { BackLink } from "../components/back-link";
 import { RouteError } from "../components/route-error";
 import { byDay, full, withChangedTimes } from "../format";
 import { sessionUrl } from "../paths";
@@ -16,13 +17,11 @@ export function PathSessions({ path, sessions }: { path: string; sessions: Sessi
 
   return (
     <>
-      <div className="mt-8 sm:mt-10">
-        <p className="font-mono text-[13px] wrap-anywhere text-muted">{path}</p>
-        <h1 className="mt-1.5 flex items-baseline gap-2.5 text-2xl font-semibold tracking-tight sm:text-[26px]">
-          Sessions
-          <span className="text-[17px] font-normal tracking-normal text-muted tabular-nums">{sessions.length}</span>
-        </h1>
-      </div>
+      <h1 className="mt-8 sm:mt-10">
+        <BackLink to="/" path={path} collection="sessions">
+          <span className="tabular-nums"> · {sessions.length}</span>
+        </BackLink>
+      </h1>
 
       <div className="mt-8 grid gap-8 sm:mt-10 sm:gap-10">
         {days.map((day) => (
