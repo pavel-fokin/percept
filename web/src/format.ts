@@ -23,3 +23,26 @@ export function dayName(date: Date, now: Date) {
 
   return day.format(date);
 }
+
+/** Items grouped by the day they fall on. Items come newest first, so a day's items are consecutive. */
+export function byDay<T>(items: T[], at: (item: T) => string, now: Date) {
+  const days: { name: string; items: T[] }[] = [];
+
+  for (const item of items) {
+    const name = dayName(new Date(at(item)), now);
+    const last = days.at(-1);
+    if (last?.name === name) last.items.push(item);
+    else days.push({ name, items: [item] });
+  }
+
+  return days;
+}
+
+/** Each item with its clock time, left out when the item before it shows the same minute. */
+export function withChangedTimes<T>(items: T[], at: (item: T) => string) {
+  return items.map((item, i) => {
+    const shown = time.format(new Date(at(item)));
+    const same = i > 0 && time.format(new Date(at(items[i - 1]))) === shown;
+    return { item, shown: same ? undefined : shown };
+  });
+}
