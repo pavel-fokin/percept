@@ -2,7 +2,7 @@ import { Link, useLoaderData, useRouteError } from "react-router";
 import { describe, getData, type MapSummary, type Session } from "../api";
 import { relative } from "../format";
 import { textLink } from "../components/ui/text-link";
-import { pathName, pathUrl } from "../paths";
+import { pathUrl } from "../paths";
 
 const README = "https://github.com/pavel-fokin/percept#readme";
 
@@ -43,14 +43,13 @@ export function Start() {
       {groups.map(({ path, maps, sessions, latest }) => (
         <section key={path}>
           <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-2xl font-semibold tracking-tight sm:text-[26px]">{pathName(path)}</h2>
+            <h2 className="min-w-0 font-mono text-[13px] font-normal break-all text-muted">{path}</h2>
             {latest && (
               <time dateTime={latest.created_at} className="flex-none text-sm text-muted tabular-nums">
                 active {relative(new Date(latest.created_at), now)}
               </time>
             )}
           </div>
-          <p className="mt-1.5 font-mono text-[13px] break-all text-muted">{path}</p>
 
           {latest && (
             <Link
@@ -69,7 +68,7 @@ export function Start() {
             </Link>
           )}
 
-          <nav aria-label={pathName(path)} className="-mx-3 mt-2 flex flex-wrap gap-1">
+          <nav aria-label={path} className="-mx-3 mt-2 flex flex-wrap gap-1">
             {maps.map((map) => (
               <Counter key={map.id} to={`/maps/${map.id}`} label={map.kind} count={map.nodes} />
             ))}

@@ -4,7 +4,7 @@ import { getData, type Event, type Session } from "../api";
 import { Markdown } from "../components/markdown";
 import { RouteError } from "../components/route-error";
 import { dayTime, full, time } from "../format";
-import { pathName, pathUrl } from "../paths";
+import { pathUrl } from "../paths";
 
 // One line per run of tool calls, so a tool never splits the agent's text.
 type Item = { type: "event"; event: Event } | { type: "tools"; events: Event[] };
@@ -65,7 +65,7 @@ export function SessionPage() {
     <>
       <div className="mt-8 flex flex-wrap gap-x-2 text-sm text-muted sm:mt-10">
         <nav aria-label="Breadcrumb" className="flex gap-x-2">
-          <span>{pathName(session.path)}</span>
+          <span>{session.path}</span>
           <span aria-hidden>/</span>
           <Link to={pathUrl(session.path)} className="-my-3 inline-flex min-h-11 items-center hover:text-text">
             sessions
