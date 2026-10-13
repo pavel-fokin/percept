@@ -4,10 +4,12 @@ import { ThemeSwitch } from "./components/theme-switch";
 export default function App() {
   return (
     <>
-      <Header />
-      <main className="mx-auto box-content max-w-3xl px-4">
-        <Outlet />
-      </main>
+      <div className="mx-auto max-w-[728px] px-4 pb-24 sm:px-6">
+        <Header />
+        <main>
+          <Outlet />
+        </main>
+      </div>
       <ScrollRestoration />
     </>
   );
@@ -15,13 +17,13 @@ export default function App() {
 
 function Header() {
   return (
-    <header className="flex items-center justify-between border-b border-border p-4 md:px-6">
-      <h1 className="font-mono text-xl font-medium tracking-tight">
-        <Link to="/">
-          percept<span className="text-accent">.</span>
-        </Link>
-      </h1>
-      <ThemeSwitch />
+    <header className="flex h-15 items-center justify-between sm:h-18">
+      <Link to="/" className="font-mono text-[19px] font-medium tracking-tight">
+        percept<span className="text-accent">.</span>
+      </Link>
+      <div className="-mr-3">
+        <ThemeSwitch />
+      </div>
     </header>
   );
 }
