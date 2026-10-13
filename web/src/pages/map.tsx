@@ -1,26 +1,25 @@
-import { useLoaderData, type LoaderFunctionArgs } from "react-router";
 import { getData, type MapDetail, type MapNode } from "../api";
+import { BackLink } from "../components/back-link";
 import { RouteError } from "../components/route-error";
 import { byDay, full, withChangedTimes } from "../format";
-import { pathName } from "../paths";
 
-export function loadMap({ params }: LoaderFunctionArgs) {
-  return getData<MapDetail>(`/api/maps/${params.id}`);
+export async function loadMap(path: string, id: string) {
+  const map = await getData<MapDetail>(`/api/maps/${id}`);
+  if (map.path !== path) throw new Response(null, { status: 404 });
+
+  return map;
 }
 
-export function MapPage() {
-  const map = useLoaderData<typeof loadMap>();
+export function MapPage({ map }: { map: MapDetail }) {
   const days = byDay(map.nodes, (n) => n.created_at, new Date());
 
   return (
     <>
-      <div className="mt-8 sm:mt-10">
-        <p className="text-sm text-muted">{pathName(map.path)}</p>
-        <h1 className="mt-1.5 flex items-baseline gap-2.5 text-2xl font-semibold tracking-tight capitalize sm:text-[26px]">
-          {map.kind}
-          <span className="text-[17px] font-normal tracking-normal text-muted tabular-nums">{map.nodes.length}</span>
-        </h1>
-      </div>
+      <h1 className="mt-8 sm:mt-10">
+        <BackLink to="/" path={map.path} collection={map.kind}>
+          <span className="tabular-nums"> · {map.nodes.length}</span>
+        </BackLink>
+      </h1>
 
       {map.nodes.length > 0 ? (
         <div className="mt-8 grid gap-8 sm:mt-10 sm:gap-10">

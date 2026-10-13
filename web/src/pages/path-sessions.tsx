@@ -1,32 +1,27 @@
-import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
+import { Link } from "react-router";
 import { getData, type Session } from "../api";
+import { BackLink } from "../components/back-link";
 import { RouteError } from "../components/route-error";
 import { byDay, full, withChangedTimes } from "../format";
-import { pathName, urlPath } from "../paths";
+import { sessionUrl } from "../paths";
 
-export async function loadPathSessions({ params }: LoaderFunctionArgs) {
-  const path = urlPath(params["*"] ?? "");
-  if (path === null) throw new Response(null, { status: 404 });
-
+export async function loadPathSessions(path: string) {
   const sessions = (await getData<Session[]>("/api/sessions")).filter((s) => s.path === path);
   if (sessions.length === 0) throw new Response(null, { status: 404 });
 
   return { path, sessions };
 }
 
-export function PathSessions() {
-  const { path, sessions } = useLoaderData<typeof loadPathSessions>();
+export function PathSessions({ path, sessions }: { path: string; sessions: Session[] }) {
   const days = byDay(sessions, (s) => s.created_at, new Date());
 
   return (
     <>
-      <div className="mt-8 sm:mt-10">
-        <p className="text-sm text-muted">{pathName(path)}</p>
-        <h1 className="mt-1.5 flex items-baseline gap-2.5 text-2xl font-semibold tracking-tight sm:text-[26px]">
-          Sessions
-          <span className="text-[17px] font-normal tracking-normal text-muted tabular-nums">{sessions.length}</span>
-        </h1>
-      </div>
+      <h1 className="mt-8 sm:mt-10">
+        <BackLink to="/" path={path} collection="sessions">
+          <span className="tabular-nums"> · {sessions.length}</span>
+        </BackLink>
+      </h1>
 
       <div className="mt-8 grid gap-8 sm:mt-10 sm:gap-10">
         {days.map((day) => (
@@ -50,7 +45,7 @@ function SessionRow({ session, shown }: { session: Session; shown?: string }) {
   return (
     <li>
       <Link
-        to={`/sessions/${session.id}`}
+        to={sessionUrl(session.path, session.id)}
         className="flex min-h-11 items-baseline gap-4 rounded-[10px] px-3 py-2.5 hover:bg-surface focus-visible:bg-surface sm:gap-6"
       >
         <span

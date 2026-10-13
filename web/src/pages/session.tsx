@@ -1,10 +1,10 @@
 import { useMemo, type ReactNode } from "react";
-import { Link, LoaderFunctionArgs, useLoaderData } from "react-router";
 import { getData, type Event, type Session } from "../api";
+import { BackLink } from "../components/back-link";
 import { Markdown } from "../components/markdown";
 import { RouteError } from "../components/route-error";
 import { dayTime, full, time } from "../format";
-import { pathName, pathUrl } from "../paths";
+import { sessionsUrl } from "../paths";
 
 // One line per run of tool calls, so a tool never splits the agent's text.
 type Item = { type: "event"; event: Event } | { type: "tools"; events: Event[] };
@@ -15,11 +15,13 @@ type Subagents = Map<string, { agent: string; task: string }>;
 // A prompt and everything the agent did until the next one. Work before the first prompt has none.
 type Exchange = { id: string; prompt?: Event; items: Item[] };
 
-export async function loadSession({ params }: LoaderFunctionArgs) {
+export async function loadSession(path: string, id: string) {
   const [session, events] = await Promise.all([
-    getData<Session>(`/api/sessions/${params.id}`),
-    getData<Event[]>(`/api/sessions/${params.id}/events`),
+    getData<Session>(`/api/sessions/${id}`),
+    getData<Event[]>(`/api/sessions/${id}/events`),
   ]);
+  if (session.path !== path) throw new Response(null, { status: 404 });
+
   return { session, events };
 }
 
@@ -55,32 +57,23 @@ function subagents(events: Event[]): Subagents {
   return result;
 }
 
-export function SessionPage() {
-  const { session, events } = useLoaderData<typeof loadSession>();
+export function SessionPage({ session, events }: { session: Session; events: Event[] }) {
   const list = useMemo(() => exchanges(events), [events]);
   const started = useMemo(() => subagents(events), [events]);
   const prompts = list.filter((e) => e.prompt).length;
 
   return (
     <>
-      <div className="mt-8 flex flex-wrap gap-x-2 text-sm text-muted sm:mt-10">
-        <nav aria-label="Breadcrumb" className="flex gap-x-2">
-          <span>{pathName(session.path)}</span>
-          <span aria-hidden>/</span>
-          <Link to={pathUrl(session.path)} className="-my-3 inline-flex min-h-11 items-center hover:text-text">
-            sessions
-          </Link>
-        </nav>
-        <span aria-hidden>/</span>
-        <h1 className="font-medium text-text">
-          <time dateTime={session.created_at} title={full.format(new Date(session.created_at))}>
-            {dayTime.format(new Date(session.created_at))}
-          </time>
-        </h1>
-        <span>
-          · {prompts} {prompts === 1 ? "exchange" : "exchanges"}
-        </span>
-      </div>
+      <nav aria-label="Breadcrumb" className="mt-8 sm:mt-10">
+        <BackLink to={sessionsUrl(session.path)} path={session.path} collection="sessions" />
+      </nav>
+      <h1 className="mt-1.5 text-sm font-normal text-muted">
+        started{" "}
+        <time dateTime={session.created_at} title={full.format(new Date(session.created_at))} className="text-text">
+          {dayTime.format(new Date(session.created_at))}
+        </time>{" "}
+        · {prompts} {prompts === 1 ? "exchange" : "exchanges"}
+      </h1>
 
       <div className="mt-12 grid gap-16 sm:mt-14 sm:gap-20">
         {list.map((exchange) => (
