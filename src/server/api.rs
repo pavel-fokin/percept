@@ -9,10 +9,10 @@ use serde::Serialize;
 use serde_json::json;
 
 use super::Api;
-use crate::core::{Actor, ClientSessionId, EventId, EventStore, MapId, NodeId, Payload, Session, SessionId};
+use crate::core::{Actor, ClientSessionId, EventId, EventStore, SchemaStore, MapId, NodeId, Payload, Session, SessionId};
 
-pub(super) async fn status<S: EventStore + Send + Sync + 'static>(
-    State(api): State<Arc<Api<S>>>,
+pub(super) async fn status<S: EventStore + Send + Sync + 'static, M: SchemaStore + Send + Sync + 'static>(
+    State(api): State<Arc<Api<S, M>>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let events = api
         .service
@@ -22,8 +22,8 @@ pub(super) async fn status<S: EventStore + Send + Sync + 'static>(
     Ok(Json(json!({ "data": { "events": events } })))
 }
 
-pub(super) async fn sessions<S: EventStore + Send + Sync + 'static>(
-    State(api): State<Arc<Api<S>>>,
+pub(super) async fn sessions<S: EventStore + Send + Sync + 'static, M: SchemaStore + Send + Sync + 'static>(
+    State(api): State<Arc<Api<S, M>>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let sessions = api
         .service
@@ -34,8 +34,8 @@ pub(super) async fn sessions<S: EventStore + Send + Sync + 'static>(
     Ok(Json(json!({ "data": sessions })))
 }
 
-pub(super) async fn session<S: EventStore + Send + Sync + 'static>(
-    State(api): State<Arc<Api<S>>>,
+pub(super) async fn session<S: EventStore + Send + Sync + 'static, M: SchemaStore + Send + Sync + 'static>(
+    State(api): State<Arc<Api<S, M>>>,
     Path(id): Path<SessionId>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let session = api
@@ -48,8 +48,8 @@ pub(super) async fn session<S: EventStore + Send + Sync + 'static>(
     Ok(Json(json!({ "data": session })))
 }
 
-pub(super) async fn maps<S: EventStore + Send + Sync + 'static>(
-    State(api): State<Arc<Api<S>>>,
+pub(super) async fn maps<S: EventStore + Send + Sync + 'static, M: SchemaStore + Send + Sync + 'static>(
+    State(api): State<Arc<Api<S, M>>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let summaries = api
         .service
@@ -70,8 +70,8 @@ pub(super) async fn maps<S: EventStore + Send + Sync + 'static>(
     Ok(Json(json!({ "data": maps })))
 }
 
-pub(super) async fn map<S: EventStore + Send + Sync + 'static>(
-    State(api): State<Arc<Api<S>>>,
+pub(super) async fn map<S: EventStore + Send + Sync + 'static, M: SchemaStore + Send + Sync + 'static>(
+    State(api): State<Arc<Api<S, M>>>,
     Path(id): Path<MapId>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let detail = api
@@ -180,8 +180,8 @@ struct EventView {
     created_at: jiff::Timestamp,
 }
 
-pub(super) async fn session_events<S: EventStore + Send + Sync + 'static>(
-    State(api): State<Arc<Api<S>>>,
+pub(super) async fn session_events<S: EventStore + Send + Sync + 'static, M: SchemaStore + Send + Sync + 'static>(
+    State(api): State<Arc<Api<S, M>>>,
     Path(id): Path<SessionId>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let events: Vec<EventView> = api

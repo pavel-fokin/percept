@@ -1,8 +1,10 @@
+use std::collections::BTreeSet;
+use std::path::Path;
 use std::sync::Mutex;
 
 use serde_json::json;
 
-use crate::core::{ClientSessionId, Event, EventStore, Payload, SessionId, Source};
+use crate::core::{ClientSessionId, EdgeKind, Event, EventStore, Payload, Schema, SchemaStore, SessionId, Source};
 use crate::shared::Result;
 
 pub(super) struct Fixed(pub(super) usize);
@@ -81,5 +83,44 @@ impl EventStore for &Memory {
     async fn append(&self, event: &Event) -> Result<()> {
         self.0.lock().unwrap().push(event.clone());
         Ok(())
+    }
+}
+
+/// Has a schema for the map kinds the app tests use, and none for any other.
+pub(super) struct Schemas;
+
+impl SchemaStore for Schemas {
+    async fn schema(&self, _: &Path, kind: &str) -> Result<Schema> {
+        match kind {
+            "decisions" => mini(
+                &[("question", &[]), ("option", &[])],
+                &[("answers", "option", "question"), ("raises", "question", "option")],
+            ),
+            "tasks" => mini(&[("task", &[])], &[("blocks", "task", "task")]),
+            "concepts" => mini(&[("concept", &["definition"])], &[]),
+            _ => Err(format!("no schema for {kind}").into()),
+        }
+    }
+}
+
+fn mini(nodes: &[(&str, &[&str])], edges: &[(&str, &str, &str)]) -> Result<Schema> {
+    let nodes = nodes
+        .iter()
+        .map(|(node, properties)| (node.to_string(), properties.iter().map(|p| p.to_string()).collect::<BTreeSet<_>>()))
+        .collect();
+    let edges = edges
+        .iter()
+        .map(|(edge, from, to)| (edge.to_string(), EdgeKind { from: from.to_string(), to: to.to_string() }))
+        .collect();
+
+    Schema::new("purpose".into(), "instructions".into(), nodes, edges)
+}
+
+/// Has no schema for any map kind.
+pub(super) struct NoSchemas;
+
+impl SchemaStore for NoSchemas {
+    async fn schema(&self, _: &Path, kind: &str) -> Result<Schema> {
+        Err(format!("no schema for {kind}").into())
     }
 }
