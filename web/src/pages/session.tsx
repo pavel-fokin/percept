@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Link, LoaderFunctionArgs, useLoaderData } from "react-router";
 import { getData, type Event, type Session } from "../api";
+import { Markdown } from "../components/markdown";
 import { RouteError } from "../components/route-error";
 import { dayTime, full, time } from "../format";
 import { pathName, pathUrl } from "../paths";
@@ -99,7 +100,7 @@ function AgentItems({ items }: { items: Item[] }) {
     return (
       <section key={item.event.id} className="min-w-0">
         {item === first && <Who name="Agent" at={item.event.created_at} />}
-        <p className="leading-[26px] wrap-anywhere whitespace-pre-wrap">{item.event.payload.content as string}</p>
+        <Markdown text={item.event.payload.content as string} />
       </section>
     );
   });
