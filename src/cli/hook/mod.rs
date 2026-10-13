@@ -4,9 +4,9 @@ mod codex;
 use clap::ValueEnum;
 use tokio::io::AsyncReadExt;
 
-use super::Result;
 use crate::app::{AppService, source_path};
 use crate::core::{Actor, ClientSessionId, Event, EventStore, SessionId, Source};
+use crate::shared::Result;
 
 #[derive(Clone, Copy, ValueEnum)]
 pub(super) enum Client {

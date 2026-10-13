@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
-use std::error::Error;
 
 use super::AppService;
 use crate::core::{Actor, ClientSessionId, Event, EventStore, Payload, Session, SessionId, Source};
+use crate::shared::Result;
 
 impl<S: EventStore> AppService<S> {
     /// Sessions newest first.
-    pub async fn sessions(&self) -> Result<Vec<Session>, Box<dyn Error + Send + Sync>> {
+    pub async fn sessions(&self) -> Result<Vec<Session>> {
         let events = self.store.all().await?;
 
         let mut titles: BTreeMap<SessionId, &str> = BTreeMap::new();
@@ -36,12 +36,12 @@ impl<S: EventStore> AppService<S> {
         Ok(sessions)
     }
 
-    pub async fn session(&self, id: SessionId) -> Result<Option<Session>, Box<dyn Error + Send + Sync>> {
+    pub async fn session(&self, id: SessionId) -> Result<Option<Session>> {
         Ok(self.sessions().await?.into_iter().find(|s| s.id == id))
     }
 
     /// The session's events in log order, or `None` if the session does not exist.
-    pub async fn session_events(&self, id: SessionId) -> Result<Option<Vec<Event>>, Box<dyn Error + Send + Sync>> {
+    pub async fn session_events(&self, id: SessionId) -> Result<Option<Vec<Event>>> {
         let events: Vec<Event> = self.store.all().await?.into_iter().filter(|e| e.payload.session() == Some(id)).collect();
 
         let exists = events.iter().any(|e| matches!(e.payload, Payload::SessionCreated { .. }));
@@ -54,7 +54,7 @@ impl<S: EventStore> AppService<S> {
         client_session_id: ClientSessionId,
         source: Source,
         event: impl FnOnce(Source, SessionId) -> Event,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    ) -> Result<()> {
         // Held until return, so parallel hooks cannot create the same session twice.
         let _lock = self.store.lock().await?;
 

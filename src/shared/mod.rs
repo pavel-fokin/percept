@@ -1,4 +1,4 @@
-//! Foundation layer: code every layer shares, such as `Id<T>`.
+//! Foundation layer: code every layer shares, such as `Id<T>` and `Result<T>`.
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -6,6 +6,9 @@ use std::marker::PhantomData;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+pub type Error = Box<dyn std::error::Error + Send + Sync>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// A UUIDv7 that identifies one entity of type `T`.
 #[derive(Serialize, Deserialize)]

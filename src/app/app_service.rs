@@ -1,6 +1,5 @@
-use std::error::Error;
-
 use crate::core::EventStore;
+use crate::shared::Result;
 
 pub struct AppService<S: EventStore> {
     pub(super) store: S,
@@ -11,7 +10,7 @@ impl<S: EventStore> AppService<S> {
         Self { store }
     }
 
-    pub async fn event_count(&self) -> Result<usize, Box<dyn Error + Send + Sync>> {
+    pub async fn event_count(&self) -> Result<usize> {
         Ok(self.store.all().await?.len())
     }
 }

@@ -6,5 +6,3 @@ mod maps;
 mod status;
 
 pub use command::run;
-
-type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;

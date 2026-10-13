@@ -1,6 +1,5 @@
 //! Server layer: serves the embedded page and its JSON API over HTTP.
 
-use std::error::Error;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
@@ -13,12 +12,13 @@ use tokio::net::TcpListener;
 
 use crate::app::AppService;
 use crate::core::EventStore;
+use crate::shared::Result;
 
 mod api;
 
 const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 
-pub async fn serve<S>(service: Arc<AppService<S>>, home: PathBuf, port: u16, open: bool) -> Result<(), Box<dyn Error + Send + Sync>>
+pub async fn serve<S>(service: Arc<AppService<S>>, home: PathBuf, port: u16, open: bool) -> Result<()>
 where
     S: EventStore + Send + Sync + 'static,
 {
@@ -82,15 +82,15 @@ mod tests {
     impl EventStore for Fixed {
         type Lock = ();
 
-        async fn lock(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        async fn lock(&self) -> Result<()> {
             unimplemented!()
         }
 
-        async fn session(&self, _: &ClientSessionId) -> Result<Option<SessionId>, Box<dyn Error + Send + Sync>> {
+        async fn session(&self, _: &ClientSessionId) -> Result<Option<SessionId>> {
             unimplemented!()
         }
 
-        async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
+        async fn all(&self) -> Result<Vec<Event>> {
             let session: SessionId = serde_json::from_value(json!(SESSION))?;
             let created = Event::session_created(Source::fixture(), session, ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
@@ -100,7 +100,7 @@ mod tests {
             Ok(std::iter::once(created).chain(started).chain([map_created, node]).collect())
         }
 
-        async fn append(&self, _: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {
+        async fn append(&self, _: &Event) -> Result<()> {
             unimplemented!()
         }
     }
