@@ -1,15 +1,46 @@
+mod claude;
+mod codex;
+
+use clap::ValueEnum;
 use tokio::io::AsyncReadExt;
 
 use super::Result;
 use crate::app::{AppService, source_path};
 use crate::core::{Actor, ClientSessionId, Event, EventStore, SessionId, Source};
 
-pub(super) async fn hook<S: EventStore>(service: &AppService<S>, client: String) -> Result<()> {
+#[derive(Clone, Copy, ValueEnum)]
+pub(super) enum Client {
+    Claude,
+    Codex,
+}
+
+impl Client {
+    fn name(self) -> &'static str {
+        match self {
+            Client::Claude => "claude",
+            Client::Codex => "codex",
+        }
+    }
+}
+
+/// What a client's hook payload means to percept.
+enum Translation {
+    Record(ClientSessionId, EventBuilder),
+    Skip,
+}
+
+pub(super) async fn hook<S: EventStore>(service: &AppService<S>, client: Client) -> Result<()> {
     let mut input = String::new();
     tokio::io::stdin().read_to_string(&mut input).await?;
     let raw: serde_json::Value = serde_json::from_str(&input)?;
-    let (client_session_id, event) = event_from_hook(raw)?;
-    let source = Source { client, path: source_path(&std::env::current_dir()?).await };
+    let translation = match client {
+        Client::Claude => claude::translate(raw)?,
+        Client::Codex => codex::translate(raw)?,
+    };
+    let Translation::Record(client_session_id, event) = translation else {
+        return Ok(());
+    };
+    let source = Source { client: client.name().to_owned(), path: source_path(&std::env::current_dir()?).await };
 
     service.record(client_session_id, source, event).await
 }
@@ -17,8 +48,9 @@ pub(super) async fn hook<S: EventStore>(service: &AppService<S>, client: String)
 /// Makes the hook's event once its session is known.
 type EventBuilder = Box<dyn FnOnce(Source, SessionId) -> Event>;
 
-fn event_from_hook(raw: serde_json::Value) -> Result<(ClientSessionId, EventBuilder)> {
-    let client_session_id = ClientSessionId::new(text(&raw, "session_id")?);
+/// Parses the hooks that Claude and Codex send in the same shape.
+fn shared(raw: serde_json::Value) -> Result<Translation> {
+    let client_session_id = session_id(&raw)?;
 
     let name = raw["hook_event_name"].as_str();
     let event: EventBuilder = match name {
@@ -26,7 +58,7 @@ fn event_from_hook(raw: serde_json::Value) -> Result<(ClientSessionId, EventBuil
             let content = text(&raw, "prompt")?;
             Box::new(move |source, s| Event::message(source, s, Actor::Human, &content, raw))
         }
-        Some("Stop" | "SubagentStop") => {
+        Some("Stop") => {
             let content = text(&raw, "last_assistant_message")?;
             Box::new(move |source, s| Event::message(source, s, Actor::Agent, &content, raw))
         }
@@ -40,7 +72,11 @@ fn event_from_hook(raw: serde_json::Value) -> Result<(ClientSessionId, EventBuil
         None => return Err("missing hook_event_name".into()),
     };
 
-    Ok((client_session_id, event))
+    Ok(Translation::Record(client_session_id, event))
+}
+
+fn session_id(raw: &serde_json::Value) -> Result<ClientSessionId> {
+    Ok(ClientSessionId::new(text(raw, "session_id")?))
 }
 
 fn text(raw: &serde_json::Value, field: &str) -> Result<String> {
@@ -57,7 +93,13 @@ mod tests {
     use serde_json::json;
 
     fn build(raw: serde_json::Value) -> (ClientSessionId, SessionId, Event) {
-        let (client_session_id, event) = event_from_hook(raw).unwrap();
+        record(shared(raw).unwrap())
+    }
+
+    pub(super) fn record(translation: Translation) -> (ClientSessionId, SessionId, Event) {
+        let Translation::Record(client_session_id, event) = translation else {
+            panic!("expected a record");
+        };
         let session = SessionId::new();
         (client_session_id, session, event(Source::fixture(), session))
     }
@@ -75,16 +117,14 @@ mod tests {
     }
 
     #[test]
-    fn stops_are_agent_messages() {
-        for name in ["Stop", "SubagentStop"] {
-            let raw = json!({"hook_event_name": name, "last_assistant_message": "done", "session_id": "a"});
+    fn stop_is_an_agent_message() {
+        let raw = json!({"hook_event_name": "Stop", "last_assistant_message": "done", "session_id": "a"});
 
-            let (_, session, event) = build(raw.clone());
+        let (_, session, event) = build(raw.clone());
 
-            assert_eq!(event.actor, Actor::Agent);
-            assert_eq!(event.payload, Payload::Message { session, content: "done".into() });
-            assert_eq!(event.raw, Some(raw));
-        }
+        assert_eq!(event.actor, Actor::Agent);
+        assert_eq!(event.payload, Payload::Message { session, content: "done".into() });
+        assert_eq!(event.raw, Some(raw));
     }
 
     #[test]
@@ -122,25 +162,25 @@ mod tests {
 
     #[test]
     fn unknown_or_missing_hook_event_name_is_an_error() {
-        assert!(event_from_hook(json!({"hook_event_name": "PreToolUse", "session_id": "a"})).is_err());
-        assert!(event_from_hook(json!({"session_id": "a"})).is_err());
+        assert!(shared(json!({"hook_event_name": "PreToolUse", "session_id": "a"})).is_err());
+        assert!(shared(json!({"hook_event_name": "SubagentStop", "session_id": "a"})).is_err());
+        assert!(shared(json!({"session_id": "a"})).is_err());
     }
 
     #[test]
     fn missing_or_non_string_session_id_is_an_error() {
-        assert!(event_from_hook(json!({"hook_event_name": "PostToolUse"})).is_err());
-        assert!(event_from_hook(json!({"hook_event_name": "PostToolUse", "session_id": 1})).is_err());
+        assert!(shared(json!({"hook_event_name": "PostToolUse"})).is_err());
+        assert!(shared(json!({"hook_event_name": "PostToolUse", "session_id": 1})).is_err());
     }
 
     #[test]
     fn missing_or_non_string_content_is_an_error() {
-        assert!(event_from_hook(json!({"hook_event_name": "UserPromptSubmit", "session_id": "a"})).is_err());
-        assert!(event_from_hook(json!({"hook_event_name": "Stop", "last_assistant_message": 1, "session_id": "a"})).is_err());
+        assert!(shared(json!({"hook_event_name": "UserPromptSubmit", "session_id": "a"})).is_err());
+        assert!(shared(json!({"hook_event_name": "Stop", "last_assistant_message": 1, "session_id": "a"})).is_err());
     }
 
     #[test]
     fn missing_tool_name_is_an_error() {
-        assert!(event_from_hook(json!({"hook_event_name": "PostToolUse", "session_id": "a"})).is_err());
+        assert!(shared(json!({"hook_event_name": "PostToolUse", "session_id": "a"})).is_err());
     }
-
 }

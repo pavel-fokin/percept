@@ -31,3 +31,17 @@ impl ClientSessionId {
         &self.0
     }
 }
+
+/// The client's own identifier for a subagent, as the client sent it.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ClientAgentId(String);
+
+impl ClientAgentId {
+    pub fn new(id: String) -> Self {
+        Self(id)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}

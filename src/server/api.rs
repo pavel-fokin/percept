@@ -206,6 +206,12 @@ fn view_payload(payload: &Payload) -> serde_json::Value {
     match payload {
         Payload::Message { content, .. } => json!({ "content": content }),
         Payload::ToolUsed { tool, .. } => json!({ "tool": tool }),
+        Payload::SubagentStarted { subagent, agent, task, .. } => {
+            json!({ "subagent": subagent.as_str(), "agent": agent, "task": task })
+        }
+        Payload::SubagentReported { subagent, content, .. } => {
+            json!({ "subagent": subagent.as_str(), "content": content })
+        }
         Payload::SessionCreated { .. }
         | Payload::SessionStarted { .. }
         | Payload::SessionStopped { .. }

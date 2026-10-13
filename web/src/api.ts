@@ -40,7 +40,14 @@ export type MapDetail = {
 export type Event = {
   id: string;
   actor: "human" | "agent" | "system";
-  kind: "session.created" | "session.started" | "session.stopped" | "message" | "tool.used";
+  kind:
+    | "session.created"
+    | "session.started"
+    | "session.stopped"
+    | "message"
+    | "tool.used"
+    | "subagent.started"
+    | "subagent.reported";
   payload: Record<string, unknown>;
   created_at: string;
 };
