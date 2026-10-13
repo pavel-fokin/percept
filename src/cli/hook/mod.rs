@@ -58,7 +58,10 @@ fn shared(raw: serde_json::Value) -> Result<Translation> {
             let content = text(&raw, "prompt")?;
             Box::new(move |source, s| Event::message(source, s, Actor::Human, &content, raw))
         }
-        Some("Stop") => agent_message(raw)?,
+        Some("Stop") => {
+            let content = text(&raw, "last_assistant_message")?;
+            Box::new(move |source, s| Event::message(source, s, Actor::Agent, &content, raw))
+        }
         Some("PostToolUse") => {
             let tool = text(&raw, "tool_name")?;
             Box::new(move |source, s| Event::tool_used(source, s, &tool, raw))
@@ -74,12 +77,6 @@ fn shared(raw: serde_json::Value) -> Result<Translation> {
 
 fn session_id(raw: &serde_json::Value) -> Result<ClientSessionId> {
     Ok(ClientSessionId::new(text(raw, "session_id")?))
-}
-
-fn agent_message(raw: serde_json::Value) -> Result<EventBuilder> {
-    let content = text(&raw, "last_assistant_message")?;
-
-    Ok(Box::new(move |source, s| Event::message(source, s, Actor::Agent, &content, raw)))
 }
 
 fn text(raw: &serde_json::Value, field: &str) -> Result<String> {
