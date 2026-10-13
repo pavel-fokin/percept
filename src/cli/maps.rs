@@ -1,16 +1,16 @@
 use std::collections::BTreeMap;
 
 use crate::app::{AppService, source_path};
-use crate::core::{Actor, EventStore, Source};
+use crate::core::{Actor, EventStore, SchemaStore, Source};
 use crate::shared::Result;
 
-pub(super) async fn create<S: EventStore>(service: &AppService<S>, kind: &str) -> Result<()> {
+pub(super) async fn create<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, kind: &str) -> Result<()> {
     let (actor, source) = cli_writer().await?;
 
     service.create_map(source, actor, kind).await
 }
 
-pub(super) async fn add<S: EventStore>(service: &AppService<S>, args: &[String]) -> Result<()> {
+pub(super) async fn add<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
     let (positionals, properties) = split_add(args)?;
 
     match positionals {
@@ -61,7 +61,7 @@ async fn cli_writer() -> Result<(Actor, Source)> {
     Ok((actor, source))
 }
 
-pub(super) async fn show<S: EventStore>(service: &AppService<S>, map: Option<&str>) -> Result<()> {
+pub(super) async fn show<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, map: Option<&str>) -> Result<()> {
     let project = source_path(&std::env::current_dir()?).await;
 
     match map {

@@ -1,8 +1,10 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 use std::sync::Mutex;
 
 use serde_json::json;
 
-use crate::core::{ClientSessionId, Event, EventStore, Payload, SessionId, Source};
+use crate::core::{ClientSessionId, Event, EventStore, Payload, Schema, SchemaStore, SessionId, Source};
 use crate::shared::Result;
 
 pub(super) struct Fixed(pub(super) usize);
@@ -81,5 +83,19 @@ impl EventStore for &Memory {
     async fn append(&self, event: &Event) -> Result<()> {
         self.0.lock().unwrap().push(event.clone());
         Ok(())
+    }
+}
+
+/// Has a schema for the map kinds the app tests use, and none for any other.
+pub(super) struct Schemas;
+
+impl SchemaStore for Schemas {
+    async fn schema(&self, _: &Path, kind: &str) -> Result<Schema> {
+        if !["decisions", "tasks", "concepts"].contains(&kind) {
+            return Err(format!("no schema for {kind}").into());
+        }
+
+        let nodes = BTreeMap::from([("node".to_string(), BTreeSet::new())]);
+        Schema::new("purpose".into(), "instructions".into(), nodes, BTreeMap::new())
     }
 }

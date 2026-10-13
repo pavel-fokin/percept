@@ -11,16 +11,17 @@ use axum::Router;
 use tokio::net::TcpListener;
 
 use crate::app::AppService;
-use crate::core::EventStore;
+use crate::core::{EventStore, SchemaStore};
 use crate::shared::Result;
 
 mod api;
 
 const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 
-pub async fn serve<S>(service: Arc<AppService<S>>, home: PathBuf, port: u16, open: bool) -> Result<()>
+pub async fn serve<S, M>(service: Arc<AppService<S, M>>, home: PathBuf, port: u16, open: bool) -> Result<()>
 where
     S: EventStore + Send + Sync + 'static,
+    M: SchemaStore + Send + Sync + 'static,
 {
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
     let url = format!("http://{}", listener.local_addr()?);
@@ -36,14 +37,15 @@ where
 }
 
 /// What the handlers read: the use cases, and the home that paths are shown under.
-struct Api<S: EventStore> {
-    service: Arc<AppService<S>>,
+struct Api<S: EventStore, M: SchemaStore> {
+    service: Arc<AppService<S, M>>,
     home: PathBuf,
 }
 
-fn router<S>(service: Arc<AppService<S>>, home: PathBuf) -> Router
+fn router<S, M>(service: Arc<AppService<S, M>>, home: PathBuf) -> Router
 where
     S: EventStore + Send + Sync + 'static,
+    M: SchemaStore + Send + Sync + 'static,
 {
     Router::new()
         .route("/api/status", get(api::status))
@@ -72,7 +74,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::{Actor, ClientSessionId, Event, MapId, NodeId, SessionId, Source};
+    use crate::core::{Actor, ClientSessionId, Event, MapId, NodeId, Schema, SchemaStore, SessionId, Source};
 
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
     const MAP: &str = "0190a0a0-0000-7000-8000-000000000003";
@@ -105,6 +107,14 @@ mod tests {
         }
     }
 
+    struct Schemas;
+
+    impl SchemaStore for Schemas {
+        async fn schema(&self, _: &std::path::Path, _: &str) -> Result<Schema> {
+            unimplemented!()
+        }
+    }
+
     fn json_body(response: &str) -> serde_json::Value {
         serde_json::from_str(response.rsplit("\r\n\r\n").next().unwrap()).unwrap()
     }
@@ -112,7 +122,7 @@ mod tests {
     async fn get_response(path: &str) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = router(Arc::new(AppService::new(Fixed(3))), "/Users/me".into());
+        let app = router(Arc::new(AppService::new(Fixed(3), Schemas)), "/Users/me".into());
         tokio::spawn(async move { axum::serve(listener, app).await });
 
         let mut stream = TcpStream::connect(addr).await.unwrap();
