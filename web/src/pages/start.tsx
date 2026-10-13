@@ -2,7 +2,7 @@ import { Link, useLoaderData, useRouteError } from "react-router";
 import { describe, getData, type MapSummary, type Session } from "../api";
 import { relative } from "../format";
 import { textLink } from "../components/ui/text-link";
-import { pathUrl } from "../paths";
+import { mapUrl, sessionsUrl, sessionUrl } from "../paths";
 
 const README = "https://github.com/pavel-fokin/percept#readme";
 
@@ -53,7 +53,7 @@ export function Start() {
 
           {latest && (
             <Link
-              to={`/sessions/${latest.id}`}
+              to={sessionUrl(path, latest.id)}
               className="-mx-3 mt-6 flex min-h-11 items-center gap-3 rounded-[10px] px-3 py-3 hover:bg-surface focus-visible:bg-surface"
             >
               <span className="grid min-w-0 flex-1 gap-0.5">
@@ -70,9 +70,9 @@ export function Start() {
 
           <nav aria-label={path} className="-mx-3 mt-2 flex flex-wrap gap-1">
             {maps.map((map) => (
-              <Counter key={map.id} to={`/maps/${map.id}`} label={map.kind} count={map.nodes} />
+              <Counter key={map.id} to={mapUrl(path, map.id)} label={map.kind} count={map.nodes} />
             ))}
-            {sessions > 0 && <Counter to={pathUrl(path)} label="sessions" count={sessions} />}
+            {sessions > 0 && <Counter to={sessionsUrl(path)} label="sessions" count={sessions} />}
           </nav>
         </section>
       ))}

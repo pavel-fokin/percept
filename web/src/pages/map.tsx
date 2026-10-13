@@ -1,14 +1,15 @@
-import { useLoaderData, type LoaderFunctionArgs } from "react-router";
 import { getData, type MapDetail, type MapNode } from "../api";
 import { RouteError } from "../components/route-error";
 import { byDay, full, withChangedTimes } from "../format";
 
-export function loadMap({ params }: LoaderFunctionArgs) {
-  return getData<MapDetail>(`/api/maps/${params.id}`);
+export async function loadMap(path: string, id: string) {
+  const map = await getData<MapDetail>(`/api/maps/${id}`);
+  if (map.path !== path) throw new Response(null, { status: 404 });
+
+  return map;
 }
 
-export function MapPage() {
-  const map = useLoaderData<typeof loadMap>();
+export function MapPage({ map }: { map: MapDetail }) {
   const days = byDay(map.nodes, (n) => n.created_at, new Date());
 
   return (

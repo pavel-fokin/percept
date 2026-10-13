@@ -1,21 +1,17 @@
-import { Link, useLoaderData, type LoaderFunctionArgs } from "react-router";
+import { Link } from "react-router";
 import { getData, type Session } from "../api";
 import { RouteError } from "../components/route-error";
 import { byDay, full, withChangedTimes } from "../format";
-import { urlPath } from "../paths";
+import { sessionUrl } from "../paths";
 
-export async function loadPathSessions({ params }: LoaderFunctionArgs) {
-  const path = urlPath(params["*"] ?? "");
-  if (path === null) throw new Response(null, { status: 404 });
-
+export async function loadPathSessions(path: string) {
   const sessions = (await getData<Session[]>("/api/sessions")).filter((s) => s.path === path);
   if (sessions.length === 0) throw new Response(null, { status: 404 });
 
   return { path, sessions };
 }
 
-export function PathSessions() {
-  const { path, sessions } = useLoaderData<typeof loadPathSessions>();
+export function PathSessions({ path, sessions }: { path: string; sessions: Session[] }) {
   const days = byDay(sessions, (s) => s.created_at, new Date());
 
   return (
@@ -50,7 +46,7 @@ function SessionRow({ session, shown }: { session: Session; shown?: string }) {
   return (
     <li>
       <Link
-        to={`/sessions/${session.id}`}
+        to={sessionUrl(session.path, session.id)}
         className="flex min-h-11 items-baseline gap-4 rounded-[10px] px-3 py-2.5 hover:bg-surface focus-visible:bg-surface sm:gap-6"
       >
         <span
