@@ -7,7 +7,10 @@ import { dayTime, full, time } from "../format";
 import { pathName, pathUrl } from "../paths";
 
 // One line per run of tool calls, so a tool never splits the agent's text.
-type Item = { type: "message"; event: Event } | { type: "tools"; events: Event[] };
+type Item =
+  | { type: "message"; event: Event }
+  | { type: "notice"; event: Event }
+  | { type: "tools"; events: Event[] };
 
 // A prompt and everything the agent did until the next one. Work before the first prompt has none.
 type Exchange = { id: string; prompt?: Event; items: Item[] };
@@ -33,7 +36,7 @@ function exchanges(events: Event[]) {
     if (result.length === 0) result.push({ id: event.id, items: [] });
     const { items } = result.at(-1)!;
     const last = items.at(-1);
-    if (event.kind === "message") items.push({ type: "message", event });
+    if (event.kind === "message") items.push({ type: event.actor === "system" ? "notice" : "message", event });
     else if (last?.type === "tools") last.events.push(event);
     else items.push({ type: "tools", events: [event] });
   }
@@ -93,6 +96,14 @@ function AgentItems({ items }: { items: Item[] }) {
       return (
         <p key={item.events[0].id} className="text-sm text-muted">
           {toolRuns(item.events)}
+        </p>
+      );
+    }
+
+    if (item.type === "notice") {
+      return (
+        <p key={item.event.id} className="text-sm text-muted wrap-anywhere">
+          {item.event.payload.content as string}
         </p>
       );
     }
