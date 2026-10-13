@@ -15,3 +15,8 @@ export function urlPath(splat: string) {
 
   return base === "home" ? ["~", ...rest].join("/") : `/${rest.join("/")}`;
 }
+
+/** The folder a path ends in: `~/code/percept` is `percept`. */
+export function pathName(path: string) {
+  return path.split("/").filter(Boolean).at(-1) ?? path;
+}
