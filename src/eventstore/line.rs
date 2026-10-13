@@ -1,11 +1,10 @@
-use std::error::Error;
-
 use jiff::Timestamp;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use crate::core::{Actor, ClientAgentId, ClientSessionId, Event, EventId, Kind, Payload, Source};
+use crate::shared::{Error, Result};
 
 /// One log line. The log format lives here, apart from the domain `Event`.
 #[derive(Serialize, Deserialize)]
@@ -58,9 +57,9 @@ impl From<&Event> for EventLine {
 }
 
 impl TryFrom<EventLine> for Event {
-    type Error = Box<dyn Error + Send + Sync>;
+    type Error = Error;
 
-    fn try_from(line: EventLine) -> Result<Self, Self::Error> {
+    fn try_from(line: EventLine) -> Result<Self> {
         let kind = Kind::from_name(&line.kind).ok_or_else(|| format!("unknown event kind {:?}", line.kind))?;
 
         let p = &line.payload;
@@ -117,7 +116,7 @@ impl TryFrom<EventLine> for Event {
 fn field<T: DeserializeOwned>(
     payload: &serde_json::Value,
     name: &str,
-) -> Result<T, Box<dyn Error + Send + Sync>> {
+) -> Result<T> {
     serde_json::from_value(payload[name].clone())
         .map_err(|error| format!("payload.{name}: {error}").into())
 }

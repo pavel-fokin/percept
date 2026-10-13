@@ -1,4 +1,3 @@
-use std::error::Error;
 use std::io::ErrorKind;
 use std::path::PathBuf;
 
@@ -6,6 +5,7 @@ use tokio::io::AsyncWriteExt;
 
 use super::line::EventLine;
 use crate::core::{ClientSessionId, Event, EventStore, Payload, SessionId};
+use crate::shared::Result;
 
 pub struct JsonlStore {
     path: PathBuf,
@@ -25,7 +25,7 @@ pub struct Lock {
 impl EventStore for JsonlStore {
     type Lock = Lock;
 
-    async fn lock(&self) -> Result<Lock, Box<dyn Error + Send + Sync>> {
+    async fn lock(&self) -> Result<Lock> {
         let mut name = self.path.clone().into_os_string();
         name.push(".lock");
         let path = PathBuf::from(name);
@@ -55,7 +55,7 @@ impl EventStore for JsonlStore {
     async fn session(
         &self,
         client_session_id: &ClientSessionId,
-    ) -> Result<Option<SessionId>, Box<dyn Error + Send + Sync>> {
+    ) -> Result<Option<SessionId>> {
         let session = self
             .all()
             .await?
@@ -70,7 +70,7 @@ impl EventStore for JsonlStore {
         Ok(session)
     }
 
-    async fn all(&self) -> Result<Vec<Event>, Box<dyn Error + Send + Sync>> {
+    async fn all(&self) -> Result<Vec<Event>> {
         let text = match tokio::fs::read_to_string(&self.path).await {
             Ok(text) => text,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
@@ -87,7 +87,7 @@ impl EventStore for JsonlStore {
             .collect()
     }
 
-    async fn append(&self, event: &Event) -> Result<(), Box<dyn Error + Send + Sync>> {
+    async fn append(&self, event: &Event) -> Result<()> {
         let mut line = serde_json::to_string(&EventLine::from(event))?;
         line.push('\n');
 

@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
-use std::error::Error;
 use std::path::Path;
 
 use super::AppService;
 use crate::core::{Actor, Edge, Event, EventStore, Map, MapId, Node, NodeId, Payload, Source};
+use crate::shared::Result;
 
 /// A map with how many nodes and edges it holds.
 pub struct MapSummary {
@@ -26,7 +26,7 @@ impl<S: EventStore> AppService<S> {
         source: Source,
         actor: Actor,
         kind: &str,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    ) -> Result<()> {
         not_blank("kind", kind)?;
 
         // Held until return, so parallel creates cannot both pass the check.
@@ -41,24 +41,24 @@ impl<S: EventStore> AppService<S> {
     }
 
     /// The project's maps in log order.
-    pub async fn maps(&self, project: &Path) -> Result<Vec<Map>, Box<dyn Error + Send + Sync>> {
+    pub async fn maps(&self, project: &Path) -> Result<Vec<Map>> {
         Ok(all_maps(&self.store.all().await?).into_iter().filter(|m| m.path == project).collect())
     }
 
     /// The project's map of the given kind, or an error if it has none.
-    pub async fn map(&self, project: &Path, kind: &str) -> Result<Map, Box<dyn Error + Send + Sync>> {
+    pub async fn map(&self, project: &Path, kind: &str) -> Result<Map> {
         let found = self.maps(project).await?.into_iter().find(|m| m.kind == kind);
 
         found.ok_or_else(|| format!("this project has no {kind} map").into())
     }
 
     /// The map's nodes in log order.
-    pub async fn nodes(&self, map: MapId) -> Result<Vec<Node>, Box<dyn Error + Send + Sync>> {
+    pub async fn nodes(&self, map: MapId) -> Result<Vec<Node>> {
         Ok(map_nodes(&self.store.all().await?, map))
     }
 
     /// The project's maps in log order, each with its node and edge counts, from one read of the log.
-    pub async fn map_summaries(&self, project: &Path) -> Result<Vec<MapSummary>, Box<dyn Error + Send + Sync>> {
+    pub async fn map_summaries(&self, project: &Path) -> Result<Vec<MapSummary>> {
         let mut summaries = self.all_map_summaries().await?;
         summaries.retain(|s| s.map.path == project);
 
@@ -66,7 +66,7 @@ impl<S: EventStore> AppService<S> {
     }
 
     /// Every map across all projects in log order, each with its node and edge counts, from one read of the log.
-    pub async fn all_map_summaries(&self) -> Result<Vec<MapSummary>, Box<dyn Error + Send + Sync>> {
+    pub async fn all_map_summaries(&self) -> Result<Vec<MapSummary>> {
         let events = self.store.all().await?;
 
         let mut summaries: Vec<MapSummary> = all_maps(&events)
@@ -86,7 +86,7 @@ impl<S: EventStore> AppService<S> {
     }
 
     /// The map with the given id, its nodes newest first and its edges in log order, from one read of the log.
-    pub async fn map_detail(&self, id: MapId) -> Result<Option<MapDetail>, Box<dyn Error + Send + Sync>> {
+    pub async fn map_detail(&self, id: MapId) -> Result<Option<MapDetail>> {
         let events = self.store.all().await?;
 
         let Some(map) = all_maps(&events).into_iter().find(|m| m.id == id) else {
@@ -100,7 +100,7 @@ impl<S: EventStore> AppService<S> {
     }
 
     /// The map's edges in log order.
-    pub async fn edges(&self, map: MapId) -> Result<Vec<Edge>, Box<dyn Error + Send + Sync>> {
+    pub async fn edges(&self, map: MapId) -> Result<Vec<Edge>> {
         Ok(map_edges(&self.store.all().await?, map))
     }
 
@@ -113,7 +113,7 @@ impl<S: EventStore> AppService<S> {
         from: &str,
         kind: &str,
         to: &str,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    ) -> Result<()> {
         not_blank("kind", kind)?;
 
         // Held until return, so the nodes cannot change between the check and the append.
@@ -148,7 +148,7 @@ impl<S: EventStore> AppService<S> {
         kind: &str,
         title: &str,
         properties: BTreeMap<String, String>,
-    ) -> Result<(), Box<dyn Error + Send + Sync>> {
+    ) -> Result<()> {
         not_blank("kind", kind)?;
         not_blank("title", title)?;
 
@@ -164,7 +164,7 @@ impl<S: EventStore> AppService<S> {
     }
 }
 
-fn not_blank(name: &str, value: &str) -> Result<(), Box<dyn Error + Send + Sync>> {
+fn not_blank(name: &str, value: &str) -> Result<()> {
     if value.trim().is_empty() {
         return Err(format!("{name} must not be blank").into());
     }

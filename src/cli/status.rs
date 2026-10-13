@@ -1,6 +1,6 @@
-use super::Result;
 use crate::app::AppService;
 use crate::core::EventStore;
+use crate::shared::Result;
 
 pub(super) async fn status<S: EventStore>(service: &AppService<S>) -> Result<()> {
     println!("percept • {}", status_line(service.event_count().await?));

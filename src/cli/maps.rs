@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-use super::Result;
 use crate::app::{AppService, source_path};
 use crate::core::{Actor, EventStore, Source};
+use crate::shared::Result;
 
 pub(super) async fn create<S: EventStore>(service: &AppService<S>, kind: &str) -> Result<()> {
     let (actor, source) = cli_writer().await?;
