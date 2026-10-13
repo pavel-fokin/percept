@@ -1,13 +1,15 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link, LoaderFunctionArgs, useLoaderData } from "react-router";
 import { getData, type Event, type Session } from "../api";
 import { RouteError } from "../components/route-error";
-import { full, time } from "../format";
+import { dayTime, full, time } from "../format";
+import { pathName, pathUrl } from "../paths";
 
-// `divided` marks a new exchange: a human turn after the first one.
-type Block =
-  | { type: "turn"; actor: "human" | "agent"; events: Event[]; divided: boolean }
-  | { type: "system"; event: Event };
+// One line per run of tool calls, so a tool never splits the agent's text.
+type Item = { type: "message"; event: Event } | { type: "tools"; events: Event[] };
+
+// A prompt and everything the agent did until the next one. Work before the first prompt has none.
+type Exchange = { id: string; prompt?: Event; items: Item[] };
 
 export async function loadSession({ params }: LoaderFunctionArgs) {
   const [session, events] = await Promise.all([
@@ -17,127 +19,114 @@ export async function loadSession({ params }: LoaderFunctionArgs) {
   return { session, events };
 }
 
-// A turn is a run of consecutive events by one actor; system events stand alone.
-function turns(events: Event[]) {
-  const blocks: Block[] = [];
-  let humanTurns = 0;
+function exchanges(events: Event[]) {
+  const result: Exchange[] = [];
 
   for (const event of events) {
-    if (event.kind === "session.created") continue;
-
-    if (event.actor === "system") {
-      blocks.push({ type: "system", event });
+    if (event.kind === "message" && event.actor === "human") {
+      result.push({ id: event.id, prompt: event, items: [] });
       continue;
     }
+    if (event.kind !== "message" && event.kind !== "tool.used") continue;
 
-    const { actor } = event;
-    const last = blocks.at(-1);
-    if (last?.type === "turn" && last.actor === actor) last.events.push(event);
-    else blocks.push({ type: "turn", actor, events: [event], divided: actor === "human" && humanTurns++ > 0 });
+    if (result.length === 0) result.push({ id: event.id, items: [] });
+    const { items } = result.at(-1)!;
+    const last = items.at(-1);
+    if (event.kind === "message") items.push({ type: "message", event });
+    else if (last?.type === "tools") last.events.push(event);
+    else items.push({ type: "tools", events: [event] });
   }
 
-  return blocks;
+  return result;
 }
 
 export function SessionPage() {
   const { session, events } = useLoaderData<typeof loadSession>();
-  const blocks = useMemo(() => turns(events), [events]);
-  const [open, setOpen] = useState<string>();
-  // A click that ends a text selection is for copying, not for the time.
-  const toggle = (id: string) => {
-    if (getSelection()?.toString()) return;
-    setOpen((current) => (current === id ? undefined : id));
-  };
+  const list = useMemo(() => exchanges(events), [events]);
+  const prompts = list.filter((e) => e.prompt).length;
 
   return (
     <>
-      <header className="grid gap-1 border-b border-border pt-6 pb-4">
-        <Link
-          to="/"
-          className="-ml-2 mb-2 inline-flex min-h-8 items-center gap-1 justify-self-start rounded-md px-2 text-muted hover:bg-surface hover:text-text"
-        >
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="size-3.5">
-            <path d="M10 3 5 8l5 5" />
-          </svg>
-          Sessions
-        </Link>
-        <h2
-          className={`line-clamp-3 max-w-[48ch] text-balance ${
-            session.title ? "text-lg font-semibold" : "font-mono text-sm break-all text-muted"
-          }`}
-        >
-          {session.title ?? session.client_session_id}
-        </h2>
-        <time dateTime={session.created_at} className="text-xs text-muted">
-          {full.format(new Date(session.created_at))}
-        </time>
-      </header>
-      <div className="grid gap-6 pt-6 pb-10">
-        {blocks.map((block) => {
-          if (block.type === "system") {
-            const { event } = block;
-            return (
-              <div
-                key={event.id}
-                data-open={open === event.id || undefined}
-                onClick={() => toggle(event.id)}
-                className="group flex cursor-default items-baseline justify-between gap-4 text-xs text-muted"
-              >
-                <p>{event.kind === "session.started" ? "Session started" : "Session stopped"}</p>
-                <Time iso={event.created_at} />
-              </div>
-            );
-          }
+      <div className="mt-8 flex flex-wrap gap-x-2 text-sm text-muted sm:mt-10">
+        <nav aria-label="Breadcrumb" className="contents">
+          <span>{pathName(session.path)}</span>
+          <span aria-hidden>/</span>
+          <Link to={pathUrl(session.path)} className="-my-3 inline-flex min-h-11 items-center hover:text-text">
+            sessions
+          </Link>
+        </nav>
+        <span aria-hidden>/</span>
+        <h1 className="font-medium text-text">
+          <time dateTime={session.created_at} title={full.format(new Date(session.created_at))}>
+            {dayTime.format(new Date(session.created_at))}
+          </time>
+        </h1>
+        <span>
+          · {prompts} {prompts === 1 ? "exchange" : "exchanges"}
+        </span>
+      </div>
 
-          const id = block.events[0].id;
-
-          return (
-            <section
-              key={id}
-              data-open={open === id || undefined}
-              onClick={() => toggle(id)}
-              className={`group grid cursor-default gap-2 ${block.divided ? "border-t border-border pt-6" : ""}`}
-            >
-              <div className="flex items-baseline justify-between gap-4">
-                <span className="font-semibold">{block.actor === "human" ? "You" : "Agent"}</span>
-                <Time iso={block.events[0].created_at} />
-              </div>
-              {block.events.map((event, i) => (
-                <Item key={event.id} event={event} previous={block.events[i - 1]} />
-              ))}
-            </section>
-          );
-        })}
+      <div className="mt-12 grid gap-16 sm:mt-14 sm:gap-20">
+        {list.map((exchange) => (
+          <article key={exchange.id} className="grid min-w-0 gap-6">
+            {exchange.prompt && (
+              <section className="min-w-0">
+                <Who name="You" at={exchange.prompt.created_at} />
+                <p className="leading-[26px] wrap-anywhere whitespace-pre-line">{exchange.prompt.payload.content as string}</p>
+              </section>
+            )}
+            <AgentItems items={exchange.items} />
+          </article>
+        ))}
       </div>
     </>
   );
 }
 
-function Time({ iso }: { iso: string }) {
-  return (
-    <time
-      dateTime={iso}
-      className="invisible text-xs text-muted tabular-nums group-hover:visible group-data-open:visible"
-    >
-      {time.format(new Date(iso))}
-    </time>
-  );
+// The agent's name heads its first message; tool lines before it stand above.
+function AgentItems({ items }: { items: Item[] }) {
+  const first = items.find((item) => item.type === "message");
+
+  return items.map((item) => {
+    if (item.type === "tools") {
+      return (
+        <p key={item.events[0].id} className="text-sm text-muted">
+          {toolRuns(item.events)}
+        </p>
+      );
+    }
+
+    return (
+      <section key={item.event.id} className="min-w-0">
+        {item === first && <Who name="Agent" at={item.event.created_at} />}
+        <p className="leading-[26px] wrap-anywhere whitespace-pre-wrap">{item.event.payload.content as string}</p>
+      </section>
+    );
+  });
 }
 
-// Tool lines stack tight; a message keeps a gap from whatever comes before or after it.
-function Item({ event, previous }: { event: Event; previous?: Event }) {
-  const stacked = event.kind === "tool.used" && previous?.kind === "tool.used";
-  const margin = previous && !stacked ? "mt-2" : "";
-
-  if (event.kind === "message") {
-    return (
-      <p className={`max-w-[68ch] text-base leading-6 break-words whitespace-pre-wrap md:text-sm ${margin}`}>
-        {event.payload.content as string}
-      </p>
-    );
+/** `Bash ×3 · Read · Edit ×2`: consecutive calls of one tool are counted. */
+function toolRuns(events: Event[]) {
+  const runs: { tool: string; count: number }[] = [];
+  for (const event of events) {
+    const tool = event.payload.tool as string;
+    const last = runs.at(-1);
+    if (last?.tool === tool) last.count += 1;
+    else runs.push({ tool, count: 1 });
   }
 
-  return <p className={`text-sm text-muted ${margin}`}>{event.payload.tool as string}</p>;
+  return runs.map(({ tool, count }) => (count > 1 ? `${tool} ×${count}` : tool)).join(" · ");
+}
+
+function Who({ name, at }: { name: string; at: string }) {
+  return (
+    <div className="mb-2 flex items-baseline justify-between text-[13px]">
+      <span className="font-medium text-muted">{name}</span>
+      <time dateTime={at} title={full.format(new Date(at))} className="text-muted tabular-nums">
+        {time.format(new Date(at))}
+      </time>
+    </div>
+  );
 }
 
 export function SessionError() {
