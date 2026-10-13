@@ -65,8 +65,8 @@ export function SessionPage({ session, events }: { session: Session; events: Eve
   return (
     <>
       <div className="mt-8 flex flex-wrap gap-x-2 text-sm text-muted sm:mt-10">
-        <nav aria-label="Breadcrumb" className="flex gap-x-2">
-          <span>{session.path}</span>
+        <nav aria-label="Breadcrumb" className="flex flex-wrap items-baseline gap-x-2">
+          <span className="font-mono text-[13px] wrap-anywhere">{session.path}</span>
           <span aria-hidden>/</span>
           <Link to={sessionsUrl(session.path)} className="-my-3 inline-flex min-h-11 items-center hover:text-text">
             sessions

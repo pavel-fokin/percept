@@ -17,7 +17,7 @@ export function PathSessions({ path, sessions }: { path: string; sessions: Sessi
   return (
     <>
       <div className="mt-8 sm:mt-10">
-        <p className="text-sm text-muted">{path}</p>
+        <p className="font-mono text-[13px] wrap-anywhere text-muted">{path}</p>
         <h1 className="mt-1.5 flex items-baseline gap-2.5 text-2xl font-semibold tracking-tight sm:text-[26px]">
           Sessions
           <span className="text-[17px] font-normal tracking-normal text-muted tabular-nums">{sessions.length}</span>

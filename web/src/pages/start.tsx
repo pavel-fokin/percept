@@ -43,7 +43,7 @@ export function Start() {
       {groups.map(({ path, maps, sessions, latest }) => (
         <section key={path}>
           <div className="flex items-baseline justify-between gap-4">
-            <h2 className="min-w-0 font-mono text-[13px] font-normal break-all text-muted">{path}</h2>
+            <h2 className="min-w-0 font-mono text-[13px] font-normal wrap-anywhere">{path}</h2>
             {latest && (
               <time dateTime={latest.created_at} className="flex-none text-sm text-muted tabular-nums">
                 active {relative(new Date(latest.created_at), now)}
