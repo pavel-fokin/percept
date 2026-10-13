@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 
-use super::hook::hook;
+use super::hook::{Client, hook};
 use super::maps::{add, create, show};
 use super::status::status;
 use crate::app::AppService;
@@ -23,8 +23,8 @@ struct Cli {
 enum Command {
     /// Records a hook payload read from stdin.
     Hook {
-        #[arg(value_parser = ["claude", "codex"])]
-        client: String,
+        #[arg(value_enum)]
+        client: Client,
     },
     /// Creates a map of the given kind in the current project.
     Create {
