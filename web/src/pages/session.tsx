@@ -49,7 +49,7 @@ export function SessionPage() {
   return (
     <>
       <div className="mt-8 flex flex-wrap gap-x-2 text-sm text-muted sm:mt-10">
-        <nav aria-label="Breadcrumb" className="contents">
+        <nav aria-label="Breadcrumb" className="flex gap-x-2">
           <span>{pathName(session.path)}</span>
           <span aria-hidden>/</span>
           <Link to={pathUrl(session.path)} className="-my-3 inline-flex min-h-11 items-center hover:text-text">

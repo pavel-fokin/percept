@@ -8,14 +8,8 @@ export function relative(date: Date, now: Date) {
   if (minutes < 60) return `${Math.max(minutes, 0)} min ago`;
   if (minutes < 360) return `${Math.floor(minutes / 60)} h ago`;
 
-  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  if (date >= midnight) return `Today, ${time.format(date)}`;
-
-  const yesterday = new Date(midnight);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (date >= yesterday) return `Yesterday, ${time.format(date)}`;
-
-  return day.format(date);
+  const name = dayName(date, now);
+  return name === "Today" || name === "Yesterday" ? `${name}, ${time.format(date)}` : name;
 }
 
 /** The day a date falls on, as a heading: `Today`, `Yesterday` or `11 Oct`. */

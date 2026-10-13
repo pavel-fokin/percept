@@ -44,7 +44,7 @@ export function PathSessions() {
 
       <div className="mt-8 grid gap-8 sm:mt-10 sm:gap-10">
         {days.map((day) => (
-          <section key={day.name}>
+          <section key={day.sessions[0].id}>
             <h2 className="mb-1 text-sm font-semibold text-muted">{day.name}</h2>
             <ul className="-mx-3 grid gap-0.5">
               {day.sessions.map((session) => (

@@ -56,7 +56,7 @@ export function MapPage() {
 
   return (
     <>
-      <h2 className="pt-6 text-lg font-semibold">{map.kind}</h2>
+      <h1 className="pt-6 text-lg font-semibold">{map.kind}</h1>
       <p className="pb-2 font-mono text-sm text-muted">{map.path}</p>
       {map.nodes.length > 0 ? (
         <ol className="pt-2">
