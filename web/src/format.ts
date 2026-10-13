@@ -16,3 +16,15 @@ export function relative(date: Date, now: Date) {
 
   return day.format(date);
 }
+
+/** The day a date falls on, as a heading: `Today`, `Yesterday` or `11 Oct`. */
+export function dayName(date: Date, now: Date) {
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (date >= midnight) return "Today";
+
+  const yesterday = new Date(midnight);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (date >= yesterday) return "Yesterday";
+
+  return day.format(date);
+}
