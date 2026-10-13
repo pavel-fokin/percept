@@ -10,7 +10,12 @@ import { pathName, pathUrl } from "../paths";
 type Item =
   | { type: "message"; event: Event }
   | { type: "notice"; event: Event }
-  | { type: "tools"; events: Event[] };
+  | { type: "tools"; events: Event[] }
+  | { type: "subagent-started"; event: Event }
+  | { type: "subagent-reported"; event: Event };
+
+// What a subagent was sent to do, by the client's id for it.
+type Subagents = Map<string, { agent: string; task: string }>;
 
 // A prompt and everything the agent did until the next one. Work before the first prompt has none.
 type Exchange = { id: string; prompt?: Event; items: Item[] };
@@ -31,14 +36,27 @@ function exchanges(events: Event[]) {
       result.push({ id: event.id, prompt: event, items: [] });
       continue;
     }
-    if (event.kind !== "message" && event.kind !== "tool.used") continue;
+    if (!["message", "tool.used", "subagent.started", "subagent.reported"].includes(event.kind)) continue;
 
     if (result.length === 0) result.push({ id: event.id, items: [] });
     const { items } = result.at(-1)!;
     const last = items.at(-1);
     if (event.kind === "message") items.push({ type: event.actor === "system" ? "notice" : "message", event });
+    else if (event.kind === "subagent.started") items.push({ type: "subagent-started", event });
+    else if (event.kind === "subagent.reported") items.push({ type: "subagent-reported", event });
     else if (last?.type === "tools") last.events.push(event);
     else items.push({ type: "tools", events: [event] });
+  }
+
+  return result;
+}
+
+function subagents(events: Event[]): Subagents {
+  const result: Subagents = new Map();
+  for (const event of events) {
+    if (event.kind !== "subagent.started") continue;
+    const { subagent, agent, task } = event.payload as { subagent: string; agent: string; task: string };
+    result.set(subagent, { agent, task });
   }
 
   return result;
@@ -47,6 +65,7 @@ function exchanges(events: Event[]) {
 export function SessionPage() {
   const { session, events } = useLoaderData<typeof loadSession>();
   const list = useMemo(() => exchanges(events), [events]);
+  const started = useMemo(() => subagents(events), [events]);
   const prompts = list.filter((e) => e.prompt).length;
 
   return (
@@ -79,7 +98,7 @@ export function SessionPage() {
                 <p className="leading-[26px] wrap-anywhere whitespace-pre-line">{exchange.prompt.payload.content as string}</p>
               </section>
             )}
-            <AgentItems items={exchange.items} />
+            <AgentItems items={exchange.items} started={started} />
           </article>
         ))}
       </div>
@@ -88,7 +107,7 @@ export function SessionPage() {
 }
 
 // The agent's name heads its first message; tool lines before it stand above.
-function AgentItems({ items }: { items: Item[] }) {
+function AgentItems({ items, started }: { items: Item[]; started: Subagents }) {
   const first = items.find((item) => item.type === "message");
 
   return items.map((item) => {
@@ -105,6 +124,41 @@ function AgentItems({ items }: { items: Item[] }) {
         <p key={item.event.id} className="text-sm text-muted wrap-anywhere">
           {item.event.payload.content as string}
         </p>
+      );
+    }
+
+    if (item.type === "subagent-started") {
+      const { agent, task } = item.event.payload as { agent: string; task: string };
+      return (
+        <p key={item.event.id} className="text-sm text-muted wrap-anywhere">
+          {agent} · {task}
+        </p>
+      );
+    }
+
+    if (item.type === "subagent-reported") {
+      const launch = started.get(item.event.payload.subagent as string);
+      return (
+        <details key={item.event.id} className="group min-w-0">
+          <summary className="-mx-2.5 flex min-h-11 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted hover:bg-surface [&::-webkit-details-marker]:hidden">
+            <svg
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              aria-hidden
+              className="size-3.5 shrink-0 transition-transform group-open:rotate-90"
+            >
+              <path d="m6 3 5 5-5 5" />
+            </svg>
+            <span className="min-w-0 wrap-anywhere">
+              {launch ? `${launch.agent} reported · ${launch.task}` : "subagent reported"}
+            </span>
+          </summary>
+          <div className="pt-2">
+            <Markdown text={item.event.payload.content as string} />
+          </div>
+        </details>
       );
     }
 

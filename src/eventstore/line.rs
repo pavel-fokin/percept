@@ -5,7 +5,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::core::{Actor, ClientSessionId, Event, EventId, Kind, Payload, Source};
+use crate::core::{Actor, ClientAgentId, ClientSessionId, Event, EventId, Kind, Payload, Source};
 
 /// One log line. The log format lives here, apart from the domain `Event`.
 #[derive(Serialize, Deserialize)]
@@ -30,6 +30,12 @@ impl From<&Event> for EventLine {
             }
             Payload::Message { session, content } => json!({ "session": session, "content": content }),
             Payload::ToolUsed { session, tool } => json!({ "session": session, "tool": tool }),
+            Payload::SubagentStarted { session, subagent, agent, task } => {
+                json!({ "session": session, "subagent": subagent.as_str(), "agent": agent, "task": task })
+            }
+            Payload::SubagentReported { session, subagent, content } => {
+                json!({ "session": session, "subagent": subagent.as_str(), "content": content })
+            }
             Payload::MapCreated { map, kind } => json!({ "map": map, "kind": kind }),
             Payload::NodeAdded { map, node, kind, title, properties } => {
                 json!({ "map": map, "node": node, "kind": kind, "title": title, "properties": properties })
@@ -67,6 +73,17 @@ impl TryFrom<EventLine> for Event {
             Kind::SessionStopped => Payload::SessionStopped { session: field(p, "session")? },
             Kind::Message => Payload::Message { session: field(p, "session")?, content: field(p, "content")? },
             Kind::ToolUsed => Payload::ToolUsed { session: field(p, "session")?, tool: field(p, "tool")? },
+            Kind::SubagentStarted => Payload::SubagentStarted {
+                session: field(p, "session")?,
+                subagent: ClientAgentId::new(field(p, "subagent")?),
+                agent: field(p, "agent")?,
+                task: field(p, "task")?,
+            },
+            Kind::SubagentReported => Payload::SubagentReported {
+                session: field(p, "session")?,
+                subagent: ClientAgentId::new(field(p, "subagent")?),
+                content: field(p, "content")?,
+            },
             Kind::MapCreated => Payload::MapCreated {
                 map: field(p, "map")?,
                 kind: field(p, "kind")?,
@@ -121,7 +138,9 @@ mod tests {
             Event::session_started(Source::fixture(), session, raw.clone()),
             Event::session_stopped(Source::fixture(), session, raw.clone()),
             Event::message(Source::fixture(), session, Actor::Human, "hi", raw.clone()),
-            Event::tool_used(Source::fixture(), session, "Bash", raw),
+            Event::tool_used(Source::fixture(), session, "Bash", raw.clone()),
+            Event::subagent_started(Source::fixture(), session, ClientAgentId::new("a1".into()), "builder", "Build it", raw.clone()),
+            Event::subagent_reported(Source::fixture(), session, ClientAgentId::new("a1".into()), "done", raw),
             Event::map_created(Source::fixture(), Actor::Human, MapId::new(), "decisions"),
             Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())])),
             Event::edge_added(Source::fixture(), Actor::Agent, MapId::new(), "answers", NodeId::new(), NodeId::new()),
@@ -177,6 +196,21 @@ mod tests {
         assert_eq!(line["kind"], "message");
         assert_eq!(line["payload"], json!({"session": session, "content": "hi"}));
         assert_eq!(line["raw"], json!({"r": 1}));
+    }
+
+    #[test]
+    fn subagent_lines_name_the_subagent() {
+        let (session, subagent) = (SessionId::new(), ClientAgentId::new("a1".into()));
+        let started = Event::subagent_started(Source::fixture(), session, subagent.clone(), "builder", "Build it", json!({}));
+        let reported = Event::subagent_reported(Source::fixture(), session, subagent, "done", json!({}));
+
+        let started = serde_json::to_value(EventLine::from(&started)).unwrap();
+        let reported = serde_json::to_value(EventLine::from(&reported)).unwrap();
+
+        assert_eq!(started["kind"], "subagent.started");
+        assert_eq!(started["payload"], json!({"session": session, "subagent": "a1", "agent": "builder", "task": "Build it"}));
+        assert_eq!(reported["kind"], "subagent.reported");
+        assert_eq!(reported["payload"], json!({"session": session, "subagent": "a1", "content": "done"}));
     }
 
     #[test]

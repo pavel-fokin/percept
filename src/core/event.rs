@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use super::{ClientSessionId, MapId, NodeId, SessionId};
+use super::{ClientAgentId, ClientSessionId, MapId, NodeId, SessionId};
 use crate::shared::Id;
 
 pub type EventId = Id<Event>;
@@ -40,6 +40,8 @@ pub enum Kind {
     SessionStopped,
     Message,
     ToolUsed,
+    SubagentStarted,
+    SubagentReported,
     MapCreated,
     NodeAdded,
     EdgeAdded,
@@ -53,6 +55,8 @@ impl Kind {
             Self::SessionStopped => "session.stopped",
             Self::Message => "message",
             Self::ToolUsed => "tool.used",
+            Self::SubagentStarted => "subagent.started",
+            Self::SubagentReported => "subagent.reported",
             Self::MapCreated => "map.created",
             Self::NodeAdded => "node.added",
             Self::EdgeAdded => "edge.added",
@@ -66,6 +70,8 @@ impl Kind {
             "session.stopped" => Some(Self::SessionStopped),
             "message" => Some(Self::Message),
             "tool.used" => Some(Self::ToolUsed),
+            "subagent.started" => Some(Self::SubagentStarted),
+            "subagent.reported" => Some(Self::SubagentReported),
             "map.created" => Some(Self::MapCreated),
             "node.added" => Some(Self::NodeAdded),
             "edge.added" => Some(Self::EdgeAdded),
@@ -82,6 +88,8 @@ pub enum Payload {
     SessionStopped { session: SessionId },
     Message { session: SessionId, content: String },
     ToolUsed { session: SessionId, tool: String },
+    SubagentStarted { session: SessionId, subagent: ClientAgentId, agent: String, task: String },
+    SubagentReported { session: SessionId, subagent: ClientAgentId, content: String },
     MapCreated { map: MapId, kind: String },
     NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String> },
     EdgeAdded { map: MapId, kind: String, from: NodeId, to: NodeId },
@@ -95,6 +103,8 @@ impl Payload {
             Self::SessionStopped { .. } => Kind::SessionStopped,
             Self::Message { .. } => Kind::Message,
             Self::ToolUsed { .. } => Kind::ToolUsed,
+            Self::SubagentStarted { .. } => Kind::SubagentStarted,
+            Self::SubagentReported { .. } => Kind::SubagentReported,
             Self::MapCreated { .. } => Kind::MapCreated,
             Self::NodeAdded { .. } => Kind::NodeAdded,
             Self::EdgeAdded { .. } => Kind::EdgeAdded,
@@ -107,7 +117,9 @@ impl Payload {
             | Self::SessionStarted { session }
             | Self::SessionStopped { session }
             | Self::Message { session, .. }
-            | Self::ToolUsed { session, .. } => Some(*session),
+            | Self::ToolUsed { session, .. }
+            | Self::SubagentStarted { session, .. }
+            | Self::SubagentReported { session, .. } => Some(*session),
             Self::MapCreated { .. } | Self::NodeAdded { .. } | Self::EdgeAdded { .. } => None,
         }
     }
@@ -142,6 +154,29 @@ impl Event {
 
     pub fn tool_used(source: Source, session: SessionId, tool: &str, raw: serde_json::Value) -> Self {
         let payload = Payload::ToolUsed { session, tool: tool.into() };
+        Self::build(source, Actor::Agent, payload, Some(raw))
+    }
+
+    pub fn subagent_started(
+        source: Source,
+        session: SessionId,
+        subagent: ClientAgentId,
+        agent: &str,
+        task: &str,
+        raw: serde_json::Value,
+    ) -> Self {
+        let payload = Payload::SubagentStarted { session, subagent, agent: agent.into(), task: task.into() };
+        Self::build(source, Actor::Agent, payload, Some(raw))
+    }
+
+    pub fn subagent_reported(
+        source: Source,
+        session: SessionId,
+        subagent: ClientAgentId,
+        content: &str,
+        raw: serde_json::Value,
+    ) -> Self {
+        let payload = Payload::SubagentReported { session, subagent, content: content.into() };
         Self::build(source, Actor::Agent, payload, Some(raw))
     }
 
@@ -229,6 +264,33 @@ mod tests {
     }
 
     #[test]
+    fn subagent_started_is_an_agent_event_carrying_the_subagent_agent_and_task() {
+        let session = SessionId::new();
+        let subagent = ClientAgentId::new("a1".into());
+
+        let event = Event::subagent_started(Source::fixture(), session, subagent.clone(), "builder", "Build it", json!({"r": 5}));
+
+        assert_eq!(event.actor, Actor::Agent);
+        assert_eq!(
+            event.payload,
+            Payload::SubagentStarted { session, subagent, agent: "builder".into(), task: "Build it".into() }
+        );
+        assert_eq!(event.raw, Some(json!({"r": 5})));
+    }
+
+    #[test]
+    fn subagent_reported_is_an_agent_event_carrying_the_subagent_and_content() {
+        let session = SessionId::new();
+        let subagent = ClientAgentId::new("a1".into());
+
+        let event = Event::subagent_reported(Source::fixture(), session, subagent.clone(), "done", json!({"r": 6}));
+
+        assert_eq!(event.actor, Actor::Agent);
+        assert_eq!(event.payload, Payload::SubagentReported { session, subagent, content: "done".into() });
+        assert_eq!(event.raw, Some(json!({"r": 6})));
+    }
+
+    #[test]
     fn session_started_is_a_system_event() {
         let session = SessionId::new();
 
@@ -259,6 +321,14 @@ mod tests {
             (Payload::SessionStopped { session }, Kind::SessionStopped),
             (Payload::Message { session, content: "hi".into() }, Kind::Message),
             (Payload::ToolUsed { session, tool: "Bash".into() }, Kind::ToolUsed),
+            (
+                Payload::SubagentStarted { session, subagent: ClientAgentId::new("a1".into()), agent: "builder".into(), task: "Build it".into() },
+                Kind::SubagentStarted,
+            ),
+            (
+                Payload::SubagentReported { session, subagent: ClientAgentId::new("a1".into()), content: "done".into() },
+                Kind::SubagentReported,
+            ),
         ];
 
         for (payload, kind) in payloads {
@@ -310,7 +380,7 @@ mod tests {
 
     #[test]
     fn every_kind_is_found_by_its_name() {
-        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed, Kind::MapCreated, Kind::NodeAdded, Kind::EdgeAdded];
+        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed, Kind::SubagentStarted, Kind::SubagentReported, Kind::MapCreated, Kind::NodeAdded, Kind::EdgeAdded];
 
         for kind in kinds {
             assert_eq!(Kind::from_name(kind.name()), Some(kind));
