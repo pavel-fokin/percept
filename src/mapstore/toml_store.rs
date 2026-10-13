@@ -87,11 +87,11 @@ mod tests {
 
         assert_eq!(schema.purpose(), "p");
         assert_eq!(schema.instructions(), "i");
-        let note: Vec<&str> = schema.nodes()["note"].iter().map(String::as_str).collect();
-        assert_eq!(note, vec!["body", "by"]);
-        assert!(schema.nodes()["topic"].is_empty());
-        assert_eq!(schema.edges()["about"].from, "note");
-        assert_eq!(schema.edges()["about"].to, "topic");
+        let properties = BTreeMap::from([("body".to_string(), "x".to_string()), ("by".to_string(), "y".to_string())]);
+        assert!(schema.check_node("note", &properties).is_ok());
+        assert!(schema.check_node("topic", &properties).is_err());
+        assert!(schema.check_edge("about", "note", "topic").is_ok());
+        assert!(schema.check_edge("about", "topic", "note").is_err());
     }
 
     #[tokio::test]
@@ -100,7 +100,7 @@ mod tests {
 
         let schema = TomlStore.schema(&dir, "notes").await.unwrap();
 
-        assert!(schema.edges().is_empty());
+        assert!(schema.check_edge("about", "note", "note").is_err());
     }
 
     #[tokio::test]

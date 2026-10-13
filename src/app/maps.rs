@@ -127,10 +127,11 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             nodes
                 .iter()
                 .find(|n| n.title == title)
-                .map(|n| n.id)
                 .ok_or_else(|| format!("the {map_kind} map has no node titled {title:?}"))
         };
         let (from, to) = (find(from)?, find(to)?);
+        self.schemas.schema(&source.path, map_kind).await?.check_edge(kind, &from.kind, &to.kind)?;
+        let (from, to) = (from.id, to.id);
 
         let repeated = self.edges(map.id).await?.iter().any(|e| e.from == from && e.kind == kind && e.to == to);
         if repeated {
@@ -287,6 +288,26 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn add_edge_checks_its_kind_and_ends_against_the_schema() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default()).await.unwrap();
+
+        let unknown_kind = service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "blocks", "Q").await;
+        let wrong_from = service.add_edge(Source::fixture(), Actor::Human, "decisions", "Q", "answers", "Q").await;
+        let wrong_to = service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "O").await;
+        let valid = service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await;
+
+        assert!(unknown_kind.unwrap_err().to_string().contains("answers"));
+        assert!(wrong_from.unwrap_err().to_string().contains("from"));
+        assert!(wrong_to.unwrap_err().to_string().contains("to"));
+        assert!(valid.is_ok());
+        assert_eq!(store.0.lock().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
     async fn add_node_fails_when_the_maps_schema_is_gone() {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
@@ -340,7 +361,7 @@ mod tests {
         service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
 
         let again = service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await;
-        let other_kind = service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "blocks", "Q").await;
+        let other_kind = service.add_edge(Source::fixture(), Actor::Human, "decisions", "Q", "raises", "O").await;
 
         assert!(again.is_err());
         assert!(other_kind.is_ok());

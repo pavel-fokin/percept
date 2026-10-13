@@ -4,9 +4,10 @@ use std::path::Path;
 use crate::shared::Result;
 
 /// The shape of one kind of map: which nodes and edges it allows.
-#[allow(dead_code, reason = "no caller reads this yet: purpose and instructions are for the agent, edges for edge validation")]
 pub struct Schema {
+    #[allow(dead_code, reason = "parsed now; read when the agent is shown the schema")]
     purpose: String,
+    #[allow(dead_code, reason = "parsed now; read when the agent is shown the schema")]
     instructions: String,
     nodes: BTreeMap<String, BTreeSet<String>>,
     edges: BTreeMap<String, EdgeKind>,
@@ -18,7 +19,6 @@ pub struct EdgeKind {
     pub to: String,
 }
 
-#[allow(dead_code, reason = "no caller reads this yet: purpose and instructions are for the agent, edges for edge validation")]
 impl Schema {
     /// A schema needs a node kind, and each edge kind links declared node kinds.
     pub fn new(
@@ -57,21 +57,30 @@ impl Schema {
         Ok(())
     }
 
+    /// An edge must be of a declared kind and link the node kinds that kind declares.
+    pub fn check_edge(&self, kind: &str, from: &str, to: &str) -> Result<()> {
+        let Some(declared) = self.edges.get(kind) else {
+            let kinds: Vec<&str> = self.edges.keys().map(String::as_str).collect();
+            return Err(format!("unknown edge kind {kind:?}; the schema declares [{}]", kinds.join(", ")).into());
+        };
+
+        for (end, expected, actual) in [("from", &declared.from, from), ("to", &declared.to, to)] {
+            if expected != actual {
+                return Err(format!("edge {kind:?} expects a {expected:?} node at {end}, not {actual:?}").into());
+            }
+        }
+
+        Ok(())
+    }
+
+    #[allow(dead_code, reason = "parsed now; read when the agent is shown the schema")]
     pub fn purpose(&self) -> &str {
         &self.purpose
     }
 
+    #[allow(dead_code, reason = "parsed now; read when the agent is shown the schema")]
     pub fn instructions(&self) -> &str {
         &self.instructions
-    }
-
-    /// Each node kind with its property names.
-    pub fn nodes(&self) -> &BTreeMap<String, BTreeSet<String>> {
-        &self.nodes
-    }
-
-    pub fn edges(&self) -> &BTreeMap<String, EdgeKind> {
-        &self.edges
     }
 }
 
@@ -113,6 +122,21 @@ mod tests {
         assert!(declared.is_ok());
         assert!(unknown_kind.unwrap_err().to_string().contains("note"));
         assert!(undeclared.unwrap_err().to_string().contains("body"));
+    }
+
+    #[test]
+    fn an_edge_must_be_a_declared_kind_between_its_declared_node_kinds() {
+        let schema = Schema::new("p".into(), "i".into(), nodes(&["a", "b"]), edge("a", "b")).unwrap();
+
+        let valid = schema.check_edge("links", "a", "b");
+        let unknown = schema.check_edge("other", "a", "b");
+        let wrong_from = schema.check_edge("links", "b", "b");
+        let wrong_to = schema.check_edge("links", "a", "a");
+
+        assert!(valid.is_ok());
+        assert!(unknown.unwrap_err().to_string().contains("links"));
+        assert!(wrong_from.unwrap_err().to_string().contains("from"));
+        assert!(wrong_to.unwrap_err().to_string().contains("to"));
     }
 
     #[test]
