@@ -35,7 +35,7 @@ skips it.
 
 ## Architecture
 
-The crate follows domain-driven design in six layers. Each is one
+The crate follows domain-driven design in seven layers. Each is one
 module under `src/`, entered through `src/<layer>/mod.rs`, whose doc
 comment states its role. The layout stays flat until a layer outgrows
 one level.
@@ -44,9 +44,10 @@ A layer imports only the layers to its right:
 
 - `cli` → `server` → `app` → `core` → `shared`
 - `eventstore` → `core` → `shared`
+- `mapstore` → `core` → `shared`
 
-`core` defines the store trait and `eventstore` implements it.
-`main.rs` wires `eventstore` into `app`.
+`core` defines the store traits. `eventstore` implements the event
+store, and `mapstore` the schema store. `main.rs` wires both into `app`.
 
 I/O is async on tokio. A trait method that does I/O returns
 `impl Future<Output = …> + Send`, and async code never makes a blocking call.
