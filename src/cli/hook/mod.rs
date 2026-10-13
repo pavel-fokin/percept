@@ -26,7 +26,6 @@ impl Client {
 /// What a client's hook payload means to percept.
 enum Translation {
     Record(ClientSessionId, EventBuilder),
-    #[allow(dead_code)]
     Skip,
 }
 
