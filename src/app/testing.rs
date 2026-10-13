@@ -91,11 +91,26 @@ pub(super) struct Schemas;
 
 impl SchemaStore for Schemas {
     async fn schema(&self, _: &Path, kind: &str) -> Result<Schema> {
-        if !["decisions", "tasks", "concepts"].contains(&kind) {
-            return Err(format!("no schema for {kind}").into());
-        }
+        let nodes: &[(&str, &[&str])] = match kind {
+            "decisions" => &[("question", &[]), ("option", &[])],
+            "tasks" => &[("task", &[])],
+            "concepts" => &[("concept", &["definition"])],
+            _ => return Err(format!("no schema for {kind}").into()),
+        };
+        let nodes = nodes
+            .iter()
+            .map(|(node, properties)| (node.to_string(), properties.iter().map(|p| p.to_string()).collect::<BTreeSet<_>>()))
+            .collect();
 
-        let nodes = BTreeMap::from([("node".to_string(), BTreeSet::new())]);
         Schema::new("purpose".into(), "instructions".into(), nodes, BTreeMap::new())
+    }
+}
+
+/// Has no schema for any map kind.
+pub(super) struct NoSchemas;
+
+impl SchemaStore for NoSchemas {
+    async fn schema(&self, _: &Path, kind: &str) -> Result<Schema> {
+        Err(format!("no schema for {kind}").into())
     }
 }
