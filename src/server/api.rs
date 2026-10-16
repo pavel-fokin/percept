@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use super::Api;
-use crate::core::{Actor, CITES, ClientSessionId, EventId, EventStore, SchemaStore, MapId, NodeBody, NodeId, Payload, Session, SessionId};
+use crate::core::{Actor, CITES, CitationSource, ClientSessionId, EventId, EventStore, SchemaStore, MapId, NodeBody, NodeId, Payload, Session, SessionId};
 
 pub(super) async fn status<S: EventStore + Send + Sync + 'static, M: SchemaStore + Send + Sync + 'static>(
     State(api): State<Arc<Api<S, M>>>,
@@ -81,6 +81,15 @@ pub(super) async fn map<S: EventStore + Send + Sync + 'static, M: SchemaStore + 
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
+    let citations: BTreeMap<NodeId, CitationView> = detail
+        .nodes
+        .iter()
+        .filter_map(|n| match &n.body {
+            NodeBody::Citation(source) => Some((n.id, CitationView::new(source))),
+            NodeBody::Note { .. } => None,
+        })
+        .collect();
+
     let map = MapDetailView {
         id: detail.map.id,
         kind: detail.map.kind,
@@ -89,7 +98,16 @@ pub(super) async fn map<S: EventStore + Send + Sync + 'static, M: SchemaStore + 
             .nodes
             .into_iter()
             .filter_map(|n| match n.body {
-                NodeBody::Note { kind, title, properties } => Some(NodeView { id: n.id, kind, title, properties, created_at: n.created_at }),
+                NodeBody::Note { kind, title, properties } => {
+                    let citations = detail
+                        .edges
+                        .iter()
+                        .filter(|e| e.kind == CITES && e.from == n.id)
+                        .filter_map(|e| citations.get(&e.to).cloned())
+                        .collect();
+
+                    Some(NodeView { id: n.id, kind, title, properties, citations, created_at: n.created_at })
+                }
                 NodeBody::Citation(_) => None,
             })
             .collect(),
@@ -129,7 +147,25 @@ struct NodeView {
     kind: String,
     title: String,
     properties: BTreeMap<String, String>,
+    citations: Vec<CitationView>,
     created_at: jiff::Timestamp,
+}
+
+/// A citation as the page reads it: the snapshot from the log, with no pointer back to the source.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "snake_case")]
+enum CitationView {
+    Message { quote: String },
+    File { path: String, lines: (u32, u32), excerpt: String },
+}
+
+impl CitationView {
+    fn new(source: &CitationSource) -> Self {
+        match source {
+            CitationSource::Message { quote, .. } => Self::Message { quote: quote.clone() },
+            CitationSource::File { path, lines, excerpt } => Self::File { path: path.display().to_string(), lines: *lines, excerpt: excerpt.clone() },
+        }
+    }
 }
 
 #[derive(Serialize)]

@@ -1,5 +1,6 @@
 import { getData, type MapDetail, type MapNode } from "../api";
 import { BackLink } from "../components/back-link";
+import { Citations } from "../components/citations";
 import { RouteError } from "../components/route-error";
 import { byDay, full, withChangedTimes } from "../format";
 
@@ -60,7 +61,7 @@ function NodeRow({ node, shown }: { node: MapNode; shown?: string }) {
     </>
   );
 
-  if (properties.length === 0) {
+  if (properties.length === 0 && node.citations.length === 0) {
     return (
       <li className={row}>
         <span className="size-3.5 flex-none" aria-hidden />
@@ -85,14 +86,19 @@ function NodeRow({ node, shown }: { node: MapNode; shown?: string }) {
           </svg>
           {content}
         </summary>
-        <dl className="grid gap-3.5 pt-1 pr-3 pb-5 pl-9">
-          {properties.map(([key, value]) => (
-            <div key={key}>
-              <dt className="text-[13px] font-medium text-muted">{key}</dt>
-              <dd className="mt-0.5 leading-[26px] wrap-anywhere">{value}</dd>
-            </div>
-          ))}
-        </dl>
+        <div className="grid gap-5 pt-1 pr-3 pb-5 pl-9">
+          {properties.length > 0 && (
+            <dl className="grid gap-3.5">
+              {properties.map(([key, value]) => (
+                <div key={key}>
+                  <dt className="text-[13px] font-medium text-muted">{key}</dt>
+                  <dd className="mt-0.5 leading-[26px] wrap-anywhere">{value}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+          <Citations citations={node.citations} />
+        </div>
       </details>
     </li>
   );

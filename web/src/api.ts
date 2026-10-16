@@ -15,11 +15,16 @@ export type MapSummary = {
   nodes: number;
 };
 
+export type Citation =
+  | { message: { quote: string } }
+  | { file: { path: string; lines: [number, number]; excerpt: string } };
+
 export type MapNode = {
   id: string;
   kind: string;
   title: string;
   properties: Record<string, string>;
+  citations: Citation[];
   created_at: string;
 };
 
