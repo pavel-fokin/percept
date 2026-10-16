@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use super::Api;
-use crate::core::{Actor, ClientSessionId, EventId, EventStore, SchemaStore, MapId, NodeId, Payload, Session, SessionId};
+use crate::core::{Actor, CITES, ClientSessionId, EventId, EventStore, SchemaStore, MapId, NodeBody, NodeId, Payload, Session, SessionId};
 
 pub(super) async fn status<S: EventStore + Send + Sync + 'static, M: SchemaStore + Send + Sync + 'static>(
     State(api): State<Arc<Api<S, M>>>,
@@ -88,15 +88,17 @@ pub(super) async fn map<S: EventStore + Send + Sync + 'static, M: SchemaStore + 
         nodes: detail
             .nodes
             .into_iter()
-            .map(|n| NodeView {
-                id: n.id,
-                kind: n.kind,
-                title: n.title,
-                properties: n.properties,
-                created_at: n.created_at,
+            .filter_map(|n| match n.body {
+                NodeBody::Note { kind, title, properties } => Some(NodeView { id: n.id, kind, title, properties, created_at: n.created_at }),
+                NodeBody::Citation(_) => None,
             })
             .collect(),
-        edges: detail.edges.into_iter().map(|e| EdgeView { kind: e.kind, from: e.from, to: e.to }).collect(),
+        edges: detail
+            .edges
+            .into_iter()
+            .filter(|e| e.kind != CITES)
+            .map(|e| EdgeView { kind: e.kind, from: e.from, to: e.to })
+            .collect(),
     };
 
     Ok(Json(json!({ "data": map })))

@@ -1,10 +1,9 @@
-use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use super::{ClientAgentId, ClientSessionId, MapId, NodeId, SessionId};
+use super::{ClientAgentId, ClientSessionId, MapId, NodeBody, NodeId, SessionId};
 use crate::shared::Id;
 
 pub type EventId = Id<Event>;
@@ -91,7 +90,7 @@ pub enum Payload {
     SubagentStarted { session: SessionId, subagent: ClientAgentId, agent: String, task: String },
     SubagentReported { session: SessionId, subagent: ClientAgentId, content: String },
     MapCreated { map: MapId, kind: String },
-    NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String> },
+    NodeAdded { map: MapId, node: NodeId, body: NodeBody },
     EdgeAdded { map: MapId, kind: String, from: NodeId, to: NodeId },
 }
 
@@ -193,17 +192,8 @@ impl Event {
         Self::build(source, actor, payload, None)
     }
 
-    pub fn node_added(
-        source: Source,
-        actor: Actor,
-        map: MapId,
-        node: NodeId,
-        kind: &str,
-        title: &str,
-        properties: BTreeMap<String, String>,
-    ) -> Self {
-        let payload = Payload::NodeAdded { map, node, kind: kind.into(), title: title.into(), properties };
-        Self::build(source, actor, payload, None)
+    pub fn node_added(source: Source, actor: Actor, map: MapId, node: NodeId, body: NodeBody) -> Self {
+        Self::build(source, actor, Payload::NodeAdded { map, node, body }, None)
     }
 
     pub fn edge_added(source: Source, actor: Actor, map: MapId, kind: &str, from: NodeId, to: NodeId) -> Self {
@@ -225,6 +215,8 @@ impl Event {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
     use serde_json::json;
 
@@ -353,14 +345,14 @@ mod tests {
     #[test]
     fn node_added_carries_the_actor_and_has_no_session() {
         let (map, node) = (MapId::new(), NodeId::new());
-
         let properties = BTreeMap::from([("definition".to_string(), "D".to_string())]);
+        let body = NodeBody::Note { kind: "question".into(), title: "Why?".into(), properties };
 
-        let event = Event::node_added(Source::fixture(), Actor::Agent, map, node, "question", "Why?", properties.clone());
+        let event = Event::node_added(Source::fixture(), Actor::Agent, map, node, body.clone());
 
         assert_eq!(event.actor, Actor::Agent);
         assert_eq!(event.payload.kind(), Kind::NodeAdded);
-        assert_eq!(event.payload, Payload::NodeAdded { map, node, kind: "question".into(), title: "Why?".into(), properties });
+        assert_eq!(event.payload, Payload::NodeAdded { map, node, body });
         assert_eq!(event.payload.session(), None);
         assert_eq!(event.raw, None);
     }
