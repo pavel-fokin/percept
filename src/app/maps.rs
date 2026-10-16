@@ -44,7 +44,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             return Err(format!("this project already has a {kind} map").into());
         }
 
-        self.store.append(&Event::map_created(source, actor, MapId::new(), kind)).await
+        self.store.append(&[Event::map_created(source, actor, MapId::new(), kind)]).await
     }
 
     /// The project's maps in log order.
@@ -146,7 +146,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             return Err(format!("the {map_kind} map already has this {kind} edge").into());
         }
 
-        self.store.append(&Event::edge_added(source, actor, map.id, kind, from, to)).await
+        self.store.append(&[Event::edge_added(source, actor, map.id, kind, from, to)]).await
     }
 
     /// Records a new note on the project's map of the given kind, with a `cites` edge to a citation for each source cited.
@@ -170,6 +170,15 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             }
         }
 
+        // Read before the lock, which hooks wait on.
+        let mut resolved = Vec::new();
+        for cite in cites {
+            resolved.push(match cite {
+                Cite::Message(quote) => Resolved::Message(quote),
+                Cite::File { path, lines } => Resolved::Source(read_file(&source.path, path, *lines).await?),
+            });
+        }
+
         // Held until return, so parallel adds cannot both pass the check.
         let _lock = self.store.lock().await?;
 
@@ -183,21 +192,20 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             return Err(format!("the {map_kind} map already has a node titled {title:?}").into());
         }
 
-        let Citations { cited, created } = cite(&events, &source.path, &nodes, cites).await?;
+        let Citations { cited, created } = cite(&events, &source.path, &nodes, resolved)?;
 
         let note = NodeId::new();
         let body = NodeBody::Note { kind: kind.into(), title: title.into(), properties };
-        self.store.append(&Event::node_added(source.clone(), actor, map.id, note, body)).await?;
 
+        let mut batch = vec![Event::node_added(source.clone(), actor, map.id, note, body)];
         for (id, citation) in created {
-            self.store.append(&Event::node_added(source.clone(), actor, map.id, id, NodeBody::Citation(citation))).await?;
+            batch.push(Event::node_added(source.clone(), actor, map.id, id, NodeBody::Citation(citation)));
         }
-
         for id in cited {
-            self.store.append(&Event::edge_added(source.clone(), actor, map.id, CITES, note, id)).await?;
+            batch.push(Event::edge_added(source.clone(), actor, map.id, CITES, note, id));
         }
 
-        Ok(())
+        self.store.append(&batch).await
     }
 }
 
@@ -215,13 +223,19 @@ struct Citations {
     created: Vec<(NodeId, CitationSource)>,
 }
 
+/// A cite whose file has been read. A quote still needs the log to find its message.
+enum Resolved<'a> {
+    Message(&'a str),
+    Source(CitationSource),
+}
+
 /// Finds the source of each cite: the message a quote is a substring of, or the current lines of a file.
 /// A citation with an equal source is reused.
-async fn cite(
+fn cite(
     events: &[Event],
     project: &Path,
     nodes: &[Node],
-    cites: &[Cite],
+    cites: Vec<Resolved<'_>>,
 ) -> Result<Citations> {
     let mut known: Vec<(NodeId, CitationSource)> = nodes
         .iter()
@@ -235,8 +249,8 @@ async fn cite(
 
     for cite in cites {
         let source = match cite {
-            Cite::Message(quote) => CitationSource::Message { event: find_message(events, project, quote)?, quote: quote.clone() },
-            Cite::File { path, lines } => CitationSource::File { path: path.clone(), lines: *lines, excerpt: read_excerpt(project, path, *lines).await? },
+            Resolved::Message(quote) => CitationSource::Message { event: find_message(events, project, quote)?, quote: quote.into() },
+            Resolved::Source(source) => source,
         };
 
         let id = match known.iter().find(|(_, known)| *known == source) {
@@ -277,8 +291,9 @@ fn find_message(events: &[Event], project: &Path, quote: &str) -> Result<EventId
         .ok_or_else(|| format!("no message in this project contains {quote:?}; copy the text verbatim from a message").into())
 }
 
-/// The lines of a file in the project, joined by newlines. The file must resolve inside the project root.
-async fn read_excerpt(root: &Path, path: &Path, (from, to): (u32, u32)) -> Result<String> {
+/// The lines of a file in the project, joined by newlines, under the file's path from the project root.
+/// The file must resolve inside the project root, so every spelling of a path cites the same file.
+async fn read_file(root: &Path, path: &Path, lines @ (from, to): (u32, u32)) -> Result<CitationSource> {
     let shown = path.display();
 
     if from == 0 || from > to {
@@ -291,17 +306,15 @@ async fn read_excerpt(root: &Path, path: &Path, (from, to): (u32, u32)) -> Resul
 
     let root = tokio::fs::canonicalize(root).await?;
     let file = tokio::fs::canonicalize(root.join(path)).await.map_err(|e| format!("cannot read {shown}: {e}"))?;
-    if !file.starts_with(&root) {
-        return Err(format!("{shown} is outside the project root").into());
-    }
+    let relative = file.strip_prefix(&root).map_err(|_| format!("{shown} is outside the project root"))?;
 
     let text = tokio::fs::read_to_string(&file).await.map_err(|e| format!("cannot read {shown}: {e}"))?;
-    let lines: Vec<&str> = text.lines().collect();
-    if to as usize > lines.len() {
-        return Err(format!("{shown} has {} lines; line {to} is beyond the end", lines.len()).into());
+    let all: Vec<&str> = text.lines().collect();
+    if to as usize > all.len() {
+        return Err(format!("{shown} has {} lines; line {to} is beyond the end", all.len()).into());
     }
 
-    Ok(lines[from as usize - 1..to as usize].join("\n"))
+    Ok(CitationSource::File { path: relative.into(), lines, excerpt: all[from as usize - 1..to as usize].join("\n") })
 }
 
 fn all_maps(events: &[Event]) -> Vec<Map> {
@@ -822,7 +835,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_file_cite_records_the_inclusive_lines_the_path_as_given_and_a_cites_edge() {
+    async fn a_file_cite_records_the_inclusive_lines_the_path_and_a_cites_edge() {
         let (_dir, source, store) = project().await;
 
         add(&store, &source, "Q", &[file("a.rs", 2, 4)]).await.unwrap();
@@ -915,6 +928,23 @@ mod tests {
 
         assert!(outside.unwrap_err().to_string().contains("outside"));
         assert!(inside.is_ok());
+        let service = AppService::new(&store, Schemas);
+        let map = service.map(&source.path, "decisions").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        assert_eq!(excerpted(&nodes[1]).0, Path::new("a.rs"));
+    }
+
+    #[tokio::test]
+    async fn every_spelling_of_a_path_reuses_one_citation() {
+        let (_dir, source, store) = project().await;
+
+        add(&store, &source, "Q", &[file("a.rs", 1, 2), file("./a.rs", 1, 2)]).await.unwrap();
+
+        let service = AppService::new(&store, Schemas);
+        let map = service.map(&source.path, "decisions").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(excerpted(&nodes[1]).0, Path::new("a.rs"));
     }
 
     #[cfg(unix)]

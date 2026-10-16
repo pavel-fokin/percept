@@ -119,8 +119,7 @@ pub(super) async fn show<S: EventStore, M: SchemaStore>(service: &AppService<S, 
                 for (key, value) in *properties {
                     println!("  {key}: {value}");
                 }
-                for edge in edges.iter().filter(|e| e.kind == CITES && e.from == *id) {
-                    let citation = cited.get(&edge.to).ok_or("a cites edge names a node that is not a citation")?;
+                for citation in edges.iter().filter(|e| e.kind == CITES && e.from == *id).filter_map(|e| cited.get(&e.to)) {
                     println!("  cites {citation}");
                 }
             }

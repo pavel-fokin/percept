@@ -27,7 +27,7 @@ impl EventStore for Fixed {
             .collect())
     }
 
-    async fn append(&self, _: &Event) -> Result<()> {
+    async fn append(&self, _: &[Event]) -> Result<()> {
         unimplemented!()
     }
 }
@@ -49,7 +49,7 @@ impl EventStore for Broken {
         Err("boom".into())
     }
 
-    async fn append(&self, _: &Event) -> Result<()> {
+    async fn append(&self, _: &[Event]) -> Result<()> {
         Err("boom".into())
     }
 }
@@ -81,8 +81,8 @@ impl EventStore for &Memory {
         Ok(events.clone())
     }
 
-    async fn append(&self, event: &Event) -> Result<()> {
-        self.0.lock().unwrap().push(event.clone());
+    async fn append(&self, events: &[Event]) -> Result<()> {
+        self.0.lock().unwrap().extend_from_slice(events);
         Ok(())
     }
 }

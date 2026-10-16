@@ -111,7 +111,7 @@ mod tests {
             Ok(std::iter::once(created).chain(started).chain([map_created, node]).chain(citations).collect())
         }
 
-        async fn append(&self, _: &Event) -> Result<()> {
+        async fn append(&self, _: &[Event]) -> Result<()> {
             unimplemented!()
         }
     }
