@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use super::Api;
-use crate::core::{Actor, CITES, CitationSource, ClientSessionId, EventId, EventStore, SchemaStore, MapId, NodeBody, NodeId, Payload, Session, SessionId};
+use crate::core::{Actor, CitationSource, ClientSessionId, EventId, EventStore, SchemaStore, MapId, NodeId, Payload, Session, SessionId};
 
 pub(super) async fn status<S: EventStore + Send + Sync + 'static, M: SchemaStore + Send + Sync + 'static>(
     State(api): State<Arc<Api<S, M>>>,
@@ -81,42 +81,23 @@ pub(super) async fn map<S: EventStore + Send + Sync + 'static, M: SchemaStore + 
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::NOT_FOUND)?;
 
-    let citations: BTreeMap<NodeId, CitationView> = detail
-        .nodes
-        .iter()
-        .filter_map(|n| match &n.body {
-            NodeBody::Citation(source) => Some((n.id, CitationView::new(source))),
-            NodeBody::Note { .. } => None,
-        })
-        .collect();
-
     let map = MapDetailView {
         id: detail.map.id,
         kind: detail.map.kind,
         path: display_path(&detail.map.path, &api.home),
         nodes: detail
-            .nodes
+            .notes
             .into_iter()
-            .filter_map(|n| match n.body {
-                NodeBody::Note { kind, title, properties } => {
-                    let citations = detail
-                        .edges
-                        .iter()
-                        .filter(|e| e.kind == CITES && e.from == n.id)
-                        .filter_map(|e| citations.get(&e.to).cloned())
-                        .collect();
-
-                    Some(NodeView { id: n.id, kind, title, properties, citations, created_at: n.created_at })
-                }
-                NodeBody::Citation(_) => None,
+            .map(|n| NodeView {
+                id: n.id,
+                kind: n.kind,
+                title: n.title,
+                properties: n.properties,
+                citations: n.citations.iter().map(CitationView::new).collect(),
+                created_at: n.created_at,
             })
             .collect(),
-        edges: detail
-            .edges
-            .into_iter()
-            .filter(|e| e.kind != CITES)
-            .map(|e| EdgeView { kind: e.kind, from: e.from, to: e.to })
-            .collect(),
+        edges: detail.edges.into_iter().map(|e| EdgeView { kind: e.kind, from: e.from, to: e.to }).collect(),
     };
 
     Ok(Json(json!({ "data": map })))
@@ -152,7 +133,7 @@ struct NodeView {
 }
 
 /// A citation as the page reads it: the snapshot from the log, with no pointer back to the source.
-#[derive(Serialize, Clone)]
+#[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 enum CitationView {
     Message { quote: String },

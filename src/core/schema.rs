@@ -73,16 +73,7 @@ impl Schema {
     }
 
     /// An edge must be of a declared kind and link the node kinds that kind declares.
-    /// A `cites` edge runs from a declared node kind to a citation.
     pub fn check_edge(&self, kind: &str, from: &str, to: &str) -> Result<()> {
-        if kind == CITES {
-            if !self.nodes.contains_key(from) || to != CITATION {
-                return Err(format!("edge {CITES:?} runs from a note to a {CITATION}, not from {from:?} to {to:?}").into());
-            }
-
-            return Ok(());
-        }
-
         let Some(declared) = self.edges.get(kind) else {
             let kinds: Vec<&str> = self.edges.keys().map(String::as_str).collect();
             return Err(format!("unknown edge kind {kind:?}; the schema declares [{}]", kinds.join(", ")).into());
@@ -170,21 +161,6 @@ mod tests {
 
         assert!(citation.err().unwrap().to_string().contains("citation"));
         assert!(cites.err().unwrap().to_string().contains("cites"));
-    }
-
-    #[test]
-    fn a_cites_edge_runs_only_from_a_note_to_a_citation() {
-        let schema = Schema::new("p".into(), "i".into(), nodes(&["a", "b"]), edge("a", "b")).unwrap();
-
-        let valid = schema.check_edge("cites", "a", "citation");
-        let to_note = schema.check_edge("cites", "a", "b");
-        let from_citation = schema.check_edge("cites", "citation", "citation");
-        let from_unknown = schema.check_edge("cites", "z", "citation");
-
-        assert!(valid.is_ok());
-        assert!(to_note.is_err());
-        assert!(from_citation.is_err());
-        assert!(from_unknown.is_err());
     }
 
     #[test]

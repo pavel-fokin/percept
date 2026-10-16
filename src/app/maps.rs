@@ -12,11 +12,21 @@ pub struct MapSummary {
     pub edges: usize,
 }
 
-/// A map with its nodes, newest first, and its edges in log order.
+/// A map with its notes, newest first, and its edges in log order. `cites` edges are not listed: each note holds its citations.
 pub struct MapDetail {
     pub map: Map,
-    pub nodes: Vec<Node>,
+    pub notes: Vec<Note>,
     pub edges: Vec<Edge>,
+}
+
+/// A note with the sources it cites, in the order of its `cites` edges.
+pub struct Note {
+    pub id: NodeId,
+    pub kind: String,
+    pub title: String,
+    pub properties: BTreeMap<String, String>,
+    pub citations: Vec<CitationSource>,
+    pub created_at: jiff::Timestamp,
 }
 
 /// A source a note cites. A file is named relative to the project root; its text is read when the note is added.
@@ -92,7 +102,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         Ok(summaries)
     }
 
-    /// The map with the given id, its nodes newest first and its edges in log order, from one read of the log.
+    /// The map with the given id, its notes newest first and its edges in log order, from one read of the log.
     pub async fn map_detail(&self, id: MapId) -> Result<Option<MapDetail>> {
         let events = self.store.all().await?;
 
@@ -100,10 +110,36 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             return Ok(None);
         };
 
-        let mut nodes = map_nodes(&events, id);
-        nodes.reverse();
+        let nodes = map_nodes(&events, id);
+        let mut edges = map_edges(&events, id);
 
-        Ok(Some(MapDetail { map, nodes, edges: map_edges(&events, id) }))
+        let citations: BTreeMap<NodeId, CitationSource> = nodes
+            .iter()
+            .filter_map(|n| match &n.body {
+                NodeBody::Citation(source) => Some((n.id, source.clone())),
+                NodeBody::Note { .. } => None,
+            })
+            .collect();
+
+        let mut notes: Vec<Note> = nodes
+            .into_iter()
+            .filter_map(|n| match n.body {
+                NodeBody::Note { kind, title, properties } => {
+                    let citations = edges
+                        .iter()
+                        .filter(|e| e.kind == CITES && e.from == n.id)
+                        .filter_map(|e| citations.get(&e.to).cloned())
+                        .collect();
+
+                    Some(Note { id: n.id, kind, title, properties, citations, created_at: n.created_at })
+                }
+                NodeBody::Citation(_) => None,
+            })
+            .collect();
+        notes.reverse();
+        edges.retain(|e| e.kind != CITES);
+
+        Ok(Some(MapDetail { map, notes, edges }))
     }
 
     /// The map's edges in log order.
@@ -164,17 +200,15 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
     ) -> Result<()> {
         not_blank("kind", kind)?;
         not_blank("title", title)?;
-        for cite in cites {
-            if let Cite::Message(quote) = cite {
-                not_blank("quote", quote)?;
-            }
-        }
 
         // Read before the lock, which hooks wait on.
         let mut resolved = Vec::new();
         for cite in cites {
             resolved.push(match cite {
-                Cite::Message(quote) => Resolved::Message(quote),
+                Cite::Message(quote) => {
+                    not_blank("quote", quote)?;
+                    Resolved::Message(quote)
+                }
                 Cite::File { path, lines } => Resolved::Source(read_file(&source.path, path, *lines).await?),
             });
         }
@@ -182,28 +216,53 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         // Held until return, so parallel adds cannot both pass the check.
         let _lock = self.store.lock().await?;
 
-        let map = self.map(&source.path, map_kind).await?;
+        let events = self.store.all().await?;
+        let map = all_maps(&events)
+            .into_iter()
+            .find(|m| m.path == source.path && m.kind == map_kind)
+            .ok_or_else(|| format!("this project has no {map_kind} map"))?;
         self.schemas.schema(&source.path, map_kind).await?.check_node(kind, &properties)?;
 
-        let events = self.store.all().await?;
         let nodes = map_nodes(&events, map.id);
         let taken = nodes.iter().any(|n| matches!(&n.body, NodeBody::Note { title: t, .. } if t == title));
         if taken {
             return Err(format!("the {map_kind} map already has a node titled {title:?}").into());
         }
 
-        let Citations { cited, created } = cite(&events, &source.path, &nodes, resolved)?;
-
+        let mut known: Vec<(NodeId, CitationSource)> = nodes
+            .iter()
+            .filter_map(|n| match &n.body {
+                NodeBody::Citation(source) => Some((n.id, source.clone())),
+                NodeBody::Note { .. } => None,
+            })
+            .collect();
         let note = NodeId::new();
         let body = NodeBody::Note { kind: kind.into(), title: title.into(), properties };
-
         let mut batch = vec![Event::node_added(source.clone(), actor, map.id, note, body)];
-        for (id, citation) in created {
-            batch.push(Event::node_added(source.clone(), actor, map.id, id, NodeBody::Citation(citation)));
+        let mut cited = Vec::new();
+
+        // A citation with an equal source is reused, within this note as well as from earlier ones.
+        for cite in resolved {
+            let citation = match cite {
+                Resolved::Message(quote) => CitationSource::Message { event: find_message(&events, &source.path, quote)?, quote: quote.into() },
+                Resolved::Source(citation) => citation,
+            };
+
+            let id = match known.iter().find(|(_, known)| *known == citation) {
+                Some((id, _)) => *id,
+                None => {
+                    let id = NodeId::new();
+                    known.push((id, citation.clone()));
+                    batch.push(Event::node_added(source.clone(), actor, map.id, id, NodeBody::Citation(citation)));
+                    id
+                }
+            };
+
+            if !cited.contains(&id) {
+                cited.push(id);
+            }
         }
-        for id in cited {
-            batch.push(Event::edge_added(source.clone(), actor, map.id, CITES, note, id));
-        }
+        batch.extend(cited.into_iter().map(|id| Event::edge_added(source.clone(), actor, map.id, CITES, note, id)));
 
         self.store.append(&batch).await
     }
@@ -217,77 +276,23 @@ fn not_blank(name: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-/// The citations a note points to, and those of them that are new to the map.
-struct Citations {
-    cited: Vec<NodeId>,
-    created: Vec<(NodeId, CitationSource)>,
-}
-
 /// A cite whose file has been read. A quote still needs the log to find its message.
 enum Resolved<'a> {
     Message(&'a str),
     Source(CitationSource),
 }
 
-/// Finds the source of each cite: the message a quote is a substring of, or the current lines of a file.
-/// A citation with an equal source is reused.
-fn cite(
-    events: &[Event],
-    project: &Path,
-    nodes: &[Node],
-    cites: Vec<Resolved<'_>>,
-) -> Result<Citations> {
-    let mut known: Vec<(NodeId, CitationSource)> = nodes
-        .iter()
-        .filter_map(|n| match &n.body {
-            NodeBody::Citation(source) => Some((n.id, source.clone())),
-            NodeBody::Note { .. } => None,
-        })
-        .collect();
-    let mut cited = Vec::new();
-    let mut created = Vec::new();
-
-    for cite in cites {
-        let source = match cite {
-            Resolved::Message(quote) => CitationSource::Message { event: find_message(events, project, quote)?, quote: quote.into() },
-            Resolved::Source(source) => source,
-        };
-
-        let id = match known.iter().find(|(_, known)| *known == source) {
-            Some((id, _)) => *id,
-            None => {
-                let id = NodeId::new();
-                known.push((id, source.clone()));
-                created.push((id, source));
-                id
-            }
-        };
-
-        if !cited.contains(&id) {
-            cited.push(id);
-        }
-    }
-
-    Ok(Citations { cited, created })
-}
-
 /// The project's message that contains the quote. Human messages come before agent messages,
 /// since an agent often repeats the user's words. Newer messages come before older ones.
 fn find_message(events: &[Event], project: &Path, quote: &str) -> Result<EventId> {
-    let messages: Vec<(&Event, &str)> = events
-        .iter()
-        .rev()
-        .filter(|e| e.source.path == project)
-        .filter_map(|e| match &e.payload {
-            Payload::Message { content, .. } => Some((e, content.as_str())),
-            _ => None,
-        })
-        .collect();
-
     [Actor::Human, Actor::Agent]
         .into_iter()
-        .find_map(|actor| messages.iter().find(|(e, content)| e.actor == actor && content.contains(quote)))
-        .map(|(e, _)| e.id)
+        .find_map(|actor| {
+            events.iter().rev().find(|e| {
+                e.actor == actor && e.source.path == project && matches!(&e.payload, Payload::Message { content, .. } if content.contains(quote))
+            })
+        })
+        .map(|e| e.id)
         .ok_or_else(|| format!("no message in this project contains {quote:?}; copy the text verbatim from a message").into())
 }
 
@@ -654,10 +659,10 @@ mod tests {
 
         let detail = service.map_detail(map.id).await.unwrap().unwrap();
 
-        let titles: Vec<&str> = detail.nodes.iter().map(|n| note_of(n).1).collect();
+        let titles: Vec<&str> = detail.notes.iter().map(|n| n.title.as_str()).collect();
         assert_eq!(titles, vec!["O", "Q"]);
         let edges: Vec<(&str, NodeId, NodeId)> = detail.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
-        assert_eq!(edges, vec![("answers", detail.nodes[0].id, detail.nodes[1].id)]);
+        assert_eq!(edges, vec![("answers", detail.notes[0].id, detail.notes[1].id)]);
         assert_eq!(detail.map.kind, "decisions");
     }
 
@@ -788,8 +793,37 @@ mod tests {
 
         let result = service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "cites", "Q").await;
 
-        assert!(result.unwrap_err().to_string().contains("citation"));
+        assert!(result.unwrap_err().to_string().contains("\"cites\""));
         assert_eq!(store.0.lock().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn map_detail_gives_each_note_its_citations_in_edge_order_and_lists_no_cites_edge() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        say(&store, Source::fixture(), Actor::Human, "one two three");
+        service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "Q", Default::default(), &[quote("two three"), quote("one two")]).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Agent, "decisions", "option", "O", Default::default(), &[]).await.unwrap();
+        service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
+        let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
+
+        let detail = service.map_detail(map.id).await.unwrap().unwrap();
+
+        let titles: Vec<&str> = detail.notes.iter().map(|n| n.title.as_str()).collect();
+        assert_eq!(titles, vec!["O", "Q"]);
+        assert!(detail.notes[0].citations.is_empty());
+        let quotes: Vec<&str> = detail.notes[1]
+            .citations
+            .iter()
+            .map(|c| match c {
+                CitationSource::Message { quote, .. } => quote.as_str(),
+                CitationSource::File { .. } => panic!("expected a message citation"),
+            })
+            .collect();
+        assert_eq!(quotes, vec!["two three", "one two"]);
+        let kinds: Vec<&str> = detail.edges.iter().map(|e| e.kind.as_str()).collect();
+        assert_eq!(kinds, vec!["answers"]);
     }
 
     #[tokio::test]

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::app::{AppService, Cite, source_path};
-use crate::core::{Actor, CITES, CitationSource, EventStore, NodeBody, NodeId, SchemaStore, Source};
+use crate::core::{Actor, CitationSource, EventStore, SchemaStore, Source};
 use crate::shared::Result;
 
 pub(super) async fn create<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, kind: &str) -> Result<()> {
@@ -90,47 +90,32 @@ pub(super) async fn show<S: EventStore, M: SchemaStore>(service: &AppService<S, 
     match map {
         Some(kind) => {
             let map = service.map(&project, kind).await?;
-            let nodes = service.nodes(map.id).await?;
-            let edges = service.edges(map.id).await?;
+            let detail = service.map_detail(map.id).await?.ok_or_else(|| format!("this project has no {kind} map"))?;
 
-            println!("{}", map.kind);
+            println!("{}", detail.map.kind);
 
-            let notes: Vec<_> = nodes
-                .iter()
-                .filter_map(|n| match &n.body {
-                    NodeBody::Note { kind, title, properties } => Some((n.id, kind, title, properties)),
-                    NodeBody::Citation(_) => None,
-                })
-                .collect();
-            let cited: BTreeMap<NodeId, String> = nodes
-                .iter()
-                .filter_map(|n| match &n.body {
-                    NodeBody::Citation(CitationSource::Message { quote, .. }) => Some((n.id, format!("{quote:?}"))),
-                    NodeBody::Citation(CitationSource::File { path, lines: (from, to), .. }) => Some((n.id, format!("{}:{from}-{to}", path.display()))),
-                    NodeBody::Note { .. } => None,
-                })
-                .collect();
-
-            if !notes.is_empty() {
+            if !detail.notes.is_empty() {
                 println!();
             }
-            for (id, kind, title, properties) in &notes {
-                println!("{kind}  {title}");
-                for (key, value) in *properties {
+            for note in detail.notes.iter().rev() {
+                println!("{}  {}", note.kind, note.title);
+                for (key, value) in &note.properties {
                     println!("  {key}: {value}");
                 }
-                for citation in edges.iter().filter(|e| e.kind == CITES && e.from == *id).filter_map(|e| cited.get(&e.to)) {
-                    println!("  cites {citation}");
+                for citation in &note.citations {
+                    match citation {
+                        CitationSource::Message { quote, .. } => println!("  cites {quote:?}"),
+                        CitationSource::File { path, lines: (from, to), .. } => println!("  cites {}:{from}-{to}", path.display()),
+                    }
                 }
             }
 
-            let titles: BTreeMap<_, _> = notes.iter().map(|(id, _, title, _)| (*id, title.as_str())).collect();
+            let titles: BTreeMap<_, _> = detail.notes.iter().map(|n| (n.id, n.title.as_str())).collect();
             let title = |id| titles.get(&id).copied().ok_or("an edge names a node that is not in its map");
-            let links: Vec<_> = edges.iter().filter(|e| e.kind != CITES).collect();
-            if !links.is_empty() {
+            if !detail.edges.is_empty() {
                 println!();
             }
-            for edge in links {
+            for edge in &detail.edges {
                 println!("\"{}\"  {}  \"{}\"", title(edge.from)?, edge.kind, title(edge.to)?);
             }
         }
