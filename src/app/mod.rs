@@ -9,3 +9,4 @@ mod testing;
 
 pub use app_service::AppService;
 pub use git::source_path;
+pub use maps::Cite;

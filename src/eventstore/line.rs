@@ -42,6 +42,9 @@ impl From<&Event> for EventLine {
             Payload::NodeAdded { map, node, body: NodeBody::Citation(CitationSource::Message { event, quote }) } => {
                 json!({ "map": map, "node": node, "citation": { "message": { "event": event, "quote": quote } } })
             }
+            Payload::NodeAdded { map, node, body: NodeBody::Citation(CitationSource::File { path, lines, excerpt }) } => {
+                json!({ "map": map, "node": node, "citation": { "file": { "path": path, "lines": lines, "excerpt": excerpt } } })
+            }
             Payload::EdgeAdded { map, kind, from, to } => {
                 json!({ "map": map, "kind": kind, "from": from, "to": to })
             }
@@ -117,12 +120,15 @@ impl TryFrom<EventLine> for Event {
 /// A node line with a `citation` field holds a citation; any other holds a note.
 fn node_body(payload: &serde_json::Value) -> Result<NodeBody> {
     if let Some(citation) = payload.get("citation") {
-        let message = citation.get("message").ok_or("payload.citation: unknown source")?;
+        let source = if let Some(message) = citation.get("message") {
+            CitationSource::Message { event: field(message, "event")?, quote: field(message, "quote")? }
+        } else if let Some(file) = citation.get("file") {
+            CitationSource::File { path: field(file, "path")?, lines: field(file, "lines")?, excerpt: field(file, "excerpt")? }
+        } else {
+            return Err("payload.citation: unknown source".into());
+        };
 
-        return Ok(NodeBody::Citation(CitationSource::Message {
-            event: field(message, "event")?,
-            quote: field(message, "quote")?,
-        }));
+        return Ok(NodeBody::Citation(source));
     }
 
     Ok(NodeBody::Note {
@@ -166,6 +172,7 @@ mod tests {
             Event::map_created(Source::fixture(), Actor::Human, MapId::new(), "decisions"),
             Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), note("question", "Why?", BTreeMap::from([("definition".into(), "D".into())]))),
             Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), NodeBody::Citation(CitationSource::Message { event: EventId::new(), quote: "Q".into() })),
+            Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), NodeBody::Citation(CitationSource::File { path: "src/a.rs".into(), lines: (2, 4), excerpt: "x\ny".into() })),
             Event::edge_added(Source::fixture(), Actor::Agent, MapId::new(), "answers", NodeId::new(), NodeId::new()),
         ];
 
@@ -211,10 +218,21 @@ mod tests {
     }
 
     #[test]
+    fn a_file_citation_line_nests_its_path_lines_and_excerpt() {
+        let (map, node) = (MapId::new(), NodeId::new());
+        let body = NodeBody::Citation(CitationSource::File { path: "src/core/map.rs".into(), lines: (17, 23), excerpt: "E".into() });
+        let event = Event::node_added(Source::fixture(), Actor::Agent, map, node, body);
+
+        let line = serde_json::to_value(EventLine::from(&event)).unwrap();
+
+        assert_eq!(line["payload"], json!({"map": map, "node": node, "citation": {"file": {"path": "src/core/map.rs", "lines": [17, 23], "excerpt": "E"}}}));
+    }
+
+    #[test]
     fn a_citation_line_with_an_unknown_source_is_an_error() {
         let event = Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), note("decision", "T", BTreeMap::new()));
         let mut line = EventLine::from(&event);
-        line.payload = json!({ "map": MapId::new(), "node": NodeId::new(), "citation": { "file": {} } });
+        line.payload = json!({ "map": MapId::new(), "node": NodeId::new(), "citation": { "link": {} } });
 
         assert!(Event::try_from(line).is_err());
     }

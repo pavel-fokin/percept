@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::json;
 
@@ -122,5 +123,24 @@ pub(super) struct NoSchemas;
 impl SchemaStore for NoSchemas {
     async fn schema(&self, _: &Path, kind: &str) -> Result<Schema> {
         Err(format!("no schema for {kind}").into())
+    }
+}
+
+/// A folder under the system temp dir, removed on drop.
+pub(super) struct TempDir(pub(super) PathBuf);
+
+impl TempDir {
+    pub(super) fn new() -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let path = std::env::temp_dir().join(format!("percept-app-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(&path).unwrap();
+
+        Self(path)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }

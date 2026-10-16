@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::AppService;
 use crate::core::{Actor, CITES, CitationSource, Edge, Event, EventId, EventStore, Map, MapId, Node, NodeBody, NodeId, Payload, SchemaStore, Source};
@@ -17,6 +17,12 @@ pub struct MapDetail {
     pub map: Map,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
+}
+
+/// A source a note cites. A file is named relative to the project root; its text is read when the note is added.
+pub enum Cite {
+    Message(String),
+    File { path: PathBuf, lines: (u32, u32) },
 }
 
 impl<S: EventStore, M: SchemaStore> AppService<S, M> {
@@ -143,7 +149,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         self.store.append(&Event::edge_added(source, actor, map.id, kind, from, to)).await
     }
 
-    /// Records a new note on the project's map of the given kind, with a `cites` edge to a citation for each quote.
+    /// Records a new note on the project's map of the given kind, with a `cites` edge to a citation for each source cited.
     /// A title is unique among the notes of its map.
     #[allow(clippy::too_many_arguments, reason = "the arguments of `percept add`, one each")]
     pub async fn add_node(
@@ -154,12 +160,14 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         kind: &str,
         title: &str,
         properties: BTreeMap<String, String>,
-        quotes: &[String],
+        cites: &[Cite],
     ) -> Result<()> {
         not_blank("kind", kind)?;
         not_blank("title", title)?;
-        for quote in quotes {
-            not_blank("quote", quote)?;
+        for cite in cites {
+            if let Cite::Message(quote) = cite {
+                not_blank("quote", quote)?;
+            }
         }
 
         // Held until return, so parallel adds cannot both pass the check.
@@ -175,7 +183,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             return Err(format!("the {map_kind} map already has a node titled {title:?}").into());
         }
 
-        let Citations { cited, created } = cite_messages(&events, &source.path, &nodes, quotes)?;
+        let Citations { cited, created } = cite(&events, &source.path, &nodes, cites).await?;
 
         let note = NodeId::new();
         let body = NodeBody::Note { kind: kind.into(), title: title.into(), properties };
@@ -207,12 +215,13 @@ struct Citations {
     created: Vec<(NodeId, CitationSource)>,
 }
 
-/// Finds the message each quote is a substring of. A citation with an equal source is reused.
-fn cite_messages(
+/// Finds the source of each cite: the message a quote is a substring of, or the current lines of a file.
+/// A citation with an equal source is reused.
+async fn cite(
     events: &[Event],
     project: &Path,
     nodes: &[Node],
-    quotes: &[String],
+    cites: &[Cite],
 ) -> Result<Citations> {
     let mut known: Vec<(NodeId, CitationSource)> = nodes
         .iter()
@@ -224,8 +233,11 @@ fn cite_messages(
     let mut cited = Vec::new();
     let mut created = Vec::new();
 
-    for quote in quotes {
-        let source = CitationSource::Message { event: find_message(events, project, quote)?, quote: quote.clone() };
+    for cite in cites {
+        let source = match cite {
+            Cite::Message(quote) => CitationSource::Message { event: find_message(events, project, quote)?, quote: quote.clone() },
+            Cite::File { path, lines } => CitationSource::File { path: path.clone(), lines: *lines, excerpt: read_excerpt(project, path, *lines).await? },
+        };
 
         let id = match known.iter().find(|(_, known)| *known == source) {
             Some((id, _)) => *id,
@@ -265,6 +277,33 @@ fn find_message(events: &[Event], project: &Path, quote: &str) -> Result<EventId
         .ok_or_else(|| format!("no message in this project contains {quote:?}; copy the text verbatim from a message").into())
 }
 
+/// The lines of a file in the project, joined by newlines. The file must resolve inside the project root.
+async fn read_excerpt(root: &Path, path: &Path, (from, to): (u32, u32)) -> Result<String> {
+    let shown = path.display();
+
+    if from == 0 || from > to {
+        return Err(format!("lines {from}-{to} of {shown} are not a range: lines count from 1 and from must not exceed to").into());
+    }
+
+    if path.is_absolute() {
+        return Err(format!("{shown} is absolute; name the file relative to the project root").into());
+    }
+
+    let root = tokio::fs::canonicalize(root).await?;
+    let file = tokio::fs::canonicalize(root.join(path)).await.map_err(|e| format!("cannot read {shown}: {e}"))?;
+    if !file.starts_with(&root) {
+        return Err(format!("{shown} is outside the project root").into());
+    }
+
+    let text = tokio::fs::read_to_string(&file).await.map_err(|e| format!("cannot read {shown}: {e}"))?;
+    let lines: Vec<&str> = text.lines().collect();
+    if to as usize > lines.len() {
+        return Err(format!("{shown} has {} lines; line {to} is beyond the end", lines.len()).into());
+    }
+
+    Ok(lines[from as usize - 1..to as usize].join("\n"))
+}
+
 fn all_maps(events: &[Event]) -> Vec<Map> {
     events
         .iter()
@@ -302,7 +341,7 @@ fn map_edges(events: &[Event], map: MapId) -> Vec<Edge> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{Broken, Memory, NoSchemas, Schemas};
+    use crate::app::testing::{Broken, Memory, NoSchemas, Schemas, TempDir};
     use crate::core::SessionId;
 
     fn say(store: &Memory, source: Source, actor: Actor, content: &str) -> EventId {
@@ -311,6 +350,10 @@ mod tests {
         store.0.lock().unwrap().push(event);
 
         id
+    }
+
+    fn quote(text: &str) -> Cite {
+        Cite::Message(text.into())
     }
 
     fn note_of(node: &Node) -> (&str, &str, &BTreeMap<String, String>) {
@@ -323,7 +366,7 @@ mod tests {
     fn quoted(node: &Node) -> (EventId, &str) {
         match &node.body {
             NodeBody::Citation(CitationSource::Message { event, quote }) => (*event, quote),
-            NodeBody::Note { .. } => panic!("expected a citation"),
+            _ => panic!("expected a message citation"),
         }
     }
 
@@ -623,7 +666,7 @@ mod tests {
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
         let said = say(&store, Source::fixture(), Actor::Human, "Maybe a node is a Node and Citation a subtype");
 
-        service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "Q", Default::default(), &["Citation a subtype".to_string()]).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "Q", Default::default(), &[quote("Citation a subtype")]).await.unwrap();
 
         let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
         let nodes = service.nodes(map.id).await.unwrap();
@@ -645,7 +688,7 @@ mod tests {
         say(&store, Source::fixture(), Actor::Agent, "we keep the log");
         let agent_only = say(&store, Source::fixture(), Actor::Agent, "a plan for the schema");
         let newest_agent = say(&store, Source::fixture(), Actor::Agent, "a plan for the schema, again");
-        let (log, plan) = (["keep the log".to_string()], ["a plan for".to_string()]);
+        let (log, plan) = ([quote("keep the log")], [quote("a plan for")]);
 
         service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "A", Default::default(), &log).await.unwrap();
         service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "B", Default::default(), &plan).await.unwrap();
@@ -665,7 +708,7 @@ mod tests {
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
         say(&store, Source::fixture(), Actor::Human, "found");
         say(&store, other, Actor::Human, "elsewhere");
-        let quotes = ["found".to_string(), "elsewhere".to_string()];
+        let quotes = [quote("found"), quote("elsewhere")];
 
         let result = service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "Q", Default::default(), &quotes).await;
 
@@ -680,7 +723,7 @@ mod tests {
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
         say(&store, Source::fixture(), Actor::Human, "hello there");
 
-        let result = service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "Q", Default::default(), &[" ".to_string()]).await;
+        let result = service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "Q", Default::default(), &[quote(" ")]).await;
 
         assert!(result.unwrap_err().to_string().contains("quote"));
         assert_eq!(store.0.lock().unwrap().len(), 2);
@@ -692,7 +735,7 @@ mod tests {
         let service = AppService::new(&store, Schemas);
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
         say(&store, Source::fixture(), Actor::Human, "one two three");
-        let (one, two) = (["one two".to_string(), "one two".to_string()], ["one two".to_string(), "two three".to_string()]);
+        let (one, two) = ([quote("one two"), quote("one two")], [quote("one two"), quote("two three")]);
 
         service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "A", Default::default(), &one).await.unwrap();
         service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "B", Default::default(), &two).await.unwrap();
@@ -716,7 +759,7 @@ mod tests {
         service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), &[]).await.unwrap();
         say(&store, Source::fixture(), Actor::Human, "hello");
 
-        let result = service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "Q", Default::default(), &["hello".to_string()]).await;
+        let result = service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "Q", Default::default(), &[quote("hello")]).await;
 
         assert!(result.is_err());
         assert_eq!(store.0.lock().unwrap().len(), 3);
@@ -742,7 +785,7 @@ mod tests {
         let service = AppService::new(&store, Schemas);
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
         say(&store, Source::fixture(), Actor::Human, "hello");
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), &["hello".to_string()]).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), &[quote("hello")]).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default(), &[]).await.unwrap();
         service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
 
@@ -750,6 +793,163 @@ mod tests {
 
         let found: Vec<(usize, usize)> = summaries.iter().map(|s| (s.nodes, s.edges)).collect();
         assert_eq!(found, vec![(2, 1)]);
+    }
+
+    fn excerpted(node: &Node) -> (&Path, (u32, u32), &str) {
+        match &node.body {
+            NodeBody::Citation(CitationSource::File { path, lines, excerpt }) => (path, *lines, excerpt),
+            _ => panic!("expected a file citation"),
+        }
+    }
+
+    fn file(path: &str, from: u32, to: u32) -> Cite {
+        Cite::File { path: path.into(), lines: (from, to) }
+    }
+
+    /// A project in a temp dir with a `decisions` map and the file `a.rs` of five lines.
+    async fn project() -> (TempDir, Source, Memory) {
+        let dir = TempDir::new();
+        std::fs::write(dir.0.join("a.rs"), "one\ntwo\nthree\nfour\nfive\n").unwrap();
+        let source = Source { client: "claude".into(), path: dir.0.clone() };
+        let store = Memory::default();
+        AppService::new(&store, Schemas).create_map(source.clone(), Actor::Human, "decisions").await.unwrap();
+
+        (dir, source, store)
+    }
+
+    async fn add(store: &Memory, source: &Source, title: &str, cites: &[Cite]) -> Result<()> {
+        AppService::new(store, Schemas).add_node(source.clone(), Actor::Agent, "decisions", "question", title, Default::default(), cites).await
+    }
+
+    #[tokio::test]
+    async fn a_file_cite_records_the_inclusive_lines_the_path_as_given_and_a_cites_edge() {
+        let (_dir, source, store) = project().await;
+
+        add(&store, &source, "Q", &[file("a.rs", 2, 4)]).await.unwrap();
+
+        let service = AppService::new(&store, Schemas);
+        let map = service.map(&source.path, "decisions").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        let edges = service.edges(map.id).await.unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(excerpted(&nodes[1]), (Path::new("a.rs"), (2, 4), "two\nthree\nfour"));
+        let found: Vec<(&str, NodeId, NodeId)> = edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
+        assert_eq!(found, vec![("cites", nodes[0].id, nodes[1].id)]);
+    }
+
+    #[tokio::test]
+    async fn the_last_line_can_be_cited_and_a_single_line_is_a_range() {
+        let (_dir, source, store) = project().await;
+
+        add(&store, &source, "Q", &[file("a.rs", 5, 5), file("a.rs", 1, 1)]).await.unwrap();
+
+        let service = AppService::new(&store, Schemas);
+        let map = service.map(&source.path, "decisions").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        assert_eq!(excerpted(&nodes[1]).2, "five");
+        assert_eq!(excerpted(&nodes[2]).2, "one");
+    }
+
+    #[tokio::test]
+    async fn a_note_can_cite_a_message_and_a_file_in_the_order_given() {
+        let (_dir, source, store) = project().await;
+        let said = say(&store, source.clone(), Actor::Human, "hello there");
+
+        add(&store, &source, "Q", &[file("a.rs", 1, 2), quote("hello")]).await.unwrap();
+
+        let service = AppService::new(&store, Schemas);
+        let map = service.map(&source.path, "decisions").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        let edges = service.edges(map.id).await.unwrap();
+        assert_eq!(excerpted(&nodes[1]).2, "one\ntwo");
+        assert_eq!(quoted(&nodes[2]), (said, "hello"));
+        let found: Vec<NodeId> = edges.iter().map(|e| e.to).collect();
+        assert_eq!(found, vec![nodes[1].id, nodes[2].id]);
+    }
+
+    #[tokio::test]
+    async fn bad_line_ranges_are_errors_and_record_nothing() {
+        let (_dir, source, store) = project().await;
+
+        let zero = add(&store, &source, "A", &[file("a.rs", 0, 2)]).await;
+        let reversed = add(&store, &source, "B", &[file("a.rs", 3, 2)]).await;
+        let beyond = add(&store, &source, "C", &[file("a.rs", 4, 6)]).await;
+
+        assert!(zero.is_err());
+        assert!(reversed.is_err());
+        assert!(beyond.unwrap_err().to_string().contains("5 lines"));
+        assert_eq!(store.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_missing_file_is_an_error_and_records_nothing() {
+        let (_dir, source, store) = project().await;
+        say(&store, source.clone(), Actor::Human, "hello");
+
+        let result = add(&store, &source, "Q", &[quote("hello"), file("nope.rs", 1, 1)]).await;
+
+        assert!(result.unwrap_err().to_string().contains("nope.rs"));
+        assert_eq!(store.0.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn an_absolute_path_is_an_error_even_inside_the_project() {
+        let (dir, source, store) = project().await;
+
+        let result = add(&store, &source, "Q", &[Cite::File { path: dir.0.join("a.rs"), lines: (1, 1) }]).await;
+
+        assert!(result.unwrap_err().to_string().contains("absolute"));
+        assert_eq!(store.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_path_leaving_the_project_through_dots_is_an_error_but_dots_within_it_resolve() {
+        let (dir, source, store) = project().await;
+        let outer = TempDir::new();
+        std::fs::write(outer.0.join("secret.rs"), "s\n").unwrap();
+        std::fs::create_dir(dir.0.join("sub")).unwrap();
+        let escape = format!("../{}/secret.rs", outer.0.file_name().unwrap().to_str().unwrap());
+
+        let outside = add(&store, &source, "A", &[file(&escape, 1, 1)]).await;
+        let inside = add(&store, &source, "B", &[file("sub/../a.rs", 1, 1)]).await;
+
+        assert!(outside.unwrap_err().to_string().contains("outside"));
+        assert!(inside.is_ok());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_symlink_leading_outside_the_project_is_an_error() {
+        let (dir, source, store) = project().await;
+        let outer = TempDir::new();
+        std::fs::write(outer.0.join("secret.rs"), "s\n").unwrap();
+        std::os::unix::fs::symlink(outer.0.join("secret.rs"), dir.0.join("link.rs")).unwrap();
+
+        let result = add(&store, &source, "Q", &[file("link.rs", 1, 1)]).await;
+
+        assert!(result.unwrap_err().to_string().contains("outside"));
+        assert_eq!(store.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_file_citation_with_an_equal_source_is_reused_until_the_text_changes() {
+        let (dir, source, store) = project().await;
+
+        add(&store, &source, "A", &[file("a.rs", 1, 2), file("a.rs", 1, 2)]).await.unwrap();
+        add(&store, &source, "B", &[file("a.rs", 1, 2)]).await.unwrap();
+        std::fs::write(dir.0.join("a.rs"), "uno\ntwo\n").unwrap();
+        add(&store, &source, "C", &[file("a.rs", 1, 2)]).await.unwrap();
+
+        let service = AppService::new(&store, Schemas);
+        let map = service.map(&source.path, "decisions").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        let edges = service.edges(map.id).await.unwrap();
+        let excerpts: Vec<&str> = nodes.iter().filter(|n| matches!(n.body, NodeBody::Citation(_))).map(|n| excerpted(n).2).collect();
+        assert_eq!(excerpts, vec!["one\ntwo", "uno\ntwo"]);
+        let (a, b, c) = (nodes[0].id, nodes[2].id, nodes[3].id);
+        let (old, new) = (nodes[1].id, nodes[4].id);
+        let found: Vec<(NodeId, NodeId)> = edges.iter().map(|e| (e.from, e.to)).collect();
+        assert_eq!(found, vec![(a, old), (b, old), (c, new)]);
     }
 
     #[tokio::test]

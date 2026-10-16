@@ -32,6 +32,8 @@ pub enum NodeBody {
 #[derive(Debug, Clone, PartialEq)]
 pub enum CitationSource {
     Message { event: EventId, quote: String },
+    /// Lines `lines.0` to `lines.1` of a project file, 1-based and inclusive, as they were when cited.
+    File { path: PathBuf, lines: (u32, u32), excerpt: String },
 }
 
 /// A directed link between two nodes of a map, added by an `EdgeAdded` event.

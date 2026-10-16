@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
-use crate::app::{AppService, source_path};
+use crate::app::{AppService, Cite, source_path};
 use crate::core::{Actor, CITES, CitationSource, EventStore, NodeBody, NodeId, SchemaStore, Source};
 use crate::shared::Result;
 
@@ -16,21 +17,21 @@ pub(super) async fn add<S: EventStore, M: SchemaStore>(service: &AppService<S, M
     match positionals {
         [map, kind, title] => {
             let (actor, source) = cli_writer().await?;
-            service.add_node(source, actor, map, kind, title, flags.properties, &flags.quotes).await
+            service.add_node(source, actor, map, kind, title, flags.properties, &flags.cites).await
         }
         [map, from, kind, to] => {
             let (actor, source) = cli_writer().await?;
             service.add_edge(source, actor, map, from, kind, to).await
         }
-        _ => Err("usage: percept add <map> <kind> <title> [--key value ...] [--cite text ...] | percept add <map> <from> <kind> <to>".into()),
+        _ => Err("usage: percept add <map> <kind> <title> [--key value ...] [--cite text ...] [--cite-file path:from-to ...] | percept add <map> <from> <kind> <to>".into()),
     }
 }
 
-/// The `--` arguments of `add`: the properties of a node and the quotes it cites.
+/// The `--` arguments of `add`: the properties of a node and the sources it cites, in the order given.
 #[derive(Default)]
 struct Flags {
     properties: BTreeMap<String, String>,
-    quotes: Vec<String>,
+    cites: Vec<Cite>,
 }
 
 /// Splits `add` arguments into positionals and flags. Only a node takes flags.
@@ -38,14 +39,14 @@ fn split_add(args: &[String]) -> Result<(&[String], Flags)> {
     let (positionals, pairs) = args.split_at(args.iter().position(|a| a.starts_with("--")).unwrap_or(args.len()));
     let flags = flags(pairs)?;
 
-    if positionals.len() == 4 && !(flags.properties.is_empty() && flags.quotes.is_empty()) {
+    if positionals.len() == 4 && !(flags.properties.is_empty() && flags.cites.is_empty()) {
         return Err("an edge takes no properties or citations".into());
     }
 
     Ok((positionals, flags))
 }
 
-/// Reads `--key value` pairs. A value may start with `-`. `--cite` may repeat and gives a quote, not a property.
+/// Reads `--key value` pairs. A value may start with `-`. `--cite` and `--cite-file` may repeat and give a source, not a property.
 fn flags(pairs: &[String]) -> Result<Flags> {
     let mut flags = Flags::default();
 
@@ -54,13 +55,26 @@ fn flags(pairs: &[String]) -> Result<Flags> {
         let value = pair.get(1).ok_or_else(|| format!("--{key} has no value"))?;
 
         if key == "cite" {
-            flags.quotes.push(value.clone());
+            flags.cites.push(Cite::Message(value.clone()));
+        } else if key == "cite-file" {
+            flags.cites.push(file_cite(value)?);
         } else if flags.properties.insert(key.to_string(), value.clone()).is_some() {
             return Err(format!("--{key} is given more than once").into());
         }
     }
 
     Ok(flags)
+}
+
+/// Reads `path:from-to`, split at the last `:`.
+fn file_cite(value: &str) -> Result<Cite> {
+    let expected = || format!("--cite-file expects path:from-to, such as src/main.rs:10-20, not {value:?}");
+
+    let (path, range) = value.rsplit_once(':').filter(|(path, _)| !path.is_empty()).ok_or_else(expected)?;
+    let (from, to) = range.split_once('-').ok_or_else(expected)?;
+    let lines = (from.parse().map_err(|_| expected())?, to.parse().map_err(|_| expected())?);
+
+    Ok(Cite::File { path: PathBuf::from(path), lines })
 }
 
 async fn cli_writer() -> Result<(Actor, Source)> {
@@ -88,10 +102,11 @@ pub(super) async fn show<S: EventStore, M: SchemaStore>(service: &AppService<S, 
                     NodeBody::Citation(_) => None,
                 })
                 .collect();
-            let quotes: BTreeMap<NodeId, &str> = nodes
+            let cited: BTreeMap<NodeId, String> = nodes
                 .iter()
                 .filter_map(|n| match &n.body {
-                    NodeBody::Citation(CitationSource::Message { quote, .. }) => Some((n.id, quote.as_str())),
+                    NodeBody::Citation(CitationSource::Message { quote, .. }) => Some((n.id, format!("{quote:?}"))),
+                    NodeBody::Citation(CitationSource::File { path, lines: (from, to), .. }) => Some((n.id, format!("{}:{from}-{to}", path.display()))),
                     NodeBody::Note { .. } => None,
                 })
                 .collect();
@@ -105,8 +120,8 @@ pub(super) async fn show<S: EventStore, M: SchemaStore>(service: &AppService<S, 
                     println!("  {key}: {value}");
                 }
                 for edge in edges.iter().filter(|e| e.kind == CITES && e.from == *id) {
-                    let quote = quotes.get(&edge.to).ok_or("a cites edge names a node that is not a citation")?;
-                    println!("  cites {quote:?}");
+                    let citation = cited.get(&edge.to).ok_or("a cites edge names a node that is not a citation")?;
+                    println!("  cites {citation}");
                 }
             }
 
@@ -179,12 +194,12 @@ mod tests {
 
     #[test]
     fn properties_are_key_value_pairs() {
-        let Flags { properties: found, quotes } = flags(&strings(&["--definition", "One log.", "--note", "-x"])).unwrap();
+        let Flags { properties: found, cites } = flags(&strings(&["--definition", "One log.", "--note", "-x"])).unwrap();
 
         assert_eq!(found.len(), 2);
         assert_eq!(found["definition"], "One log.");
         assert_eq!(found["note"], "-x");
-        assert!(quotes.is_empty());
+        assert!(cites.is_empty());
         assert!(flags(&[]).unwrap().properties.is_empty());
     }
 
@@ -226,9 +241,48 @@ mod tests {
 
         let (_, flags) = split_add(&args).unwrap();
 
-        assert_eq!(flags.quotes, vec!["one", "-two"]);
+        let quotes: Vec<&str> = flags.cites.iter().map(|c| match c {
+            Cite::Message(quote) => quote.as_str(),
+            Cite::File { .. } => panic!("expected a quote"),
+        }).collect();
+        assert_eq!(quotes, vec!["one", "-two"]);
         assert_eq!(flags.properties.len(), 1);
         assert_eq!(flags.properties["why"], "w");
+    }
+
+    #[test]
+    fn cite_file_may_mix_with_cite_in_the_order_given() {
+        let args = strings(&["m", "k", "T", "--cite-file", "a.rs:1-2", "--cite", "q", "--cite-file", "b.rs:3-3"]);
+
+        let (_, flags) = split_add(&args).unwrap();
+
+        assert!(flags.properties.is_empty());
+        assert!(matches!(&flags.cites[0], Cite::File { path, lines: (1, 2) } if path == &PathBuf::from("a.rs")));
+        assert!(matches!(&flags.cites[1], Cite::Message(q) if q == "q"));
+        assert!(matches!(&flags.cites[2], Cite::File { path, lines: (3, 3) } if path == &PathBuf::from("b.rs")));
+    }
+
+    #[test]
+    fn a_file_cite_is_split_at_the_last_colon() {
+        let cite = file_cite("dir:odd/a.rs:10-20").unwrap();
+
+        assert!(matches!(cite, Cite::File { path, lines: (10, 20) } if path.to_str() == Some("dir:odd/a.rs")));
+    }
+
+    #[test]
+    fn a_malformed_file_cite_is_an_error_naming_the_expected_form() {
+        for value in ["a.rs", "a.rs:10", "a.rs:x-2", "a.rs:1-", "a.rs:-2", "a.rs:1-2-3", ":1-2", "a.rs:1:2", "a.rs:-1-2"] {
+            let error = file_cite(value).err().unwrap().to_string();
+
+            assert!(error.contains("path:from-to"), "{value}: {error}");
+        }
+    }
+
+    #[test]
+    fn a_file_cite_on_an_edge_is_an_error() {
+        let args = strings(&["m", "a", "k", "b", "--cite-file", "a.rs:1-2"]);
+
+        assert!(split_add(&args).is_err());
     }
 
     #[test]
