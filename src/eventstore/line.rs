@@ -3,7 +3,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::core::{Actor, ClientAgentId, ClientSessionId, Event, EventId, Kind, Payload, Source};
+use crate::core::{Actor, CitationSource, ClientAgentId, ClientSessionId, Event, EventId, Kind, NodeBody, Payload, Source};
 use crate::shared::{Error, Result};
 
 /// One log line. The log format lives here, apart from the domain `Event`.
@@ -36,8 +36,14 @@ impl From<&Event> for EventLine {
                 json!({ "session": session, "subagent": subagent.as_str(), "content": content })
             }
             Payload::MapCreated { map, kind } => json!({ "map": map, "kind": kind }),
-            Payload::NodeAdded { map, node, kind, title, properties } => {
+            Payload::NodeAdded { map, node, body: NodeBody::Note { kind, title, properties } } => {
                 json!({ "map": map, "node": node, "kind": kind, "title": title, "properties": properties })
+            }
+            Payload::NodeAdded { map, node, body: NodeBody::Citation(CitationSource::Message { event, quote }) } => {
+                json!({ "map": map, "node": node, "citation": { "message": { "event": event, "quote": quote } } })
+            }
+            Payload::NodeAdded { map, node, body: NodeBody::Citation(CitationSource::File { path, lines, excerpt }) } => {
+                json!({ "map": map, "node": node, "citation": { "file": { "path": path, "lines": lines, "excerpt": excerpt } } })
             }
             Payload::EdgeAdded { map, kind, from, to } => {
                 json!({ "map": map, "kind": kind, "from": from, "to": to })
@@ -90,9 +96,7 @@ impl TryFrom<EventLine> for Event {
             Kind::NodeAdded => Payload::NodeAdded {
                 map: field(p, "map")?,
                 node: field(p, "node")?,
-                kind: field(p, "kind")?,
-                title: field(p, "title")?,
-                properties: if p.get("properties").is_some() { field(p, "properties")? } else { Default::default() },
+                body: node_body(p)?,
             },
             Kind::EdgeAdded => Payload::EdgeAdded {
                 map: field(p, "map")?,
@@ -113,6 +117,27 @@ impl TryFrom<EventLine> for Event {
     }
 }
 
+/// A node line with a `citation` field holds a citation; any other holds a note.
+fn node_body(payload: &serde_json::Value) -> Result<NodeBody> {
+    if let Some(citation) = payload.get("citation") {
+        let source = if let Some(message) = citation.get("message") {
+            CitationSource::Message { event: field(message, "event")?, quote: field(message, "quote")? }
+        } else if let Some(file) = citation.get("file") {
+            CitationSource::File { path: field(file, "path")?, lines: field(file, "lines")?, excerpt: field(file, "excerpt")? }
+        } else {
+            return Err("payload.citation: unknown source".into());
+        };
+
+        return Ok(NodeBody::Citation(source));
+    }
+
+    Ok(NodeBody::Note {
+        kind: field(payload, "kind")?,
+        title: field(payload, "title")?,
+        properties: if payload.get("properties").is_some() { field(payload, "properties")? } else { Default::default() },
+    })
+}
+
 fn field<T: DeserializeOwned>(
     payload: &serde_json::Value,
     name: &str,
@@ -128,6 +153,10 @@ mod tests {
     use super::*;
     use crate::core::{MapId, NodeId, SessionId};
 
+    fn note(kind: &str, title: &str, properties: BTreeMap<String, String>) -> NodeBody {
+        NodeBody::Note { kind: kind.into(), title: title.into(), properties }
+    }
+
     #[test]
     fn every_payload_round_trips_through_a_line() {
         let session = SessionId::new();
@@ -141,7 +170,9 @@ mod tests {
             Event::subagent_started(Source::fixture(), session, ClientAgentId::new("a1".into()), "builder", "Build it", raw.clone()),
             Event::subagent_reported(Source::fixture(), session, ClientAgentId::new("a1".into()), "done", raw),
             Event::map_created(Source::fixture(), Actor::Human, MapId::new(), "decisions"),
-            Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())])),
+            Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), note("question", "Why?", BTreeMap::from([("definition".into(), "D".into())]))),
+            Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), NodeBody::Citation(CitationSource::Message { event: EventId::new(), quote: "Q".into() })),
+            Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), NodeBody::Citation(CitationSource::File { path: "src/a.rs".into(), lines: (2, 4), excerpt: "x\ny".into() })),
             Event::edge_added(Source::fixture(), Actor::Agent, MapId::new(), "answers", NodeId::new(), NodeId::new()),
         ];
 
@@ -162,13 +193,48 @@ mod tests {
     #[test]
     fn a_node_line_without_properties_reads_as_empty() {
         let (map, node) = (MapId::new(), NodeId::new());
-        let event = Event::node_added(Source::fixture(), Actor::Agent, map, node, "question", "Why?", BTreeMap::new());
+        let event = Event::node_added(Source::fixture(), Actor::Agent, map, node, note("question", "Why?", BTreeMap::new()));
         let mut line = EventLine::from(&event);
         line.payload = json!({ "map": map, "node": node, "kind": "question", "title": "Why?" });
 
         let back = Event::try_from(line).unwrap();
 
         assert_eq!(back.payload, event.payload);
+    }
+
+    #[test]
+    fn a_note_line_stays_flat_and_a_citation_line_nests_its_source() {
+        let (map, node, quoted) = (MapId::new(), NodeId::new(), EventId::new());
+        let properties = BTreeMap::from([("why".to_string(), "W".to_string())]);
+        let note = Event::node_added(Source::fixture(), Actor::Agent, map, node, note("decision", "T", properties));
+        let body = NodeBody::Citation(CitationSource::Message { event: quoted, quote: "Q".into() });
+        let citation = Event::node_added(Source::fixture(), Actor::Agent, map, node, body);
+
+        let note = serde_json::to_value(EventLine::from(&note)).unwrap();
+        let citation = serde_json::to_value(EventLine::from(&citation)).unwrap();
+
+        assert_eq!(note["payload"], json!({"map": map, "node": node, "kind": "decision", "title": "T", "properties": {"why": "W"}}));
+        assert_eq!(citation["payload"], json!({"map": map, "node": node, "citation": {"message": {"event": quoted, "quote": "Q"}}}));
+    }
+
+    #[test]
+    fn a_file_citation_line_nests_its_path_lines_and_excerpt() {
+        let (map, node) = (MapId::new(), NodeId::new());
+        let body = NodeBody::Citation(CitationSource::File { path: "src/core/map.rs".into(), lines: (17, 23), excerpt: "E".into() });
+        let event = Event::node_added(Source::fixture(), Actor::Agent, map, node, body);
+
+        let line = serde_json::to_value(EventLine::from(&event)).unwrap();
+
+        assert_eq!(line["payload"], json!({"map": map, "node": node, "citation": {"file": {"path": "src/core/map.rs", "lines": [17, 23], "excerpt": "E"}}}));
+    }
+
+    #[test]
+    fn a_citation_line_with_an_unknown_source_is_an_error() {
+        let event = Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), note("decision", "T", BTreeMap::new()));
+        let mut line = EventLine::from(&event);
+        line.payload = json!({ "map": MapId::new(), "node": NodeId::new(), "citation": { "link": {} } });
+
+        assert!(Event::try_from(line).is_err());
     }
 
     #[test]

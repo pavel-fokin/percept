@@ -87,9 +87,12 @@ impl EventStore for JsonlStore {
             .collect()
     }
 
-    async fn append(&self, event: &Event) -> Result<()> {
-        let mut line = serde_json::to_string(&EventLine::from(event))?;
-        line.push('\n');
+    async fn append(&self, events: &[Event]) -> Result<()> {
+        let mut lines = String::new();
+        for event in events {
+            lines.push_str(&serde_json::to_string(&EventLine::from(event))?);
+            lines.push('\n');
+        }
 
         let path = &self.path;
         let write = async {
@@ -103,8 +106,8 @@ impl EventStore for JsonlStore {
                 .open(path)
                 .await?;
 
-            // One write call, so concurrent appends do not interleave.
-            file.write_all(line.as_bytes()).await?;
+            // One write call for the whole batch, so concurrent appends do not interleave.
+            file.write_all(lines.as_bytes()).await?;
             // tokio buffers the write; flush surfaces its error.
             file.flush().await
         };
@@ -186,11 +189,11 @@ mod tests {
         let file = TempFile::new();
         let store = file.store();
         store
-            .append(&Event::message(Source::fixture(), SessionId::new(), Actor::Human, "hi", json!({"a": 1})))
+            .append(&[Event::message(Source::fixture(), SessionId::new(), Actor::Human, "hi", json!({"a": 1}))])
             .await
             .unwrap();
         store
-            .append(&Event::session_started(Source::fixture(), SessionId::new(), json!({"b": 2})))
+            .append(&[Event::session_started(Source::fixture(), SessionId::new(), json!({"b": 2}))])
             .await
             .unwrap();
 
@@ -206,10 +209,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn append_writes_a_batch_as_consecutive_lines_in_order() {
+        let file = TempFile::new();
+        let store = file.store();
+        let batch: Vec<Event> = (0..3).map(|_| Event::tool_used(Source::fixture(), SessionId::new(), "Bash", json!({}))).collect();
+        let ids: Vec<EventId> = batch.iter().map(|e| e.id).collect();
+
+        store.append(&batch).await.unwrap();
+
+        let text = fs::read_to_string(&file.0).unwrap();
+        assert_eq!(text.lines().count(), 3);
+        let events = store.all().await.unwrap();
+        assert_eq!(events.iter().map(|e| e.id).collect::<Vec<_>>(), ids);
+    }
+
+    #[tokio::test]
     async fn append_creates_a_missing_directory() {
         let dir = TempFile::new();
         let nested = JsonlStore::new(dir.0.join("sub").join("log.jsonl"));
-        nested.append(&Event::tool_used(Source::fixture(), SessionId::new(), "Bash", json!(null))).await.unwrap();
+        nested.append(&[Event::tool_used(Source::fixture(), SessionId::new(), "Bash", json!(null))]).await.unwrap();
         assert_eq!(nested.all().await.unwrap().len(), 1);
         let _ = fs::remove_dir_all(&dir.0);
     }
@@ -220,7 +238,7 @@ mod tests {
         let store = file.store();
         let created = Event::session_created(Source::fixture(), SessionId::new(), ClientSessionId::new("a".into()));
         let session = created.payload.session().unwrap();
-        store.append(&created).await.unwrap();
+        store.append(&[created]).await.unwrap();
 
         let found = store.session(&ClientSessionId::new("a".into())).await.unwrap();
         let unknown = store.session(&ClientSessionId::new("b".into())).await.unwrap();

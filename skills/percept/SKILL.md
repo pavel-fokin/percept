@@ -31,4 +31,12 @@ by a schema in `.percept/schemas/<map>.toml`:
 
 5. Use only the kinds and properties the schema declares. Leave out a
    property that has no value.
-6. Tell the user what you added, one line per node or edge.
+6. When a node rests on a message or on code, cite it as you add the
+   node. Both flags repeat:
+
+   | Flag | Cites |
+   |---|---|
+   | `--cite "<text>"` | the message holding this text, copied verbatim |
+   | `--cite-file <path>:<from>-<to>` | those lines of a file, path from the project root |
+
+7. Tell the user what you added, one line per node or edge.

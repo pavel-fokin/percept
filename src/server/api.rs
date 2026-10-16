@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use super::Api;
-use crate::core::{Actor, ClientSessionId, EventId, EventStore, SchemaStore, MapId, NodeId, Payload, Session, SessionId};
+use crate::core::{Actor, CitationSource, ClientSessionId, EventId, EventStore, SchemaStore, MapId, NodeId, Payload, Session, SessionId};
 
 pub(super) async fn status<S: EventStore + Send + Sync + 'static, M: SchemaStore + Send + Sync + 'static>(
     State(api): State<Arc<Api<S, M>>>,
@@ -86,13 +86,14 @@ pub(super) async fn map<S: EventStore + Send + Sync + 'static, M: SchemaStore + 
         kind: detail.map.kind,
         path: display_path(&detail.map.path, &api.home),
         nodes: detail
-            .nodes
+            .notes
             .into_iter()
             .map(|n| NodeView {
                 id: n.id,
                 kind: n.kind,
                 title: n.title,
                 properties: n.properties,
+                citations: n.citations.iter().map(CitationView::new).collect(),
                 created_at: n.created_at,
             })
             .collect(),
@@ -127,7 +128,25 @@ struct NodeView {
     kind: String,
     title: String,
     properties: BTreeMap<String, String>,
+    citations: Vec<CitationView>,
     created_at: jiff::Timestamp,
+}
+
+/// A citation as the page reads it: the snapshot from the log, with no pointer back to the source.
+#[derive(Serialize)]
+#[serde(rename_all = "snake_case")]
+enum CitationView {
+    Message { quote: String },
+    File { path: String, lines: (u32, u32), excerpt: String },
+}
+
+impl CitationView {
+    fn new(source: &CitationSource) -> Self {
+        match source {
+            CitationSource::Message { quote, .. } => Self::Message { quote: quote.clone() },
+            CitationSource::File { path, lines, excerpt } => Self::File { path: path.display().to_string(), lines: *lines, excerpt: excerpt.clone() },
+        }
+    }
 }
 
 #[derive(Serialize)]

@@ -31,7 +31,7 @@ enum Command {
         #[arg(allow_hyphen_values = true)]
         kind: String,
     },
-    /// Adds a node, `add <map> <kind> <title>`, or an edge, `add <map> <from> <kind> <to>`.
+    /// Adds a node, `add <map> <kind> <title>`, citing messages with `--cite <text>` and file lines with `--cite-file <path:from-to>`, or an edge, `add <map> <from> <kind> <to>`.
     Add {
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,

@@ -14,8 +14,9 @@ pub trait EventStore {
 
     fn all(&self) -> impl Future<Output = Result<Vec<Event>>> + Send;
 
+    /// Writes the events in order as one write, so no other append lands inside the batch.
     fn append(
         &self,
-        event: &Event,
+        events: &[Event],
     ) -> impl Future<Output = Result<()>> + Send;
 }

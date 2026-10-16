@@ -1,6 +1,7 @@
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use serde_json::json;
 
@@ -26,7 +27,7 @@ impl EventStore for Fixed {
             .collect())
     }
 
-    async fn append(&self, _: &Event) -> Result<()> {
+    async fn append(&self, _: &[Event]) -> Result<()> {
         unimplemented!()
     }
 }
@@ -48,7 +49,7 @@ impl EventStore for Broken {
         Err("boom".into())
     }
 
-    async fn append(&self, _: &Event) -> Result<()> {
+    async fn append(&self, _: &[Event]) -> Result<()> {
         Err("boom".into())
     }
 }
@@ -80,8 +81,8 @@ impl EventStore for &Memory {
         Ok(events.clone())
     }
 
-    async fn append(&self, event: &Event) -> Result<()> {
-        self.0.lock().unwrap().push(event.clone());
+    async fn append(&self, events: &[Event]) -> Result<()> {
+        self.0.lock().unwrap().extend_from_slice(events);
         Ok(())
     }
 }
@@ -122,5 +123,24 @@ pub(super) struct NoSchemas;
 impl SchemaStore for NoSchemas {
     async fn schema(&self, _: &Path, kind: &str) -> Result<Schema> {
         Err(format!("no schema for {kind}").into())
+    }
+}
+
+/// A folder under the system temp dir, removed on drop.
+pub(super) struct TempDir(pub(super) PathBuf);
+
+impl TempDir {
+    pub(super) fn new() -> Self {
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let path = std::env::temp_dir().join(format!("percept-app-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        std::fs::create_dir_all(&path).unwrap();
+
+        Self(path)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }

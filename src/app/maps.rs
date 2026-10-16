@@ -1,22 +1,38 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::AppService;
-use crate::core::{Actor, Edge, Event, EventStore, Map, MapId, Node, NodeId, Payload, SchemaStore, Source};
+use crate::core::{Actor, CITES, CitationSource, Edge, Event, EventId, EventStore, Map, MapId, Node, NodeBody, NodeId, Payload, SchemaStore, Source};
 use crate::shared::Result;
 
-/// A map with how many nodes and edges it holds.
+/// A map with how many notes and edges it holds. Citations and `cites` edges are not counted.
 pub struct MapSummary {
     pub map: Map,
     pub nodes: usize,
     pub edges: usize,
 }
 
-/// A map with its nodes, newest first, and its edges in log order.
+/// A map with its notes, newest first, and its edges in log order. `cites` edges are not listed: each note holds its citations.
 pub struct MapDetail {
     pub map: Map,
-    pub nodes: Vec<Node>,
+    pub notes: Vec<Note>,
     pub edges: Vec<Edge>,
+}
+
+/// A note with the sources it cites, in the order of its `cites` edges.
+pub struct Note {
+    pub id: NodeId,
+    pub kind: String,
+    pub title: String,
+    pub properties: BTreeMap<String, String>,
+    pub citations: Vec<CitationSource>,
+    pub created_at: jiff::Timestamp,
+}
+
+/// A source a note cites. A file is named relative to the project root; its text is read when the note is added.
+pub enum Cite {
+    Message(String),
+    File { path: PathBuf, lines: (u32, u32) },
 }
 
 impl<S: EventStore, M: SchemaStore> AppService<S, M> {
@@ -38,7 +54,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             return Err(format!("this project already has a {kind} map").into());
         }
 
-        self.store.append(&Event::map_created(source, actor, MapId::new(), kind)).await
+        self.store.append(&[Event::map_created(source, actor, MapId::new(), kind)]).await
     }
 
     /// The project's maps in log order.
@@ -58,7 +74,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         Ok(map_nodes(&self.store.all().await?, map))
     }
 
-    /// The project's maps in log order, each with its node and edge counts, from one read of the log.
+    /// The project's maps in log order, each with its note and edge counts, from one read of the log.
     pub async fn map_summaries(&self, project: &Path) -> Result<Vec<MapSummary>> {
         let mut summaries = self.all_map_summaries().await?;
         summaries.retain(|s| s.map.path == project);
@@ -66,7 +82,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         Ok(summaries)
     }
 
-    /// Every map across all projects in log order, each with its node and edge counts, from one read of the log.
+    /// Every map across all projects in log order, each with its note and edge counts, from one read of the log.
     pub async fn all_map_summaries(&self) -> Result<Vec<MapSummary>> {
         let events = self.store.all().await?;
 
@@ -77,8 +93,8 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
 
         for e in &events {
             match &e.payload {
-                Payload::NodeAdded { map, .. } => summaries.iter_mut().filter(|s| s.map.id == *map).for_each(|s| s.nodes += 1),
-                Payload::EdgeAdded { map, .. } => summaries.iter_mut().filter(|s| s.map.id == *map).for_each(|s| s.edges += 1),
+                Payload::NodeAdded { map, body: NodeBody::Note { .. }, .. } => summaries.iter_mut().filter(|s| s.map.id == *map).for_each(|s| s.nodes += 1),
+                Payload::EdgeAdded { map, kind, .. } if kind != CITES => summaries.iter_mut().filter(|s| s.map.id == *map).for_each(|s| s.edges += 1),
                 _ => {}
             }
         }
@@ -86,7 +102,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         Ok(summaries)
     }
 
-    /// The map with the given id, its nodes newest first and its edges in log order, from one read of the log.
+    /// The map with the given id, its notes newest first and its edges in log order, from one read of the log.
     pub async fn map_detail(&self, id: MapId) -> Result<Option<MapDetail>> {
         let events = self.store.all().await?;
 
@@ -94,10 +110,36 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             return Ok(None);
         };
 
-        let mut nodes = map_nodes(&events, id);
-        nodes.reverse();
+        let nodes = map_nodes(&events, id);
+        let mut edges = map_edges(&events, id);
 
-        Ok(Some(MapDetail { map, nodes, edges: map_edges(&events, id) }))
+        let citations: BTreeMap<NodeId, CitationSource> = nodes
+            .iter()
+            .filter_map(|n| match &n.body {
+                NodeBody::Citation(source) => Some((n.id, source.clone())),
+                NodeBody::Note { .. } => None,
+            })
+            .collect();
+
+        let mut notes: Vec<Note> = nodes
+            .into_iter()
+            .filter_map(|n| match n.body {
+                NodeBody::Note { kind, title, properties } => {
+                    let citations = edges
+                        .iter()
+                        .filter(|e| e.kind == CITES && e.from == n.id)
+                        .filter_map(|e| citations.get(&e.to).cloned())
+                        .collect();
+
+                    Some(Note { id: n.id, kind, title, properties, citations, created_at: n.created_at })
+                }
+                NodeBody::Citation(_) => None,
+            })
+            .collect();
+        notes.reverse();
+        edges.retain(|e| e.kind != CITES);
+
+        Ok(Some(MapDetail { map, notes, edges }))
     }
 
     /// The map's edges in log order.
@@ -126,22 +168,26 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         let find = |title: &str| {
             nodes
                 .iter()
-                .find(|n| n.title == title)
+                .find_map(|n| match &n.body {
+                    NodeBody::Note { kind, title: t, .. } if t == title => Some((n.id, kind.as_str())),
+                    _ => None,
+                })
                 .ok_or_else(|| format!("the {map_kind} map has no node titled {title:?}"))
         };
-        let (from, to) = (find(from)?, find(to)?);
-        self.schemas.schema(&source.path, map_kind).await?.check_edge(kind, &from.kind, &to.kind)?;
-        let (from, to) = (from.id, to.id);
+        let ((from, from_kind), (to, to_kind)) = (find(from)?, find(to)?);
+        self.schemas.schema(&source.path, map_kind).await?.check_edge(kind, from_kind, to_kind)?;
 
         let repeated = self.edges(map.id).await?.iter().any(|e| e.from == from && e.kind == kind && e.to == to);
         if repeated {
             return Err(format!("the {map_kind} map already has this {kind} edge").into());
         }
 
-        self.store.append(&Event::edge_added(source, actor, map.id, kind, from, to)).await
+        self.store.append(&[Event::edge_added(source, actor, map.id, kind, from, to)]).await
     }
 
-    /// Records a new node on the project's map of the given kind. A title is unique within its map.
+    /// Records a new note on the project's map of the given kind, with a `cites` edge to a citation for each source cited.
+    /// A title is unique among the notes of its map.
+    #[allow(clippy::too_many_arguments, reason = "the arguments of `percept add`, one each")]
     pub async fn add_node(
         &self,
         source: Source,
@@ -150,20 +196,75 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         kind: &str,
         title: &str,
         properties: BTreeMap<String, String>,
+        cites: &[Cite],
     ) -> Result<()> {
         not_blank("kind", kind)?;
         not_blank("title", title)?;
 
+        // Read before the lock, which hooks wait on.
+        let mut resolved = Vec::new();
+        for cite in cites {
+            resolved.push(match cite {
+                Cite::Message(quote) => {
+                    not_blank("quote", quote)?;
+                    Resolved::Message(quote)
+                }
+                Cite::File { path, lines } => Resolved::Source(read_file(&source.path, path, *lines).await?),
+            });
+        }
+
         // Held until return, so parallel adds cannot both pass the check.
         let _lock = self.store.lock().await?;
 
-        let map = self.map(&source.path, map_kind).await?;
+        let events = self.store.all().await?;
+        let map = all_maps(&events)
+            .into_iter()
+            .find(|m| m.path == source.path && m.kind == map_kind)
+            .ok_or_else(|| format!("this project has no {map_kind} map"))?;
         self.schemas.schema(&source.path, map_kind).await?.check_node(kind, &properties)?;
-        if self.nodes(map.id).await?.iter().any(|n| n.title == title) {
+
+        let nodes = map_nodes(&events, map.id);
+        let taken = nodes.iter().any(|n| matches!(&n.body, NodeBody::Note { title: t, .. } if t == title));
+        if taken {
             return Err(format!("the {map_kind} map already has a node titled {title:?}").into());
         }
 
-        self.store.append(&Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties)).await
+        let mut known: Vec<(NodeId, CitationSource)> = nodes
+            .iter()
+            .filter_map(|n| match &n.body {
+                NodeBody::Citation(source) => Some((n.id, source.clone())),
+                NodeBody::Note { .. } => None,
+            })
+            .collect();
+        let note = NodeId::new();
+        let body = NodeBody::Note { kind: kind.into(), title: title.into(), properties };
+        let mut batch = vec![Event::node_added(source.clone(), actor, map.id, note, body)];
+        let mut cited = Vec::new();
+
+        // A citation with an equal source is reused, within this note as well as from earlier ones.
+        for cite in resolved {
+            let citation = match cite {
+                Resolved::Message(quote) => CitationSource::Message { event: find_message(&events, &source.path, quote)?, quote: quote.into() },
+                Resolved::Source(citation) => citation,
+            };
+
+            let id = match known.iter().find(|(_, known)| *known == citation) {
+                Some((id, _)) => *id,
+                None => {
+                    let id = NodeId::new();
+                    known.push((id, citation.clone()));
+                    batch.push(Event::node_added(source.clone(), actor, map.id, id, NodeBody::Citation(citation)));
+                    id
+                }
+            };
+
+            if !cited.contains(&id) {
+                cited.push(id);
+            }
+        }
+        batch.extend(cited.into_iter().map(|id| Event::edge_added(source.clone(), actor, map.id, CITES, note, id)));
+
+        self.store.append(&batch).await
     }
 }
 
@@ -173,6 +274,52 @@ fn not_blank(name: &str, value: &str) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// A cite whose file has been read. A quote still needs the log to find its message.
+enum Resolved<'a> {
+    Message(&'a str),
+    Source(CitationSource),
+}
+
+/// The project's message that contains the quote. Human messages come before agent messages,
+/// since an agent often repeats the user's words. Newer messages come before older ones.
+fn find_message(events: &[Event], project: &Path, quote: &str) -> Result<EventId> {
+    [Actor::Human, Actor::Agent]
+        .into_iter()
+        .find_map(|actor| {
+            events.iter().rev().find(|e| {
+                e.actor == actor && e.source.path == project && matches!(&e.payload, Payload::Message { content, .. } if content.contains(quote))
+            })
+        })
+        .map(|e| e.id)
+        .ok_or_else(|| format!("no message in this project contains {quote:?}; copy the text verbatim from a message").into())
+}
+
+/// The lines of a file in the project, joined by newlines, under the file's path from the project root.
+/// The file must resolve inside the project root, so every spelling of a path cites the same file.
+async fn read_file(root: &Path, path: &Path, lines @ (from, to): (u32, u32)) -> Result<CitationSource> {
+    let shown = path.display();
+
+    if from == 0 || from > to {
+        return Err(format!("lines {from}-{to} of {shown} are not a range: lines count from 1 and from must not exceed to").into());
+    }
+
+    if path.is_absolute() {
+        return Err(format!("{shown} is absolute; name the file relative to the project root").into());
+    }
+
+    let root = tokio::fs::canonicalize(root).await?;
+    let file = tokio::fs::canonicalize(root.join(path)).await.map_err(|e| format!("cannot read {shown}: {e}"))?;
+    let relative = file.strip_prefix(&root).map_err(|_| format!("{shown} is outside the project root"))?;
+
+    let text = tokio::fs::read_to_string(&file).await.map_err(|e| format!("cannot read {shown}: {e}"))?;
+    let all: Vec<&str> = text.lines().collect();
+    if to as usize > all.len() {
+        return Err(format!("{shown} has {} lines; line {to} is beyond the end", all.len()).into());
+    }
+
+    Ok(CitationSource::File { path: relative.into(), lines, excerpt: all[from as usize - 1..to as usize].join("\n") })
 }
 
 fn all_maps(events: &[Event]) -> Vec<Map> {
@@ -189,11 +336,9 @@ fn map_nodes(events: &[Event], map: MapId) -> Vec<Node> {
     events
         .iter()
         .filter_map(|e| match &e.payload {
-            Payload::NodeAdded { map: id, node, kind, title, properties } if *id == map => Some(Node {
+            Payload::NodeAdded { map: id, node, body } if *id == map => Some(Node {
                 id: *node,
-                kind: kind.clone(),
-                title: title.clone(),
-                properties: properties.clone(),
+                body: body.clone(),
                 created_at: e.created_at,
             }),
             _ => None,
@@ -214,7 +359,34 @@ fn map_edges(events: &[Event], map: MapId) -> Vec<Edge> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{Broken, Memory, NoSchemas, Schemas};
+    use crate::app::testing::{Broken, Memory, NoSchemas, Schemas, TempDir};
+    use crate::core::SessionId;
+
+    fn say(store: &Memory, source: Source, actor: Actor, content: &str) -> EventId {
+        let event = Event::message(source, SessionId::new(), actor, content, serde_json::json!({}));
+        let id = event.id;
+        store.0.lock().unwrap().push(event);
+
+        id
+    }
+
+    fn quote(text: &str) -> Cite {
+        Cite::Message(text.into())
+    }
+
+    fn note_of(node: &Node) -> (&str, &str, &BTreeMap<String, String>) {
+        match &node.body {
+            NodeBody::Note { kind, title, properties } => (kind, title, properties),
+            NodeBody::Citation(_) => panic!("expected a note"),
+        }
+    }
+
+    fn quoted(node: &Node) -> (EventId, &str) {
+        match &node.body {
+            NodeBody::Citation(CitationSource::Message { event, quote }) => (*event, quote),
+            _ => panic!("expected a message citation"),
+        }
+    }
 
     #[tokio::test]
     async fn the_same_map_kind_can_be_created_in_two_projects_but_not_twice_in_one() {
@@ -264,7 +436,7 @@ mod tests {
         let service = AppService::new(&store, Schemas);
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
 
-        let result = service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default()).await;
+        let result = service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default(), &[]).await;
 
         assert!(result.is_err());
         assert_eq!(store.0.lock().unwrap().len(), 1);
@@ -277,9 +449,9 @@ mod tests {
         service.create_map(Source::fixture(), Actor::Human, "concepts").await.unwrap();
         let undeclared = BTreeMap::from([("colour".to_string(), "red".to_string())]);
 
-        let unknown_kind = service.add_node(Source::fixture(), Actor::Human, "concepts", "idea", "A", Default::default()).await;
-        let unknown_property = service.add_node(Source::fixture(), Actor::Human, "concepts", "concept", "B", undeclared).await;
-        let subset = service.add_node(Source::fixture(), Actor::Human, "concepts", "concept", "C", Default::default()).await;
+        let unknown_kind = service.add_node(Source::fixture(), Actor::Human, "concepts", "idea", "A", Default::default(), &[]).await;
+        let unknown_property = service.add_node(Source::fixture(), Actor::Human, "concepts", "concept", "B", undeclared, &[]).await;
+        let subset = service.add_node(Source::fixture(), Actor::Human, "concepts", "concept", "C", Default::default(), &[]).await;
 
         assert!(unknown_kind.unwrap_err().to_string().contains("concept"));
         assert!(unknown_property.unwrap_err().to_string().contains("definition"));
@@ -292,8 +464,8 @@ mod tests {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default()).await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), &[]).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default(), &[]).await.unwrap();
 
         let unknown_kind = service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "blocks", "Q").await;
         let wrong_from = service.add_edge(Source::fixture(), Actor::Human, "decisions", "Q", "answers", "Q").await;
@@ -314,7 +486,7 @@ mod tests {
         service.create_map(Source::fixture(), Actor::Human, "tasks").await.unwrap();
         let gone = AppService::new(&store, NoSchemas);
 
-        let result = gone.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default()).await;
+        let result = gone.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default(), &[]).await;
 
         assert!(result.is_err());
         assert_eq!(store.0.lock().unwrap().len(), 1);
@@ -327,11 +499,11 @@ mod tests {
         service.create_map(Source::fixture(), Actor::Human, "concepts").await.unwrap();
         let properties = BTreeMap::from([("definition".to_string(), "One log.".to_string())]);
 
-        service.add_node(Source::fixture(), Actor::Human, "concepts", "concept", "Event log", properties.clone()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "concepts", "concept", "Event log", properties.clone(), &[]).await.unwrap();
 
         let map = service.map(&Source::fixture().path, "concepts").await.unwrap();
         let nodes = service.nodes(map.id).await.unwrap();
-        assert_eq!(nodes[0].properties, properties);
+        assert_eq!(note_of(&nodes[0]).2, &properties);
     }
 
     #[tokio::test]
@@ -339,10 +511,10 @@ mod tests {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), &[]).await.unwrap();
 
         let map = service.create_map(Source::fixture(), Actor::Human, " ").await;
-        let node = service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "", Default::default()).await;
+        let node = service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "", Default::default(), &[]).await;
         let edge = service.add_edge(Source::fixture(), Actor::Human, "decisions", "Q", "", "Q").await;
 
         assert!(map.is_err());
@@ -356,8 +528,8 @@ mod tests {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default()).await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), &[]).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default(), &[]).await.unwrap();
         service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
 
         let again = service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await;
@@ -373,10 +545,10 @@ mod tests {
         let service = AppService::new(&store, Schemas);
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
         service.create_map(Source::fixture(), Actor::Human, "tasks").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Why?", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Why?", Default::default(), &[]).await.unwrap();
 
-        let same_map = service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "Why?", Default::default()).await;
-        let other_map = service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "Why?", Default::default()).await;
+        let same_map = service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "Why?", Default::default(), &[]).await;
+        let other_map = service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "Why?", Default::default(), &[]).await;
 
         assert!(same_map.is_err());
         assert!(other_map.is_ok());
@@ -389,14 +561,14 @@ mod tests {
         let service = AppService::new(&store, Schemas);
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
         service.create_map(Source::fixture(), Actor::Human, "tasks").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default()).await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default()).await.unwrap();
-        service.add_node(Source::fixture(), Actor::Agent, "decisions", "option", "O", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), &[]).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default(), &[]).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Agent, "decisions", "option", "O", Default::default(), &[]).await.unwrap();
         let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
 
         let nodes = service.nodes(map.id).await.unwrap();
 
-        let found: Vec<(&str, &str)> = nodes.iter().map(|n| (n.kind.as_str(), n.title.as_str())).collect();
+        let found: Vec<(&str, &str)> = nodes.iter().map(|n| (note_of(n).0, note_of(n).1)).collect();
         assert_eq!(found, vec![("question", "Q"), ("option", "O")]);
         assert!(service.map(&Source::fixture().path, "nope").await.is_err());
     }
@@ -406,8 +578,8 @@ mod tests {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default()).await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), &[]).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default(), &[]).await.unwrap();
 
         let missing_to = service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "nope").await;
         let missing_from = service.add_edge(Source::fixture(), Actor::Human, "decisions", "nope", "answers", "Q").await;
@@ -427,7 +599,7 @@ mod tests {
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
         service.create_map(Source::fixture(), Actor::Human, "tasks").await.unwrap();
         for (map, kind, title) in [("decisions", "question", "Q"), ("decisions", "option", "O"), ("tasks", "task", "T"), ("tasks", "task", "U")] {
-            service.add_node(Source::fixture(), Actor::Human, map, kind, title, Default::default()).await.unwrap();
+            service.add_node(Source::fixture(), Actor::Human, map, kind, title, Default::default(), &[]).await.unwrap();
         }
         service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
         service.add_edge(Source::fixture(), Actor::Human, "tasks", "T", "blocks", "U").await.unwrap();
@@ -447,9 +619,9 @@ mod tests {
         let service = AppService::new(&store, Schemas);
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
         service.create_map(Source::fixture(), Actor::Human, "tasks").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default()).await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default()).await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), &[]).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default(), &[]).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default(), &[]).await.unwrap();
         service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
 
         let summaries = service.map_summaries(&Source::fixture().path).await.unwrap();
@@ -465,7 +637,7 @@ mod tests {
         let other = Source { client: "claude".into(), path: "/other".into() };
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
         service.create_map(other.clone(), Actor::Human, "tasks").await.unwrap();
-        service.add_node(other, Actor::Human, "tasks", "task", "T", Default::default()).await.unwrap();
+        service.add_node(other, Actor::Human, "tasks", "task", "T", Default::default(), &[]).await.unwrap();
 
         let summaries = service.all_map_summaries().await.unwrap();
 
@@ -479,18 +651,18 @@ mod tests {
         let service = AppService::new(&store, Schemas);
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
         service.create_map(Source::fixture(), Actor::Human, "tasks").await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default()).await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default()).await.unwrap();
-        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), &[]).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default(), &[]).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default(), &[]).await.unwrap();
         service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
         let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
 
         let detail = service.map_detail(map.id).await.unwrap().unwrap();
 
-        let titles: Vec<&str> = detail.nodes.iter().map(|n| n.title.as_str()).collect();
+        let titles: Vec<&str> = detail.notes.iter().map(|n| n.title.as_str()).collect();
         assert_eq!(titles, vec!["O", "Q"]);
         let edges: Vec<(&str, NodeId, NodeId)> = detail.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
-        assert_eq!(edges, vec![("answers", detail.nodes[0].id, detail.nodes[1].id)]);
+        assert_eq!(edges, vec![("answers", detail.notes[0].id, detail.notes[1].id)]);
         assert_eq!(detail.map.kind, "decisions");
     }
 
@@ -503,6 +675,345 @@ mod tests {
         let detail = service.map_detail(MapId::new()).await.unwrap();
 
         assert!(detail.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_quote_records_a_citation_node_and_a_cites_edge_from_the_note() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        let said = say(&store, Source::fixture(), Actor::Human, "Maybe a node is a Node and Citation a subtype");
+
+        service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "Q", Default::default(), &[quote("Citation a subtype")]).await.unwrap();
+
+        let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        let edges = service.edges(map.id).await.unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(note_of(&nodes[0]).1, "Q");
+        assert_eq!(quoted(&nodes[1]), (said, "Citation a subtype"));
+        let found: Vec<(&str, NodeId, NodeId)> = edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
+        assert_eq!(found, vec![("cites", nodes[0].id, nodes[1].id)]);
+    }
+
+    #[tokio::test]
+    async fn a_quote_is_found_in_human_messages_first_then_agent_messages_newest_first() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        say(&store, Source::fixture(), Actor::Human, "keep the log, older");
+        let newer_human = say(&store, Source::fixture(), Actor::Human, "keep the log, newer");
+        say(&store, Source::fixture(), Actor::Agent, "we keep the log");
+        let agent_only = say(&store, Source::fixture(), Actor::Agent, "a plan for the schema");
+        let newest_agent = say(&store, Source::fixture(), Actor::Agent, "a plan for the schema, again");
+        let (log, plan) = ([quote("keep the log")], [quote("a plan for")]);
+
+        service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "A", Default::default(), &log).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "B", Default::default(), &plan).await.unwrap();
+
+        let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        assert_eq!(quoted(&nodes[1]).0, newer_human);
+        assert_eq!(quoted(&nodes[3]).0, newest_agent);
+        assert_ne!(quoted(&nodes[3]).0, agent_only);
+    }
+
+    #[tokio::test]
+    async fn a_quote_found_in_no_message_of_the_project_is_an_error_and_records_nothing() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        let other = Source { client: "claude".into(), path: "/other".into() };
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        say(&store, Source::fixture(), Actor::Human, "found");
+        say(&store, other, Actor::Human, "elsewhere");
+        let quotes = [quote("found"), quote("elsewhere")];
+
+        let result = service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "Q", Default::default(), &quotes).await;
+
+        assert!(result.unwrap_err().to_string().contains("verbatim"));
+        assert_eq!(store.0.lock().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn a_blank_quote_is_an_error_and_records_nothing() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        say(&store, Source::fixture(), Actor::Human, "hello there");
+
+        let result = service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "Q", Default::default(), &[quote(" ")]).await;
+
+        assert!(result.unwrap_err().to_string().contains("quote"));
+        assert_eq!(store.0.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_citation_with_an_equal_source_is_reused_by_a_later_note_and_within_one_add() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        say(&store, Source::fixture(), Actor::Human, "one two three");
+        let (one, two) = ([quote("one two"), quote("one two")], [quote("one two"), quote("two three")]);
+
+        service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "A", Default::default(), &one).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "B", Default::default(), &two).await.unwrap();
+
+        let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        let edges = service.edges(map.id).await.unwrap();
+        let citations: Vec<&str> = nodes.iter().filter(|n| matches!(n.body, NodeBody::Citation(_))).map(|n| quoted(n).1).collect();
+        assert_eq!(citations, vec!["one two", "two three"]);
+        let (a, b) = (nodes[0].id, nodes[2].id);
+        let (shared, second) = (nodes[1].id, nodes[3].id);
+        let found: Vec<(NodeId, NodeId)> = edges.iter().map(|e| (e.from, e.to)).collect();
+        assert_eq!(found, vec![(a, shared), (b, shared), (b, second)]);
+    }
+
+    #[tokio::test]
+    async fn a_taken_title_with_a_quote_records_no_citation() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), &[]).await.unwrap();
+        say(&store, Source::fixture(), Actor::Human, "hello");
+
+        let result = service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "Q", Default::default(), &[quote("hello")]).await;
+
+        assert!(result.is_err());
+        assert_eq!(store.0.lock().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn a_cites_edge_cannot_be_added_between_notes() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), &[]).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default(), &[]).await.unwrap();
+
+        let result = service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "cites", "Q").await;
+
+        assert!(result.unwrap_err().to_string().contains("\"cites\""));
+        assert_eq!(store.0.lock().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn map_detail_gives_each_note_its_citations_in_edge_order_and_lists_no_cites_edge() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        say(&store, Source::fixture(), Actor::Human, "one two three");
+        service.add_node(Source::fixture(), Actor::Agent, "decisions", "question", "Q", Default::default(), &[quote("two three"), quote("one two")]).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Agent, "decisions", "option", "O", Default::default(), &[]).await.unwrap();
+        service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
+        let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
+
+        let detail = service.map_detail(map.id).await.unwrap().unwrap();
+
+        let titles: Vec<&str> = detail.notes.iter().map(|n| n.title.as_str()).collect();
+        assert_eq!(titles, vec!["O", "Q"]);
+        assert!(detail.notes[0].citations.is_empty());
+        let quotes: Vec<&str> = detail.notes[1]
+            .citations
+            .iter()
+            .map(|c| match c {
+                CitationSource::Message { quote, .. } => quote.as_str(),
+                CitationSource::File { .. } => panic!("expected a message citation"),
+            })
+            .collect();
+        assert_eq!(quotes, vec!["two three", "one two"]);
+        let kinds: Vec<&str> = detail.edges.iter().map(|e| e.kind.as_str()).collect();
+        assert_eq!(kinds, vec!["answers"]);
+    }
+
+    #[tokio::test]
+    async fn map_summaries_count_notes_and_edges_other_than_cites() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        say(&store, Source::fixture(), Actor::Human, "hello");
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), &[quote("hello")]).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default(), &[]).await.unwrap();
+        service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
+
+        let summaries = service.map_summaries(&Source::fixture().path).await.unwrap();
+
+        let found: Vec<(usize, usize)> = summaries.iter().map(|s| (s.nodes, s.edges)).collect();
+        assert_eq!(found, vec![(2, 1)]);
+    }
+
+    fn excerpted(node: &Node) -> (&Path, (u32, u32), &str) {
+        match &node.body {
+            NodeBody::Citation(CitationSource::File { path, lines, excerpt }) => (path, *lines, excerpt),
+            _ => panic!("expected a file citation"),
+        }
+    }
+
+    fn file(path: &str, from: u32, to: u32) -> Cite {
+        Cite::File { path: path.into(), lines: (from, to) }
+    }
+
+    /// A project in a temp dir with a `decisions` map and the file `a.rs` of five lines.
+    async fn project() -> (TempDir, Source, Memory) {
+        let dir = TempDir::new();
+        std::fs::write(dir.0.join("a.rs"), "one\ntwo\nthree\nfour\nfive\n").unwrap();
+        let source = Source { client: "claude".into(), path: dir.0.clone() };
+        let store = Memory::default();
+        AppService::new(&store, Schemas).create_map(source.clone(), Actor::Human, "decisions").await.unwrap();
+
+        (dir, source, store)
+    }
+
+    async fn add(store: &Memory, source: &Source, title: &str, cites: &[Cite]) -> Result<()> {
+        AppService::new(store, Schemas).add_node(source.clone(), Actor::Agent, "decisions", "question", title, Default::default(), cites).await
+    }
+
+    #[tokio::test]
+    async fn a_file_cite_records_the_inclusive_lines_the_path_and_a_cites_edge() {
+        let (_dir, source, store) = project().await;
+
+        add(&store, &source, "Q", &[file("a.rs", 2, 4)]).await.unwrap();
+
+        let service = AppService::new(&store, Schemas);
+        let map = service.map(&source.path, "decisions").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        let edges = service.edges(map.id).await.unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(excerpted(&nodes[1]), (Path::new("a.rs"), (2, 4), "two\nthree\nfour"));
+        let found: Vec<(&str, NodeId, NodeId)> = edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
+        assert_eq!(found, vec![("cites", nodes[0].id, nodes[1].id)]);
+    }
+
+    #[tokio::test]
+    async fn the_last_line_can_be_cited_and_a_single_line_is_a_range() {
+        let (_dir, source, store) = project().await;
+
+        add(&store, &source, "Q", &[file("a.rs", 5, 5), file("a.rs", 1, 1)]).await.unwrap();
+
+        let service = AppService::new(&store, Schemas);
+        let map = service.map(&source.path, "decisions").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        assert_eq!(excerpted(&nodes[1]).2, "five");
+        assert_eq!(excerpted(&nodes[2]).2, "one");
+    }
+
+    #[tokio::test]
+    async fn a_note_can_cite_a_message_and_a_file_in_the_order_given() {
+        let (_dir, source, store) = project().await;
+        let said = say(&store, source.clone(), Actor::Human, "hello there");
+
+        add(&store, &source, "Q", &[file("a.rs", 1, 2), quote("hello")]).await.unwrap();
+
+        let service = AppService::new(&store, Schemas);
+        let map = service.map(&source.path, "decisions").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        let edges = service.edges(map.id).await.unwrap();
+        assert_eq!(excerpted(&nodes[1]).2, "one\ntwo");
+        assert_eq!(quoted(&nodes[2]), (said, "hello"));
+        let found: Vec<NodeId> = edges.iter().map(|e| e.to).collect();
+        assert_eq!(found, vec![nodes[1].id, nodes[2].id]);
+    }
+
+    #[tokio::test]
+    async fn bad_line_ranges_are_errors_and_record_nothing() {
+        let (_dir, source, store) = project().await;
+
+        let zero = add(&store, &source, "A", &[file("a.rs", 0, 2)]).await;
+        let reversed = add(&store, &source, "B", &[file("a.rs", 3, 2)]).await;
+        let beyond = add(&store, &source, "C", &[file("a.rs", 4, 6)]).await;
+
+        assert!(zero.is_err());
+        assert!(reversed.is_err());
+        assert!(beyond.unwrap_err().to_string().contains("5 lines"));
+        assert_eq!(store.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_missing_file_is_an_error_and_records_nothing() {
+        let (_dir, source, store) = project().await;
+        say(&store, source.clone(), Actor::Human, "hello");
+
+        let result = add(&store, &source, "Q", &[quote("hello"), file("nope.rs", 1, 1)]).await;
+
+        assert!(result.unwrap_err().to_string().contains("nope.rs"));
+        assert_eq!(store.0.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn an_absolute_path_is_an_error_even_inside_the_project() {
+        let (dir, source, store) = project().await;
+
+        let result = add(&store, &source, "Q", &[Cite::File { path: dir.0.join("a.rs"), lines: (1, 1) }]).await;
+
+        assert!(result.unwrap_err().to_string().contains("absolute"));
+        assert_eq!(store.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_path_leaving_the_project_through_dots_is_an_error_but_dots_within_it_resolve() {
+        let (dir, source, store) = project().await;
+        let outer = TempDir::new();
+        std::fs::write(outer.0.join("secret.rs"), "s\n").unwrap();
+        std::fs::create_dir(dir.0.join("sub")).unwrap();
+        let escape = format!("../{}/secret.rs", outer.0.file_name().unwrap().to_str().unwrap());
+
+        let outside = add(&store, &source, "A", &[file(&escape, 1, 1)]).await;
+        let inside = add(&store, &source, "B", &[file("sub/../a.rs", 1, 1)]).await;
+
+        assert!(outside.unwrap_err().to_string().contains("outside"));
+        assert!(inside.is_ok());
+        let service = AppService::new(&store, Schemas);
+        let map = service.map(&source.path, "decisions").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        assert_eq!(excerpted(&nodes[1]).0, Path::new("a.rs"));
+    }
+
+    #[tokio::test]
+    async fn every_spelling_of_a_path_reuses_one_citation() {
+        let (_dir, source, store) = project().await;
+
+        add(&store, &source, "Q", &[file("a.rs", 1, 2), file("./a.rs", 1, 2)]).await.unwrap();
+
+        let service = AppService::new(&store, Schemas);
+        let map = service.map(&source.path, "decisions").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(excerpted(&nodes[1]).0, Path::new("a.rs"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_symlink_leading_outside_the_project_is_an_error() {
+        let (dir, source, store) = project().await;
+        let outer = TempDir::new();
+        std::fs::write(outer.0.join("secret.rs"), "s\n").unwrap();
+        std::os::unix::fs::symlink(outer.0.join("secret.rs"), dir.0.join("link.rs")).unwrap();
+
+        let result = add(&store, &source, "Q", &[file("link.rs", 1, 1)]).await;
+
+        assert!(result.unwrap_err().to_string().contains("outside"));
+        assert_eq!(store.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_file_citation_with_an_equal_source_is_reused_until_the_text_changes() {
+        let (dir, source, store) = project().await;
+
+        add(&store, &source, "A", &[file("a.rs", 1, 2), file("a.rs", 1, 2)]).await.unwrap();
+        add(&store, &source, "B", &[file("a.rs", 1, 2)]).await.unwrap();
+        std::fs::write(dir.0.join("a.rs"), "uno\ntwo\n").unwrap();
+        add(&store, &source, "C", &[file("a.rs", 1, 2)]).await.unwrap();
+
+        let service = AppService::new(&store, Schemas);
+        let map = service.map(&source.path, "decisions").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        let edges = service.edges(map.id).await.unwrap();
+        let excerpts: Vec<&str> = nodes.iter().filter(|n| matches!(n.body, NodeBody::Citation(_))).map(|n| excerpted(n).2).collect();
+        assert_eq!(excerpts, vec!["one\ntwo", "uno\ntwo"]);
+        let (a, b, c) = (nodes[0].id, nodes[2].id, nodes[3].id);
+        let (old, new) = (nodes[1].id, nodes[4].id);
+        let found: Vec<(NodeId, NodeId)> = edges.iter().map(|e| (e.from, e.to)).collect();
+        assert_eq!(found, vec![(a, old), (b, old), (c, new)]);
     }
 
     #[tokio::test]

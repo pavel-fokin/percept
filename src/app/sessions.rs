@@ -63,10 +63,10 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
 
         if existing.is_none() {
             let created = Event::session_created(source.clone(), session, client_session_id);
-            self.store.append(&created).await?;
+            self.store.append(&[created]).await?;
         }
 
-        self.store.append(&event(source, session)).await
+        self.store.append(&[event(source, session)]).await
     }
 }
 

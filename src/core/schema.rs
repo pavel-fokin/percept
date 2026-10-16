@@ -3,6 +3,12 @@ use std::path::Path;
 
 use crate::shared::Result;
 
+/// The node kind of a citation. Every map has it, and no schema declares it.
+const CITATION: &str = "citation";
+
+/// The edge kind from a note to a citation. Every map has it, and no schema declares it.
+pub const CITES: &str = "cites";
+
 /// The shape of one kind of map: which nodes and edges it allows.
 pub struct Schema {
     #[allow(dead_code, reason = "parsed now; read when the agent is shown the schema")]
@@ -21,6 +27,7 @@ pub struct EdgeKind {
 
 impl Schema {
     /// A schema needs a node kind, and each edge kind links declared node kinds.
+    /// The built-in `citation` node kind and `cites` edge kind are not its to declare.
     pub fn new(
         purpose: String,
         instructions: String,
@@ -29,6 +36,14 @@ impl Schema {
     ) -> Result<Self> {
         if nodes.is_empty() {
             return Err("a schema needs at least one node kind".into());
+        }
+
+        if nodes.contains_key(CITATION) {
+            return Err(format!("the node kind {CITATION:?} is built in; a schema cannot declare it").into());
+        }
+
+        if edges.contains_key(CITES) {
+            return Err(format!("the edge kind {CITES:?} is built in; a schema cannot declare it").into());
         }
 
         for (kind, edge) in &edges {
@@ -137,6 +152,24 @@ mod tests {
         assert!(unknown.unwrap_err().to_string().contains("links"));
         assert!(wrong_from.unwrap_err().to_string().contains("from"));
         assert!(wrong_to.unwrap_err().to_string().contains("to"));
+    }
+
+    #[test]
+    fn a_schema_cannot_declare_the_built_in_citation_or_cites() {
+        let citation = Schema::new("p".into(), "i".into(), nodes(&["a", "citation"]), BTreeMap::new());
+        let cites = Schema::new("p".into(), "i".into(), nodes(&["a"]), BTreeMap::from([("cites".to_string(), EdgeKind { from: "a".into(), to: "a".into() })]));
+
+        assert!(citation.err().unwrap().to_string().contains("citation"));
+        assert!(cites.err().unwrap().to_string().contains("cites"));
+    }
+
+    #[test]
+    fn a_schema_edge_cannot_reach_a_citation() {
+        let schema = Schema::new("p".into(), "i".into(), nodes(&["a", "b"]), edge("a", "b")).unwrap();
+
+        let result = schema.check_edge("links", "a", "citation");
+
+        assert!(result.is_err());
     }
 
     #[test]
