@@ -1,9 +1,11 @@
+use std::path::PathBuf;
+
 use jiff::Timestamp;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::core::{Actor, ClientAgentId, ClientSessionId, Event, EventId, Kind, Payload, Source};
+use crate::core::{Actor, ClientAgentId, ClientSessionId, Event, EventId, Kind, Payload, Reference, Source};
 use crate::shared::{Error, Result};
 
 /// One log line. The log format lives here, apart from the domain `Event`.
@@ -36,8 +38,10 @@ impl From<&Event> for EventLine {
                 json!({ "session": session, "subagent": subagent.as_str(), "content": content })
             }
             Payload::MapCreated { map, kind } => json!({ "map": map, "kind": kind }),
-            Payload::NodeAdded { map, node, kind, title, properties } => {
-                json!({ "map": map, "node": node, "kind": kind, "title": title, "properties": properties })
+            Payload::NodeAdded { map, node, kind, title, properties, references } => {
+                let references: Vec<ReferenceLine> = references.iter().map(ReferenceLine::from).collect();
+
+                json!({ "map": map, "node": node, "kind": kind, "title": title, "properties": properties, "references": references })
             }
             Payload::EdgeAdded { map, kind, from, to } => {
                 json!({ "map": map, "kind": kind, "from": from, "to": to })
@@ -93,6 +97,11 @@ impl TryFrom<EventLine> for Event {
                 kind: field(p, "kind")?,
                 title: field(p, "title")?,
                 properties: if p.get("properties").is_some() { field(p, "properties")? } else { Default::default() },
+                references: if p.get("references").is_some() {
+                    field::<Vec<ReferenceLine>>(p, "references")?.into_iter().map(Reference::from).collect()
+                } else {
+                    Vec::new()
+                },
             },
             Kind::EdgeAdded => Payload::EdgeAdded {
                 map: field(p, "map")?,
@@ -110,6 +119,31 @@ impl TryFrom<EventLine> for Event {
             raw: line.raw,
             created_at: line.created_at,
         })
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ReferenceLine {
+    Message { event: EventId, quote: String },
+    File { path: PathBuf, lines: (u32, u32), excerpt: String },
+}
+
+impl From<&Reference> for ReferenceLine {
+    fn from(reference: &Reference) -> Self {
+        match reference {
+            Reference::Message { event, quote } => Self::Message { event: *event, quote: quote.clone() },
+            Reference::File { path, lines, excerpt } => Self::File { path: path.clone(), lines: *lines, excerpt: excerpt.clone() },
+        }
+    }
+}
+
+impl From<ReferenceLine> for Reference {
+    fn from(line: ReferenceLine) -> Self {
+        match line {
+            ReferenceLine::Message { event, quote } => Self::Message { event, quote },
+            ReferenceLine::File { path, lines, excerpt } => Self::File { path, lines, excerpt },
+        }
     }
 }
 
@@ -141,7 +175,7 @@ mod tests {
             Event::subagent_started(Source::fixture(), session, ClientAgentId::new("a1".into()), "builder", "Build it", raw.clone()),
             Event::subagent_reported(Source::fixture(), session, ClientAgentId::new("a1".into()), "done", raw),
             Event::map_created(Source::fixture(), Actor::Human, MapId::new(), "decisions"),
-            Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())])),
+            Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())]), Vec::new()),
             Event::edge_added(Source::fixture(), Actor::Agent, MapId::new(), "answers", NodeId::new(), NodeId::new()),
         ];
 
@@ -162,13 +196,81 @@ mod tests {
     #[test]
     fn a_node_line_without_properties_reads_as_empty() {
         let (map, node) = (MapId::new(), NodeId::new());
-        let event = Event::node_added(Source::fixture(), Actor::Agent, map, node, "question", "Why?", BTreeMap::new());
+        let event = Event::node_added(Source::fixture(), Actor::Agent, map, node, "question", "Why?", BTreeMap::new(), Vec::new());
         let mut line = EventLine::from(&event);
         line.payload = json!({ "map": map, "node": node, "kind": "question", "title": "Why?" });
 
         let back = Event::try_from(line).unwrap();
 
         assert_eq!(back.payload, event.payload);
+    }
+
+    #[test]
+    fn node_references_round_trip_in_the_flat_payload() {
+        let event_id = EventId::new();
+        let references = vec![
+            Reference::Message { event: event_id, quote: "Use one log.".into() },
+            Reference::File { path: "src/main.rs".into(), lines: (2, 4), excerpt: "fn main() {}\n".into() },
+        ];
+        let event = Event::node_added(
+            Source::fixture(), Actor::Human, MapId::new(), NodeId::new(),
+            "decision", "One log", BTreeMap::new(), references,
+        );
+
+        let value = serde_json::to_value(EventLine::from(&event)).unwrap();
+        let line: EventLine = serde_json::from_value(value.clone()).unwrap();
+        let back = Event::try_from(line).unwrap();
+
+        assert_eq!(value["payload"]["kind"], "decision");
+        assert_eq!(value["payload"]["title"], "One log");
+        assert_eq!(value["payload"]["references"], json!([
+            { "message": { "event": event_id, "quote": "Use one log." } },
+            { "file": { "path": "src/main.rs", "lines": [2, 4], "excerpt": "fn main() {}\n" } },
+        ]));
+        assert_eq!(back.payload, event.payload);
+    }
+
+    #[test]
+    fn node_lines_write_empty_references_and_read_a_missing_field_as_empty() {
+        let event = Event::node_added(
+            Source::fixture(), Actor::Human, MapId::new(), NodeId::new(),
+            "question", "Why?", BTreeMap::new(), Vec::new(),
+        );
+        let mut line = EventLine::from(&event);
+        assert_eq!(line.payload["references"], json!([]));
+        line.payload.as_object_mut().unwrap().remove("references");
+
+        let back = Event::try_from(line).unwrap();
+
+        assert_eq!(back.payload, event.payload);
+    }
+
+    #[test]
+    fn malformed_node_references_are_errors() {
+        let malformed = [
+            json!(null),
+            json!({}),
+            json!([{}]),
+            json!([{ "unknown": {} }]),
+            json!([{ "message": { "event": "invalid", "quote": "Q" } }]),
+            json!([{ "message": { "event": EventId::new() } }]),
+            json!([{ "file": { "path": "src/main.rs", "lines": [1, 2] } }]),
+            json!([{ "file": { "path": "src/main.rs", "lines": [1], "excerpt": "Q" } }]),
+            json!([{ "file": { "path": "src/main.rs", "lines": [-1, 2], "excerpt": "Q" } }]),
+        ];
+
+        for references in malformed {
+            let event = Event::node_added(
+                Source::fixture(), Actor::Human, MapId::new(), NodeId::new(),
+                "question", "Why?", BTreeMap::new(), Vec::new(),
+            );
+            let mut line = EventLine::from(&event);
+            line.payload["references"] = references;
+
+            let error = Event::try_from(line).unwrap_err();
+
+            assert!(error.to_string().contains("payload.references"));
+        }
     }
 
     #[test]

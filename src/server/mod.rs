@@ -74,12 +74,12 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::{Actor, ClientSessionId, Event, MapId, NodeId, Schema, SchemaStore, SessionId, Source};
+    use crate::core::{Actor, ClientSessionId, Event, MapId, NodeId, Reference, Schema, SchemaStore, SessionId, Source};
 
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
     const MAP: &str = "0190a0a0-0000-7000-8000-000000000003";
 
-    struct Fixed(usize);
+    struct Fixed(usize, Vec<Reference>);
 
     impl EventStore for Fixed {
         type Lock = ();
@@ -98,7 +98,7 @@ mod tests {
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
             let map: MapId = serde_json::from_value(json!(MAP))?;
             let map_created = Event::map_created(Source::fixture(), Actor::Human, map, "decisions");
-            let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default());
+            let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default(), self.1.clone());
             Ok(std::iter::once(created).chain(started).chain([map_created, node]).collect())
         }
 
@@ -120,9 +120,13 @@ mod tests {
     }
 
     async fn get_response(path: &str) -> String {
+        get_response_with_references(path, Vec::new()).await
+    }
+
+    async fn get_response_with_references(path: &str, references: Vec<Reference>) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = router(Arc::new(AppService::new(Fixed(3), Schemas)), "/Users/me".into());
+        let app = router(Arc::new(AppService::new(Fixed(3, references), Schemas)), "/Users/me".into());
         tokio::spawn(async move { axum::serve(listener, app).await });
 
         let mut stream = TcpStream::connect(addr).await.unwrap();
@@ -182,7 +186,30 @@ mod tests {
         assert_eq!(data["nodes"].as_array().unwrap().len(), 1);
         assert_eq!(data["nodes"][0]["title"], "Q");
         assert_eq!(data["nodes"][0]["properties"], json!({}));
+        assert_eq!(data["nodes"][0]["references"], json!([]));
         assert!(data["nodes"][0]["created_at"].is_string());
+        assert_eq!(data["edges"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn map_nodes_include_saved_message_and_file_references_in_order() {
+        let event = serde_json::from_value(json!("0190a0a0-0000-7000-8000-000000000004")).unwrap();
+        let references = vec![
+            Reference::Message { event, quote: "A <quote>\n  **verbatim**".into() },
+            Reference::File { path: "src/main.rs".into(), lines: (2, 4), excerpt: "fn main() {\n}\n".into() },
+            Reference::Message { event, quote: "A <quote>\n  **verbatim**".into() },
+        ];
+
+        let response = get_response_with_references(&format!("/api/maps/{MAP}"), references).await;
+
+        assert!(response.starts_with("HTTP/1.1 200"));
+        let data = &json_body(&response)["data"];
+        assert_eq!(data["nodes"].as_array().unwrap().len(), 1);
+        assert_eq!(data["nodes"][0]["references"], json!([
+            { "message": { "event": event, "quote": "A <quote>\n  **verbatim**" } },
+            { "file": { "path": "src/main.rs", "lines": [2, 4], "excerpt": "fn main() {\n}\n" } },
+            { "message": { "event": event, "quote": "A <quote>\n  **verbatim**" } },
+        ]));
         assert_eq!(data["edges"], json!([]));
     }
 

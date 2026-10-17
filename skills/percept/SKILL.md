@@ -31,4 +31,15 @@ by a schema in `.percept/schemas/<map>.toml`:
 
 5. Use only the kinds and properties the schema declares. Leave out a
    property that has no value.
-6. Tell the user what you added, one line per node or edge.
+6. Add references with the node when they help a reader check it.
+   Repeat `--ref` for each source:
+
+   | Flag | Source |
+   |---|---|
+   | `--ref 'msg:<text>'` | a project message containing this text, copied verbatim |
+   | `--ref 'file:<path>:<from>-<to>'` | a project file's lines, numbered from 1, both bounds included |
+
+   File paths are relative to the project root. Message lookup prefers
+   human messages, then agent messages, newest first within each.
+   Both forms save the quoted text with the node.
+7. Tell the user what you added, one line per node or edge.
