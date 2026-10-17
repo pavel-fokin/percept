@@ -163,7 +163,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             return Err(format!("the {map_kind} map already has a node titled {title:?}").into());
         }
 
-        self.store.append(&Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties)).await
+        self.store.append(&Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties, Vec::new())).await
     }
 }
 
@@ -189,11 +189,12 @@ fn map_nodes(events: &[Event], map: MapId) -> Vec<Node> {
     events
         .iter()
         .filter_map(|e| match &e.payload {
-            Payload::NodeAdded { map: id, node, kind, title, properties } if *id == map => Some(Node {
+            Payload::NodeAdded { map: id, node, kind, title, properties, references } if *id == map => Some(Node {
                 id: *node,
                 kind: kind.clone(),
                 title: title.clone(),
                 properties: properties.clone(),
+                references: references.clone(),
                 created_at: e.created_at,
             }),
             _ => None,
@@ -399,6 +400,26 @@ mod tests {
         let found: Vec<(&str, &str)> = nodes.iter().map(|n| (n.kind.as_str(), n.title.as_str())).collect();
         assert_eq!(found, vec![("question", "Q"), ("option", "O")]);
         assert!(service.map(&Source::fixture().path, "nope").await.is_err());
+    }
+
+    #[test]
+    fn node_projection_preserves_references() {
+        use crate::core::{EventId, Reference};
+
+        let map = MapId::new();
+        let references = vec![
+            Reference::Message { event: EventId::new(), quote: "Keep the text.".into() },
+            Reference::File { path: "src/main.rs".into(), lines: (1, 3), excerpt: "fn main() {}".into() },
+        ];
+        let event = Event::node_added(
+            Source::fixture(), Actor::Human, map, NodeId::new(),
+            "decision", "Keep snapshots", BTreeMap::new(), references.clone(),
+        );
+
+        let nodes = map_nodes(&[event], map);
+
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].references, references);
     }
 
     #[tokio::test]

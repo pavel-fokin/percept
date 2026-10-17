@@ -98,7 +98,7 @@ mod tests {
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
             let map: MapId = serde_json::from_value(json!(MAP))?;
             let map_created = Event::map_created(Source::fixture(), Actor::Human, map, "decisions");
-            let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default());
+            let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default(), Vec::new());
             Ok(std::iter::once(created).chain(started).chain([map_created, node]).collect())
         }
 
