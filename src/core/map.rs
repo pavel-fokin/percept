@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+use super::EventId;
 use crate::shared::Id;
 
 pub type MapId = Id<Map>;
@@ -19,7 +20,14 @@ pub struct Node {
     pub kind: String,
     pub title: String,
     pub properties: BTreeMap<String, String>,
+    pub references: Vec<Reference>,
     pub created_at: jiff::Timestamp,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Reference {
+    Message { event: EventId, quote: String },
+    File { path: PathBuf, lines: (u32, u32), excerpt: String },
 }
 
 /// A directed link between two nodes of a map, added by an `EdgeAdded` event.

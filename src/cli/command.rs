@@ -32,6 +32,7 @@ enum Command {
         kind: String,
     },
     /// Adds a node, `add <map> <kind> <title>`, or an edge, `add <map> <from> <kind> <to>`.
+    #[command(after_help = "Node options: --key <value> for properties; repeat --ref 'msg:<text>' or --ref 'file:<path>:<from>-<to>' for saved excerpts.")]
     Add {
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,
@@ -72,5 +73,20 @@ pub async fn run<S: EventStore + Send + Sync + 'static, M: SchemaStore + Send + 
             eprintln!("percept: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn add_passes_reference_flags_and_values_to_its_parser() {
+        let cli = Cli::try_parse_from([
+            "percept", "add", "m", "k", "T", "--ref", "msg:--flag: text", "--note", "-x",
+        ]).unwrap();
+
+        let Some(Command::Add { args }) = cli.command else { panic!("expected add") };
+        assert_eq!(args, ["m", "k", "T", "--ref", "msg:--flag: text", "--note", "-x"]);
     }
 }

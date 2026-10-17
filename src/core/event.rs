@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use super::{ClientAgentId, ClientSessionId, MapId, NodeId, SessionId};
+use super::{ClientAgentId, ClientSessionId, MapId, NodeId, Reference, SessionId};
 use crate::shared::Id;
 
 pub type EventId = Id<Event>;
@@ -91,7 +91,7 @@ pub enum Payload {
     SubagentStarted { session: SessionId, subagent: ClientAgentId, agent: String, task: String },
     SubagentReported { session: SessionId, subagent: ClientAgentId, content: String },
     MapCreated { map: MapId, kind: String },
-    NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String> },
+    NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
     EdgeAdded { map: MapId, kind: String, from: NodeId, to: NodeId },
 }
 
@@ -193,6 +193,7 @@ impl Event {
         Self::build(source, actor, payload, None)
     }
 
+    #[allow(clippy::too_many_arguments, reason = "the fields of node.added")]
     pub fn node_added(
         source: Source,
         actor: Actor,
@@ -201,8 +202,9 @@ impl Event {
         kind: &str,
         title: &str,
         properties: BTreeMap<String, String>,
+        references: Vec<Reference>,
     ) -> Self {
-        let payload = Payload::NodeAdded { map, node, kind: kind.into(), title: title.into(), properties };
+        let payload = Payload::NodeAdded { map, node, kind: kind.into(), title: title.into(), properties, references };
         Self::build(source, actor, payload, None)
     }
 
@@ -356,11 +358,11 @@ mod tests {
 
         let properties = BTreeMap::from([("definition".to_string(), "D".to_string())]);
 
-        let event = Event::node_added(Source::fixture(), Actor::Agent, map, node, "question", "Why?", properties.clone());
+        let event = Event::node_added(Source::fixture(), Actor::Agent, map, node, "question", "Why?", properties.clone(), Vec::new());
 
         assert_eq!(event.actor, Actor::Agent);
         assert_eq!(event.payload.kind(), Kind::NodeAdded);
-        assert_eq!(event.payload, Payload::NodeAdded { map, node, kind: "question".into(), title: "Why?".into(), properties });
+        assert_eq!(event.payload, Payload::NodeAdded { map, node, kind: "question".into(), title: "Why?".into(), properties, references: Vec::new() });
         assert_eq!(event.payload.session(), None);
         assert_eq!(event.raw, None);
     }
