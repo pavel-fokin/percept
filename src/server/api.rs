@@ -9,7 +9,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use super::Api;
-use crate::core::{Actor, ClientSessionId, EventId, EventStore, SchemaStore, MapId, NodeId, Payload, Session, SessionId};
+use crate::core::{Actor, ClientSessionId, EventId, EventStore, SchemaStore, MapId, NodeId, Payload, Reference, Session, SessionId};
 
 pub(super) async fn status<S: EventStore + Send + Sync + 'static, M: SchemaStore + Send + Sync + 'static>(
     State(api): State<Arc<Api<S, M>>>,
@@ -93,6 +93,7 @@ pub(super) async fn map<S: EventStore + Send + Sync + 'static, M: SchemaStore + 
                 kind: n.kind,
                 title: n.title,
                 properties: n.properties,
+                references: n.references.into_iter().map(ReferenceView::from).collect(),
                 created_at: n.created_at,
             })
             .collect(),
@@ -127,7 +128,24 @@ struct NodeView {
     kind: String,
     title: String,
     properties: BTreeMap<String, String>,
+    references: Vec<ReferenceView>,
     created_at: jiff::Timestamp,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+enum ReferenceView {
+    Message { event: EventId, quote: String },
+    File { path: String, lines: (u32, u32), excerpt: String },
+}
+
+impl From<Reference> for ReferenceView {
+    fn from(reference: Reference) -> Self {
+        match reference {
+            Reference::Message { event, quote } => Self::Message { event, quote },
+            Reference::File { path, lines, excerpt } => Self::File { path: path.display().to_string(), lines, excerpt },
+        }
+    }
 }
 
 #[derive(Serialize)]

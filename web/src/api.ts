@@ -20,8 +20,13 @@ export type MapNode = {
   kind: string;
   title: string;
   properties: Record<string, string>;
+  references: Reference[];
   created_at: string;
 };
+
+export type Reference =
+  | { message: { event: string; quote: string } }
+  | { file: { path: string; lines: [number, number]; excerpt: string } };
 
 export type MapEdge = {
   kind: string;
