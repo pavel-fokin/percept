@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::AppService;
 use crate::core::{Actor, Edge, Event, EventStore, Map, MapId, Node, NodeId, Payload, Reference, SchemaStore, Source};
@@ -8,6 +8,7 @@ use crate::shared::Result;
 #[derive(Debug, PartialEq)]
 pub enum Ref {
     Message(String),
+    File { path: PathBuf, lines: (u32, u32) },
 }
 
 /// A map with how many nodes and edges it holds.
@@ -172,13 +173,16 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             return Err(format!("the {map_kind} map already has a node titled {title:?}").into());
         }
 
-        let references = references.into_iter().map(|reference| resolve_reference(&events, &source.path, reference)).collect::<Result<Vec<_>>>()?;
+        let mut resolved = Vec::new();
+        for reference in references {
+            resolved.push(resolve_reference(&events, &source.path, reference).await?);
+        }
 
-        self.store.append(&Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties, references)).await
+        self.store.append(&Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties, resolved)).await
     }
 }
 
-fn resolve_reference(events: &[Event], project: &Path, reference: Ref) -> Result<Reference> {
+async fn resolve_reference(events: &[Event], project: &Path, reference: Ref) -> Result<Reference> {
     match reference {
         Ref::Message(quote) => {
             not_blank("message reference", &quote)?;
@@ -191,6 +195,29 @@ fn resolve_reference(events: &[Event], project: &Path, reference: Ref) -> Result
             }).ok_or("no matching message in this project; copy the quote verbatim from a recorded message")?;
 
             Ok(Reference::Message { event: event.id, quote })
+        }
+        Ref::File { path, lines: (from, to) } => {
+            if path.as_os_str().is_empty() || path.is_absolute() {
+                return Err("a file reference path must be nonempty and relative to the project".into());
+            }
+            if from == 0 || from > to {
+                return Err("a file reference range must use 1-based lines with from <= to".into());
+            }
+
+            let root = tokio::fs::canonicalize(project).await
+                .map_err(|error| format!("cannot read project {}: {error}", project.display()))?;
+            let target = tokio::fs::canonicalize(root.join(&path)).await
+                .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+            let relative = target.strip_prefix(&root).map_err(|_| "a file reference must stay inside the project")?.to_path_buf();
+            let text = tokio::fs::read_to_string(&target).await
+                .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+
+            let excerpt: Vec<_> = text.lines().skip((from - 1) as usize).take((to - from + 1) as usize).collect();
+            if excerpt.len() != (to - from + 1) as usize {
+                return Err(format!("file reference {}:{from}-{to} exceeds the file's lines", path.display()).into());
+            }
+
+            Ok(Reference::File { path: relative, lines: (from, to), excerpt: excerpt.join("\n") })
         }
     }
 }
@@ -449,8 +476,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn system_messages_other_projects_and_non_messages_are_not_reference_sources() {
+    #[tokio::test]
+    async fn system_messages_other_projects_and_non_messages_are_not_reference_sources() {
         use crate::core::SessionId;
         use serde_json::json;
 
@@ -462,9 +489,134 @@ mod tests {
             Event::subagent_reported(Source::fixture(), session, crate::core::ClientAgentId::new("a".into()), "Match", json!({})),
         ];
 
-        let result = resolve_reference(&events, &project, Ref::Message("Match".into()));
+        let result = resolve_reference(&events, &project, Ref::Message("Match".into())).await;
 
         assert!(result.is_err());
+    }
+
+    async fn file_project() -> Source {
+        let path = std::env::temp_dir().join(format!("percept-references-{}", uuid::Uuid::now_v7()));
+        tokio::fs::create_dir_all(&path).await.unwrap();
+
+        Source { client: "percept-cli".into(), path }
+    }
+
+    #[tokio::test]
+    async fn file_references_save_inclusive_single_and_last_lines() {
+        let source = file_project().await;
+        tokio::fs::write(source.path.join("text.txt"), "first\r\n\nthird\nlast").await.unwrap();
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.create_map(source.clone(), Actor::Human, "concepts").await.unwrap();
+
+        service.add_node(
+            source.clone(), Actor::Human, "concepts", "concept", "Excerpts", BTreeMap::new(),
+            vec![
+                Ref::File { path: "text.txt".into(), lines: (1, 1) },
+                Ref::File { path: "text.txt".into(), lines: (2, 3) },
+                Ref::File { path: "text.txt".into(), lines: (4, 4) },
+            ],
+        ).await.unwrap();
+        tokio::fs::write(source.path.join("text.txt"), "changed").await.unwrap();
+
+        let map = service.map(&source.path, "concepts").await.unwrap();
+        let nodes = service.nodes(map.id).await.unwrap();
+        assert_eq!(nodes[0].references, vec![
+            Reference::File { path: "text.txt".into(), lines: (1, 1), excerpt: "first".into() },
+            Reference::File { path: "text.txt".into(), lines: (2, 3), excerpt: "\nthird".into() },
+            Reference::File { path: "text.txt".into(), lines: (4, 4), excerpt: "last".into() },
+        ]);
+        assert_eq!(store.0.lock().unwrap().len(), 2);
+        tokio::fs::remove_dir_all(&source.path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn mixed_references_keep_order_multiplicity_and_canonical_paths() {
+        use crate::core::SessionId;
+        use serde_json::json;
+
+        let source = file_project().await;
+        tokio::fs::create_dir(source.path.join("src")).await.unwrap();
+        tokio::fs::write(source.path.join("src/a:b.rs"), "code\n").await.unwrap();
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.create_map(source.clone(), Actor::Human, "concepts").await.unwrap();
+        let message = Event::message(source.clone(), SessionId::new(), Actor::Human, "Keep code", json!({}));
+        store.0.lock().unwrap().push(message.clone());
+
+        service.add_node(
+            source.clone(), Actor::Human, "concepts", "concept", "Code", BTreeMap::new(),
+            vec![
+                Ref::File { path: "./src/../src/a:b.rs".into(), lines: (1, 1) },
+                Ref::Message("Keep code".into()),
+                Ref::File { path: "src/a:b.rs".into(), lines: (1, 1) },
+            ],
+        ).await.unwrap();
+
+        let events = store.0.lock().unwrap().clone();
+        let Payload::NodeAdded { references, .. } = &events.last().unwrap().payload else { panic!("expected node.added") };
+        assert_eq!(references, &vec![
+            Reference::File { path: "src/a:b.rs".into(), lines: (1, 1), excerpt: "code".into() },
+            Reference::Message { event: message.id, quote: "Keep code".into() },
+            Reference::File { path: "src/a:b.rs".into(), lines: (1, 1), excerpt: "code".into() },
+        ]);
+        assert_eq!(events.len(), 3);
+        tokio::fs::remove_dir_all(&source.path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn invalid_file_references_leave_the_log_unchanged() {
+        let source = file_project().await;
+        tokio::fs::write(source.path.join("text.txt"), "first\nsecond\n").await.unwrap();
+        tokio::fs::write(source.path.join("empty.txt"), "").await.unwrap();
+        tokio::fs::write(source.path.join("binary"), [0xff]).await.unwrap();
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.create_map(source.clone(), Actor::Human, "concepts").await.unwrap();
+        let invalid = [
+            Ref::File { path: "".into(), lines: (1, 1) },
+            Ref::File { path: source.path.join("text.txt"), lines: (1, 1) },
+            Ref::File { path: "missing".into(), lines: (1, 1) },
+            Ref::File { path: ".".into(), lines: (1, 1) },
+            Ref::File { path: "empty.txt".into(), lines: (1, 1) },
+            Ref::File { path: "binary".into(), lines: (1, 1) },
+            Ref::File { path: "text.txt".into(), lines: (0, 1) },
+            Ref::File { path: "text.txt".into(), lines: (2, 1) },
+            Ref::File { path: "text.txt".into(), lines: (1, 3) },
+            Ref::File { path: "text.txt".into(), lines: (3, 3) },
+        ];
+
+        for reference in invalid {
+            let result = service.add_node(
+                source.clone(), Actor::Human, "concepts", "concept", "Excerpts", BTreeMap::new(),
+                vec![Ref::File { path: "text.txt".into(), lines: (1, 1) }, reference],
+            ).await;
+
+            assert!(result.is_err());
+            assert_eq!(store.0.lock().unwrap().len(), 1);
+        }
+        tokio::fs::remove_dir_all(&source.path).await.unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn file_references_resolve_internal_symlinks_and_reject_escapes() {
+        let source = file_project().await;
+        let project = source.path.join("project");
+        tokio::fs::create_dir(&project).await.unwrap();
+        tokio::fs::write(project.join("inside.txt"), "inside").await.unwrap();
+        tokio::fs::write(source.path.join("outside.txt"), "outside").await.unwrap();
+        tokio::fs::symlink("inside.txt", project.join("alias.txt")).await.unwrap();
+        tokio::fs::symlink("../outside.txt", project.join("escape.txt")).await.unwrap();
+
+        let inside = resolve_reference(&[], &project, Ref::File { path: "alias.txt".into(), lines: (1, 1) }).await.unwrap();
+        let escape = resolve_reference(&[], &project, Ref::File { path: "escape.txt".into(), lines: (1, 1) }).await;
+        let parent = resolve_reference(&[], &project, Ref::File { path: "../outside.txt".into(), lines: (1, 1) }).await;
+
+        assert_eq!(inside, Reference::File { path: "inside.txt".into(), lines: (1, 1), excerpt: "inside".into() });
+        assert!(escape.is_err());
+        assert!(parent.is_err());
+        tokio::fs::remove_dir_all(&source.path).await.unwrap();
     }
 
     #[tokio::test]

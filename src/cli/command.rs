@@ -32,7 +32,7 @@ enum Command {
         kind: String,
     },
     /// Adds a node, `add <map> <kind> <title>`, or an edge, `add <map> <from> <kind> <to>`.
-    #[command(after_help = "Node options: --key <value> for properties; repeat --ref 'msg:<text>' for saved message quotes.")]
+    #[command(after_help = "Node options: --key <value> for properties; repeat --ref 'msg:<text>' or --ref 'file:<path>:<from>-<to>' for saved excerpts.")]
     Add {
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,

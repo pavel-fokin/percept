@@ -22,7 +22,7 @@ pub(super) async fn add<S: EventStore, M: SchemaStore>(service: &AppService<S, M
             let (actor, source) = cli_writer().await?;
             service.add_edge(source, actor, map, from, kind, to).await
         }
-        _ => Err("usage: percept add <map> <kind> <title> [--key value ...] [--ref msg:<text> ...] | percept add <map> <from> <kind> <to>".into()),
+        _ => Err("usage: percept add <map> <kind> <title> [--key value ...] [--ref 'msg:<text>' | --ref 'file:<path>:<from>-<to>' ...] | percept add <map> <from> <kind> <to>".into()),
     }
 }
 
@@ -42,11 +42,7 @@ fn split_add(args: &[String]) -> Result<AddArgs<'_>> {
         let value = pair.get(1).ok_or_else(|| format!("--{key} has no value"))?;
 
         if key == "ref" {
-            let quote = value.strip_prefix("msg:").ok_or("--ref expects msg:<text>")?;
-            if quote.trim().is_empty() {
-                return Err("a message reference must not be blank".into());
-            }
-            references.push(Ref::Message(quote.to_string()));
+            references.push(parse_reference(value)?);
         } else if properties.insert(key.to_string(), value.clone()).is_some() {
             return Err(format!("--{key} is given more than once").into());
         }
@@ -62,6 +58,32 @@ fn split_add(args: &[String]) -> Result<AddArgs<'_>> {
     }
 
     Ok(AddArgs { positionals, properties, references })
+}
+
+fn parse_reference(value: &str) -> Result<Ref> {
+    if let Some(quote) = value.strip_prefix("msg:") {
+        if quote.trim().is_empty() {
+            return Err("a message reference must not be blank".into());
+        }
+        return Ok(Ref::Message(quote.to_string()));
+    }
+    if let Some(file) = value.strip_prefix("file:") {
+        let (path, range) = file.rsplit_once(':').ok_or("a file reference expects file:<path>:<from>-<to>")?;
+        let (from, to) = range.split_once('-').ok_or("a file reference expects file:<path>:<from>-<to>")?;
+        let from = from.parse::<u32>().map_err(|_| "a file reference line must be a positive integer")?;
+        let to = to.parse::<u32>().map_err(|_| "a file reference line must be a positive integer")?;
+
+        if path.is_empty() || std::path::Path::new(path).is_absolute() {
+            return Err("a file reference path must be nonempty and relative to the project".into());
+        }
+        if from == 0 || from > to {
+            return Err("a file reference range must use 1-based lines with from <= to".into());
+        }
+
+        return Ok(Ref::File { path: path.into(), lines: (from, to) });
+    }
+
+    Err("--ref expects msg:<text> or file:<path>:<from>-<to>".into())
 }
 
 async fn cli_writer() -> Result<(Actor, Source)> {
@@ -91,8 +113,14 @@ pub(super) async fn show<S: EventStore, M: SchemaStore>(service: &AppService<S, 
                     println!("  {key}: {value}");
                 }
                 for reference in &node.references {
-                    if let Reference::Message { quote, .. } = reference {
-                        println!("  ref msg: {quote:?}");
+                    match reference {
+                        Reference::Message { quote, .. } => println!("  ref msg: {quote:?}"),
+                        Reference::File { path, lines: (from, to), excerpt } => {
+                            println!("  ref file: {}:{from}-{to}", path.display());
+                            for line in excerpt.split('\n') {
+                                println!("    {line}");
+                            }
+                        }
                     }
                 }
             }
@@ -223,7 +251,7 @@ mod tests {
 
     #[test]
     fn references_require_a_known_prefix_and_nonblank_quote() {
-        for value in ["", "msg:", "msg: ", "message:text", "file:a.rs:1-2", "text"] {
+        for value in ["", "msg:", "msg: ", "message:text", "unknown:a.rs:1-2", "text"] {
             let args = strings(&["m", "k", "T", "--ref", value]);
 
             assert!(split_add(&args).is_err(), "accepted {value:?}");
@@ -232,10 +260,41 @@ mod tests {
     }
 
     #[test]
-    fn references_on_an_edge_are_an_error() {
-        let args = strings(&["m", "a", "k", "b", "--ref", "msg:quote"]);
+    fn file_references_split_the_range_at_the_last_colon() {
+        let args = strings(&[
+            "m", "k", "T", "--ref", "file:src/a:b.rs:2-4", "--ref", "msg:words",
+            "--ref", "file:./src/../src/a:b.rs:1-1",
+        ]);
 
-        assert!(split_add(&args).is_err());
+        let found = split_add(&args).unwrap();
+
+        assert_eq!(found.references, vec![
+            Ref::File { path: "src/a:b.rs".into(), lines: (2, 4) },
+            Ref::Message("words".into()),
+            Ref::File { path: "./src/../src/a:b.rs".into(), lines: (1, 1) },
+        ]);
+    }
+
+    #[test]
+    fn file_references_require_a_relative_path_and_explicit_valid_range() {
+        for value in [
+            "file:", "file::1-2", "file:/a.rs:1-2", "file:a.rs", "file:a.rs:1",
+            "file:a.rs:0-1", "file:a.rs:2-1", "file:a.rs:1-", "file:a.rs:-1-2",
+            "file:a.rs:a-b", "file:a.rs:1-4294967296", "file:a.rs:1-2-3",
+        ] {
+            let args = strings(&["m", "k", "T", "--ref", value]);
+
+            assert!(split_add(&args).is_err(), "accepted {value:?}");
+        }
+    }
+
+    #[test]
+    fn references_on_an_edge_are_an_error() {
+        for value in ["msg:quote", "file:a.rs:1-2"] {
+            let args = strings(&["m", "a", "k", "b", "--ref", value]);
+
+            assert!(split_add(&args).is_err());
+        }
     }
 
     #[test]
