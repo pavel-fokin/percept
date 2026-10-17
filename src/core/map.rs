@@ -20,7 +20,6 @@ pub struct Node {
     pub kind: String,
     pub title: String,
     pub properties: BTreeMap<String, String>,
-    #[allow(dead_code, reason = "reference display follows in the next issue")]
     pub references: Vec<Reference>,
     pub created_at: jiff::Timestamp,
 }

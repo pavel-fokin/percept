@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
-use crate::app::{AppService, source_path};
-use crate::core::{Actor, EventStore, SchemaStore, Source};
+use crate::app::{AppService, Ref, source_path};
+use crate::core::{Actor, EventStore, Reference, SchemaStore, Source};
 use crate::shared::Result;
 
 pub(super) async fn create<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, kind: &str) -> Result<()> {
@@ -11,47 +11,57 @@ pub(super) async fn create<S: EventStore, M: SchemaStore>(service: &AppService<S
 }
 
 pub(super) async fn add<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
-    let (positionals, properties) = split_add(args)?;
+    let AddArgs { positionals, properties, references } = split_add(args)?;
 
     match positionals {
         [map, kind, title] => {
             let (actor, source) = cli_writer().await?;
-            service.add_node(source, actor, map, kind, title, properties).await
+            service.add_node(source, actor, map, kind, title, properties, references).await
         }
         [map, from, kind, to] => {
             let (actor, source) = cli_writer().await?;
             service.add_edge(source, actor, map, from, kind, to).await
         }
-        _ => Err("usage: percept add <map> <kind> <title> [--key value ...] | percept add <map> <from> <kind> <to>".into()),
+        _ => Err("usage: percept add <map> <kind> <title> [--key value ...] [--ref msg:<text> ...] | percept add <map> <from> <kind> <to>".into()),
     }
 }
 
-/// Splits `add` arguments into positionals and properties. Only a node takes properties.
-fn split_add(args: &[String]) -> Result<(&[String], BTreeMap<String, String>)> {
+struct AddArgs<'a> {
+    positionals: &'a [String],
+    properties: BTreeMap<String, String>,
+    references: Vec<Ref>,
+}
+
+fn split_add(args: &[String]) -> Result<AddArgs<'_>> {
     let (positionals, pairs) = args.split_at(args.iter().position(|a| a.starts_with("--")).unwrap_or(args.len()));
-    let properties = properties(pairs)?;
-
-    if positionals.len() == 4 && !properties.is_empty() {
-        return Err("an edge takes no properties".into());
-    }
-
-    Ok((positionals, properties))
-}
-
-/// Reads `--key value` pairs. A value may start with `-`.
-fn properties(pairs: &[String]) -> Result<BTreeMap<String, String>> {
     let mut properties = BTreeMap::new();
+    let mut references = Vec::new();
 
     for pair in pairs.chunks(2) {
         let key = pair[0].strip_prefix("--").filter(|key| !key.is_empty()).ok_or("a property key is empty or lacks its --")?;
         let value = pair.get(1).ok_or_else(|| format!("--{key} has no value"))?;
 
-        if properties.insert(key.to_string(), value.clone()).is_some() {
+        if key == "ref" {
+            let quote = value.strip_prefix("msg:").ok_or("--ref expects msg:<text>")?;
+            if quote.trim().is_empty() {
+                return Err("a message reference must not be blank".into());
+            }
+            references.push(Ref::Message(quote.to_string()));
+        } else if properties.insert(key.to_string(), value.clone()).is_some() {
             return Err(format!("--{key} is given more than once").into());
         }
     }
 
-    Ok(properties)
+    if positionals.len() == 4 {
+        if !properties.is_empty() {
+            return Err("an edge takes no properties".into());
+        }
+        if !references.is_empty() {
+            return Err("an edge takes no references".into());
+        }
+    }
+
+    Ok(AddArgs { positionals, properties, references })
 }
 
 async fn cli_writer() -> Result<(Actor, Source)> {
@@ -79,6 +89,11 @@ pub(super) async fn show<S: EventStore, M: SchemaStore>(service: &AppService<S, 
                 println!("{}  {}", node.kind, node.title);
                 for (key, value) in &node.properties {
                     println!("  {key}: {value}");
+                }
+                for reference in &node.references {
+                    if let Reference::Message { quote, .. } = reference {
+                        println!("  ref msg: {quote:?}");
+                    }
                 }
             }
 
@@ -150,28 +165,29 @@ mod tests {
 
     #[test]
     fn properties_are_key_value_pairs() {
-        let found = properties(&strings(&["--definition", "One log.", "--note", "-x"])).unwrap();
+        let args = strings(&["m", "k", "T", "--definition", "One log.", "--note", "-x"]);
+        let found = split_add(&args).unwrap().properties;
 
         assert_eq!(found.len(), 2);
         assert_eq!(found["definition"], "One log.");
         assert_eq!(found["note"], "-x");
-        assert!(properties(&[]).unwrap().is_empty());
+        assert!(split_add(&[]).unwrap().properties.is_empty());
     }
 
     #[test]
     fn a_property_without_a_value_is_an_error() {
-        assert!(properties(&strings(&["--definition"])).is_err());
-        assert!(properties(&strings(&["--a", "1", "--b"])).is_err());
+        assert!(split_add(&strings(&["--definition"])).is_err());
+        assert!(split_add(&strings(&["--a", "1", "--b"])).is_err());
     }
 
     #[test]
     fn a_repeated_property_key_is_an_error() {
-        assert!(properties(&strings(&["--a", "1", "--a", "2"])).is_err());
+        assert!(split_add(&strings(&["--a", "1", "--a", "2"])).is_err());
     }
 
     #[test]
     fn an_empty_property_key_is_an_error() {
-        assert!(properties(&strings(&["--", "1"])).is_err());
+        assert!(split_add(&strings(&["--", "1"])).is_err());
     }
 
     #[test]
@@ -183,8 +199,43 @@ mod tests {
         let node = split_add(&node_args).unwrap();
 
         assert!(edge.is_err());
-        assert_eq!(node.0.len(), 3);
-        assert_eq!(node.1["definition"], "x");
+        assert_eq!(node.positionals.len(), 3);
+        assert_eq!(node.properties["definition"], "x");
+    }
+
+    #[test]
+    fn references_preserve_order_colons_dashes_and_whitespace() {
+        let args = strings(&[
+            "m", "k", "T", "--ref", "msg: --flag: value ", "--definition", "-x",
+            "--ref", "msg:another: quote", "--ref", "msg: --flag: value ",
+        ]);
+
+        let found = split_add(&args).unwrap();
+
+        assert_eq!(found.positionals, &args[..3]);
+        assert_eq!(found.properties, BTreeMap::from([("definition".into(), "-x".into())]));
+        assert_eq!(found.references, vec![
+            Ref::Message(" --flag: value ".into()),
+            Ref::Message("another: quote".into()),
+            Ref::Message(" --flag: value ".into()),
+        ]);
+    }
+
+    #[test]
+    fn references_require_a_known_prefix_and_nonblank_quote() {
+        for value in ["", "msg:", "msg: ", "message:text", "file:a.rs:1-2", "text"] {
+            let args = strings(&["m", "k", "T", "--ref", value]);
+
+            assert!(split_add(&args).is_err(), "accepted {value:?}");
+        }
+        assert!(split_add(&strings(&["m", "k", "T", "--ref"])).is_err());
+    }
+
+    #[test]
+    fn references_on_an_edge_are_an_error() {
+        let args = strings(&["m", "a", "k", "b", "--ref", "msg:quote"]);
+
+        assert!(split_add(&args).is_err());
     }
 
     #[test]
