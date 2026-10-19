@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::Arc;
 
-use axum::http::{StatusCode, Uri};
+use axum::http::{header::CONTENT_TYPE, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
@@ -17,6 +17,9 @@ use crate::shared::Result;
 mod api;
 
 const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
+const FAVICON_SVG: &[u8] = include_bytes!("../../web/public/favicon.svg");
+const FAVICON_ICO: &[u8] = include_bytes!("../../web/public/favicon.ico");
+const APPLE_TOUCH_ICON: &[u8] = include_bytes!("../../web/public/apple-touch-icon.png");
 
 pub async fn serve<S, M>(service: Arc<AppService<S, M>>, home: PathBuf, port: u16, open: bool) -> Result<()>
 where
@@ -54,8 +57,15 @@ where
         .route("/api/sessions/{id}/events", get(api::session_events))
         .route("/api/maps", get(api::maps))
         .route("/api/maps/{id}", get(api::map))
+        .route("/favicon.svg", get(|| async { asset("image/svg+xml", FAVICON_SVG) }))
+        .route("/favicon.ico", get(|| async { asset("image/x-icon", FAVICON_ICO) }))
+        .route("/apple-touch-icon.png", get(|| async { asset("image/png", APPLE_TOUCH_ICON) }))
         .fallback(fallback)
         .with_state(Arc::new(Api { service, home }))
+}
+
+fn asset(content_type: &'static str, body: &'static [u8]) -> impl IntoResponse {
+    ([(CONTENT_TYPE, content_type)], body)
 }
 
 async fn fallback(uri: Uri) -> Response {
