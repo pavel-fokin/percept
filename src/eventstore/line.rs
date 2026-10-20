@@ -30,7 +30,9 @@ impl From<&Event> for EventLine {
                 json!({ "session": session })
             }
             Payload::Message { session, content } => json!({ "session": session, "content": content }),
-            Payload::ToolUsed { session, tool } => json!({ "session": session, "tool": tool }),
+            Payload::ToolUsed { session, tool, input, output } => {
+                json!({ "session": session, "tool": tool, "input": input, "output": output })
+            }
             Payload::SubagentStarted { session, subagent, agent, task } => {
                 json!({ "session": session, "subagent": subagent.as_str(), "agent": agent, "task": task })
             }
@@ -75,7 +77,12 @@ impl TryFrom<EventLine> for Event {
             Kind::SessionStarted => Payload::SessionStarted { session: field(p, "session")? },
             Kind::SessionStopped => Payload::SessionStopped { session: field(p, "session")? },
             Kind::Message => Payload::Message { session: field(p, "session")?, content: field(p, "content")? },
-            Kind::ToolUsed => Payload::ToolUsed { session: field(p, "session")?, tool: field(p, "tool")? },
+            Kind::ToolUsed => Payload::ToolUsed {
+                session: field(p, "session")?,
+                tool: field(p, "tool")?,
+                input: field(p, "input")?,
+                output: field(p, "output")?,
+            },
             Kind::SubagentStarted => Payload::SubagentStarted {
                 session: field(p, "session")?,
                 subagent: ClientAgentId::new(field(p, "subagent")?),
@@ -171,7 +178,8 @@ mod tests {
             Event::session_started(Source::fixture(), session, raw.clone()),
             Event::session_stopped(Source::fixture(), session, raw.clone()),
             Event::message(Source::fixture(), session, Actor::Human, "hi", raw.clone()),
-            Event::tool_used(Source::fixture(), session, "Bash", raw.clone()),
+            Event::tool_used(Source::fixture(), session, "Bash", Some("ls".into()), Some("a.txt".into()), raw.clone()),
+            Event::tool_used(Source::fixture(), session, "Read", None, None, raw.clone()),
             Event::subagent_started(Source::fixture(), session, ClientAgentId::new("a1".into()), "builder", "Build it", raw.clone()),
             Event::subagent_reported(Source::fixture(), session, ClientAgentId::new("a1".into()), "done", raw),
             Event::map_created(Source::fixture(), Actor::Human, MapId::new(), "decisions"),
@@ -199,6 +207,18 @@ mod tests {
         let event = Event::node_added(Source::fixture(), Actor::Agent, map, node, "question", "Why?", BTreeMap::new(), Vec::new());
         let mut line = EventLine::from(&event);
         line.payload = json!({ "map": map, "node": node, "kind": "question", "title": "Why?" });
+
+        let back = Event::try_from(line).unwrap();
+
+        assert_eq!(back.payload, event.payload);
+    }
+
+    #[test]
+    fn a_tool_line_without_input_and_output_reads_as_none() {
+        let session = SessionId::new();
+        let event = Event::tool_used(Source::fixture(), session, "Bash", None, None, json!({}));
+        let mut line = EventLine::from(&event);
+        line.payload = json!({ "session": session, "tool": "Bash" });
 
         let back = Event::try_from(line).unwrap();
 

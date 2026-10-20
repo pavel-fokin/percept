@@ -1,5 +1,6 @@
 import { getData, type MapDetail, type MapNode } from "../api";
 import { BackLink } from "../components/back-link";
+import { Chevron } from "../components/chevron";
 import { References } from "../components/references";
 import { RouteError } from "../components/route-error";
 import { byDay, full, withChangedTimes } from "../format";
@@ -74,16 +75,7 @@ function NodeRow({ node, shown }: { node: MapNode; shown?: string }) {
     <li>
       <details className="group">
         <summary className={`${row} cursor-pointer list-none hover:bg-surface focus-visible:bg-surface [&::-webkit-details-marker]:hidden`}>
-          <svg
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            aria-hidden
-            className="mt-[5px] size-3.5 flex-none text-muted transition-transform group-open:rotate-90"
-          >
-            <path d="m6 3 5 5-5 5" />
-          </svg>
+          <Chevron className="mt-[5px] text-muted" />
           {content}
         </summary>
         <div className="grid gap-3.5 pt-1 pr-3 pb-5 pl-9">

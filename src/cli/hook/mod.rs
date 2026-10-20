@@ -48,8 +48,11 @@ pub(super) async fn hook<S: EventStore, M: SchemaStore>(service: &AppService<S, 
 /// Makes the hook's event once its session is known.
 type EventBuilder = Box<dyn FnOnce(Source, SessionId) -> Event>;
 
+/// A client's reading of a tool call: the input and output worth recording, from the tool's name and the hook.
+type ToolIo = fn(&str, &serde_json::Value) -> (Option<String>, Option<String>);
+
 /// Parses the hooks that Claude and Codex send in the same shape.
-fn shared(raw: serde_json::Value) -> Result<Translation> {
+fn shared(raw: serde_json::Value, tool_io: ToolIo) -> Result<Translation> {
     let client_session_id = session_id(&raw)?;
 
     let name = raw["hook_event_name"].as_str();
@@ -64,7 +67,8 @@ fn shared(raw: serde_json::Value) -> Result<Translation> {
         }
         Some("PostToolUse") => {
             let tool = text(&raw, "tool_name")?;
-            Box::new(move |source, s| Event::tool_used(source, s, &tool, raw))
+            let (input, output) = tool_io(&tool, &raw);
+            Box::new(move |source, s| Event::tool_used(source, s, &tool, input, output, raw))
         }
         Some("SessionStart") => Box::new(move |source, s| Event::session_started(source, s, raw)),
         Some("SessionEnd") => Box::new(move |source, s| Event::session_stopped(source, s, raw)),
@@ -86,6 +90,55 @@ fn text(raw: &serde_json::Value, field: &str) -> Result<String> {
         .ok_or_else(|| format!("missing {field}").into())
 }
 
+fn non_empty(value: Option<&str>) -> Option<String> {
+    value.filter(|value| !value.is_empty()).map(str::to_owned)
+}
+
+fn str_field(value: &serde_json::Value, field: &str) -> Option<String> {
+    non_empty(value[field].as_str())
+}
+
+fn joined(lines: Vec<&str>) -> Option<String> {
+    let text = lines.join("\n");
+    (!text.is_empty()).then_some(text)
+}
+
+/// Null, `{}` and `[]` carry nothing worth showing.
+fn is_blank(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => true,
+        serde_json::Value::Object(fields) => fields.is_empty(),
+        serde_json::Value::Array(items) => items.is_empty(),
+        _ => false,
+    }
+}
+
+/// The tool's input as compact JSON, for a tool whose arguments have no one field to show.
+fn json_input(raw: &serde_json::Value) -> Option<String> {
+    let input = &raw["tool_input"];
+    (!is_blank(input)).then(|| input.to_string())
+}
+
+/// The text parts of an MCP tool's `content` array.
+fn mcp_output(response: &serde_json::Value) -> Option<String> {
+    let parts = response["content"].as_array()?;
+    joined(parts.iter().filter(|part| part["type"] == "text").filter_map(|part| part["text"].as_str()).collect())
+}
+
+/// Reads a tool no client table covers: the input as compact JSON, the response as text.
+fn unknown_tool_io(raw: &serde_json::Value) -> (Option<String>, Option<String>) {
+    let output = match &raw["tool_response"] {
+        response if is_blank(response) => None,
+        serde_json::Value::String(text) => non_empty(Some(text)),
+        serde_json::Value::Array(items) if items.iter().all(|item| item["text"].is_string()) => {
+            joined(items.iter().filter_map(|item| item["text"].as_str()).collect())
+        }
+        response => serde_json::to_string_pretty(response).ok(),
+    };
+
+    (json_input(raw), output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -93,7 +146,20 @@ mod tests {
     use serde_json::json;
 
     fn build(raw: serde_json::Value) -> (ClientSessionId, SessionId, Event) {
-        record(shared(raw).unwrap())
+        record(shared_no_io(raw).unwrap())
+    }
+
+    fn shared_no_io(raw: serde_json::Value) -> Result<Translation> {
+        shared(raw, |_, _| (None, None))
+    }
+
+    /// A client's `tool_io` applied to a hook that names its tool.
+    pub(super) fn io(tool_io: ToolIo, raw: serde_json::Value) -> (Option<String>, Option<String>) {
+        tool_io(raw["tool_name"].as_str().unwrap(), &raw)
+    }
+
+    pub(super) fn some(text: &str) -> Option<String> {
+        Some(text.to_owned())
     }
 
     pub(super) fn record(translation: Translation) -> (ClientSessionId, SessionId, Event) {
@@ -134,7 +200,7 @@ mod tests {
         let (_, session, event) = build(raw.clone());
 
         assert_eq!(event.actor, Actor::Agent);
-        assert_eq!(event.payload, Payload::ToolUsed { session, tool: "Bash".into() });
+        assert_eq!(event.payload, Payload::ToolUsed { session, tool: "Bash".into(), input: None, output: None });
         assert_eq!(event.raw, Some(raw));
     }
 
@@ -162,25 +228,25 @@ mod tests {
 
     #[test]
     fn unknown_or_missing_hook_event_name_is_an_error() {
-        assert!(shared(json!({"hook_event_name": "PreToolUse", "session_id": "a"})).is_err());
-        assert!(shared(json!({"hook_event_name": "SubagentStop", "session_id": "a"})).is_err());
-        assert!(shared(json!({"session_id": "a"})).is_err());
+        assert!(shared_no_io(json!({"hook_event_name": "PreToolUse", "session_id": "a"})).is_err());
+        assert!(shared_no_io(json!({"hook_event_name": "SubagentStop", "session_id": "a"})).is_err());
+        assert!(shared_no_io(json!({"session_id": "a"})).is_err());
     }
 
     #[test]
     fn missing_or_non_string_session_id_is_an_error() {
-        assert!(shared(json!({"hook_event_name": "PostToolUse"})).is_err());
-        assert!(shared(json!({"hook_event_name": "PostToolUse", "session_id": 1})).is_err());
+        assert!(shared_no_io(json!({"hook_event_name": "PostToolUse"})).is_err());
+        assert!(shared_no_io(json!({"hook_event_name": "PostToolUse", "session_id": 1})).is_err());
     }
 
     #[test]
     fn missing_or_non_string_content_is_an_error() {
-        assert!(shared(json!({"hook_event_name": "UserPromptSubmit", "session_id": "a"})).is_err());
-        assert!(shared(json!({"hook_event_name": "Stop", "last_assistant_message": 1, "session_id": "a"})).is_err());
+        assert!(shared_no_io(json!({"hook_event_name": "UserPromptSubmit", "session_id": "a"})).is_err());
+        assert!(shared_no_io(json!({"hook_event_name": "Stop", "last_assistant_message": 1, "session_id": "a"})).is_err());
     }
 
     #[test]
     fn missing_tool_name_is_an_error() {
-        assert!(shared(json!({"hook_event_name": "PostToolUse", "session_id": "a"})).is_err());
+        assert!(shared_no_io(json!({"hook_event_name": "PostToolUse", "session_id": "a"})).is_err());
     }
 }

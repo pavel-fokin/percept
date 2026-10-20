@@ -1,6 +1,7 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { getData, type Event, type Session } from "../api";
 import { BackLink } from "../components/back-link";
+import { Chevron } from "../components/chevron";
 import { Markdown } from "../components/markdown";
 import { RouteError } from "../components/route-error";
 import { dayTime, full, time } from "../format";
@@ -97,7 +98,7 @@ function AgentItems({ items, started }: { items: Item[]; started: Subagents }) {
   const first = items.find((item) => item.type === "event" && isAgentMessage(item.event));
 
   return items.map((item) => {
-    if (item.type === "tools") return <Quiet key={item.events[0].id}>{toolRuns(item.events)}</Quiet>;
+    if (item.type === "tools") return <Tools key={item.events[0].id} events={item.events} />;
 
     const { event } = item;
     const payload = event.payload as Record<string, string>;
@@ -123,20 +124,14 @@ function Quiet({ children }: { children: ReactNode }) {
   return <p className="text-sm text-muted wrap-anywhere">{children}</p>;
 }
 
+const summaryClass =
+  "-mx-2.5 flex min-h-11 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted hover:bg-surface [&::-webkit-details-marker]:hidden";
+
 function Report({ content, launch }: { content: string; launch?: { agent: string; task: string } }) {
   return (
     <details className="group min-w-0">
-      <summary className="-mx-2.5 flex min-h-11 cursor-pointer list-none items-center gap-1.5 rounded-lg px-2.5 text-sm text-muted hover:bg-surface [&::-webkit-details-marker]:hidden">
-        <svg
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          aria-hidden
-          className="size-3.5 shrink-0 transition-transform group-open:rotate-90"
-        >
-          <path d="m6 3 5 5-5 5" />
-        </svg>
+      <summary className={summaryClass}>
+        <Chevron />
         <span className="min-w-0 wrap-anywhere">
           {launch ? `${launch.agent} reported · ${launch.task}` : "subagent reported"}
         </span>
@@ -144,6 +139,58 @@ function Report({ content, launch }: { content: string; launch?: { agent: string
       <div className="pt-2">
         <Markdown text={content} />
       </div>
+    </details>
+  );
+}
+
+function Tools({ events }: { events: Event[] }) {
+  return (
+    <details className="group min-w-0">
+      <summary className={summaryClass}>
+        <Chevron />
+        <span className="min-w-0 wrap-anywhere">{toolRuns(events)}</span>
+      </summary>
+      <div className="grid min-w-0 pb-2 pl-5">
+        {events.map((event) => (
+          <ToolCall key={event.id} payload={event.payload as ToolPayload} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
+type ToolPayload = { tool: string; input: string | null; output: string | null };
+
+// A call opens on its own to its full input and output; one with neither is a plain line, indented to match.
+// The body mounts on first open: a long session holds hundreds of outputs nobody reads.
+function ToolCall({ payload: { tool, input, output } }: { payload: ToolPayload }) {
+  const [opened, setOpened] = useState(false);
+
+  const line = (
+    <span className="flex min-w-0 gap-2 font-mono text-[13px]">
+      <span className="shrink-0 text-text">{tool}</span>
+      {input && (
+        <span title={input} className="min-w-0 truncate">
+          {input}
+        </span>
+      )}
+    </span>
+  );
+
+  if (!input && !output) return <div className="flex min-h-11 items-center pl-5 text-muted sm:min-h-9">{line}</div>;
+
+  return (
+    <details className="group/call min-w-0" onToggle={(e) => e.currentTarget.open && setOpened(true)}>
+      <summary className={`${summaryClass} sm:min-h-9`}>
+        <Chevron open="group-open/call:rotate-90" />
+        {line}
+      </summary>
+      {opened && (
+        <div className="mt-1 mb-2 grid gap-2 font-mono text-[13px] leading-[20px]">
+          {input && <p className="pl-5 whitespace-pre-wrap wrap-anywhere">{input}</p>}
+          {output && <pre className="max-h-80 overflow-auto rounded-[10px] bg-surface px-4 py-3.5">{output}</pre>}
+        </div>
+      )}
     </details>
   );
 }

@@ -1,4 +1,4 @@
-use super::{EventBuilder, Result, Translation, session_id, shared, text};
+use super::{EventBuilder, Result, Translation, joined, json_input, mcp_output, session_id, shared, str_field, text, unknown_tool_io};
 use crate::core::{Actor, ClientAgentId, Event};
 
 const AGENT_MESSAGE: &str = "<agent-message from=\"";
@@ -18,7 +18,30 @@ pub(super) fn translate(raw: serde_json::Value) -> Result<Translation> {
         Some("UserPromptSubmit") if is_hand_back(&text(&raw, "prompt")?) => {
             Ok(Translation::Record(session_id(&raw)?, hand_back(raw)?))
         }
-        _ => shared(raw),
+        _ => shared(raw, tool_io),
+    }
+}
+
+fn tool_io(tool: &str, raw: &serde_json::Value) -> (Option<String>, Option<String>) {
+    let (input, response) = (&raw["tool_input"], &raw["tool_response"]);
+
+    match tool {
+        "Bash" => {
+            let streams = ["stdout", "stderr"].iter().filter_map(|stream| response[stream].as_str()).filter(|text| !text.is_empty());
+            (str_field(input, "command"), joined(streams.collect()))
+        }
+        "Read" | "Write" => (str_field(input, "file_path"), None),
+        "Edit" => {
+            let hunks = response["structuredPatch"].as_array().into_iter().flatten();
+            let lines = hunks.flat_map(|hunk| hunk["lines"].as_array().into_iter().flatten()).filter_map(|line| line.as_str());
+            (str_field(input, "file_path"), joined(lines.collect()))
+        }
+        "Grep" | "Glob" => (str_field(input, "pattern"), None),
+        "WebFetch" => (str_field(input, "url"), None),
+        "WebSearch" => (str_field(input, "query"), None),
+        "Skill" => (str_field(input, "skill"), None),
+        mcp if mcp.starts_with("mcp__") => (json_input(raw), mcp_output(response)),
+        _ => unknown_tool_io(raw),
     }
 }
 
@@ -79,7 +102,7 @@ fn between<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::record;
+    use super::super::tests::{record, some};
     use super::*;
     use crate::core::{Actor, Payload};
     use serde_json::json;
@@ -116,7 +139,80 @@ mod tests {
 
         let (_, session, event) = record(translate(raw).unwrap());
 
-        assert_eq!(event.payload, Payload::ToolUsed { session, tool: "Agent".into() });
+        assert_eq!(event.payload, Payload::ToolUsed { session, tool: "Agent".into(), input: Some(r#"{"description":"Look"}"#.into()), output: None });
+    }
+
+    fn io(raw: serde_json::Value) -> (Option<String>, Option<String>) {
+        super::super::tests::io(tool_io, raw)
+    }
+
+    #[test]
+    fn bash_joins_non_empty_streams() {
+        let both = json!({"tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_response": {"stdout": "a", "stderr": "b"}});
+        let quiet = json!({"tool_name": "Bash", "tool_input": {"command": ""}, "tool_response": {"stdout": "", "stderr": ""}});
+        let err_only = json!({"tool_name": "Bash", "tool_input": {"command": "ls"}, "tool_response": {"stdout": "", "stderr": "b"}});
+
+        assert_eq!(io(both), (some("ls"), some("a\nb")));
+        assert_eq!(io(quiet), (None, None));
+        assert_eq!(io(err_only), (some("ls"), some("b")));
+    }
+
+    #[test]
+    fn file_tools_record_the_path() {
+        for tool in ["Read", "Write"] {
+            let raw = json!({"tool_name": tool, "tool_input": {"file_path": "/a.rs"}, "tool_response": {"content": "x"}});
+
+            assert_eq!(io(raw), (some("/a.rs"), None));
+        }
+    }
+
+    #[test]
+    fn edit_outputs_the_patch_lines() {
+        let patch = json!([{"lines": ["-old", "+new"]}, {"lines": [" ctx"]}]);
+        let raw = json!({"tool_name": "Edit", "tool_input": {"file_path": "/a.rs"}, "tool_response": {"structuredPatch": patch}});
+
+        assert_eq!(io(raw), (some("/a.rs"), some("-old\n+new\n ctx")));
+    }
+
+    #[test]
+    fn lookup_tools_record_their_query() {
+        let cases = [("Grep", "pattern"), ("Glob", "pattern"), ("WebFetch", "url"), ("WebSearch", "query"), ("Skill", "skill")];
+
+        for (tool, field) in cases {
+            let raw = json!({"tool_name": tool, "tool_input": {field: "q"}, "tool_response": {}});
+
+            assert_eq!(io(raw), (some("q"), None));
+        }
+    }
+
+    #[test]
+    fn a_known_tool_missing_its_field_has_none() {
+        let raw = json!({"tool_name": "Read", "tool_input": {"path": "/a.rs"}});
+
+        assert_eq!(io(raw), (None, None));
+    }
+
+    #[test]
+    fn mcp_tools_record_their_arguments_and_text_parts() {
+        let content = json!([{"type": "text", "text": "one"}, {"type": "image", "data": "x"}, {"type": "text", "text": "two"}]);
+        let raw = json!({"tool_name": "mcp__docs__read", "tool_input": {"id": 7}, "tool_response": {"content": content}});
+
+        assert_eq!(io(raw), (some(r#"{"id":7}"#), some("one\ntwo")));
+    }
+
+    #[test]
+    fn an_unknown_tool_records_its_input_and_response_as_text() {
+        let compact = json!({"tool_name": "SendMessage", "tool_input": {"to": "a"}, "tool_response": {"ok": true}});
+        let string = json!({"tool_name": "SendMessage", "tool_input": {}, "tool_response": "sent"});
+        let texts = json!({"tool_name": "SendMessage", "tool_input": {}, "tool_response": [{"text": "x"}, {"text": "y"}]});
+        let missing = json!({"tool_name": "SendMessage"});
+        let blank = json!({"tool_name": "SendMessage", "tool_input": {}, "tool_response": []});
+
+        assert_eq!(io(compact), (some(r#"{"to":"a"}"#), some("{\n  \"ok\": true\n}")));
+        assert_eq!(io(string).1, some("sent"));
+        assert_eq!(io(texts).1, some("x\ny"));
+        assert_eq!(io(missing), (None, None));
+        assert_eq!(io(blank), (None, None));
     }
 
     #[test]
