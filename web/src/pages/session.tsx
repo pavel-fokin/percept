@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigationType } from "react-router";
 import { getData, type Event, type Session } from "../api";
 import { BackLink } from "../components/back-link";
 import { Chevron } from "../components/chevron";
 import { Markdown } from "../components/markdown";
+import { NewMessage } from "../components/new-message";
 import { RouteError } from "../components/route-error";
+import { Spinner } from "../components/spinner";
 import { dayTime, full, time } from "../format";
 import { sessionsUrl } from "../paths";
+import { usePolling } from "../use-polling";
 
 // One line per run of tool calls, so a tool never splits the agent's text.
 type Item = { type: "event"; event: Event } | { type: "tools"; events: Event[] };
@@ -64,6 +67,7 @@ export function SessionPage({ session, events }: { session: Session; events: Eve
   const started = useMemo(() => subagents(events), [events]);
   const prompted = list.filter((e) => e.prompt);
   const prompts = prompted.length;
+  usePolling(session.status !== "ended");
   useQuoteHighlight();
   useScrollToLastPrompt(prompted.at(-1)?.id);
 
@@ -90,9 +94,16 @@ export function SessionPage({ session, events }: { session: Session; events: Eve
               </section>
             )}
             <AgentItems items={exchange.items} started={started} agent={clientName(session.client)} />
+            {exchange === list.at(-1) && session.status === "working" && (
+              <p className="flex items-center gap-1.5 text-sm text-muted">
+                <Spinner />
+                {clientName(session.client)} is working
+              </p>
+            )}
           </article>
         ))}
       </div>
+      <NewMessage key={session.id} events={events} />
     </>
   );
 }
@@ -137,12 +148,16 @@ function Quiet({ id, children }: { id: string; children: ReactNode }) {
   return <p id={id} className={`${messageClass} text-sm text-muted wrap-anywhere`}>{children}</p>;
 }
 
-/** Opens a session at its last prompt, so the reader starts with the latest question and its answer. */
+/** Opens a session at its last prompt, so the reader starts with the latest question and its answer. Once per page open: a revalidation that brings a newer prompt does not move the reader. */
 function useScrollToLastPrompt(id: string | undefined) {
   const { hash, key } = useLocation();
   const navigation = useNavigationType();
+  const opened = useRef<string | null>(null);
 
   useEffect(() => {
+    if (opened.current === key) return;
+    opened.current = key;
+
     // Back, forward and reload return to where the reader was; only a fresh tab's first entry has the default key.
     if (hash || !id || (navigation === "POP" && key !== "default")) return;
     document.getElementById(id)?.scrollIntoView();

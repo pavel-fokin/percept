@@ -1,8 +1,10 @@
 import { Link, useLoaderData, useRouteError } from "react-router";
 import { describe, getData, type MapSummary, type Session } from "../api";
 import { relative } from "../format";
+import { Spinner } from "../components/spinner";
 import { textLink } from "../components/ui/text-link";
 import { mapUrl, sessionsUrl, sessionUrl } from "../paths";
+import { usePolling } from "../use-polling";
 
 const README = "https://github.com/pavel-fokin/percept#readme";
 
@@ -21,10 +23,10 @@ export async function loadStart() {
     return groups.get(path)!;
   };
 
-  // Sessions come newest first, so a path's first session is its latest.
+  // Latest by activity, so a working session stays in view when a newer one sits idle beside it.
   for (const session of sessions) {
     const g = group(session.path);
-    g.latest ??= session;
+    if (!g.latest || new Date(session.last_event_at) > new Date(g.latest.last_event_at)) g.latest = session;
     g.sessions += 1;
   }
   for (const map of maps) group(map.path).maps.push(map);
@@ -34,6 +36,7 @@ export async function loadStart() {
 
 export function Start() {
   const groups = useLoaderData<typeof loadStart>();
+  usePolling(true);
   const now = new Date();
 
   if (groups.length === 0) return <EmptyState />;
@@ -45,8 +48,8 @@ export function Start() {
           <div className="flex items-baseline justify-between gap-4">
             <h2 className="min-w-0 font-mono text-[13px] font-normal wrap-anywhere">{path}</h2>
             {latest && (
-              <time dateTime={latest.created_at} className="flex-none text-sm text-muted tabular-nums">
-                active {relative(new Date(latest.created_at), now)}
+              <time dateTime={latest.last_event_at} className="flex-none text-sm text-muted tabular-nums">
+                active {relative(new Date(latest.last_event_at), now)}
               </time>
             )}
           </div>
@@ -57,7 +60,10 @@ export function Start() {
               className="-mx-3 mt-6 flex min-h-11 items-center gap-3 rounded-[10px] px-3 py-3 hover:bg-surface focus-visible:bg-surface"
             >
               <span className="grid min-w-0 flex-1 gap-0.5">
-                <span className="text-[13px] text-muted">Latest session</span>
+                <span className="flex items-center gap-1.5 text-[13px] text-muted">
+                  Latest session
+                  {latest.status === "working" && <Working />}
+                </span>
                 <span className={`line-clamp-2 sm:line-clamp-1 ${latest.title ? "" : "font-mono text-sm text-muted"}`}>
                   {latest.title ?? latest.client_session_id}
                 </span>
@@ -82,6 +88,17 @@ export function Start() {
 
 export function StartError() {
   return <p className="pt-6">Failed to load sessions: {describe(useRouteError())}</p>;
+}
+
+// Only working is marked: a client that never sends SessionEnd leaves its session waiting for good.
+function Working() {
+  return (
+    <>
+      <span aria-hidden>·</span>
+      <Spinner />
+      working
+    </>
+  );
 }
 
 function Counter({ to, label, count }: { to: string; label: string; count: number }) {

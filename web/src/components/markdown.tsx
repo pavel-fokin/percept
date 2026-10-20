@@ -1,4 +1,4 @@
-import { createElement, type ComponentType, type JSX } from "react";
+import { createElement, memo, type ComponentType, type JSX } from "react";
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { textLink } from "./ui/text-link";
@@ -40,7 +40,7 @@ const components: Components = {
   td: styled("td", "border-b border-border py-2 pr-5"),
 };
 
-export function Markdown({ text }: { text: string }) {
+export const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
     <div className="min-w-0 leading-[26px] wrap-anywhere [&>:first-child]:mt-0 [&>:last-child]:mb-0">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
@@ -48,4 +48,4 @@ export function Markdown({ text }: { text: string }) {
       </ReactMarkdown>
     </div>
   );
-}
+});

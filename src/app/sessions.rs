@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 
+use jiff::Timestamp;
+
 use super::AppService;
-use crate::core::{Actor, ClientSessionId, Event, EventStore, Payload, SchemaStore, Session, SessionId, Source};
+use crate::core::{Actor, ClientSessionId, Event, EventStore, Payload, SchemaStore, Session, SessionId, SessionStatus, Source};
 use crate::shared::Result;
 
 impl<S: EventStore, M: SchemaStore> AppService<S, M> {
@@ -18,18 +20,30 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             }
         }
 
+        let mut last: BTreeMap<SessionId, (SessionStatus, Timestamp)> = BTreeMap::new();
+        for e in &events {
+            if let (Some(session), Some(status)) = (e.payload.session(), SessionStatus::after(e)) {
+                last.insert(session, (status, e.created_at));
+            }
+        }
+
         let sessions = events
             .iter()
             .rev()
             .filter_map(|e| match &e.payload {
-                Payload::SessionCreated { session, client_session_id } => Some(Session {
-                    id: *session,
-                    client_session_id: client_session_id.clone(),
-                    created_at: e.created_at,
-                    path: e.source.path.clone(),
-                    client: e.source.client.clone(),
-                    title: titles.get(session).map(|t| t.to_string()),
-                }),
+                Payload::SessionCreated { session, client_session_id } => {
+                    let (status, last_event_at) = last[session];
+                    Some(Session {
+                        id: *session,
+                        client_session_id: client_session_id.clone(),
+                        created_at: e.created_at,
+                        path: e.source.path.clone(),
+                        client: e.source.client.clone(),
+                        title: titles.get(session).map(|t| t.to_string()),
+                        status,
+                        last_event_at,
+                    })
+                }
                 _ => None,
             })
             .collect();
@@ -196,6 +210,59 @@ mod tests {
         let sessions = service.sessions().await.unwrap();
 
         assert_eq!(sessions[0].title, None);
+    }
+
+    #[tokio::test]
+    async fn status_is_ended_after_session_stopped() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Human, "hi", json!({}))).await.unwrap();
+        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::session_stopped(src, s, json!({}))).await.unwrap();
+
+        let sessions = service.sessions().await.unwrap();
+
+        assert_eq!(sessions[0].status, SessionStatus::Ended);
+    }
+
+    #[tokio::test]
+    async fn status_is_waiting_after_an_agent_message() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
+        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Agent, "done", json!({}))).await.unwrap();
+
+        let sessions = service.sessions().await.unwrap();
+
+        assert_eq!(sessions[0].status, SessionStatus::Waiting);
+    }
+
+    #[tokio::test]
+    async fn status_is_working_mid_turn() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Agent, "done", json!({}))).await.unwrap();
+        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Human, "next", json!({}))).await.unwrap();
+        service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
+
+        let sessions = service.sessions().await.unwrap();
+
+        assert_eq!(sessions[0].status, SessionStatus::Working);
+        assert_eq!(sessions[1].status, SessionStatus::Working);
+    }
+
+    #[tokio::test]
+    async fn last_event_at_is_the_time_of_the_last_event() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
+        service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
+        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Read", None, None, json!({}))).await.unwrap();
+
+        let sessions = service.sessions().await.unwrap();
+
+        let events = store.0.lock().unwrap();
+        assert_eq!(sessions[1].last_event_at, events[4].created_at);
+        assert_eq!(sessions[0].last_event_at, events[3].created_at);
     }
 
     #[tokio::test]

@@ -5,7 +5,8 @@ export const dayTime = new Intl.DateTimeFormat("en-GB", { day: "numeric", month:
 
 export function relative(date: Date, now: Date) {
   const minutes = Math.floor((now.getTime() - date.getTime()) / 60_000);
-  if (minutes < 60) return `${Math.max(minutes, 0)} min ago`;
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
   if (minutes < 360) return `${Math.floor(minutes / 60)} h ago`;
 
   const name = dayName(date, now);
