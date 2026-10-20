@@ -5,7 +5,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use super::paths::{display_path, display_paths};
-use crate::app::CitedMessage;
+use crate::app::{self, CitedMessage};
 use crate::core::{self, Actor, ClientSessionId, EventId, MapId, NodeId, Payload, SessionId};
 
 /// The envelope every API response is sent in.
@@ -22,42 +22,80 @@ pub(super) struct Status {
 /// A map as the page reads it, with its path as a human sees it.
 #[derive(Serialize)]
 pub(super) struct MapSummary {
-    pub(super) id: MapId,
-    pub(super) kind: String,
-    pub(super) path: String,
-    pub(super) nodes: usize,
+    id: MapId,
+    kind: String,
+    path: String,
+    nodes: usize,
+}
+
+impl MapSummary {
+    pub(super) fn new(summary: app::MapSummary, home: &Path) -> Self {
+        Self {
+            id: summary.map.id,
+            kind: summary.map.kind,
+            path: display_path(&summary.map.path, home),
+            nodes: summary.nodes,
+        }
+    }
 }
 
 /// A whole map as the page reads it, with its path as a human sees it.
 #[derive(Serialize)]
 pub(super) struct MapDetail {
-    pub(super) id: MapId,
-    pub(super) kind: String,
-    pub(super) path: String,
-    pub(super) nodes: Vec<Node>,
-    pub(super) edges: Vec<Edge>,
+    id: MapId,
+    kind: String,
+    path: String,
+    nodes: Vec<Node>,
+    edges: Vec<Edge>,
+}
+
+impl MapDetail {
+    pub(super) fn new(detail: app::MapDetail, home: &Path) -> Self {
+        let messages = &detail.messages;
+
+        Self {
+            id: detail.map.id,
+            kind: detail.map.kind,
+            path: display_path(&detail.map.path, home),
+            nodes: detail.nodes.into_iter().map(|n| Node::new(n, messages)).collect(),
+            edges: detail.edges.into_iter().map(Edge::from).collect(),
+        }
+    }
 }
 
 #[derive(Serialize)]
-pub(super) struct Node {
-    pub(super) id: NodeId,
-    pub(super) kind: String,
-    pub(super) title: String,
-    pub(super) properties: BTreeMap<String, String>,
-    pub(super) references: Vec<Reference>,
-    pub(super) created_at: jiff::Timestamp,
+struct Node {
+    id: NodeId,
+    kind: String,
+    title: String,
+    properties: BTreeMap<String, String>,
+    references: Vec<Reference>,
+    created_at: jiff::Timestamp,
+}
+
+impl Node {
+    fn new(node: core::Node, messages: &BTreeMap<EventId, CitedMessage>) -> Self {
+        Self {
+            id: node.id,
+            kind: node.kind,
+            title: node.title,
+            properties: node.properties,
+            references: node.references.into_iter().map(|r| Reference::new(r, messages)).collect(),
+            created_at: node.created_at,
+        }
+    }
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "lowercase")]
-pub(super) enum Reference {
+enum Reference {
     Message { event: EventId, session: SessionId, created_at: jiff::Timestamp, quote: String },
     File { path: String, lines: (u32, u32), excerpt: String },
 }
 
 impl Reference {
     /// A node's reference is validated when written, so its message is in `messages`.
-    pub(super) fn new(reference: core::Reference, messages: &BTreeMap<EventId, CitedMessage>) -> Self {
+    fn new(reference: core::Reference, messages: &BTreeMap<EventId, CitedMessage>) -> Self {
         match reference {
             core::Reference::Message { event, quote } => {
                 let CitedMessage { session, created_at } = messages[&event];
@@ -69,10 +107,16 @@ impl Reference {
 }
 
 #[derive(Serialize)]
-pub(super) struct Edge {
-    pub(super) kind: String,
-    pub(super) from: NodeId,
-    pub(super) to: NodeId,
+struct Edge {
+    kind: String,
+    from: NodeId,
+    to: NodeId,
+}
+
+impl From<core::Edge> for Edge {
+    fn from(edge: core::Edge) -> Self {
+        Self { kind: edge.kind, from: edge.from, to: edge.to }
+    }
 }
 
 /// A session as the page reads it, with its path as a human sees it.
@@ -102,14 +146,26 @@ impl Session {
 /// An event as the page reads it: the hook input stays in the log.
 #[derive(Serialize)]
 pub(super) struct Event {
-    pub(super) id: EventId,
-    pub(super) actor: Actor,
-    pub(super) kind: &'static str,
-    pub(super) payload: serde_json::Value,
-    pub(super) created_at: jiff::Timestamp,
+    id: EventId,
+    actor: Actor,
+    kind: &'static str,
+    payload: serde_json::Value,
+    created_at: jiff::Timestamp,
 }
 
-pub(super) fn view_payload(payload: &Payload, home: &Path) -> serde_json::Value {
+impl Event {
+    pub(super) fn new(event: core::Event, home: &Path) -> Self {
+        Self {
+            id: event.id,
+            actor: event.actor,
+            kind: event.payload.kind().name(),
+            payload: payload(&event.payload, home),
+            created_at: event.created_at,
+        }
+    }
+}
+
+fn payload(payload: &Payload, home: &Path) -> serde_json::Value {
     match payload {
         Payload::Message { content, .. } => json!({ "content": content }),
         Payload::ToolUsed { tool, input, output, .. } => {

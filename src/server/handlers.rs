@@ -5,8 +5,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
-use super::paths::display_path;
-use super::responses::{self, view_payload, Data, Edge, MapDetail, MapSummary, Node, Reference, Status};
+use super::responses::{self, Data, MapDetail, MapSummary, Status};
 use super::Api;
 use crate::core::{EventStore, MapId, SchemaStore, SessionId};
 use crate::shared::Error;
@@ -59,60 +58,18 @@ where
 
     pub(super) async fn maps(State(api): State<Arc<Self>>) -> Reply<Vec<MapSummary>> {
         let summaries = api.service.all_map_summaries().await?;
-
-        let maps = summaries
-            .into_iter()
-            .map(|s| MapSummary {
-                id: s.map.id,
-                kind: s.map.kind,
-                path: display_path(&s.map.path, &api.home),
-                nodes: s.nodes,
-            })
-            .collect();
-
+        let maps = summaries.into_iter().map(|s| MapSummary::new(s, &api.home)).collect();
         Ok(Json(Data { data: maps }))
     }
 
     pub(super) async fn map(State(api): State<Arc<Self>>, Path(id): Path<MapId>) -> Reply<MapDetail> {
         let detail = api.service.map_detail(id).await?.ok_or(ApiError::NotFound)?;
-
-        let map = MapDetail {
-            id: detail.map.id,
-            kind: detail.map.kind,
-            path: display_path(&detail.map.path, &api.home),
-            nodes: detail
-                .nodes
-                .into_iter()
-                .map(|n| Node {
-                    id: n.id,
-                    kind: n.kind,
-                    title: n.title,
-                    properties: n.properties,
-                    references: n.references.into_iter().map(|r| Reference::new(r, &detail.messages)).collect(),
-                    created_at: n.created_at,
-                })
-                .collect(),
-            edges: detail.edges.into_iter().map(|e| Edge { kind: e.kind, from: e.from, to: e.to }).collect(),
-        };
-
-        Ok(Json(Data { data: map }))
+        Ok(Json(Data { data: MapDetail::new(detail, &api.home) }))
     }
 
     pub(super) async fn session_events(State(api): State<Arc<Self>>, Path(id): Path<SessionId>) -> Reply<Vec<responses::Event>> {
-        let events = api
-            .service
-            .session_events(id)
-            .await?
-            .ok_or(ApiError::NotFound)?
-            .into_iter()
-            .map(|e| responses::Event {
-                id: e.id,
-                actor: e.actor,
-                kind: e.payload.kind().name(),
-                payload: view_payload(&e.payload, &api.home),
-                created_at: e.created_at,
-            })
-            .collect();
+        let events = api.service.session_events(id).await?.ok_or(ApiError::NotFound)?;
+        let events = events.into_iter().map(|e| responses::Event::new(e, &api.home)).collect();
         Ok(Json(Data { data: events }))
     }
 }
