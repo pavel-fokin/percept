@@ -16,6 +16,18 @@ pub struct Session {
     pub client: String,
     /// The first non-empty thing the human said, if they said anything.
     pub title: Option<String>,
+    pub status: SessionStatus,
+    /// When the session's last event happened.
+    pub last_event_at: Timestamp,
+}
+
+/// What the session is doing, from its last event.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionStatus {
+    Working,
+    Waiting,
+    Ended,
 }
 
 pub type SessionId = Id<Session>;

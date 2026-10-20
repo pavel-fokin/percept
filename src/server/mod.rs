@@ -166,7 +166,9 @@ mod tests {
         let data = body["data"].as_array().unwrap();
         assert_eq!(data.len(), 1);
         assert_eq!(data[0]["client_session_id"], "k");
-        assert_eq!(data[0].as_object().unwrap().len(), 6);
+        assert_eq!(data[0].as_object().unwrap().len(), 8);
+        assert_eq!(data[0]["status"], "waiting");
+        assert!(data[0]["last_event_at"].is_string());
         assert_eq!(data[0]["path"], "/repo");
         assert_eq!(data[0]["client"], "claude-code");
         assert!(data[0]["id"].is_string());

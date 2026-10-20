@@ -6,7 +6,7 @@ use serde_json::json;
 
 use super::paths::{display_path, display_paths};
 use crate::app::{self, CitedMessage};
-use crate::core::{self, Actor, ClientSessionId, EventId, MapId, NodeId, Payload, SessionId};
+use crate::core::{self, Actor, ClientSessionId, EventId, MapId, NodeId, Payload, SessionId, SessionStatus};
 
 /// The envelope every API response is sent in.
 #[derive(Serialize)]
@@ -128,6 +128,8 @@ pub(super) struct Session {
     title: Option<String>,
     path: String,
     client: String,
+    status: SessionStatus,
+    last_event_at: jiff::Timestamp,
 }
 
 impl Session {
@@ -139,6 +141,8 @@ impl Session {
             title: session.title,
             path: display_path(&session.path, home),
             client: session.client,
+            status: session.status,
+            last_event_at: session.last_event_at,
         }
     }
 }
