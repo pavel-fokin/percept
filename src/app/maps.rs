@@ -111,16 +111,10 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         let _lock = self.store.lock().await?;
 
         let (_, map) = self.project_map(&source.path, map_kind).await?;
-        let Map { nodes, edges, .. } = &map;
 
-        let (from, to) = (find_node(nodes, map_kind, from)?, find_node(nodes, map_kind, to)?);
+        let (from, to) = (find_node(&map.nodes, map_kind, from)?, find_node(&map.nodes, map_kind, to)?);
         self.schemas.schema(&source.path, map_kind).await?.check_edge(kind, &from.kind, &to.kind)?;
         let (from, to) = (from.id, to.id);
-
-        let repeated = edges.iter().any(|e| e.is(kind, from, to));
-        if repeated {
-            return Err(format!("the {map_kind} map already has this {kind} edge").into());
-        }
 
         self.write(&map, Event::edge_added(source, actor, map.id, kind, from, to)).await
     }
@@ -141,9 +135,6 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         let (_, map) = self.project_map(&source.path, map_kind).await?;
 
         let (from, to) = (find_node(&map.nodes, map_kind, from)?.id, find_node(&map.nodes, map_kind, to)?.id);
-        if !map.edges.iter().any(|e| e.is(kind, from, to)) {
-            return Err(format!("the {map_kind} map has no such {kind} edge").into());
-        }
 
         self.write(&map, Event::edge_removed(source, actor, map.id, kind, from, to)).await
     }
@@ -172,16 +163,12 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         references: Vec<Ref>,
     ) -> Result<()> {
         not_blank("kind", kind)?;
-        not_blank("title", title)?;
 
         // Held until return, so parallel adds cannot both pass the check.
         let _lock = self.store.lock().await?;
 
         let (events, map) = self.project_map(&source.path, map_kind).await?;
         self.schemas.schema(&source.path, map_kind).await?.check_node(kind, &properties)?;
-        if map.nodes.iter().any(|n| n.title == title) {
-            return Err(format!("the {map_kind} map already has a node titled {title:?}").into());
-        }
 
         let mut resolved = Vec::new();
         for reference in references {
@@ -212,10 +199,6 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         let node = find_node(&map.nodes, map_kind, title)?;
 
         let new_title = new_title.unwrap_or(&node.title);
-        not_blank("title", new_title)?;
-        if map.nodes.iter().any(|n| n.id != node.id && n.title == new_title) {
-            return Err(format!("the {map_kind} map already has a node titled {new_title:?}").into());
-        }
 
         let mut merged = node.properties.clone();
         merged.extend(properties);
@@ -242,8 +225,9 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         Ok((events, map))
     }
 
-    /// The one way a node or an edge event reaches the log: the policy sees it first.
+    /// The one way a node or an edge event reaches the log: the map and then the policy see it first.
     async fn write(&self, map: &Map, event: Event) -> Result<()> {
+        map.check(&event)?;
         Policy::check(&event, map)?;
 
         self.store.append(&event).await

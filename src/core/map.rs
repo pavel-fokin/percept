@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 
 use super::{Actor, Event, EventId, Payload};
-use crate::shared::Id;
+use crate::shared::{Id, Result};
 
 pub type MapId = Id<Map>;
 pub type NodeId = Id<Node>;
@@ -99,6 +99,65 @@ impl Map {
 
     pub fn node(&self, id: NodeId) -> Option<&Node> {
         self.nodes.iter().find(|n| n.id == id)
+    }
+
+    /// Refuses an event that would break the map: a node title blank or held by another node,
+    /// a node or an edge end that is not on the map, an edge the map already has or lacks.
+    pub fn check(&self, event: &Event) -> Result<()> {
+        match &event.payload {
+            Payload::NodeAdded { title, .. } => self.check_title(title, None),
+            Payload::NodeChanged { node, title, .. } => {
+                self.check_node(*node)?;
+
+                self.check_title(title, Some(*node))
+            }
+            Payload::NodeRemoved { node, .. } => self.check_node(*node),
+            Payload::EdgeAdded { kind, from, to, .. } => {
+                self.check_node(*from)?;
+                self.check_node(*to)?;
+
+                if self.edges.iter().any(|e| e.is(kind, *from, *to)) {
+                    return Err(format!("the {} map already has this {kind} edge", self.kind).into());
+                }
+
+                Ok(())
+            }
+            Payload::EdgeRemoved { kind, from, to, .. } => {
+                if !self.edges.iter().any(|e| e.is(kind, *from, *to)) {
+                    return Err(format!("the {} map has no such {kind} edge", self.kind).into());
+                }
+
+                Ok(())
+            }
+            Payload::MapCreated { .. }
+            | Payload::SessionCreated { .. }
+            | Payload::SessionStarted { .. }
+            | Payload::SessionStopped { .. }
+            | Payload::Message { .. }
+            | Payload::ToolUsed { .. }
+            | Payload::SubagentStarted { .. }
+            | Payload::SubagentReported { .. } => Ok(()),
+        }
+    }
+
+    fn check_node(&self, id: NodeId) -> Result<()> {
+        if self.node(id).is_none() {
+            return Err(format!("the {} map has no such node", self.kind).into());
+        }
+
+        Ok(())
+    }
+
+    /// A title is not blank and is held by no node but `own`.
+    fn check_title(&self, title: &str, own: Option<NodeId>) -> Result<()> {
+        if title.trim().is_empty() {
+            return Err("title must not be blank".into());
+        }
+        if self.nodes.iter().any(|n| Some(n.id) != own && n.title == title) {
+            return Err(format!("the {} map already has a node titled {title:?}", self.kind).into());
+        }
+
+        Ok(())
     }
 
     /// Folds `event` in; changes to a node not on the map, and removals of a node or edge not on it, change nothing.
@@ -385,5 +444,113 @@ mod tests {
         assert_eq!(maps[0].edges.iter().map(|e| (e.from, e.to)).collect::<Vec<_>>(), vec![(a, a)]);
         assert_eq!(maps[1].nodes.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(), vec!["B"]);
         assert_eq!(maps[1].edges.iter().map(|e| (e.from, e.to)).collect::<Vec<_>>(), vec![(b, b)]);
+    }
+
+    fn check_map() -> (MapId, NodeId, NodeId, Map) {
+        let map = MapId::new();
+        let (a, add_a) = node_added(map, Actor::Human, "A");
+        let (b, add_b) = node_added(map, Actor::Human, "B");
+        let edge = Event::edge_added(Source::fixture(), Actor::Human, map, "links", a, b);
+
+        (map, a, b, Map::fixture(map, &[add_a, add_b, edge]))
+    }
+
+    #[test]
+    fn check_refuses_a_node_added_with_a_blank_title_or_one_another_node_holds() {
+        let (map, _, _, folded) = check_map();
+
+        let blank = folded.check(&node_added(map, Actor::Agent, " ").1);
+        let taken = folded.check(&node_added(map, Actor::Agent, "A").1);
+        let free = folded.check(&node_added(map, Actor::Agent, "C").1);
+
+        assert_eq!(blank.unwrap_err().to_string(), "title must not be blank");
+        assert_eq!(taken.unwrap_err().to_string(), "the concepts map already has a node titled \"A\"");
+        assert!(free.is_ok());
+    }
+
+    fn change(map: MapId, node: NodeId, title: &str) -> Event {
+        Event::node_changed(Source::fixture(), Actor::Human, map, node, title, BTreeMap::new(), Vec::new())
+    }
+
+    #[test]
+    fn check_refuses_a_node_changed_that_is_missing_or_gets_a_blank_or_taken_title() {
+        let (map, a, _, folded) = check_map();
+
+        let missing = folded.check(&change(map, NodeId::new(), "C"));
+        let blank = folded.check(&change(map, a, " "));
+        let taken = folded.check(&change(map, a, "B"));
+        let renamed = folded.check(&change(map, a, "C"));
+
+        assert_eq!(missing.unwrap_err().to_string(), "the concepts map has no such node");
+        assert_eq!(blank.unwrap_err().to_string(), "title must not be blank");
+        assert_eq!(taken.unwrap_err().to_string(), "the concepts map already has a node titled \"B\"");
+        assert!(renamed.is_ok());
+    }
+
+    #[test]
+    fn check_lets_a_node_keep_its_own_title_on_a_change() {
+        let (map, a, _, folded) = check_map();
+
+        let result = folded.check(&change(map, a, "A"));
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn check_refuses_a_node_removed_that_is_not_on_the_map() {
+        let (map, a, _, folded) = check_map();
+
+        let missing = folded.check(&Event::node_removed(Source::fixture(), Actor::Human, map, NodeId::new()));
+        let present = folded.check(&Event::node_removed(Source::fixture(), Actor::Human, map, a));
+
+        assert_eq!(missing.unwrap_err().to_string(), "the concepts map has no such node");
+        assert!(present.is_ok());
+    }
+
+    #[test]
+    fn check_refuses_an_edge_added_with_an_end_off_the_map_or_one_the_map_has() {
+        let (map, a, b, folded) = check_map();
+        let edge = |kind, from, to| Event::edge_added(Source::fixture(), Actor::Human, map, kind, from, to);
+
+        let from_missing = folded.check(&edge("links", NodeId::new(), b));
+        let to_missing = folded.check(&edge("links", a, NodeId::new()));
+        let repeated = folded.check(&edge("links", a, b));
+        let reversed = folded.check(&edge("links", b, a));
+        let other_kind = folded.check(&edge("cites", a, b));
+
+        assert_eq!(from_missing.unwrap_err().to_string(), "the concepts map has no such node");
+        assert_eq!(to_missing.unwrap_err().to_string(), "the concepts map has no such node");
+        assert_eq!(repeated.unwrap_err().to_string(), "the concepts map already has this links edge");
+        assert!(reversed.is_ok());
+        assert!(other_kind.is_ok());
+    }
+
+    #[test]
+    fn check_refuses_an_edge_removed_that_is_not_on_the_map() {
+        let (map, a, b, folded) = check_map();
+        let remove = |kind, from, to| Event::edge_removed(Source::fixture(), Actor::Human, map, kind, from, to);
+
+        let missing = folded.check(&remove("links", b, a));
+        let other_kind = folded.check(&remove("cites", a, b));
+        let present = folded.check(&remove("links", a, b));
+
+        assert_eq!(missing.unwrap_err().to_string(), "the concepts map has no such links edge");
+        assert!(other_kind.is_err());
+        assert!(present.is_ok());
+    }
+
+    #[test]
+    fn check_passes_every_other_payload() {
+        let (map, _, _, folded) = check_map();
+        let session = crate::core::SessionId::new();
+        let events = [
+            Event::map_created(Source::fixture(), Actor::Human, map, "concepts"),
+            Event::session_created(Source::fixture(), session, crate::core::ClientSessionId::new("c".into())),
+            Event::message(Source::fixture(), session, Actor::Human, "Hello", serde_json::json!({})),
+        ];
+
+        for event in &events {
+            assert!(folded.check(event).is_ok());
+        }
     }
 }
