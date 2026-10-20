@@ -27,7 +27,7 @@ stays out when none was weighed.
 or replied to this decision itself. `agent` otherwise, including when
 the user moved on without answering it.
 
-A decision is never changed. A later decision that reverses or
+A decision is never changed or removed. A later decision that reverses or
 narrows it points to it with `supersedes`.
 """
 

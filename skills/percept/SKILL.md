@@ -29,9 +29,23 @@ by a schema in `.percept/schemas/<map>.toml`:
    percept add <map> "<from title>" <edge kind> "<to title>"
    ```
 
-5. Use only the kinds and properties the schema declares. Leave out a
+5. Change a node the session showed is no longer accurate. Remove a
+   node or an edge that no longer holds. Follow the map's
+   `instructions` first: a map may forbid both.
+
+   ```
+   percept change <map> "<title>" ["<new title>"] --<property> "<value>"
+   percept remove <map> "<title>"
+   percept remove <map> "<from title>" <edge kind> "<to title>"
+   ```
+
+   A change keeps the properties it does not name. `--<property> ""`
+   drops one. Removing a node removes its edges.
+6. percept refuses an agent's change or removal of what a human wrote.
+   Leave it as it is, and tell the user what you would change and why.
+7. Use only the kinds and properties the schema declares. Leave out a
    property that has no value.
-6. Add references with the node when they help a reader check it.
+8. Add references with the node when they help a reader check it.
    Repeat `--ref` for each source:
 
    | Flag | Source |
@@ -41,5 +55,7 @@ by a schema in `.percept/schemas/<map>.toml`:
 
    File paths are relative to the project root. Message lookup prefers
    human messages, then agent messages, newest first within each.
-   Both forms save the quoted text with the node.
-7. Tell the user what you added, one line per node or edge.
+   Both forms save the quoted text with the node. On `change`, each
+   `--ref` adds to the node's references.
+9. Tell the user what you added, changed, and removed, one line per
+   node or edge.
