@@ -14,7 +14,9 @@ use crate::app::AppService;
 use crate::core::{EventStore, SchemaStore};
 use crate::shared::Result;
 
-mod api;
+mod handlers;
+mod paths;
+mod responses;
 
 const PAGE: &str = include_str!(concat!(env!("OUT_DIR"), "/index.html"));
 const FAVICON_SVG: &[u8] = include_bytes!("../../web/public/favicon.svg");
@@ -51,12 +53,12 @@ where
     M: SchemaStore + Send + Sync + 'static,
 {
     Router::new()
-        .route("/api/status", get(api::status))
-        .route("/api/sessions", get(api::sessions))
-        .route("/api/sessions/{id}", get(api::session))
-        .route("/api/sessions/{id}/events", get(api::session_events))
-        .route("/api/maps", get(api::maps))
-        .route("/api/maps/{id}", get(api::map))
+        .route("/api/status", get(Api::<S, M>::status))
+        .route("/api/sessions", get(Api::<S, M>::sessions))
+        .route("/api/sessions/{id}", get(Api::<S, M>::session))
+        .route("/api/sessions/{id}/events", get(Api::<S, M>::session_events))
+        .route("/api/maps", get(Api::<S, M>::maps))
+        .route("/api/maps/{id}", get(Api::<S, M>::map))
         .route("/favicon.svg", get(|| async { asset("image/svg+xml", FAVICON_SVG) }))
         .route("/favicon.ico", get(|| async { asset("image/x-icon", FAVICON_ICO) }))
         .route("/apple-touch-icon.png", get(|| async { asset("image/png", APPLE_TOUCH_ICON) }))
