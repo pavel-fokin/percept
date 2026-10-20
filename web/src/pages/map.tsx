@@ -1,8 +1,11 @@
-import { getData, type MapDetail, type MapNode } from "../api";
+import { Fragment } from "react";
+
+import { getData, type MapDetail, type MapEdge, type MapNode } from "../api";
 import { BackLink } from "../components/back-link";
 import { Chevron } from "../components/chevron";
 import { References } from "../components/references";
 import { RouteError } from "../components/route-error";
+import { textLink } from "../components/ui/text-link";
 import { byDay, changedWhen, dayAndTime, full, time, withChangedTimes } from "../format";
 
 export async function loadMap(path: string, id: string) {
@@ -15,6 +18,7 @@ export async function loadMap(path: string, id: string) {
 export function MapPage({ map }: { map: MapDetail }) {
   const now = new Date();
   const days = byDay(map.nodes, (n) => n.created_at, now);
+  const nodes = new Map(map.nodes.map((n) => [n.id, n]));
 
   return (
     <>
@@ -31,7 +35,7 @@ export function MapPage({ map }: { map: MapDetail }) {
               <h2 className="mb-1 text-sm font-semibold text-muted">{day.name}</h2>
               <ul className="-mx-3 grid gap-0.5">
                 {withChangedTimes(day.items, (n) => stamp(n, day.name, now)).map(({ item, shown }) => (
-                  <NodeRow key={item.id} path={map.path} node={item} shown={shown} now={now} />
+                  <NodeRow key={item.id} path={map.path} node={item} links={links(item, map.edges, nodes)} shown={shown} now={now} />
                 ))}
               </ul>
             </section>
@@ -54,8 +58,29 @@ function stamp(node: MapNode, day: string, now: Date) {
   return node.changed_at ? `changed ${changedWhen(new Date(node.changed_at), day, now)}` : time.format(new Date(node.created_at));
 }
 
-function NodeRow({ path, node, shown, now }: { path: string; node: MapNode; shown?: string; now: Date }) {
+type Link = { kind: string; arrow: "→" | "←"; node: MapNode };
+
+/** The edges at `node`, each with the node at its other end: `→` where it leaves, `←` where it arrives. */
+function links(node: MapNode, edges: MapEdge[], nodes: Map<string, MapNode>): Link[] {
+  return edges.flatMap((e): Link[] => {
+    if (e.from === node.id) return [{ kind: e.kind, arrow: "→", node: nodes.get(e.to)! }];
+    if (e.to === node.id) return [{ kind: e.kind, arrow: "←", node: nodes.get(e.from)! }];
+    return [];
+  });
+}
+
+/** Opens a node's row and moves focus to it, which scrolls it into view. */
+function reveal(id: string) {
+  const details = document.getElementById(`node-${id}`)?.querySelector("details");
+  if (!details) return;
+
+  details.open = true;
+  details.querySelector("summary")?.focus();
+}
+
+function NodeRow({ path, node, links, shown, now }: { path: string; node: MapNode; links: Link[]; shown?: string; now: Date }) {
   const properties = Object.entries(node.properties);
+  const kinds = [...new Set(links.map((l) => l.kind))];
   const created = new Date(node.created_at);
   const changed = node.changed_at ? new Date(node.changed_at) : null;
   const at = changed ?? created;
@@ -71,9 +96,9 @@ function NodeRow({ path, node, shown, now }: { path: string; node: MapNode; show
     </>
   );
 
-  if (properties.length === 0 && node.references.length === 0 && !changed) {
+  if (properties.length === 0 && links.length === 0 && node.references.length === 0 && !changed) {
     return (
-      <li className={row}>
+      <li id={`node-${node.id}`} className={row}>
         <span className="size-3.5 flex-none" aria-hidden />
         {content}
       </li>
@@ -81,7 +106,7 @@ function NodeRow({ path, node, shown, now }: { path: string; node: MapNode; show
   }
 
   return (
-    <li>
+    <li id={`node-${node.id}`}>
       <details className="group">
         <summary className={`${row} cursor-pointer list-none hover:bg-surface focus-visible:bg-surface [&::-webkit-details-marker]:hidden`}>
           <Chevron className="mt-[5px] text-muted" />
@@ -93,12 +118,36 @@ function NodeRow({ path, node, shown, now }: { path: string; node: MapNode; show
               Added {dayAndTime(created, now)} · Changed {dayAndTime(changed, now)}
             </p>
           )}
-          {properties.length > 0 && (
+          {(properties.length > 0 || links.length > 0) && (
             <dl className="grid gap-3.5">
               {properties.map(([key, value]) => (
                 <div key={key}>
                   <dt className="text-[13px] font-medium text-muted">{key}</dt>
                   <dd className="mt-0.5 leading-[26px] wrap-anywhere">{value}</dd>
+                </div>
+              ))}
+              {kinds.map((kind) => (
+                <div key={kind}>
+                  <dt className="text-[13px] font-medium text-muted">{kind}</dt>
+                  {(["→", "←"] as const).map((arrow) => {
+                    const ends = links.filter((l) => l.kind === kind && l.arrow === arrow);
+
+                    return (
+                      ends.length > 0 && (
+                        <dd key={arrow} className="mt-0.5 leading-[26px] wrap-anywhere">
+                          <span className="text-muted">{arrow} </span>
+                          {ends.map((l, i) => (
+                            <Fragment key={l.node.id}>
+                              {i > 0 && " · "}
+                              <button type="button" onClick={() => reveal(l.node.id)} className={`${textLink} cursor-pointer text-left`}>
+                                {l.node.title}
+                              </button>
+                            </Fragment>
+                          ))}
+                        </dd>
+                      )
+                    );
+                  })}
                 </div>
               ))}
             </dl>
