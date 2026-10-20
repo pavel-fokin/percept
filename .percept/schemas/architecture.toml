@@ -1,0 +1,36 @@
+purpose = "the parts of this project's code, what each owns, and which may use which"
+
+instructions = """
+Code shows what each file imports. This map keeps the design the
+imports follow: where a thing belongs, and what may depend on what.
+It describes the code as it is now, not its history.
+
+A component is a part of the code with one responsibility and a
+boundary: a layer, a module, a package, a service. Leave out a file
+or type that sits inside a component.
+
+The title is the component's name as the code spells it. `owns`
+names the types and concepts that live in it, then what it must
+never hold, when a reader would get that wrong. Keep it to two
+sentences. Behaviour, endpoints, flags, and settings stay out: they
+change with the code. Dependencies stay out too: they are edges.
+
+`A uses B` says A may depend on B. A may use whatever it reaches
+along `uses` edges, and nothing else, so add only the direct edges.
+The edges never form a cycle.
+
+When the map is empty, build it from the code. After that, keep it
+current. Add a component or an edge a session created. Change a
+component whose name or ownership moved. Remove one the code no
+longer has. An import the edges do not allow is not a new edge:
+tell the user about it instead.
+"""
+
+order = "edges"
+
+[nodes.component]
+owns = ""
+
+[edges.uses]
+from = "component"
+to = "component"
