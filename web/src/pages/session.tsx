@@ -5,6 +5,7 @@ import { BackLink } from "../components/back-link";
 import { Chevron } from "../components/chevron";
 import { Markdown } from "../components/markdown";
 import { RouteError } from "../components/route-error";
+import { Spinner } from "../components/spinner";
 import { dayTime, full, time } from "../format";
 import { sessionsUrl } from "../paths";
 import { usePolling } from "../use-polling";
@@ -92,6 +93,12 @@ export function SessionPage({ session, events }: { session: Session; events: Eve
               </section>
             )}
             <AgentItems items={exchange.items} started={started} agent={clientName(session.client)} />
+            {exchange === list.at(-1) && session.status === "working" && (
+              <p className="flex items-center gap-1.5 text-sm text-muted">
+                <Spinner />
+                {clientName(session.client)} is working
+              </p>
+            )}
           </article>
         ))}
       </div>
