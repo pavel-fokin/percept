@@ -22,7 +22,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
 
         let mut last: BTreeMap<SessionId, (SessionStatus, Timestamp)> = BTreeMap::new();
         for e in &events {
-            if let Some((session, status)) = e.session_status() {
+            if let (Some(session), Some(status)) = (e.payload.session(), SessionStatus::after(e)) {
                 last.insert(session, (status, e.created_at));
             }
         }

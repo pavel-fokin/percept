@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 use serde::Serialize;
 
+use super::{Actor, Event, Payload};
 use crate::shared::Id;
 
 /// A conversation with a coding client, created by a `SessionCreated` event.
@@ -27,6 +28,21 @@ pub enum SessionStatus {
     Working,
     Waiting,
     Ended,
+}
+
+impl SessionStatus {
+    /// The status a session is in after `event`; map events change none. A hook sends an agent message only when the agent stops.
+    pub fn after(event: &Event) -> Option<Self> {
+        match &event.payload {
+            Payload::SessionStopped { .. } => Some(Self::Ended),
+            Payload::SessionCreated { .. } | Payload::SessionStarted { .. } => Some(Self::Waiting),
+            Payload::Message { .. } if event.actor == Actor::Agent => Some(Self::Waiting),
+            Payload::Message { .. } | Payload::ToolUsed { .. } | Payload::SubagentStarted { .. } | Payload::SubagentReported { .. } => {
+                Some(Self::Working)
+            }
+            Payload::MapCreated { .. } | Payload::NodeAdded { .. } | Payload::EdgeAdded { .. } => None,
+        }
+    }
 }
 
 pub type SessionId = Id<Session>;
