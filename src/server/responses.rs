@@ -8,6 +8,17 @@ use super::paths::{display_path, display_paths};
 use crate::app::CitedMessage;
 use crate::core::{self, Actor, ClientSessionId, EventId, MapId, NodeId, Payload, SessionId};
 
+/// The envelope every API response is sent in.
+#[derive(Serialize)]
+pub(super) struct Data<T> {
+    pub(super) data: T,
+}
+
+#[derive(Serialize)]
+pub(super) struct Status {
+    pub(super) events: usize,
+}
+
 /// A map as the page reads it, with its path as a human sees it.
 #[derive(Serialize)]
 pub(super) struct MapSummary {

@@ -53,12 +53,12 @@ where
     M: SchemaStore + Send + Sync + 'static,
 {
     Router::new()
-        .route("/api/status", get(handlers::status))
-        .route("/api/sessions", get(handlers::sessions))
-        .route("/api/sessions/{id}", get(handlers::session))
-        .route("/api/sessions/{id}/events", get(handlers::session_events))
-        .route("/api/maps", get(handlers::maps))
-        .route("/api/maps/{id}", get(handlers::map))
+        .route("/api/status", get(Api::<S, M>::status))
+        .route("/api/sessions", get(Api::<S, M>::sessions))
+        .route("/api/sessions/{id}", get(Api::<S, M>::session))
+        .route("/api/sessions/{id}/events", get(Api::<S, M>::session_events))
+        .route("/api/maps", get(Api::<S, M>::maps))
+        .route("/api/maps/{id}", get(Api::<S, M>::map))
         .route("/favicon.svg", get(|| async { asset("image/svg+xml", FAVICON_SVG) }))
         .route("/favicon.ico", get(|| async { asset("image/x-icon", FAVICON_ICO) }))
         .route("/apple-touch-icon.png", get(|| async { asset("image/png", APPLE_TOUCH_ICON) }))
