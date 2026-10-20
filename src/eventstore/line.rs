@@ -45,7 +45,13 @@ impl From<&Event> for EventLine {
 
                 json!({ "map": map, "node": node, "kind": kind, "title": title, "properties": properties, "references": references })
             }
-            Payload::EdgeAdded { map, kind, from, to } => {
+            Payload::NodeChanged { map, node, title, properties, references } => {
+                let references: Vec<ReferenceLine> = references.iter().map(ReferenceLine::from).collect();
+
+                json!({ "map": map, "node": node, "title": title, "properties": properties, "references": references })
+            }
+            Payload::NodeRemoved { map, node } => json!({ "map": map, "node": node }),
+            Payload::EdgeAdded { map, kind, from, to } | Payload::EdgeRemoved { map, kind, from, to } => {
                 json!({ "map": map, "kind": kind, "from": from, "to": to })
             }
         };
@@ -110,7 +116,21 @@ impl TryFrom<EventLine> for Event {
                     Vec::new()
                 },
             },
+            Kind::NodeChanged => Payload::NodeChanged {
+                map: field(p, "map")?,
+                node: field(p, "node")?,
+                title: field(p, "title")?,
+                properties: field(p, "properties")?,
+                references: field::<Vec<ReferenceLine>>(p, "references")?.into_iter().map(Reference::from).collect(),
+            },
+            Kind::NodeRemoved => Payload::NodeRemoved { map: field(p, "map")?, node: field(p, "node")? },
             Kind::EdgeAdded => Payload::EdgeAdded {
+                map: field(p, "map")?,
+                kind: field(p, "kind")?,
+                from: field(p, "from")?,
+                to: field(p, "to")?,
+            },
+            Kind::EdgeRemoved => Payload::EdgeRemoved {
                 map: field(p, "map")?,
                 kind: field(p, "kind")?,
                 from: field(p, "from")?,
@@ -184,7 +204,10 @@ mod tests {
             Event::subagent_reported(Source::fixture(), session, ClientAgentId::new("a1".into()), "done", raw),
             Event::map_created(Source::fixture(), Actor::Human, MapId::new(), "decisions"),
             Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())]), Vec::new()),
+            Event::node_changed(Source::fixture(), Actor::Human, MapId::new(), NodeId::new(), "Why not?", BTreeMap::from([("definition".into(), "E".into())]), Vec::new()),
+            Event::node_removed(Source::fixture(), Actor::Human, MapId::new(), NodeId::new()),
             Event::edge_added(Source::fixture(), Actor::Agent, MapId::new(), "answers", NodeId::new(), NodeId::new()),
+            Event::edge_removed(Source::fixture(), Actor::Human, MapId::new(), "answers", NodeId::new(), NodeId::new()),
         ];
 
         for event in events {
@@ -210,6 +233,56 @@ mod tests {
 
         let back = Event::try_from(line).unwrap();
 
+        assert_eq!(back.payload, event.payload);
+    }
+
+    #[test]
+    fn a_node_changed_line_is_the_full_new_state() {
+        let (map, node, event_id) = (MapId::new(), NodeId::new(), EventId::new());
+        let references = vec![Reference::Message { event: event_id, quote: "Use one log.".into() }];
+        let properties = BTreeMap::from([("definition".to_string(), "D".to_string())]);
+        let event = Event::node_changed(Source::fixture(), Actor::Human, map, node, "One log", properties, references);
+
+        let value = serde_json::to_value(EventLine::from(&event)).unwrap();
+        let line: EventLine = serde_json::from_value(value.clone()).unwrap();
+        let back = Event::try_from(line).unwrap();
+
+        assert_eq!(value["kind"], "node.changed");
+        assert_eq!(value["payload"], json!({
+            "map": map,
+            "node": node,
+            "title": "One log",
+            "properties": { "definition": "D" },
+            "references": [{ "message": { "event": event_id, "quote": "Use one log." } }],
+        }));
+        assert_eq!(back.payload, event.payload);
+    }
+
+    #[test]
+    fn a_node_removed_line_names_the_node() {
+        let (map, node) = (MapId::new(), NodeId::new());
+        let event = Event::node_removed(Source::fixture(), Actor::Human, map, node);
+
+        let value = serde_json::to_value(EventLine::from(&event)).unwrap();
+        let line: EventLine = serde_json::from_value(value.clone()).unwrap();
+        let back = Event::try_from(line).unwrap();
+
+        assert_eq!(value["kind"], "node.removed");
+        assert_eq!(value["payload"], json!({ "map": map, "node": node }));
+        assert_eq!(back.payload, event.payload);
+    }
+
+    #[test]
+    fn an_edge_removed_line_names_the_edge() {
+        let (map, from, to) = (MapId::new(), NodeId::new(), NodeId::new());
+        let event = Event::edge_removed(Source::fixture(), Actor::Human, map, "answers", from, to);
+
+        let value = serde_json::to_value(EventLine::from(&event)).unwrap();
+        let line: EventLine = serde_json::from_value(value.clone()).unwrap();
+        let back = Event::try_from(line).unwrap();
+
+        assert_eq!(value["kind"], "edge.removed");
+        assert_eq!(value["payload"], json!({ "map": map, "kind": "answers", "from": from, "to": to }));
         assert_eq!(back.payload, event.payload);
     }
 

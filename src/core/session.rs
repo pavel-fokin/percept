@@ -40,7 +40,7 @@ impl SessionStatus {
             Payload::Message { .. } | Payload::ToolUsed { .. } | Payload::SubagentStarted { .. } | Payload::SubagentReported { .. } => {
                 Some(Self::Working)
             }
-            Payload::MapCreated { .. } | Payload::NodeAdded { .. } | Payload::EdgeAdded { .. } => None,
+            Payload::MapCreated { .. } | Payload::NodeAdded { .. } | Payload::NodeChanged { .. } | Payload::NodeRemoved { .. } | Payload::EdgeAdded { .. } | Payload::EdgeRemoved { .. } => None,
         }
     }
 }

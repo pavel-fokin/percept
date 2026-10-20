@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::hook::Client;
 use crate::app::{AppService, Ref, source_path};
-use crate::core::{Actor, EventStore, Reference, SchemaStore, Source};
+use crate::core::{Actor, EventStore, Map, Reference, SchemaStore, Source};
 use crate::shared::Result;
 
 pub(super) async fn create<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, kind: &str) -> Result<()> {
@@ -25,6 +25,41 @@ pub(super) async fn add<S: EventStore, M: SchemaStore>(service: &AppService<S, M
         }
         _ => Err("usage: percept add <map> <kind> <title> [--key value ...] [--ref 'msg:<text>' | --ref 'file:<path>:<from>-<to>' ...] | percept add <map> <from> <kind> <to>".into()),
     }
+}
+
+pub(super) async fn change<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
+    let AddArgs { positionals, properties, references } = split_add(args)?;
+
+    let (map, title, new_title) = match positionals {
+        [map, title] => (map, title, None),
+        [map, title, new_title] => (map, title, Some(new_title.as_str())),
+        _ => return Err("usage: percept change <map> <title> [<new title>] [--key value ...] [--ref 'msg:<text>' | --ref 'file:<path>:<from>-<to>' ...]".into()),
+    };
+    let (actor, source) = cli_writer().await?;
+
+    service.change_node(source, actor, map, title, new_title, properties, references).await
+}
+
+pub(super) async fn remove<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
+    match split_remove(args)? {
+        [map, title] => {
+            let (actor, source) = cli_writer().await?;
+            service.remove_node(source, actor, map, title).await
+        }
+        [map, from, kind, to] => {
+            let (actor, source) = cli_writer().await?;
+            service.remove_edge(source, actor, map, from, kind, to).await
+        }
+        _ => Err("usage: percept remove <map> <title> | percept remove <map> <from> <kind> <to>".into()),
+    }
+}
+
+fn split_remove(args: &[String]) -> Result<&[String]> {
+    if args.iter().any(|a| a.starts_with("--")) {
+        return Err("remove takes no properties or references".into());
+    }
+
+    Ok(args)
 }
 
 struct AddArgs<'a> {
@@ -101,11 +136,9 @@ pub(super) async fn show<S: EventStore, M: SchemaStore>(service: &AppService<S, 
 
     match map {
         Some(kind) => {
-            let map = service.map(&project, kind).await?;
-            let nodes = service.nodes(map.id).await?;
-            let edges = service.edges(map.id).await?;
+            let Map { kind, nodes, edges, .. } = service.map(&project, kind).await?;
 
-            println!("{}", map.kind);
+            println!("{kind}");
 
             if !nodes.is_empty() {
                 println!();
@@ -138,8 +171,8 @@ pub(super) async fn show<S: EventStore, M: SchemaStore>(service: &AppService<S, 
             }
         }
         None => {
-            for s in service.map_summaries(&project).await? {
-                println!("{}  {}, {}", s.map.kind, node_count(s.nodes), edge_count(s.edges));
+            for map in service.maps(&project).await? {
+                println!("{}  {}, {}", map.kind, node_count(map.nodes.len()), edge_count(map.edges.len()));
             }
         }
     }
@@ -297,6 +330,20 @@ mod tests {
             let args = strings(&["m", "a", "k", "b", "--ref", value]);
 
             assert!(split_add(&args).is_err());
+        }
+    }
+
+    #[test]
+    fn remove_takes_positionals_and_no_flags() {
+        let edge = strings(&["m", "a", "k", "b"]);
+        let node = strings(&["m", "a"]);
+
+        assert_eq!(split_remove(&edge).unwrap(), &edge[..]);
+        assert_eq!(split_remove(&node).unwrap(), &node[..]);
+        for flag in ["--ref", "--definition", "--"] {
+            let args = strings(&["m", "a", "k", "b", flag, "x"]);
+
+            assert!(split_remove(&args).is_err(), "accepted {flag:?}");
         }
     }
 

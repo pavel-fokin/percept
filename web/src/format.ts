@@ -10,7 +10,7 @@ export function relative(date: Date, now: Date) {
   if (minutes < 360) return `${Math.floor(minutes / 60)} h ago`;
 
   const name = dayName(date, now);
-  return name === "Today" || name === "Yesterday" ? `${name}, ${time.format(date)}` : name;
+  return name === "Today" || name === "Yesterday" ? dayAndTime(date, now) : name;
 }
 
 /** The day a date falls on, as a heading: `Today`, `Yesterday` or `11 Oct`. */
@@ -23,6 +23,20 @@ export function dayName(date: Date, now: Date) {
   if (date >= yesterday) return "Yesterday";
 
   return day.format(date);
+}
+
+/** A date as its day heading and clock time: `Today, 16:05` or `11 Oct, 09:30`. */
+export function dayAndTime(date: Date, now: Date) {
+  return `${dayName(date, now)}, ${time.format(date)}`;
+}
+
+/** When a row's item changed, in a section headed `section`: the clock time on that day, else the day too, `yesterday, 16:05`. */
+export function changedWhen(date: Date, section: string, now: Date) {
+  const name = dayName(date, now);
+  if (name === section) return time.format(date);
+
+  const day = name === "Today" || name === "Yesterday" ? name.toLowerCase() : name;
+  return `${day}, ${time.format(date)}`;
 }
 
 /** Items grouped by the day they fall on. Items come newest first, so a day's items are consecutive. */
@@ -39,11 +53,11 @@ export function byDay<T>(items: T[], at: (item: T) => string, now: Date) {
   return days;
 }
 
-/** Each item with its clock time, left out when the item before it shows the same minute. */
-export function withChangedTimes<T>(items: T[], at: (item: T) => string) {
+/** Each item with its time stamp, left out when the item before it shows the same stamp. */
+export function withChangedTimes<T>(items: T[], stamp: (item: T) => string) {
   return items.map((item, i) => {
-    const shown = time.format(new Date(at(item)));
-    const same = i > 0 && time.format(new Date(at(items[i - 1]))) === shown;
+    const shown = stamp(item);
+    const same = i > 0 && stamp(items[i - 1]) === shown;
     return { item, shown: same ? undefined : shown };
   });
 }

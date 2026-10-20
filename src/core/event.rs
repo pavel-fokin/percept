@@ -44,7 +44,10 @@ pub enum Kind {
     SubagentReported,
     MapCreated,
     NodeAdded,
+    NodeChanged,
+    NodeRemoved,
     EdgeAdded,
+    EdgeRemoved,
 }
 
 impl Kind {
@@ -59,7 +62,10 @@ impl Kind {
             Self::SubagentReported => "subagent.reported",
             Self::MapCreated => "map.created",
             Self::NodeAdded => "node.added",
+            Self::NodeChanged => "node.changed",
+            Self::NodeRemoved => "node.removed",
             Self::EdgeAdded => "edge.added",
+            Self::EdgeRemoved => "edge.removed",
         }
     }
 
@@ -74,7 +80,10 @@ impl Kind {
             "subagent.reported" => Some(Self::SubagentReported),
             "map.created" => Some(Self::MapCreated),
             "node.added" => Some(Self::NodeAdded),
+            "node.changed" => Some(Self::NodeChanged),
+            "node.removed" => Some(Self::NodeRemoved),
             "edge.added" => Some(Self::EdgeAdded),
+            "edge.removed" => Some(Self::EdgeRemoved),
             _ => None,
         }
     }
@@ -92,7 +101,11 @@ pub enum Payload {
     SubagentReported { session: SessionId, subagent: ClientAgentId, content: String },
     MapCreated { map: MapId, kind: String },
     NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
+    /// The node's full new state, not a diff.
+    NodeChanged { map: MapId, node: NodeId, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
+    NodeRemoved { map: MapId, node: NodeId },
     EdgeAdded { map: MapId, kind: String, from: NodeId, to: NodeId },
+    EdgeRemoved { map: MapId, kind: String, from: NodeId, to: NodeId },
 }
 
 impl Payload {
@@ -107,7 +120,10 @@ impl Payload {
             Self::SubagentReported { .. } => Kind::SubagentReported,
             Self::MapCreated { .. } => Kind::MapCreated,
             Self::NodeAdded { .. } => Kind::NodeAdded,
+            Self::NodeChanged { .. } => Kind::NodeChanged,
+            Self::NodeRemoved { .. } => Kind::NodeRemoved,
             Self::EdgeAdded { .. } => Kind::EdgeAdded,
+            Self::EdgeRemoved { .. } => Kind::EdgeRemoved,
         }
     }
 
@@ -120,7 +136,25 @@ impl Payload {
             | Self::ToolUsed { session, .. }
             | Self::SubagentStarted { session, .. }
             | Self::SubagentReported { session, .. } => Some(*session),
-            Self::MapCreated { .. } | Self::NodeAdded { .. } | Self::EdgeAdded { .. } => None,
+            Self::MapCreated { .. } | Self::NodeAdded { .. } | Self::NodeChanged { .. } | Self::NodeRemoved { .. } | Self::EdgeAdded { .. } | Self::EdgeRemoved { .. } => None,
+        }
+    }
+
+    pub fn map(&self) -> Option<MapId> {
+        match self {
+            Self::MapCreated { map, .. }
+            | Self::NodeAdded { map, .. }
+            | Self::NodeChanged { map, .. }
+            | Self::NodeRemoved { map, .. }
+            | Self::EdgeAdded { map, .. }
+            | Self::EdgeRemoved { map, .. } => Some(*map),
+            Self::SessionCreated { .. }
+            | Self::SessionStarted { .. }
+            | Self::SessionStopped { .. }
+            | Self::Message { .. }
+            | Self::ToolUsed { .. }
+            | Self::SubagentStarted { .. }
+            | Self::SubagentReported { .. } => None,
         }
     }
 }
@@ -215,8 +249,31 @@ impl Event {
         Self::build(source, actor, payload, None)
     }
 
+    pub fn node_changed(
+        source: Source,
+        actor: Actor,
+        map: MapId,
+        node: NodeId,
+        title: &str,
+        properties: BTreeMap<String, String>,
+        references: Vec<Reference>,
+    ) -> Self {
+        let payload = Payload::NodeChanged { map, node, title: title.into(), properties, references };
+        Self::build(source, actor, payload, None)
+    }
+
     pub fn edge_added(source: Source, actor: Actor, map: MapId, kind: &str, from: NodeId, to: NodeId) -> Self {
         let payload = Payload::EdgeAdded { map, kind: kind.into(), from, to };
+        Self::build(source, actor, payload, None)
+    }
+
+    pub fn node_removed(source: Source, actor: Actor, map: MapId, node: NodeId) -> Self {
+        let payload = Payload::NodeRemoved { map, node };
+        Self::build(source, actor, payload, None)
+    }
+
+    pub fn edge_removed(source: Source, actor: Actor, map: MapId, kind: &str, from: NodeId, to: NodeId) -> Self {
+        let payload = Payload::EdgeRemoved { map, kind: kind.into(), from, to };
         Self::build(source, actor, payload, None)
     }
 
@@ -375,6 +432,20 @@ mod tests {
     }
 
     #[test]
+    fn node_changed_carries_the_actor_and_the_full_new_state_and_has_no_session() {
+        let (map, node) = (MapId::new(), NodeId::new());
+        let properties = BTreeMap::from([("definition".to_string(), "D".to_string())]);
+
+        let event = Event::node_changed(Source::fixture(), Actor::Human, map, node, "Why not?", properties.clone(), Vec::new());
+
+        assert_eq!(event.actor, Actor::Human);
+        assert_eq!(event.payload.kind(), Kind::NodeChanged);
+        assert_eq!(event.payload, Payload::NodeChanged { map, node, title: "Why not?".into(), properties, references: Vec::new() });
+        assert_eq!(event.payload.session(), None);
+        assert_eq!(event.raw, None);
+    }
+
+    #[test]
     fn edge_added_carries_the_actor_and_has_no_session() {
         let (map, from, to) = (MapId::new(), NodeId::new(), NodeId::new());
 
@@ -388,8 +459,34 @@ mod tests {
     }
 
     #[test]
+    fn node_removed_carries_the_actor_and_has_no_session() {
+        let (map, node) = (MapId::new(), NodeId::new());
+
+        let event = Event::node_removed(Source::fixture(), Actor::Human, map, node);
+
+        assert_eq!(event.actor, Actor::Human);
+        assert_eq!(event.payload.kind(), Kind::NodeRemoved);
+        assert_eq!(event.payload, Payload::NodeRemoved { map, node });
+        assert_eq!(event.payload.session(), None);
+        assert_eq!(event.raw, None);
+    }
+
+    #[test]
+    fn edge_removed_carries_the_actor_and_has_no_session() {
+        let (map, from, to) = (MapId::new(), NodeId::new(), NodeId::new());
+
+        let event = Event::edge_removed(Source::fixture(), Actor::Human, map, "answers", from, to);
+
+        assert_eq!(event.actor, Actor::Human);
+        assert_eq!(event.payload.kind(), Kind::EdgeRemoved);
+        assert_eq!(event.payload, Payload::EdgeRemoved { map, kind: "answers".into(), from, to });
+        assert_eq!(event.payload.session(), None);
+        assert_eq!(event.raw, None);
+    }
+
+    #[test]
     fn every_kind_is_found_by_its_name() {
-        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed, Kind::SubagentStarted, Kind::SubagentReported, Kind::MapCreated, Kind::NodeAdded, Kind::EdgeAdded];
+        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed, Kind::SubagentStarted, Kind::SubagentReported, Kind::MapCreated, Kind::NodeAdded, Kind::NodeChanged, Kind::NodeRemoved, Kind::EdgeAdded, Kind::EdgeRemoved];
 
         for kind in kinds {
             assert_eq!(Kind::from_name(kind.name()), Some(kind));

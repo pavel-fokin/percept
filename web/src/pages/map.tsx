@@ -3,7 +3,7 @@ import { BackLink } from "../components/back-link";
 import { Chevron } from "../components/chevron";
 import { References } from "../components/references";
 import { RouteError } from "../components/route-error";
-import { byDay, full, withChangedTimes } from "../format";
+import { byDay, changedWhen, dayAndTime, full, time, withChangedTimes } from "../format";
 
 export async function loadMap(path: string, id: string) {
   const map = await getData<MapDetail>(`/api/maps/${id}`);
@@ -13,7 +13,8 @@ export async function loadMap(path: string, id: string) {
 }
 
 export function MapPage({ map }: { map: MapDetail }) {
-  const days = byDay(map.nodes, (n) => n.created_at, new Date());
+  const now = new Date();
+  const days = byDay(map.nodes, (n) => n.created_at, now);
 
   return (
     <>
@@ -29,8 +30,8 @@ export function MapPage({ map }: { map: MapDetail }) {
             <section key={day.items[0].id}>
               <h2 className="mb-1 text-sm font-semibold text-muted">{day.name}</h2>
               <ul className="-mx-3 grid gap-0.5">
-                {withChangedTimes(day.items, (n) => n.created_at).map(({ item, shown }) => (
-                  <NodeRow key={item.id} path={map.path} node={item} shown={shown} />
+                {withChangedTimes(day.items, (n) => stamp(n, day.name, now)).map(({ item, shown }) => (
+                  <NodeRow key={item.id} path={map.path} node={item} shown={shown} now={now} />
                 ))}
               </ul>
             </section>
@@ -48,21 +49,29 @@ export function MapPage({ map }: { map: MapDetail }) {
   );
 }
 
-function NodeRow({ path, node, shown }: { path: string; node: MapNode; shown?: string }) {
+/** The time a node's row shows: when it was added, or when it changed, in the section headed `day`. */
+function stamp(node: MapNode, day: string, now: Date) {
+  return node.changed_at ? `changed ${changedWhen(new Date(node.changed_at), day, now)}` : time.format(new Date(node.created_at));
+}
+
+function NodeRow({ path, node, shown, now }: { path: string; node: MapNode; shown?: string; now: Date }) {
   const properties = Object.entries(node.properties);
+  const created = new Date(node.created_at);
+  const changed = node.changed_at ? new Date(node.changed_at) : null;
+  const at = changed ?? created;
   const row = "flex min-h-11 items-start gap-2.5 rounded-[10px] px-3 py-2.5";
   const content = (
     <>
       <span className="min-w-0 flex-1 wrap-anywhere">{node.title}</span>
       {shown && (
-        <time dateTime={node.created_at} title={full.format(new Date(node.created_at))} className="flex-none text-[13px] leading-6 text-muted tabular-nums">
+        <time dateTime={at.toISOString()} title={full.format(at)} className="flex-none text-[13px] leading-6 text-muted tabular-nums">
           {shown}
         </time>
       )}
     </>
   );
 
-  if (properties.length === 0 && node.references.length === 0) {
+  if (properties.length === 0 && node.references.length === 0 && !changed) {
     return (
       <li className={row}>
         <span className="size-3.5 flex-none" aria-hidden />
@@ -79,6 +88,11 @@ function NodeRow({ path, node, shown }: { path: string; node: MapNode; shown?: s
           {content}
         </summary>
         <div className="grid gap-3.5 pt-1 pr-3 pb-5 pl-9">
+          {changed && (
+            <p className="text-[13px] text-muted tabular-nums">
+              Added {dayAndTime(created, now)} · Changed {dayAndTime(changed, now)}
+            </p>
+          )}
           {properties.length > 0 && (
             <dl className="grid gap-3.5">
               {properties.map(([key, value]) => (

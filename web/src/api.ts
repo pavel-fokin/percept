@@ -25,6 +25,7 @@ export type MapNode = {
   properties: Record<string, string>;
   references: Reference[];
   created_at: string;
+  changed_at: string | null;
 };
 
 export type Reference =

@@ -98,6 +98,7 @@ impl SchemaStore for Schemas {
             ),
             "tasks" => mini(&[("task", &[])], &[("blocks", "task", "task")]),
             "concepts" => mini(&[("concept", &["definition"])], &[]),
+            "glossary" => mini(&[("term", &["definition", "source"])], &[]),
             _ => Err(format!("no schema for {kind}").into()),
         }
     }

@@ -29,13 +29,8 @@ pub(super) struct MapSummary {
 }
 
 impl MapSummary {
-    pub(super) fn new(summary: app::MapSummary, home: &Path) -> Self {
-        Self {
-            id: summary.map.id,
-            kind: summary.map.kind,
-            path: display_path(&summary.map.path, home),
-            nodes: summary.nodes,
-        }
+    pub(super) fn new(map: core::Map, home: &Path) -> Self {
+        Self { id: map.id, kind: map.kind, path: display_path(&map.path, home), nodes: map.nodes.len() }
     }
 }
 
@@ -51,14 +46,14 @@ pub(super) struct MapDetail {
 
 impl MapDetail {
     pub(super) fn new(detail: app::MapDetail, home: &Path) -> Self {
-        let messages = &detail.messages;
+        let (map, messages) = (detail.map, &detail.messages);
 
         Self {
-            id: detail.map.id,
-            kind: detail.map.kind,
-            path: display_path(&detail.map.path, home),
-            nodes: detail.nodes.into_iter().map(|n| Node::new(n, messages)).collect(),
-            edges: detail.edges.into_iter().map(Edge::from).collect(),
+            id: map.id,
+            kind: map.kind,
+            path: display_path(&map.path, home),
+            nodes: map.nodes.into_iter().map(|n| Node::new(n, messages)).collect(),
+            edges: map.edges.into_iter().map(Edge::from).collect(),
         }
     }
 }
@@ -71,6 +66,8 @@ struct Node {
     properties: BTreeMap<String, String>,
     references: Vec<Reference>,
     created_at: jiff::Timestamp,
+    /// When the node last changed; none while it is as it was added.
+    changed_at: Option<jiff::Timestamp>,
 }
 
 impl Node {
@@ -81,7 +78,8 @@ impl Node {
             title: node.title,
             properties: node.properties,
             references: node.references.into_iter().map(|r| Reference::new(r, messages)).collect(),
-            created_at: node.created_at,
+            created_at: node.changes[0].at,
+            changed_at: node.changes[1..].last().map(|c| c.at),
         }
     }
 }
@@ -187,6 +185,34 @@ fn payload(payload: &Payload, home: &Path) -> serde_json::Value {
         | Payload::SessionStopped { .. }
         | Payload::MapCreated { .. }
         | Payload::NodeAdded { .. }
-        | Payload::EdgeAdded { .. } => json!({}),
+        | Payload::NodeChanged { .. }
+        | Payload::NodeRemoved { .. }
+        | Payload::EdgeAdded { .. }
+        | Payload::EdgeRemoved { .. } => json!({}),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Source;
+
+    #[test]
+    fn a_node_has_a_changed_time_only_after_a_change() {
+        let (map, node) = (MapId::new(), NodeId::new());
+        let added = core::Event::node_added(Source::fixture(), Actor::Agent, map, node, "question", "Q", BTreeMap::new(), Vec::new());
+        let changed = core::Event::node_changed(Source::fixture(), Actor::Human, map, node, "Q2", BTreeMap::new(), Vec::new());
+        let response = |events: &[core::Event]| {
+            let node = core::Map::fixture(map, events).nodes.remove(0);
+            serde_json::to_value(Node::new(node, &BTreeMap::new())).unwrap()
+        };
+
+        let as_added = response(std::slice::from_ref(&added));
+        let as_changed = response(&[added.clone(), changed.clone()]);
+
+        assert_eq!(as_added["created_at"], json!(added.created_at));
+        assert_eq!(as_added["changed_at"], json!(null));
+        assert_eq!(as_changed["created_at"], json!(added.created_at));
+        assert_eq!(as_changed["changed_at"], json!(changed.created_at));
     }
 }
