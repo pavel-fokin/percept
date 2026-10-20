@@ -27,6 +27,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
                     client_session_id: client_session_id.clone(),
                     created_at: e.created_at,
                     path: e.source.path.clone(),
+                    client: e.source.client.clone(),
                     title: titles.get(session).map(|t| t.to_string()),
                 }),
                 _ => None,
@@ -141,12 +142,24 @@ mod tests {
     async fn path_is_the_source_path_of_the_created_event() {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
-        let source = Source { client: "claude".into(), path: "/work/app".into() };
+        let source = Source { client: "claude-code".into(), path: "/work/app".into() };
         service.record(client_session_id("a"), source, |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
 
         let sessions = service.sessions().await.unwrap();
 
         assert_eq!(sessions[0].path, std::path::Path::new("/work/app"));
+    }
+
+    #[tokio::test]
+    async fn client_is_the_source_client_of_the_created_event() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        let source = Source { client: "claude-code".into(), path: "/work/app".into() };
+        service.record(client_session_id("a"), source, |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
+
+        let sessions = service.sessions().await.unwrap();
+
+        assert_eq!(sessions[0].client, "claude-code");
     }
 
     #[tokio::test]

@@ -77,7 +77,7 @@ export function SessionPage({ session, events }: { session: Session; events: Eve
         <time dateTime={session.created_at} title={full.format(new Date(session.created_at))} className="text-text">
           {dayTime.format(new Date(session.created_at))}
         </time>{" "}
-        · {prompts} {prompts === 1 ? "exchange" : "exchanges"}
+        · {prompts} {prompts === 1 ? "exchange" : "exchanges"} · {clientName(session.client)}
       </h1>
 
       <div className="mt-12 grid gap-16 sm:mt-14 sm:gap-20">
@@ -89,7 +89,7 @@ export function SessionPage({ session, events }: { session: Session; events: Eve
                 <p className="leading-[26px] wrap-anywhere whitespace-pre-line">{exchange.prompt.payload.content as string}</p>
               </section>
             )}
-            <AgentItems items={exchange.items} started={started} />
+            <AgentItems items={exchange.items} started={started} agent={clientName(session.client)} />
           </article>
         ))}
       </div>
@@ -97,8 +97,14 @@ export function SessionPage({ session, events }: { session: Session; events: Eve
   );
 }
 
+const clientNames: Record<string, string> = { "claude-code": "Claude Code", codex: "Codex" };
+
+function clientName(client: string) {
+  return clientNames[client] ?? client;
+}
+
 // The agent's name heads its first message; quiet lines before it stand above.
-function AgentItems({ items, started }: { items: Item[]; started: Subagents }) {
+function AgentItems({ items, started, agent }: { items: Item[]; started: Subagents; agent: string }) {
   const first = items.find((item) => item.type === "event" && isAgentMessage(item.event));
 
   return items.map((item) => {
@@ -113,7 +119,7 @@ function AgentItems({ items, started }: { items: Item[]; started: Subagents }) {
 
     return (
       <section key={event.id} id={event.id} className={messageClass}>
-        {item === first && <Who name="Agent" at={event.created_at} />}
+        {item === first && <Who name={agent} at={event.created_at} />}
         <Markdown text={payload.content} />
       </section>
     );

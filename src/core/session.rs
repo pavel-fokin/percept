@@ -12,6 +12,8 @@ pub struct Session {
     pub created_at: Timestamp,
     /// Where the client ran, from the `source` of the `SessionCreated` event.
     pub path: PathBuf,
+    /// The client that ran it, from the same event.
+    pub client: String,
     /// The first non-empty thing the human said, if they said anything.
     pub title: Option<String>,
 }

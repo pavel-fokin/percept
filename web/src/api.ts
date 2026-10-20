@@ -6,6 +6,7 @@ export type Session = {
   title: string | null;
   created_at: string;
   path: string;
+  client: string;
 };
 
 export type MapSummary = {

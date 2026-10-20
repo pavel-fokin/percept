@@ -302,7 +302,7 @@ mod tests {
     async fn the_same_map_kind_can_be_created_in_two_projects_but_not_twice_in_one() {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
-        let other = Source { client: "claude".into(), path: "/other".into() };
+        let other = Source { client: "claude-code".into(), path: "/other".into() };
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
         service.create_map(other, Actor::Human, "decisions").await.unwrap();
 
@@ -329,7 +329,7 @@ mod tests {
     async fn maps_are_the_current_projects_in_log_order() {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
-        let other = Source { client: "claude".into(), path: "/other".into() };
+        let other = Source { client: "claude-code".into(), path: "/other".into() };
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
         service.create_map(other, Actor::Human, "tasks").await.unwrap();
         service.create_map(Source::fixture(), Actor::Human, "tasks").await.unwrap();
@@ -511,7 +511,7 @@ mod tests {
         let project = Source::fixture().path;
         let events = [
             Event::message(Source::fixture(), session, Actor::System, "Match", json!({})),
-            Event::message(Source { client: "claude".into(), path: "/other".into() }, session, Actor::Human, "Match", json!({})),
+            Event::message(Source { client: "claude-code".into(), path: "/other".into() }, session, Actor::Human, "Match", json!({})),
             Event::subagent_reported(Source::fixture(), session, crate::core::ClientAgentId::new("a".into()), "Match", json!({})),
         ];
 
@@ -793,7 +793,7 @@ mod tests {
     async fn all_map_summaries_span_projects_and_carry_each_maps_path() {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
-        let other = Source { client: "claude".into(), path: "/other".into() };
+        let other = Source { client: "claude-code".into(), path: "/other".into() };
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
         service.create_map(other.clone(), Actor::Human, "tasks").await.unwrap();
         service.add_node(other, Actor::Human, "tasks", "task", "T", Default::default(), Vec::new()).await.unwrap();
