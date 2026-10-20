@@ -39,8 +39,8 @@ by a schema in `.percept/schemas/<map>.toml`:
    percept remove <map> "<from title>" <edge kind> "<to title>"
    ```
 
-   A change keeps the properties it does not name. `--<property> ""`
-   drops one. Removing a node removes its edges.
+   A change keeps the properties it does not name. Removing a node
+   removes its edges.
 6. percept refuses an agent's change or removal of what a human wrote.
    Leave it as it is, and tell the user what you would change and why.
 7. Use only the kinds and properties the schema declares. Leave out a

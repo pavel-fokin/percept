@@ -228,7 +228,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
     }
 
     /// Records the full new state of the node with this title on the project's map of the given kind.
-    /// A property in `properties` is set, or dropped when its value is empty; the others keep their values.
+    /// Each property in `properties` is set; the others keep their values.
     /// `references` are resolved and appended to the node's own. A new title is unique within its map.
     #[allow(clippy::too_many_arguments, reason = "the inputs for changing a node")]
     pub async fn change_node(
@@ -254,16 +254,12 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         }
 
         let mut merged = node.properties.clone();
-        for (key, value) in properties {
-            if value.is_empty() {
-                merged.remove(&key);
-            } else {
-                merged.insert(key, value);
-            }
-        }
+        merged.extend(properties);
+
         if new_title == node.title && merged == node.properties && references.is_empty() {
             return Err(format!("the change leaves {title:?} as it is").into());
         }
+
         self.schemas.schema(&source.path, map_kind).await?.check_node(&node.kind, &merged)?;
 
         let mut all_references = node.references.clone();
@@ -972,14 +968,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn an_empty_value_drops_a_property() {
+    async fn an_empty_value_is_set_like_any_other() {
         let store = Memory::default();
         let service = glossary(&store).await;
 
         service.change_node(Source::fixture(), Actor::Human, "glossary", "Log", None, props(&[("source", "")]), Vec::new()).await.unwrap();
 
         let nodes = glossary_nodes(&service).await;
-        assert_eq!(nodes[0].properties, props(&[("definition", "One log.")]));
+        assert_eq!(nodes[0].properties, props(&[("definition", "One log."), ("source", "")]));
     }
 
     #[tokio::test]

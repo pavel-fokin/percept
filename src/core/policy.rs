@@ -1,8 +1,7 @@
-use super::map::{Change, Edge};
-use super::{Actor, Event, Graph, Payload};
+use super::{Actor, Change, Edge, Event, Graph, Payload};
 use crate::shared::Result;
 
-/// The rules a write must pass before it is appended. They apply to new events only, never to the log, so a later rule cannot invalidate it.
+/// Who may make a write. It judges new events only, never the log, so a later rule cannot invalidate it.
 pub struct Policy;
 
 impl Policy {
@@ -32,6 +31,7 @@ impl Policy {
                 let Some(found) = graph.node(*node) else {
                     return Ok(());
                 };
+
                 refuse_human(&found.changes, &format!("{:?}", found.title), "remove")?;
 
                 let cascade = format!("remove {:?}, which removes", found.title);
@@ -41,7 +41,16 @@ impl Policy {
                     .filter(|e| e.from == *node || e.to == *node)
                     .try_for_each(|e| refuse_human(&e.changes, &edge_name(graph, e), &cascade))
             }
-            _ => Ok(()),
+            Payload::MapCreated { .. }
+            | Payload::NodeAdded { .. }
+            | Payload::EdgeAdded { .. }
+            | Payload::SessionCreated { .. }
+            | Payload::SessionStarted { .. }
+            | Payload::SessionStopped { .. }
+            | Payload::Message { .. }
+            | Payload::ToolUsed { .. }
+            | Payload::SubagentStarted { .. }
+            | Payload::SubagentReported { .. } => Ok(()),
         }
     }
 }

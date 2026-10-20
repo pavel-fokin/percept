@@ -38,7 +38,7 @@ enum Command {
         args: Vec<String>,
     },
     /// Changes a node, `change <map> <title> [<new title>]`.
-    #[command(after_help = "Options: --key <value> sets a property and --key '' drops it; repeat --ref 'msg:<text>' or --ref 'file:<path>:<from>-<to>' to add saved excerpts.")]
+    #[command(after_help = "Options: --key <value> sets a property and keeps the others; repeat --ref 'msg:<text>' or --ref 'file:<path>:<from>-<to>' to add saved excerpts.")]
     Change {
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,

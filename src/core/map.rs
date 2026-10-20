@@ -103,7 +103,14 @@ impl Graph {
                 self.edges.push(Edge { kind: kind.clone(), from: *from, to: *to, changes: vec![change] })
             }
             Payload::EdgeRemoved { kind, from, to, .. } => self.edges.retain(|e| !e.is(kind, *from, *to)),
-            _ => {}
+            Payload::MapCreated { .. }
+            | Payload::SessionCreated { .. }
+            | Payload::SessionStarted { .. }
+            | Payload::SessionStopped { .. }
+            | Payload::Message { .. }
+            | Payload::ToolUsed { .. }
+            | Payload::SubagentStarted { .. }
+            | Payload::SubagentReported { .. } => {}
         }
 
         self
