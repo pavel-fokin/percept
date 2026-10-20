@@ -7,6 +7,7 @@ import { Markdown } from "../components/markdown";
 import { RouteError } from "../components/route-error";
 import { dayTime, full, time } from "../format";
 import { sessionsUrl } from "../paths";
+import { usePolling } from "../use-polling";
 
 // One line per run of tool calls, so a tool never splits the agent's text.
 type Item = { type: "event"; event: Event } | { type: "tools"; events: Event[] };
@@ -64,6 +65,7 @@ export function SessionPage({ session, events }: { session: Session; events: Eve
   const started = useMemo(() => subagents(events), [events]);
   const prompted = list.filter((e) => e.prompt);
   const prompts = prompted.length;
+  usePolling(5000, session.status !== "ended");
   useQuoteHighlight();
   useScrollToLastPrompt(prompted.at(-1)?.id);
 
@@ -137,7 +139,7 @@ function Quiet({ id, children }: { id: string; children: ReactNode }) {
   return <p id={id} className={`${messageClass} text-sm text-muted wrap-anywhere`}>{children}</p>;
 }
 
-/** Opens a session at its last prompt, so the reader starts with the latest question and its answer. */
+/** Opens a session at its last prompt, so the reader starts with the latest question and its answer. Once per page open: a revalidation that brings a newer prompt does not move the reader. */
 function useScrollToLastPrompt(id: string | undefined) {
   const { hash, key } = useLocation();
   const navigation = useNavigationType();
@@ -146,7 +148,7 @@ function useScrollToLastPrompt(id: string | undefined) {
     // Back, forward and reload return to where the reader was; only a fresh tab's first entry has the default key.
     if (hash || !id || (navigation === "POP" && key !== "default")) return;
     document.getElementById(id)?.scrollIntoView();
-  }, [hash, id, key, navigation]);
+  }, [hash, key, navigation]);
 }
 
 /** Marks the `?q=` quote inside the message `#<event>` names. A quote that spans markdown syntax is not in the rendered text and stays unmarked. */
