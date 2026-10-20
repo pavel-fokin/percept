@@ -26,8 +26,6 @@ longer has. An import the edges do not allow is not a new edge:
 tell the user about it instead.
 """
 
-order = "edges"
-
 [nodes.component]
 owns = ""
 

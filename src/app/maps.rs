@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::AppService;
-use crate::core::{Actor, Event, EventId, EventStore, Map, MapId, Node, NodeId, Order, Payload, Policy, Reference, SchemaStore, SessionId, Source};
+use crate::core::{Actor, Event, EventId, EventStore, Map, MapId, Node, NodeId, Payload, Policy, Reference, SchemaStore, SessionId, Source};
 use crate::shared::Result;
 
 #[derive(Debug, PartialEq)]
@@ -12,11 +12,9 @@ pub enum Ref {
 }
 
 /// A map with its nodes newest first and its edges in log order.
-/// `order` is how its schema says to list them.
 /// `messages` holds every message its nodes cite.
 pub struct MapDetail {
     pub map: Map,
-    pub order: Order,
     pub messages: BTreeMap<EventId, CitedMessage>,
 }
 
@@ -76,8 +74,6 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         };
         map.nodes.reverse();
 
-        let order = self.schemas.schema(&map.path, &map.kind).await?.order();
-
         let cited: BTreeSet<EventId> = map
             .nodes
             .iter()
@@ -96,7 +92,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             })
             .collect();
 
-        Ok(Some(MapDetail { map, order, messages }))
+        Ok(Some(MapDetail { map, messages }))
     }
 
     /// Records a new edge on the project's map of the given kind, between the nodes with these titles.
@@ -828,35 +824,6 @@ mod tests {
         assert_eq!(detail.messages.len(), 1);
         assert_eq!(detail.messages[&cited.id].session, session);
         assert_eq!(detail.messages[&cited.id].created_at, cited.created_at);
-    }
-
-    #[tokio::test]
-    async fn map_detail_carries_the_order_its_schema_declares() {
-        let store = Memory::default();
-        let service = AppService::new(&store, Schemas);
-        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
-        service.create_map(Source::fixture(), Actor::Human, "levels").await.unwrap();
-        let decisions = service.map(&Source::fixture().path, "decisions").await.unwrap();
-        let levels = service.map(&Source::fixture().path, "levels").await.unwrap();
-
-        let decisions = service.map_detail(decisions.id).await.unwrap().unwrap();
-        let levels = service.map_detail(levels.id).await.unwrap().unwrap();
-
-        assert_eq!(decisions.order, Order::Added);
-        assert_eq!(levels.order, Order::Edges);
-    }
-
-    #[tokio::test]
-    async fn map_detail_fails_when_the_maps_schema_is_gone() {
-        let store = Memory::default();
-        let service = AppService::new(&store, Schemas);
-        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
-        let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
-        let gone = AppService::new(&store, NoSchemas);
-
-        let result = gone.map_detail(map.id).await;
-
-        assert!(result.is_err());
     }
 
     #[tokio::test]

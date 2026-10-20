@@ -9,18 +9,8 @@ pub struct Schema {
     purpose: String,
     #[allow(dead_code, reason = "parsed now; read when the agent is shown the schema")]
     instructions: String,
-    order: Order,
     nodes: BTreeMap<String, BTreeSet<String>>,
     edges: BTreeMap<String, EdgeKind>,
-}
-
-/// How a map's page lists its nodes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Order {
-    /// By the day each node was added, newest first.
-    Added,
-    /// By rank along the map's edges.
-    Edges,
 }
 
 /// The node kinds an edge kind links.
@@ -34,7 +24,6 @@ impl Schema {
     pub fn new(
         purpose: String,
         instructions: String,
-        order: Order,
         nodes: BTreeMap<String, BTreeSet<String>>,
         edges: BTreeMap<String, EdgeKind>,
     ) -> Result<Self> {
@@ -50,7 +39,7 @@ impl Schema {
             }
         }
 
-        Ok(Self { purpose, instructions, order, nodes, edges })
+        Ok(Self { purpose, instructions, nodes, edges })
     }
 
     /// A node must be of a declared kind and hold only properties that kind declares.
@@ -82,10 +71,6 @@ impl Schema {
         }
 
         Ok(())
-    }
-
-    pub fn order(&self) -> Order {
-        self.order
     }
 
     #[allow(dead_code, reason = "parsed now; read when the agent is shown the schema")]
@@ -124,7 +109,7 @@ mod tests {
     #[test]
     fn a_node_must_be_a_declared_kind_with_declared_properties() {
         let nodes = BTreeMap::from([("note".to_string(), BTreeSet::from(["body".to_string()]))]);
-        let schema = Schema::new("p".into(), "i".into(), Order::Added, nodes, BTreeMap::new()).unwrap();
+        let schema = Schema::new("p".into(), "i".into(), nodes, BTreeMap::new()).unwrap();
         let body = BTreeMap::from([("body".to_string(), "x".to_string())]);
         let other = BTreeMap::from([("other".to_string(), "x".to_string())]);
 
@@ -141,7 +126,7 @@ mod tests {
 
     #[test]
     fn an_edge_must_be_a_declared_kind_between_its_declared_node_kinds() {
-        let schema = Schema::new("p".into(), "i".into(), Order::Added, nodes(&["a", "b"]), edge("a", "b")).unwrap();
+        let schema = Schema::new("p".into(), "i".into(), nodes(&["a", "b"]), edge("a", "b")).unwrap();
 
         let valid = schema.check_edge("links", "a", "b");
         let unknown = schema.check_edge("other", "a", "b");
@@ -155,24 +140,17 @@ mod tests {
     }
 
     #[test]
-    fn a_schema_keeps_its_order() {
-        let schema = Schema::new("p".into(), "i".into(), Order::Edges, nodes(&["a"]), BTreeMap::new()).unwrap();
-
-        assert_eq!(schema.order(), Order::Edges);
-    }
-
-    #[test]
     fn a_schema_needs_a_node_kind() {
-        let result = Schema::new("p".into(), "i".into(), Order::Added, nodes(&[]), BTreeMap::new());
+        let result = Schema::new("p".into(), "i".into(), nodes(&[]), BTreeMap::new());
 
         assert!(result.is_err());
     }
 
     #[test]
     fn an_edge_must_link_declared_node_kinds() {
-        let declared = Schema::new("p".into(), "i".into(), Order::Added, nodes(&["a", "b"]), edge("a", "b"));
-        let undeclared_to = Schema::new("p".into(), "i".into(), Order::Added, nodes(&["a"]), edge("a", "b"));
-        let undeclared_from = Schema::new("p".into(), "i".into(), Order::Added, nodes(&["b"]), edge("a", "b"));
+        let declared = Schema::new("p".into(), "i".into(), nodes(&["a", "b"]), edge("a", "b"));
+        let undeclared_to = Schema::new("p".into(), "i".into(), nodes(&["a"]), edge("a", "b"));
+        let undeclared_from = Schema::new("p".into(), "i".into(), nodes(&["b"]), edge("a", "b"));
 
         assert!(declared.is_ok());
         assert!(undeclared_to.is_err());

@@ -42,7 +42,6 @@ export type MapDetail = {
   id: string;
   kind: string;
   path: string;
-  order: "added" | "edges";
   nodes: MapNode[];
   edges: MapEdge[];
 };

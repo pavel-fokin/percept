@@ -460,7 +460,7 @@ mod tests {
         let edge = || crate::core::EdgeKind { from: "concept".into(), to: "concept".into() };
         let edges = BTreeMap::from([("links".to_string(), edge()), ("cites".to_string(), edge())]);
 
-        Schema::new("p".into(), "i".into(), crate::core::Order::Added, nodes, edges).unwrap()
+        Schema::new("p".into(), "i".into(), nodes, edges).unwrap()
     }
 
     #[test]
