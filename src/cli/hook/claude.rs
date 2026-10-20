@@ -194,8 +194,8 @@ mod tests {
 
     #[test]
     fn mcp_tools_record_their_arguments_and_text_parts() {
-        let content = json!([{"type": "text", "text": "one"}, {"type": "image", "data": "x"}, {"type": "text", "text": "two"}]);
-        let raw = json!({"tool_name": "mcp__docs__read", "tool_input": {"id": 7}, "tool_response": {"content": content}});
+        let parts = json!([{"text": "one"}, {"type": "image", "data": "x"}, {"type": "text", "text": "two"}]);
+        let raw = json!({"tool_name": "mcp__docs__read", "tool_input": {"id": 7}, "tool_response": parts});
 
         assert_eq!(io(raw), (some(r#"{"id":7}"#), some("one\ntwo")));
     }

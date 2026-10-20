@@ -119,10 +119,15 @@ fn json_input(raw: &serde_json::Value) -> Option<String> {
     (!is_blank(input)).then(|| input.to_string())
 }
 
-/// The text parts of an MCP tool's `content` array.
+/// The text parts of an MCP result: Codex wraps them in `content`, Claude sends the array bare.
 fn mcp_output(response: &serde_json::Value) -> Option<String> {
-    let parts = response["content"].as_array()?;
-    joined(parts.iter().filter(|part| part["type"] == "text").filter_map(|part| part["text"].as_str()).collect())
+    let parts = response["content"].as_array().or(response.as_array())?;
+    text_parts(parts)
+}
+
+/// The `text` of each part that has one, joined; images and other parts carry none.
+fn text_parts(parts: &[serde_json::Value]) -> Option<String> {
+    joined(parts.iter().filter_map(|part| part["text"].as_str()).collect())
 }
 
 /// Reads a tool no client table covers: the input as compact JSON, the response as text.
@@ -130,9 +135,7 @@ fn unknown_tool_io(raw: &serde_json::Value) -> (Option<String>, Option<String>) 
     let output = match &raw["tool_response"] {
         response if is_blank(response) => None,
         serde_json::Value::String(text) => non_empty(Some(text)),
-        serde_json::Value::Array(items) if items.iter().all(|item| item["text"].is_string()) => {
-            joined(items.iter().filter_map(|item| item["text"].as_str()).collect())
-        }
+        serde_json::Value::Array(items) if items.iter().all(|item| item["text"].is_string()) => text_parts(items),
         response => serde_json::to_string_pretty(response).ok(),
     };
 
