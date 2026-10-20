@@ -43,7 +43,7 @@ enum Command {
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Removes an edge, `remove <map> <from> <kind> <to>`.
+    /// Removes a node, `remove <map> <title>`, or an edge, `remove <map> <from> <kind> <to>`.
     Remove {
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,
@@ -111,6 +111,14 @@ mod tests {
 
         let Some(Command::Change { args }) = cli.command else { panic!("expected change") };
         assert_eq!(args, ["m", "T", "New", "--note", "", "--ref", "msg:text"]);
+    }
+
+    #[test]
+    fn remove_passes_a_node_title_to_its_parser() {
+        let cli = Cli::try_parse_from(["percept", "remove", "m", "A"]).unwrap();
+
+        let Some(Command::Remove { args }) = cli.command else { panic!("expected remove") };
+        assert_eq!(args, ["m", "A"]);
     }
 
     #[test]

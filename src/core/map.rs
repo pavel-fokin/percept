@@ -62,7 +62,8 @@ impl Graph {
         events.iter().fold(Self::default(), |graph, event| graph.apply(map, event))
     }
 
-    /// The graph after `event`; events of other maps, changes to a node not in the graph, and removals of an edge not in it change nothing.
+    /// The graph after `event`; events of other maps, changes to a node not in the graph, and removals of a node or edge not in it change nothing.
+    /// A removed node takes every edge from or to it.
     fn apply(mut self, map: MapId, event: &Event) -> Self {
         let change = Change { actor: event.actor, at: event.created_at };
 
@@ -82,6 +83,10 @@ impl Graph {
                     found.references = new_references.clone();
                     found.changes.push(change);
                 }
+            }
+            Payload::NodeRemoved { map: id, node } if *id == map => {
+                self.nodes.retain(|n| n.id != *node);
+                self.edges.retain(|e| e.from != *node && e.to != *node);
             }
             Payload::EdgeAdded { map: id, kind, from, to } if *id == map => {
                 self.edges.push(Edge { kind: kind.clone(), from: *from, to: *to, changes: vec![change] })
@@ -208,6 +213,68 @@ mod tests {
         let edges: Vec<(&str, NodeId, NodeId)> = graph.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
         assert_eq!(edges, vec![("links", b, a), ("cites", a, b)]);
         assert_eq!(graph.nodes.len(), 2);
+    }
+
+    #[test]
+    fn a_removed_node_takes_its_edges_in_both_directions_and_nothing_else() {
+        let (map, other) = (MapId::new(), MapId::new());
+        let (a, add_a) = node_added(map, Actor::Human, "A");
+        let (b, add_b) = node_added(map, Actor::Human, "B");
+        let (c, add_c) = node_added(map, Actor::Human, "C");
+        let (elsewhere, add_elsewhere) = node_added(other, Actor::Human, "A");
+        let edge = |map, from, to| Event::edge_added(Source::fixture(), Actor::Human, map, "links", from, to);
+        let events = [
+            add_a,
+            add_b,
+            add_c,
+            add_elsewhere,
+            edge(map, a, b),
+            edge(map, c, a),
+            edge(map, b, c),
+            edge(other, elsewhere, elsewhere),
+            Event::node_removed(Source::fixture(), Actor::Agent, map, a),
+            Event::node_removed(Source::fixture(), Actor::Agent, other, b),
+        ];
+
+        let graph = Graph::of(map, &events);
+        let elsewhere_graph = Graph::of(other, &events);
+
+        let titles: Vec<&str> = graph.nodes.iter().map(|n| n.title.as_str()).collect();
+        let edges: Vec<(NodeId, NodeId)> = graph.edges.iter().map(|e| (e.from, e.to)).collect();
+        assert_eq!(titles, vec!["B", "C"]);
+        assert_eq!(edges, vec![(b, c)]);
+        assert_eq!(elsewhere_graph.nodes.len(), 1);
+        assert_eq!(elsewhere_graph.edges.len(), 1);
+    }
+
+    #[test]
+    fn removing_a_missing_node_changes_nothing() {
+        let map = MapId::new();
+        let (a, add_a) = node_added(map, Actor::Human, "A");
+        let events = [
+            add_a,
+            Event::edge_added(Source::fixture(), Actor::Human, map, "links", a, a),
+            Event::node_removed(Source::fixture(), Actor::Agent, map, NodeId::new()),
+        ];
+
+        let graph = Graph::of(map, &events);
+
+        assert_eq!(graph.nodes.len(), 1);
+        assert_eq!(graph.edges.len(), 1);
+    }
+
+    #[test]
+    fn a_removed_node_added_again_is_a_new_node() {
+        let map = MapId::new();
+        let (a, add_a) = node_added(map, Actor::Human, "A");
+        let (again, add_again) = node_added(map, Actor::Agent, "A");
+        let events = [add_a, Event::node_removed(Source::fixture(), Actor::Human, map, a), add_again];
+
+        let graph = Graph::of(map, &events);
+
+        assert_eq!(graph.nodes.len(), 1);
+        assert_eq!(graph.nodes[0].id, again);
+        assert_eq!(graph.nodes[0].changes.len(), 1);
     }
 
     #[test]

@@ -45,6 +45,7 @@ pub enum Kind {
     MapCreated,
     NodeAdded,
     NodeChanged,
+    NodeRemoved,
     EdgeAdded,
     EdgeRemoved,
 }
@@ -62,6 +63,7 @@ impl Kind {
             Self::MapCreated => "map.created",
             Self::NodeAdded => "node.added",
             Self::NodeChanged => "node.changed",
+            Self::NodeRemoved => "node.removed",
             Self::EdgeAdded => "edge.added",
             Self::EdgeRemoved => "edge.removed",
         }
@@ -79,6 +81,7 @@ impl Kind {
             "map.created" => Some(Self::MapCreated),
             "node.added" => Some(Self::NodeAdded),
             "node.changed" => Some(Self::NodeChanged),
+            "node.removed" => Some(Self::NodeRemoved),
             "edge.added" => Some(Self::EdgeAdded),
             "edge.removed" => Some(Self::EdgeRemoved),
             _ => None,
@@ -100,6 +103,7 @@ pub enum Payload {
     NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
     /// The node's full new state, not a diff.
     NodeChanged { map: MapId, node: NodeId, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
+    NodeRemoved { map: MapId, node: NodeId },
     EdgeAdded { map: MapId, kind: String, from: NodeId, to: NodeId },
     EdgeRemoved { map: MapId, kind: String, from: NodeId, to: NodeId },
 }
@@ -117,6 +121,7 @@ impl Payload {
             Self::MapCreated { .. } => Kind::MapCreated,
             Self::NodeAdded { .. } => Kind::NodeAdded,
             Self::NodeChanged { .. } => Kind::NodeChanged,
+            Self::NodeRemoved { .. } => Kind::NodeRemoved,
             Self::EdgeAdded { .. } => Kind::EdgeAdded,
             Self::EdgeRemoved { .. } => Kind::EdgeRemoved,
         }
@@ -131,7 +136,7 @@ impl Payload {
             | Self::ToolUsed { session, .. }
             | Self::SubagentStarted { session, .. }
             | Self::SubagentReported { session, .. } => Some(*session),
-            Self::MapCreated { .. } | Self::NodeAdded { .. } | Self::NodeChanged { .. } | Self::EdgeAdded { .. } | Self::EdgeRemoved { .. } => None,
+            Self::MapCreated { .. } | Self::NodeAdded { .. } | Self::NodeChanged { .. } | Self::NodeRemoved { .. } | Self::EdgeAdded { .. } | Self::EdgeRemoved { .. } => None,
         }
     }
 }
@@ -241,6 +246,11 @@ impl Event {
 
     pub fn edge_added(source: Source, actor: Actor, map: MapId, kind: &str, from: NodeId, to: NodeId) -> Self {
         let payload = Payload::EdgeAdded { map, kind: kind.into(), from, to };
+        Self::build(source, actor, payload, None)
+    }
+
+    pub fn node_removed(source: Source, actor: Actor, map: MapId, node: NodeId) -> Self {
+        let payload = Payload::NodeRemoved { map, node };
         Self::build(source, actor, payload, None)
     }
 
@@ -431,6 +441,19 @@ mod tests {
     }
 
     #[test]
+    fn node_removed_carries_the_actor_and_has_no_session() {
+        let (map, node) = (MapId::new(), NodeId::new());
+
+        let event = Event::node_removed(Source::fixture(), Actor::Human, map, node);
+
+        assert_eq!(event.actor, Actor::Human);
+        assert_eq!(event.payload.kind(), Kind::NodeRemoved);
+        assert_eq!(event.payload, Payload::NodeRemoved { map, node });
+        assert_eq!(event.payload.session(), None);
+        assert_eq!(event.raw, None);
+    }
+
+    #[test]
     fn edge_removed_carries_the_actor_and_has_no_session() {
         let (map, from, to) = (MapId::new(), NodeId::new(), NodeId::new());
 
@@ -445,7 +468,7 @@ mod tests {
 
     #[test]
     fn every_kind_is_found_by_its_name() {
-        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed, Kind::SubagentStarted, Kind::SubagentReported, Kind::MapCreated, Kind::NodeAdded, Kind::NodeChanged, Kind::EdgeAdded, Kind::EdgeRemoved];
+        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed, Kind::SubagentStarted, Kind::SubagentReported, Kind::MapCreated, Kind::NodeAdded, Kind::NodeChanged, Kind::NodeRemoved, Kind::EdgeAdded, Kind::EdgeRemoved];
 
         for kind in kinds {
             assert_eq!(Kind::from_name(kind.name()), Some(kind));

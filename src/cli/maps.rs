@@ -42,11 +42,15 @@ pub(super) async fn change<S: EventStore, M: SchemaStore>(service: &AppService<S
 
 pub(super) async fn remove<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
     match split_remove(args)? {
+        [map, title] => {
+            let (actor, source) = cli_writer().await?;
+            service.remove_node(source, actor, map, title).await
+        }
         [map, from, kind, to] => {
             let (actor, source) = cli_writer().await?;
             service.remove_edge(source, actor, map, from, kind, to).await
         }
-        _ => Err("usage: percept remove <map> <from> <kind> <to>".into()),
+        _ => Err("usage: percept remove <map> <title> | percept remove <map> <from> <kind> <to>".into()),
     }
 }
 
@@ -334,8 +338,10 @@ mod tests {
     #[test]
     fn remove_takes_positionals_and_no_flags() {
         let edge = strings(&["m", "a", "k", "b"]);
+        let node = strings(&["m", "a"]);
 
         assert_eq!(split_remove(&edge).unwrap(), &edge[..]);
+        assert_eq!(split_remove(&node).unwrap(), &node[..]);
         for flag in ["--ref", "--definition", "--"] {
             let args = strings(&["m", "a", "k", "b", flag, "x"]);
 
