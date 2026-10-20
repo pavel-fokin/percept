@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use super::hook::Client;
 use crate::app::{AppService, Ref, source_path};
-use crate::core::{Actor, EventStore, Reference, SchemaStore, Source};
+use crate::core::{Actor, EventStore, Map, Reference, SchemaStore, Source};
 use crate::shared::Result;
 
 pub(super) async fn create<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, kind: &str) -> Result<()> {
@@ -136,11 +136,9 @@ pub(super) async fn show<S: EventStore, M: SchemaStore>(service: &AppService<S, 
 
     match map {
         Some(kind) => {
-            let map = service.map(&project, kind).await?;
-            let nodes = service.nodes(map.id).await?;
-            let edges = service.edges(map.id).await?;
+            let Map { kind, nodes, edges, .. } = service.map(&project, kind).await?;
 
-            println!("{}", map.kind);
+            println!("{kind}");
 
             if !nodes.is_empty() {
                 println!();
@@ -173,8 +171,8 @@ pub(super) async fn show<S: EventStore, M: SchemaStore>(service: &AppService<S, 
             }
         }
         None => {
-            for s in service.map_summaries(&project).await? {
-                println!("{}  {}, {}", s.map.kind, node_count(s.nodes), edge_count(s.edges));
+            for map in service.maps(&project).await? {
+                println!("{}  {}, {}", map.kind, node_count(map.nodes.len()), edge_count(map.edges.len()));
             }
         }
     }

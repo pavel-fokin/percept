@@ -57,8 +57,8 @@ where
     }
 
     pub(super) async fn maps(State(api): State<Arc<Self>>) -> Reply<Vec<MapSummary>> {
-        let summaries = api.service.all_map_summaries().await?;
-        let maps = summaries.into_iter().map(|s| MapSummary::new(s, &api.home)).collect();
+        let maps = api.service.all_maps().await?;
+        let maps = maps.into_iter().map(|m| MapSummary::new(m, &api.home)).collect();
         Ok(Json(Data { data: maps }))
     }
 

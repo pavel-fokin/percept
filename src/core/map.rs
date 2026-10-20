@@ -10,10 +10,13 @@ pub type MapId = Id<Map>;
 pub type NodeId = Id<Node>;
 
 /// A named body of understanding in one project, created by a `MapCreated` event.
+/// Its nodes and edges are folded from the log, both in log order.
 pub struct Map {
     pub id: MapId,
     pub kind: String,
     pub path: PathBuf,
+    pub nodes: Vec<Node>,
+    pub edges: Vec<Edge>,
 }
 
 /// One item on a map, added by a `NodeAdded` event.
@@ -49,6 +52,17 @@ impl Edge {
     }
 }
 
+#[cfg(test)]
+impl Map {
+    /// The map `id` after `events`, created by a `MapCreated` event placed first.
+    pub fn fixture(id: MapId, events: &[Event]) -> Self {
+        let created = Event::map_created(crate::core::Source::fixture(), Actor::Human, id, "concepts");
+        let log: Vec<Event> = std::iter::once(created).chain(events.iter().cloned()).collect();
+
+        Self::all(&log).remove(0)
+    }
+}
+
 /// Who wrote to a node or an edge, and when.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Change {
@@ -56,26 +70,40 @@ pub struct Change {
     pub at: Timestamp,
 }
 
-/// The nodes and edges of one map, folded from the log. Both are in log order.
-#[derive(Default)]
-pub struct Graph {
-    pub nodes: Vec<Node>,
-    pub edges: Vec<Edge>,
-}
+impl Map {
+    /// Every map in `events` in `MapCreated` order, each after the events that reached it.
+    /// Events of a map with no `MapCreated` are ignored.
+    pub fn all(events: &[Event]) -> Vec<Self> {
+        let mut maps: Vec<Self> = Vec::new();
 
-impl Graph {
-    /// The graph of `map` after every event in `events`.
-    pub fn of(map: MapId, events: &[Event]) -> Self {
-        events.iter().filter(|e| e.payload.map() == Some(map)).fold(Self::default(), Self::apply)
+        for event in events {
+            match &event.payload {
+                Payload::MapCreated { map, kind } => maps.push(Self {
+                    id: *map,
+                    kind: kind.clone(),
+                    path: event.source.path.clone(),
+                    nodes: Vec::new(),
+                    edges: Vec::new(),
+                }),
+                payload => {
+                    let id = payload.map();
+                    if let Some(found) = maps.iter_mut().find(|m| Some(m.id) == id) {
+                        found.apply(event);
+                    }
+                }
+            }
+        }
+
+        maps
     }
 
     pub fn node(&self, id: NodeId) -> Option<&Node> {
         self.nodes.iter().find(|n| n.id == id)
     }
 
-    /// The graph after `event`; changes to a node not in the graph, and removals of a node or edge not in it, change nothing.
+    /// Folds `event` in; changes to a node not on the map, and removals of a node or edge not on it, change nothing.
     /// A removed node takes every edge from or to it.
-    fn apply(mut self, event: &Event) -> Self {
+    fn apply(&mut self, event: &Event) {
         let change = Change { actor: event.actor, at: event.created_at };
 
         match &event.payload {
@@ -112,14 +140,14 @@ impl Graph {
             | Payload::SubagentStarted { .. }
             | Payload::SubagentReported { .. } => {}
         }
-
-        self
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+
     use crate::core::Source;
 
     fn node_added(map: MapId, actor: Actor, title: &str) -> (NodeId, Event) {
@@ -144,10 +172,10 @@ mod tests {
             Event::edge_added(Source::fixture(), Actor::Human, map, "cites", a, b),
         ];
 
-        let graph = Graph::of(map, &events);
+        let folded = Map::fixture(map, &events);
 
-        let nodes: Vec<&str> = graph.nodes.iter().map(|n| n.title.as_str()).collect();
-        let edges: Vec<(&str, NodeId, NodeId)> = graph.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
+        let nodes: Vec<&str> = folded.nodes.iter().map(|n| n.title.as_str()).collect();
+        let edges: Vec<(&str, NodeId, NodeId)> = folded.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
         assert_eq!(nodes, vec!["A", "B"]);
         assert_eq!(edges, vec![("links", b, a), ("cites", a, b)]);
     }
@@ -160,10 +188,10 @@ mod tests {
         add_a.created_at = "2026-01-01T00:00:00Z".parse().unwrap();
         add_edge.created_at = "2026-01-02T00:00:00Z".parse().unwrap();
 
-        let graph = Graph::of(map, &[add_a.clone(), add_edge.clone()]);
+        let folded = Map::fixture(map, &[add_a.clone(), add_edge.clone()]);
 
-        assert_eq!(graph.nodes[0].changes, vec![Change { actor: Actor::Agent, at: add_a.created_at }]);
-        assert_eq!(graph.edges[0].changes, vec![Change { actor: Actor::Human, at: add_edge.created_at }]);
+        assert_eq!(folded.nodes[0].changes, vec![Change { actor: Actor::Agent, at: add_a.created_at }]);
+        assert_eq!(folded.edges[0].changes, vec![Change { actor: Actor::Human, at: add_edge.created_at }]);
     }
 
     #[test]
@@ -176,19 +204,19 @@ mod tests {
         let mut change = Event::node_changed(Source::fixture(), Actor::Human, map, a, "A2", properties.clone(), references.clone());
         change.created_at = "2026-01-03T00:00:00Z".parse().unwrap();
 
-        let graph = Graph::of(map, &[add_a.clone(), add_b, change.clone()]);
+        let folded = Map::fixture(map, &[add_a.clone(), add_b, change.clone()]);
 
-        let titles: Vec<&str> = graph.nodes.iter().map(|n| n.title.as_str()).collect();
+        let titles: Vec<&str> = folded.nodes.iter().map(|n| n.title.as_str()).collect();
         assert_eq!(titles, vec!["A2", "B"]);
-        assert_eq!(graph.nodes[0].id, a);
-        assert_eq!(graph.nodes[0].kind, "concept");
-        assert_eq!(graph.nodes[0].properties, properties);
-        assert_eq!(graph.nodes[0].references, references);
-        assert_eq!(graph.nodes[0].changes, vec![
+        assert_eq!(folded.nodes[0].id, a);
+        assert_eq!(folded.nodes[0].kind, "concept");
+        assert_eq!(folded.nodes[0].properties, properties);
+        assert_eq!(folded.nodes[0].references, references);
+        assert_eq!(folded.nodes[0].changes, vec![
             Change { actor: Actor::Agent, at: add_a.created_at },
             Change { actor: Actor::Human, at: change.created_at },
         ]);
-        assert_eq!(graph.nodes[1].changes.len(), 1);
+        assert_eq!(folded.nodes[1].changes.len(), 1);
     }
 
     #[test]
@@ -198,11 +226,11 @@ mod tests {
         let elsewhere = Event::node_changed(Source::fixture(), Actor::Human, other, a, "X", BTreeMap::new(), Vec::new());
         let missing = Event::node_changed(Source::fixture(), Actor::Human, map, NodeId::new(), "Y", BTreeMap::new(), Vec::new());
 
-        let graph = Graph::of(map, &[add_a, elsewhere, missing]);
+        let folded = Map::fixture(map, &[add_a, elsewhere, missing]);
 
-        assert_eq!(graph.nodes.len(), 1);
-        assert_eq!(graph.nodes[0].title, "A");
-        assert_eq!(graph.nodes[0].changes.len(), 1);
+        assert_eq!(folded.nodes.len(), 1);
+        assert_eq!(folded.nodes[0].title, "A");
+        assert_eq!(folded.nodes[0].changes.len(), 1);
     }
 
     #[test]
@@ -224,11 +252,11 @@ mod tests {
             remove(map, "links", a, b),
         ];
 
-        let graph = Graph::of(map, &events);
+        let folded = Map::fixture(map, &events);
 
-        let edges: Vec<(&str, NodeId, NodeId)> = graph.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
+        let edges: Vec<(&str, NodeId, NodeId)> = folded.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
         assert_eq!(edges, vec![("links", b, a), ("cites", a, b)]);
-        assert_eq!(graph.nodes.len(), 2);
+        assert_eq!(folded.nodes.len(), 2);
     }
 
     #[test]
@@ -252,15 +280,18 @@ mod tests {
             Event::node_removed(Source::fixture(), Actor::Agent, other, b),
         ];
 
-        let graph = Graph::of(map, &events);
-        let elsewhere_graph = Graph::of(other, &events);
+        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, "concepts");
+        let log: Vec<Event> = [created(map), created(other)].into_iter().chain(events).collect();
 
-        let titles: Vec<&str> = graph.nodes.iter().map(|n| n.title.as_str()).collect();
-        let edges: Vec<(NodeId, NodeId)> = graph.edges.iter().map(|e| (e.from, e.to)).collect();
+        let maps = Map::all(&log);
+        let (folded, elsewhere_map) = (&maps[0], &maps[1]);
+
+        let titles: Vec<&str> = folded.nodes.iter().map(|n| n.title.as_str()).collect();
+        let edges: Vec<(NodeId, NodeId)> = folded.edges.iter().map(|e| (e.from, e.to)).collect();
         assert_eq!(titles, vec!["B", "C"]);
         assert_eq!(edges, vec![(b, c)]);
-        assert_eq!(elsewhere_graph.nodes.len(), 1);
-        assert_eq!(elsewhere_graph.edges.len(), 1);
+        assert_eq!(elsewhere_map.nodes.len(), 1);
+        assert_eq!(elsewhere_map.edges.len(), 1);
     }
 
     #[test]
@@ -273,10 +304,10 @@ mod tests {
             Event::node_removed(Source::fixture(), Actor::Agent, map, NodeId::new()),
         ];
 
-        let graph = Graph::of(map, &events);
+        let folded = Map::fixture(map, &events);
 
-        assert_eq!(graph.nodes.len(), 1);
-        assert_eq!(graph.edges.len(), 1);
+        assert_eq!(folded.nodes.len(), 1);
+        assert_eq!(folded.edges.len(), 1);
     }
 
     #[test]
@@ -286,11 +317,11 @@ mod tests {
         let (again, add_again) = node_added(map, Actor::Agent, "A");
         let events = [add_a, Event::node_removed(Source::fixture(), Actor::Human, map, a), add_again];
 
-        let graph = Graph::of(map, &events);
+        let folded = Map::fixture(map, &events);
 
-        assert_eq!(graph.nodes.len(), 1);
-        assert_eq!(graph.nodes[0].id, again);
-        assert_eq!(graph.nodes[0].changes.len(), 1);
+        assert_eq!(folded.nodes.len(), 1);
+        assert_eq!(folded.nodes[0].id, again);
+        assert_eq!(folded.nodes[0].changes.len(), 1);
     }
 
     #[test]
@@ -304,11 +335,11 @@ mod tests {
             Event::edge_added(Source::fixture(), Actor::Agent, map, "links", a, a),
         ];
 
-        let graph = Graph::of(map, &events);
+        let folded = Map::fixture(map, &events);
 
-        assert_eq!(graph.edges.len(), 1);
-        assert_eq!(graph.edges[0].changes.len(), 1);
-        assert_eq!(graph.edges[0].changes[0].actor, Actor::Agent);
+        assert_eq!(folded.edges.len(), 1);
+        assert_eq!(folded.edges[0].changes.len(), 1);
+        assert_eq!(folded.edges[0].changes[0].actor, Actor::Agent);
     }
 
     #[test]
@@ -323,18 +354,36 @@ mod tests {
             "decision", "Keep snapshots", BTreeMap::new(), references.clone(),
         );
 
-        let graph = Graph::of(map, &[event]);
+        let folded = Map::fixture(map, &[event]);
 
-        assert_eq!(graph.nodes[0].references, references);
+        assert_eq!(folded.nodes[0].references, references);
     }
 
     #[test]
-    fn a_map_with_no_events_has_an_empty_graph() {
-        let (_, other) = node_added(MapId::new(), Actor::Human, "A");
+    fn one_fold_builds_each_map_in_creation_order_and_ignores_a_map_never_created() {
+        let (first, second, uncreated) = (MapId::new(), MapId::new(), MapId::new());
+        let (a, add_a) = node_added(first, Actor::Human, "A");
+        let (b, add_b) = node_added(second, Actor::Agent, "B");
+        let (_, add_lost) = node_added(uncreated, Actor::Human, "Lost");
+        let created = |id, kind| Event::map_created(Source::fixture(), Actor::Human, id, kind);
+        let events = [
+            created(first, "concepts"),
+            add_lost,
+            add_a,
+            created(second, "decisions"),
+            Event::edge_added(Source::fixture(), Actor::Human, first, "links", a, a),
+            add_b,
+            Event::edge_added(Source::fixture(), Actor::Agent, second, "links", b, b),
+            Event::edge_added(Source::fixture(), Actor::Agent, uncreated, "links", a, b),
+        ];
 
-        let graph = Graph::of(MapId::new(), &[other]);
+        let maps = Map::all(&events);
 
-        assert!(graph.nodes.is_empty());
-        assert!(graph.edges.is_empty());
+        let found: Vec<(MapId, &str, &Path)> = maps.iter().map(|m| (m.id, m.kind.as_str(), m.path.as_path())).collect();
+        assert_eq!(found, vec![(first, "concepts", Path::new("/repo")), (second, "decisions", Path::new("/repo"))]);
+        assert_eq!(maps[0].nodes.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(), vec!["A"]);
+        assert_eq!(maps[0].edges.iter().map(|e| (e.from, e.to)).collect::<Vec<_>>(), vec![(a, a)]);
+        assert_eq!(maps[1].nodes.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(), vec!["B"]);
+        assert_eq!(maps[1].edges.iter().map(|e| (e.from, e.to)).collect::<Vec<_>>(), vec![(b, b)]);
     }
 }

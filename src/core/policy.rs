@@ -1,4 +1,4 @@
-use super::{Actor, Change, Edge, Event, Graph, Payload};
+use super::{Actor, Change, Edge, Event, Map, Payload};
 use crate::shared::Result;
 
 /// Who may make a write. It judges new events only, never the log, so a later rule cannot invalidate it.
@@ -7,39 +7,38 @@ pub struct Policy;
 impl Policy {
     /// Refuses an agent's change to a node, or removal of a node or an edge, that a human wrote.
     /// Removing a node also removes its edges, so a human's edge on it refuses the removal. Additions and a human's writes pass.
-    pub fn check(event: &Event, graph: &Graph) -> Result<()> {
+    pub fn check(event: &Event, map: &Map) -> Result<()> {
         if event.actor != Actor::Agent {
             return Ok(());
         }
 
         match &event.payload {
             Payload::NodeChanged { node, .. } => {
-                let Some(found) = graph.node(*node) else {
+                let Some(found) = map.node(*node) else {
                     return Ok(());
                 };
 
                 refuse_human(&found.changes, &format!("{:?}", found.title), "change")
             }
             Payload::EdgeRemoved { kind, from, to, .. } => {
-                let Some(found) = graph.edges.iter().find(|e| e.is(kind, *from, *to)) else {
+                let Some(found) = map.edges.iter().find(|e| e.is(kind, *from, *to)) else {
                     return Ok(());
                 };
 
-                refuse_human(&found.changes, &edge_name(graph, found), "remove")
+                refuse_human(&found.changes, &edge_name(map, found), "remove")
             }
             Payload::NodeRemoved { node, .. } => {
-                let Some(found) = graph.node(*node) else {
+                let Some(found) = map.node(*node) else {
                     return Ok(());
                 };
 
                 refuse_human(&found.changes, &format!("{:?}", found.title), "remove")?;
 
                 let cascade = format!("remove {:?}, which removes", found.title);
-                graph
-                    .edges
+                map.edges
                     .iter()
                     .filter(|e| e.from == *node || e.to == *node)
-                    .try_for_each(|e| refuse_human(&e.changes, &edge_name(graph, e), &cascade))
+                    .try_for_each(|e| refuse_human(&e.changes, &edge_name(map, e), &cascade))
             }
             Payload::MapCreated { .. }
             | Payload::NodeAdded { .. }
@@ -55,8 +54,8 @@ impl Policy {
     }
 }
 
-fn edge_name(graph: &Graph, edge: &Edge) -> String {
-    let title = |id| graph.node(id).map_or("", |n| n.title.as_str());
+fn edge_name(map: &Map, edge: &Edge) -> String {
+    let title = |id| map.node(id).map_or("", |n| n.title.as_str());
 
     format!("the edge {:?} {} {:?}", title(edge.from), edge.kind, title(edge.to))
 }
@@ -92,9 +91,9 @@ mod tests {
     fn an_agent_may_not_change_a_node_a_human_added() {
         let map = MapId::new();
         let (node, add) = added(map, Actor::Human, "A");
-        let graph = Graph::of(map, &[add]);
+        let map_ = Map::fixture(map, &[add]);
 
-        let result = Policy::check(&change(map, Actor::Agent, node), &graph);
+        let result = Policy::check(&change(map, Actor::Agent, node), &map_);
 
         let error = result.unwrap_err().to_string();
         assert!(error.contains("\"A\""));
@@ -105,9 +104,9 @@ mod tests {
     fn an_agent_may_not_change_an_agents_node_a_human_later_changed() {
         let map = MapId::new();
         let (node, add) = added(map, Actor::Agent, "A");
-        let graph = Graph::of(map, &[add, change(map, Actor::Human, node)]);
+        let map_ = Map::fixture(map, &[add, change(map, Actor::Human, node)]);
 
-        let result = Policy::check(&change(map, Actor::Agent, node), &graph);
+        let result = Policy::check(&change(map, Actor::Agent, node), &map_);
 
         assert!(result.is_err());
     }
@@ -116,9 +115,9 @@ mod tests {
     fn an_agent_may_change_a_node_only_agents_wrote() {
         let map = MapId::new();
         let (node, add) = added(map, Actor::Agent, "A");
-        let graph = Graph::of(map, &[add, change(map, Actor::Agent, node)]);
+        let map_ = Map::fixture(map, &[add, change(map, Actor::Agent, node)]);
 
-        let result = Policy::check(&change(map, Actor::Agent, node), &graph);
+        let result = Policy::check(&change(map, Actor::Agent, node), &map_);
 
         assert!(result.is_ok());
     }
@@ -127,9 +126,9 @@ mod tests {
     fn a_human_may_change_an_agents_node() {
         let map = MapId::new();
         let (node, add) = added(map, Actor::Agent, "A");
-        let graph = Graph::of(map, &[add]);
+        let map_ = Map::fixture(map, &[add]);
 
-        let result = Policy::check(&change(map, Actor::Human, node), &graph);
+        let result = Policy::check(&change(map, Actor::Human, node), &map_);
 
         assert!(result.is_ok());
     }
@@ -138,21 +137,21 @@ mod tests {
         Event::edge_removed(Source::fixture(), actor, map, "links", from, to)
     }
 
-    fn linked(map: MapId, edge_actor: Actor) -> (NodeId, NodeId, Graph) {
+    fn linked(map: MapId, edge_actor: Actor) -> (NodeId, NodeId, Map) {
         let (a, add_a) = added(map, Actor::Agent, "A");
         let (b, add_b) = added(map, Actor::Agent, "B");
         let edge = Event::edge_added(Source::fixture(), edge_actor, map, "links", a, b);
-        let graph = Graph::of(map, &[add_a, add_b, edge]);
+        let map_ = Map::fixture(map, &[add_a, add_b, edge]);
 
-        (a, b, graph)
+        (a, b, map_)
     }
 
     #[test]
     fn an_agent_may_not_remove_an_edge_a_human_added() {
         let map = MapId::new();
-        let (a, b, graph) = linked(map, Actor::Human);
+        let (a, b, map_) = linked(map, Actor::Human);
 
-        let result = Policy::check(&edge_removal(map, Actor::Agent, a, b), &graph);
+        let result = Policy::check(&edge_removal(map, Actor::Agent, a, b), &map_);
 
         let error = result.unwrap_err().to_string();
         assert!(error.contains("\"A\" links \"B\""));
@@ -162,9 +161,9 @@ mod tests {
     #[test]
     fn an_agent_may_remove_an_edge_only_agents_wrote() {
         let map = MapId::new();
-        let (a, b, graph) = linked(map, Actor::Agent);
+        let (a, b, map_) = linked(map, Actor::Agent);
 
-        let result = Policy::check(&edge_removal(map, Actor::Agent, a, b), &graph);
+        let result = Policy::check(&edge_removal(map, Actor::Agent, a, b), &map_);
 
         assert!(result.is_ok());
     }
@@ -172,9 +171,9 @@ mod tests {
     #[test]
     fn a_human_may_remove_an_agents_edge() {
         let map = MapId::new();
-        let (a, b, graph) = linked(map, Actor::Agent);
+        let (a, b, map_) = linked(map, Actor::Agent);
 
-        let result = Policy::check(&edge_removal(map, Actor::Human, a, b), &graph);
+        let result = Policy::check(&edge_removal(map, Actor::Human, a, b), &map_);
 
         assert!(result.is_ok());
     }
@@ -187,9 +186,9 @@ mod tests {
     fn an_agent_may_not_remove_a_node_a_human_added() {
         let map = MapId::new();
         let (node, add) = added(map, Actor::Human, "A");
-        let graph = Graph::of(map, &[add]);
+        let map_ = Map::fixture(map, &[add]);
 
-        let result = Policy::check(&node_removal(map, Actor::Agent, node), &graph);
+        let result = Policy::check(&node_removal(map, Actor::Agent, node), &map_);
 
         let error = result.unwrap_err().to_string();
         assert!(error.contains("\"A\" was written by a human, so only a human may remove it"));
@@ -199,9 +198,9 @@ mod tests {
     fn an_agent_may_not_remove_its_node_when_a_human_changed_it() {
         let map = MapId::new();
         let (node, add) = added(map, Actor::Agent, "A");
-        let graph = Graph::of(map, &[add, change(map, Actor::Human, node)]);
+        let map_ = Map::fixture(map, &[add, change(map, Actor::Human, node)]);
 
-        let result = Policy::check(&node_removal(map, Actor::Agent, node), &graph);
+        let result = Policy::check(&node_removal(map, Actor::Agent, node), &map_);
 
         assert!(result.is_err());
     }
@@ -214,9 +213,9 @@ mod tests {
             let (b, add_b) = added(map, Actor::Agent, "B");
             let (from, to) = if outgoing { (a, b) } else { (b, a) };
             let edge = Event::edge_added(Source::fixture(), Actor::Human, map, "links", from, to);
-            let graph = Graph::of(map, &[add_a, add_b, edge]);
+            let map_ = Map::fixture(map, &[add_a, add_b, edge]);
 
-            let result = Policy::check(&node_removal(map, Actor::Agent, a), &graph);
+            let result = Policy::check(&node_removal(map, Actor::Agent, a), &map_);
 
             let error = result.unwrap_err().to_string();
             let named = if outgoing { "\"A\" links \"B\"" } else { "\"B\" links \"A\"" };
@@ -228,20 +227,20 @@ mod tests {
     #[test]
     fn an_agent_may_remove_its_node_with_only_agents_edges() {
         let map = MapId::new();
-        let (a, b, graph) = linked(map, Actor::Agent);
+        let (a, b, map_) = linked(map, Actor::Agent);
 
-        let result = Policy::check(&node_removal(map, Actor::Agent, a), &graph);
+        let result = Policy::check(&node_removal(map, Actor::Agent, a), &map_);
 
         assert!(result.is_ok());
-        assert!(Policy::check(&node_removal(map, Actor::Agent, b), &graph).is_ok());
+        assert!(Policy::check(&node_removal(map, Actor::Agent, b), &map_).is_ok());
     }
 
     #[test]
     fn a_human_may_remove_a_node_with_a_human_edge() {
         let map = MapId::new();
-        let (a, _, graph) = linked(map, Actor::Human);
+        let (a, _, map_) = linked(map, Actor::Human);
 
-        let result = Policy::check(&node_removal(map, Actor::Human, a), &graph);
+        let result = Policy::check(&node_removal(map, Actor::Human, a), &map_);
 
         assert!(result.is_ok());
     }
@@ -251,10 +250,10 @@ mod tests {
         let map = MapId::new();
         let (a, add_a) = added(map, Actor::Human, "A");
         let (_, add_b) = added(map, Actor::Agent, "B");
-        let graph = Graph::of(map, &[add_a]);
+        let map_ = Map::fixture(map, &[add_a]);
         let edge = Event::edge_added(Source::fixture(), Actor::Agent, map, "links", a, a);
 
-        assert!(Policy::check(&add_b, &graph).is_ok());
-        assert!(Policy::check(&edge, &graph).is_ok());
+        assert!(Policy::check(&add_b, &map_).is_ok());
+        assert!(Policy::check(&edge, &map_).is_ok());
     }
 }

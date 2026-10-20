@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::AppService;
-use crate::core::{Actor, Edge, Event, EventId, EventStore, Graph, Map, MapId, Node, NodeId, Payload, Policy, Reference, SchemaStore, SessionId, Source};
+use crate::core::{Actor, Event, EventId, EventStore, Map, MapId, Node, NodeId, Payload, Policy, Reference, SchemaStore, SessionId, Source};
 use crate::shared::Result;
 
 #[derive(Debug, PartialEq)]
@@ -11,19 +11,10 @@ pub enum Ref {
     File { path: PathBuf, lines: (u32, u32) },
 }
 
-/// A map with how many nodes and edges it holds.
-pub struct MapSummary {
-    pub map: Map,
-    pub nodes: usize,
-    pub edges: usize,
-}
-
-/// A map with its nodes, newest first, and its edges in log order.
+/// A map with its nodes newest first and its edges in log order.
 /// `messages` holds every message its nodes cite.
 pub struct MapDetail {
     pub map: Map,
-    pub nodes: Vec<Node>,
-    pub edges: Vec<Edge>,
     pub messages: BTreeMap<EventId, CitedMessage>,
 }
 
@@ -56,57 +47,35 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         self.store.append(&Event::map_created(source, actor, MapId::new(), kind)).await
     }
 
-    /// The project's maps in log order.
+    /// The project's maps in log order, each with its nodes and edges, from one read of the log.
     pub async fn maps(&self, project: &Path) -> Result<Vec<Map>> {
-        Ok(all_maps(&self.store.all().await?).into_iter().filter(|m| m.path == project).collect())
+        let mut maps = self.all_maps().await?;
+        maps.retain(|m| m.path == project);
+
+        Ok(maps)
     }
 
-    /// The project's map of the given kind, or an error if it has none.
+    /// Every map across all projects in log order, each with its nodes and edges, from one read of the log.
+    pub async fn all_maps(&self) -> Result<Vec<Map>> {
+        Ok(Map::all(&self.store.all().await?))
+    }
+
+    /// The project's map of the given kind with its nodes and edges, or an error if it has none.
     pub async fn map(&self, project: &Path, kind: &str) -> Result<Map> {
         find_map(&self.store.all().await?, project, kind)
-    }
-
-    /// The map's nodes in log order.
-    pub async fn nodes(&self, map: MapId) -> Result<Vec<Node>> {
-        Ok(Graph::of(map, &self.store.all().await?).nodes)
-    }
-
-    /// The project's maps in log order, each with its node and edge counts, from one read of the log.
-    pub async fn map_summaries(&self, project: &Path) -> Result<Vec<MapSummary>> {
-        let mut summaries = self.all_map_summaries().await?;
-        summaries.retain(|s| s.map.path == project);
-
-        Ok(summaries)
-    }
-
-    /// Every map across all projects in log order, each with its node and edge counts, from one read of the log.
-    pub async fn all_map_summaries(&self) -> Result<Vec<MapSummary>> {
-        let events = self.store.all().await?;
-
-        let summaries = all_maps(&events)
-            .into_iter()
-            .map(|map| {
-                let graph = Graph::of(map.id, &events);
-
-                MapSummary { map, nodes: graph.nodes.len(), edges: graph.edges.len() }
-            })
-            .collect();
-
-        Ok(summaries)
     }
 
     /// The map with the given id, its nodes newest first and its edges in log order, from one read of the log.
     pub async fn map_detail(&self, id: MapId) -> Result<Option<MapDetail>> {
         let events = self.store.all().await?;
 
-        let Some(map) = all_maps(&events).into_iter().find(|m| m.id == id) else {
+        let Some(mut map) = Map::all(&events).into_iter().find(|m| m.id == id) else {
             return Ok(None);
         };
+        map.nodes.reverse();
 
-        let Graph { mut nodes, edges } = Graph::of(id, &events);
-        nodes.reverse();
-
-        let cited: BTreeSet<EventId> = nodes
+        let cited: BTreeSet<EventId> = map
+            .nodes
             .iter()
             .flat_map(|n| &n.references)
             .filter_map(|r| match r {
@@ -123,12 +92,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             })
             .collect();
 
-        Ok(Some(MapDetail { map, nodes, edges, messages }))
-    }
-
-    /// The map's edges in log order.
-    pub async fn edges(&self, map: MapId) -> Result<Vec<Edge>> {
-        Ok(Graph::of(map, &self.store.all().await?).edges)
+        Ok(Some(MapDetail { map, messages }))
     }
 
     /// Records a new edge on the project's map of the given kind, between the nodes with these titles.
@@ -146,8 +110,8 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         // Held until return, so the nodes cannot change between the check and the append.
         let _lock = self.store.lock().await?;
 
-        let (_, map, graph) = self.graph(&source.path, map_kind).await?;
-        let Graph { nodes, edges } = &graph;
+        let (_, map) = self.project_map(&source.path, map_kind).await?;
+        let Map { nodes, edges, .. } = &map;
 
         let (from, to) = (find_node(nodes, map_kind, from)?, find_node(nodes, map_kind, to)?);
         self.schemas.schema(&source.path, map_kind).await?.check_edge(kind, &from.kind, &to.kind)?;
@@ -158,7 +122,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             return Err(format!("the {map_kind} map already has this {kind} edge").into());
         }
 
-        self.write(&graph, Event::edge_added(source, actor, map.id, kind, from, to)).await
+        self.write(&map, Event::edge_added(source, actor, map.id, kind, from, to)).await
     }
 
     /// Records the removal of the edge of this kind between the nodes with these titles on the project's map of the given kind.
@@ -174,14 +138,14 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         // Held until return, so the edge cannot change between the check and the append.
         let _lock = self.store.lock().await?;
 
-        let (_, map, graph) = self.graph(&source.path, map_kind).await?;
+        let (_, map) = self.project_map(&source.path, map_kind).await?;
 
-        let (from, to) = (find_node(&graph.nodes, map_kind, from)?.id, find_node(&graph.nodes, map_kind, to)?.id);
-        if !graph.edges.iter().any(|e| e.is(kind, from, to)) {
+        let (from, to) = (find_node(&map.nodes, map_kind, from)?.id, find_node(&map.nodes, map_kind, to)?.id);
+        if !map.edges.iter().any(|e| e.is(kind, from, to)) {
             return Err(format!("the {map_kind} map has no such {kind} edge").into());
         }
 
-        self.write(&graph, Event::edge_removed(source, actor, map.id, kind, from, to)).await
+        self.write(&map, Event::edge_removed(source, actor, map.id, kind, from, to)).await
     }
 
     /// Records the removal of the node with this title, and with it every edge from or to it, from the project's map of the given kind.
@@ -189,10 +153,10 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         // Held until return, so the node cannot change between the check and the append.
         let _lock = self.store.lock().await?;
 
-        let (_, map, graph) = self.graph(&source.path, map_kind).await?;
-        let node = find_node(&graph.nodes, map_kind, title)?.id;
+        let (_, map) = self.project_map(&source.path, map_kind).await?;
+        let node = find_node(&map.nodes, map_kind, title)?.id;
 
-        self.write(&graph, Event::node_removed(source, actor, map.id, node)).await
+        self.write(&map, Event::node_removed(source, actor, map.id, node)).await
     }
 
     /// Records a new node on the project's map of the given kind. A title is unique within its map.
@@ -213,9 +177,9 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         // Held until return, so parallel adds cannot both pass the check.
         let _lock = self.store.lock().await?;
 
-        let (events, map, graph) = self.graph(&source.path, map_kind).await?;
+        let (events, map) = self.project_map(&source.path, map_kind).await?;
         self.schemas.schema(&source.path, map_kind).await?.check_node(kind, &properties)?;
-        if graph.nodes.iter().any(|n| n.title == title) {
+        if map.nodes.iter().any(|n| n.title == title) {
             return Err(format!("the {map_kind} map already has a node titled {title:?}").into());
         }
 
@@ -224,7 +188,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             resolved.push(resolve_reference(&events, &source.path, reference).await?);
         }
 
-        self.write(&graph, Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties, resolved)).await
+        self.write(&map, Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties, resolved)).await
     }
 
     /// Records the full new state of the node with this title on the project's map of the given kind.
@@ -244,12 +208,12 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         // Held until return, so the node cannot change between the check and the append.
         let _lock = self.store.lock().await?;
 
-        let (events, map, graph) = self.graph(&source.path, map_kind).await?;
-        let node = find_node(&graph.nodes, map_kind, title)?;
+        let (events, map) = self.project_map(&source.path, map_kind).await?;
+        let node = find_node(&map.nodes, map_kind, title)?;
 
         let new_title = new_title.unwrap_or(&node.title);
         not_blank("title", new_title)?;
-        if graph.nodes.iter().any(|n| n.id != node.id && n.title == new_title) {
+        if map.nodes.iter().any(|n| n.id != node.id && n.title == new_title) {
             return Err(format!("the {map_kind} map already has a node titled {new_title:?}").into());
         }
 
@@ -267,28 +231,27 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             all_references.push(resolve_reference(&events, &source.path, reference).await?);
         }
 
-        self.write(&graph, Event::node_changed(source, actor, map.id, node.id, new_title, merged, all_references)).await
+        self.write(&map, Event::node_changed(source, actor, map.id, node.id, new_title, merged, all_references)).await
     }
 
-    /// The log, the project's map of the given kind and its graph, read under the store lock.
-    async fn graph(&self, project: &Path, map_kind: &str) -> Result<(Vec<Event>, Map, Graph)> {
+    /// The log and the project's map of the given kind, read under the store lock.
+    async fn project_map(&self, project: &Path, map_kind: &str) -> Result<(Vec<Event>, Map)> {
         let events = self.store.all().await?;
         let map = find_map(&events, project, map_kind)?;
-        let graph = Graph::of(map.id, &events);
 
-        Ok((events, map, graph))
+        Ok((events, map))
     }
 
     /// The one way a node or an edge event reaches the log: the policy sees it first.
-    async fn write(&self, graph: &Graph, event: Event) -> Result<()> {
-        Policy::check(&event, graph)?;
+    async fn write(&self, map: &Map, event: Event) -> Result<()> {
+        Policy::check(&event, map)?;
 
         self.store.append(&event).await
     }
 }
 
 fn find_map(events: &[Event], project: &Path, kind: &str) -> Result<Map> {
-    all_maps(events)
+    Map::all(events)
         .into_iter()
         .find(|m| m.path == project && m.kind == kind)
         .ok_or_else(|| format!("this project has no {kind} map").into())
@@ -347,16 +310,6 @@ fn not_blank(name: &str, value: &str) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn all_maps(events: &[Event]) -> Vec<Map> {
-    events
-        .iter()
-        .filter_map(|e| match &e.payload {
-            Payload::MapCreated { map, kind } => Some(Map { id: *map, kind: kind.clone(), path: e.source.path.clone() }),
-            _ => None,
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -477,8 +430,7 @@ mod tests {
 
         service.add_node(Source::fixture(), Actor::Human, "concepts", "concept", "Event log", properties.clone(), Vec::new()).await.unwrap();
 
-        let map = service.map(&Source::fixture().path, "concepts").await.unwrap();
-        let nodes = service.nodes(map.id).await.unwrap();
+        let nodes = service.map(&Source::fixture().path, "concepts").await.unwrap().nodes;
         assert_eq!(nodes[0].properties, properties);
     }
 
@@ -611,8 +563,7 @@ mod tests {
         ).await.unwrap();
         tokio::fs::write(source.path.join("text.txt"), "changed").await.unwrap();
 
-        let map = service.map(&source.path, "concepts").await.unwrap();
-        let nodes = service.nodes(map.id).await.unwrap();
+        let nodes = service.map(&source.path, "concepts").await.unwrap().nodes;
         assert_eq!(nodes[0].references, vec![
             Reference::File { path: "text.txt".into(), lines: (1, 1), excerpt: "first".into() },
             Reference::File { path: "text.txt".into(), lines: (2, 3), excerpt: "\nthird".into() },
@@ -769,11 +720,10 @@ mod tests {
         service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Agent, "decisions", "option", "O", Default::default(), Vec::new()).await.unwrap();
+
         let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
 
-        let nodes = service.nodes(map.id).await.unwrap();
-
-        let found: Vec<(&str, &str)> = nodes.iter().map(|n| (n.kind.as_str(), n.title.as_str())).collect();
+        let found: Vec<(&str, &str)> = map.nodes.iter().map(|n| (n.kind.as_str(), n.title.as_str())).collect();
         assert_eq!(found, vec![("question", "Q"), ("option", "O")]);
         assert!(service.map(&Source::fixture().path, "nope").await.is_err());
     }
@@ -809,17 +759,16 @@ mod tests {
         service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
         service.add_edge(Source::fixture(), Actor::Human, "tasks", "T", "blocks", "U").await.unwrap();
         service.add_edge(Source::fixture(), Actor::Human, "decisions", "Q", "raises", "O").await.unwrap();
+
         let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
-        let nodes = service.nodes(map.id).await.unwrap();
 
-        let edges = service.edges(map.id).await.unwrap();
-
-        let found: Vec<(&str, NodeId, NodeId)> = edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
+        let found: Vec<(&str, NodeId, NodeId)> = map.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
+        let nodes = &map.nodes;
         assert_eq!(found, vec![("answers", nodes[1].id, nodes[0].id), ("raises", nodes[0].id, nodes[1].id)]);
     }
 
     #[tokio::test]
-    async fn map_summaries_count_each_maps_nodes_and_edges() {
+    async fn maps_carry_each_maps_nodes_and_edges() {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
@@ -829,14 +778,14 @@ mod tests {
         service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default(), Vec::new()).await.unwrap();
         service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
 
-        let summaries = service.map_summaries(&Source::fixture().path).await.unwrap();
+        let maps = service.maps(&Source::fixture().path).await.unwrap();
 
-        let found: Vec<(&str, usize, usize)> = summaries.iter().map(|s| (s.map.kind.as_str(), s.nodes, s.edges)).collect();
+        let found: Vec<(&str, usize, usize)> = maps.iter().map(|m| (m.kind.as_str(), m.nodes.len(), m.edges.len())).collect();
         assert_eq!(found, vec![("decisions", 2, 1), ("tasks", 1, 0)]);
     }
 
     #[tokio::test]
-    async fn all_map_summaries_span_projects_and_carry_each_maps_path() {
+    async fn all_maps_span_projects_and_carry_each_maps_path() {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
         let other = Source { client: "claude-code".into(), path: "/other".into() };
@@ -844,9 +793,9 @@ mod tests {
         service.create_map(other.clone(), Actor::Human, "tasks").await.unwrap();
         service.add_node(other, Actor::Human, "tasks", "task", "T", Default::default(), Vec::new()).await.unwrap();
 
-        let summaries = service.all_map_summaries().await.unwrap();
+        let maps = service.all_maps().await.unwrap();
 
-        let found: Vec<(&str, &Path, usize)> = summaries.iter().map(|s| (s.map.kind.as_str(), s.map.path.as_path(), s.nodes)).collect();
+        let found: Vec<(&str, &Path, usize)> = maps.iter().map(|m| (m.kind.as_str(), m.path.as_path(), m.nodes.len())).collect();
         assert_eq!(found, vec![("decisions", Source::fixture().path.as_path(), 0), ("tasks", Path::new("/other"), 1)]);
     }
 
@@ -864,10 +813,10 @@ mod tests {
 
         let detail = service.map_detail(map.id).await.unwrap().unwrap();
 
-        let titles: Vec<&str> = detail.nodes.iter().map(|n| n.title.as_str()).collect();
+        let titles: Vec<&str> = detail.map.nodes.iter().map(|n| n.title.as_str()).collect();
         assert_eq!(titles, vec!["O", "Q"]);
-        let edges: Vec<(&str, NodeId, NodeId)> = detail.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
-        assert_eq!(edges, vec![("answers", detail.nodes[0].id, detail.nodes[1].id)]);
+        let edges: Vec<(&str, NodeId, NodeId)> = detail.map.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
+        assert_eq!(edges, vec![("answers", detail.map.nodes[0].id, detail.map.nodes[1].id)]);
         assert_eq!(detail.map.kind, "decisions");
     }
 
@@ -923,9 +872,7 @@ mod tests {
     }
 
     async fn glossary_nodes(service: &AppService<&Memory, Schemas>) -> Vec<Node> {
-        let map = service.map(&Source::fixture().path, "glossary").await.unwrap();
-
-        service.nodes(map.id).await.unwrap()
+        service.map(&Source::fixture().path, "glossary").await.unwrap().nodes
     }
 
     #[tokio::test]
@@ -1097,16 +1044,14 @@ mod tests {
     async fn removing_an_edge_drops_it_from_the_edges_and_the_summary() {
         let store = Memory::default();
         let service = decisions(&store, Actor::Human).await;
-        let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
 
         service.remove_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
 
         let last = store.0.lock().unwrap().last().unwrap().clone();
         assert_eq!(last.actor, Actor::Human);
         assert_eq!(last.payload.kind(), crate::core::Kind::EdgeRemoved);
-        assert!(service.edges(map.id).await.unwrap().is_empty());
-        let summaries = service.map_summaries(&Source::fixture().path).await.unwrap();
-        assert_eq!((summaries[0].nodes, summaries[0].edges), (2, 0));
+        let after = service.map(&Source::fixture().path, "decisions").await.unwrap();
+        assert_eq!((after.nodes.len(), after.edges.len()), (2, 0));
     }
 
     #[tokio::test]
@@ -1145,14 +1090,13 @@ mod tests {
     async fn an_agent_may_remove_its_own_edge_and_a_removed_edge_can_be_added_again() {
         let store = Memory::default();
         let service = decisions(&store, Actor::Agent).await;
-        let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
 
         let removed = service.remove_edge(Source::fixture(), Actor::Agent, "decisions", "O", "answers", "Q").await;
         let again = service.add_edge(Source::fixture(), Actor::Agent, "decisions", "O", "answers", "Q").await;
 
         assert!(removed.is_ok());
         assert!(again.is_ok());
-        assert_eq!(service.edges(map.id).await.unwrap().len(), 1);
+        assert_eq!(service.map(&Source::fixture().path, "decisions").await.unwrap().edges.len(), 1);
         assert_eq!(store.0.lock().unwrap().len(), 6);
     }
 
@@ -1167,11 +1111,11 @@ mod tests {
         let last = store.0.lock().unwrap().last().unwrap().clone();
         assert_eq!(last.payload.kind(), crate::core::Kind::NodeRemoved);
         let detail = service.map_detail(map.id).await.unwrap().unwrap();
-        let titles: Vec<&str> = detail.nodes.iter().map(|n| n.title.as_str()).collect();
+        let titles: Vec<&str> = detail.map.nodes.iter().map(|n| n.title.as_str()).collect();
         assert_eq!(titles, vec!["O"]);
-        assert!(detail.edges.is_empty());
-        let summaries = service.map_summaries(&Source::fixture().path).await.unwrap();
-        assert_eq!((summaries[0].nodes, summaries[0].edges), (1, 0));
+        assert!(detail.map.edges.is_empty());
+        let maps = service.maps(&Source::fixture().path).await.unwrap();
+        assert_eq!((maps[0].nodes.len(), maps[0].edges.len()), (1, 0));
     }
 
     #[tokio::test]
@@ -1183,8 +1127,8 @@ mod tests {
         let again = service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), Vec::new()).await;
 
         assert!(again.is_ok());
-        let summaries = service.map_summaries(&Source::fixture().path).await.unwrap();
-        assert_eq!((summaries[0].nodes, summaries[0].edges), (2, 0));
+        let maps = service.maps(&Source::fixture().path).await.unwrap();
+        assert_eq!((maps[0].nodes.len(), maps[0].edges.len()), (2, 0));
     }
 
     #[tokio::test]
@@ -1240,8 +1184,8 @@ mod tests {
         let result = service.remove_node(Source::fixture(), Actor::Agent, "decisions", "Q").await;
 
         assert!(result.is_ok());
-        let summaries = service.map_summaries(&Source::fixture().path).await.unwrap();
-        assert_eq!((summaries[0].nodes, summaries[0].edges), (1, 0));
+        let maps = service.maps(&Source::fixture().path).await.unwrap();
+        assert_eq!((maps[0].nodes.len(), maps[0].edges.len()), (1, 0));
     }
 
     #[tokio::test]

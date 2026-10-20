@@ -29,13 +29,8 @@ pub(super) struct MapSummary {
 }
 
 impl MapSummary {
-    pub(super) fn new(summary: app::MapSummary, home: &Path) -> Self {
-        Self {
-            id: summary.map.id,
-            kind: summary.map.kind,
-            path: display_path(&summary.map.path, home),
-            nodes: summary.nodes,
-        }
+    pub(super) fn new(map: core::Map, home: &Path) -> Self {
+        Self { id: map.id, kind: map.kind, path: display_path(&map.path, home), nodes: map.nodes.len() }
     }
 }
 
@@ -51,14 +46,14 @@ pub(super) struct MapDetail {
 
 impl MapDetail {
     pub(super) fn new(detail: app::MapDetail, home: &Path) -> Self {
-        let messages = &detail.messages;
+        let (map, messages) = (detail.map, &detail.messages);
 
         Self {
-            id: detail.map.id,
-            kind: detail.map.kind,
-            path: display_path(&detail.map.path, home),
-            nodes: detail.nodes.into_iter().map(|n| Node::new(n, messages)).collect(),
-            edges: detail.edges.into_iter().map(Edge::from).collect(),
+            id: map.id,
+            kind: map.kind,
+            path: display_path(&map.path, home),
+            nodes: map.nodes.into_iter().map(|n| Node::new(n, messages)).collect(),
+            edges: map.edges.into_iter().map(Edge::from).collect(),
         }
     }
 }
@@ -200,7 +195,7 @@ fn payload(payload: &Payload, home: &Path) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Graph, Source};
+    use crate::core::Source;
 
     #[test]
     fn a_node_has_a_changed_time_only_after_a_change() {
@@ -208,7 +203,7 @@ mod tests {
         let added = core::Event::node_added(Source::fixture(), Actor::Agent, map, node, "question", "Q", BTreeMap::new(), Vec::new());
         let changed = core::Event::node_changed(Source::fixture(), Actor::Human, map, node, "Q2", BTreeMap::new(), Vec::new());
         let response = |events: &[core::Event]| {
-            let node = Graph::of(map, events).nodes.remove(0);
+            let node = core::Map::fixture(map, events).nodes.remove(0);
             serde_json::to_value(Node::new(node, &BTreeMap::new())).unwrap()
         };
 
