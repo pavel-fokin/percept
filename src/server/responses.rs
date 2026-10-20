@@ -71,6 +71,8 @@ struct Node {
     properties: BTreeMap<String, String>,
     references: Vec<Reference>,
     created_at: jiff::Timestamp,
+    /// When the node last changed; none while it is as it was added.
+    changed_at: Option<jiff::Timestamp>,
 }
 
 impl Node {
@@ -82,6 +84,7 @@ impl Node {
             properties: node.properties,
             references: node.references.into_iter().map(|r| Reference::new(r, messages)).collect(),
             created_at: node.changes[0].at,
+            changed_at: node.changes[1..].last().map(|c| c.at),
         }
     }
 }
@@ -191,5 +194,30 @@ fn payload(payload: &Payload, home: &Path) -> serde_json::Value {
         | Payload::NodeRemoved { .. }
         | Payload::EdgeAdded { .. }
         | Payload::EdgeRemoved { .. } => json!({}),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{Graph, Source};
+
+    #[test]
+    fn a_node_has_a_changed_time_only_after_a_change() {
+        let (map, node) = (MapId::new(), NodeId::new());
+        let added = core::Event::node_added(Source::fixture(), Actor::Agent, map, node, "question", "Q", BTreeMap::new(), Vec::new());
+        let changed = core::Event::node_changed(Source::fixture(), Actor::Human, map, node, "Q2", BTreeMap::new(), Vec::new());
+        let response = |events: &[core::Event]| {
+            let node = Graph::of(map, events).nodes.remove(0);
+            serde_json::to_value(Node::new(node, &BTreeMap::new())).unwrap()
+        };
+
+        let as_added = response(std::slice::from_ref(&added));
+        let as_changed = response(&[added.clone(), changed.clone()]);
+
+        assert_eq!(as_added["created_at"], json!(added.created_at));
+        assert_eq!(as_added["changed_at"], json!(null));
+        assert_eq!(as_changed["created_at"], json!(added.created_at));
+        assert_eq!(as_changed["changed_at"], json!(changed.created_at));
     }
 }

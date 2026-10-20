@@ -3,7 +3,7 @@ import { BackLink } from "../components/back-link";
 import { Chevron } from "../components/chevron";
 import { References } from "../components/references";
 import { RouteError } from "../components/route-error";
-import { byDay, full, withChangedTimes } from "../format";
+import { byDay, changedWhen, dayAndTime, full, withChangedTimes } from "../format";
 
 export async function loadMap(path: string, id: string) {
   const map = await getData<MapDetail>(`/api/maps/${id}`);
@@ -13,7 +13,8 @@ export async function loadMap(path: string, id: string) {
 }
 
 export function MapPage({ map }: { map: MapDetail }) {
-  const days = byDay(map.nodes, (n) => n.created_at, new Date());
+  const now = new Date();
+  const days = byDay(map.nodes, (n) => n.created_at, now);
 
   return (
     <>
@@ -30,7 +31,7 @@ export function MapPage({ map }: { map: MapDetail }) {
               <h2 className="mb-1 text-sm font-semibold text-muted">{day.name}</h2>
               <ul className="-mx-3 grid gap-0.5">
                 {withChangedTimes(day.items, (n) => n.created_at).map(({ item, shown }) => (
-                  <NodeRow key={item.id} path={map.path} node={item} shown={shown} />
+                  <NodeRow key={item.id} path={map.path} node={item} shown={shown} day={day.name} now={now} />
                 ))}
               </ul>
             </section>
@@ -48,16 +49,25 @@ export function MapPage({ map }: { map: MapDetail }) {
   );
 }
 
-function NodeRow({ path, node, shown }: { path: string; node: MapNode; shown?: string }) {
+function NodeRow({ path, node, shown, day, now }: { path: string; node: MapNode; shown?: string; day: string; now: Date }) {
   const properties = Object.entries(node.properties);
+  const created = new Date(node.created_at);
+  const changed = node.changed_at ? new Date(node.changed_at) : null;
   const row = "flex min-h-11 items-start gap-2.5 rounded-[10px] px-3 py-2.5";
+  const stamp = "flex-none text-[13px] leading-6 text-muted tabular-nums";
   const content = (
     <>
       <span className="min-w-0 flex-1 wrap-anywhere">{node.title}</span>
-      {shown && (
-        <time dateTime={node.created_at} title={full.format(new Date(node.created_at))} className="flex-none text-[13px] leading-6 text-muted tabular-nums">
-          {shown}
+      {changed ? (
+        <time dateTime={changed.toISOString()} title={full.format(changed)} className={stamp}>
+          changed {changedWhen(changed, day, now)}
         </time>
+      ) : (
+        shown && (
+          <time dateTime={node.created_at} title={full.format(created)} className={stamp}>
+            {shown}
+          </time>
+        )
       )}
     </>
   );
@@ -79,6 +89,11 @@ function NodeRow({ path, node, shown }: { path: string; node: MapNode; shown?: s
           {content}
         </summary>
         <div className="grid gap-3.5 pt-1 pr-3 pb-5 pl-9">
+          {changed && (
+            <p className="text-[13px] text-muted tabular-nums">
+              Added {dayAndTime(created, now)} · Changed {dayAndTime(changed, now)}
+            </p>
+          )}
           {properties.length > 0 && (
             <dl className="grid gap-3.5">
               {properties.map(([key, value]) => (

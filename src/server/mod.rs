@@ -203,6 +203,7 @@ mod tests {
         assert_eq!(data["nodes"][0]["properties"], json!({}));
         assert_eq!(data["nodes"][0]["references"], json!([]));
         assert!(data["nodes"][0]["created_at"].is_string());
+        assert_eq!(data["nodes"][0]["changed_at"], json!(null));
         assert_eq!(data["edges"], json!([]));
     }
 

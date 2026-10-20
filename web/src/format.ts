@@ -25,6 +25,20 @@ export function dayName(date: Date, now: Date) {
   return day.format(date);
 }
 
+/** A date as its day heading and clock time: `Today, 16:05` or `11 Oct, 09:30`. */
+export function dayAndTime(date: Date, now: Date) {
+  return `${dayName(date, now)}, ${time.format(date)}`;
+}
+
+/** When a row's item changed, in a section headed `section`: the clock time on that day, else the day too, `yesterday, 16:05`. */
+export function changedWhen(date: Date, section: string, now: Date) {
+  const name = dayName(date, now);
+  if (name === section) return time.format(date);
+
+  const day = name === "Today" || name === "Yesterday" ? name.toLowerCase() : name;
+  return `${day}, ${time.format(date)}`;
+}
+
 /** Items grouped by the day they fall on. Items come newest first, so a day's items are consecutive. */
 export function byDay<T>(items: T[], at: (item: T) => string, now: Date) {
   const days: { name: string; items: T[] }[] = [];
