@@ -5,6 +5,8 @@ export type Session = {
   client_session_id: string;
   title: string | null;
   created_at: string;
+  last_event_at: string;
+  status: "working" | "waiting" | "ended";
   path: string;
   client: string;
 };
