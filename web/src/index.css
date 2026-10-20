@@ -41,6 +41,8 @@
   /* The wordmark dot only. Links, buttons and focus stay monochrome. */
   --color-accent: var(--ink-400);
   --color-border: var(--graphite-800);
+  /* The quote a reference opens at. */
+  --color-mark: var(--ink-700);
 }
 
 :root[data-theme="light"] {
@@ -50,6 +52,7 @@
   --color-muted: var(--graphite-600);
   --color-accent: var(--ink-600);
   --color-border: var(--graphite-300);
+  --color-mark: var(--ink-300);
   color-scheme: light;
 }
 
@@ -67,7 +70,7 @@
   --graphite-900: #161a1e;
   --graphite-950: #0e1114;
 
-  /* Only 400 (dark) and 600 (light) are in use, as the accent. */
+  /* In use: 400 (dark) and 600 (light) as the accent, 700 (dark) and 300 (light) as the mark. */
   --ink-50: #f2f7ff;
   --ink-100: #e5efff;
   --ink-200: #cedffd;
@@ -85,6 +88,10 @@
 
 body {
   @apply bg-bg font-sans text-text;
+}
+
+::highlight(quote) {
+  background-color: var(--color-mark);
 }
 
 :focus-visible {

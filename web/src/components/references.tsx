@@ -1,13 +1,25 @@
-import type { Reference } from "../api";
+import { Link } from "react-router";
 
-export function References({ references }: { references: Reference[] }) {
+import type { Reference } from "../api";
+import { dayTime } from "../format";
+import { sessionUrl } from "../paths";
+import { textLink } from "./ui/text-link";
+
+export function References({ path, references }: { path: string; references: Reference[] }) {
   return (
     <div className="grid gap-3.5">
       {references.map((reference, index) => (
         <figure key={index} className="min-w-0">
           {"message" in reference ? (
             <>
-              <figcaption className="text-[13px] font-medium text-muted">Message</figcaption>
+              <figcaption className="text-[13px] font-medium text-muted">
+                <Link
+                  to={`${sessionUrl(path, reference.message.session)}?q=${encodeURIComponent(reference.message.quote)}#${reference.message.event}`}
+                  className={`${textLink} relative -my-3 inline-block py-3`}
+                >
+                  Message · {dayTime.format(new Date(reference.message.created_at))} →
+                </Link>
+              </figcaption>
               <blockquote className="mt-0.5 leading-[26px] whitespace-pre-wrap wrap-anywhere">
                 {reference.message.quote}
               </blockquote>

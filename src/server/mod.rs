@@ -89,7 +89,7 @@ mod tests {
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
     const MAP: &str = "0190a0a0-0000-7000-8000-000000000003";
 
-    struct Fixed(usize, Vec<Reference>);
+    struct Fixed(usize, Vec<Reference>, Vec<Event>);
 
     impl EventStore for Fixed {
         type Lock = ();
@@ -109,7 +109,7 @@ mod tests {
             let map: MapId = serde_json::from_value(json!(MAP))?;
             let map_created = Event::map_created(Source::fixture(), Actor::Human, map, "decisions");
             let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default(), self.1.clone());
-            Ok(std::iter::once(created).chain(started).chain([map_created, node]).collect())
+            Ok(std::iter::once(created).chain(started).chain(self.2.clone()).chain([map_created, node]).collect())
         }
 
         async fn append(&self, _: &Event) -> Result<()> {
@@ -130,13 +130,13 @@ mod tests {
     }
 
     async fn get_response(path: &str) -> String {
-        get_response_with_references(path, Vec::new()).await
+        get_response_with_references(path, Vec::new(), Vec::new()).await
     }
 
-    async fn get_response_with_references(path: &str, references: Vec<Reference>) -> String {
+    async fn get_response_with_references(path: &str, references: Vec<Reference>, messages: Vec<Event>) -> String {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = router(Arc::new(AppService::new(Fixed(3, references), Schemas)), "/Users/me".into());
+        let app = router(Arc::new(AppService::new(Fixed(3, references, messages), Schemas)), "/Users/me".into());
         tokio::spawn(async move { axum::serve(listener, app).await });
 
         let mut stream = TcpStream::connect(addr).await.unwrap();
@@ -203,22 +203,24 @@ mod tests {
 
     #[tokio::test]
     async fn map_nodes_include_saved_message_and_file_references_in_order() {
-        let event = serde_json::from_value(json!("0190a0a0-0000-7000-8000-000000000004")).unwrap();
+        let session: SessionId = serde_json::from_value(json!(SESSION)).unwrap();
+        let message = Event::message(Source::fixture(), session, Actor::Human, "A <quote>\n  **verbatim**", json!({}));
+        let event = message.id;
         let references = vec![
             Reference::Message { event, quote: "A <quote>\n  **verbatim**".into() },
             Reference::File { path: "src/main.rs".into(), lines: (2, 4), excerpt: "fn main() {\n}\n".into() },
             Reference::Message { event, quote: "A <quote>\n  **verbatim**".into() },
         ];
 
-        let response = get_response_with_references(&format!("/api/maps/{MAP}"), references).await;
+        let response = get_response_with_references(&format!("/api/maps/{MAP}"), references, vec![message.clone()]).await;
 
         assert!(response.starts_with("HTTP/1.1 200"));
         let data = &json_body(&response)["data"];
         assert_eq!(data["nodes"].as_array().unwrap().len(), 1);
         assert_eq!(data["nodes"][0]["references"], json!([
-            { "message": { "event": event, "quote": "A <quote>\n  **verbatim**" } },
+            { "message": { "event": event, "session": session, "created_at": message.created_at, "quote": "A <quote>\n  **verbatim**" } },
             { "file": { "path": "src/main.rs", "lines": [2, 4], "excerpt": "fn main() {\n}\n" } },
-            { "message": { "event": event, "quote": "A <quote>\n  **verbatim**" } },
+            { "message": { "event": event, "session": session, "created_at": message.created_at, "quote": "A <quote>\n  **verbatim**" } },
         ]));
         assert_eq!(data["edges"], json!([]));
     }

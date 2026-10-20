@@ -1,4 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useLocation } from "react-router";
 import { getData, type Event, type Session } from "../api";
 import { BackLink } from "../components/back-link";
 import { Chevron } from "../components/chevron";
@@ -62,6 +63,7 @@ export function SessionPage({ session, events }: { session: Session; events: Eve
   const list = useMemo(() => exchanges(events), [events]);
   const started = useMemo(() => subagents(events), [events]);
   const prompts = list.filter((e) => e.prompt).length;
+  useQuoteHighlight();
 
   return (
     <>
@@ -80,7 +82,7 @@ export function SessionPage({ session, events }: { session: Session; events: Eve
         {list.map((exchange) => (
           <article key={exchange.id} className="grid min-w-0 gap-6">
             {exchange.prompt && (
-              <section className="min-w-0">
+              <section id={exchange.prompt.id} className={messageClass}>
                 <Who name="You" at={exchange.prompt.created_at} />
                 <p className="leading-[26px] wrap-anywhere whitespace-pre-line">{exchange.prompt.payload.content as string}</p>
               </section>
@@ -103,12 +105,12 @@ function AgentItems({ items, started }: { items: Item[]; started: Subagents }) {
     const { event } = item;
     const payload = event.payload as Record<string, string>;
 
-    if (event.kind === "subagent.started") return <Quiet key={event.id}>{payload.agent} · {payload.task}</Quiet>;
+    if (event.kind === "subagent.started") return <Quiet key={event.id} id={event.id}>{payload.agent} · {payload.task}</Quiet>;
     if (event.kind === "subagent.reported") return <Report key={event.id} content={payload.content} launch={started.get(payload.subagent)} />;
-    if (!isAgentMessage(event)) return <Quiet key={event.id}>{payload.content}</Quiet>;
+    if (!isAgentMessage(event)) return <Quiet key={event.id} id={event.id}>{payload.content}</Quiet>;
 
     return (
-      <section key={event.id} className="min-w-0">
+      <section key={event.id} id={event.id} className={messageClass}>
         {item === first && <Who name="Agent" at={event.created_at} />}
         <Markdown text={payload.content} />
       </section>
@@ -120,8 +122,49 @@ function isAgentMessage(event: Event) {
   return event.kind === "message" && event.actor === "agent";
 }
 
-function Quiet({ children }: { children: ReactNode }) {
-  return <p className="text-sm text-muted wrap-anywhere">{children}</p>;
+// A reference opens a message by its event id, so the message clears the top edge it scrolls to.
+const messageClass = "min-w-0 scroll-mt-6";
+
+function Quiet({ id, children }: { id: string; children: ReactNode }) {
+  return <p id={id} className={`${messageClass} text-sm text-muted wrap-anywhere`}>{children}</p>;
+}
+
+/** Marks the `?q=` quote inside the message `#<event>` names. A quote that spans markdown syntax is not in the rendered text and stays unmarked. */
+function useQuoteHighlight() {
+  const { hash, search } = useLocation();
+
+  useEffect(() => {
+    const quote = new URLSearchParams(search).get("q");
+    const message = document.getElementById(decodeURIComponent(hash.slice(1)));
+    if (!quote || !message) return;
+
+    const range = rangeOf(message, quote);
+    if (!range) return;
+
+    CSS.highlights.set("quote", new Highlight(range));
+    return () => void CSS.highlights.delete("quote");
+  }, [hash, search]);
+}
+
+// The rendered text splits across text nodes, so the quote is found in their joined text and mapped back.
+function rangeOf(root: Element, quote: string) {
+  const nodes: Text[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+
+  const at = nodes.map((node) => node.data).join("").indexOf(quote);
+  if (at < 0) return null;
+
+  const range = document.createRange();
+  let offset = 0;
+  for (const node of nodes) {
+    const end = offset + node.length;
+    if (at >= offset && at < end) range.setStart(node, at - offset);
+    if (at + quote.length > offset && at + quote.length <= end) range.setEnd(node, at + quote.length - offset);
+    offset = end;
+  }
+
+  return range;
 }
 
 const summaryClass =

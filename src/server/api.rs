@@ -9,6 +9,7 @@ use serde::Serialize;
 use serde_json::json;
 
 use super::Api;
+use crate::app::CitedMessage;
 use crate::core::{Actor, ClientSessionId, EventId, EventStore, SchemaStore, MapId, NodeId, Payload, Reference, Session, SessionId};
 
 pub(super) async fn status<S: EventStore + Send + Sync + 'static, M: SchemaStore + Send + Sync + 'static>(
@@ -93,7 +94,7 @@ pub(super) async fn map<S: EventStore + Send + Sync + 'static, M: SchemaStore + 
                 kind: n.kind,
                 title: n.title,
                 properties: n.properties,
-                references: n.references.into_iter().map(ReferenceView::from).collect(),
+                references: n.references.into_iter().map(|r| ReferenceView::new(r, &detail.messages)).collect(),
                 created_at: n.created_at,
             })
             .collect(),
@@ -135,14 +136,18 @@ struct NodeView {
 #[derive(Serialize)]
 #[serde(rename_all = "lowercase")]
 enum ReferenceView {
-    Message { event: EventId, quote: String },
+    Message { event: EventId, session: SessionId, created_at: jiff::Timestamp, quote: String },
     File { path: String, lines: (u32, u32), excerpt: String },
 }
 
-impl From<Reference> for ReferenceView {
-    fn from(reference: Reference) -> Self {
+impl ReferenceView {
+    /// A node's reference is validated when written, so its message is in `messages`.
+    fn new(reference: Reference, messages: &BTreeMap<EventId, CitedMessage>) -> Self {
         match reference {
-            Reference::Message { event, quote } => Self::Message { event, quote },
+            Reference::Message { event, quote } => {
+                let CitedMessage { session, created_at } = messages[&event];
+                Self::Message { event, session, created_at, quote }
+            }
             Reference::File { path, lines, excerpt } => Self::File { path: path.display().to_string(), lines, excerpt },
         }
     }

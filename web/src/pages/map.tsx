@@ -30,7 +30,7 @@ export function MapPage({ map }: { map: MapDetail }) {
               <h2 className="mb-1 text-sm font-semibold text-muted">{day.name}</h2>
               <ul className="-mx-3 grid gap-0.5">
                 {withChangedTimes(day.items, (n) => n.created_at).map(({ item, shown }) => (
-                  <NodeRow key={item.id} node={item} shown={shown} />
+                  <NodeRow key={item.id} path={map.path} node={item} shown={shown} />
                 ))}
               </ul>
             </section>
@@ -48,7 +48,7 @@ export function MapPage({ map }: { map: MapDetail }) {
   );
 }
 
-function NodeRow({ node, shown }: { node: MapNode; shown?: string }) {
+function NodeRow({ path, node, shown }: { path: string; node: MapNode; shown?: string }) {
   const properties = Object.entries(node.properties);
   const row = "flex min-h-11 items-start gap-2.5 rounded-[10px] px-3 py-2.5";
   const content = (
@@ -89,7 +89,7 @@ function NodeRow({ node, shown }: { node: MapNode; shown?: string }) {
               ))}
             </dl>
           )}
-          {node.references.length > 0 && <References references={node.references} />}
+          {node.references.length > 0 && <References path={path} references={node.references} />}
         </div>
       </details>
     </li>
