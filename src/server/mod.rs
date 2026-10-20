@@ -81,12 +81,14 @@ async fn fallback(uri: Uri) -> Response {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{BTreeMap, BTreeSet};
+
     use super::*;
     use serde_json::json;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::{Actor, ClientSessionId, Event, MapId, NodeId, Reference, Schema, SchemaStore, SessionId, Source};
+    use crate::core::{Actor, ClientSessionId, Event, MapId, NodeId, Order, Reference, Schema, SchemaStore, SessionId, Source};
 
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
     const MAP: &str = "0190a0a0-0000-7000-8000-000000000003";
@@ -123,7 +125,9 @@ mod tests {
 
     impl SchemaStore for Schemas {
         async fn schema(&self, _: &std::path::Path, _: &str) -> Result<Schema> {
-            unimplemented!()
+            let nodes = BTreeMap::from([("question".to_string(), BTreeSet::new())]);
+
+            Schema::new("p".into(), "i".into(), Order::Edges, nodes, BTreeMap::new())
         }
     }
 
@@ -198,6 +202,7 @@ mod tests {
         assert_eq!(data["id"], MAP);
         assert_eq!(data["kind"], "decisions");
         assert_eq!(data["path"], "/repo");
+        assert_eq!(data["order"], "edges");
         assert_eq!(data["nodes"].as_array().unwrap().len(), 1);
         assert_eq!(data["nodes"][0]["title"], "Q");
         assert_eq!(data["nodes"][0]["properties"], json!({}));

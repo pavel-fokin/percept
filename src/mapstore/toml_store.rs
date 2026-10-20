@@ -3,7 +3,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::core::{EdgeKind, Schema, SchemaStore};
+use crate::core::{EdgeKind, Order, Schema, SchemaStore};
 use crate::shared::Result;
 
 /// Reads `<project>/.percept/schemas/<kind>.toml`.
@@ -15,9 +15,19 @@ struct File {
     purpose: String,
     instructions: String,
     #[serde(default)]
+    order: FileOrder,
+    #[serde(default)]
     nodes: BTreeMap<String, BTreeMap<String, String>>,
     #[serde(default)]
     edges: BTreeMap<String, Edge>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+enum FileOrder {
+    #[default]
+    Added,
+    Edges,
 }
 
 #[derive(Deserialize)]
@@ -44,7 +54,12 @@ impl SchemaStore for TomlStore {
         }
         let edges = file.edges.into_iter().map(|(k, e)| (k, EdgeKind { from: e.from, to: e.to })).collect();
 
-        Schema::new(file.purpose, file.instructions, nodes, edges).map_err(|e| format!("{name}: {e}").into())
+        let order = match file.order {
+            FileOrder::Added => Order::Added,
+            FileOrder::Edges => Order::Edges,
+        };
+
+        Schema::new(file.purpose, file.instructions, order, nodes, edges).map_err(|e| format!("{name}: {e}").into())
     }
 }
 
@@ -104,6 +119,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_order_is_added_unless_the_file_says_edges() {
+        let absent = project("purpose = \"p\"\ninstructions = \"i\"\n[nodes.note]\n");
+        let added = project("purpose = \"p\"\ninstructions = \"i\"\norder = \"added\"\n[nodes.note]\n");
+        let edges = project("purpose = \"p\"\ninstructions = \"i\"\norder = \"edges\"\n[nodes.note]\n");
+
+        let absent = TomlStore.schema(&absent, "notes").await.unwrap();
+        let added = TomlStore.schema(&added, "notes").await.unwrap();
+        let edges = TomlStore.schema(&edges, "notes").await.unwrap();
+
+        assert_eq!(absent.order(), Order::Added);
+        assert_eq!(added.order(), Order::Added);
+        assert_eq!(edges.order(), Order::Edges);
+    }
+
+    #[tokio::test]
     async fn a_missing_file_is_an_error_naming_it() {
         let dir = project("");
 
@@ -117,6 +147,8 @@ mod tests {
         let cases = [
             "purpose = \"p\"\ninstructions = \"i\"\nextra = 1\n[nodes.note]\n",
             "purpose = \"p\"\ninstructions = \"i\"\n[nodes.note]\nbody = \"text\"\n",
+            "purpose = \"p\"\ninstructions = \"i\"\norder = \"newest\"\n[nodes.note]\n",
+            "purpose = \"p\"\ninstructions = \"i\"\norder = 1\n[nodes.note]\n",
             "purpose = \"p\"\ninstructions = \"i\"\n[nodes.note]\n[edges.about]\nfrom = \"note\"\nto = \"topic\"\n",
             "purpose = \"p\"\ninstructions = \"i\"\n",
             "purpose = \"p\"\n[nodes.note]\n",

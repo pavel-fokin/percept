@@ -7,6 +7,7 @@ import { References } from "../components/references";
 import { RouteError } from "../components/route-error";
 import { textLink } from "../components/ui/text-link";
 import { byDay, changedWhen, dayAndTime, full, time, withChangedTimes } from "../format";
+import { byRank } from "../rank";
 
 export async function loadMap(path: string, id: string) {
   const map = await getData<MapDetail>(`/api/maps/${id}`);
@@ -29,18 +30,32 @@ export function MapPage({ map }: { map: MapDetail }) {
       </h1>
 
       {map.nodes.length > 0 ? (
-        <div className="mt-8 grid gap-8 sm:mt-10 sm:gap-10">
-          {days.map((day) => (
-            <section key={day.items[0].id}>
-              <h2 className="mb-1 text-sm font-semibold text-muted">{day.name}</h2>
-              <ul className="-mx-3 grid gap-0.5">
-                {withChangedTimes(day.items, (n) => stamp(n, day.name, now)).map(({ item, shown }) => (
-                  <NodeRow key={item.id} path={map.path} node={item} links={links(item, map.edges, nodes)} shown={shown} now={now} />
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
+        map.order === "edges" ? (
+          <div className="mt-8 grid gap-3 sm:mt-10">
+            {byRank(map.nodes, map.edges).map((group) => (
+              <section key={group[0].id} className="border-border not-first:border-t not-first:pt-3">
+                <ul className="-mx-3 grid gap-0.5">
+                  {group.map((n) => (
+                    <NodeRow key={n.id} path={map.path} node={n} links={links(n, map.edges, nodes)} now={now} />
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <div className="mt-8 grid gap-8 sm:mt-10 sm:gap-10">
+            {days.map((day) => (
+              <section key={day.items[0].id}>
+                <h2 className="mb-1 text-sm font-semibold text-muted">{day.name}</h2>
+                <ul className="-mx-3 grid gap-0.5">
+                  {withChangedTimes(day.items, (n) => stamp(n, day.name, now)).map(({ item, shown }) => (
+                    <NodeRow key={item.id} path={map.path} node={item} links={links(item, map.edges, nodes)} shown={shown} now={now} />
+                  ))}
+                </ul>
+              </section>
+            ))}
+          </div>
+        )
       ) : (
         <section className="grid justify-items-center gap-3 py-16 text-center">
           <h2 className="text-2xl font-semibold text-balance">No {map.kind} yet</h2>

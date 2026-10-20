@@ -6,7 +6,7 @@ use serde_json::json;
 
 use super::paths::{display_path, display_paths};
 use crate::app::{self, CitedMessage};
-use crate::core::{self, Actor, ClientSessionId, EventId, MapId, NodeId, Payload, SessionId, SessionStatus};
+use crate::core::{self, Actor, ClientSessionId, EventId, MapId, NodeId, Order, Payload, SessionId, SessionStatus};
 
 /// The envelope every API response is sent in.
 #[derive(Serialize)]
@@ -40,6 +40,7 @@ pub(super) struct MapDetail {
     id: MapId,
     kind: String,
     path: String,
+    order: &'static str,
     nodes: Vec<Node>,
     edges: Vec<Edge>,
 }
@@ -47,11 +48,16 @@ pub(super) struct MapDetail {
 impl MapDetail {
     pub(super) fn new(detail: app::MapDetail, home: &Path) -> Self {
         let (map, messages) = (detail.map, &detail.messages);
+        let order = match detail.order {
+            Order::Added => "added",
+            Order::Edges => "edges",
+        };
 
         Self {
             id: map.id,
             kind: map.kind,
             path: display_path(&map.path, home),
+            order,
             nodes: map.nodes.into_iter().map(|n| Node::new(n, messages)).collect(),
             edges: map.edges.into_iter().map(Edge::from).collect(),
         }
