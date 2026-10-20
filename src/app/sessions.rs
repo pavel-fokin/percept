@@ -93,9 +93,9 @@ mod tests {
     async fn sessions_are_the_created_events_newest_first() {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
-        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", json!({}))).await.unwrap();
-        service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", json!({}))).await.unwrap();
-        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", json!({}))).await.unwrap();
+        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
+        service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
+        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
 
         let sessions = service.sessions().await.unwrap();
 
@@ -110,7 +110,7 @@ mod tests {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Human, "hi", json!({}))).await.unwrap();
-        service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", json!({}))).await.unwrap();
+        service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
         let id = store.0.lock().unwrap()[0].payload.session().unwrap();
 
         let found = service.session(id).await.unwrap().unwrap();
@@ -126,8 +126,8 @@ mod tests {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Human, "hi", json!({}))).await.unwrap();
-        service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", json!({}))).await.unwrap();
-        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Read", json!({}))).await.unwrap();
+        service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
+        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Read", None, None, json!({}))).await.unwrap();
         let id = store.0.lock().unwrap()[0].payload.session().unwrap();
 
         let events = service.session_events(id).await.unwrap().unwrap();
@@ -142,7 +142,7 @@ mod tests {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
         let source = Source { client: "claude".into(), path: "/work/app".into() };
-        service.record(client_session_id("a"), source, |src, s| Event::tool_used(src, s, "Bash", json!({}))).await.unwrap();
+        service.record(client_session_id("a"), source, |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
 
         let sessions = service.sessions().await.unwrap();
 
@@ -209,9 +209,9 @@ mod tests {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
 
-        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", json!({}))).await.unwrap();
-        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", json!({}))).await.unwrap();
-        service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", json!({}))).await.unwrap();
+        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
+        service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
+        service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
 
         let events = store.0.lock().unwrap();
         let kinds: Vec<Kind> = events.iter().map(|e| e.payload.kind()).collect();
@@ -230,7 +230,7 @@ mod tests {
         let source = Source { client: "codex".into(), path: "/work/app".into() };
 
         AppService::new(&store, Schemas)
-            .record(client_session_id("a"), source.clone(), |src, s| Event::tool_used(src, s, "Bash", json!({})))
+            .record(client_session_id("a"), source.clone(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({})))
             .await
             .unwrap();
 
@@ -244,7 +244,7 @@ mod tests {
     #[tokio::test]
     async fn record_passes_store_errors_through() {
         let result = AppService::new(Broken, Schemas)
-            .record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", json!({})))
+            .record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({})))
             .await;
 
         assert!(result.is_err());

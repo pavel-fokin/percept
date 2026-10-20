@@ -87,7 +87,7 @@ pub enum Payload {
     SessionStarted { session: SessionId },
     SessionStopped { session: SessionId },
     Message { session: SessionId, content: String },
-    ToolUsed { session: SessionId, tool: String },
+    ToolUsed { session: SessionId, tool: String, input: Option<String>, output: Option<String> },
     SubagentStarted { session: SessionId, subagent: ClientAgentId, agent: String, task: String },
     SubagentReported { session: SessionId, subagent: ClientAgentId, content: String },
     MapCreated { map: MapId, kind: String },
@@ -152,8 +152,15 @@ impl Event {
         Self::build(source, actor, payload, Some(raw))
     }
 
-    pub fn tool_used(source: Source, session: SessionId, tool: &str, raw: serde_json::Value) -> Self {
-        let payload = Payload::ToolUsed { session, tool: tool.into() };
+    pub fn tool_used(
+        source: Source,
+        session: SessionId,
+        tool: &str,
+        input: Option<String>,
+        output: Option<String>,
+        raw: serde_json::Value,
+    ) -> Self {
+        let payload = Payload::ToolUsed { session, tool: tool.into(), input, output };
         Self::build(source, Actor::Agent, payload, Some(raw))
     }
 
@@ -258,10 +265,10 @@ mod tests {
     fn tool_used_is_an_agent_event_carrying_the_tool() {
         let session = SessionId::new();
 
-        let event = Event::tool_used(Source::fixture(), session, "Bash", json!({"r": 2}));
+        let event = Event::tool_used(Source::fixture(), session, "Bash", Some("ls".into()), None, json!({"r": 2}));
 
         assert_eq!(event.actor, Actor::Agent);
-        assert_eq!(event.payload, Payload::ToolUsed { session, tool: "Bash".into() });
+        assert_eq!(event.payload, Payload::ToolUsed { session, tool: "Bash".into(), input: Some("ls".into()), output: None });
         assert_eq!(event.raw, Some(json!({"r": 2})));
     }
 
@@ -322,7 +329,7 @@ mod tests {
             (Payload::SessionStarted { session }, Kind::SessionStarted),
             (Payload::SessionStopped { session }, Kind::SessionStopped),
             (Payload::Message { session, content: "hi".into() }, Kind::Message),
-            (Payload::ToolUsed { session, tool: "Bash".into() }, Kind::ToolUsed),
+            (Payload::ToolUsed { session, tool: "Bash".into(), input: None, output: None }, Kind::ToolUsed),
             (
                 Payload::SubagentStarted { session, subagent: ClientAgentId::new("a1".into()), agent: "builder".into(), task: "Build it".into() },
                 Kind::SubagentStarted,
