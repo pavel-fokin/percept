@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::AppService;
-use crate::core::{Actor, Edge, Event, EventId, EventStore, Graph, Map, MapId, Node, NodeId, Payload, Reference, SchemaStore, SessionId, Source};
+use crate::core::{Actor, Edge, Event, EventId, EventStore, Graph, Map, MapId, Node, NodeId, Payload, Policy, Reference, SchemaStore, SessionId, Source};
 use crate::shared::Result;
 
 #[derive(Debug, PartialEq)]
@@ -148,8 +148,8 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         // Held until return, so the nodes cannot change between the check and the append.
         let _lock = self.store.lock().await?;
 
-        let map = self.map(&source.path, map_kind).await?;
-        let Graph { nodes, edges } = Graph::of(map.id, &self.store.all().await?);
+        let (_, map, graph) = self.graph(&source.path, map_kind).await?;
+        let Graph { nodes, edges } = &graph;
 
         let find = |title: &str| {
             nodes
@@ -166,7 +166,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             return Err(format!("the {map_kind} map already has this {kind} edge").into());
         }
 
-        self.store.append(&Event::edge_added(source, actor, map.id, kind, from, to)).await
+        self.write(&graph, Event::edge_added(source, actor, map.id, kind, from, to)).await
     }
 
     /// Records a new node on the project's map of the given kind. A title is unique within its map.
@@ -187,11 +187,9 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         // Held until return, so parallel adds cannot both pass the check.
         let _lock = self.store.lock().await?;
 
-        let events = self.store.all().await?;
-        let map = all_maps(&events).into_iter().find(|m| m.path == source.path && m.kind == map_kind)
-            .ok_or_else(|| format!("this project has no {map_kind} map"))?;
+        let (events, map, graph) = self.graph(&source.path, map_kind).await?;
         self.schemas.schema(&source.path, map_kind).await?.check_node(kind, &properties)?;
-        if Graph::of(map.id, &events).nodes.iter().any(|n| n.title == title) {
+        if graph.nodes.iter().any(|n| n.title == title) {
             return Err(format!("the {map_kind} map already has a node titled {title:?}").into());
         }
 
@@ -200,7 +198,73 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             resolved.push(resolve_reference(&events, &source.path, reference).await?);
         }
 
-        self.store.append(&Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties, resolved)).await
+        self.write(&graph, Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties, resolved)).await
+    }
+
+    /// Records the full new state of the node with this title on the project's map of the given kind.
+    /// A property in `properties` is set, or dropped when its value is empty; the others keep their values.
+    /// `references` are resolved and appended to the node's own. A new title is unique within its map.
+    #[allow(clippy::too_many_arguments, reason = "the inputs for changing a node")]
+    pub async fn change_node(
+        &self,
+        source: Source,
+        actor: Actor,
+        map_kind: &str,
+        title: &str,
+        new_title: Option<&str>,
+        properties: BTreeMap<String, String>,
+        references: Vec<Ref>,
+    ) -> Result<()> {
+        // Held until return, so the node cannot change between the check and the append.
+        let _lock = self.store.lock().await?;
+
+        let (events, map, graph) = self.graph(&source.path, map_kind).await?;
+        let node = graph.nodes.iter().find(|n| n.title == title)
+            .ok_or_else(|| format!("the {map_kind} map has no node titled {title:?}"))?;
+
+        let new_title = new_title.unwrap_or(&node.title);
+        not_blank("title", new_title)?;
+        if graph.nodes.iter().any(|n| n.id != node.id && n.title == new_title) {
+            return Err(format!("the {map_kind} map already has a node titled {new_title:?}").into());
+        }
+
+        let mut merged = node.properties.clone();
+        for (key, value) in properties {
+            if value.is_empty() {
+                merged.remove(&key);
+            } else {
+                merged.insert(key, value);
+            }
+        }
+        self.schemas.schema(&source.path, map_kind).await?.check_node(&node.kind, &merged)?;
+
+        let mut all_references = node.references.clone();
+        for reference in references {
+            all_references.push(resolve_reference(&events, &source.path, reference).await?);
+        }
+
+        if new_title == node.title && merged == node.properties && all_references == node.references {
+            return Err(format!("the change leaves {title:?} as it is").into());
+        }
+
+        self.write(&graph, Event::node_changed(source, actor, map.id, node.id, new_title, merged, all_references)).await
+    }
+
+    /// The log, the project's map of the given kind and its graph, read under the store lock.
+    async fn graph(&self, project: &Path, map_kind: &str) -> Result<(Vec<Event>, Map, Graph)> {
+        let events = self.store.all().await?;
+        let map = all_maps(&events).into_iter().find(|m| m.path == project && m.kind == map_kind)
+            .ok_or_else(|| format!("this project has no {map_kind} map"))?;
+        let graph = Graph::of(map.id, &events);
+
+        Ok((events, map, graph))
+    }
+
+    /// The one way a node or an edge event reaches the log: the policy sees it first.
+    async fn write(&self, graph: &Graph, event: Event) -> Result<()> {
+        Policy::check(&event, graph)?;
+
+        self.store.append(&event).await
     }
 }
 
@@ -808,6 +872,182 @@ mod tests {
         let detail = service.map_detail(MapId::new()).await.unwrap();
 
         assert!(detail.is_none());
+    }
+
+    fn props(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+    }
+
+    async fn glossary(store: &Memory) -> AppService<&Memory, Schemas> {
+        let service = AppService::new(store, Schemas);
+        service.create_map(Source::fixture(), Actor::Human, "glossary").await.unwrap();
+        service.add_node(
+            Source::fixture(), Actor::Human, "glossary", "term", "Log",
+            props(&[("definition", "One log."), ("source", "docs")]), Vec::new(),
+        ).await.unwrap();
+
+        service
+    }
+
+    async fn glossary_nodes(service: &AppService<&Memory, Schemas>) -> Vec<Node> {
+        let map = service.map(&Source::fixture().path, "glossary").await.unwrap();
+
+        service.nodes(map.id).await.unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_change_writes_the_full_new_state_and_keeps_unnamed_properties() {
+        let store = Memory::default();
+        let service = glossary(&store).await;
+        let map = service.map(&Source::fixture().path, "glossary").await.unwrap();
+        let before = glossary_nodes(&service).await;
+
+        service.change_node(
+            Source::fixture(), Actor::Human, "glossary", "Log", Some("Event log"),
+            props(&[("definition", "Append-only.")]), Vec::new(),
+        ).await.unwrap();
+
+        let last = store.0.lock().unwrap().last().unwrap().clone();
+        assert_eq!(last.actor, Actor::Human);
+        assert_eq!(last.payload, Payload::NodeChanged {
+            map: map.id,
+            node: before[0].id,
+            title: "Event log".into(),
+            properties: props(&[("definition", "Append-only."), ("source", "docs")]),
+            references: Vec::new(),
+        });
+        let after = glossary_nodes(&service).await;
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].title, "Event log");
+        assert_eq!(after[0].changes.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn two_positionals_keep_the_title() {
+        let store = Memory::default();
+        let service = glossary(&store).await;
+
+        service.change_node(Source::fixture(), Actor::Human, "glossary", "Log", None, props(&[("source", "spec")]), Vec::new()).await.unwrap();
+
+        let nodes = glossary_nodes(&service).await;
+        assert_eq!(nodes[0].title, "Log");
+        assert_eq!(nodes[0].properties, props(&[("definition", "One log."), ("source", "spec")]));
+    }
+
+    #[tokio::test]
+    async fn an_empty_value_drops_a_property() {
+        let store = Memory::default();
+        let service = glossary(&store).await;
+
+        service.change_node(Source::fixture(), Actor::Human, "glossary", "Log", None, props(&[("source", "")]), Vec::new()).await.unwrap();
+
+        let nodes = glossary_nodes(&service).await;
+        assert_eq!(nodes[0].properties, props(&[("definition", "One log.")]));
+    }
+
+    #[tokio::test]
+    async fn a_reference_is_appended_to_the_existing_ones() {
+        use crate::core::SessionId;
+        use serde_json::json;
+
+        let store = Memory::default();
+        let service = glossary(&store).await;
+        let first = Event::message(Source::fixture(), SessionId::new(), Actor::Human, "First quote", json!({}));
+        let second = Event::message(Source::fixture(), SessionId::new(), Actor::Human, "Second quote", json!({}));
+        store.0.lock().unwrap().extend([first.clone(), second.clone()]);
+
+        service.change_node(Source::fixture(), Actor::Human, "glossary", "Log", None, BTreeMap::new(), vec![Ref::Message("First quote".into())]).await.unwrap();
+        service.change_node(Source::fixture(), Actor::Human, "glossary", "Log", None, BTreeMap::new(), vec![Ref::Message("Second quote".into())]).await.unwrap();
+
+        let nodes = glossary_nodes(&service).await;
+        assert_eq!(nodes[0].references, vec![
+            Reference::Message { event: first.id, quote: "First quote".into() },
+            Reference::Message { event: second.id, quote: "Second quote".into() },
+        ]);
+    }
+
+    #[tokio::test]
+    async fn a_rename_is_not_blank_and_unique_within_its_map_but_may_keep_the_old_title() {
+        let store = Memory::default();
+        let service = glossary(&store).await;
+        service.add_node(Source::fixture(), Actor::Human, "glossary", "term", "Other", BTreeMap::new(), Vec::new()).await.unwrap();
+
+        let taken = service.change_node(Source::fixture(), Actor::Human, "glossary", "Log", Some("Other"), BTreeMap::new(), Vec::new()).await;
+        let blank = service.change_node(Source::fixture(), Actor::Human, "glossary", "Log", Some(" "), BTreeMap::new(), Vec::new()).await;
+        let same = service.change_node(Source::fixture(), Actor::Human, "glossary", "Log", Some("Log"), props(&[("source", "spec")]), Vec::new()).await;
+
+        assert!(taken.unwrap_err().to_string().contains("\"Other\""));
+        assert!(blank.unwrap_err().to_string().contains("blank"));
+        assert!(same.is_ok());
+        assert_eq!(store.0.lock().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn the_merged_properties_are_checked_against_the_schema() {
+        let store = Memory::default();
+        let service = glossary(&store).await;
+
+        let result = service.change_node(Source::fixture(), Actor::Human, "glossary", "Log", None, props(&[("colour", "red")]), Vec::new()).await;
+
+        assert!(result.unwrap_err().to_string().contains("colour"));
+        assert_eq!(store.0.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_change_that_leaves_the_node_as_it_is_is_an_error() {
+        let store = Memory::default();
+        let service = glossary(&store).await;
+
+        let nothing = service.change_node(Source::fixture(), Actor::Human, "glossary", "Log", None, BTreeMap::new(), Vec::new()).await;
+        let same_title = service.change_node(Source::fixture(), Actor::Human, "glossary", "Log", Some("Log"), BTreeMap::new(), Vec::new()).await;
+        let same_value = service.change_node(Source::fixture(), Actor::Human, "glossary", "Log", None, props(&[("source", "docs")]), Vec::new()).await;
+        let absent_drop = service.change_node(Source::fixture(), Actor::Human, "glossary", "Log", None, props(&[("definition", "One log."), ("source", "docs")]), Vec::new()).await;
+
+        assert!(nothing.is_err());
+        assert!(same_title.is_err());
+        assert!(same_value.is_err());
+        assert!(absent_drop.is_err());
+        assert_eq!(store.0.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn changing_a_missing_node_or_map_is_an_error() {
+        let store = Memory::default();
+        let service = glossary(&store).await;
+
+        let node = service.change_node(Source::fixture(), Actor::Human, "glossary", "Nope", None, props(&[("source", "x")]), Vec::new()).await;
+        let map = service.change_node(Source::fixture(), Actor::Human, "tasks", "Log", None, props(&[("source", "x")]), Vec::new()).await;
+
+        assert!(node.unwrap_err().to_string().contains("\"Nope\""));
+        assert!(map.is_err());
+        assert_eq!(store.0.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn the_policy_refuses_an_agent_changing_a_human_node_and_the_log_stays() {
+        let store = Memory::default();
+        let service = glossary(&store).await;
+
+        let result = service.change_node(Source::fixture(), Actor::Agent, "glossary", "Log", None, props(&[("source", "x")]), Vec::new()).await;
+
+        assert!(result.unwrap_err().to_string().contains("only a human may change it"));
+        assert_eq!(store.0.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn an_agent_may_change_its_own_node_until_a_human_changes_it() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.create_map(Source::fixture(), Actor::Human, "glossary").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Agent, "glossary", "term", "Log", BTreeMap::new(), Vec::new()).await.unwrap();
+
+        let agent = service.change_node(Source::fixture(), Actor::Agent, "glossary", "Log", None, props(&[("source", "a")]), Vec::new()).await;
+        service.change_node(Source::fixture(), Actor::Human, "glossary", "Log", None, props(&[("source", "h")]), Vec::new()).await.unwrap();
+        let after_human = service.change_node(Source::fixture(), Actor::Agent, "glossary", "Log", None, props(&[("source", "b")]), Vec::new()).await;
+
+        assert!(agent.is_ok());
+        assert!(after_human.is_err());
+        assert_eq!(store.0.lock().unwrap().len(), 4);
     }
 
     #[tokio::test]

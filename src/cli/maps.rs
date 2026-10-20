@@ -27,6 +27,19 @@ pub(super) async fn add<S: EventStore, M: SchemaStore>(service: &AppService<S, M
     }
 }
 
+pub(super) async fn change<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
+    let AddArgs { positionals, properties, references } = split_add(args)?;
+
+    let (map, title, new_title) = match positionals {
+        [map, title] => (map, title, None),
+        [map, title, new_title] => (map, title, Some(new_title.as_str())),
+        _ => return Err("usage: percept change <map> <title> [<new title>] [--key value ...] [--ref 'msg:<text>' | --ref 'file:<path>:<from>-<to>' ...]".into()),
+    };
+    let (actor, source) = cli_writer().await?;
+
+    service.change_node(source, actor, map, title, new_title, properties, references).await
+}
+
 struct AddArgs<'a> {
     positionals: &'a [String],
     properties: BTreeMap<String, String>,

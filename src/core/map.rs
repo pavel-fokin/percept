@@ -63,7 +63,7 @@ impl Graph {
         events.iter().fold(Self::default(), |graph, event| graph.apply(map, event))
     }
 
-    /// The graph after `event`; events of other maps change nothing.
+    /// The graph after `event`; events of other maps, and changes to a node not in the graph, change nothing.
     fn apply(mut self, map: MapId, event: &Event) -> Self {
         let change = Change { actor: event.actor, at: event.created_at };
 
@@ -76,6 +76,14 @@ impl Graph {
                 references: references.clone(),
                 changes: vec![change],
             }),
+            Payload::NodeChanged { map: id, node, title: new_title, properties: new_properties, references: new_references } if *id == map => {
+                if let Some(found) = self.nodes.iter_mut().find(|n| n.id == *node) {
+                    found.title = new_title.clone();
+                    found.properties = new_properties.clone();
+                    found.references = new_references.clone();
+                    found.changes.push(change);
+                }
+            }
             Payload::EdgeAdded { map: id, kind, from, to } if *id == map => {
                 self.edges.push(Edge { kind: kind.clone(), from: *from, to: *to, changes: vec![change] })
             }
@@ -133,6 +141,45 @@ mod tests {
 
         assert_eq!(graph.nodes[0].changes, vec![Change { actor: Actor::Agent, at: add_a.created_at }]);
         assert_eq!(graph.edges[0].changes, vec![Change { actor: Actor::Human, at: add_edge.created_at }]);
+    }
+
+    #[test]
+    fn a_change_replaces_the_nodes_state_keeps_its_place_and_appends_a_change() {
+        let map = MapId::new();
+        let (a, add_a) = node_added(map, Actor::Agent, "A");
+        let (_, add_b) = node_added(map, Actor::Agent, "B");
+        let references = vec![Reference::Message { event: EventId::new(), quote: "Q".into() }];
+        let properties = BTreeMap::from([("definition".to_string(), "D".to_string())]);
+        let mut change = Event::node_changed(Source::fixture(), Actor::Human, map, a, "A2", properties.clone(), references.clone());
+        change.created_at = "2026-01-03T00:00:00Z".parse().unwrap();
+
+        let graph = Graph::of(map, &[add_a.clone(), add_b, change.clone()]);
+
+        let titles: Vec<&str> = graph.nodes.iter().map(|n| n.title.as_str()).collect();
+        assert_eq!(titles, vec!["A2", "B"]);
+        assert_eq!(graph.nodes[0].id, a);
+        assert_eq!(graph.nodes[0].kind, "concept");
+        assert_eq!(graph.nodes[0].properties, properties);
+        assert_eq!(graph.nodes[0].references, references);
+        assert_eq!(graph.nodes[0].changes, vec![
+            Change { actor: Actor::Agent, at: add_a.created_at },
+            Change { actor: Actor::Human, at: change.created_at },
+        ]);
+        assert_eq!(graph.nodes[1].changes.len(), 1);
+    }
+
+    #[test]
+    fn a_change_to_another_maps_or_a_missing_node_changes_nothing() {
+        let (map, other) = (MapId::new(), MapId::new());
+        let (a, add_a) = node_added(map, Actor::Human, "A");
+        let elsewhere = Event::node_changed(Source::fixture(), Actor::Human, other, a, "X", BTreeMap::new(), Vec::new());
+        let missing = Event::node_changed(Source::fixture(), Actor::Human, map, NodeId::new(), "Y", BTreeMap::new(), Vec::new());
+
+        let graph = Graph::of(map, &[add_a, elsewhere, missing]);
+
+        assert_eq!(graph.nodes.len(), 1);
+        assert_eq!(graph.nodes[0].title, "A");
+        assert_eq!(graph.nodes[0].changes.len(), 1);
     }
 
     #[test]

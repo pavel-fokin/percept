@@ -44,6 +44,7 @@ pub enum Kind {
     SubagentReported,
     MapCreated,
     NodeAdded,
+    NodeChanged,
     EdgeAdded,
 }
 
@@ -59,6 +60,7 @@ impl Kind {
             Self::SubagentReported => "subagent.reported",
             Self::MapCreated => "map.created",
             Self::NodeAdded => "node.added",
+            Self::NodeChanged => "node.changed",
             Self::EdgeAdded => "edge.added",
         }
     }
@@ -74,6 +76,7 @@ impl Kind {
             "subagent.reported" => Some(Self::SubagentReported),
             "map.created" => Some(Self::MapCreated),
             "node.added" => Some(Self::NodeAdded),
+            "node.changed" => Some(Self::NodeChanged),
             "edge.added" => Some(Self::EdgeAdded),
             _ => None,
         }
@@ -92,6 +95,8 @@ pub enum Payload {
     SubagentReported { session: SessionId, subagent: ClientAgentId, content: String },
     MapCreated { map: MapId, kind: String },
     NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
+    /// The node's full new state, not a diff.
+    NodeChanged { map: MapId, node: NodeId, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
     EdgeAdded { map: MapId, kind: String, from: NodeId, to: NodeId },
 }
 
@@ -107,6 +112,7 @@ impl Payload {
             Self::SubagentReported { .. } => Kind::SubagentReported,
             Self::MapCreated { .. } => Kind::MapCreated,
             Self::NodeAdded { .. } => Kind::NodeAdded,
+            Self::NodeChanged { .. } => Kind::NodeChanged,
             Self::EdgeAdded { .. } => Kind::EdgeAdded,
         }
     }
@@ -120,7 +126,7 @@ impl Payload {
             | Self::ToolUsed { session, .. }
             | Self::SubagentStarted { session, .. }
             | Self::SubagentReported { session, .. } => Some(*session),
-            Self::MapCreated { .. } | Self::NodeAdded { .. } | Self::EdgeAdded { .. } => None,
+            Self::MapCreated { .. } | Self::NodeAdded { .. } | Self::NodeChanged { .. } | Self::EdgeAdded { .. } => None,
         }
     }
 }
@@ -212,6 +218,19 @@ impl Event {
         references: Vec<Reference>,
     ) -> Self {
         let payload = Payload::NodeAdded { map, node, kind: kind.into(), title: title.into(), properties, references };
+        Self::build(source, actor, payload, None)
+    }
+
+    pub fn node_changed(
+        source: Source,
+        actor: Actor,
+        map: MapId,
+        node: NodeId,
+        title: &str,
+        properties: BTreeMap<String, String>,
+        references: Vec<Reference>,
+    ) -> Self {
+        let payload = Payload::NodeChanged { map, node, title: title.into(), properties, references };
         Self::build(source, actor, payload, None)
     }
 
@@ -375,6 +394,20 @@ mod tests {
     }
 
     #[test]
+    fn node_changed_carries_the_actor_and_the_full_new_state_and_has_no_session() {
+        let (map, node) = (MapId::new(), NodeId::new());
+        let properties = BTreeMap::from([("definition".to_string(), "D".to_string())]);
+
+        let event = Event::node_changed(Source::fixture(), Actor::Human, map, node, "Why not?", properties.clone(), Vec::new());
+
+        assert_eq!(event.actor, Actor::Human);
+        assert_eq!(event.payload.kind(), Kind::NodeChanged);
+        assert_eq!(event.payload, Payload::NodeChanged { map, node, title: "Why not?".into(), properties, references: Vec::new() });
+        assert_eq!(event.payload.session(), None);
+        assert_eq!(event.raw, None);
+    }
+
+    #[test]
     fn edge_added_carries_the_actor_and_has_no_session() {
         let (map, from, to) = (MapId::new(), NodeId::new(), NodeId::new());
 
@@ -389,7 +422,7 @@ mod tests {
 
     #[test]
     fn every_kind_is_found_by_its_name() {
-        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed, Kind::SubagentStarted, Kind::SubagentReported, Kind::MapCreated, Kind::NodeAdded, Kind::EdgeAdded];
+        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed, Kind::SubagentStarted, Kind::SubagentReported, Kind::MapCreated, Kind::NodeAdded, Kind::NodeChanged, Kind::EdgeAdded];
 
         for kind in kinds {
             assert_eq!(Kind::from_name(kind.name()), Some(kind));
