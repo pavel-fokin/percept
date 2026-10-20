@@ -87,6 +87,10 @@ body {
   @apply bg-bg font-sans text-text;
 }
 
+::highlight(quote) {
+  background-color: var(--color-border);
+}
+
 :focus-visible {
   @apply outline-2 outline-offset-2 outline-text;
 }
