@@ -4,9 +4,12 @@ use crate::shared::Result;
 /// Who may make a write. It judges new events only, never the log, so a later rule cannot invalidate it.
 pub struct Policy;
 
+const CHECKED: &str = "Map::check refuses a write to what is not on the map";
+
 impl Policy {
     /// Refuses an agent's change to a node, or removal of a node or an edge, that a human wrote.
     /// Removing a node also removes its edges, so a human's edge on it refuses the removal. Additions and a human's writes pass.
+    /// The event has passed `Map::check`, so what it changes or removes is on the map.
     pub fn check(event: &Event, map: &Map) -> Result<()> {
         if event.actor != Actor::Agent {
             return Ok(());
@@ -14,23 +17,17 @@ impl Policy {
 
         match &event.payload {
             Payload::NodeChanged { node, .. } => {
-                let Some(found) = map.node(*node) else {
-                    return Ok(());
-                };
+                let found = map.node(*node).expect(CHECKED);
 
                 refuse_human(&found.changes, &format!("{:?}", found.title), "change")
             }
             Payload::EdgeRemoved { kind, from, to, .. } => {
-                let Some(found) = map.edges.iter().find(|e| e.is(kind, *from, *to)) else {
-                    return Ok(());
-                };
+                let found = map.edges.iter().find(|e| e.is(kind, *from, *to)).expect(CHECKED);
 
                 refuse_human(&found.changes, &edge_name(map, found), "remove")
             }
             Payload::NodeRemoved { node, .. } => {
-                let Some(found) = map.node(*node) else {
-                    return Ok(());
-                };
+                let found = map.node(*node).expect(CHECKED);
 
                 refuse_human(&found.changes, &format!("{:?}", found.title), "remove")?;
 
