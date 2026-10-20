@@ -4,6 +4,7 @@ import { getData, type Event, type Session } from "../api";
 import { BackLink } from "../components/back-link";
 import { Chevron } from "../components/chevron";
 import { Markdown } from "../components/markdown";
+import { NewMessage } from "../components/new-message";
 import { RouteError } from "../components/route-error";
 import { Spinner } from "../components/spinner";
 import { dayTime, full, time } from "../format";
@@ -102,6 +103,7 @@ export function SessionPage({ session, events }: { session: Session; events: Eve
           </article>
         ))}
       </div>
+      <NewMessage key={session.id} events={events} />
     </>
   );
 }
