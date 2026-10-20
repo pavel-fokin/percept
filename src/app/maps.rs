@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::AppService;
-use crate::core::{Actor, Edge, Event, EventId, EventStore, Map, MapId, Node, NodeId, Payload, Reference, SchemaStore, SessionId, Source};
+use crate::core::{Actor, Edge, Event, EventId, EventStore, Graph, Map, MapId, Node, NodeId, Payload, Reference, SchemaStore, SessionId, Source};
 use crate::shared::Result;
 
 #[derive(Debug, PartialEq)]
@@ -70,7 +70,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
 
     /// The map's nodes in log order.
     pub async fn nodes(&self, map: MapId) -> Result<Vec<Node>> {
-        Ok(map_nodes(&self.store.all().await?, map))
+        Ok(Graph::of(map, &self.store.all().await?).nodes)
     }
 
     /// The project's maps in log order, each with its node and edge counts, from one read of the log.
@@ -85,18 +85,14 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
     pub async fn all_map_summaries(&self) -> Result<Vec<MapSummary>> {
         let events = self.store.all().await?;
 
-        let mut summaries: Vec<MapSummary> = all_maps(&events)
+        let summaries = all_maps(&events)
             .into_iter()
-            .map(|map| MapSummary { map, nodes: 0, edges: 0 })
-            .collect();
+            .map(|map| {
+                let graph = Graph::of(map.id, &events);
 
-        for e in &events {
-            match &e.payload {
-                Payload::NodeAdded { map, .. } => summaries.iter_mut().filter(|s| s.map.id == *map).for_each(|s| s.nodes += 1),
-                Payload::EdgeAdded { map, .. } => summaries.iter_mut().filter(|s| s.map.id == *map).for_each(|s| s.edges += 1),
-                _ => {}
-            }
-        }
+                MapSummary { map, nodes: graph.nodes.len(), edges: graph.edges.len() }
+            })
+            .collect();
 
         Ok(summaries)
     }
@@ -109,7 +105,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             return Ok(None);
         };
 
-        let mut nodes = map_nodes(&events, id);
+        let Graph { mut nodes, edges } = Graph::of(id, &events);
         nodes.reverse();
 
         let cited: BTreeSet<EventId> = nodes
@@ -129,12 +125,12 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             })
             .collect();
 
-        Ok(Some(MapDetail { map, nodes, edges: map_edges(&events, id), messages }))
+        Ok(Some(MapDetail { map, nodes, edges, messages }))
     }
 
     /// The map's edges in log order.
     pub async fn edges(&self, map: MapId) -> Result<Vec<Edge>> {
-        Ok(map_edges(&self.store.all().await?, map))
+        Ok(Graph::of(map, &self.store.all().await?).edges)
     }
 
     /// Records a new edge on the project's map of the given kind, between the nodes with these titles.
@@ -153,7 +149,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         let _lock = self.store.lock().await?;
 
         let map = self.map(&source.path, map_kind).await?;
-        let nodes = self.nodes(map.id).await?;
+        let Graph { nodes, edges } = Graph::of(map.id, &self.store.all().await?);
 
         let find = |title: &str| {
             nodes
@@ -165,7 +161,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         self.schemas.schema(&source.path, map_kind).await?.check_edge(kind, &from.kind, &to.kind)?;
         let (from, to) = (from.id, to.id);
 
-        let repeated = self.edges(map.id).await?.iter().any(|e| e.from == from && e.kind == kind && e.to == to);
+        let repeated = edges.iter().any(|e| e.from == from && e.kind == kind && e.to == to);
         if repeated {
             return Err(format!("the {map_kind} map already has this {kind} edge").into());
         }
@@ -195,7 +191,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         let map = all_maps(&events).into_iter().find(|m| m.path == source.path && m.kind == map_kind)
             .ok_or_else(|| format!("this project has no {map_kind} map"))?;
         self.schemas.schema(&source.path, map_kind).await?.check_node(kind, &properties)?;
-        if map_nodes(&events, map.id).iter().any(|n| n.title == title) {
+        if Graph::of(map.id, &events).nodes.iter().any(|n| n.title == title) {
             return Err(format!("the {map_kind} map already has a node titled {title:?}").into());
         }
 
@@ -261,33 +257,6 @@ fn all_maps(events: &[Event]) -> Vec<Map> {
         .iter()
         .filter_map(|e| match &e.payload {
             Payload::MapCreated { map, kind } => Some(Map { id: *map, kind: kind.clone(), path: e.source.path.clone() }),
-            _ => None,
-        })
-        .collect()
-}
-
-fn map_nodes(events: &[Event], map: MapId) -> Vec<Node> {
-    events
-        .iter()
-        .filter_map(|e| match &e.payload {
-            Payload::NodeAdded { map: id, node, kind, title, properties, references } if *id == map => Some(Node {
-                id: *node,
-                kind: kind.clone(),
-                title: title.clone(),
-                properties: properties.clone(),
-                references: references.clone(),
-                created_at: e.created_at,
-            }),
-            _ => None,
-        })
-        .collect()
-}
-
-fn map_edges(events: &[Event], map: MapId) -> Vec<Edge> {
-    events
-        .iter()
-        .filter_map(|e| match &e.payload {
-            Payload::EdgeAdded { map: id, kind, from, to } if *id == map => Some(Edge { kind: kind.clone(), from: *from, to: *to }),
             _ => None,
         })
         .collect()
@@ -710,26 +679,6 @@ mod tests {
         let found: Vec<(&str, &str)> = nodes.iter().map(|n| (n.kind.as_str(), n.title.as_str())).collect();
         assert_eq!(found, vec![("question", "Q"), ("option", "O")]);
         assert!(service.map(&Source::fixture().path, "nope").await.is_err());
-    }
-
-    #[test]
-    fn node_projection_preserves_references() {
-        use crate::core::{EventId, Reference};
-
-        let map = MapId::new();
-        let references = vec![
-            Reference::Message { event: EventId::new(), quote: "Keep the text.".into() },
-            Reference::File { path: "src/main.rs".into(), lines: (1, 3), excerpt: "fn main() {}".into() },
-        ];
-        let event = Event::node_added(
-            Source::fixture(), Actor::Human, map, NodeId::new(),
-            "decision", "Keep snapshots", BTreeMap::new(), references.clone(),
-        );
-
-        let nodes = map_nodes(&[event], map);
-
-        assert_eq!(nodes.len(), 1);
-        assert_eq!(nodes[0].references, references);
     }
 
     #[tokio::test]

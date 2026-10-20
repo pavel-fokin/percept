@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use super::EventId;
+use jiff::Timestamp;
+
+use super::{Actor, Event, EventId, Payload};
 use crate::shared::Id;
 
 pub type MapId = Id<Map>;
@@ -21,7 +23,8 @@ pub struct Node {
     pub title: String,
     pub properties: BTreeMap<String, String>,
     pub references: Vec<Reference>,
-    pub created_at: jiff::Timestamp,
+    /// Every event that reached the node, the addition first, in log order.
+    pub changes: Vec<Change>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -35,4 +38,127 @@ pub struct Edge {
     pub kind: String,
     pub from: NodeId,
     pub to: NodeId,
+    /// Every event that reached the edge, the addition first, in log order.
+    #[allow(dead_code, reason = "no reader yet; the next issues read it")]
+    pub changes: Vec<Change>,
+}
+
+/// Who wrote to a node or an edge, and when.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Change {
+    pub actor: Actor,
+    pub at: Timestamp,
+}
+
+/// The nodes and edges of one map, folded from the log. Both are in log order.
+#[derive(Default)]
+pub struct Graph {
+    pub nodes: Vec<Node>,
+    pub edges: Vec<Edge>,
+}
+
+impl Graph {
+    /// The graph of `map` after every event in `events`.
+    pub fn of(map: MapId, events: &[Event]) -> Self {
+        events.iter().fold(Self::default(), |graph, event| graph.apply(map, event))
+    }
+
+    /// The graph after `event`; events of other maps change nothing.
+    fn apply(mut self, map: MapId, event: &Event) -> Self {
+        let change = Change { actor: event.actor, at: event.created_at };
+
+        match &event.payload {
+            Payload::NodeAdded { map: id, node, kind, title, properties, references } if *id == map => self.nodes.push(Node {
+                id: *node,
+                kind: kind.clone(),
+                title: title.clone(),
+                properties: properties.clone(),
+                references: references.clone(),
+                changes: vec![change],
+            }),
+            Payload::EdgeAdded { map: id, kind, from, to } if *id == map => {
+                self.edges.push(Edge { kind: kind.clone(), from: *from, to: *to, changes: vec![change] })
+            }
+            _ => {}
+        }
+
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::Source;
+
+    fn node_added(map: MapId, actor: Actor, title: &str) -> (NodeId, Event) {
+        let node = NodeId::new();
+        let event = Event::node_added(Source::fixture(), actor, map, node, "concept", title, BTreeMap::new(), Vec::new());
+
+        (node, event)
+    }
+
+    #[test]
+    fn nodes_and_edges_are_the_maps_own_in_log_order() {
+        let (map, other) = (MapId::new(), MapId::new());
+        let (a, add_a) = node_added(map, Actor::Human, "A");
+        let (b, add_b) = node_added(map, Actor::Agent, "B");
+        let (_, add_elsewhere) = node_added(other, Actor::Human, "Elsewhere");
+        let events = [
+            add_a,
+            add_elsewhere,
+            Event::edge_added(Source::fixture(), Actor::Human, other, "links", a, b),
+            add_b,
+            Event::edge_added(Source::fixture(), Actor::Human, map, "links", b, a),
+            Event::edge_added(Source::fixture(), Actor::Human, map, "cites", a, b),
+        ];
+
+        let graph = Graph::of(map, &events);
+
+        let nodes: Vec<&str> = graph.nodes.iter().map(|n| n.title.as_str()).collect();
+        let edges: Vec<(&str, NodeId, NodeId)> = graph.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
+        assert_eq!(nodes, vec!["A", "B"]);
+        assert_eq!(edges, vec![("links", b, a), ("cites", a, b)]);
+    }
+
+    #[test]
+    fn the_first_change_carries_the_events_actor_and_time() {
+        let map = MapId::new();
+        let (a, mut add_a) = node_added(map, Actor::Agent, "A");
+        let mut add_edge = Event::edge_added(Source::fixture(), Actor::Human, map, "links", a, a);
+        add_a.created_at = "2026-01-01T00:00:00Z".parse().unwrap();
+        add_edge.created_at = "2026-01-02T00:00:00Z".parse().unwrap();
+
+        let graph = Graph::of(map, &[add_a.clone(), add_edge.clone()]);
+
+        assert_eq!(graph.nodes[0].changes, vec![Change { actor: Actor::Agent, at: add_a.created_at }]);
+        assert_eq!(graph.edges[0].changes, vec![Change { actor: Actor::Human, at: add_edge.created_at }]);
+    }
+
+    #[test]
+    fn a_node_keeps_its_references() {
+        let map = MapId::new();
+        let references = vec![
+            Reference::Message { event: EventId::new(), quote: "Keep the text.".into() },
+            Reference::File { path: "src/main.rs".into(), lines: (1, 3), excerpt: "fn main() {}".into() },
+        ];
+        let event = Event::node_added(
+            Source::fixture(), Actor::Human, map, NodeId::new(),
+            "decision", "Keep snapshots", BTreeMap::new(), references.clone(),
+        );
+
+        let graph = Graph::of(map, &[event]);
+
+        assert_eq!(graph.nodes[0].references, references);
+    }
+
+    #[test]
+    fn a_map_with_no_events_has_an_empty_graph() {
+        let (_, other) = node_added(MapId::new(), Actor::Human, "A");
+
+        let graph = Graph::of(MapId::new(), &[other]);
+
+        assert!(graph.nodes.is_empty());
+        assert!(graph.edges.is_empty());
+    }
 }

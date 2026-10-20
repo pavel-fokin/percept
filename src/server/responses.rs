@@ -81,7 +81,7 @@ impl Node {
             title: node.title,
             properties: node.properties,
             references: node.references.into_iter().map(|r| Reference::new(r, messages)).collect(),
-            created_at: node.created_at,
+            created_at: node.changes[0].at,
         }
     }
 }
