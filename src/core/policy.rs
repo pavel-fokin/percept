@@ -1,3 +1,4 @@
+use super::map::Change;
 use super::{Actor, Event, Graph, Payload};
 use crate::shared::Result;
 
@@ -5,21 +6,40 @@ use crate::shared::Result;
 pub struct Policy;
 
 impl Policy {
-    /// Refuses an agent's change to a node a human wrote or changed. Additions and a human's writes pass.
+    /// Refuses an agent's change to a node, or removal of an edge, that a human wrote. Additions and a human's writes pass.
     pub fn check(event: &Event, graph: &Graph) -> Result<()> {
-        let Payload::NodeChanged { node, .. } = &event.payload else {
+        if event.actor != Actor::Agent {
             return Ok(());
-        };
-
-        let Some(found) = graph.nodes.iter().find(|n| n.id == *node) else {
-            return Ok(());
-        };
-        if event.actor == Actor::Agent && found.changes.iter().any(|c| c.actor == Actor::Human) {
-            return Err(format!("{:?} was written by a human, so only a human may change it", found.title).into());
         }
 
-        Ok(())
+        match &event.payload {
+            Payload::NodeChanged { node, .. } => {
+                let Some(found) = graph.nodes.iter().find(|n| n.id == *node) else {
+                    return Ok(());
+                };
+
+                refuse_human(&found.changes, &format!("{:?}", found.title), "change")
+            }
+            Payload::EdgeRemoved { kind, from, to, .. } => {
+                let Some(found) = graph.edges.iter().find(|e| e.kind == *kind && e.from == *from && e.to == *to) else {
+                    return Ok(());
+                };
+                let title = |id| graph.nodes.iter().find(|n| n.id == id).map_or("", |n| n.title.as_str());
+
+                refuse_human(&found.changes, &format!("the edge {:?} {kind} {:?}", title(found.from), title(found.to)), "remove")
+            }
+            _ => Ok(()),
+        }
     }
+}
+
+/// Refuses when any of `changes` is a human's: `what` was written by a human, so only a human may `verb` it.
+fn refuse_human(changes: &[Change], what: &str, verb: &str) -> Result<()> {
+    if changes.iter().any(|c| c.actor == Actor::Human) {
+        return Err(format!("{what} was written by a human, so only a human may {verb} it").into());
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -82,6 +102,51 @@ mod tests {
         let graph = Graph::of(map, &[add]);
 
         let result = Policy::check(&change(map, Actor::Human, node), &graph);
+
+        assert!(result.is_ok());
+    }
+
+    fn edge_removal(map: MapId, actor: Actor, from: NodeId, to: NodeId) -> Event {
+        Event::edge_removed(Source::fixture(), actor, map, "links", from, to)
+    }
+
+    fn linked(map: MapId, edge_actor: Actor) -> (NodeId, NodeId, Graph) {
+        let (a, add_a) = added(map, Actor::Agent, "A");
+        let (b, add_b) = added(map, Actor::Agent, "B");
+        let edge = Event::edge_added(Source::fixture(), edge_actor, map, "links", a, b);
+        let graph = Graph::of(map, &[add_a, add_b, edge]);
+
+        (a, b, graph)
+    }
+
+    #[test]
+    fn an_agent_may_not_remove_an_edge_a_human_added() {
+        let map = MapId::new();
+        let (a, b, graph) = linked(map, Actor::Human);
+
+        let result = Policy::check(&edge_removal(map, Actor::Agent, a, b), &graph);
+
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("\"A\" links \"B\""));
+        assert!(error.contains("written by a human, so only a human may remove it"));
+    }
+
+    #[test]
+    fn an_agent_may_remove_an_edge_only_agents_wrote() {
+        let map = MapId::new();
+        let (a, b, graph) = linked(map, Actor::Agent);
+
+        let result = Policy::check(&edge_removal(map, Actor::Agent, a, b), &graph);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn a_human_may_remove_an_agents_edge() {
+        let map = MapId::new();
+        let (a, b, graph) = linked(map, Actor::Agent);
+
+        let result = Policy::check(&edge_removal(map, Actor::Human, a, b), &graph);
 
         assert!(result.is_ok());
     }

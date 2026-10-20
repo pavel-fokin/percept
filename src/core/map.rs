@@ -33,13 +33,12 @@ pub enum Reference {
     File { path: PathBuf, lines: (u32, u32), excerpt: String },
 }
 
-/// A directed link between two nodes of a map, added by an `EdgeAdded` event.
+/// A directed link between two nodes of a map, added by an `EdgeAdded` event and dropped by an `EdgeRemoved` one.
 pub struct Edge {
     pub kind: String,
     pub from: NodeId,
     pub to: NodeId,
     /// Every event that reached the edge, the addition first, in log order.
-    #[allow(dead_code, reason = "no reader yet; the next issues read it")]
     pub changes: Vec<Change>,
 }
 
@@ -63,7 +62,7 @@ impl Graph {
         events.iter().fold(Self::default(), |graph, event| graph.apply(map, event))
     }
 
-    /// The graph after `event`; events of other maps, and changes to a node not in the graph, change nothing.
+    /// The graph after `event`; events of other maps, changes to a node not in the graph, and removals of an edge not in it change nothing.
     fn apply(mut self, map: MapId, event: &Event) -> Self {
         let change = Change { actor: event.actor, at: event.created_at };
 
@@ -86,6 +85,9 @@ impl Graph {
             }
             Payload::EdgeAdded { map: id, kind, from, to } if *id == map => {
                 self.edges.push(Edge { kind: kind.clone(), from: *from, to: *to, changes: vec![change] })
+            }
+            Payload::EdgeRemoved { map: id, kind, from, to } if *id == map => {
+                self.edges.retain(|e| !(e.kind == *kind && e.from == *from && e.to == *to))
             }
             _ => {}
         }
@@ -180,6 +182,50 @@ mod tests {
         assert_eq!(graph.nodes.len(), 1);
         assert_eq!(graph.nodes[0].title, "A");
         assert_eq!(graph.nodes[0].changes.len(), 1);
+    }
+
+    #[test]
+    fn a_removal_drops_the_matching_edge_and_nothing_else() {
+        let (map, other) = (MapId::new(), MapId::new());
+        let (a, add_a) = node_added(map, Actor::Human, "A");
+        let (b, add_b) = node_added(map, Actor::Human, "B");
+        let edge = |map, kind, from, to| Event::edge_added(Source::fixture(), Actor::Human, map, kind, from, to);
+        let remove = |map, kind, from, to| Event::edge_removed(Source::fixture(), Actor::Agent, map, kind, from, to);
+        let events = [
+            add_a,
+            add_b,
+            edge(map, "links", a, b),
+            edge(map, "links", b, a),
+            edge(map, "cites", a, b),
+            remove(other, "links", a, b),
+            remove(map, "links", a, a),
+            remove(map, "links", a, b),
+            remove(map, "links", a, b),
+        ];
+
+        let graph = Graph::of(map, &events);
+
+        let edges: Vec<(&str, NodeId, NodeId)> = graph.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
+        assert_eq!(edges, vec![("links", b, a), ("cites", a, b)]);
+        assert_eq!(graph.nodes.len(), 2);
+    }
+
+    #[test]
+    fn a_removed_edge_added_again_starts_a_new_history() {
+        let map = MapId::new();
+        let (a, add_a) = node_added(map, Actor::Human, "A");
+        let events = [
+            add_a,
+            Event::edge_added(Source::fixture(), Actor::Human, map, "links", a, a),
+            Event::edge_removed(Source::fixture(), Actor::Human, map, "links", a, a),
+            Event::edge_added(Source::fixture(), Actor::Agent, map, "links", a, a),
+        ];
+
+        let graph = Graph::of(map, &events);
+
+        assert_eq!(graph.edges.len(), 1);
+        assert_eq!(graph.edges[0].changes.len(), 1);
+        assert_eq!(graph.edges[0].changes[0].actor, Actor::Agent);
     }
 
     #[test]

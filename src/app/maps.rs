@@ -151,13 +151,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         let (_, map, graph) = self.graph(&source.path, map_kind).await?;
         let Graph { nodes, edges } = &graph;
 
-        let find = |title: &str| {
-            nodes
-                .iter()
-                .find(|n| n.title == title)
-                .ok_or_else(|| format!("the {map_kind} map has no node titled {title:?}"))
-        };
-        let (from, to) = (find(from)?, find(to)?);
+        let (from, to) = (find_node(nodes, map_kind, from)?, find_node(nodes, map_kind, to)?);
         self.schemas.schema(&source.path, map_kind).await?.check_edge(kind, &from.kind, &to.kind)?;
         let (from, to) = (from.id, to.id);
 
@@ -167,6 +161,29 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         }
 
         self.write(&graph, Event::edge_added(source, actor, map.id, kind, from, to)).await
+    }
+
+    /// Records the removal of the edge of this kind between the nodes with these titles on the project's map of the given kind.
+    pub async fn remove_edge(
+        &self,
+        source: Source,
+        actor: Actor,
+        map_kind: &str,
+        from: &str,
+        kind: &str,
+        to: &str,
+    ) -> Result<()> {
+        // Held until return, so the edge cannot change between the check and the append.
+        let _lock = self.store.lock().await?;
+
+        let (_, map, graph) = self.graph(&source.path, map_kind).await?;
+
+        let (from, to) = (find_node(&graph.nodes, map_kind, from)?.id, find_node(&graph.nodes, map_kind, to)?.id);
+        if !graph.edges.iter().any(|e| e.from == from && e.kind == kind && e.to == to) {
+            return Err(format!("the {map_kind} map has no such {kind} edge").into());
+        }
+
+        self.write(&graph, Event::edge_removed(source, actor, map.id, kind, from, to)).await
     }
 
     /// Records a new node on the project's map of the given kind. A title is unique within its map.
@@ -266,6 +283,13 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
 
         self.store.append(&event).await
     }
+}
+
+fn find_node<'a>(nodes: &'a [Node], map_kind: &str, title: &str) -> Result<&'a Node> {
+    nodes
+        .iter()
+        .find(|n| n.title == title)
+        .ok_or_else(|| format!("the {map_kind} map has no node titled {title:?}").into())
 }
 
 async fn resolve_reference(events: &[Event], project: &Path, reference: Ref) -> Result<Reference> {
@@ -1048,6 +1072,79 @@ mod tests {
         assert!(agent.is_ok());
         assert!(after_human.is_err());
         assert_eq!(store.0.lock().unwrap().len(), 4);
+    }
+
+    async fn decisions(store: &Memory, actor: Actor) -> AppService<&Memory, Schemas> {
+        let service = AppService::new(store, Schemas);
+        service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "question", "Q", Default::default(), Vec::new()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default(), Vec::new()).await.unwrap();
+        service.add_edge(Source::fixture(), actor, "decisions", "O", "answers", "Q").await.unwrap();
+
+        service
+    }
+
+    #[tokio::test]
+    async fn removing_an_edge_drops_it_from_the_edges_and_the_summary() {
+        let store = Memory::default();
+        let service = decisions(&store, Actor::Human).await;
+        let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
+
+        service.remove_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
+
+        let last = store.0.lock().unwrap().last().unwrap().clone();
+        assert_eq!(last.actor, Actor::Human);
+        assert_eq!(last.payload.kind(), crate::core::Kind::EdgeRemoved);
+        assert!(service.edges(map.id).await.unwrap().is_empty());
+        let summaries = service.map_summaries(&Source::fixture().path).await.unwrap();
+        assert_eq!((summaries[0].nodes, summaries[0].edges), (2, 0));
+    }
+
+    #[tokio::test]
+    async fn removing_a_missing_node_or_edge_is_an_error_and_the_log_stays() {
+        let store = Memory::default();
+        let service = decisions(&store, Actor::Human).await;
+
+        let from = service.remove_edge(Source::fixture(), Actor::Human, "decisions", "Nope", "answers", "Q").await;
+        let to = service.remove_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Nope").await;
+        let reversed = service.remove_edge(Source::fixture(), Actor::Human, "decisions", "Q", "answers", "O").await;
+        let kind = service.remove_edge(Source::fixture(), Actor::Human, "decisions", "O", "raises", "Q").await;
+        let map = service.remove_edge(Source::fixture(), Actor::Human, "tasks", "O", "answers", "Q").await;
+
+        assert!(from.unwrap_err().to_string().contains("\"Nope\""));
+        assert!(to.unwrap_err().to_string().contains("\"Nope\""));
+        assert!(reversed.unwrap_err().to_string().contains("answers"));
+        assert!(kind.unwrap_err().to_string().contains("raises"));
+        assert!(map.is_err());
+        assert_eq!(store.0.lock().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn the_policy_refuses_an_agent_removing_a_human_edge_and_the_log_stays() {
+        let store = Memory::default();
+        let service = decisions(&store, Actor::Human).await;
+
+        let result = service.remove_edge(Source::fixture(), Actor::Agent, "decisions", "O", "answers", "Q").await;
+
+        let error = result.unwrap_err().to_string();
+        assert!(error.contains("\"O\" answers \"Q\""));
+        assert!(error.contains("only a human may remove it"));
+        assert_eq!(store.0.lock().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn an_agent_may_remove_its_own_edge_and_a_removed_edge_can_be_added_again() {
+        let store = Memory::default();
+        let service = decisions(&store, Actor::Agent).await;
+        let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
+
+        let removed = service.remove_edge(Source::fixture(), Actor::Agent, "decisions", "O", "answers", "Q").await;
+        let again = service.add_edge(Source::fixture(), Actor::Agent, "decisions", "O", "answers", "Q").await;
+
+        assert!(removed.is_ok());
+        assert!(again.is_ok());
+        assert_eq!(service.edges(map.id).await.unwrap().len(), 1);
+        assert_eq!(store.0.lock().unwrap().len(), 6);
     }
 
     #[tokio::test]

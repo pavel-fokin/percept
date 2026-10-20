@@ -40,6 +40,24 @@ pub(super) async fn change<S: EventStore, M: SchemaStore>(service: &AppService<S
     service.change_node(source, actor, map, title, new_title, properties, references).await
 }
 
+pub(super) async fn remove<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
+    match split_remove(args)? {
+        [map, from, kind, to] => {
+            let (actor, source) = cli_writer().await?;
+            service.remove_edge(source, actor, map, from, kind, to).await
+        }
+        _ => Err("usage: percept remove <map> <from> <kind> <to>".into()),
+    }
+}
+
+fn split_remove(args: &[String]) -> Result<&[String]> {
+    if args.iter().any(|a| a.starts_with("--")) {
+        return Err("remove takes no properties or references".into());
+    }
+
+    Ok(args)
+}
+
 struct AddArgs<'a> {
     positionals: &'a [String],
     properties: BTreeMap<String, String>,
@@ -310,6 +328,18 @@ mod tests {
             let args = strings(&["m", "a", "k", "b", "--ref", value]);
 
             assert!(split_add(&args).is_err());
+        }
+    }
+
+    #[test]
+    fn remove_takes_positionals_and_no_flags() {
+        let edge = strings(&["m", "a", "k", "b"]);
+
+        assert_eq!(split_remove(&edge).unwrap(), &edge[..]);
+        for flag in ["--ref", "--definition", "--"] {
+            let args = strings(&["m", "a", "k", "b", flag, "x"]);
+
+            assert!(split_remove(&args).is_err(), "accepted {flag:?}");
         }
     }
 

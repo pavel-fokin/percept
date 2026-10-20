@@ -188,6 +188,7 @@ fn payload(payload: &Payload, home: &Path) -> serde_json::Value {
         | Payload::MapCreated { .. }
         | Payload::NodeAdded { .. }
         | Payload::NodeChanged { .. }
-        | Payload::EdgeAdded { .. } => json!({}),
+        | Payload::EdgeAdded { .. }
+        | Payload::EdgeRemoved { .. } => json!({}),
     }
 }
