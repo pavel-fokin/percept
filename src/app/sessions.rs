@@ -141,7 +141,7 @@ mod tests {
     async fn path_is_the_source_path_of_the_created_event() {
         let store = Memory::default();
         let service = AppService::new(&store, Schemas);
-        let source = Source { client: "claude".into(), path: "/work/app".into() };
+        let source = Source { client: "claude-code".into(), path: "/work/app".into() };
         service.record(client_session_id("a"), source, |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
 
         let sessions = service.sessions().await.unwrap();

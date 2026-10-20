@@ -28,7 +28,7 @@ pub struct Source {
 #[cfg(test)]
 impl Source {
     pub fn fixture() -> Self {
-        Self { client: "claude".into(), path: "/repo".into() }
+        Self { client: "claude-code".into(), path: "/repo".into() }
     }
 }
 

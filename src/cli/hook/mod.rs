@@ -8,16 +8,16 @@ use crate::app::{AppService, source_path};
 use crate::core::{Actor, ClientSessionId, Event, EventStore, SchemaStore, SessionId, Source};
 use crate::shared::Result;
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, ValueEnum)]
 pub(super) enum Client {
     Claude,
     Codex,
 }
 
 impl Client {
-    fn name(self) -> &'static str {
+    pub(super) fn name(self) -> &'static str {
         match self {
-            Client::Claude => "claude",
+            Client::Claude => "claude-code",
             Client::Codex => "codex",
         }
     }

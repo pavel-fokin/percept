@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 
+use super::hook::Client;
 use crate::app::{AppService, Ref, source_path};
 use crate::core::{Actor, EventStore, Reference, SchemaStore, Source};
 use crate::shared::Result;
@@ -87,8 +88,10 @@ fn parse_reference(value: &str) -> Result<Ref> {
 }
 
 async fn cli_writer() -> Result<(Actor, Source)> {
-    let (actor, client) = writer(env_flag("CLAUDECODE"), env_flag("CODEX_SESSION_ID"))?;
-    let source = Source { client: client.into(), path: source_path(&std::env::current_dir()?).await };
+    let client = writer(env_flag("CLAUDECODE"), env_flag("CODEX_SESSION_ID"))?;
+    let actor = if client.is_some() { Actor::Agent } else { Actor::Human };
+    let name = client.map_or("percept-cli", Client::name);
+    let source = Source { client: name.into(), path: source_path(&std::env::current_dir()?).await };
 
     Ok((actor, source))
 }
@@ -162,13 +165,13 @@ fn env_flag(name: &str) -> Option<String> {
     std::env::var(name).ok()
 }
 
-/// Who is running the CLI, from the values of `CLAUDECODE` and `CODEX_SESSION_ID`.
-fn writer(claudecode: Option<String>, codex_session_id: Option<String>) -> Result<(Actor, &'static str)> {
+/// The client running the CLI, from the values of `CLAUDECODE` and `CODEX_SESSION_ID`; none means a human.
+fn writer(claudecode: Option<String>, codex_session_id: Option<String>) -> Result<Option<Client>> {
     match (claudecode.as_deref() == Some("1"), codex_session_id.is_some()) {
         (true, true) => Err("both CLAUDECODE and CODEX_SESSION_ID are set".into()),
-        (true, false) => Ok((Actor::Agent, "claude")),
-        (false, true) => Ok((Actor::Agent, "codex")),
-        (false, false) => Ok((Actor::Human, "percept-cli")),
+        (true, false) => Ok(Some(Client::Claude)),
+        (false, true) => Ok(Some(Client::Codex)),
+        (false, false) => Ok(None),
     }
 }
 
@@ -181,9 +184,9 @@ mod tests {
     fn writer_follows_the_client_environment() {
         let set = || Some("1".to_string());
 
-        assert_eq!(writer(set(), None).unwrap(), (Actor::Agent, "claude"));
-        assert_eq!(writer(None, set()).unwrap(), (Actor::Agent, "codex"));
-        assert_eq!(writer(None, None).unwrap(), (Actor::Human, "percept-cli"));
+        assert_eq!(writer(set(), None).unwrap(), Some(Client::Claude));
+        assert_eq!(writer(None, set()).unwrap(), Some(Client::Codex));
+        assert_eq!(writer(None, None).unwrap(), None);
         assert!(writer(set(), set()).is_err());
     }
 

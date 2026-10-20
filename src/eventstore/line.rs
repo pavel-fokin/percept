@@ -312,7 +312,7 @@ mod tests {
 
         let line = serde_json::to_value(EventLine::from(&event)).unwrap();
 
-        assert_eq!(line["source"], json!({"client": "claude", "path": "/repo"}));
+        assert_eq!(line["source"], json!({"client": "claude-code", "path": "/repo"}));
         assert_eq!(line["actor"], "human");
         assert_eq!(line["kind"], "message");
         assert_eq!(line["payload"], json!({"session": session, "content": "hi"}));
