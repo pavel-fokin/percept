@@ -25,7 +25,7 @@ export type MapNode = {
 };
 
 export type Reference =
-  | { message: { event: string; quote: string } }
+  | { message: { event: string; session: string; created_at: string; quote: string } }
   | { file: { path: string; lines: [number, number]; excerpt: string } };
 
 export type MapEdge = {

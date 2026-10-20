@@ -1,8 +1,8 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::AppService;
-use crate::core::{Actor, Edge, Event, EventStore, Map, MapId, Node, NodeId, Payload, Reference, SchemaStore, Source};
+use crate::core::{Actor, Edge, Event, EventId, EventStore, Map, MapId, Node, NodeId, Payload, Reference, SchemaStore, SessionId, Source};
 use crate::shared::Result;
 
 #[derive(Debug, PartialEq)]
@@ -19,10 +19,19 @@ pub struct MapSummary {
 }
 
 /// A map with its nodes, newest first, and its edges in log order.
+/// `messages` holds every message its nodes cite.
 pub struct MapDetail {
     pub map: Map,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
+    pub messages: BTreeMap<EventId, CitedMessage>,
+}
+
+/// Where a cited message sits: its session and when it was said.
+#[derive(Clone, Copy)]
+pub struct CitedMessage {
+    pub session: SessionId,
+    pub created_at: jiff::Timestamp,
 }
 
 impl<S: EventStore, M: SchemaStore> AppService<S, M> {
@@ -103,7 +112,24 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         let mut nodes = map_nodes(&events, id);
         nodes.reverse();
 
-        Ok(Some(MapDetail { map, nodes, edges: map_edges(&events, id) }))
+        let cited: BTreeSet<EventId> = nodes
+            .iter()
+            .flat_map(|n| &n.references)
+            .filter_map(|r| match r {
+                Reference::Message { event, .. } => Some(*event),
+                Reference::File { .. } => None,
+            })
+            .collect();
+        let messages = events
+            .iter()
+            .filter(|e| cited.contains(&e.id))
+            .filter_map(|e| match &e.payload {
+                Payload::Message { session, .. } => Some((e.id, CitedMessage { session: *session, created_at: e.created_at })),
+                _ => None,
+            })
+            .collect();
+
+        Ok(Some(MapDetail { map, nodes, edges: map_edges(&events, id), messages }))
     }
 
     /// The map's edges in log order.
@@ -797,6 +823,31 @@ mod tests {
         let edges: Vec<(&str, NodeId, NodeId)> = detail.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
         assert_eq!(edges, vec![("answers", detail.nodes[0].id, detail.nodes[1].id)]);
         assert_eq!(detail.map.kind, "decisions");
+    }
+
+    #[tokio::test]
+    async fn map_detail_locates_the_messages_its_nodes_cite() {
+        use crate::core::SessionId;
+        use serde_json::json;
+
+        let store = Memory::default();
+        let service = AppService::new(&store, Schemas);
+        service.create_map(Source::fixture(), Actor::Human, "concepts").await.unwrap();
+        let session = SessionId::new();
+        let cited = Event::message(Source::fixture(), session, Actor::Human, "Keep the text", json!({}));
+        let other = Event::message(Source::fixture(), session, Actor::Human, "Unrelated", json!({}));
+        store.0.lock().unwrap().extend([cited.clone(), other]);
+        service.add_node(
+            Source::fixture(), Actor::Human, "concepts", "concept", "C", BTreeMap::new(),
+            vec![Ref::Message("Keep the text".into())],
+        ).await.unwrap();
+        let map = service.map(&Source::fixture().path, "concepts").await.unwrap();
+
+        let detail = service.map_detail(map.id).await.unwrap().unwrap();
+
+        assert_eq!(detail.messages.len(), 1);
+        assert_eq!(detail.messages[&cited.id].session, session);
+        assert_eq!(detail.messages[&cited.id].created_at, cited.created_at);
     }
 
     #[tokio::test]
