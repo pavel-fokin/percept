@@ -168,6 +168,7 @@ struct SessionView {
     created_at: jiff::Timestamp,
     title: Option<String>,
     path: String,
+    client: String,
 }
 
 impl SessionView {
@@ -178,6 +179,7 @@ impl SessionView {
             created_at: session.created_at,
             title: session.title,
             path: display_path(&session.path, home),
+            client: session.client,
         }
     }
 }
