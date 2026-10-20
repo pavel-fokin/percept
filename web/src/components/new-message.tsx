@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Event } from "../api";
+import { Button } from "./ui/button";
 
 type Target = { id: string; label: string };
 
@@ -14,11 +15,9 @@ export function NewMessage({ events }: { events: Event[] }) {
     seen.current = new Set(messages.map((event) => event.id));
     if (!known) return;
 
-    const fresh = messages.find((event) => !known.has(event.id));
+    const below = (id: string) => (document.getElementById(id)?.getBoundingClientRect().top ?? 0) >= window.innerHeight;
+    const fresh = messages.find((event) => !known.has(event.id) && below(event.id));
     if (!fresh) return;
-
-    const element = document.getElementById(fresh.id);
-    if (!element || element.getBoundingClientRect().top < window.innerHeight) return;
 
     const label = fresh.actor === "human" ? "New prompt" : "New reply";
     setTarget((current) => current ?? { id: fresh.id, label });
@@ -43,14 +42,14 @@ export function NewMessage({ events }: { events: Event[] }) {
   return (
     <div role="status">
       {target && (
-        <button
-          type="button"
+        <Button
+          variant="secondary"
           onClick={jump}
-          className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-1/2 z-10 min-h-11 -translate-x-1/2 cursor-pointer rounded-full border border-border bg-surface px-4 text-sm whitespace-nowrap text-text"
+          className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-1/2 z-10 min-h-11 -translate-x-1/2 whitespace-nowrap"
         >
-          <span aria-hidden>↓ </span>
+          <span aria-hidden>↓</span>
           {target.label}
-        </button>
+        </Button>
       )}
     </div>
   );

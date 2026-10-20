@@ -36,7 +36,7 @@ export async function loadStart() {
 
 export function Start() {
   const groups = useLoaderData<typeof loadStart>();
-  usePolling(5000, true);
+  usePolling(true);
   const now = new Date();
 
   if (groups.length === 0) return <EmptyState />;

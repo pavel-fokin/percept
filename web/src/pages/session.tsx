@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigationType } from "react-router";
 import { getData, type Event, type Session } from "../api";
 import { BackLink } from "../components/back-link";
@@ -67,7 +67,7 @@ export function SessionPage({ session, events }: { session: Session; events: Eve
   const started = useMemo(() => subagents(events), [events]);
   const prompted = list.filter((e) => e.prompt);
   const prompts = prompted.length;
-  usePolling(5000, session.status !== "ended");
+  usePolling(session.status !== "ended");
   useQuoteHighlight();
   useScrollToLastPrompt(prompted.at(-1)?.id);
 
@@ -152,12 +152,16 @@ function Quiet({ id, children }: { id: string; children: ReactNode }) {
 function useScrollToLastPrompt(id: string | undefined) {
   const { hash, key } = useLocation();
   const navigation = useNavigationType();
+  const opened = useRef<string | null>(null);
 
   useEffect(() => {
+    if (opened.current === key) return;
+    opened.current = key;
+
     // Back, forward and reload return to where the reader was; only a fresh tab's first entry has the default key.
     if (hash || !id || (navigation === "POP" && key !== "default")) return;
     document.getElementById(id)?.scrollIntoView();
-  }, [hash, key, navigation]);
+  }, [hash, id, key, navigation]);
 }
 
 /** Marks the `?q=` quote inside the message `#<event>` names. A quote that spans markdown syntax is not in the rendered text and stays unmarked. */

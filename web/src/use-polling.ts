@@ -1,8 +1,10 @@
 import { useEffect } from "react";
 import { useRevalidator } from "react-router";
 
-/** While `active`, revalidates the route loaders every `ms` while the tab is visible, never overlapping requests. */
-export function usePolling(ms: number, active: boolean) {
+const INTERVAL_MS = 5000;
+
+/** While `active`, revalidates the route loaders every 5 s while the tab is visible, never overlapping requests. */
+export function usePolling(active: boolean) {
   const { revalidate, state } = useRevalidator();
 
   useEffect(() => {
@@ -11,7 +13,7 @@ export function usePolling(ms: number, active: boolean) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const schedule = () => {
       if (document.visibilityState === "hidden") return;
-      timer = setTimeout(() => void revalidate(), ms);
+      timer = setTimeout(() => void revalidate(), INTERVAL_MS);
     };
     const onVisibility = () => {
       clearTimeout(timer);
@@ -25,5 +27,5 @@ export function usePolling(ms: number, active: boolean) {
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVisibility);
     };
-  }, [active, ms, revalidate, state]);
+  }, [active, revalidate, state]);
 }

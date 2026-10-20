@@ -17,7 +17,6 @@ pub struct Session {
     /// The first non-empty thing the human said, if they said anything.
     pub title: Option<String>,
     pub status: SessionStatus,
-    /// When the session's last event happened.
     pub last_event_at: Timestamp,
 }
 

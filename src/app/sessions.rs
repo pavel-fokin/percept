@@ -22,8 +22,8 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
 
         let mut last: BTreeMap<SessionId, (SessionStatus, Timestamp)> = BTreeMap::new();
         for e in &events {
-            if let Some(session) = e.payload.session() {
-                last.insert(session, (status(e), e.created_at));
+            if let Some((session, status)) = e.session_status() {
+                last.insert(session, (status, e.created_at));
             }
         }
 
@@ -82,21 +82,6 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         }
 
         self.store.append(&event(source, session)).await
-    }
-}
-
-/// The status an event of a session leaves it in. A hook sends an agent message only when the agent stops.
-fn status(event: &Event) -> SessionStatus {
-    match &event.payload {
-        Payload::SessionStopped { .. } => SessionStatus::Ended,
-        Payload::SessionCreated { .. } | Payload::SessionStarted { .. } => SessionStatus::Waiting,
-        Payload::Message { .. } if event.actor == Actor::Agent => SessionStatus::Waiting,
-        Payload::Message { .. } | Payload::ToolUsed { .. } | Payload::SubagentStarted { .. } | Payload::SubagentReported { .. } => {
-            SessionStatus::Working
-        }
-        Payload::MapCreated { .. } | Payload::NodeAdded { .. } | Payload::EdgeAdded { .. } => {
-            unreachable!("map events carry no session")
-        }
     }
 }
 

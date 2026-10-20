@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use super::{ClientAgentId, ClientSessionId, MapId, NodeId, Reference, SessionId};
+use super::{ClientAgentId, ClientSessionId, MapId, NodeId, Reference, SessionId, SessionStatus};
 use crate::shared::Id;
 
 pub type EventId = Id<Event>;
@@ -218,6 +218,20 @@ impl Event {
     pub fn edge_added(source: Source, actor: Actor, map: MapId, kind: &str, from: NodeId, to: NodeId) -> Self {
         let payload = Payload::EdgeAdded { map, kind: kind.into(), from, to };
         Self::build(source, actor, payload, None)
+    }
+
+    /// The session this event belongs to and the status it leaves it in. A hook sends an agent message only when the agent stops.
+    pub fn session_status(&self) -> Option<(SessionId, SessionStatus)> {
+        match &self.payload {
+            Payload::SessionStopped { session } => Some((*session, SessionStatus::Ended)),
+            Payload::SessionCreated { session, .. } | Payload::SessionStarted { session } => Some((*session, SessionStatus::Waiting)),
+            Payload::Message { session, .. } if self.actor == Actor::Agent => Some((*session, SessionStatus::Waiting)),
+            Payload::Message { session, .. }
+            | Payload::ToolUsed { session, .. }
+            | Payload::SubagentStarted { session, .. }
+            | Payload::SubagentReported { session, .. } => Some((*session, SessionStatus::Working)),
+            Payload::MapCreated { .. } | Payload::NodeAdded { .. } | Payload::EdgeAdded { .. } => None,
+        }
     }
 
     fn build(source: Source, actor: Actor, payload: Payload, raw: Option<serde_json::Value>) -> Self {
