@@ -99,11 +99,24 @@ fn str_field(value: &serde_json::Value, field: &str) -> Option<String> {
 }
 
 fn joined(lines: Vec<&str>) -> Option<String> {
-    joined_with(lines, "\n")
+    let text = lines.join("\n");
+    (!text.is_empty()).then_some(text)
 }
 
-fn joined_with(parts: Vec<&str>, separator: &str) -> Option<String> {
-    non_empty(Some(&parts.join(separator)))
+/// Null, `{}` and `[]` carry nothing worth showing.
+fn is_blank(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null => true,
+        serde_json::Value::Object(fields) => fields.is_empty(),
+        serde_json::Value::Array(items) => items.is_empty(),
+        _ => false,
+    }
+}
+
+/// The tool's input as compact JSON, for a tool whose arguments have no one field to show.
+fn json_input(raw: &serde_json::Value) -> Option<String> {
+    let input = &raw["tool_input"];
+    (!is_blank(input)).then(|| input.to_string())
 }
 
 /// The text parts of an MCP tool's `content` array.
@@ -114,20 +127,16 @@ fn mcp_output(response: &serde_json::Value) -> Option<String> {
 
 /// Reads a tool no client table covers: the input as compact JSON, the response as text.
 fn unknown_tool_io(raw: &serde_json::Value) -> (Option<String>, Option<String>) {
-    let input = match &raw["tool_input"] {
-        serde_json::Value::Null => None,
-        input => Some(input.to_string()),
-    };
     let output = match &raw["tool_response"] {
-        serde_json::Value::Null => None,
+        response if is_blank(response) => None,
         serde_json::Value::String(text) => non_empty(Some(text)),
-        serde_json::Value::Array(items) if items.iter().all(|item| item["text"].is_string()) && !items.is_empty() => {
+        serde_json::Value::Array(items) if items.iter().all(|item| item["text"].is_string()) => {
             joined(items.iter().filter_map(|item| item["text"].as_str()).collect())
         }
         response => serde_json::to_string_pretty(response).ok(),
     };
 
-    (input, output)
+    (json_input(raw), output)
 }
 
 #[cfg(test)]
@@ -142,6 +151,15 @@ mod tests {
 
     fn shared_no_io(raw: serde_json::Value) -> Result<Translation> {
         shared(raw, |_, _| (None, None))
+    }
+
+    /// A client's `tool_io` applied to a hook that names its tool.
+    pub(super) fn io(tool_io: ToolIo, raw: serde_json::Value) -> (Option<String>, Option<String>) {
+        tool_io(raw["tool_name"].as_str().unwrap(), &raw)
+    }
+
+    pub(super) fn some(text: &str) -> Option<String> {
+        Some(text.to_owned())
     }
 
     pub(super) fn record(translation: Translation) -> (ClientSessionId, SessionId, Event) {

@@ -80,8 +80,8 @@ impl TryFrom<EventLine> for Event {
             Kind::ToolUsed => Payload::ToolUsed {
                 session: field(p, "session")?,
                 tool: field(p, "tool")?,
-                input: if p.get("input").is_some() { field(p, "input")? } else { None },
-                output: if p.get("output").is_some() { field(p, "output")? } else { None },
+                input: field(p, "input")?,
+                output: field(p, "output")?,
             },
             Kind::SubagentStarted => Payload::SubagentStarted {
                 session: field(p, "session")?,

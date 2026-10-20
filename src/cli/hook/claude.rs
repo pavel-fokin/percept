@@ -1,4 +1,4 @@
-use super::{EventBuilder, Result, Translation, joined, mcp_output, session_id, shared, str_field, text, unknown_tool_io};
+use super::{EventBuilder, Result, Translation, joined, json_input, mcp_output, session_id, shared, str_field, text, unknown_tool_io};
 use crate::core::{Actor, ClientAgentId, Event};
 
 const AGENT_MESSAGE: &str = "<agent-message from=\"";
@@ -40,7 +40,7 @@ fn tool_io(tool: &str, raw: &serde_json::Value) -> (Option<String>, Option<Strin
         "WebFetch" => (str_field(input, "url"), None),
         "WebSearch" => (str_field(input, "query"), None),
         "Skill" => (str_field(input, "skill"), None),
-        mcp if mcp.starts_with("mcp__") => (str_field(input, "title"), mcp_output(response)),
+        mcp if mcp.starts_with("mcp__") => (json_input(raw), mcp_output(response)),
         _ => unknown_tool_io(raw),
     }
 }
@@ -102,7 +102,7 @@ fn between<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::record;
+    use super::super::tests::{record, some};
     use super::*;
     use crate::core::{Actor, Payload};
     use serde_json::json;
@@ -139,16 +139,11 @@ mod tests {
 
         let (_, session, event) = record(translate(raw).unwrap());
 
-        assert_eq!(event.payload, Payload::ToolUsed { session, tool: "Agent".into(), input: Some(r#"{"description":"Look"}"#.into()), output: Some("{}".into()) });
+        assert_eq!(event.payload, Payload::ToolUsed { session, tool: "Agent".into(), input: Some(r#"{"description":"Look"}"#.into()), output: None });
     }
 
     fn io(raw: serde_json::Value) -> (Option<String>, Option<String>) {
-        let tool = raw["tool_name"].as_str().unwrap().to_owned();
-        tool_io(&tool, &raw)
-    }
-
-    fn some(text: &str) -> Option<String> {
-        Some(text.to_owned())
+        super::super::tests::io(tool_io, raw)
     }
 
     #[test]
@@ -198,11 +193,11 @@ mod tests {
     }
 
     #[test]
-    fn mcp_tools_output_their_text_parts() {
+    fn mcp_tools_record_their_arguments_and_text_parts() {
         let content = json!([{"type": "text", "text": "one"}, {"type": "image", "data": "x"}, {"type": "text", "text": "two"}]);
-        let raw = json!({"tool_name": "mcp__docs__read", "tool_input": {"title": "T"}, "tool_response": {"content": content}});
+        let raw = json!({"tool_name": "mcp__docs__read", "tool_input": {"id": 7}, "tool_response": {"content": content}});
 
-        assert_eq!(io(raw), (some("T"), some("one\ntwo")));
+        assert_eq!(io(raw), (some(r#"{"id":7}"#), some("one\ntwo")));
     }
 
     #[test]
@@ -211,11 +206,13 @@ mod tests {
         let string = json!({"tool_name": "SendMessage", "tool_input": {}, "tool_response": "sent"});
         let texts = json!({"tool_name": "SendMessage", "tool_input": {}, "tool_response": [{"text": "x"}, {"text": "y"}]});
         let missing = json!({"tool_name": "SendMessage"});
+        let blank = json!({"tool_name": "SendMessage", "tool_input": {}, "tool_response": []});
 
         assert_eq!(io(compact), (some(r#"{"to":"a"}"#), some("{\n  \"ok\": true\n}")));
         assert_eq!(io(string).1, some("sent"));
         assert_eq!(io(texts).1, some("x\ny"));
         assert_eq!(io(missing), (None, None));
+        assert_eq!(io(blank), (None, None));
     }
 
     #[test]

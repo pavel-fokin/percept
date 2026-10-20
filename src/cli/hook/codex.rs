@@ -1,48 +1,46 @@
-use super::{Result, Translation, joined_with, mcp_output, non_empty, shared, str_field, unknown_tool_io};
+use super::{Result, Translation, json_input, mcp_output, non_empty, shared, str_field, unknown_tool_io};
+
+const PATCH_FILE_LINES: [&str; 4] = ["*** Add File: ", "*** Update File: ", "*** Delete File: ", "*** Move to: "];
 
 pub(super) fn translate(raw: serde_json::Value) -> Result<Translation> {
     shared(raw, tool_io)
 }
 
 fn tool_io(tool: &str, raw: &serde_json::Value) -> (Option<String>, Option<String>) {
-    let input = &raw["tool_input"];
+    let (input, response) = (&raw["tool_input"], &raw["tool_response"]);
 
     match tool {
-        "Bash" => (str_field(input, "command"), non_empty(raw["tool_response"].as_str())),
+        "Bash" => (str_field(input, "command"), non_empty(response.as_str())),
         "apply_patch" => {
             let patch = input["command"].as_str().unwrap_or_default();
-            let paths = patch.lines().filter_map(|line| {
-                ["*** Add File: ", "*** Update File: ", "*** Delete File: "].iter().find_map(|prefix| line.strip_prefix(prefix))
-            });
-            (joined_with(paths.collect(), ", "), non_empty(Some(patch)))
+            let paths: Vec<&str> = patch
+                .lines()
+                .filter_map(|line| PATCH_FILE_LINES.iter().find_map(|prefix| line.strip_prefix(prefix)))
+                .collect();
+            (non_empty(Some(&paths.join(", "))), non_empty(Some(patch)))
         }
         "view_image" => (str_field(input, "path"), None),
-        mcp if mcp.starts_with("mcp__") => (str_field(input, "title"), mcp_output(&raw["tool_response"])),
+        mcp if mcp.starts_with("mcp__") => (json_input(raw), mcp_output(response)),
         _ => unknown_tool_io(raw),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::super::tests::record;
+    use super::super::tests::{record, some};
     use super::*;
     use crate::core::{Actor, Payload};
     use serde_json::json;
+
+    fn io(raw: serde_json::Value) -> (Option<String>, Option<String>) {
+        super::super::tests::io(tool_io, raw)
+    }
 
     #[test]
     fn subagent_stop_is_an_error() {
         let raw = json!({"hook_event_name": "SubagentStop", "last_assistant_message": "done", "session_id": "a"});
 
         assert!(translate(raw).is_err());
-    }
-
-    fn io(raw: serde_json::Value) -> (Option<String>, Option<String>) {
-        let tool = raw["tool_name"].as_str().unwrap().to_owned();
-        tool_io(&tool, &raw)
-    }
-
-    fn some(text: &str) -> Option<String> {
-        Some(text.to_owned())
     }
 
     #[test]
@@ -54,10 +52,10 @@ mod tests {
 
     #[test]
     fn apply_patch_lists_the_files_and_outputs_the_patch() {
-        let patch = "*** Begin Patch\n*** Add File: a.rs\n+x\n*** Update File: b.rs\n@@\n-y\n*** Delete File: c.rs\n*** End Patch";
+        let patch = "*** Begin Patch\n*** Add File: a.rs\n+x\n*** Update File: b.rs\n*** Move to: d.rs\n@@\n-y\n*** Delete File: c.rs\n*** End Patch";
         let raw = json!({"tool_name": "apply_patch", "tool_input": {"command": patch}, "tool_response": "ok"});
 
-        assert_eq!(io(raw), (some("a.rs, b.rs, c.rs"), some(patch)));
+        assert_eq!(io(raw), (some("a.rs, b.rs, d.rs, c.rs"), some(patch)));
     }
 
     #[test]
@@ -68,10 +66,10 @@ mod tests {
     }
 
     #[test]
-    fn mcp_tools_output_their_text_parts() {
-        let raw = json!({"tool_name": "mcp__docs__read", "tool_input": {"title": "T"}, "tool_response": {"content": [{"type": "text", "text": "one"}]}});
+    fn mcp_tools_record_their_arguments_and_text_parts() {
+        let raw = json!({"tool_name": "mcp__docs__read", "tool_input": {"id": 7}, "tool_response": {"content": [{"type": "text", "text": "one"}]}});
 
-        assert_eq!(io(raw), (some("T"), some("one")));
+        assert_eq!(io(raw), (some(r#"{"id":7}"#), some("one")));
     }
 
     #[test]

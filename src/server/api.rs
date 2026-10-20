@@ -177,9 +177,14 @@ impl SessionView {
     }
 }
 
-/// `~/rest` under home, the absolute path otherwise. A home of `/` or empty is no home: everything would sit under it.
+/// A home of `/` or empty is no home: everything would sit under it.
+fn real_home(home: &FsPath) -> Option<&FsPath> {
+    home.parent().map(|_| home)
+}
+
+/// `~/rest` under home, the absolute path otherwise.
 fn display_path(path: &FsPath, home: &FsPath) -> String {
-    let rest = home.parent().and_then(|_| path.strip_prefix(home).ok());
+    let rest = real_home(home).and_then(|home| path.strip_prefix(home).ok());
 
     match rest {
         Some(rest) if rest.as_os_str().is_empty() => "~".to_string(),
@@ -188,12 +193,27 @@ fn display_path(path: &FsPath, home: &FsPath) -> String {
     }
 }
 
-/// Every path under home in `text` written as `~/rest`, so a command reads like a file path does.
+/// Every path in `text` that starts at home written from `~`, so a command reads like a file path does.
+/// Home counts only as a whole path segment that begins a word: `/mnt/Users/me/a` and `/Users/me2` stay.
 fn display_paths(text: &str, home: &FsPath) -> String {
-    match home.parent() {
-        Some(_) => text.replace(&format!("{}/", home.display()), "~/"),
-        None => text.to_string(),
+    let Some(home) = real_home(home) else { return text.to_string() };
+    let home = home.display().to_string();
+
+    let mut shown = String::with_capacity(text.len());
+    let mut copied = 0;
+    for (at, _) in text.match_indices(&home) {
+        let end = at + home.len();
+        let starts_word = text[..at].chars().next_back().is_none_or(|c| c.is_whitespace() || "'\"=:(".contains(c));
+        let ends_segment = text[end..].chars().next().is_none_or(|c| c == '/' || c.is_whitespace() || "'\";:)".contains(c));
+        if starts_word && ends_segment {
+            shown.push_str(&text[copied..at]);
+            shown.push('~');
+            copied = end;
+        }
     }
+    shown.push_str(&text[copied..]);
+
+    shown
 }
 
 /// An event as the page reads it: the hook input stays in the log.
@@ -282,11 +302,18 @@ mod tests {
 
     #[test]
     fn paths_under_home_inside_text_start_with_a_tilde() {
-        let text = "sed -n 1,9p /Users/pavel-fokin/a.rs /Users/pavel-fokinx/b.rs";
+        let text = "cd /Users/pavel-fokin && sed -n 1,9p '/Users/pavel-fokin/a.rs' /Users/pavel-fokinx/b.rs";
 
         let shown = display_paths(text, FsPath::new(HOME));
 
-        assert_eq!(shown, "sed -n 1,9p ~/a.rs /Users/pavel-fokinx/b.rs");
+        assert_eq!(shown, "cd ~ && sed -n 1,9p '~/a.rs' /Users/pavel-fokinx/b.rs");
+    }
+
+    #[test]
+    fn home_inside_another_path_stays() {
+        let text = "ls /Volumes/backup/Users/pavel-fokin/a.rs";
+
+        assert_eq!(display_paths(text, FsPath::new(HOME)), text);
     }
 
     #[test]
