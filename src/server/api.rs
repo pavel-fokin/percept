@@ -188,6 +188,14 @@ fn display_path(path: &FsPath, home: &FsPath) -> String {
     }
 }
 
+/// Every path under home in `text` written as `~/rest`, so a command reads like a file path does.
+fn display_paths(text: &str, home: &FsPath) -> String {
+    match home.parent() {
+        Some(_) => text.replace(&format!("{}/", home.display()), "~/"),
+        None => text.to_string(),
+    }
+}
+
 /// An event as the page reads it: the hook input stays in the log.
 #[derive(Serialize)]
 struct EventView {
@@ -213,17 +221,20 @@ pub(super) async fn session_events<S: EventStore + Send + Sync + 'static, M: Sch
             id: e.id,
             actor: e.actor,
             kind: e.payload.kind().name(),
-            payload: view_payload(&e.payload),
+            payload: view_payload(&e.payload, &api.home),
             created_at: e.created_at,
         })
         .collect();
     Ok(Json(json!({ "data": events })))
 }
 
-fn view_payload(payload: &Payload) -> serde_json::Value {
+fn view_payload(payload: &Payload, home: &FsPath) -> serde_json::Value {
     match payload {
         Payload::Message { content, .. } => json!({ "content": content }),
-        Payload::ToolUsed { tool, .. } => json!({ "tool": tool }),
+        Payload::ToolUsed { tool, input, output, .. } => {
+            let input = input.as_deref().map(|input| display_paths(input, home));
+            json!({ "tool": tool, "input": input, "output": output })
+        }
         Payload::SubagentStarted { subagent, agent, task, .. } => {
             json!({ "subagent": subagent.as_str(), "agent": agent, "task": task })
         }
@@ -267,6 +278,20 @@ mod tests {
     #[test]
     fn a_sibling_of_home_is_outside_it() {
         assert_eq!(shown("/Users/pavel-fokinX/code"), "/Users/pavel-fokinX/code");
+    }
+
+    #[test]
+    fn paths_under_home_inside_text_start_with_a_tilde() {
+        let text = "sed -n 1,9p /Users/pavel-fokin/a.rs /Users/pavel-fokinx/b.rs";
+
+        let shown = display_paths(text, FsPath::new(HOME));
+
+        assert_eq!(shown, "sed -n 1,9p ~/a.rs /Users/pavel-fokinx/b.rs");
+    }
+
+    #[test]
+    fn a_root_home_leaves_text_unchanged() {
+        assert_eq!(display_paths("cat /a.rs", FsPath::new("/")), "cat /a.rs");
     }
 
     #[test]
