@@ -51,10 +51,7 @@ impl From<&Event> for EventLine {
                 json!({ "map": map, "node": node, "title": title, "properties": properties, "references": references })
             }
             Payload::NodeRemoved { map, node } => json!({ "map": map, "node": node }),
-            Payload::EdgeAdded { map, kind, from, to } => {
-                json!({ "map": map, "kind": kind, "from": from, "to": to })
-            }
-            Payload::EdgeRemoved { map, kind, from, to } => {
+            Payload::EdgeAdded { map, kind, from, to } | Payload::EdgeRemoved { map, kind, from, to } => {
                 json!({ "map": map, "kind": kind, "from": from, "to": to })
             }
         };

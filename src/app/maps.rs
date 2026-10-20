@@ -63,9 +63,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
 
     /// The project's map of the given kind, or an error if it has none.
     pub async fn map(&self, project: &Path, kind: &str) -> Result<Map> {
-        let found = self.maps(project).await?.into_iter().find(|m| m.kind == kind);
-
-        found.ok_or_else(|| format!("this project has no {kind} map").into())
+        find_map(&self.store.all().await?, project, kind)
     }
 
     /// The map's nodes in log order.
@@ -155,7 +153,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         self.schemas.schema(&source.path, map_kind).await?.check_edge(kind, &from.kind, &to.kind)?;
         let (from, to) = (from.id, to.id);
 
-        let repeated = edges.iter().any(|e| e.from == from && e.kind == kind && e.to == to);
+        let repeated = edges.iter().any(|e| e.is(kind, from, to));
         if repeated {
             return Err(format!("the {map_kind} map already has this {kind} edge").into());
         }
@@ -179,7 +177,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         let (_, map, graph) = self.graph(&source.path, map_kind).await?;
 
         let (from, to) = (find_node(&graph.nodes, map_kind, from)?.id, find_node(&graph.nodes, map_kind, to)?.id);
-        if !graph.edges.iter().any(|e| e.from == from && e.kind == kind && e.to == to) {
+        if !graph.edges.iter().any(|e| e.is(kind, from, to)) {
             return Err(format!("the {map_kind} map has no such {kind} edge").into());
         }
 
@@ -247,8 +245,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         let _lock = self.store.lock().await?;
 
         let (events, map, graph) = self.graph(&source.path, map_kind).await?;
-        let node = graph.nodes.iter().find(|n| n.title == title)
-            .ok_or_else(|| format!("the {map_kind} map has no node titled {title:?}"))?;
+        let node = find_node(&graph.nodes, map_kind, title)?;
 
         let new_title = new_title.unwrap_or(&node.title);
         not_blank("title", new_title)?;
@@ -264,15 +261,14 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
                 merged.insert(key, value);
             }
         }
+        if new_title == node.title && merged == node.properties && references.is_empty() {
+            return Err(format!("the change leaves {title:?} as it is").into());
+        }
         self.schemas.schema(&source.path, map_kind).await?.check_node(&node.kind, &merged)?;
 
         let mut all_references = node.references.clone();
         for reference in references {
             all_references.push(resolve_reference(&events, &source.path, reference).await?);
-        }
-
-        if new_title == node.title && merged == node.properties && all_references == node.references {
-            return Err(format!("the change leaves {title:?} as it is").into());
         }
 
         self.write(&graph, Event::node_changed(source, actor, map.id, node.id, new_title, merged, all_references)).await
@@ -281,8 +277,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
     /// The log, the project's map of the given kind and its graph, read under the store lock.
     async fn graph(&self, project: &Path, map_kind: &str) -> Result<(Vec<Event>, Map, Graph)> {
         let events = self.store.all().await?;
-        let map = all_maps(&events).into_iter().find(|m| m.path == project && m.kind == map_kind)
-            .ok_or_else(|| format!("this project has no {map_kind} map"))?;
+        let map = find_map(&events, project, map_kind)?;
         let graph = Graph::of(map.id, &events);
 
         Ok((events, map, graph))
@@ -294,6 +289,13 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
 
         self.store.append(&event).await
     }
+}
+
+fn find_map(events: &[Event], project: &Path, kind: &str) -> Result<Map> {
+    all_maps(events)
+        .into_iter()
+        .find(|m| m.path == project && m.kind == kind)
+        .ok_or_else(|| format!("this project has no {kind} map").into())
 }
 
 fn find_node<'a>(nodes: &'a [Node], map_kind: &str, title: &str) -> Result<&'a Node> {

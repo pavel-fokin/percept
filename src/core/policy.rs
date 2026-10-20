@@ -15,21 +15,21 @@ impl Policy {
 
         match &event.payload {
             Payload::NodeChanged { node, .. } => {
-                let Some(found) = graph.nodes.iter().find(|n| n.id == *node) else {
+                let Some(found) = graph.node(*node) else {
                     return Ok(());
                 };
 
                 refuse_human(&found.changes, &format!("{:?}", found.title), "change")
             }
             Payload::EdgeRemoved { kind, from, to, .. } => {
-                let Some(found) = graph.edges.iter().find(|e| e.kind == *kind && e.from == *from && e.to == *to) else {
+                let Some(found) = graph.edges.iter().find(|e| e.is(kind, *from, *to)) else {
                     return Ok(());
                 };
 
                 refuse_human(&found.changes, &edge_name(graph, found), "remove")
             }
             Payload::NodeRemoved { node, .. } => {
-                let Some(found) = graph.nodes.iter().find(|n| n.id == *node) else {
+                let Some(found) = graph.node(*node) else {
                     return Ok(());
                 };
                 refuse_human(&found.changes, &format!("{:?}", found.title), "remove")?;
@@ -47,7 +47,7 @@ impl Policy {
 }
 
 fn edge_name(graph: &Graph, edge: &Edge) -> String {
-    let title = |id| graph.nodes.iter().find(|n| n.id == id).map_or("", |n| n.title.as_str());
+    let title = |id| graph.node(id).map_or("", |n| n.title.as_str());
 
     format!("the edge {:?} {} {:?}", title(edge.from), edge.kind, title(edge.to))
 }

@@ -2,7 +2,7 @@ import { Link } from "react-router";
 import { getData, type Session } from "../api";
 import { BackLink } from "../components/back-link";
 import { RouteError } from "../components/route-error";
-import { byDay, full, withChangedTimes } from "../format";
+import { byDay, full, time, withChangedTimes } from "../format";
 import { sessionUrl } from "../paths";
 
 export async function loadPathSessions(path: string) {
@@ -28,7 +28,7 @@ export function PathSessions({ path, sessions }: { path: string; sessions: Sessi
           <section key={day.items[0].id}>
             <h2 className="mb-1 text-sm font-semibold text-muted">{day.name}</h2>
             <ul className="-mx-3 grid gap-0.5">
-              {withChangedTimes(day.items, (s) => s.created_at).map(({ item, shown }) => (
+              {withChangedTimes(day.items, (s) => time.format(new Date(s.created_at))).map(({ item, shown }) => (
                 <SessionRow key={item.id} session={item} shown={shown} />
               ))}
             </ul>

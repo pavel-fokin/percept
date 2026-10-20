@@ -10,7 +10,7 @@ export function relative(date: Date, now: Date) {
   if (minutes < 360) return `${Math.floor(minutes / 60)} h ago`;
 
   const name = dayName(date, now);
-  return name === "Today" || name === "Yesterday" ? `${name}, ${time.format(date)}` : name;
+  return name === "Today" || name === "Yesterday" ? dayAndTime(date, now) : name;
 }
 
 /** The day a date falls on, as a heading: `Today`, `Yesterday` or `11 Oct`. */
@@ -53,11 +53,11 @@ export function byDay<T>(items: T[], at: (item: T) => string, now: Date) {
   return days;
 }
 
-/** Each item with its clock time, left out when the item before it shows the same minute. */
-export function withChangedTimes<T>(items: T[], at: (item: T) => string) {
+/** Each item with its time stamp, left out when the item before it shows the same stamp. */
+export function withChangedTimes<T>(items: T[], stamp: (item: T) => string) {
   return items.map((item, i) => {
-    const shown = time.format(new Date(at(item)));
-    const same = i > 0 && time.format(new Date(at(items[i - 1]))) === shown;
+    const shown = stamp(item);
+    const same = i > 0 && stamp(items[i - 1]) === shown;
     return { item, shown: same ? undefined : shown };
   });
 }

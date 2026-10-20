@@ -42,6 +42,13 @@ pub struct Edge {
     pub changes: Vec<Change>,
 }
 
+impl Edge {
+    /// An edge is its kind and its two ends; two edges alike would be one fact stated twice.
+    pub fn is(&self, kind: &str, from: NodeId, to: NodeId) -> bool {
+        self.kind == kind && self.from == from && self.to == to
+    }
+}
+
 /// Who wrote to a node or an edge, and when.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Change {
@@ -59,16 +66,20 @@ pub struct Graph {
 impl Graph {
     /// The graph of `map` after every event in `events`.
     pub fn of(map: MapId, events: &[Event]) -> Self {
-        events.iter().fold(Self::default(), |graph, event| graph.apply(map, event))
+        events.iter().filter(|e| e.payload.map() == Some(map)).fold(Self::default(), Self::apply)
     }
 
-    /// The graph after `event`; events of other maps, changes to a node not in the graph, and removals of a node or edge not in it change nothing.
+    pub fn node(&self, id: NodeId) -> Option<&Node> {
+        self.nodes.iter().find(|n| n.id == id)
+    }
+
+    /// The graph after `event`; changes to a node not in the graph, and removals of a node or edge not in it, change nothing.
     /// A removed node takes every edge from or to it.
-    fn apply(mut self, map: MapId, event: &Event) -> Self {
+    fn apply(mut self, event: &Event) -> Self {
         let change = Change { actor: event.actor, at: event.created_at };
 
         match &event.payload {
-            Payload::NodeAdded { map: id, node, kind, title, properties, references } if *id == map => self.nodes.push(Node {
+            Payload::NodeAdded { node, kind, title, properties, references, .. } => self.nodes.push(Node {
                 id: *node,
                 kind: kind.clone(),
                 title: title.clone(),
@@ -76,7 +87,7 @@ impl Graph {
                 references: references.clone(),
                 changes: vec![change],
             }),
-            Payload::NodeChanged { map: id, node, title: new_title, properties: new_properties, references: new_references } if *id == map => {
+            Payload::NodeChanged { node, title: new_title, properties: new_properties, references: new_references, .. } => {
                 if let Some(found) = self.nodes.iter_mut().find(|n| n.id == *node) {
                     found.title = new_title.clone();
                     found.properties = new_properties.clone();
@@ -84,16 +95,14 @@ impl Graph {
                     found.changes.push(change);
                 }
             }
-            Payload::NodeRemoved { map: id, node } if *id == map => {
+            Payload::NodeRemoved { node, .. } => {
                 self.nodes.retain(|n| n.id != *node);
                 self.edges.retain(|e| e.from != *node && e.to != *node);
             }
-            Payload::EdgeAdded { map: id, kind, from, to } if *id == map => {
+            Payload::EdgeAdded { kind, from, to, .. } => {
                 self.edges.push(Edge { kind: kind.clone(), from: *from, to: *to, changes: vec![change] })
             }
-            Payload::EdgeRemoved { map: id, kind, from, to } if *id == map => {
-                self.edges.retain(|e| !(e.kind == *kind && e.from == *from && e.to == *to))
-            }
+            Payload::EdgeRemoved { kind, from, to, .. } => self.edges.retain(|e| !e.is(kind, *from, *to)),
             _ => {}
         }
 

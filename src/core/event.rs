@@ -139,6 +139,24 @@ impl Payload {
             Self::MapCreated { .. } | Self::NodeAdded { .. } | Self::NodeChanged { .. } | Self::NodeRemoved { .. } | Self::EdgeAdded { .. } | Self::EdgeRemoved { .. } => None,
         }
     }
+
+    pub fn map(&self) -> Option<MapId> {
+        match self {
+            Self::MapCreated { map, .. }
+            | Self::NodeAdded { map, .. }
+            | Self::NodeChanged { map, .. }
+            | Self::NodeRemoved { map, .. }
+            | Self::EdgeAdded { map, .. }
+            | Self::EdgeRemoved { map, .. } => Some(*map),
+            Self::SessionCreated { .. }
+            | Self::SessionStarted { .. }
+            | Self::SessionStopped { .. }
+            | Self::Message { .. }
+            | Self::ToolUsed { .. }
+            | Self::SubagentStarted { .. }
+            | Self::SubagentReported { .. } => None,
+        }
+    }
 }
 
 /// `raw` is the hook input, unchanged. Events percept makes itself have no `raw`.
