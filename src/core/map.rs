@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use jiff::Timestamp;
 
-use super::{Actor, Event, EventId, Payload, Schema};
+use super::{Actor, Event, EventId, Payload, ProjectId, Schema};
 use crate::shared::{Id, Result};
 
 pub type MapId = Id<Map>;
@@ -14,7 +14,7 @@ pub type NodeId = Id<Node>;
 pub struct Map {
     pub id: MapId,
     pub kind: String,
-    pub path: PathBuf,
+    pub project: ProjectId,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
 }
@@ -56,7 +56,7 @@ impl Edge {
 impl Map {
     /// The map `id` after `events`, created by a `MapCreated` event placed first.
     pub fn fixture(id: MapId, events: &[Event]) -> Self {
-        let created = Event::map_created(crate::core::Source::fixture(), Actor::Human, id, "concepts");
+        let created = Event::map_created(crate::core::Source::fixture(), Actor::Human, id, ProjectId::new(), "concepts");
         let log: Vec<Event> = std::iter::once(created).chain(events.iter().cloned()).collect();
 
         Self::all(&log).remove(0)
@@ -78,10 +78,10 @@ impl Map {
 
         for event in events {
             match &event.payload {
-                Payload::MapCreated { map, kind } => maps.push(Self {
+                Payload::MapCreated { map, project, kind } => maps.push(Self {
                     id: *map,
                     kind: kind.clone(),
-                    path: event.source.path.clone(),
+                    project: *project,
                     nodes: Vec::new(),
                     edges: Vec::new(),
                 }),
@@ -206,8 +206,6 @@ impl Map {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
-
     use crate::core::Source;
 
     fn node_added(map: MapId, actor: Actor, title: &str) -> (NodeId, Event) {
@@ -340,7 +338,7 @@ mod tests {
             Event::node_removed(Source::fixture(), Actor::Agent, other, b),
         ];
 
-        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, "concepts");
+        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, ProjectId::new(), "concepts");
         let log: Vec<Event> = [created(map), created(other)].into_iter().chain(events).collect();
 
         let maps = Map::all(&log);
@@ -425,12 +423,13 @@ mod tests {
         let (a, add_a) = node_added(first, Actor::Human, "A");
         let (b, add_b) = node_added(second, Actor::Agent, "B");
         let (_, add_lost) = node_added(uncreated, Actor::Human, "Lost");
-        let created = |id, kind| Event::map_created(Source::fixture(), Actor::Human, id, kind);
+        let (one, two) = (ProjectId::new(), ProjectId::new());
+        let created = |id, project, kind| Event::map_created(Source::fixture(), Actor::Human, id, project, kind);
         let events = [
-            created(first, "concepts"),
+            created(first, one, "concepts"),
             add_lost,
             add_a,
-            created(second, "decisions"),
+            created(second, two, "decisions"),
             Event::edge_added(Source::fixture(), Actor::Human, first, "links", a, a),
             add_b,
             Event::edge_added(Source::fixture(), Actor::Agent, second, "links", b, b),
@@ -439,8 +438,8 @@ mod tests {
 
         let maps = Map::all(&events);
 
-        let found: Vec<(MapId, &str, &Path)> = maps.iter().map(|m| (m.id, m.kind.as_str(), m.path.as_path())).collect();
-        assert_eq!(found, vec![(first, "concepts", Path::new("/repo")), (second, "decisions", Path::new("/repo"))]);
+        let found: Vec<(MapId, &str, ProjectId)> = maps.iter().map(|m| (m.id, m.kind.as_str(), m.project)).collect();
+        assert_eq!(found, vec![(first, "concepts", one), (second, "decisions", two)]);
         assert_eq!(maps[0].nodes.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(), vec!["A"]);
         assert_eq!(maps[0].edges.iter().map(|e| (e.from, e.to)).collect::<Vec<_>>(), vec![(a, a)]);
         assert_eq!(maps[1].nodes.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(), vec!["B"]);
@@ -571,7 +570,7 @@ mod tests {
         let (map, _, _, folded) = check_map();
         let session = crate::core::SessionId::new();
         let events = [
-            Event::map_created(Source::fixture(), Actor::Human, map, "concepts"),
+            Event::map_created(Source::fixture(), Actor::Human, map, ProjectId::new(), "concepts"),
             Event::session_created(Source::fixture(), session, crate::core::ProjectId::new(), crate::core::ClientSessionId::new("c".into())),
             Event::message(Source::fixture(), session, Actor::Human, "Hello", serde_json::json!({})),
         ];

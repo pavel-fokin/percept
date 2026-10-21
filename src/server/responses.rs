@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde_json::json;
@@ -29,8 +29,8 @@ pub(super) struct MapSummary {
 }
 
 impl MapSummary {
-    pub(super) fn new(map: core::Map, home: &Path) -> Self {
-        Self { id: map.id, kind: map.kind, path: display_path(&map.path, home), nodes: map.nodes.len() }
+    pub(super) fn new((map, root): (core::Map, PathBuf), home: &Path) -> Self {
+        Self { id: map.id, kind: map.kind, path: display_path(&root, home), nodes: map.nodes.len() }
     }
 }
 
@@ -51,7 +51,7 @@ impl MapDetail {
         Self {
             id: map.id,
             kind: map.kind,
-            path: display_path(&map.path, home),
+            path: display_path(&detail.root, home),
             nodes: map.nodes.into_iter().map(|n| Node::new(n, messages)).collect(),
             edges: map.edges.into_iter().map(Edge::from).collect(),
         }

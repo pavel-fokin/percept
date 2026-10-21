@@ -146,7 +146,7 @@ mod tests {
         let source = |path: &str| Source { client: "percept-cli".into(), path: path.into() };
         let events = [
             Event::project_created(source("/a"), Actor::Human, ProjectId::new(), ProjectName::new("a").unwrap()),
-            Event::map_created(Source::fixture(), Actor::Human, crate::core::MapId::new(), "decisions"),
+            Event::map_created(Source::fixture(), Actor::Human, crate::core::MapId::new(), ProjectId::new(), "decisions"),
             Event::project_created(source("/b"), Actor::Human, ProjectId::new(), ProjectName::new("b").unwrap()),
         ];
 

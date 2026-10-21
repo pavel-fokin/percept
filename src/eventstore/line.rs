@@ -40,7 +40,7 @@ impl From<&Event> for EventLine {
                 json!({ "session": session, "subagent": subagent.as_str(), "content": content })
             }
             Payload::ProjectCreated { project, name } => json!({ "project": project, "name": name.as_str() }),
-            Payload::MapCreated { map, kind } => json!({ "map": map, "kind": kind }),
+            Payload::MapCreated { map, project, kind } => json!({ "map": map, "project": project, "kind": kind }),
             Payload::NodeAdded { map, node, kind, title, properties, references } => {
                 let references: Vec<ReferenceLine> = references.iter().map(ReferenceLine::from).collect();
 
@@ -108,6 +108,7 @@ impl TryFrom<EventLine> for Event {
             },
             Kind::MapCreated => Payload::MapCreated {
                 map: field(p, "map")?,
+                project: field(p, "project")?,
                 kind: field(p, "kind")?,
             },
             Kind::NodeAdded => Payload::NodeAdded {
@@ -209,7 +210,7 @@ mod tests {
             Event::subagent_started(Source::fixture(), session, ClientAgentId::new("a1".into()), "builder", "Build it", raw.clone()),
             Event::subagent_reported(Source::fixture(), session, ClientAgentId::new("a1".into()), "done", raw),
             Event::project_created(Source::fixture(), Actor::Human, ProjectId::new(), ProjectName::new("percept").unwrap()),
-            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), "decisions"),
+            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), ProjectId::new(), "decisions"),
             Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())]), Vec::new()),
             Event::node_changed(Source::fixture(), Actor::Human, MapId::new(), NodeId::new(), "Why not?", BTreeMap::from([("definition".into(), "E".into())]), Vec::new()),
             Event::node_removed(Source::fixture(), Actor::Human, MapId::new(), NodeId::new()),
@@ -375,10 +376,10 @@ mod tests {
 
     #[test]
     fn a_legacy_map_line_with_a_title_still_reads() {
-        let map = MapId::new();
-        let event = Event::map_created(Source::fixture(), Actor::Human, map, "decisions");
+        let (map, project) = (MapId::new(), ProjectId::new());
+        let event = Event::map_created(Source::fixture(), Actor::Human, map, project, "decisions");
         let mut line = EventLine::from(&event);
-        line.payload = json!({ "map": map, "kind": "decisions", "title": "Event model" });
+        line.payload = json!({ "map": map, "project": project, "kind": "decisions", "title": "Event model" });
 
         let back = Event::try_from(line).unwrap();
 

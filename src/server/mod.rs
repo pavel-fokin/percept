@@ -86,7 +86,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::{Actor, ClientSessionId, Event, MapId, NodeId, ProjectId, Reference, Schema, SchemaStore, SessionId, Source};
+    use crate::core::{Actor, ClientSessionId, Event, MapId, NodeId, ProjectId, ProjectName, Reference, Schema, SchemaStore, SessionId, Source};
 
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
     const MAP: &str = "0190a0a0-0000-7000-8000-000000000003";
@@ -106,12 +106,14 @@ mod tests {
 
         async fn all(&self) -> Result<Vec<Event>> {
             let session: SessionId = serde_json::from_value(json!(SESSION))?;
-            let created = Event::session_created(Source::fixture(), session, ProjectId::new(), ClientSessionId::new("k".into()));
+            let project = ProjectId::new();
+            let project_created = Event::project_created(Source::fixture(), Actor::Human, project, ProjectName::new("repo").unwrap());
+            let created = Event::session_created(Source::fixture(), session, project, ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
             let map: MapId = serde_json::from_value(json!(MAP))?;
-            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, "decisions");
+            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, "decisions");
             let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default(), self.1.clone());
-            Ok(std::iter::once(created).chain(started).chain(self.2.clone()).chain([map_created, node]).collect())
+            Ok([project_created, created].into_iter().chain(started).chain(self.2.clone()).chain([map_created, node]).collect())
         }
 
         async fn append(&self, _: &Event) -> Result<()> {
@@ -154,7 +156,7 @@ mod tests {
         let response = get_response("/api/status").await;
 
         assert!(response.starts_with("HTTP/1.1 200"));
-        assert!(response.ends_with(r#"{"data":{"events":5}}"#));
+        assert!(response.ends_with(r#"{"data":{"events":6}}"#));
     }
 
     #[tokio::test]

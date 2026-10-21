@@ -95,17 +95,10 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{Broken, Memory, Schemas};
-    use crate::core::{Kind, ProjectId, ProjectName};
+    use crate::app::testing::{Broken, Schemas, in_project};
+    use crate::core::Kind;
 
     use serde_json::json;
-
-    /// A log holding one project, rooted at `root`.
-    fn in_project(root: &str) -> Memory {
-        let source = Source { client: "percept-cli".into(), path: root.into() };
-        let created = Event::project_created(source, Actor::Human, ProjectId::new(), ProjectName::new("app").unwrap());
-        Memory(std::sync::Mutex::new(vec![created]))
-    }
 
     fn client_session_id(id: &str) -> ClientSessionId {
         ClientSessionId::new(id.into())
