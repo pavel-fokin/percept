@@ -97,3 +97,25 @@ body {
 :focus-visible {
   @apply outline-2 outline-offset-2 outline-text;
 }
+
+/* The canvas takes its colours from the theme tokens, so it follows the theme switch. */
+.react-flow {
+  --xy-edge-stroke: var(--color-muted);
+  --xy-edge-stroke-selected: var(--color-text);
+  --xy-edge-stroke-width: 1.5;
+  --xy-connectionline-stroke: var(--color-muted);
+  --xy-background-color: var(--color-bg);
+  --xy-background-pattern-dots-color: var(--color-border);
+}
+
+.react-flow__controls {
+  @apply overflow-hidden rounded-md border border-border bg-surface;
+}
+
+.react-flow__controls-button {
+  @apply flex size-8 items-center justify-center text-muted hover:bg-bg hover:text-text;
+}
+
+.react-flow__controls-button svg {
+  @apply size-3 fill-current;
+}
