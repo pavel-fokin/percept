@@ -52,7 +52,7 @@ export function Sidebar() {
 function Logo({ className }: { className: string }) {
   return (
     <svg viewBox="0 0 64 64" aria-hidden className={className}>
-      <rect x="1.15" y="1.15" width="61.7" height="61.7" rx="12" strokeWidth="2.3" className="fill-bg stroke-border" />
+      <rect x="1.15" y="1.15" width="61.7" height="61.7" rx="12" strokeWidth="2.3" className="fill-none stroke-border" />
       <circle cx="46.6" cy="46.6" r="6.4" className="fill-accent" />
     </svg>
   );
