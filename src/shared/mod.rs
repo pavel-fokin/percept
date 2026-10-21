@@ -68,6 +68,12 @@ impl<T> Ord for Id<T> {
     }
 }
 
+impl<T> fmt::Display for Id<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.uuid)
+    }
+}
+
 impl<T> fmt::Debug for Id<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Id({})", self.uuid)
@@ -93,7 +99,7 @@ mod tests {
     fn id_is_parsed_from_its_uuid_text() {
         let id = Id::<Entity>::new();
 
-        let back: Id<Entity> = id.uuid.to_string().parse().unwrap();
+        let back: Id<Entity> = id.to_string().parse().unwrap();
 
         assert_eq!(back, id);
         assert!("not-an-id".parse::<Id<Entity>>().is_err());

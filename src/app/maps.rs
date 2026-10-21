@@ -74,7 +74,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
     pub async fn map_detail(&self, project: &str, kind: &str) -> Result<Option<MapDetail>> {
         let events = self.store.all().await?;
 
-        let Some(project) = Project::all(&events).into_iter().find(|p| p.name.as_str() == project) else {
+        let Some(project) = Project::named(&events, project) else {
             return Ok(None);
         };
         let Some(mut map) = Map::all(&events).into_iter().find(|m| m.project == project.id && m.kind == kind) else {

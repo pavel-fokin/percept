@@ -43,10 +43,6 @@ mod tests {
         Event::board_created(Source::fixture(), Actor::Human, BoardId::new(), project, Name::new(name).unwrap())
     }
 
-    fn text(id: BoardId) -> String {
-        serde_json::to_value(id).unwrap().as_str().unwrap().to_string()
-    }
-
     #[test]
     fn boards_are_folded_from_their_events_in_log_order() {
         let project = ProjectId::new();
@@ -70,9 +66,9 @@ mod tests {
 
         assert!(ideas.is("ideas"));
         assert!(ideas.is("IDEAS"));
-        assert!(ideas.is(&text(ideas.id)));
+        assert!(ideas.is(&ideas.id.to_string()));
         assert!(!ideas.is("plan"));
-        assert!(!ideas.is(&text(BoardId::new())));
+        assert!(!ideas.is(&BoardId::new().to_string()));
         assert!(!ideas.is("not a name"));
     }
 }

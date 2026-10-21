@@ -99,20 +99,17 @@ where
     pub(super) async fn boards(State(api): State<Arc<Self>>) -> Reply<Vec<BoardSummary>> {
         let boards = api.service.boards().await?;
         let projects = api.service.projects().await?;
-        let boards = boards.into_iter().map(|b| BoardSummary::new(b, &projects)).collect();
-        Ok(Json(Data { data: boards }))
+        Ok(Json(Data { data: BoardSummary::all(boards, &projects) }))
     }
 
     pub(super) async fn board(State(api): State<Arc<Self>>, Path((project, board)): Path<(String, String)>) -> Reply<BoardSummary> {
         let board = api.service.board(&project, &board).await?.ok_or(ApiError::NotFound)?;
-        let projects = api.service.projects().await?;
-        Ok(Json(Data { data: BoardSummary::new(board, &projects) }))
+        Ok(Json(Data { data: BoardSummary::new(board, project) }))
     }
 
     pub(super) async fn create_board(State(api): State<Arc<Self>>, Path(project): Path<String>, Json(new): Json<NewBoard>) -> Reply<BoardSummary> {
         let board = api.service.create_board("percept-web", Actor::Human, &project, &new.name).await?;
-        let projects = api.service.projects().await?;
-        Ok(Json(Data { data: BoardSummary::new(board, &projects) }))
+        Ok(Json(Data { data: BoardSummary::new(board, project) }))
     }
 
     pub(super) async fn session_events(State(api): State<Arc<Self>>, Path(id): Path<SessionId>) -> Reply<Vec<responses::Event>> {

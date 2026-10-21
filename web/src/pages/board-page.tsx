@@ -1,20 +1,18 @@
-import { useLoaderData, type LoaderFunctionArgs } from "react-router";
+import type { LoaderFunctionArgs } from "react-router";
 import { getData, type BoardSummary } from "../api";
+import { gutter } from "../app";
 import { RouteError } from "../components/route-error";
-import { Board } from "./board";
 
+/** Loads the board only to tell a missing one apart; its contents are not saved yet. */
 export function loadBoard({ params }: LoaderFunctionArgs) {
   const { project, board } = params;
   return getData<BoardSummary>(`/api/projects/${encodeURIComponent(project!)}/boards/${encodeURIComponent(board!)}`);
 }
 
-export function BoardPage() {
-  // The board's contents are not saved yet; its identity is all the page takes from the server.
-  useLoaderData<typeof loadBoard>();
-
-  return <Board />;
-}
-
 export function BoardError() {
-  return <RouteError notFound="Board not found." failed="board" />;
+  return (
+    <div className={gutter}>
+      <RouteError notFound="Board not found." failed="board" />
+    </div>
+  );
 }

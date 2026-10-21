@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
-import type { BoardSummary } from "../api";
+import { describe, postData, type BoardSummary } from "../api";
 import { boardUrl } from "../paths";
+import { chip } from "./ui/chip";
 
 /** A `+ Board` button that turns into a name input; Enter creates the board and opens it. */
 export function NewBoard({ project }: { project: string }) {
@@ -9,6 +10,7 @@ export function NewBoard({ project }: { project: string }) {
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const cancel = () => {
     setNaming(false);
@@ -17,18 +19,16 @@ export function NewBoard({ project }: { project: string }) {
   };
 
   const create = async () => {
-    const res = await fetch(`/api/projects/${encodeURIComponent(project)}/boards`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name }),
-    });
-    if (!res.ok) {
-      setError((await res.text()) || `HTTP ${res.status}`);
-      return;
-    }
+    if (creating) return;
+    setCreating(true);
 
-    const board = ((await res.json()) as { data: BoardSummary }).data;
-    navigate(boardUrl(project, board.name));
+    try {
+      const board = await postData<BoardSummary>(`/api/projects/${encodeURIComponent(project)}/boards`, { name });
+      navigate(boardUrl(project, board.name));
+    } catch (e) {
+      setError(describe(e));
+      setCreating(false);
+    }
   };
 
   if (!naming) {
@@ -36,7 +36,7 @@ export function NewBoard({ project }: { project: string }) {
       <button
         type="button"
         onClick={() => setNaming(true)}
-        className="min-h-11 cursor-pointer rounded-lg px-3 py-2.5 text-base text-muted hover:bg-surface hover:text-text focus-visible:bg-surface"
+        className={`${chip} cursor-pointer text-base text-muted hover:text-text`}
       >
         + Board
       </button>
@@ -50,7 +50,10 @@ export function NewBoard({ project }: { project: string }) {
         aria-label="Board name"
         placeholder="Board name"
         value={name}
-        onChange={(e) => setName(e.target.value)}
+        onChange={(e) => {
+          setName(e.target.value);
+          setError(null);
+        }}
         onBlur={() => name === "" && cancel()}
         onKeyDown={(e) => {
           if (e.key === "Escape") cancel();

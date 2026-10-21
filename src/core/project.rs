@@ -27,6 +27,13 @@ impl Project {
             .collect()
     }
 
+    /// The project in `events` named `name`, in any case.
+    pub fn named(events: &[Event], name: &str) -> Option<Self> {
+        let name = Name::new(name).ok()?;
+
+        Self::all(events).into_iter().find(|p| p.name == name)
+    }
+
     /// The project in `events` whose root is the nearest at or above `path`, as git finds its root.
     pub fn containing(events: &[Event], path: &Path) -> Option<Self> {
         Self::all(events).into_iter().filter(|p| path.starts_with(&p.root)).max_by_key(|p| p.root.components().count())
@@ -58,6 +65,18 @@ mod tests {
         assert_eq!(name("/work/apple/x"), Some("apple".to_string()));
         assert_eq!(name("/work"), None);
         assert_eq!(name("/elsewhere"), None);
+    }
+
+    #[test]
+    fn a_project_is_found_by_its_name_in_any_case() {
+        let events = [Event::project_created(source("/work/app"), Actor::Human, ProjectId::new(), Name::new("app").unwrap())];
+
+        let found = |name: &str| Project::named(&events, name).map(|p| p.root);
+
+        assert_eq!(found("app"), Some("/work/app".into()));
+        assert_eq!(found("APP"), Some("/work/app".into()));
+        assert_eq!(found("other"), None);
+        assert_eq!(found("not a name"), None);
     }
 
     #[test]

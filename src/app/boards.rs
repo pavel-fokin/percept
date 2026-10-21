@@ -39,7 +39,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         let _lock = self.store.lock().await?;
 
         let events = self.store.all().await?;
-        let project = Project::all(&events).into_iter().find(|p| p.name.as_str() == project).ok_or(CreateBoardError::UnknownProject)?;
+        let project = Project::named(&events, project).ok_or(CreateBoardError::UnknownProject)?;
         if Board::all(&events).iter().any(|b| b.project == project.id && b.name == name) {
             return Err(CreateBoardError::NameTaken(name));
         }
@@ -60,7 +60,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
     pub async fn board(&self, project: &str, board: &str) -> Result<Option<Board>> {
         let events = self.store.all().await?;
 
-        let Some(project) = Project::all(&events).into_iter().find(|p| p.name.as_str() == project) else {
+        let Some(project) = Project::named(&events, project) else {
             return Ok(None);
         };
 
@@ -130,7 +130,7 @@ mod tests {
         add_project(&store, "/work/b");
         let service = AppService::new(&store, Schemas);
         let ideas = service.create_board("percept-web", Actor::Human, "p0", "ideas").await.unwrap();
-        let id = serde_json::to_value(ideas.id).unwrap().as_str().unwrap().to_string();
+        let id = ideas.id.to_string();
 
         let by_name = service.board("p0", "Ideas").await.unwrap();
         let by_id = service.board("p0", &id).await.unwrap();

@@ -60,8 +60,18 @@ pub(super) struct BoardSummary {
 }
 
 impl BoardSummary {
-    pub(super) fn new(board: core::Board, projects: &[Project]) -> Self {
-        Self { id: board.id, name: board.name.as_str().to_string(), project: project_name(projects, board.project) }
+    pub(super) fn new(board: core::Board, project: String) -> Self {
+        Self { id: board.id, name: board.name.as_str().to_string(), project }
+    }
+
+    pub(super) fn all(boards: Vec<core::Board>, projects: &[Project]) -> Vec<Self> {
+        boards
+            .into_iter()
+            .map(|board| {
+                let project = project_name(projects, board.project);
+                Self::new(board, project)
+            })
+            .collect()
     }
 }
 

@@ -167,8 +167,31 @@ mod tests {
         }
     }
 
+    fn text_body(response: &str) -> &str {
+        response.rsplit("\r\n\r\n").next().unwrap()
+    }
+
     fn json_body(response: &str) -> serde_json::Value {
-        serde_json::from_str(response.rsplit("\r\n\r\n").next().unwrap()).unwrap()
+        serde_json::from_str(text_body(response)).unwrap()
+    }
+
+    async fn serve<S: EventStore + Send + Sync + 'static>(store: S) -> std::net::SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = router(Arc::new(AppService::new(store, Schemas)), "/Users/me".into());
+        tokio::spawn(async move { axum::serve(listener, app).await });
+
+        addr
+    }
+
+    async fn send(addr: std::net::SocketAddr, method: &str, path: &str, body: &str) -> String {
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let request = format!("{method} {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+        stream.write_all(request.as_bytes()).await.unwrap();
+
+        let mut response = String::new();
+        stream.read_to_string(&mut response).await.unwrap();
+        response
     }
 
     async fn get_response(path: &str) -> String {
@@ -176,17 +199,9 @@ mod tests {
     }
 
     async fn get_response_with_references(path: &str, references: Vec<Reference>, messages: Vec<Event>) -> String {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let app = router(Arc::new(AppService::new(Fixed(3, references, messages), Schemas)), "/Users/me".into());
-        tokio::spawn(async move { axum::serve(listener, app).await });
+        let addr = serve(Fixed(3, references, messages)).await;
 
-        let mut stream = TcpStream::connect(addr).await.unwrap();
-        let request = format!("GET {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
-        stream.write_all(request.as_bytes()).await.unwrap();
-        let mut response = String::new();
-        stream.read_to_string(&mut response).await.unwrap();
-        response
+        send(addr, "GET", path, "").await
     }
 
     #[tokio::test]
@@ -333,32 +348,10 @@ mod tests {
         assert!(get_response("/api").await.starts_with("HTTP/1.1 404"));
     }
 
-    async fn serve_log(log: &Arc<Log>) -> std::net::SocketAddr {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let app = router(Arc::new(AppService::new(log.clone(), Schemas)), "/Users/me".into());
-        tokio::spawn(async move { axum::serve(listener, app).await });
-
-        addr
-    }
-
-    async fn send(addr: std::net::SocketAddr, method: &str, path: &str, body: &str) -> String {
-        let mut stream = TcpStream::connect(addr).await.unwrap();
-        let request = format!("{method} {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len());
-        stream.write_all(request.as_bytes()).await.unwrap();
-        let mut response = String::new();
-        stream.read_to_string(&mut response).await.unwrap();
-        response
-    }
-
-    fn text_body(response: &str) -> &str {
-        response.rsplit("\r\n\r\n").next().unwrap()
-    }
-
     #[tokio::test]
     async fn a_posted_board_is_created_and_returned_then_read_back() {
         let log = Arc::new(Log::new());
-        let addr = serve_log(&log).await;
+        let addr = serve(log.clone()).await;
 
         let created = send(addr, "POST", "/api/projects/repo/boards", r#"{"name":"Ideas"}"#).await;
         let id = json_body(&created)["data"]["id"].as_str().unwrap().to_string();
@@ -379,7 +372,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_taken_or_invalid_board_name_is_a_bad_request_with_the_reason() {
-        let addr = serve_log(&Arc::new(Log::new())).await;
+        let addr = serve(Arc::new(Log::new())).await;
         send(addr, "POST", "/api/projects/repo/boards", r#"{"name":"ideas"}"#).await;
 
         let taken = send(addr, "POST", "/api/projects/repo/boards", r#"{"name":"IDEAS"}"#).await;
@@ -393,7 +386,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_unknown_project_or_board_is_not_found() {
-        let addr = serve_log(&Arc::new(Log::new())).await;
+        let addr = serve(Arc::new(Log::new())).await;
 
         let post = send(addr, "POST", "/api/projects/other/boards", r#"{"name":"ideas"}"#).await;
         let no_board = send(addr, "GET", "/api/projects/repo/boards/ideas", "").await;

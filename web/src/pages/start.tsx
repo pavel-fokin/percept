@@ -3,6 +3,7 @@ import { describe, getData, type BoardSummary, type MapSummary, type Project, ty
 import { relative } from "../format";
 import { NewBoard } from "../components/new-board";
 import { Spinner } from "../components/spinner";
+import { chip } from "../components/ui/chip";
 import { textLink } from "../components/ui/text-link";
 import { boardUrl, mapUrl, sessionsUrl, sessionUrl } from "../paths";
 import { usePolling } from "../use-polling";
@@ -10,6 +11,8 @@ import { usePolling } from "../use-polling";
 const README = "https://github.com/pavel-fokin/percept#readme";
 
 type ProjectGroup = { project: string; root: string; maps: MapSummary[]; boards: BoardSummary[]; sessions: number; latest?: Session };
+
+const hasContent = (g: Pick<ProjectGroup, "maps" | "boards">) => g.maps.length > 0 || g.boards.length > 0;
 
 /** One group per project: those with sessions by newest session, then those with only maps or boards, then empty ones. */
 export async function loadStart() {
@@ -36,7 +39,6 @@ export async function loadStart() {
   for (const board of boards) groups.get(board.project)!.boards.push(board);
 
   const rest = [...groups.values()].filter((g) => !active.has(g));
-  const hasContent = (g: ProjectGroup) => g.maps.length > 0 || g.boards.length > 0;
   return [...active, ...rest.filter(hasContent), ...rest.filter((g) => !hasContent(g))];
 }
 
@@ -50,7 +52,7 @@ export function Start() {
   return (
     <div className="mt-8 grid gap-14 sm:mt-14">
       {groups.map(({ project, root, maps, boards, sessions, latest }) => {
-        const isEmpty = sessions === 0 && maps.length === 0 && boards.length === 0;
+        const isEmpty = sessions === 0 && !hasContent({ maps, boards });
 
         return (
           <section key={project}>
@@ -107,7 +109,7 @@ export function Start() {
                 <Link
                   key={board.id}
                   to={boardUrl(project, board.name)}
-                  className="group flex min-h-11 items-center gap-2 rounded-lg px-3 py-2.5 hover:bg-surface focus-visible:bg-surface"
+                  className={`group flex items-center gap-2 ${chip}`}
                 >
                   <BoardIcon />
                   <span className="text-base text-muted group-hover:text-text">{board.name}</span>
@@ -149,7 +151,7 @@ function BoardIcon() {
 
 function Counter({ to, label, count }: { to: string; label: string; count: number }) {
   return (
-    <Link to={to} className="group flex min-h-11 items-baseline gap-2 rounded-lg px-3 py-2.5 hover:bg-surface focus-visible:bg-surface">
+    <Link to={to} className={`group flex items-baseline gap-2 ${chip}`}>
       <span className="text-lg font-semibold tabular-nums">{count}</span>
       <span className="text-base text-muted group-hover:text-text">{label}</span>
     </Link>
