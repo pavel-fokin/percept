@@ -18,7 +18,6 @@ import {
   type NodeProps,
   type NodeTypes,
 } from "@xyflow/react";
-import "@xyflow/react/dist/base.css";
 
 import { Button } from "../components/ui/button";
 
@@ -44,7 +43,6 @@ export function Board() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={(c: Connection) => setEdges((es) => addEdge(c, es))}
-          connectOnClick
           proOptions={{ hideAttribution: true }}
         >
           <Background />
