@@ -86,7 +86,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::{Actor, ClientSessionId, Event, MapId, NodeId, Reference, Schema, SchemaStore, SessionId, Source};
+    use crate::core::{Actor, ClientSessionId, Event, MapId, NodeId, ProjectId, Reference, Schema, SchemaStore, SessionId, Source};
 
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
     const MAP: &str = "0190a0a0-0000-7000-8000-000000000003";
@@ -106,7 +106,7 @@ mod tests {
 
         async fn all(&self) -> Result<Vec<Event>> {
             let session: SessionId = serde_json::from_value(json!(SESSION))?;
-            let created = Event::session_created(Source::fixture(), session, ClientSessionId::new("k".into()));
+            let created = Event::session_created(Source::fixture(), session, ProjectId::new(), ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
             let map: MapId = serde_json::from_value(json!(MAP))?;
             let map_created = Event::map_created(Source::fixture(), Actor::Human, map, "decisions");

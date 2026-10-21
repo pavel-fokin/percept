@@ -23,8 +23,8 @@ pub(super) struct EventLine {
 impl From<&Event> for EventLine {
     fn from(event: &Event) -> Self {
         let payload = match &event.payload {
-            Payload::SessionCreated { session, client_session_id } => {
-                json!({ "session": session, "client_session_id": client_session_id.as_str() })
+            Payload::SessionCreated { session, project, client_session_id } => {
+                json!({ "session": session, "project": project, "client_session_id": client_session_id.as_str() })
             }
             Payload::SessionStarted { session } | Payload::SessionStopped { session } => {
                 json!({ "session": session })
@@ -79,6 +79,7 @@ impl TryFrom<EventLine> for Event {
         let payload = match kind {
             Kind::SessionCreated => Payload::SessionCreated {
                 session: field(p, "session")?,
+                project: field(p, "project")?,
                 client_session_id: ClientSessionId::new(field(p, "client_session_id")?),
             },
             Kind::SessionStarted => Payload::SessionStarted { session: field(p, "session")? },
@@ -199,7 +200,7 @@ mod tests {
         let session = SessionId::new();
         let raw = json!({"r": 1});
         let events = [
-            Event::session_created(Source::fixture(), session, ClientSessionId::new("a".into())),
+            Event::session_created(Source::fixture(), session, ProjectId::new(), ClientSessionId::new("a".into())),
             Event::session_started(Source::fixture(), session, raw.clone()),
             Event::session_stopped(Source::fixture(), session, raw.clone()),
             Event::message(Source::fixture(), session, Actor::Human, "hi", raw.clone()),

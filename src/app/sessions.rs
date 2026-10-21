@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use jiff::Timestamp;
 
 use super::AppService;
-use crate::core::{Actor, ClientSessionId, Event, EventStore, Payload, SchemaStore, Session, SessionId, SessionStatus, Source};
+use crate::core::{Actor, ClientSessionId, Event, EventStore, Payload, Project, SchemaStore, Session, SessionId, SessionStatus, Source};
 use crate::shared::Result;
 
 impl<S: EventStore, M: SchemaStore> AppService<S, M> {
@@ -31,11 +31,12 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             .iter()
             .rev()
             .filter_map(|e| match &e.payload {
-                Payload::SessionCreated { session, client_session_id } => {
+                Payload::SessionCreated { session, project, client_session_id } => {
                     let (status, last_event_at) = last[session];
                     Some(Session {
                         id: *session,
                         client_session_id: client_session_id.clone(),
+                        project: *project,
                         created_at: e.created_at,
                         path: e.source.path.clone(),
                         client: e.source.client.clone(),
@@ -64,6 +65,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
     }
 
     /// Appends the event to the session the client's session id names, creating the session first if it is new.
+    /// A new session joins the project nearest above `source.path`; with none, nothing is recorded.
     pub async fn record(
         &self,
         client_session_id: ClientSessionId,
@@ -77,7 +79,12 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         let session = existing.unwrap_or_else(SessionId::new);
 
         if existing.is_none() {
-            let created = Event::session_created(source.clone(), session, client_session_id);
+            let projects = Project::all(&self.store.all().await?);
+            let Some(project) = Project::containing(&projects, &source.path) else {
+                return Ok(());
+            };
+
+            let created = Event::session_created(source.clone(), session, project.id, client_session_id);
             self.store.append(&created).await?;
         }
 
@@ -89,9 +96,16 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
 mod tests {
     use super::*;
     use crate::app::testing::{Broken, Memory, Schemas};
-    use crate::core::Kind;
+    use crate::core::{Kind, ProjectId, ProjectName};
 
     use serde_json::json;
+
+    /// A log holding one project, rooted at `root`.
+    fn in_project(root: &str) -> Memory {
+        let source = Source { client: "percept-cli".into(), path: root.into() };
+        let created = Event::project_created(source, Actor::Human, ProjectId::new(), ProjectName::new("app").unwrap());
+        Memory(std::sync::Mutex::new(vec![created]))
+    }
 
     fn client_session_id(id: &str) -> ClientSessionId {
         ClientSessionId::new(id.into())
@@ -106,7 +120,7 @@ mod tests {
 
     #[tokio::test]
     async fn sessions_are_the_created_events_newest_first() {
-        let store = Memory::default();
+        let store = in_project("/");
         let service = AppService::new(&store, Schemas);
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
         service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
@@ -116,17 +130,17 @@ mod tests {
 
         let events = store.0.lock().unwrap();
         let found: Vec<(SessionId, &str)> = sessions.iter().map(|s| (s.id, s.client_session_id.as_str())).collect();
-        assert_eq!(found, vec![(events[2].payload.session().unwrap(), "b"), (events[0].payload.session().unwrap(), "a")]);
-        assert_eq!(sessions[1].created_at, events[0].created_at);
+        assert_eq!(found, vec![(events[3].payload.session().unwrap(), "b"), (events[1].payload.session().unwrap(), "a")]);
+        assert_eq!(sessions[1].created_at, events[1].created_at);
     }
 
     #[tokio::test]
     async fn session_finds_one_session_by_id() {
-        let store = Memory::default();
+        let store = in_project("/");
         let service = AppService::new(&store, Schemas);
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Human, "hi", json!({}))).await.unwrap();
         service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
-        let id = store.0.lock().unwrap()[0].payload.session().unwrap();
+        let id = store.0.lock().unwrap()[1].payload.session().unwrap();
 
         let found = service.session(id).await.unwrap().unwrap();
 
@@ -138,12 +152,12 @@ mod tests {
 
     #[tokio::test]
     async fn session_events_are_the_sessions_own_in_log_order() {
-        let store = Memory::default();
+        let store = in_project("/");
         let service = AppService::new(&store, Schemas);
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Human, "hi", json!({}))).await.unwrap();
         service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Read", None, None, json!({}))).await.unwrap();
-        let id = store.0.lock().unwrap()[0].payload.session().unwrap();
+        let id = store.0.lock().unwrap()[1].payload.session().unwrap();
 
         let events = service.session_events(id).await.unwrap().unwrap();
 
@@ -154,7 +168,7 @@ mod tests {
 
     #[tokio::test]
     async fn path_is_the_source_path_of_the_created_event() {
-        let store = Memory::default();
+        let store = in_project("/");
         let service = AppService::new(&store, Schemas);
         let source = Source { client: "claude-code".into(), path: "/work/app".into() };
         service.record(client_session_id("a"), source, |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
@@ -166,7 +180,7 @@ mod tests {
 
     #[tokio::test]
     async fn client_is_the_source_client_of_the_created_event() {
-        let store = Memory::default();
+        let store = in_project("/");
         let service = AppService::new(&store, Schemas);
         let source = Source { client: "claude-code".into(), path: "/work/app".into() };
         service.record(client_session_id("a"), source, |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
@@ -178,7 +192,7 @@ mod tests {
 
     #[tokio::test]
     async fn title_is_the_first_human_message() {
-        let store = Memory::default();
+        let store = in_project("/");
         let service = AppService::new(&store, Schemas);
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Agent, "agent", json!({}))).await.unwrap();
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Human, "first", json!({}))).await.unwrap();
@@ -191,7 +205,7 @@ mod tests {
 
     #[tokio::test]
     async fn title_skips_empty_human_messages() {
-        let store = Memory::default();
+        let store = in_project("/");
         let service = AppService::new(&store, Schemas);
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Human, " ", json!({}))).await.unwrap();
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Human, "first", json!({}))).await.unwrap();
@@ -203,7 +217,7 @@ mod tests {
 
     #[tokio::test]
     async fn title_is_none_without_a_human_message() {
-        let store = Memory::default();
+        let store = in_project("/");
         let service = AppService::new(&store, Schemas);
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Agent, "agent", json!({}))).await.unwrap();
 
@@ -214,7 +228,7 @@ mod tests {
 
     #[tokio::test]
     async fn status_is_ended_after_session_stopped() {
-        let store = Memory::default();
+        let store = in_project("/");
         let service = AppService::new(&store, Schemas);
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Human, "hi", json!({}))).await.unwrap();
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::session_stopped(src, s, json!({}))).await.unwrap();
@@ -226,7 +240,7 @@ mod tests {
 
     #[tokio::test]
     async fn status_is_waiting_after_an_agent_message() {
-        let store = Memory::default();
+        let store = in_project("/");
         let service = AppService::new(&store, Schemas);
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Agent, "done", json!({}))).await.unwrap();
@@ -238,7 +252,7 @@ mod tests {
 
     #[tokio::test]
     async fn status_is_working_mid_turn() {
-        let store = Memory::default();
+        let store = in_project("/");
         let service = AppService::new(&store, Schemas);
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Agent, "done", json!({}))).await.unwrap();
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Human, "next", json!({}))).await.unwrap();
@@ -252,7 +266,7 @@ mod tests {
 
     #[tokio::test]
     async fn last_event_at_is_the_time_of_the_last_event() {
-        let store = Memory::default();
+        let store = in_project("/");
         let service = AppService::new(&store, Schemas);
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
         service.record(client_session_id("b"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
@@ -261,13 +275,13 @@ mod tests {
         let sessions = service.sessions().await.unwrap();
 
         let events = store.0.lock().unwrap();
-        assert_eq!(sessions[1].last_event_at, events[4].created_at);
-        assert_eq!(sessions[0].last_event_at, events[3].created_at);
+        assert_eq!(sessions[1].last_event_at, events[5].created_at);
+        assert_eq!(sessions[0].last_event_at, events[4].created_at);
     }
 
     #[tokio::test]
     async fn record_creates_a_session_for_an_unknown_client_session_id() {
-        let store = Memory::default();
+        let store = in_project("/");
 
         AppService::new(&store, Schemas)
             .record(client_session_id("a"), Source::fixture(), |src, s| Event::message(src, s, Actor::Human, "hi", json!({})))
@@ -275,18 +289,18 @@ mod tests {
             .unwrap();
 
         let events = store.0.lock().unwrap();
-        assert_eq!(events.len(), 2);
+        assert_eq!(events.len(), 3);
         assert!(matches!(
-            &events[0].payload,
+            &events[1].payload,
             Payload::SessionCreated { client_session_id, .. } if client_session_id.as_str() == "a"
         ));
-        assert!(matches!(&events[1].payload, Payload::Message { content, .. } if content == "hi"));
-        assert_eq!(events[1].payload.session(), events[0].payload.session());
+        assert!(matches!(&events[2].payload, Payload::Message { content, .. } if content == "hi"));
+        assert_eq!(events[2].payload.session(), events[1].payload.session());
     }
 
     #[tokio::test]
     async fn record_reuses_the_session_of_a_known_client_session_id() {
-        let store = Memory::default();
+        let store = in_project("/");
         let service = AppService::new(&store, Schemas);
 
         service.record(client_session_id("a"), Source::fixture(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
@@ -297,16 +311,16 @@ mod tests {
         let kinds: Vec<Kind> = events.iter().map(|e| e.payload.kind()).collect();
         assert_eq!(
             kinds,
-            vec![Kind::SessionCreated, Kind::ToolUsed, Kind::ToolUsed, Kind::SessionCreated, Kind::ToolUsed]
+            vec![Kind::ProjectCreated, Kind::SessionCreated, Kind::ToolUsed, Kind::ToolUsed, Kind::SessionCreated, Kind::ToolUsed]
         );
-        assert_eq!(events[1].payload.session(), events[0].payload.session());
-        assert_eq!(events[2].payload.session(), events[0].payload.session());
-        assert_ne!(events[4].payload.session(), events[0].payload.session());
+        assert_eq!(events[2].payload.session(), events[1].payload.session());
+        assert_eq!(events[3].payload.session(), events[1].payload.session());
+        assert_ne!(events[5].payload.session(), events[1].payload.session());
     }
 
     #[tokio::test]
     async fn record_gives_the_session_created_event_the_same_source_and_no_later_a_time() {
-        let store = Memory::default();
+        let store = in_project("/");
         let source = Source { client: "codex".into(), path: "/work/app".into() };
 
         AppService::new(&store, Schemas)
@@ -315,10 +329,71 @@ mod tests {
             .unwrap();
 
         let events = store.0.lock().unwrap();
-        assert_eq!(events[0].source, source);
         assert_eq!(events[1].source, source);
-        assert!(events[0].id <= events[1].id);
-        assert!(events[0].created_at <= events[1].created_at);
+        assert_eq!(events[2].source, source);
+        assert!(events[1].id <= events[2].id);
+        assert!(events[1].created_at <= events[2].created_at);
+    }
+
+    fn at(path: &str) -> Source {
+        Source { client: "claude-code".into(), path: path.into() }
+    }
+
+    fn tool(src: Source, s: SessionId) -> Event {
+        Event::tool_used(src, s, "Bash", None, None, json!({}))
+    }
+
+    #[tokio::test]
+    async fn a_session_joins_the_project_of_its_root_a_subfolder_or_a_nested_worktree() {
+        let store = in_project("/work/app");
+        let service = AppService::new(&store, Schemas);
+        service.record(client_session_id("a"), at("/work/app"), tool).await.unwrap();
+        service.record(client_session_id("b"), at("/work/app/src/deep"), tool).await.unwrap();
+        service.record(client_session_id("c"), at("/work/app/.claude/worktrees/x"), tool).await.unwrap();
+
+        let sessions = service.sessions().await.unwrap();
+
+        let project = Project::all(&store.0.lock().unwrap())[0].id;
+        assert_eq!(sessions.len(), 3);
+        assert!(sessions.iter().all(|s| s.project == project));
+    }
+
+    #[tokio::test]
+    async fn a_session_joins_the_nearest_of_two_nested_projects() {
+        let store = in_project("/work/app");
+        store.0.lock().unwrap().push(in_project("/work/app/inner").0.lock().unwrap()[0].clone());
+        let service = AppService::new(&store, Schemas);
+        service.record(client_session_id("a"), at("/work/app/inner/src"), tool).await.unwrap();
+        service.record(client_session_id("b"), at("/work/app/src"), tool).await.unwrap();
+
+        let sessions = service.sessions().await.unwrap();
+
+        let projects = Project::all(&store.0.lock().unwrap());
+        assert_eq!(sessions[0].project, projects[0].id);
+        assert_eq!(sessions[1].project, projects[1].id);
+    }
+
+    #[tokio::test]
+    async fn a_hook_outside_every_project_records_nothing() {
+        let store = in_project("/work/app");
+        let service = AppService::new(&store, Schemas);
+
+        service.record(client_session_id("a"), at("/work/apple"), tool).await.unwrap();
+
+        assert_eq!(store.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_known_session_keeps_its_project_and_its_events_are_recorded_from_anywhere() {
+        let store = in_project("/work/app");
+        let service = AppService::new(&store, Schemas);
+        service.record(client_session_id("a"), at("/work/app"), tool).await.unwrap();
+
+        service.record(client_session_id("a"), at("/elsewhere"), tool).await.unwrap();
+
+        let events = store.0.lock().unwrap();
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[3].payload.session(), events[1].payload.session());
     }
 
     #[tokio::test]

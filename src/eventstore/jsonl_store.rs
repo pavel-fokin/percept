@@ -61,7 +61,7 @@ impl EventStore for JsonlStore {
             .await?
             .into_iter()
             .find_map(|e| match e.payload {
-                Payload::SessionCreated { session, client_session_id: id } if id == *client_session_id => {
+                Payload::SessionCreated { session, client_session_id: id, .. } if id == *client_session_id => {
                     Some(session)
                 }
                 _ => None,
@@ -121,7 +121,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
-    use crate::core::{Actor, EventId, Kind, Source};
+    use crate::core::{Actor, EventId, Kind, ProjectId, Source};
     use serde_json::json;
 
     struct TempFile(PathBuf);
@@ -218,7 +218,7 @@ mod tests {
     async fn session_finds_a_created_session_and_none_for_an_unknown_client_session_id() {
         let file = TempFile::new();
         let store = file.store();
-        let created = Event::session_created(Source::fixture(), SessionId::new(), ClientSessionId::new("a".into()));
+        let created = Event::session_created(Source::fixture(), SessionId::new(), ProjectId::new(), ClientSessionId::new("a".into()));
         let session = created.payload.session().unwrap();
         store.append(&created).await.unwrap();
 

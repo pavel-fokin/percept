@@ -68,7 +68,7 @@ impl EventStore for &Memory {
         Ok(events
             .iter()
             .find_map(|e| match &e.payload {
-                Payload::SessionCreated { session, client_session_id: id } if id == client_session_id => {
+                Payload::SessionCreated { session, client_session_id: id, .. } if id == client_session_id => {
                     Some(*session)
                 }
                 _ => None,

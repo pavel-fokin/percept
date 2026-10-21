@@ -572,7 +572,7 @@ mod tests {
         let session = crate::core::SessionId::new();
         let events = [
             Event::map_created(Source::fixture(), Actor::Human, map, "concepts"),
-            Event::session_created(Source::fixture(), session, crate::core::ClientSessionId::new("c".into())),
+            Event::session_created(Source::fixture(), session, crate::core::ProjectId::new(), crate::core::ClientSessionId::new("c".into())),
             Event::message(Source::fixture(), session, Actor::Human, "Hello", serde_json::json!({})),
         ];
 

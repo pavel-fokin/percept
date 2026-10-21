@@ -8,7 +8,6 @@ pub type ProjectId = Id<Project>;
 /// A folder percept tracks, created by a `ProjectCreated` event.
 /// Its root is the `source.path` of that event.
 pub struct Project {
-    #[allow(dead_code, reason = "nothing reads a project's id yet")]
     pub id: ProjectId,
     pub name: ProjectName,
     pub root: PathBuf,
@@ -26,6 +25,11 @@ impl Project {
                 _ => None,
             })
             .collect()
+    }
+
+    /// The project whose root is the nearest at or above `path`, as git finds its root.
+    pub fn containing<'a>(projects: &'a [Self], path: &Path) -> Option<&'a Self> {
+        projects.iter().filter(|p| path.starts_with(&p.root)).max_by_key(|p| p.root.components().count())
     }
 }
 
@@ -115,6 +119,26 @@ mod tests {
 
             assert_eq!(error.to_string(), "pass a name: percept init <name>", "{root}");
         }
+    }
+
+    #[test]
+    fn the_nearest_root_at_or_above_a_path_wins() {
+        let source = |path: &str| Source { client: "percept-cli".into(), path: path.into() };
+        let events = [
+            Event::project_created(source("/work/app"), Actor::Human, ProjectId::new(), ProjectName::new("app").unwrap()),
+            Event::project_created(source("/work/app/inner"), Actor::Human, ProjectId::new(), ProjectName::new("inner").unwrap()),
+            Event::project_created(source("/work/apple"), Actor::Human, ProjectId::new(), ProjectName::new("apple").unwrap()),
+        ];
+        let projects = Project::all(&events);
+
+        let name = |path: &str| Project::containing(&projects, Path::new(path)).map(|p| p.name.as_str());
+
+        assert_eq!(name("/work/app"), Some("app"));
+        assert_eq!(name("/work/app/src/deep"), Some("app"));
+        assert_eq!(name("/work/app/inner/src"), Some("inner"));
+        assert_eq!(name("/work/apple/x"), Some("apple"));
+        assert_eq!(name("/work"), None);
+        assert_eq!(name("/elsewhere"), None);
     }
 
     #[test]

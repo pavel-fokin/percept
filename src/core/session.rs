@@ -3,13 +3,15 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 use serde::Serialize;
 
-use super::{Actor, Event, Payload};
+use super::{Actor, Event, Payload, ProjectId};
 use crate::shared::Id;
 
 /// A conversation with a coding client, created by a `SessionCreated` event.
 pub struct Session {
     pub id: SessionId,
     pub client_session_id: ClientSessionId,
+    #[allow(dead_code, reason = "no response carries a session's project yet")]
+    pub project: ProjectId,
     pub created_at: Timestamp,
     /// Where the client ran, from the `source` of the `SessionCreated` event.
     pub path: PathBuf,

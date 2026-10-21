@@ -95,7 +95,7 @@ impl Kind {
 /// What happened, with the data that kind of event carries.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Payload {
-    SessionCreated { session: SessionId, client_session_id: ClientSessionId },
+    SessionCreated { session: SessionId, project: ProjectId, client_session_id: ClientSessionId },
     SessionStarted { session: SessionId },
     SessionStopped { session: SessionId },
     Message { session: SessionId, content: String },
@@ -177,8 +177,8 @@ pub struct Event {
 }
 
 impl Event {
-    pub fn session_created(source: Source, session: SessionId, client_session_id: ClientSessionId) -> Self {
-        Self::build(source, Actor::System, Payload::SessionCreated { session, client_session_id }, None)
+    pub fn session_created(source: Source, session: SessionId, project: ProjectId, client_session_id: ClientSessionId) -> Self {
+        Self::build(source, Actor::System, Payload::SessionCreated { session, project, client_session_id }, None)
     }
 
     pub fn message(
@@ -306,7 +306,7 @@ mod tests {
 
     #[test]
     fn session_created_is_a_system_event_carrying_the_client_session_id() {
-        let event = Event::session_created(Source::fixture(), SessionId::new(), ClientSessionId::new("a".into()));
+        let event = Event::session_created(Source::fixture(), SessionId::new(), ProjectId::new(), ClientSessionId::new("a".into()));
 
         assert_eq!(event.actor, Actor::System);
         assert_eq!(event.payload.kind(), Kind::SessionCreated);
@@ -392,7 +392,7 @@ mod tests {
     fn every_payload_names_its_kind_and_session() {
         let session = SessionId::new();
         let payloads = [
-            (Payload::SessionCreated { session, client_session_id: ClientSessionId::new("a".into()) }, Kind::SessionCreated),
+            (Payload::SessionCreated { session, project: ProjectId::new(), client_session_id: ClientSessionId::new("a".into()) }, Kind::SessionCreated),
             (Payload::SessionStarted { session }, Kind::SessionStarted),
             (Payload::SessionStopped { session }, Kind::SessionStopped),
             (Payload::Message { session, content: "hi".into() }, Kind::Message),
