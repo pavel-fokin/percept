@@ -62,6 +62,12 @@ Prefer a minimal core and plain, standard data structures (e.g., plain graph + a
 
 When behavior changes, remove the old logic cleanly. Do not preserve legacy paths or squeeze new behavior into old structures unless asked.
 
+- Add no concept the domain lacks - a setting, a variant, a view -
+  until a case visibly needs it. Show what the existing pieces give
+  first.
+- Give every rule and invariant one owner, in the layer and type that
+  own the data, even when that takes a new type or module.
+
 ## Code Quality
 
 Entity IDs use UUIDv7, each wrapped in a type specific to that entity,
