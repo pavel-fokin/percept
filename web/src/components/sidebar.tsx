@@ -1,7 +1,7 @@
 import { useRef, useState, useSyncExternalStore } from "react";
-import { Link, NavLink } from "react-router";
+import { Link } from "react-router";
 import { ThemeSwitch } from "./theme-switch";
-import { ghost, IconButton } from "./ui/button";
+import { IconButton } from "./ui/button";
 
 // Tailwind's md breakpoint. The panel mounts once, so its theme switch
 // and an open drawer never outlive a resize across it.
@@ -81,10 +81,6 @@ function Panel({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => vo
         </div>
       </div>
 
-      <nav className="mt-4 grid gap-1">
-        <NavItem to="/board" label="Board" icon={<BoardIcon />} collapsed={collapsed} />
-      </nav>
-
       <div className="mt-auto">
         <ThemeSwitch />
       </div>
@@ -97,21 +93,6 @@ function Wordmark({ className = "" }: { className?: string }) {
     <Link to="/" className={`font-mono text-xl font-medium tracking-tight whitespace-nowrap ${className}`}>
       percept<span className="text-accent">.</span>
     </Link>
-  );
-}
-
-function NavItem({ to, label, icon, collapsed }: { to: string; label: string; icon: React.ReactNode; collapsed: boolean }) {
-  return (
-    <NavLink
-      to={to}
-      title={collapsed ? label : undefined}
-      className={({ isActive }) =>
-        `flex h-11 items-center gap-3 rounded-md px-3.5 text-sm whitespace-nowrap transition-colors ${isActive ? "bg-border text-text" : ghost}`
-      }
-    >
-      {icon}
-      <span className={collapsed ? "sr-only" : ""}>{label}</span>
-    </NavLink>
   );
 }
 
@@ -130,16 +111,6 @@ function PanelIcon({ className = "" }: { className?: string }) {
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden className={`size-4 ${className}`}>
       <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" />
       <path d="M6 2.75v10.5" />
-    </svg>
-  );
-}
-
-function BoardIcon() {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden className="size-4 flex-none">
-      <rect x="1.75" y="1.75" width="6" height="4.5" rx="1" />
-      <rect x="8.25" y="9.75" width="6" height="4.5" rx="1" />
-      <path d="M4.75 6.25v3.75a2 2 0 0 0 2 2h1.5" />
     </svg>
   );
 }

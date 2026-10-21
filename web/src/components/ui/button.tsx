@@ -5,8 +5,7 @@ type ButtonProps = React.ComponentProps<"button"> & { variant: Variant };
 const base =
   "inline-flex cursor-pointer items-center justify-center gap-2 rounded-md text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
 
-// Shared with links that look like ghost buttons, such as the sidebar's nav items.
-export const ghost = "text-muted hover:bg-border/50 hover:text-text";
+const ghost = "text-muted hover:bg-border/50 hover:text-text";
 
 const variants: Record<Variant, string> = {
   primary: "bg-text font-semibold text-bg hover:bg-text/85",

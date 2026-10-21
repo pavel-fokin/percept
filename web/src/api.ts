@@ -22,6 +22,12 @@ export type MapSummary = {
   nodes: number;
 };
 
+export type BoardSummary = {
+  id: string;
+  name: string;
+  project: string;
+};
+
 export type MapNode = {
   id: string;
   kind: string;

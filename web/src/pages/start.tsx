@@ -1,25 +1,27 @@
 import { Link, useLoaderData, useRouteError } from "react-router";
-import { describe, getData, type MapSummary, type Project, type Session } from "../api";
+import { describe, getData, type BoardSummary, type MapSummary, type Project, type Session } from "../api";
 import { relative } from "../format";
+import { NewBoard } from "../components/new-board";
 import { Spinner } from "../components/spinner";
 import { textLink } from "../components/ui/text-link";
-import { mapUrl, sessionsUrl, sessionUrl } from "../paths";
+import { boardUrl, mapUrl, sessionsUrl, sessionUrl } from "../paths";
 import { usePolling } from "../use-polling";
 
 const README = "https://github.com/pavel-fokin/percept#readme";
 
-type ProjectGroup = { project: string; root: string; maps: MapSummary[]; sessions: number; latest?: Session };
+type ProjectGroup = { project: string; root: string; maps: MapSummary[]; boards: BoardSummary[]; sessions: number; latest?: Session };
 
-/** One group per project: those with sessions by newest session, then those with only maps, then empty ones. */
+/** One group per project: those with sessions by newest session, then those with only maps or boards, then empty ones. */
 export async function loadStart() {
-  const [projects, sessions, maps] = await Promise.all([
+  const [projects, sessions, maps, boards] = await Promise.all([
     getData<Project[]>("/api/projects"),
     getData<Session[]>("/api/sessions"),
     getData<MapSummary[]>("/api/maps"),
+    getData<BoardSummary[]>("/api/boards"),
   ]);
 
   const groups = new Map<string, ProjectGroup>(
-    projects.map(({ name, root }) => [name, { project: name, root, maps: [], sessions: 0 }]),
+    projects.map(({ name, root }) => [name, { project: name, root, maps: [], boards: [], sessions: 0 }]),
   );
 
   // Latest by activity, so a working session stays in view when a newer one sits idle beside it.
@@ -31,9 +33,11 @@ export async function loadStart() {
     active.add(g);
   }
   for (const map of maps) groups.get(map.project)!.maps.push(map);
+  for (const board of boards) groups.get(board.project)!.boards.push(board);
 
   const rest = [...groups.values()].filter((g) => !active.has(g));
-  return [...active, ...rest.filter((g) => g.maps.length > 0), ...rest.filter((g) => g.maps.length === 0)];
+  const hasContent = (g: ProjectGroup) => g.maps.length > 0 || g.boards.length > 0;
+  return [...active, ...rest.filter(hasContent), ...rest.filter((g) => !hasContent(g))];
 }
 
 export function Start() {
@@ -45,8 +49,8 @@ export function Start() {
 
   return (
     <div className="mt-8 grid gap-14 sm:mt-14">
-      {groups.map(({ project, root, maps, sessions, latest }) => {
-        const isEmpty = sessions === 0 && maps.length === 0;
+      {groups.map(({ project, root, maps, boards, sessions, latest }) => {
+        const isEmpty = sessions === 0 && maps.length === 0 && boards.length === 0;
 
         return (
           <section key={project}>
@@ -89,7 +93,7 @@ export function Start() {
               </Link>
             )}
 
-            {!isEmpty && (
+            {(maps.length > 0 || sessions > 0) && (
               <nav aria-label={project} className="-mx-3 mt-2 flex flex-wrap gap-1">
                 {maps.map((map) => (
                   <Counter key={map.kind} to={mapUrl(project, map.kind)} label={map.kind} count={map.nodes} />
@@ -97,6 +101,20 @@ export function Start() {
                 {sessions > 0 && <Counter to={sessionsUrl(project)} label="sessions" count={sessions} />}
               </nav>
             )}
+
+            <nav aria-label={`${project} boards`} className="-mx-3 mt-1 flex flex-wrap items-center gap-1">
+              {boards.map((board) => (
+                <Link
+                  key={board.id}
+                  to={boardUrl(project, board.name)}
+                  className="group flex min-h-11 items-center gap-2 rounded-lg px-3 py-2.5 hover:bg-surface focus-visible:bg-surface"
+                >
+                  <BoardIcon />
+                  <span className="text-base text-muted group-hover:text-text">{board.name}</span>
+                </Link>
+              ))}
+              <NewBoard project={project} />
+            </nav>
           </section>
         );
       })}
@@ -116,6 +134,16 @@ function Working() {
       <Spinner />
       working
     </>
+  );
+}
+
+function BoardIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden className="size-4 flex-none text-muted">
+      <rect x="1.75" y="1.75" width="6" height="4.5" rx="1" />
+      <rect x="8.25" y="9.75" width="6" height="4.5" rx="1" />
+      <path d="M4.75 6.25v3.75a2 2 0 0 0 2 2h1.5" />
+    </svg>
   );
 }
 

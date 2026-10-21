@@ -8,6 +8,10 @@ const url = (...segments: string[]) => `/${["home", ...segments].map(encodeURICo
 export const sessionsUrl = (project: string) => url(project, "sessions");
 export const sessionUrl = (project: string, id: string) => url(project, "sessions", id);
 export const mapUrl = (project: string, kind: string) => url(project, "maps", kind);
+export const boardUrl = (project: string, board: string) => url(project, "boards", board);
+
+/** The router pattern of a board page, which sits outside the reading column. */
+export const boardPattern = "home/:project/boards/:board";
 
 /** The page a `*` splat names, or null if it names none. */
 export function parseRoute(splat: string): Route | null {
