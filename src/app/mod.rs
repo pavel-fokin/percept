@@ -3,6 +3,7 @@
 mod app_service;
 mod git;
 mod maps;
+mod projects;
 mod sessions;
 #[cfg(test)]
 mod testing;

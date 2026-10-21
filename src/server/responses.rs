@@ -183,6 +183,7 @@ fn payload(payload: &Payload, home: &Path) -> serde_json::Value {
         Payload::SessionCreated { .. }
         | Payload::SessionStarted { .. }
         | Payload::SessionStopped { .. }
+        | Payload::ProjectCreated { .. }
         | Payload::MapCreated { .. }
         | Payload::NodeAdded { .. }
         | Payload::NodeChanged { .. }

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use super::{ClientAgentId, ClientSessionId, MapId, NodeId, Reference, SessionId};
+use super::{ClientAgentId, ClientSessionId, MapId, NodeId, ProjectId, ProjectName, Reference, SessionId};
 use crate::shared::Id;
 
 pub type EventId = Id<Event>;
@@ -42,6 +42,7 @@ pub enum Kind {
     ToolUsed,
     SubagentStarted,
     SubagentReported,
+    ProjectCreated,
     MapCreated,
     NodeAdded,
     NodeChanged,
@@ -60,6 +61,7 @@ impl Kind {
             Self::ToolUsed => "tool.used",
             Self::SubagentStarted => "subagent.started",
             Self::SubagentReported => "subagent.reported",
+            Self::ProjectCreated => "project.created",
             Self::MapCreated => "map.created",
             Self::NodeAdded => "node.added",
             Self::NodeChanged => "node.changed",
@@ -78,6 +80,7 @@ impl Kind {
             "tool.used" => Some(Self::ToolUsed),
             "subagent.started" => Some(Self::SubagentStarted),
             "subagent.reported" => Some(Self::SubagentReported),
+            "project.created" => Some(Self::ProjectCreated),
             "map.created" => Some(Self::MapCreated),
             "node.added" => Some(Self::NodeAdded),
             "node.changed" => Some(Self::NodeChanged),
@@ -99,6 +102,7 @@ pub enum Payload {
     ToolUsed { session: SessionId, tool: String, input: Option<String>, output: Option<String> },
     SubagentStarted { session: SessionId, subagent: ClientAgentId, agent: String, task: String },
     SubagentReported { session: SessionId, subagent: ClientAgentId, content: String },
+    ProjectCreated { project: ProjectId, name: ProjectName },
     MapCreated { map: MapId, kind: String },
     NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
     /// The node's full new state, not a diff.
@@ -118,6 +122,7 @@ impl Payload {
             Self::ToolUsed { .. } => Kind::ToolUsed,
             Self::SubagentStarted { .. } => Kind::SubagentStarted,
             Self::SubagentReported { .. } => Kind::SubagentReported,
+            Self::ProjectCreated { .. } => Kind::ProjectCreated,
             Self::MapCreated { .. } => Kind::MapCreated,
             Self::NodeAdded { .. } => Kind::NodeAdded,
             Self::NodeChanged { .. } => Kind::NodeChanged,
@@ -136,7 +141,7 @@ impl Payload {
             | Self::ToolUsed { session, .. }
             | Self::SubagentStarted { session, .. }
             | Self::SubagentReported { session, .. } => Some(*session),
-            Self::MapCreated { .. } | Self::NodeAdded { .. } | Self::NodeChanged { .. } | Self::NodeRemoved { .. } | Self::EdgeAdded { .. } | Self::EdgeRemoved { .. } => None,
+            Self::ProjectCreated { .. } | Self::MapCreated { .. } | Self::NodeAdded { .. } | Self::NodeChanged { .. } | Self::NodeRemoved { .. } | Self::EdgeAdded { .. } | Self::EdgeRemoved { .. } => None,
         }
     }
 
@@ -148,7 +153,8 @@ impl Payload {
             | Self::NodeRemoved { map, .. }
             | Self::EdgeAdded { map, .. }
             | Self::EdgeRemoved { map, .. } => Some(*map),
-            Self::SessionCreated { .. }
+            Self::ProjectCreated { .. }
+            | Self::SessionCreated { .. }
             | Self::SessionStarted { .. }
             | Self::SessionStopped { .. }
             | Self::Message { .. }
@@ -227,6 +233,10 @@ impl Event {
 
     pub fn session_stopped(source: Source, session: SessionId, raw: serde_json::Value) -> Self {
         Self::build(source, Actor::System, Payload::SessionStopped { session }, Some(raw))
+    }
+
+    pub fn project_created(source: Source, actor: Actor, project: ProjectId, name: ProjectName) -> Self {
+        Self::build(source, actor, Payload::ProjectCreated { project, name }, None)
     }
 
     pub fn map_created(source: Source, actor: Actor, map: MapId, kind: &str) -> Self {

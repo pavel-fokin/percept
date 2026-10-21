@@ -132,7 +132,8 @@ impl Map {
 
                 Ok(())
             }
-            Payload::MapCreated { .. }
+            Payload::ProjectCreated { .. }
+            | Payload::MapCreated { .. }
             | Payload::SessionCreated { .. }
             | Payload::SessionStarted { .. }
             | Payload::SessionStopped { .. }
@@ -189,7 +190,8 @@ impl Map {
                 self.edges.push(Edge { kind: kind.clone(), from: *from, to: *to, changes: vec![change] })
             }
             Payload::EdgeRemoved { kind, from, to, .. } => self.edges.retain(|e| !e.is(kind, *from, *to)),
-            Payload::MapCreated { .. }
+            Payload::ProjectCreated { .. }
+            | Payload::MapCreated { .. }
             | Payload::SessionCreated { .. }
             | Payload::SessionStarted { .. }
             | Payload::SessionStopped { .. }

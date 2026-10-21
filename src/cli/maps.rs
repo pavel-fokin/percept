@@ -122,7 +122,7 @@ fn parse_reference(value: &str) -> Result<Ref> {
     Err("--ref expects msg:<text> or file:<path>:<from>-<to>".into())
 }
 
-async fn cli_writer() -> Result<(Actor, Source)> {
+pub(super) async fn cli_writer() -> Result<(Actor, Source)> {
     let client = writer(env_flag("CLAUDECODE"), env_flag("CODEX_SESSION_ID"))?;
     let actor = if client.is_some() { Actor::Agent } else { Actor::Human };
     let name = client.map_or("percept-cli", Client::name);
