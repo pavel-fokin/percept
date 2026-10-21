@@ -8,9 +8,10 @@ use crate::shared::Result;
 
 pub(super) async fn create<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, kind: &str, file: &Path) -> Result<()> {
     let (actor, source) = cli_writer().await?;
+    let project = service.project_at(source.path()?).await?.id;
     let file = tokio::fs::canonicalize(file).await.map_err(|e| format!("{}: {e}", file.display()))?;
 
-    service.create_map(source, actor, kind, &file).await
+    service.create_map(source, actor, project, kind, &file).await
 }
 
 pub(super) async fn add<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
@@ -19,11 +20,13 @@ pub(super) async fn add<S: EventStore, M: DefinitionStore>(service: &AppService<
     match positionals {
         [map, kind, title] => {
             let (actor, source) = cli_writer().await?;
-            service.add_node(source, actor, map, kind, title, properties, references).await
+            let project = service.project_at(source.path()?).await?.id;
+            service.add_node(source, actor, project, map, kind, title, properties, references).await
         }
         [map, from, kind, to] => {
             let (actor, source) = cli_writer().await?;
-            service.add_edge(source, actor, map, from, kind, to).await
+            let project = service.project_at(source.path()?).await?.id;
+            service.add_edge(source, actor, project, map, from, kind, to).await
         }
         _ => Err("usage: percept add <map> <kind> <title> [--key value ...] [--ref 'msg:<text>' | --ref 'file:<path>:<from>-<to>' ...] | percept add <map> <from> <kind> <to>".into()),
     }
@@ -38,19 +41,22 @@ pub(super) async fn change<S: EventStore, M: DefinitionStore>(service: &AppServi
         _ => return Err("usage: percept change <map> <title> [<new title>] [--key value ...] [--ref 'msg:<text>' | --ref 'file:<path>:<from>-<to>' ...]".into()),
     };
     let (actor, source) = cli_writer().await?;
+    let project = service.project_at(source.path()?).await?.id;
 
-    service.change_node(source, actor, map, title, new_title, properties, references).await
+    service.change_node(source, actor, project, map, title, new_title, properties, references).await
 }
 
 pub(super) async fn remove<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
     match split_remove(args)? {
         [map, title] => {
             let (actor, source) = cli_writer().await?;
-            service.remove_node(source, actor, map, title).await
+            let project = service.project_at(source.path()?).await?.id;
+            service.remove_node(source, actor, project, map, title).await
         }
         [map, from, kind, to] => {
             let (actor, source) = cli_writer().await?;
-            service.remove_edge(source, actor, map, from, kind, to).await
+            let project = service.project_at(source.path()?).await?.id;
+            service.remove_edge(source, actor, project, map, from, kind, to).await
         }
         _ => Err("usage: percept remove <map> <title> | percept remove <map> <from> <kind> <to>".into()),
     }
@@ -134,12 +140,12 @@ pub(super) async fn cli_writer() -> Result<(Actor, Source)> {
 }
 
 pub(super) async fn show<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, map: Option<&str>) -> Result<()> {
-    let project = source_path(&std::env::current_dir()?).await;
+    let project = service.project_at(&source_path(&std::env::current_dir()?).await).await?.id;
 
     match map {
-        Some(kind) => println!("{}", map_markdown(&service.map(&project, kind).await?)?),
+        Some(kind) => println!("{}", map_markdown(&service.map(project, kind).await?)?),
         None => {
-            for map in service.maps(&project).await? {
+            for map in service.maps(project).await? {
                 println!("{}  {}, {}", map.kind, node_count(map.nodes.len()), edge_count(map.edges.len()));
             }
         }
@@ -149,8 +155,8 @@ pub(super) async fn show<S: EventStore, M: DefinitionStore>(service: &AppService
 }
 
 pub(super) async fn describe<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, kind: &str) -> Result<()> {
-    let project = source_path(&std::env::current_dir()?).await;
-    let definition = service.definition(&project, kind).await?;
+    let project = service.project_at(&source_path(&std::env::current_dir()?).await).await?.id;
+    let definition = service.definition(project, kind).await?;
 
     println!("{}", definition_markdown(kind, &definition));
 

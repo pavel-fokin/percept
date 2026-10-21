@@ -102,6 +102,11 @@ pub(super) fn add_project(store: &Memory, root: &str) {
     store.0.lock().unwrap().push(Event::project_created(source, Actor::Human, ProjectId::new(), name, root.into()));
 }
 
+/// The id of the project nearest above `root`.
+pub(super) fn id_at(store: &Memory, root: &str) -> ProjectId {
+    Project::containing(&store.0.lock().unwrap(), Path::new(root)).unwrap().id
+}
+
 /// Appends a session of the project nearest above `root` and returns its id.
 pub(super) fn add_session(store: &Memory, root: &str) -> SessionId {
     let mut events = store.0.lock().unwrap();

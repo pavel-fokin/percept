@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use super::AppService;
 use crate::core::{Actor, DefinitionStore, Event, EventStore, Name, Project, ProjectId, Source};
 use crate::shared::Result;
@@ -31,6 +33,13 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
     /// Every project in `ProjectCreated` order.
     pub async fn projects(&self) -> Result<Vec<Project>> {
         Ok(Project::all(&self.store.all().await?))
+    }
+
+    /// The nearest project at or above `path`.
+    pub async fn project_at(&self, path: &Path) -> Result<Project> {
+        let events = self.store.all().await?;
+
+        Ok(Project::containing(&events, path).ok_or("not in a project; run percept init")?)
     }
 }
 
