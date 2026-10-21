@@ -95,6 +95,16 @@ body {
   background-color: var(--color-mark);
 }
 
+/* Scroll targets land below the sticky top bar, which shows only below md. */
+html {
+  @apply scroll-pt-15 md:scroll-pt-0;
+}
+
+/* The page stays put behind an open drawer. */
+html:has(dialog[open]) {
+  overflow: hidden;
+}
+
 /* The scrim stays dark in either theme. */
 ::backdrop {
   background-color: color-mix(in srgb, var(--graphite-950) 60%, transparent);

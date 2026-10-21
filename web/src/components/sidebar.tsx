@@ -1,7 +1,7 @@
 import { useRef, useState, useSyncExternalStore } from "react";
 import { Link, NavLink } from "react-router";
 import { ThemeSwitch } from "./theme-switch";
-import { IconButton } from "./ui/button";
+import { ghost, IconButton } from "./ui/button";
 
 // Tailwind's md breakpoint. The panel mounts once, so its theme switch
 // and an open drawer never outlive a resize across it.
@@ -55,7 +55,7 @@ function MobileSidebar() {
       <dialog
         ref={drawer}
         onClick={closeOnClick}
-        className="m-0 h-dvh max-h-none w-72 max-w-full -translate-x-full border-r border-border bg-surface text-text transition-[translate,display,overlay] transition-discrete open:translate-x-0 motion-reduce:transition-none starting:open:-translate-x-full"
+        className="h-dvh max-h-none w-72 max-w-full -translate-x-full border-r border-border bg-surface text-text transition-[translate,display,overlay] transition-discrete open:translate-x-0 motion-reduce:transition-none starting:open:-translate-x-full"
       >
         <Panel collapsed={false} onToggle={() => drawer.current?.close()} />
       </dialog>
@@ -75,14 +75,8 @@ function Panel({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => vo
             aria-expanded={!collapsed}
             onClick={onToggle}
           >
-            {collapsed ? (
-              <>
-                <Logo className="size-7 group-hover:hidden group-has-focus-visible:hidden" />
-                <PanelIcon className="hidden group-hover:block group-has-focus-visible:block" />
-              </>
-            ) : (
-              <PanelIcon />
-            )}
+            {collapsed && <Logo className="size-7 group-hover:hidden group-has-focus-visible:hidden" />}
+            <PanelIcon className={collapsed ? "hidden group-hover:block group-has-focus-visible:block" : ""} />
           </IconButton>
         </div>
       </div>
@@ -112,7 +106,7 @@ function NavItem({ to, label, icon, collapsed }: { to: string; label: string; ic
       to={to}
       title={collapsed ? label : undefined}
       className={({ isActive }) =>
-        `flex h-11 items-center gap-3 rounded-md px-3.5 text-sm whitespace-nowrap transition-colors hover:bg-border hover:text-text ${isActive ? "bg-border text-text" : "text-muted"}`
+        `flex h-11 items-center gap-3 rounded-md px-3.5 text-sm whitespace-nowrap transition-colors ${isActive ? "bg-border text-text" : ghost}`
       }
     >
       {icon}
