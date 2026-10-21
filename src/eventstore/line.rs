@@ -12,7 +12,7 @@ use crate::shared::{Error, Result};
 #[derive(Serialize, Deserialize)]
 pub(super) struct EventLine {
     id: EventId,
-    source: Source,
+    source: SourceLine,
     actor: Actor,
     kind: String,
     payload: serde_json::Value,
@@ -60,7 +60,7 @@ impl From<&Event> for EventLine {
 
         Self {
             id: event.id,
-            source: event.source.clone(),
+            source: SourceLine::from(&event.source),
             actor: event.actor,
             kind: event.payload.kind().name().into(),
             payload,
@@ -155,12 +155,38 @@ impl TryFrom<EventLine> for Event {
 
         Ok(Event {
             id: line.id,
-            source: line.source,
+            source: line.source.into(),
             actor: line.actor,
             payload,
             raw: line.raw,
             created_at: line.created_at,
         })
+    }
+}
+
+/// A source with no `path` is the web.
+#[derive(Serialize, Deserialize)]
+struct SourceLine {
+    client: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    path: Option<PathBuf>,
+}
+
+impl From<&Source> for SourceLine {
+    fn from(source: &Source) -> Self {
+        match source {
+            Source::Checkout { client, path } => Self { client: client.clone(), path: Some(path.clone()) },
+            Source::Web => Self { client: Source::WEB_CLIENT.into(), path: None },
+        }
+    }
+}
+
+impl From<SourceLine> for Source {
+    fn from(line: SourceLine) -> Self {
+        match line.path {
+            Some(path) => Self::Checkout { client: line.client, path },
+            None => Self::Web,
+        }
     }
 }
 
@@ -239,6 +265,18 @@ mod tests {
             assert_eq!(back.raw, event.raw);
             assert_eq!(back.created_at, event.created_at);
         }
+    }
+
+    #[test]
+    fn a_web_source_is_a_line_without_a_path() {
+        let event = Event::board_created(Source::Web, Actor::Human, BoardId::new(), ProjectId::new(), Name::new("ideas").unwrap());
+
+        let value = serde_json::to_value(EventLine::from(&event)).unwrap();
+        let line: EventLine = serde_json::from_value(value.clone()).unwrap();
+        let back = Event::try_from(line).unwrap();
+
+        assert_eq!(value["source"], json!({"client": "percept-web"}));
+        assert_eq!(back.source, Source::Web);
     }
 
     #[test]

@@ -128,7 +128,7 @@ pub(super) async fn cli_writer() -> Result<(Actor, Source)> {
     let client = writer(env_flag("CLAUDECODE"), env_flag("CODEX_SESSION_ID"))?;
     let actor = if client.is_some() { Actor::Agent } else { Actor::Human };
     let name = client.map_or("percept-cli", Client::name);
-    let source = Source { client: name.into(), path: source_path(&std::env::current_dir()?).await };
+    let source = Source::Checkout { client: name.into(), path: source_path(&std::env::current_dir()?).await };
 
     Ok((actor, source))
 }

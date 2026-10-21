@@ -44,7 +44,7 @@ mod tests {
     use crate::core::{Actor, Source};
 
     fn source(path: &str) -> Source {
-        Source { client: "percept-cli".into(), path: path.into() }
+        Source::Checkout { client: "percept-cli".into(), path: path.into() }
     }
 
     #[test]

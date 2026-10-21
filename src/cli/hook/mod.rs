@@ -40,7 +40,7 @@ pub(super) async fn hook<S: EventStore, M: DefinitionStore>(service: &AppService
     let Translation::Record(client_session_id, event) = translation else {
         return Ok(());
     };
-    let source = Source { client: client.name().to_owned(), path: source_path(&std::env::current_dir()?).await };
+    let source = Source::Checkout { client: client.name().to_owned(), path: source_path(&std::env::current_dir()?).await };
 
     service.record(client_session_id, source, event).await
 }

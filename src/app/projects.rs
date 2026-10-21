@@ -14,15 +14,16 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         // Held until return, so parallel inits cannot both pass the checks.
         let _lock = self.store.lock().await?;
 
+        let root = source.path()?.to_owned();
         let projects = Project::all(&self.store.all().await?);
-        if projects.iter().any(|p| p.root == source.path) {
-            return Err(format!("{} is already a project", source.path.display()).into());
+        if projects.iter().any(|p| p.root == root) {
+            return Err(format!("{} is already a project", root.display()).into());
         }
         if projects.iter().any(|p| p.name == name) {
             return Err(format!("the name {} is taken", name.as_str()).into());
         }
 
-        self.store.append(&Event::project_created(source.clone(), actor, ProjectId::new(), name.clone(), source.path)).await?;
+        self.store.append(&Event::project_created(source.clone(), actor, ProjectId::new(), name.clone(), root)).await?;
 
         Ok(name)
     }
@@ -43,7 +44,7 @@ mod tests {
     }
 
     fn source(path: &str) -> Source {
-        Source { client: "percept-cli".into(), path: path.into() }
+        Source::Checkout { client: "percept-cli".into(), path: path.into() }
     }
 
     #[tokio::test]

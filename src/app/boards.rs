@@ -3,9 +3,9 @@ use crate::core::{Actor, Board, BoardId, DefinitionStore, Event, EventStore, Nam
 use crate::shared::Result;
 
 impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
-    /// Records a new board in the project named `project`, written by `client` from the project's root.
+    /// Records a new board in the project named `project`, written from `source`.
     /// It is named `board-N`, N the smallest number no board of the project already uses.
-    pub async fn create_board(&self, client: &str, actor: Actor, project: &str) -> Result<Option<Board>> {
+    pub async fn create_board(&self, source: Source, actor: Actor, project: &str) -> Result<Option<Board>> {
         // Held until return, so parallel creates cannot both pick the same name.
         let _lock = self.store.lock().await?;
 
@@ -19,7 +19,6 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         let name = Name::new(&free)?;
 
         let board = BoardId::new();
-        let source = Source { client: client.into(), path: project.root };
         self.store.append(&Event::board_created(source, actor, board, project.id, name.clone())).await?;
 
         Ok(Some(Board { id: board, project: project.id, name }))
@@ -53,7 +52,7 @@ mod tests {
         let store = in_project("/work/a");
         let service = AppService::new(&store, Definitions);
 
-        let created = service.create_board("percept-web", Actor::Human, "p0").await.unwrap().unwrap();
+        let created = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
 
         let boards = service.boards().await.unwrap();
         assert_eq!(boards, vec![created.clone()]);
@@ -61,7 +60,7 @@ mod tests {
         let events = store.0.lock().unwrap();
         let event = events.last().unwrap();
         assert_eq!(event.actor, Actor::Human);
-        assert_eq!(event.source, Source { client: "percept-web".into(), path: "/work/a".into() });
+        assert_eq!(event.source, Source::Web);
         assert!(matches!(&event.payload, Payload::BoardCreated { board, .. } if *board == created.id));
     }
 
@@ -71,9 +70,9 @@ mod tests {
         add_project(&store, "/work/b");
         let service = AppService::new(&store, Definitions);
 
-        let first = service.create_board("percept-web", Actor::Human, "p0").await.unwrap().unwrap();
-        let second = service.create_board("percept-web", Actor::Human, "p0").await.unwrap().unwrap();
-        let other = service.create_board("percept-web", Actor::Human, "p1").await.unwrap().unwrap();
+        let first = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
+        let second = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
+        let other = service.create_board(Source::Web, Actor::Human, "p1").await.unwrap().unwrap();
 
         assert_eq!(first.name.as_str(), "board-1");
         assert_eq!(second.name.as_str(), "board-2");
@@ -85,12 +84,12 @@ mod tests {
         let store = in_project("/work/a");
         let project = Project::named(&store.0.lock().unwrap(), "p0").unwrap();
         for name in ["board-1", "board-3"] {
-            let source = Source { client: "percept-web".into(), path: "/work/a".into() };
+            let source = Source::Web;
             store.0.lock().unwrap().push(Event::board_created(source, Actor::Human, BoardId::new(), project.id, Name::new(name).unwrap()));
         }
         let service = AppService::new(&store, Definitions);
 
-        let created = service.create_board("percept-web", Actor::Human, "p0").await.unwrap().unwrap();
+        let created = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
 
         assert_eq!(created.name.as_str(), "board-2");
     }
@@ -100,8 +99,8 @@ mod tests {
         let store = in_project("/work/a");
         let service = AppService::new(&store, Definitions);
 
-        let unknown = service.create_board("percept-web", Actor::Human, "nope").await.unwrap();
-        let broken = AppService::new(Broken, Definitions).create_board("percept-web", Actor::Human, "p0").await;
+        let unknown = service.create_board(Source::Web, Actor::Human, "nope").await.unwrap();
+        let broken = AppService::new(Broken, Definitions).create_board(Source::Web, Actor::Human, "p0").await;
 
         assert_eq!(unknown, None);
         assert!(broken.is_err());
@@ -113,7 +112,7 @@ mod tests {
         let store = in_project("/work/a");
         add_project(&store, "/work/b");
         let service = AppService::new(&store, Definitions);
-        let first = service.create_board("percept-web", Actor::Human, "p0").await.unwrap().unwrap();
+        let first = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
 
         let by_name = service.board("p0", "Board-1").await.unwrap();
         let in_other_project = service.board("p1", "board-1").await.unwrap();

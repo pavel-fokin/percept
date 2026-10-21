@@ -8,7 +8,7 @@ pub(super) async fn init<S: EventStore, M: DefinitionStore>(service: &AppService
 
     let name = match name {
         Some(typed) => Name::new(typed)?,
-        None => Name::from_root(&source.path).ok_or("pass a name: percept init <name>")?,
+        None => Name::from_root(source.path()?).ok_or("pass a name: percept init <name>")?,
     };
 
     let name = service.create_project(source, actor, name).await?;

@@ -38,7 +38,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
                         client_session_id: client_session_id.clone(),
                         project: *project,
                         created_at: e.created_at,
-                        client: e.source.client.clone(),
+                        client: e.source.client().to_owned(),
                         title: titles.get(session).map(|t| t.to_string()),
                         status,
                         last_event_at,
@@ -77,7 +77,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         let session = match self.store.session(&client_session_id).await? {
             Some(session) => session,
             None => {
-                let Some(project) = Project::containing(&self.store.all().await?, &source.path) else {
+                let Some(project) = Project::containing(&self.store.all().await?, source.path()?) else {
                     return Ok(());
                 };
 
@@ -164,7 +164,7 @@ mod tests {
     async fn client_is_the_source_client_of_the_created_event() {
         let store = in_project("/");
         let service = AppService::new(&store, Definitions);
-        let source = Source { client: "claude-code".into(), path: "/work/app".into() };
+        let source = Source::Checkout { client: "claude-code".into(), path: "/work/app".into() };
         service.record(client_session_id("a"), source, |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
 
         let sessions = service.sessions().await.unwrap();
@@ -303,7 +303,7 @@ mod tests {
     #[tokio::test]
     async fn record_gives_the_session_created_event_the_same_source_and_no_later_a_time() {
         let store = in_project("/");
-        let source = Source { client: "codex".into(), path: "/work/app".into() };
+        let source = Source::Checkout { client: "codex".into(), path: "/work/app".into() };
 
         AppService::new(&store, Definitions)
             .record(client_session_id("a"), source.clone(), |src, s| Event::tool_used(src, s, "Bash", None, None, json!({})))
@@ -318,7 +318,7 @@ mod tests {
     }
 
     fn at(path: &str) -> Source {
-        Source { client: "claude-code".into(), path: path.into() }
+        Source::Checkout { client: "claude-code".into(), path: path.into() }
     }
 
     fn tool(src: Source, s: SessionId) -> Event {

@@ -7,7 +7,7 @@ use axum::Json;
 
 use super::responses::{self, BoardSummary, Data, MapDetail, MapSummary, ProjectSummary, Status};
 use super::Api;
-use crate::core::{Actor, DefinitionStore, EventStore, SessionId};
+use crate::core::{Actor, DefinitionStore, EventStore, SessionId, Source};
 use crate::shared::Error;
 
 type Reply<T> = Result<Json<Data<T>>, ApiError>;
@@ -88,7 +88,7 @@ where
     }
 
     pub(super) async fn create_board(State(api): State<Arc<Self>>, Path(project): Path<String>) -> Reply<BoardSummary> {
-        let board = api.service.create_board("percept-web", Actor::Human, &project).await?.ok_or(ApiError::NotFound)?;
+        let board = api.service.create_board(Source::Web, Actor::Human, &project).await?.ok_or(ApiError::NotFound)?;
         Ok(Json(Data { data: BoardSummary::new(board, project) }))
     }
 
