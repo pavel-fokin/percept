@@ -15,10 +15,12 @@ export default function App() {
   );
 }
 
+const column = "mx-auto w-full max-w-3xl px-4 sm:px-6";
+
 /** The reading width for pages of text; a page that needs the full width sits outside it. */
 export function Column() {
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 pb-24 sm:px-6">
+    <div className={`${column} pb-24`}>
       <Outlet />
     </div>
   );
@@ -26,7 +28,7 @@ export function Column() {
 
 function Header() {
   return (
-    <header className="mx-auto flex h-15 w-full max-w-3xl items-center justify-between px-4 sm:h-18 sm:px-6">
+    <header className={`${column} flex h-15 items-center justify-between sm:h-18`}>
       <Link to="/" className="font-mono text-xl font-medium tracking-tight">
         percept<span className="text-accent">.</span>
       </Link>

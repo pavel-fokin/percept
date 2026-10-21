@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
 import {
-  addEdge,
   Background,
   BaseEdge,
   Controls,
@@ -11,60 +10,53 @@ import {
   Panel,
   Position,
   ReactFlow,
-  useEdgesState,
-  useNodesState,
   useReactFlow,
   useStoreApi,
-  type Connection,
-  type DefaultEdgeOptions,
   type EdgeProps,
-  type EdgeTypes,
   type Node,
   type NodeProps,
-  type NodeTypes,
 } from "@xyflow/react";
 
 import { Button } from "../components/ui/button";
 
 type Note = Node<{ text: string }, "note">;
 
-const nodeTypes: NodeTypes = { note: NoteNode };
+const nodeTypes = { note: NoteNode };
 
-const edgeTypes: EdgeTypes = { default: LabeledEdge };
+const edgeTypes = { default: LabeledEdge };
 
-const edgeOptions: DefaultEdgeOptions = { markerEnd: { type: MarkerType.ArrowClosed, color: null } };
+const edgeOptions = { markerEnd: { type: MarkerType.ArrowClosed, color: null } };
+
+const handle = "size-4 rounded-full border border-border bg-muted";
+
+function caretToEnd(e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) {
+  const end = e.currentTarget.value.length;
+  e.currentTarget.setSelectionRange(end, end);
+}
 
 export function Board() {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Note>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-
   return (
-    <div className="relative flex-1">
-      <div className="absolute inset-0">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          nodeOrigin={[0.5, 0.5]}
-          defaultEdgeOptions={edgeOptions}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={(c: Connection) => setEdges((es) => addEdge(c, es))}
-          proOptions={{ hideAttribution: true }}
-        >
-          <Background />
-          <Controls showInteractive={false} />
-          <Panel position="top-left">
-            <AddNote onAdd={(note) => setNodes((ns) => [...ns, note])} />
-          </Panel>
-        </ReactFlow>
-      </div>
-    </div>
+    <ReactFlow
+      className="flex-1"
+      defaultNodes={[]}
+      defaultEdges={[]}
+      nodeTypes={nodeTypes}
+      edgeTypes={edgeTypes}
+      nodeOrigin={[0.5, 0]}
+      defaultEdgeOptions={edgeOptions}
+      proOptions={{ hideAttribution: true }}
+    >
+      <Background />
+      <Controls showInteractive={false} />
+      <Panel position="top-left">
+        <AddNote />
+      </Panel>
+    </ReactFlow>
   );
 }
 
-function AddNote({ onAdd }: { onAdd: (note: Note) => void }) {
+function AddNote() {
+  const { addNodes } = useReactFlow();
   const store = useStoreApi();
   const count = useRef(0);
 
@@ -72,7 +64,7 @@ function AddNote({ onAdd }: { onAdd: (note: Note) => void }) {
     const { width, height, transform: [x, y, zoom] } = store.getState();
     const position = { x: (width / 2 - x) / zoom, y: (height / 2 - y) / zoom };
 
-    onAdd({ id: `note-${count.current++}`, type: "note", position, data: { text: "" } });
+    addNodes({ id: `note-${count.current++}`, type: "note", position, data: { text: "" } });
   }
 
   return (
@@ -92,10 +84,11 @@ function NoteNode({ id, data, selected }: NodeProps<Note>) {
       onDoubleClick={() => setEditing(true)}
       className={`min-h-16 w-48 rounded-md border bg-surface p-3 text-sm ${ring}`}
     >
-      <Handle type="target" position={Position.Top} className="size-4 rounded-full border border-border bg-muted" />
+      <Handle type="target" position={Position.Top} className={handle} />
       {editing ? (
         <textarea
           autoFocus
+          onFocus={caretToEnd}
           value={data.text}
           onChange={(e) => updateNodeData(id, { text: e.target.value })}
           onBlur={() => setEditing(false)}
@@ -105,7 +98,7 @@ function NoteNode({ id, data, selected }: NodeProps<Note>) {
       ) : (
         <p className={`break-words whitespace-pre-wrap ${data.text ? "" : "text-muted"}`}>{data.text || "Empty note"}</p>
       )}
-      <Handle type="source" position={Position.Bottom} className="size-4 rounded-full border border-border bg-muted" />
+      <Handle type="source" position={Position.Bottom} className={handle} />
     </div>
   );
 }
@@ -130,6 +123,7 @@ function LabeledEdge({ id, label, markerEnd, ...ends }: EdgeProps) {
             {editing ? (
               <input
                 autoFocus
+                onFocus={caretToEnd}
                 value={typeof label === "string" ? label : ""}
                 onChange={(e) => updateEdge(id, { label: e.target.value })}
                 onBlur={() => setEditing(false)}

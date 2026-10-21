@@ -105,8 +105,7 @@ body {
   --xy-edge-stroke-selected: var(--color-text);
   --xy-edge-stroke-width: 1.5;
   --xy-connectionline-stroke: var(--color-muted);
-  --xy-background-color: var(--color-bg);
-  --xy-background-pattern-dots-color: var(--color-border);
+  --xy-background-pattern-color: var(--color-muted);
 }
 
 .react-flow__controls {
@@ -114,9 +113,5 @@ body {
 }
 
 .react-flow__controls-button {
-  @apply flex size-8 items-center justify-center text-muted hover:bg-bg hover:text-text;
-}
-
-.react-flow__controls-button svg {
-  @apply size-3 fill-current;
+  @apply size-8 text-muted hover:bg-bg hover:text-text;
 }
