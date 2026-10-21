@@ -4,9 +4,9 @@ import { ThemeSwitch } from "./components/theme-switch";
 export default function App() {
   return (
     <>
-      <div className="mx-auto max-w-3xl px-4 pb-24 sm:px-6">
+      <div className="flex min-h-dvh flex-col">
         <Header />
-        <main>
+        <main className="flex flex-1 flex-col">
           <Outlet />
         </main>
       </div>
@@ -15,9 +15,18 @@ export default function App() {
   );
 }
 
+/** The reading width for pages of text; a page that needs the full width sits outside it. */
+export function Column() {
+  return (
+    <div className="mx-auto w-full max-w-3xl px-4 pb-24 sm:px-6">
+      <Outlet />
+    </div>
+  );
+}
+
 function Header() {
   return (
-    <header className="flex h-15 items-center justify-between sm:h-18">
+    <header className="mx-auto flex h-15 w-full max-w-3xl items-center justify-between px-4 sm:h-18 sm:px-6">
       <Link to="/" className="font-mono text-xl font-medium tracking-tight">
         percept<span className="text-accent">.</span>
       </Link>
