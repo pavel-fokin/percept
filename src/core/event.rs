@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use super::{ClientAgentId, ClientSessionId, MapId, NodeId, Reference, SessionId};
+use super::{ClientAgentId, ClientSessionId, MapId, NodeId, ProjectId, ProjectName, Reference, SessionId};
 use crate::shared::Id;
 
 pub type EventId = Id<Event>;
@@ -42,6 +42,7 @@ pub enum Kind {
     ToolUsed,
     SubagentStarted,
     SubagentReported,
+    ProjectCreated,
     MapCreated,
     NodeAdded,
     NodeChanged,
@@ -60,6 +61,7 @@ impl Kind {
             Self::ToolUsed => "tool.used",
             Self::SubagentStarted => "subagent.started",
             Self::SubagentReported => "subagent.reported",
+            Self::ProjectCreated => "project.created",
             Self::MapCreated => "map.created",
             Self::NodeAdded => "node.added",
             Self::NodeChanged => "node.changed",
@@ -78,6 +80,7 @@ impl Kind {
             "tool.used" => Some(Self::ToolUsed),
             "subagent.started" => Some(Self::SubagentStarted),
             "subagent.reported" => Some(Self::SubagentReported),
+            "project.created" => Some(Self::ProjectCreated),
             "map.created" => Some(Self::MapCreated),
             "node.added" => Some(Self::NodeAdded),
             "node.changed" => Some(Self::NodeChanged),
@@ -92,14 +95,15 @@ impl Kind {
 /// What happened, with the data that kind of event carries.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Payload {
-    SessionCreated { session: SessionId, client_session_id: ClientSessionId },
+    SessionCreated { session: SessionId, project: ProjectId, client_session_id: ClientSessionId },
     SessionStarted { session: SessionId },
     SessionStopped { session: SessionId },
     Message { session: SessionId, content: String },
     ToolUsed { session: SessionId, tool: String, input: Option<String>, output: Option<String> },
     SubagentStarted { session: SessionId, subagent: ClientAgentId, agent: String, task: String },
     SubagentReported { session: SessionId, subagent: ClientAgentId, content: String },
-    MapCreated { map: MapId, kind: String },
+    ProjectCreated { project: ProjectId, name: ProjectName },
+    MapCreated { map: MapId, project: ProjectId, kind: String },
     NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
     /// The node's full new state, not a diff.
     NodeChanged { map: MapId, node: NodeId, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
@@ -118,6 +122,7 @@ impl Payload {
             Self::ToolUsed { .. } => Kind::ToolUsed,
             Self::SubagentStarted { .. } => Kind::SubagentStarted,
             Self::SubagentReported { .. } => Kind::SubagentReported,
+            Self::ProjectCreated { .. } => Kind::ProjectCreated,
             Self::MapCreated { .. } => Kind::MapCreated,
             Self::NodeAdded { .. } => Kind::NodeAdded,
             Self::NodeChanged { .. } => Kind::NodeChanged,
@@ -136,7 +141,7 @@ impl Payload {
             | Self::ToolUsed { session, .. }
             | Self::SubagentStarted { session, .. }
             | Self::SubagentReported { session, .. } => Some(*session),
-            Self::MapCreated { .. } | Self::NodeAdded { .. } | Self::NodeChanged { .. } | Self::NodeRemoved { .. } | Self::EdgeAdded { .. } | Self::EdgeRemoved { .. } => None,
+            Self::ProjectCreated { .. } | Self::MapCreated { .. } | Self::NodeAdded { .. } | Self::NodeChanged { .. } | Self::NodeRemoved { .. } | Self::EdgeAdded { .. } | Self::EdgeRemoved { .. } => None,
         }
     }
 
@@ -148,7 +153,8 @@ impl Payload {
             | Self::NodeRemoved { map, .. }
             | Self::EdgeAdded { map, .. }
             | Self::EdgeRemoved { map, .. } => Some(*map),
-            Self::SessionCreated { .. }
+            Self::ProjectCreated { .. }
+            | Self::SessionCreated { .. }
             | Self::SessionStarted { .. }
             | Self::SessionStopped { .. }
             | Self::Message { .. }
@@ -171,8 +177,8 @@ pub struct Event {
 }
 
 impl Event {
-    pub fn session_created(source: Source, session: SessionId, client_session_id: ClientSessionId) -> Self {
-        Self::build(source, Actor::System, Payload::SessionCreated { session, client_session_id }, None)
+    pub fn session_created(source: Source, session: SessionId, project: ProjectId, client_session_id: ClientSessionId) -> Self {
+        Self::build(source, Actor::System, Payload::SessionCreated { session, project, client_session_id }, None)
     }
 
     pub fn message(
@@ -229,8 +235,12 @@ impl Event {
         Self::build(source, Actor::System, Payload::SessionStopped { session }, Some(raw))
     }
 
-    pub fn map_created(source: Source, actor: Actor, map: MapId, kind: &str) -> Self {
-        let payload = Payload::MapCreated { map, kind: kind.into() };
+    pub fn project_created(source: Source, actor: Actor, project: ProjectId, name: ProjectName) -> Self {
+        Self::build(source, actor, Payload::ProjectCreated { project, name }, None)
+    }
+
+    pub fn map_created(source: Source, actor: Actor, map: MapId, project: ProjectId, kind: &str) -> Self {
+        let payload = Payload::MapCreated { map, project, kind: kind.into() };
         Self::build(source, actor, payload, None)
     }
 
@@ -296,7 +306,7 @@ mod tests {
 
     #[test]
     fn session_created_is_a_system_event_carrying_the_client_session_id() {
-        let event = Event::session_created(Source::fixture(), SessionId::new(), ClientSessionId::new("a".into()));
+        let event = Event::session_created(Source::fixture(), SessionId::new(), ProjectId::new(), ClientSessionId::new("a".into()));
 
         assert_eq!(event.actor, Actor::System);
         assert_eq!(event.payload.kind(), Kind::SessionCreated);
@@ -382,7 +392,7 @@ mod tests {
     fn every_payload_names_its_kind_and_session() {
         let session = SessionId::new();
         let payloads = [
-            (Payload::SessionCreated { session, client_session_id: ClientSessionId::new("a".into()) }, Kind::SessionCreated),
+            (Payload::SessionCreated { session, project: ProjectId::new(), client_session_id: ClientSessionId::new("a".into()) }, Kind::SessionCreated),
             (Payload::SessionStarted { session }, Kind::SessionStarted),
             (Payload::SessionStopped { session }, Kind::SessionStopped),
             (Payload::Message { session, content: "hi".into() }, Kind::Message),
@@ -405,13 +415,13 @@ mod tests {
 
     #[test]
     fn map_created_carries_the_actor_and_has_no_session() {
-        let map = MapId::new();
+        let (map, project) = (MapId::new(), ProjectId::new());
 
-        let event = Event::map_created(Source::fixture(), Actor::Human, map, "decisions");
+        let event = Event::map_created(Source::fixture(), Actor::Human, map, project, "decisions");
 
         assert_eq!(event.actor, Actor::Human);
         assert_eq!(event.payload.kind(), Kind::MapCreated);
-        assert_eq!(event.payload, Payload::MapCreated { map, kind: "decisions".into() });
+        assert_eq!(event.payload, Payload::MapCreated { map, project, kind: "decisions".into() });
         assert_eq!(event.payload.session(), None);
         assert_eq!(event.raw, None);
     }

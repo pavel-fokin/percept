@@ -1,28 +1,21 @@
 export type Route =
-  | { page: "sessions"; path: string }
-  | { page: "session"; path: string; id: string }
-  | { page: "map"; path: string; id: string };
+  | { page: "sessions"; project: string }
+  | { page: "session"; project: string; id: string }
+  | { page: "map"; project: string; kind: string };
 
-/** `~/x` becomes `/home/x/…`. */
-function projectUrl(path: string, ...tail: string[]) {
-  const segments = ["home", ...path.slice(1).split("/").filter(Boolean), ...tail];
-  return `/${segments.map(encodeURIComponent).join("/")}`;
-}
+const url = (...segments: string[]) => `/${["home", ...segments].map(encodeURIComponent).join("/")}`;
 
-export const sessionsUrl = (path: string) => projectUrl(path, "sessions");
-export const sessionUrl = (path: string, id: string) => projectUrl(path, "sessions", id);
-export const mapUrl = (path: string, id: string) => projectUrl(path, "maps", id);
+export const sessionsUrl = (project: string) => url(project, "sessions");
+export const sessionUrl = (project: string, id: string) => url(project, "sessions", id);
+export const mapUrl = (project: string, kind: string) => url(project, "maps", kind);
 
-/** The page a `*` splat names, or null if it names none. Read from the end, so a folder called `sessions` stays a folder. */
+/** The page a `*` splat names, or null if it names none. */
 export function parseRoute(splat: string): Route | null {
-  const [base, ...segments] = splat.split("/");
-  if (base !== "home") return null;
+  const [base, project, view, rest, ...extra] = splat.split("/");
+  if (base !== "home" || !project || extra.length > 0) return null;
 
-  const pathOf = (rest: string[]) => ["~", ...rest].join("/");
-  const [view, id] = segments.slice(-2);
-
-  if (segments.at(-1) === "sessions") return { page: "sessions", path: pathOf(segments.slice(0, -1)) };
-  if (id && view === "sessions") return { page: "session", path: pathOf(segments.slice(0, -2)), id };
-  if (id && view === "maps") return { page: "map", path: pathOf(segments.slice(0, -2)), id };
+  if (view === "sessions" && rest === undefined) return { page: "sessions", project };
+  if (view === "sessions" && rest) return { page: "session", project, id: rest };
+  if (view === "maps" && rest) return { page: "map", project, kind: rest };
   return null;
 }

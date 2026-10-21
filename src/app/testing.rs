@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use serde_json::json;
 
-use crate::core::{ClientSessionId, EdgeKind, Event, EventStore, Payload, Schema, SchemaStore, SessionId, Source};
+use crate::core::{Actor, ClientSessionId, EdgeKind, Event, EventStore, Payload, Project, ProjectId, ProjectName, Schema, SchemaStore, SessionId, Source};
 use crate::shared::Result;
 
 pub(super) struct Fixed(pub(super) usize);
@@ -68,7 +68,7 @@ impl EventStore for &Memory {
         Ok(events
             .iter()
             .find_map(|e| match &e.payload {
-                Payload::SessionCreated { session, client_session_id: id } if id == client_session_id => {
+                Payload::SessionCreated { session, client_session_id: id, .. } if id == client_session_id => {
                     Some(*session)
                 }
                 _ => None,
@@ -84,6 +84,35 @@ impl EventStore for &Memory {
         self.0.lock().unwrap().push(event.clone());
         Ok(())
     }
+}
+
+/// A log holding one project, rooted at `root`.
+pub(super) fn in_project(root: &str) -> Memory {
+    let store = Memory::default();
+    add_project(&store, root);
+
+    store
+}
+
+/// Appends a project rooted at `root`, named by a number so names never clash.
+pub(super) fn add_project(store: &Memory, root: &str) {
+    let source = Source { client: "percept-cli".into(), path: root.into() };
+    let name = ProjectName::new(&format!("p{}", store.0.lock().unwrap().len())).unwrap();
+
+    store.0.lock().unwrap().push(Event::project_created(source, Actor::Human, ProjectId::new(), name));
+}
+
+/// Appends a session of the project nearest above `root` and returns its id.
+pub(super) fn add_session(store: &Memory, root: &str) -> SessionId {
+    let mut events = store.0.lock().unwrap();
+    let project = Project::containing(&events, Path::new(root)).unwrap().id;
+
+    let session = SessionId::new();
+    let source = Source { client: "claude-code".into(), path: root.into() };
+    let client_session_id = ClientSessionId::new(events.len().to_string());
+    events.push(Event::session_created(source, session, project, client_session_id));
+
+    session
 }
 
 /// Has a schema for the map kinds the app tests use, and none for any other.

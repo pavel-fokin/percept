@@ -54,11 +54,12 @@ where
 {
     Router::new()
         .route("/api/status", get(Api::<S, M>::status))
+        .route("/api/projects", get(Api::<S, M>::projects))
         .route("/api/sessions", get(Api::<S, M>::sessions))
         .route("/api/sessions/{id}", get(Api::<S, M>::session))
         .route("/api/sessions/{id}/events", get(Api::<S, M>::session_events))
         .route("/api/maps", get(Api::<S, M>::maps))
-        .route("/api/maps/{id}", get(Api::<S, M>::map))
+        .route("/api/projects/{project}/maps/{kind}", get(Api::<S, M>::map))
         .route("/favicon.svg", get(|| async { asset("image/svg+xml", FAVICON_SVG) }))
         .route("/favicon.ico", get(|| async { asset("image/x-icon", FAVICON_ICO) }))
         .route("/apple-touch-icon.png", get(|| async { asset("image/png", APPLE_TOUCH_ICON) }))
@@ -86,10 +87,11 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::{Actor, ClientSessionId, Event, MapId, NodeId, Reference, Schema, SchemaStore, SessionId, Source};
+    use crate::core::{Actor, ClientSessionId, Event, MapId, NodeId, ProjectId, ProjectName, Reference, Schema, SchemaStore, SessionId, Source};
 
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
     const MAP: &str = "0190a0a0-0000-7000-8000-000000000003";
+    const PROJECT: &str = "0190a0a0-0000-7000-8000-000000000004";
 
     struct Fixed(usize, Vec<Reference>, Vec<Event>);
 
@@ -106,12 +108,14 @@ mod tests {
 
         async fn all(&self) -> Result<Vec<Event>> {
             let session: SessionId = serde_json::from_value(json!(SESSION))?;
-            let created = Event::session_created(Source::fixture(), session, ClientSessionId::new("k".into()));
+            let project: ProjectId = serde_json::from_value(json!(PROJECT))?;
+            let project_created = Event::project_created(Source { client: "claude-code".into(), path: "/Users/me/repo".into() }, Actor::Human, project, ProjectName::new("repo").unwrap());
+            let created = Event::session_created(Source::fixture(), session, project, ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
             let map: MapId = serde_json::from_value(json!(MAP))?;
-            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, "decisions");
+            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, "decisions");
             let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default(), self.1.clone());
-            Ok(std::iter::once(created).chain(started).chain(self.2.clone()).chain([map_created, node]).collect())
+            Ok([project_created, created].into_iter().chain(started).chain(self.2.clone()).chain([map_created, node]).collect())
         }
 
         async fn append(&self, _: &Event) -> Result<()> {
@@ -154,7 +158,15 @@ mod tests {
         let response = get_response("/api/status").await;
 
         assert!(response.starts_with("HTTP/1.1 200"));
-        assert!(response.ends_with(r#"{"data":{"events":5}}"#));
+        assert!(response.ends_with(r#"{"data":{"events":6}}"#));
+    }
+
+    #[tokio::test]
+    async fn projects_returns_each_name_with_its_root_from_home() {
+        let response = get_response("/api/projects").await;
+
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert_eq!(json_body(&response)["data"], json!([{ "name": "repo", "root": "~/repo" }]));
     }
 
     #[tokio::test]
@@ -169,35 +181,33 @@ mod tests {
         assert_eq!(data[0].as_object().unwrap().len(), 8);
         assert_eq!(data[0]["status"], "waiting");
         assert!(data[0]["last_event_at"].is_string());
-        assert_eq!(data[0]["path"], "/repo");
+        assert_eq!(data[0]["project"], "repo");
         assert_eq!(data[0]["client"], "claude-code");
         assert!(data[0]["id"].is_string());
     }
 
     #[tokio::test]
-    async fn maps_returns_every_map_with_its_path_and_node_count() {
+    async fn maps_returns_every_map_with_its_project_and_node_count() {
         let response = get_response("/api/maps").await;
 
         assert!(response.starts_with("HTTP/1.1 200"));
         let body = json_body(&response);
         let data = body["data"].as_array().unwrap();
         assert_eq!(data.len(), 1);
-        assert_eq!(data[0].as_object().unwrap().len(), 4);
+        assert_eq!(data[0].as_object().unwrap().len(), 3);
         assert_eq!(data[0]["kind"], "decisions");
-        assert_eq!(data[0]["path"], "/repo");
+        assert_eq!(data[0]["project"], "repo");
         assert_eq!(data[0]["nodes"], 1);
-        assert!(data[0]["id"].is_string());
     }
 
     #[tokio::test]
     async fn map_returns_the_whole_map() {
-        let response = get_response(&format!("/api/maps/{MAP}")).await;
+        let response = get_response("/api/projects/repo/maps/decisions").await;
 
         assert!(response.starts_with("HTTP/1.1 200"));
         let data = &json_body(&response)["data"];
-        assert_eq!(data["id"], MAP);
         assert_eq!(data["kind"], "decisions");
-        assert_eq!(data["path"], "/repo");
+        assert_eq!(data["project"], "repo");
         assert_eq!(data["nodes"].as_array().unwrap().len(), 1);
         assert_eq!(data["nodes"][0]["title"], "Q");
         assert_eq!(data["nodes"][0]["properties"], json!({}));
@@ -218,7 +228,7 @@ mod tests {
             Reference::Message { event, quote: "A <quote>\n  **verbatim**".into() },
         ];
 
-        let response = get_response_with_references(&format!("/api/maps/{MAP}"), references, vec![message.clone()]).await;
+        let response = get_response_with_references("/api/projects/repo/maps/decisions", references, vec![message.clone()]).await;
 
         assert!(response.starts_with("HTTP/1.1 200"));
         let data = &json_body(&response)["data"];
@@ -233,9 +243,8 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_map_is_not_found() {
-        let unknown = "0190a0a0-0000-7000-8000-000000000002";
-
-        assert!(get_response(&format!("/api/maps/{unknown}")).await.starts_with("HTTP/1.1 404"));
+        assert!(get_response("/api/projects/repo/maps/tasks").await.starts_with("HTTP/1.1 404"));
+        assert!(get_response("/api/projects/other/maps/decisions").await.starts_with("HTTP/1.1 404"));
     }
 
     #[tokio::test]
@@ -247,6 +256,7 @@ mod tests {
         assert_eq!(body["data"]["id"], SESSION);
         assert_eq!(body["data"]["client_session_id"], "k");
         assert_eq!(body["data"]["client"], "claude-code");
+        assert_eq!(body["data"]["project"], "repo");
     }
 
     #[tokio::test]

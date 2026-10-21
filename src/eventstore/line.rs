@@ -5,7 +5,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::core::{Actor, ClientAgentId, ClientSessionId, Event, EventId, Kind, Payload, Reference, Source};
+use crate::core::{Actor, ClientAgentId, ClientSessionId, Event, EventId, Kind, Payload, ProjectName, Reference, Source};
 use crate::shared::{Error, Result};
 
 /// One log line. The log format lives here, apart from the domain `Event`.
@@ -23,8 +23,8 @@ pub(super) struct EventLine {
 impl From<&Event> for EventLine {
     fn from(event: &Event) -> Self {
         let payload = match &event.payload {
-            Payload::SessionCreated { session, client_session_id } => {
-                json!({ "session": session, "client_session_id": client_session_id.as_str() })
+            Payload::SessionCreated { session, project, client_session_id } => {
+                json!({ "session": session, "project": project, "client_session_id": client_session_id.as_str() })
             }
             Payload::SessionStarted { session } | Payload::SessionStopped { session } => {
                 json!({ "session": session })
@@ -39,7 +39,8 @@ impl From<&Event> for EventLine {
             Payload::SubagentReported { session, subagent, content } => {
                 json!({ "session": session, "subagent": subagent.as_str(), "content": content })
             }
-            Payload::MapCreated { map, kind } => json!({ "map": map, "kind": kind }),
+            Payload::ProjectCreated { project, name } => json!({ "project": project, "name": name.as_str() }),
+            Payload::MapCreated { map, project, kind } => json!({ "map": map, "project": project, "kind": kind }),
             Payload::NodeAdded { map, node, kind, title, properties, references } => {
                 let references: Vec<ReferenceLine> = references.iter().map(ReferenceLine::from).collect();
 
@@ -78,6 +79,7 @@ impl TryFrom<EventLine> for Event {
         let payload = match kind {
             Kind::SessionCreated => Payload::SessionCreated {
                 session: field(p, "session")?,
+                project: field(p, "project")?,
                 client_session_id: ClientSessionId::new(field(p, "client_session_id")?),
             },
             Kind::SessionStarted => Payload::SessionStarted { session: field(p, "session")? },
@@ -100,8 +102,13 @@ impl TryFrom<EventLine> for Event {
                 subagent: ClientAgentId::new(field(p, "subagent")?),
                 content: field(p, "content")?,
             },
+            Kind::ProjectCreated => Payload::ProjectCreated {
+                project: field(p, "project")?,
+                name: ProjectName::new(&field::<String>(p, "name")?)?,
+            },
             Kind::MapCreated => Payload::MapCreated {
                 map: field(p, "map")?,
+                project: field(p, "project")?,
                 kind: field(p, "kind")?,
             },
             Kind::NodeAdded => Payload::NodeAdded {
@@ -187,14 +194,14 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::core::{MapId, NodeId, SessionId};
+    use crate::core::{MapId, NodeId, ProjectId, SessionId};
 
     #[test]
     fn every_payload_round_trips_through_a_line() {
         let session = SessionId::new();
         let raw = json!({"r": 1});
         let events = [
-            Event::session_created(Source::fixture(), session, ClientSessionId::new("a".into())),
+            Event::session_created(Source::fixture(), session, ProjectId::new(), ClientSessionId::new("a".into())),
             Event::session_started(Source::fixture(), session, raw.clone()),
             Event::session_stopped(Source::fixture(), session, raw.clone()),
             Event::message(Source::fixture(), session, Actor::Human, "hi", raw.clone()),
@@ -202,7 +209,8 @@ mod tests {
             Event::tool_used(Source::fixture(), session, "Read", None, None, raw.clone()),
             Event::subagent_started(Source::fixture(), session, ClientAgentId::new("a1".into()), "builder", "Build it", raw.clone()),
             Event::subagent_reported(Source::fixture(), session, ClientAgentId::new("a1".into()), "done", raw),
-            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), "decisions"),
+            Event::project_created(Source::fixture(), Actor::Human, ProjectId::new(), ProjectName::new("percept").unwrap()),
+            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), ProjectId::new(), "decisions"),
             Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())]), Vec::new()),
             Event::node_changed(Source::fixture(), Actor::Human, MapId::new(), NodeId::new(), "Why not?", BTreeMap::from([("definition".into(), "E".into())]), Vec::new()),
             Event::node_removed(Source::fixture(), Actor::Human, MapId::new(), NodeId::new()),
@@ -364,18 +372,6 @@ mod tests {
 
             assert!(error.to_string().contains("payload.references"));
         }
-    }
-
-    #[test]
-    fn a_legacy_map_line_with_a_title_still_reads() {
-        let map = MapId::new();
-        let event = Event::map_created(Source::fixture(), Actor::Human, map, "decisions");
-        let mut line = EventLine::from(&event);
-        line.payload = json!({ "map": map, "kind": "decisions", "title": "Event model" });
-
-        let back = Event::try_from(line).unwrap();
-
-        assert_eq!(back.payload, event.payload);
     }
 
     #[test]

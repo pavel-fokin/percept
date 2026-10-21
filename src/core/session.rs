@@ -1,18 +1,15 @@
-use std::path::PathBuf;
-
 use jiff::Timestamp;
 use serde::Serialize;
 
-use super::{Actor, Event, Payload};
+use super::{Actor, Event, Payload, ProjectId};
 use crate::shared::Id;
 
 /// A conversation with a coding client, created by a `SessionCreated` event.
 pub struct Session {
     pub id: SessionId,
     pub client_session_id: ClientSessionId,
+    pub project: ProjectId,
     pub created_at: Timestamp,
-    /// Where the client ran, from the `source` of the `SessionCreated` event.
-    pub path: PathBuf,
     /// The client that ran it, from the same event.
     pub client: String,
     /// The first non-empty thing the human said, if they said anything.
@@ -31,7 +28,7 @@ pub enum SessionStatus {
 }
 
 impl SessionStatus {
-    /// The status a session is in after `event`; map events change none. A hook sends an agent message only when the agent stops.
+    /// The status a session is in after `event`; project and map events change none. A hook sends an agent message only when the agent stops.
     pub fn after(event: &Event) -> Option<Self> {
         match &event.payload {
             Payload::SessionStopped { .. } => Some(Self::Ended),
@@ -40,7 +37,7 @@ impl SessionStatus {
             Payload::Message { .. } | Payload::ToolUsed { .. } | Payload::SubagentStarted { .. } | Payload::SubagentReported { .. } => {
                 Some(Self::Working)
             }
-            Payload::MapCreated { .. } | Payload::NodeAdded { .. } | Payload::NodeChanged { .. } | Payload::NodeRemoved { .. } | Payload::EdgeAdded { .. } | Payload::EdgeRemoved { .. } => None,
+            Payload::ProjectCreated { .. } | Payload::MapCreated { .. } | Payload::NodeAdded { .. } | Payload::NodeChanged { .. } | Payload::NodeRemoved { .. } | Payload::EdgeAdded { .. } | Payload::EdgeRemoved { .. } => None,
         }
     }
 }

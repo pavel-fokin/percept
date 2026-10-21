@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand};
 
 use super::hook::{Client, hook};
 use super::maps::{add, change, create, remove, show};
+use super::projects::init;
 use super::status::status;
 use crate::app::AppService;
 use crate::core::{EventStore, SchemaStore};
@@ -26,6 +27,8 @@ enum Command {
         #[arg(value_enum)]
         client: Client,
     },
+    /// Creates a project at the root of the current git repository, or in the current folder outside one, named after that folder unless a name is given.
+    Init { name: Option<String> },
     /// Creates a map of the given kind in the current project.
     Create {
         #[arg(allow_hyphen_values = true)]
@@ -73,6 +76,7 @@ pub async fn run<S: EventStore + Send + Sync + 'static, M: SchemaStore + Send + 
     let result = match cli.command {
         None => status(&service).await,
         Some(Command::Hook { client }) => hook(&service, client).await,
+        Some(Command::Init { name }) => init(&service, name.as_deref()).await,
         Some(Command::Create { kind }) => create(&service, &kind).await,
         Some(Command::Add { args }) => add(&service, &args).await,
         Some(Command::Change { args }) => change(&service, &args).await,

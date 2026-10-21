@@ -8,11 +8,8 @@ import { RouteError } from "../components/route-error";
 import { textLink } from "../components/ui/text-link";
 import { byDay, changedWhen, dayAndTime, full, time, withChangedTimes } from "../format";
 
-export async function loadMap(path: string, id: string) {
-  const map = await getData<MapDetail>(`/api/maps/${id}`);
-  if (map.path !== path) throw new Response(null, { status: 404 });
-
-  return map;
+export function loadMap(project: string, kind: string) {
+  return getData<MapDetail>(`/api/projects/${encodeURIComponent(project)}/maps/${encodeURIComponent(kind)}`);
 }
 
 export function MapPage({ map }: { map: MapDetail }) {
@@ -23,7 +20,7 @@ export function MapPage({ map }: { map: MapDetail }) {
   return (
     <>
       <h1 className="mt-8 sm:mt-10">
-        <BackLink to="/" path={map.path} collection={map.kind}>
+        <BackLink to="/" project={map.project} collection={map.kind}>
           <span className="tabular-nums"> · {map.nodes.length}</span>
         </BackLink>
       </h1>
@@ -35,7 +32,7 @@ export function MapPage({ map }: { map: MapDetail }) {
               <h2 className="mb-1 text-sm font-semibold text-muted">{day.name}</h2>
               <ul className="-mx-3 grid gap-0.5">
                 {withChangedTimes(day.items, (n) => stamp(n, day.name, now)).map(({ item, shown }) => (
-                  <NodeRow key={item.id} path={map.path} node={item} links={links(item, map.edges, nodes)} shown={shown} now={now} />
+                  <NodeRow key={item.id} project={map.project} node={item} links={links(item, map.edges, nodes)} shown={shown} now={now} />
                 ))}
               </ul>
             </section>
@@ -78,7 +75,7 @@ function reveal(id: string) {
   details.querySelector("summary")?.focus();
 }
 
-function NodeRow({ path, node, links, shown, now }: { path: string; node: MapNode; links: Link[]; shown?: string; now: Date }) {
+function NodeRow({ project, node, links, shown, now }: { project: string; node: MapNode; links: Link[]; shown?: string; now: Date }) {
   const properties = Object.entries(node.properties);
   const kinds = [...new Set(links.map((l) => l.kind))];
   const created = new Date(node.created_at);
@@ -152,7 +149,7 @@ function NodeRow({ path, node, links, shown, now }: { path: string; node: MapNod
               ))}
             </dl>
           )}
-          {node.references.length > 0 && <References path={path} references={node.references} />}
+          {node.references.length > 0 && <References project={project} references={node.references} />}
         </div>
       </details>
     </li>

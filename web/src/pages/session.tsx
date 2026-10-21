@@ -20,12 +20,12 @@ type Subagents = Map<string, { agent: string; task: string }>;
 // A prompt and everything the agent did until the next one. Work before the first prompt has none.
 type Exchange = { id: string; prompt?: Event; items: Item[] };
 
-export async function loadSession(path: string, id: string) {
+export async function loadSession(project: string, id: string) {
   const [session, events] = await Promise.all([
     getData<Session>(`/api/sessions/${id}`),
     getData<Event[]>(`/api/sessions/${id}/events`),
   ]);
-  if (session.path !== path) throw new Response(null, { status: 404 });
+  if (session.project !== project) throw new Response(null, { status: 404 });
 
   return { session, events };
 }
@@ -74,7 +74,7 @@ export function SessionPage({ session, events }: { session: Session; events: Eve
   return (
     <>
       <nav aria-label="Breadcrumb" className="mt-8 sm:mt-10">
-        <BackLink to={sessionsUrl(session.path)} path={session.path} collection="sessions" />
+        <BackLink to={sessionsUrl(session.project)} project={session.project} collection="sessions" />
       </nav>
       <h1 className="mt-1.5 text-sm font-normal text-muted">
         started{" "}

@@ -1,26 +1,26 @@
 import { useLoaderData, useParams, type LoaderFunctionArgs } from "react-router";
 import { parseRoute } from "../paths";
 import { loadMap, MapError, MapPage } from "./map";
-import { loadPathSessions, PathSessions, PathSessionsError } from "./path-sessions";
 import { loadSession, SessionError, SessionPage } from "./session";
+import { loadSessions, Sessions, SessionsError } from "./sessions";
 
 type Loaded =
-  | { page: "sessions"; data: Awaited<ReturnType<typeof loadPathSessions>> }
+  | { page: "sessions"; data: Awaited<ReturnType<typeof loadSessions>> }
   | { page: "session"; data: Awaited<ReturnType<typeof loadSession>> }
   | { page: "map"; data: Awaited<ReturnType<typeof loadMap>> };
 
-/** The one route under a project's path: its URL picks the page. */
+/** The one route under a project: its URL picks the page. */
 export async function loadProject({ params }: LoaderFunctionArgs): Promise<Loaded> {
   const route = parseRoute(params["*"] ?? "");
   if (route === null) throw new Response(null, { status: 404 });
 
   switch (route.page) {
     case "sessions":
-      return { page: "sessions", data: await loadPathSessions(route.path) };
+      return { page: "sessions", data: await loadSessions(route.project) };
     case "session":
-      return { page: "session", data: await loadSession(route.path, route.id) };
+      return { page: "session", data: await loadSession(route.project, route.id) };
     case "map":
-      return { page: "map", data: await loadMap(route.path, route.id) };
+      return { page: "map", data: await loadMap(route.project, route.kind) };
   }
 }
 
@@ -29,7 +29,7 @@ export function Project() {
 
   switch (loaded.page) {
     case "sessions":
-      return <PathSessions {...loaded.data} />;
+      return <Sessions {...loaded.data} />;
     case "session":
       return <SessionPage {...loaded.data} />;
     case "map":
@@ -42,5 +42,5 @@ export function ProjectError() {
 
   if (page === "session") return <SessionError />;
   if (page === "map") return <MapError />;
-  return <PathSessionsError />;
+  return <SessionsError />;
 }

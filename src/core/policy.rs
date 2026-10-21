@@ -37,7 +37,8 @@ impl Policy {
                     .filter(|e| e.from == *node || e.to == *node)
                     .try_for_each(|e| refuse_human(&e.changes, &edge_name(map, e), &cascade))
             }
-            Payload::MapCreated { .. }
+            Payload::ProjectCreated { .. }
+            | Payload::MapCreated { .. }
             | Payload::NodeAdded { .. }
             | Payload::EdgeAdded { .. }
             | Payload::SessionCreated { .. }

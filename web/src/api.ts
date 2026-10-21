@@ -1,5 +1,10 @@
 import { isRouteErrorResponse } from "react-router";
 
+export type Project = {
+  name: string;
+  root: string;
+};
+
 export type Session = {
   id: string;
   client_session_id: string;
@@ -7,14 +12,13 @@ export type Session = {
   created_at: string;
   last_event_at: string;
   status: "working" | "waiting" | "ended";
-  path: string;
+  project: string;
   client: string;
 };
 
 export type MapSummary = {
-  id: string;
   kind: string;
-  path: string;
+  project: string;
   nodes: number;
 };
 
@@ -39,9 +43,8 @@ export type MapEdge = {
 };
 
 export type MapDetail = {
-  id: string;
   kind: string;
-  path: string;
+  project: string;
   nodes: MapNode[];
   edges: MapEdge[];
 };
