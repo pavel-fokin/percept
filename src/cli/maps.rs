@@ -3,7 +3,7 @@ use std::path::Path;
 
 use super::hook::Client;
 use crate::app::{AppService, Ref, source_path};
-use crate::core::{Actor, DefinitionStore, EventStore, Map, Reference, Source};
+use crate::core::{Actor, Definition, DefinitionStore, EventStore, Map, Reference, Source};
 use crate::shared::Result;
 
 pub(super) async fn create<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, kind: &str, file: &Path) -> Result<()> {
@@ -182,6 +182,37 @@ pub(super) async fn show<S: EventStore, M: DefinitionStore>(service: &AppService
     Ok(())
 }
 
+pub(super) async fn describe<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, kind: &str) -> Result<()> {
+    let project = source_path(&std::env::current_dir()?).await;
+    let definition = service.definition(&project, kind).await?;
+
+    println!("{}", markdown(kind, &definition));
+
+    Ok(())
+}
+
+fn markdown(kind: &str, definition: &Definition) -> String {
+    let mut text = format!(
+        "# {kind}\n\n{}\n\n## Instructions\n\n{}\n\n## Schema\n\n| Node kind | Properties |\n|---|---|\n",
+        definition.purpose().trim(),
+        definition.instructions().trim(),
+    );
+
+    for (node, properties) in definition.nodes() {
+        let properties: Vec<&str> = properties.iter().map(String::as_str).collect();
+        text.push_str(&format!("| {node} | {} |\n", properties.join(", ")));
+    }
+
+    if !definition.edges().is_empty() {
+        text.push_str("\n| Edge kind | From | To |\n|---|---|---|\n");
+    }
+    for (edge, ends) in definition.edges() {
+        text.push_str(&format!("| {edge} | {} | {} |\n", ends.from, ends.to));
+    }
+
+    text.trim_end().to_string()
+}
+
 fn node_count(count: usize) -> String {
     match count {
         1 => "1 node".to_string(),
@@ -214,6 +245,7 @@ fn writer(claudecode: Option<String>, codex_session_id: Option<String>) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::EdgeKind;
 
     #[test]
     fn writer_follows_the_client_environment() {
@@ -347,6 +379,33 @@ mod tests {
 
             assert!(split_remove(&args).is_err(), "accepted {flag:?}");
         }
+    }
+
+    #[test]
+    fn a_definition_renders_as_markdown() {
+        let nodes = BTreeMap::from([
+            ("decision".to_string(), ["why", "by"].map(String::from).into()),
+            ("note".to_string(), Default::default()),
+        ]);
+        let edges = BTreeMap::from([("supersedes".to_string(), EdgeKind { from: "decision".into(), to: "decision".into() })]);
+        let definition = Definition::new("Why.".into(), "\nKeep it.\n\nShort.\n".into(), nodes, edges).unwrap();
+
+        let text = markdown("decisions", &definition);
+
+        assert_eq!(text, "# decisions\n\nWhy.\n\n## Instructions\n\nKeep it.\n\nShort.\n\n## Schema\n\n\
+            | Node kind | Properties |\n|---|---|\n| decision | by, why |\n| note |  |\n\n\
+            | Edge kind | From | To |\n|---|---|---|\n| supersedes | decision | decision |");
+    }
+
+    #[test]
+    fn without_edge_kinds_the_edge_table_is_left_out() {
+        let nodes = BTreeMap::from([("note".to_string(), Default::default())]);
+        let definition = Definition::new("p".into(), "i".into(), nodes, BTreeMap::new()).unwrap();
+
+        let text = markdown("notes", &definition);
+
+        assert!(text.ends_with("| note |  |"));
+        assert!(!text.contains("Edge kind"));
     }
 
     #[test]

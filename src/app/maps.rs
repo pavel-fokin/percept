@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::AppService;
-use crate::core::{Actor, DefinitionStore, Event, EventId, EventStore, Map, MapId, Node, NodeId, Payload, Policy, Project, Reference, SessionId, Source};
+use crate::core::{Actor, Definition, DefinitionStore, Event, EventId, EventStore, Map, MapId, Node, NodeId, Payload, Policy, Project, Reference, SessionId, Source};
 use crate::shared::Result;
 
 #[derive(Debug, PartialEq)]
@@ -72,6 +72,13 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
     /// The map of the given kind in the project containing `path`, with its nodes and edges, or an error if it has none.
     pub async fn map(&self, path: &Path, kind: &str) -> Result<Map> {
         Ok(self.located(path, kind).await?.map)
+    }
+
+    /// The definition of the map of the given kind in the project containing `path`, or an error if the project has no such map or its definition cannot be read.
+    pub async fn definition(&self, path: &Path, kind: &str) -> Result<Definition> {
+        let map = self.map(path, kind).await?;
+
+        self.definitions.definition(&map.definition).await
     }
 
     /// The map of the given kind in the project of the given name, its nodes newest first and its edges in log order, from one read of the log.

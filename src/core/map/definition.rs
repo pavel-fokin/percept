@@ -5,9 +5,7 @@ use crate::shared::Result;
 
 /// The shape of one kind of map: which nodes and edges it allows.
 pub struct Definition {
-    #[allow(dead_code, reason = "parsed now; read when the agent is shown the schema")]
     purpose: String,
-    #[allow(dead_code, reason = "parsed now; read when the agent is shown the schema")]
     instructions: String,
     nodes: BTreeMap<String, BTreeSet<String>>,
     edges: BTreeMap<String, EdgeKind>,
@@ -73,14 +71,21 @@ impl Definition {
         Ok(())
     }
 
-    #[allow(dead_code, reason = "parsed now; read when the agent is shown the schema")]
     pub fn purpose(&self) -> &str {
         &self.purpose
     }
 
-    #[allow(dead_code, reason = "parsed now; read when the agent is shown the schema")]
     pub fn instructions(&self) -> &str {
         &self.instructions
+    }
+
+    /// The node kinds, each with its property names.
+    pub fn nodes(&self) -> &BTreeMap<String, BTreeSet<String>> {
+        &self.nodes
+    }
+
+    pub fn edges(&self) -> &BTreeMap<String, EdgeKind> {
+        &self.edges
     }
 }
 

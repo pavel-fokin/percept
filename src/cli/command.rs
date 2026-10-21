@@ -5,7 +5,7 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 
 use super::hook::{Client, hook};
-use super::maps::{add, change, create, remove, show};
+use super::maps::{add, change, create, describe, remove, show};
 use super::projects::init;
 use super::status::status;
 use crate::app::AppService;
@@ -54,6 +54,8 @@ enum Command {
     },
     /// Lists the current project's maps, or one map's nodes and edges.
     Show { map: Option<String> },
+    /// Prints a map's definition as markdown: its purpose, instructions, and node and edge kinds.
+    Describe { map: String },
     /// Serves the page in the browser.
     Ui {
         /// Port to serve on; 0 picks a free one.
@@ -83,6 +85,7 @@ pub async fn run<S: EventStore + Send + Sync + 'static, M: DefinitionStore + Sen
         Some(Command::Change { args }) => change(&service, &args).await,
         Some(Command::Remove { args }) => remove(&service, &args).await,
         Some(Command::Show { map }) => show(&service, map.as_deref()).await,
+        Some(Command::Describe { map }) => describe(&service, &map).await,
         Some(Command::Ui { port, no_open }) => server::serve(service, home, port, !no_open).await,
     };
     match result {

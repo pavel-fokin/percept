@@ -5,22 +5,22 @@ description: >-
   user asks to reflect, or to record what was decided or learned.
 ---
 
-percept keeps maps of what a project understands. A map is declared
-by a schema in `.percept/maps/<map>.toml`:
+percept keeps maps of what a project understands. Each map has a
+definition. `percept describe <map>` prints it as markdown:
 
-| Field | Holds |
+| Part | Holds |
 |---|---|
-| `purpose` | what the map is for, in one line |
-| `instructions` | what belongs on the map and how to write it |
-| `[nodes.<kind>]` | a node kind; its keys are the node's properties |
-| `[edges.<kind>]` | an edge kind, with the node kinds it links |
+| Line under the title | what the map is for |
+| Instructions | what belongs on the map and how to write it |
+| Schema | each node kind with its properties, each edge kind with the node kinds it links |
 
 ## Reflect
 
-1. Read every schema in `.percept/maps/`.
-2. Run `percept show <map>` for each. If the map is missing, tell the
-   user; they choose its file and create it.
-3. From this session, pick what each map's `instructions` admit.
+1. Run `percept show` to list the project's maps.
+2. For each map, run `percept describe <map>`, then `percept show <map>`.
+   If a map you need is missing, tell the user. They choose its
+   definition file and create the map.
+3. From this session, pick what each map's instructions admit.
 4. Skip what the map already holds, judged by meaning, not wording.
    Add the rest:
 
@@ -43,7 +43,7 @@ by a schema in `.percept/maps/<map>.toml`:
    removes its edges.
 6. percept refuses an agent's change or removal of what a human wrote.
    Leave it as it is, and tell the user what you would change and why.
-7. Use only the kinds and properties the schema declares. Leave out a
+7. Use only the kinds and properties the definition declares. Leave out a
    property that has no value.
 8. Add references with the node when they help a reader check it.
    Repeat `--ref` for each source:
