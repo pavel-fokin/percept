@@ -21,7 +21,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
 
         let projects = Project::all(&self.store.all().await?);
         if projects.iter().any(|p| p.root == source.path) {
-            return Err("this folder is already a project".into());
+            return Err(format!("{} is already a project", source.path.display()).into());
         }
         if projects.iter().any(|p| p.name == name) {
             return Err(format!("the name {} is taken", name.as_str()).into());
@@ -69,7 +69,7 @@ mod tests {
 
         let error = service.create_project(source("/work/a"), Actor::Human, Some("other")).await.unwrap_err();
 
-        assert_eq!(error.to_string(), "this folder is already a project");
+        assert_eq!(error.to_string(), "/work/a is already a project");
         assert_eq!(store.0.lock().unwrap().len(), 1);
     }
 

@@ -105,8 +105,7 @@ pub(super) fn add_project(store: &Memory, root: &str) {
 /// Appends a session of the project nearest above `root` and returns its id.
 pub(super) fn add_session(store: &Memory, root: &str) -> SessionId {
     let mut events = store.0.lock().unwrap();
-    let projects = Project::all(&events);
-    let project = Project::containing(&projects, Path::new(root)).unwrap().id;
+    let project = Project::containing(&events, Path::new(root)).unwrap().id;
 
     let session = SessionId::new();
     let source = Source { client: "claude-code".into(), path: root.into() };

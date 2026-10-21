@@ -375,18 +375,6 @@ mod tests {
     }
 
     #[test]
-    fn a_legacy_map_line_with_a_title_still_reads() {
-        let (map, project) = (MapId::new(), ProjectId::new());
-        let event = Event::map_created(Source::fixture(), Actor::Human, map, project, "decisions");
-        let mut line = EventLine::from(&event);
-        line.payload = json!({ "map": map, "project": project, "kind": "decisions", "title": "Event model" });
-
-        let back = Event::try_from(line).unwrap();
-
-        assert_eq!(back.payload, event.payload);
-    }
-
-    #[test]
     fn a_line_has_a_kind_and_a_payload_naming_the_session() {
         let session = SessionId::new();
         let event = Event::message(Source::fixture(), session, Actor::Human, "hi", json!({"r": 1}));

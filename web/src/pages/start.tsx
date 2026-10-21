@@ -76,7 +76,7 @@ export function Start() {
 
           <nav aria-label={project} className="-mx-3 mt-2 flex flex-wrap gap-1">
             {maps.map((map) => (
-              <Counter key={map.id} to={mapUrl(project, map.kind)} label={map.kind} count={map.nodes} />
+              <Counter key={map.kind} to={mapUrl(project, map.kind)} label={map.kind} count={map.nodes} />
             ))}
             {sessions > 0 && <Counter to={sessionsUrl(project)} label="sessions" count={sessions} />}
           </nav>

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::AppService;
-use crate::core::{Actor, Event, EventId, EventStore, Map, MapId, Node, NodeId, Payload, Policy, Project, ProjectId, ProjectName, Reference, SchemaStore, SessionId, Source};
+use crate::core::{Actor, Event, EventId, EventStore, Map, MapId, Node, NodeId, Payload, Policy, Project, Reference, SchemaStore, SessionId, Source};
 use crate::shared::Result;
 
 #[derive(Debug, PartialEq)]
@@ -15,7 +15,6 @@ pub enum Ref {
 /// `messages` holds every message its nodes cite.
 pub struct MapDetail {
     pub map: Map,
-    pub project: ProjectName,
     pub messages: BTreeMap<EventId, CitedMessage>,
 }
 
@@ -40,23 +39,23 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         let _lock = self.store.lock().await?;
 
         let events = self.store.all().await?;
-        let (project, root) = project_at(&events, &source.path)?;
-        self.schemas.schema(&root, kind).await?;
+        let project = project_at(&events, &source.path)?;
+        self.schemas.schema(&project.root, kind).await?;
 
-        if Map::all(&events).iter().any(|m| m.project == project && m.kind == kind) {
+        if Map::all(&events).iter().any(|m| m.project == project.id && m.kind == kind) {
             return Err(format!("this project already has a {kind} map").into());
         }
 
-        self.store.append(&Event::map_created(source, actor, MapId::new(), project, kind)).await
+        self.store.append(&Event::map_created(source, actor, MapId::new(), project.id, kind)).await
     }
 
     /// The maps of the project containing `path` in log order, each with its nodes and edges, from one read of the log.
     pub async fn maps(&self, path: &Path) -> Result<Vec<Map>> {
         let events = self.store.all().await?;
-        let (project, _) = project_at(&events, path)?;
+        let project = project_at(&events, path)?;
 
         let mut maps = Map::all(&events);
-        maps.retain(|m| m.project == project);
+        maps.retain(|m| m.project == project.id);
 
         Ok(maps)
     }
@@ -101,7 +100,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             })
             .collect();
 
-        Ok(Some(MapDetail { map, project: project.name, messages }))
+        Ok(Some(MapDetail { map, messages }))
     }
 
     /// Records a new edge on the project's map of the given kind, between the nodes with these titles.
@@ -119,11 +118,11 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         // Held until return, so the nodes cannot change between the check and the append.
         let _lock = self.store.lock().await?;
 
-        let Located { root, map, .. } = self.located(&source.path, map_kind).await?;
+        let Located { project, map, .. } = self.located(&source.path, map_kind).await?;
 
         let (from, to) = (find_node(&map.nodes, map_kind, from)?.id, find_node(&map.nodes, map_kind, to)?.id);
 
-        self.write(&root, &map, Event::edge_added(source, actor, map.id, kind, from, to)).await
+        self.write(&project.root, &map, Event::edge_added(source, actor, map.id, kind, from, to)).await
     }
 
     /// Records the removal of the edge of this kind between the nodes with these titles on the project's map of the given kind.
@@ -139,11 +138,11 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         // Held until return, so the edge cannot change between the check and the append.
         let _lock = self.store.lock().await?;
 
-        let Located { root, map, .. } = self.located(&source.path, map_kind).await?;
+        let Located { project, map, .. } = self.located(&source.path, map_kind).await?;
 
         let (from, to) = (find_node(&map.nodes, map_kind, from)?.id, find_node(&map.nodes, map_kind, to)?.id);
 
-        self.write(&root, &map, Event::edge_removed(source, actor, map.id, kind, from, to)).await
+        self.write(&project.root, &map, Event::edge_removed(source, actor, map.id, kind, from, to)).await
     }
 
     /// Records the removal of the node with this title, and with it every edge from or to it, from the project's map of the given kind.
@@ -151,10 +150,10 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         // Held until return, so the node cannot change between the check and the append.
         let _lock = self.store.lock().await?;
 
-        let Located { root, map, .. } = self.located(&source.path, map_kind).await?;
+        let Located { project, map, .. } = self.located(&source.path, map_kind).await?;
         let node = find_node(&map.nodes, map_kind, title)?.id;
 
-        self.write(&root, &map, Event::node_removed(source, actor, map.id, node)).await
+        self.write(&project.root, &map, Event::node_removed(source, actor, map.id, node)).await
     }
 
     /// Records a new node on the project's map of the given kind. A title is unique within its map.
@@ -174,14 +173,14 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         // Held until return, so parallel adds cannot both pass the check.
         let _lock = self.store.lock().await?;
 
-        let Located { events, project, root, map } = self.located(&source.path, map_kind).await?;
+        let Located { events, project, map } = self.located(&source.path, map_kind).await?;
 
         let mut resolved = Vec::new();
         for reference in references {
-            resolved.push(resolve_reference(&events, project, &root, reference).await?);
+            resolved.push(resolve_reference(&events, &project, &source.path, reference).await?);
         }
 
-        self.write(&root, &map, Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties, resolved)).await
+        self.write(&project.root, &map, Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties, resolved)).await
     }
 
     /// Records the full new state of the node with this title on the project's map of the given kind.
@@ -201,7 +200,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         // Held until return, so the node cannot change between the check and the append.
         let _lock = self.store.lock().await?;
 
-        let Located { events, project, root, map } = self.located(&source.path, map_kind).await?;
+        let Located { events, project, map } = self.located(&source.path, map_kind).await?;
         let node = find_node(&map.nodes, map_kind, title)?;
 
         let new_title = new_title.unwrap_or(&node.title);
@@ -215,23 +214,23 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
 
         let mut all_references = node.references.clone();
         for reference in references {
-            all_references.push(resolve_reference(&events, project, &root, reference).await?);
+            all_references.push(resolve_reference(&events, &project, &source.path, reference).await?);
         }
 
-        self.write(&root, &map, Event::node_changed(source, actor, map.id, node.id, new_title, merged, all_references)).await
+        self.write(&project.root, &map, Event::node_changed(source, actor, map.id, node.id, new_title, merged, all_references)).await
     }
 
     /// The log and the map of the given kind in the project containing `path`, read under the store lock.
     async fn located(&self, path: &Path, map_kind: &str) -> Result<Located> {
         let events = self.store.all().await?;
-        let (project, root) = project_at(&events, path)?;
+        let project = project_at(&events, path)?;
 
         let map = Map::all(&events)
             .into_iter()
-            .find(|m| m.project == project && m.kind == map_kind)
+            .find(|m| m.project == project.id && m.kind == map_kind)
             .ok_or_else(|| format!("this project has no {map_kind} map"))?;
 
-        Ok(Located { events, project, root, map })
+        Ok(Located { events, project, map })
     }
 
     /// The one way a node or an edge event reaches the log: the map, under its schema, and then the policy see it first.
@@ -248,17 +247,13 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
 /// A map found in its project, with the log it was read from.
 struct Located {
     events: Vec<Event>,
-    project: ProjectId,
-    root: PathBuf,
+    project: Project,
     map: Map,
 }
 
-/// The id and root of the project containing `path`.
-fn project_at(events: &[Event], path: &Path) -> Result<(ProjectId, PathBuf)> {
-    let projects = Project::all(events);
-    let project = Project::containing(&projects, path).ok_or("not in a project; run percept init")?;
-
-    Ok((project.id, project.root.clone()))
+/// The project containing `path`.
+fn project_at(events: &[Event], path: &Path) -> Result<Project> {
+    Ok(Project::containing(events, path).ok_or("not in a project; run percept init")?)
 }
 
 fn find_node<'a>(nodes: &'a [Node], map_kind: &str, title: &str) -> Result<&'a Node> {
@@ -268,7 +263,8 @@ fn find_node<'a>(nodes: &'a [Node], map_kind: &str, title: &str) -> Result<&'a N
         .ok_or_else(|| format!("the {map_kind} map has no node titled {title:?}").into())
 }
 
-async fn resolve_reference(events: &[Event], project: ProjectId, root: &Path, reference: Ref) -> Result<Reference> {
+/// File references resolve against `folder`, the writer's checkout, and must stay inside it.
+async fn resolve_reference(events: &[Event], project: &Project, folder: &Path, reference: Ref) -> Result<Reference> {
     match reference {
         Ref::Message(quote) => {
             not_blank("message reference", &quote)?;
@@ -276,7 +272,7 @@ async fn resolve_reference(events: &[Event], project: ProjectId, root: &Path, re
             let sessions: BTreeSet<SessionId> = events
                 .iter()
                 .filter_map(|event| match &event.payload {
-                    Payload::SessionCreated { session, project: of, .. } if *of == project => Some(*session),
+                    Payload::SessionCreated { session, project: of, .. } if *of == project.id => Some(*session),
                     _ => None,
                 })
                 .collect();
@@ -298,11 +294,11 @@ async fn resolve_reference(events: &[Event], project: ProjectId, root: &Path, re
                 return Err("a file reference range must use 1-based lines with from <= to".into());
             }
 
-            let root = tokio::fs::canonicalize(root).await
-                .map_err(|error| format!("cannot read project {}: {error}", root.display()))?;
-            let target = tokio::fs::canonicalize(root.join(&path)).await
+            let folder = tokio::fs::canonicalize(folder).await
+                .map_err(|error| format!("cannot read {}: {error}", folder.display()))?;
+            let target = tokio::fs::canonicalize(folder.join(&path)).await
                 .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-            let relative = target.strip_prefix(&root).map_err(|_| "a file reference must stay inside the project")?.to_path_buf();
+            let relative = target.strip_prefix(&folder).map_err(|_| "a file reference must stay inside the project")?.to_path_buf();
             let text = tokio::fs::read_to_string(&target).await
                 .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
 
@@ -604,9 +600,9 @@ mod tests {
         ];
         store.0.lock().unwrap().extend(events);
         let events = store.0.lock().unwrap().clone();
-        let project = Project::all(&events)[0].id;
+        let project = Project::all(&events).remove(0);
 
-        let result = resolve_reference(&events, project, Path::new("/repo"), Ref::Message("Match".into())).await;
+        let result = resolve_reference(&events, &project, Path::new("/repo"), Ref::Message("Match".into())).await;
 
         assert!(result.is_err());
     }
@@ -725,13 +721,40 @@ mod tests {
         tokio::fs::symlink("inside.txt", project.join("alias.txt")).await.unwrap();
         tokio::fs::symlink("../outside.txt", project.join("escape.txt")).await.unwrap();
 
-        let inside = resolve_reference(&[], ProjectId::new(), &project, Ref::File { path: "alias.txt".into(), lines: (1, 1) }).await.unwrap();
-        let escape = resolve_reference(&[], ProjectId::new(), &project, Ref::File { path: "escape.txt".into(), lines: (1, 1) }).await;
-        let parent = resolve_reference(&[], ProjectId::new(), &project, Ref::File { path: "../outside.txt".into(), lines: (1, 1) }).await;
+        let stub = Project { id: crate::core::ProjectId::new(), name: crate::core::ProjectName::new("stub").unwrap(), root: project.clone() };
+
+        let inside = resolve_reference(&[], &stub, &project, Ref::File { path: "alias.txt".into(), lines: (1, 1) }).await.unwrap();
+        let escape = resolve_reference(&[], &stub, &project, Ref::File { path: "escape.txt".into(), lines: (1, 1) }).await;
+        let parent = resolve_reference(&[], &stub, &project, Ref::File { path: "../outside.txt".into(), lines: (1, 1) }).await;
 
         assert_eq!(inside, Reference::File { path: "inside.txt".into(), lines: (1, 1), excerpt: "inside".into() });
         assert!(escape.is_err());
         assert!(parent.is_err());
+        tokio::fs::remove_dir_all(&source.path).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_file_reference_resolves_against_the_writers_folder_not_the_project_root() {
+        let source = file_project().await;
+        let worktree = source.path.join("worktree");
+        tokio::fs::create_dir(&worktree).await.unwrap();
+        tokio::fs::write(worktree.join("only-here.txt"), "mine").await.unwrap();
+        let store = in_project(source.path.to_str().unwrap());
+        let service = AppService::new(&store, Schemas);
+        service.create_map(source.clone(), Actor::Human, "concepts").await.unwrap();
+        let writer = Source { client: "claude-code".into(), path: worktree };
+
+        let found = service.add_node(
+            writer.clone(), Actor::Agent, "concepts", "concept", "A", BTreeMap::new(),
+            vec![Ref::File { path: "only-here.txt".into(), lines: (1, 1) }],
+        ).await;
+        let at_root = service.add_node(
+            source.clone(), Actor::Agent, "concepts", "concept", "B", BTreeMap::new(),
+            vec![Ref::File { path: "only-here.txt".into(), lines: (1, 1) }],
+        ).await;
+
+        found.unwrap();
+        assert!(at_root.is_err());
         tokio::fs::remove_dir_all(&source.path).await.unwrap();
     }
 
@@ -887,7 +910,6 @@ mod tests {
 
         let detail = service.map_detail("p0", "decisions").await.unwrap().unwrap();
 
-        assert_eq!(detail.project.as_str(), "p0");
         let titles: Vec<&str> = detail.map.nodes.iter().map(|n| n.title.as_str()).collect();
         assert_eq!(titles, vec!["O", "Q"]);
         let edges: Vec<(&str, NodeId, NodeId)> = detail.map.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();

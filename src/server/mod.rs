@@ -185,11 +185,10 @@ mod tests {
         let body = json_body(&response);
         let data = body["data"].as_array().unwrap();
         assert_eq!(data.len(), 1);
-        assert_eq!(data[0].as_object().unwrap().len(), 4);
+        assert_eq!(data[0].as_object().unwrap().len(), 3);
         assert_eq!(data[0]["kind"], "decisions");
         assert_eq!(data[0]["project"], "repo");
         assert_eq!(data[0]["nodes"], 1);
-        assert!(data[0]["id"].is_string());
     }
 
     #[tokio::test]
@@ -198,7 +197,6 @@ mod tests {
 
         assert!(response.starts_with("HTTP/1.1 200"));
         let data = &json_body(&response)["data"];
-        assert_eq!(data["id"], MAP);
         assert_eq!(data["kind"], "decisions");
         assert_eq!(data["project"], "repo");
         assert_eq!(data["nodes"].as_array().unwrap().len(), 1);

@@ -74,18 +74,20 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         // Held until return, so parallel hooks cannot create the same session twice.
         let _lock = self.store.lock().await?;
 
-        let existing = self.store.session(&client_session_id).await?;
-        let session = existing.unwrap_or_else(SessionId::new);
+        let session = match self.store.session(&client_session_id).await? {
+            Some(session) => session,
+            None => {
+                let Some(project) = Project::containing(&self.store.all().await?, &source.path) else {
+                    return Ok(());
+                };
 
-        if existing.is_none() {
-            let projects = Project::all(&self.store.all().await?);
-            let Some(project) = Project::containing(&projects, &source.path) else {
-                return Ok(());
-            };
+                let session = SessionId::new();
+                let created = Event::session_created(source.clone(), session, project.id, client_session_id);
+                self.store.append(&created).await?;
 
-            let created = Event::session_created(source.clone(), session, project.id, client_session_id);
-            self.store.append(&created).await?;
-        }
+                session
+            }
+        };
 
         self.store.append(&event(source, session)).await
     }

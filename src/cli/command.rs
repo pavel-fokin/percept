@@ -27,7 +27,7 @@ enum Command {
         #[arg(value_enum)]
         client: Client,
     },
-    /// Creates a project in the current folder, named after the folder unless a name is given.
+    /// Creates a project at the root of the current git repository, or in the current folder outside one, named after that folder unless a name is given.
     Init { name: Option<String> },
     /// Creates a map of the given kind in the current project.
     Create {

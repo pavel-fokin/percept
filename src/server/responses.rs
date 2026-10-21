@@ -6,7 +6,7 @@ use serde_json::json;
 
 use super::paths::display_paths;
 use crate::app::{self, CitedMessage};
-use crate::core::{self, Actor, ClientSessionId, EventId, MapId, NodeId, Payload, Project, ProjectId, SessionId, SessionStatus};
+use crate::core::{self, Actor, ClientSessionId, EventId, NodeId, Payload, Project, ProjectId, SessionId, SessionStatus};
 
 /// The envelope every API response is sent in.
 #[derive(Serialize)]
@@ -27,7 +27,6 @@ fn project_name(projects: &[Project], id: ProjectId) -> String {
 /// A map as the page reads it, under the name of its project.
 #[derive(Serialize)]
 pub(super) struct MapSummary {
-    id: MapId,
     kind: String,
     project: String,
     nodes: usize,
@@ -35,14 +34,13 @@ pub(super) struct MapSummary {
 
 impl MapSummary {
     pub(super) fn new(map: core::Map, projects: &[Project]) -> Self {
-        Self { id: map.id, kind: map.kind, project: project_name(projects, map.project), nodes: map.nodes.len() }
+        Self { kind: map.kind, project: project_name(projects, map.project), nodes: map.nodes.len() }
     }
 }
 
 /// A whole map as the page reads it, under the name of its project.
 #[derive(Serialize)]
 pub(super) struct MapDetail {
-    id: MapId,
     kind: String,
     project: String,
     nodes: Vec<Node>,
@@ -50,13 +48,12 @@ pub(super) struct MapDetail {
 }
 
 impl MapDetail {
-    pub(super) fn new(detail: app::MapDetail) -> Self {
+    pub(super) fn new(detail: app::MapDetail, project: String) -> Self {
         let (map, messages) = (detail.map, &detail.messages);
 
         Self {
-            id: map.id,
             kind: map.kind,
-            project: detail.project.as_str().to_string(),
+            project,
             nodes: map.nodes.into_iter().map(|n| Node::new(n, messages)).collect(),
             edges: map.edges.into_iter().map(Edge::from).collect(),
         }
@@ -201,7 +198,7 @@ fn payload(payload: &Payload, home: &Path) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::Source;
+    use crate::core::{MapId, Source};
 
     #[test]
     fn a_node_has_a_changed_time_only_after_a_change() {

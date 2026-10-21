@@ -67,7 +67,7 @@ where
 
     pub(super) async fn map(State(api): State<Arc<Self>>, Path((project, kind)): Path<(String, String)>) -> Reply<MapDetail> {
         let detail = api.service.map_detail(&project, &kind).await?.ok_or(ApiError::NotFound)?;
-        Ok(Json(Data { data: MapDetail::new(detail) }))
+        Ok(Json(Data { data: MapDetail::new(detail, project) }))
     }
 
     pub(super) async fn session_events(State(api): State<Arc<Self>>, Path(id): Path<SessionId>) -> Reply<Vec<responses::Event>> {

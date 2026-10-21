@@ -27,13 +27,13 @@ impl Project {
             .collect()
     }
 
-    /// The project whose root is the nearest at or above `path`, as git finds its root.
-    pub fn containing<'a>(projects: &'a [Self], path: &Path) -> Option<&'a Self> {
-        projects.iter().filter(|p| path.starts_with(&p.root)).max_by_key(|p| p.root.components().count())
+    /// The project in `events` whose root is the nearest at or above `path`, as git finds its root.
+    pub fn containing(events: &[Event], path: &Path) -> Option<Self> {
+        Self::all(events).into_iter().filter(|p| path.starts_with(&p.root)).max_by_key(|p| p.root.components().count())
     }
 }
 
-/// A project's name: lowercase, nonempty, and only `a-z`, `0-9`, `.`, `_` and `-`.
+/// A project's name: lowercase, starting with `a-z` or `0-9`, and only `a-z`, `0-9`, `.`, `_` and `-`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProjectName(String);
 
@@ -41,15 +41,16 @@ impl ProjectName {
     /// Lowercases `name`, so names are case-insensitive, then validates it.
     pub fn new(name: &str) -> Result<Self> {
         let name = name.to_lowercase();
-        if name.is_empty() || !name.chars().all(allowed) {
-            return Err(format!("invalid project name {name:?}: use a-z, 0-9, '.', '_' and '-'").into());
+        let starts_well = name.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit());
+        if !starts_well || !name.chars().all(allowed) {
+            return Err(format!("invalid project name {name:?}: start with a-z or 0-9, then use a-z, 0-9, '.', '_' and '-'").into());
         }
 
         Ok(Self(name))
     }
 
     /// The name of a project rooted at `root`: its folder name, lowercased,
-    /// each run of other characters replaced by one `-`, and outer `-` trimmed.
+    /// each run of other characters replaced by one `-`, and leading `.`, `_`, `-` and trailing `-` trimmed.
     pub fn from_root(root: &Path) -> Result<Self> {
         let folder = root.file_name().unwrap_or_default().to_string_lossy().to_lowercase();
 
@@ -61,7 +62,7 @@ impl ProjectName {
                 name.push('-');
             }
         }
-        let name = name.trim_matches('-');
+        let name = name.trim_start_matches(['.', '_', '-']).trim_end_matches('-');
 
         if name.is_empty() {
             return Err("pass a name: percept init <name>".into());
@@ -84,6 +85,10 @@ mod tests {
     use super::*;
     use crate::core::{Actor, Source};
 
+    fn source(path: &str) -> Source {
+        Source { client: "percept-cli".into(), path: path.into() }
+    }
+
     #[test]
     fn a_name_is_lowercased() {
         assert_eq!(ProjectName::new("My-App_1.0").unwrap().as_str(), "my-app_1.0");
@@ -91,7 +96,7 @@ mod tests {
 
     #[test]
     fn a_name_that_is_empty_or_has_other_characters_is_refused() {
-        for name in ["", "my app", "a/b", "café", "a:b"] {
+        for name in ["", "my app", "a/b", "café", "a:b", ".", "..", ".x", "-x", "_x"] {
             assert!(ProjectName::new(name).is_err(), "{name:?}");
         }
     }
@@ -105,6 +110,8 @@ mod tests {
             ("/work/--x--", "x"),
             ("/work/v1.2_beta", "v1.2_beta"),
             ("/work/café", "caf"),
+            ("/work/.dotfiles", "dotfiles"),
+            ("/work/_-.x", "x"),
         ];
 
         for (root, name) in cases {
@@ -123,27 +130,24 @@ mod tests {
 
     #[test]
     fn the_nearest_root_at_or_above_a_path_wins() {
-        let source = |path: &str| Source { client: "percept-cli".into(), path: path.into() };
         let events = [
             Event::project_created(source("/work/app"), Actor::Human, ProjectId::new(), ProjectName::new("app").unwrap()),
             Event::project_created(source("/work/app/inner"), Actor::Human, ProjectId::new(), ProjectName::new("inner").unwrap()),
             Event::project_created(source("/work/apple"), Actor::Human, ProjectId::new(), ProjectName::new("apple").unwrap()),
         ];
-        let projects = Project::all(&events);
 
-        let name = |path: &str| Project::containing(&projects, Path::new(path)).map(|p| p.name.as_str());
+        let name = |path: &str| Project::containing(&events, Path::new(path)).map(|p| p.name.as_str().to_string());
 
-        assert_eq!(name("/work/app"), Some("app"));
-        assert_eq!(name("/work/app/src/deep"), Some("app"));
-        assert_eq!(name("/work/app/inner/src"), Some("inner"));
-        assert_eq!(name("/work/apple/x"), Some("apple"));
+        assert_eq!(name("/work/app"), Some("app".to_string()));
+        assert_eq!(name("/work/app/src/deep"), Some("app".to_string()));
+        assert_eq!(name("/work/app/inner/src"), Some("inner".to_string()));
+        assert_eq!(name("/work/apple/x"), Some("apple".to_string()));
         assert_eq!(name("/work"), None);
         assert_eq!(name("/elsewhere"), None);
     }
 
     #[test]
     fn projects_are_folded_from_their_events_in_log_order() {
-        let source = |path: &str| Source { client: "percept-cli".into(), path: path.into() };
         let events = [
             Event::project_created(source("/a"), Actor::Human, ProjectId::new(), ProjectName::new("a").unwrap()),
             Event::map_created(Source::fixture(), Actor::Human, crate::core::MapId::new(), ProjectId::new(), "decisions"),

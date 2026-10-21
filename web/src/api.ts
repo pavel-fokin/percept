@@ -12,7 +12,6 @@ export type Session = {
 };
 
 export type MapSummary = {
-  id: string;
   kind: string;
   project: string;
   nodes: number;
@@ -39,7 +38,6 @@ export type MapEdge = {
 };
 
 export type MapDetail = {
-  id: string;
   kind: string;
   project: string;
   nodes: MapNode[];

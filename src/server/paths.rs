@@ -1,14 +1,12 @@
 use std::path::Path;
 
-/// A home of `/` or empty is no home: everything would sit under it.
-fn real_home(home: &Path) -> Option<&Path> {
-    home.parent().map(|_| home)
-}
-
 /// Every path in `text` that starts at home written from `~`, so a command reads like a file path does.
 /// Home counts only as a whole path segment that begins a word: `/mnt/Users/me/a` and `/Users/me2` stay.
+/// A home of `/` or empty is no home: everything would sit under it.
 pub(super) fn display_paths(text: &str, home: &Path) -> String {
-    let Some(home) = real_home(home) else { return text.to_string() };
+    if home.parent().is_none() {
+        return text.to_string();
+    }
     let home = home.display().to_string();
 
     let mut shown = String::with_capacity(text.len());
