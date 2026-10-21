@@ -1,4 +1,5 @@
-import { Outlet, ScrollRestoration } from "react-router";
+import { Outlet, ScrollRestoration, useRouteError } from "react-router";
+import { describe } from "./api";
 import { Sidebar } from "./components/sidebar";
 
 export default function App() {
@@ -13,6 +14,11 @@ export default function App() {
       <ScrollRestoration />
     </>
   );
+}
+
+/** The sidebar's data failed to load, so no page can render beside it. */
+export function AppError() {
+  return <p className={`pt-6 ${gutter}`}>Failed to load projects: {describe(useRouteError())}</p>;
 }
 
 /** The side gutter of every page. */
