@@ -16,7 +16,7 @@ type ProjectGroup = { project: string; root: string; maps: MapSummary[]; boards:
 const hasContent = (g: Pick<ProjectGroup, "maps" | "boards">) => g.maps.length > 0 || g.boards.length > 0;
 
 /** One group per project: those with sessions by newest session, then those with only maps or boards, then empty ones. */
-export async function loadStart() {
+export async function loadHome() {
   const [projects, sessions, maps, boards] = await Promise.all([
     getData<Project[]>("/api/projects"),
     getData<Session[]>("/api/sessions"),
@@ -43,8 +43,8 @@ export async function loadStart() {
   return [...active, ...rest.filter(hasContent), ...rest.filter((g) => !hasContent(g))];
 }
 
-export function Start() {
-  const groups = useLoaderData<typeof loadStart>();
+export function Home() {
+  const groups = useLoaderData<typeof loadHome>();
   usePolling(true);
   const now = new Date();
 
@@ -125,7 +125,7 @@ export function Start() {
   );
 }
 
-export function StartError() {
+export function HomeError() {
   return <p className="pt-6">Failed to load sessions: {describe(useRouteError())}</p>;
 }
 

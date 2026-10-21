@@ -7,7 +7,7 @@ import { Board } from "./pages/board";
 import { BoardError, loadBoard } from "./pages/board-page";
 import { boardPattern } from "./paths";
 import { loadProject, Project, ProjectError } from "./pages/project";
-import { loadStart, Start, StartError } from "./pages/start";
+import { Home, HomeError, loadHome } from "./pages/home";
 import "./index.css";
 
 const router = createBrowserRouter([
@@ -23,7 +23,7 @@ const router = createBrowserRouter([
       {
         Component: Column,
         children: [
-          { index: true, loader: loadStart, Component: Start, ErrorBoundary: StartError },
+          { index: true, loader: loadHome, Component: Home, ErrorBoundary: HomeError },
           { path: "*", loader: loadProject, Component: Project, ErrorBoundary: ProjectError },
         ],
       },
