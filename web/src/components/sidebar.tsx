@@ -1,5 +1,9 @@
 import { useRef, useState, useSyncExternalStore } from "react";
-import { Link, NavLink } from "react-router";
+import { Link, NavLink, useLoaderData } from "react-router";
+import { getData, type BoardSummary, type MapSummary, type Project } from "../api";
+import { boardUrl, mapUrl, sessionsUrl } from "../paths";
+import { BoardIcon } from "./board-icon";
+import { Chevron } from "./chevron";
 import { ThemeSwitch } from "./theme-switch";
 import { IconButton } from "./ui/button";
 
@@ -10,6 +14,21 @@ const desktop = window.matchMedia("(min-width: 48rem)");
 function subscribe(onChange: () => void) {
   desktop.addEventListener("change", onChange);
   return () => desktop.removeEventListener("change", onChange);
+}
+
+/** The projects in `/api/projects` order, each with its boards and maps. */
+export async function loadTree() {
+  const [projects, maps, boards] = await Promise.all([
+    getData<Project[]>("/api/projects"),
+    getData<MapSummary[]>("/api/maps"),
+    getData<BoardSummary[]>("/api/boards"),
+  ]);
+
+  return projects.map(({ name }) => ({
+    name,
+    boards: boards.filter((b) => b.project === name),
+    maps: maps.filter((m) => m.project === name),
+  }));
 }
 
 /** A column on the left from md up, collapsible to a rail; below md a top bar whose button slides the same panel in. */
@@ -64,6 +83,8 @@ function MobileSidebar() {
 }
 
 function Panel({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const tree = useLoaderData<typeof loadTree>();
+
   return (
     <div className="flex h-full flex-col p-1.5">
       <div className="flex items-center justify-between">
@@ -103,15 +124,45 @@ function Panel({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => vo
         </button>
       </nav>
 
-      <div className="mt-auto">
-        <ThemeSwitch />
+      {/* The rail has no room for a label per project, so the tree leaves with the labels. */}
+      <div className="mt-4 min-h-0 flex-1 overflow-y-auto">
+        {!collapsed &&
+          tree.map(({ name, boards, maps }) => (
+            <details key={name} open className="group">
+              <summary className="flex h-9 cursor-pointer list-none items-center gap-2 rounded-md px-3.5 font-mono text-sm text-muted hover:bg-border/50 hover:text-text [&::-webkit-details-marker]:hidden">
+                <Chevron />
+                <span className="min-w-0 truncate">{name}</span>
+              </summary>
+              <nav aria-label={name} className="grid gap-0.5">
+                {boards.map((board) => (
+                  <NavLink key={board.id} to={boardUrl(name, board.name)} className={child}>
+                    <BoardIcon />
+                    <span className="min-w-0 truncate">{board.name}</span>
+                  </NavLink>
+                ))}
+                {maps.map((map) => (
+                  <NavLink key={map.kind} to={mapUrl(name, map.kind)} className={child}>
+                    <span className="min-w-0 truncate pl-7">{map.kind}</span>
+                  </NavLink>
+                ))}
+                <NavLink to={sessionsUrl(name)} className={child}>
+                  <span className="pl-7">sessions</span>
+                </NavLink>
+              </nav>
+            </details>
+          ))}
       </div>
+
+      <ThemeSwitch />
     </div>
   );
 }
 
 // An icon at the centre of a rail-wide square, so the rail keeps it in place.
 const item = "flex h-11 items-center gap-3 rounded-md px-3.5 text-sm whitespace-nowrap text-muted hover:bg-border/50 hover:text-text";
+
+const child = ({ isActive }: { isActive: boolean }) =>
+  `flex h-9 items-center gap-3 rounded-md pr-3.5 pl-6 text-sm whitespace-nowrap text-muted hover:bg-border/50 hover:text-text ${isActive ? "bg-border/50 text-text" : ""}`;
 
 function Wordmark({ className = "" }: { className?: string }) {
   return (
