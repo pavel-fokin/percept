@@ -46,7 +46,7 @@ mod tests {
         let project = ProjectId::new();
         let events = [
             board(project, "ideas"),
-            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, "decisions"),
+            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, "decisions", "/maps/decisions.toml".into()),
             board(project, "plan"),
         ];
 

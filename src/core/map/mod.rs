@@ -21,6 +21,8 @@ pub struct Map {
     pub id: MapId,
     pub kind: String,
     pub project: ProjectId,
+    /// The absolute path of the file that defines the map.
+    pub definition: PathBuf,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
 }
@@ -62,7 +64,7 @@ impl Edge {
 impl Map {
     /// The map `id` after `events`, created by a `MapCreated` event placed first.
     pub fn fixture(id: MapId, events: &[Event]) -> Self {
-        let created = Event::map_created(crate::core::Source::fixture(), Actor::Human, id, ProjectId::new(), "concepts");
+        let created = Event::map_created(crate::core::Source::fixture(), Actor::Human, id, ProjectId::new(), "concepts", "/maps/concepts.toml".into());
         let log: Vec<Event> = std::iter::once(created).chain(events.iter().cloned()).collect();
 
         Self::all(&log).remove(0)
@@ -84,9 +86,10 @@ impl Map {
 
         for event in events {
             match &event.payload {
-                Payload::MapCreated { map, project, kind } => maps.push(Self {
+                Payload::MapCreated { map, project, kind, definition } => maps.push(Self {
                     id: *map,
                     kind: kind.clone(),
+                    definition: definition.clone(),
                     project: *project,
                     nodes: Vec::new(),
                     edges: Vec::new(),
@@ -346,7 +349,7 @@ mod tests {
             Event::node_removed(Source::fixture(), Actor::Agent, other, b),
         ];
 
-        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, ProjectId::new(), "concepts");
+        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, ProjectId::new(), "concepts", "/maps/concepts.toml".into());
         let log: Vec<Event> = [created(map), created(other)].into_iter().chain(events).collect();
 
         let maps = Map::all(&log);
@@ -432,7 +435,7 @@ mod tests {
         let (b, add_b) = node_added(second, Actor::Agent, "B");
         let (_, add_lost) = node_added(uncreated, Actor::Human, "Lost");
         let (one, two) = (ProjectId::new(), ProjectId::new());
-        let created = |id, project, kind| Event::map_created(Source::fixture(), Actor::Human, id, project, kind);
+        let created = |id, project, kind| Event::map_created(Source::fixture(), Actor::Human, id, project, kind, format!("/maps/{kind}.toml").into());
         let events = [
             created(first, one, "concepts"),
             add_lost,
@@ -578,7 +581,7 @@ mod tests {
         let (map, _, _, folded) = check_map();
         let session = crate::core::SessionId::new();
         let events = [
-            Event::map_created(Source::fixture(), Actor::Human, map, ProjectId::new(), "concepts"),
+            Event::map_created(Source::fixture(), Actor::Human, map, ProjectId::new(), "concepts", "/maps/concepts.toml".into()),
             Event::session_created(Source::fixture(), session, crate::core::ProjectId::new(), crate::core::ClientSessionId::new("c".into())),
             Event::message(Source::fixture(), session, Actor::Human, "Hello", serde_json::json!({})),
         ];

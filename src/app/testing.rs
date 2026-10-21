@@ -115,12 +115,12 @@ pub(super) fn add_session(store: &Memory, root: &str) -> SessionId {
     session
 }
 
-/// Has a definition for the map kinds the app tests use, and none for any other.
+/// Has a definition for the files the app tests use, keyed by file stem, and none for any other.
 pub(super) struct Definitions;
 
 impl DefinitionStore for Definitions {
-    async fn definition(&self, _: &Path, kind: &str) -> Result<Definition> {
-        match kind {
+    async fn definition(&self, file: &Path) -> Result<Definition> {
+        match file.file_stem().and_then(|s| s.to_str()).unwrap_or_default() {
             "decisions" => mini(
                 &[("question", &[]), ("option", &[])],
                 &[("answers", "option", "question"), ("raises", "question", "option")],
@@ -128,7 +128,7 @@ impl DefinitionStore for Definitions {
             "tasks" => mini(&[("task", &[])], &[("blocks", "task", "task")]),
             "concepts" => mini(&[("concept", &["definition"])], &[]),
             "glossary" => mini(&[("term", &["definition", "source"])], &[]),
-            _ => Err(format!("no definition for {kind}").into()),
+            _ => Err(format!("no definition in {}", file.display()).into()),
         }
     }
 }
@@ -146,11 +146,11 @@ fn mini(nodes: &[(&str, &[&str])], edges: &[(&str, &str, &str)]) -> Result<Defin
     Definition::new("purpose".into(), "instructions".into(), nodes, edges)
 }
 
-/// Has no definition for any map kind.
+/// Has no definition for any file.
 pub(super) struct NoDefinitions;
 
 impl DefinitionStore for NoDefinitions {
-    async fn definition(&self, _: &Path, kind: &str) -> Result<Definition> {
-        Err(format!("no definition for {kind}").into())
+    async fn definition(&self, file: &Path) -> Result<Definition> {
+        Err(format!("no definition in {}", file.display()).into())
     }
 }

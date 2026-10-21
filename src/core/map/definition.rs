@@ -84,13 +84,12 @@ impl Definition {
     }
 }
 
-/// Reads the definitions a project defines for its maps.
+/// Reads the definition a map is declared by.
 pub trait DefinitionStore {
-    /// The definition of the given map kind in the project at `project`.
+    /// The definition in `file`.
     fn definition(
         &self,
-        project: &Path,
-        kind: &str,
+        file: &Path,
     ) -> impl Future<Output = Result<Definition>> + Send;
 }
 

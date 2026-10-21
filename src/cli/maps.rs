@@ -1,14 +1,16 @@
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use super::hook::Client;
 use crate::app::{AppService, Ref, source_path};
 use crate::core::{Actor, DefinitionStore, EventStore, Map, Reference, Source};
 use crate::shared::Result;
 
-pub(super) async fn create<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, kind: &str) -> Result<()> {
+pub(super) async fn create<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, kind: &str, file: &Path) -> Result<()> {
     let (actor, source) = cli_writer().await?;
+    let file = tokio::fs::canonicalize(file).await.map_err(|e| format!("{}: {e}", file.display()))?;
 
-    service.create_map(source, actor, kind).await
+    service.create_map(source, actor, kind, &file).await
 }
 
 pub(super) async fn add<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {

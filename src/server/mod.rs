@@ -116,7 +116,7 @@ mod tests {
             let created = Event::session_created(Source::fixture(), session, project, ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
             let map: MapId = serde_json::from_value(json!(MAP))?;
-            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, "decisions");
+            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, "decisions", "/maps/decisions.toml".into());
             let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default(), self.1.clone());
             Ok([project_created, created].into_iter().chain(started).chain(self.2.clone()).chain([map_created, node]).collect())
         }
@@ -162,7 +162,7 @@ mod tests {
     struct Definitions;
 
     impl DefinitionStore for Definitions {
-        async fn definition(&self, _: &std::path::Path, _: &str) -> Result<Definition> {
+        async fn definition(&self, _: &std::path::Path) -> Result<Definition> {
             unimplemented!()
         }
     }

@@ -6,7 +6,7 @@ description: >-
 ---
 
 percept keeps maps of what a project understands. A map is declared
-by a schema in `.percept/schemas/<map>.toml`:
+by a schema in `.percept/maps/<map>.toml`:
 
 | Field | Holds |
 |---|---|
@@ -17,9 +17,9 @@ by a schema in `.percept/schemas/<map>.toml`:
 
 ## Reflect
 
-1. Read every schema in `.percept/schemas/`.
-2. Run `percept show <map>` for each. If the map is missing, run
-   `percept create <map>`.
+1. Read every schema in `.percept/maps/`.
+2. Run `percept show <map>` for each. If the map is missing, tell the
+   user; they choose its file and create it.
 3. From this session, pick what each map's `instructions` admit.
 4. Skip what the map already holds, judged by meaning, not wording.
    Add the rest:
