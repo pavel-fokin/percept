@@ -6,7 +6,7 @@ use crate::shared::Id;
 pub type ProjectId = Id<Project>;
 
 /// A folder percept tracks, created by a `ProjectCreated` event.
-/// Its root is the `source.path` of that event.
+/// Its root is the folder the payload names, not where the event was written.
 pub struct Project {
     pub id: ProjectId,
     pub name: Name,
@@ -19,9 +19,7 @@ impl Project {
         events
             .iter()
             .filter_map(|event| match &event.payload {
-                Payload::ProjectCreated { project, name } => {
-                    Some(Self { id: *project, name: name.clone(), root: event.source.path.clone() })
-                }
+                Payload::ProjectCreated { project, name, root } => Some(Self { id: *project, name: name.clone(), root: root.clone() }),
                 _ => None,
             })
             .collect()
@@ -52,9 +50,9 @@ mod tests {
     #[test]
     fn the_nearest_root_at_or_above_a_path_wins() {
         let events = [
-            Event::project_created(source("/work/app"), Actor::Human, ProjectId::new(), Name::new("app").unwrap()),
-            Event::project_created(source("/work/app/inner"), Actor::Human, ProjectId::new(), Name::new("inner").unwrap()),
-            Event::project_created(source("/work/apple"), Actor::Human, ProjectId::new(), Name::new("apple").unwrap()),
+            Event::project_created(source("/work/app"), Actor::Human, ProjectId::new(), Name::new("app").unwrap(), "/work/app".into()),
+            Event::project_created(source("/work/app/inner"), Actor::Human, ProjectId::new(), Name::new("inner").unwrap(), "/work/app/inner".into()),
+            Event::project_created(source("/work/apple"), Actor::Human, ProjectId::new(), Name::new("apple").unwrap(), "/work/apple".into()),
         ];
 
         let name = |path: &str| Project::containing(&events, Path::new(path)).map(|p| p.name.as_str().to_string());
@@ -69,7 +67,7 @@ mod tests {
 
     #[test]
     fn a_project_is_found_by_its_name_in_any_case() {
-        let events = [Event::project_created(source("/work/app"), Actor::Human, ProjectId::new(), Name::new("app").unwrap())];
+        let events = [Event::project_created(source("/work/app"), Actor::Human, ProjectId::new(), Name::new("app").unwrap(), "/work/app".into())];
 
         let found = |name: &str| Project::named(&events, name).map(|p| p.root);
 
@@ -82,14 +80,23 @@ mod tests {
     #[test]
     fn projects_are_folded_from_their_events_in_log_order() {
         let events = [
-            Event::project_created(source("/a"), Actor::Human, ProjectId::new(), Name::new("a").unwrap()),
+            Event::project_created(source("/a"), Actor::Human, ProjectId::new(), Name::new("a").unwrap(), "/a".into()),
             Event::map_created(Source::fixture(), Actor::Human, crate::core::MapId::new(), ProjectId::new(), "decisions", "/maps/decisions.toml".into()),
-            Event::project_created(source("/b"), Actor::Human, ProjectId::new(), Name::new("b").unwrap()),
+            Event::project_created(source("/b"), Actor::Human, ProjectId::new(), Name::new("b").unwrap(), "/b".into()),
         ];
 
         let projects = Project::all(&events);
 
         let found: Vec<(&str, &Path)> = projects.iter().map(|p| (p.name.as_str(), p.root.as_path())).collect();
         assert_eq!(found, vec![("a", Path::new("/a")), ("b", Path::new("/b"))]);
+    }
+
+    #[test]
+    fn a_project_root_comes_from_the_payload_not_the_event_source() {
+        let events = [Event::project_created(source("/elsewhere"), Actor::Human, ProjectId::new(), Name::new("app").unwrap(), "/work/app".into())];
+
+        let projects = Project::all(&events);
+
+        assert_eq!(projects[0].root, Path::new("/work/app"));
     }
 }

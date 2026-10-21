@@ -105,7 +105,7 @@ pub enum Payload {
     ToolUsed { session: SessionId, tool: String, input: Option<String>, output: Option<String> },
     SubagentStarted { session: SessionId, subagent: ClientAgentId, agent: String, task: String },
     SubagentReported { session: SessionId, subagent: ClientAgentId, content: String },
-    ProjectCreated { project: ProjectId, name: Name },
+    ProjectCreated { project: ProjectId, name: Name, root: PathBuf },
     BoardCreated { board: BoardId, project: ProjectId, name: Name },
     MapCreated { map: MapId, project: ProjectId, kind: String, definition: PathBuf },
     NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
@@ -241,8 +241,8 @@ impl Event {
         Self::build(source, Actor::System, Payload::SessionStopped { session }, Some(raw))
     }
 
-    pub fn project_created(source: Source, actor: Actor, project: ProjectId, name: Name) -> Self {
-        Self::build(source, actor, Payload::ProjectCreated { project, name }, None)
+    pub fn project_created(source: Source, actor: Actor, project: ProjectId, name: Name, root: PathBuf) -> Self {
+        Self::build(source, actor, Payload::ProjectCreated { project, name, root }, None)
     }
 
     pub fn board_created(source: Source, actor: Actor, board: BoardId, project: ProjectId, name: Name) -> Self {

@@ -22,7 +22,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
             return Err(format!("the name {} is taken", name.as_str()).into());
         }
 
-        self.store.append(&Event::project_created(source, actor, ProjectId::new(), name.clone())).await?;
+        self.store.append(&Event::project_created(source.clone(), actor, ProjectId::new(), name.clone(), source.path)).await?;
 
         Ok(name)
     }

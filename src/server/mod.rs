@@ -112,7 +112,7 @@ mod tests {
         async fn all(&self) -> Result<Vec<Event>> {
             let session: SessionId = serde_json::from_value(json!(SESSION))?;
             let project: ProjectId = serde_json::from_value(json!(PROJECT))?;
-            let project_created = Event::project_created(Source { client: "claude-code".into(), path: "/Users/me/repo".into() }, Actor::Human, project, Name::new("repo").unwrap());
+            let project_created = Event::project_created(Source { client: "claude-code".into(), path: "/Users/me/repo".into() }, Actor::Human, project, Name::new("repo").unwrap(), "/Users/me/repo".into());
             let created = Event::session_created(Source::fixture(), session, project, ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
             let map: MapId = serde_json::from_value(json!(MAP))?;
@@ -132,7 +132,7 @@ mod tests {
     impl Log {
         fn new() -> Self {
             let source = Source { client: "claude-code".into(), path: "/Users/me/repo".into() };
-            let project = Event::project_created(source, Actor::Human, ProjectId::new(), Name::new("repo").unwrap());
+            let project = Event::project_created(source, Actor::Human, ProjectId::new(), Name::new("repo").unwrap(), "/Users/me/repo".into());
 
             Self(std::sync::Mutex::new(vec![project]))
         }
