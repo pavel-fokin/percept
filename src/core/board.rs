@@ -24,13 +24,11 @@ impl Board {
             .collect()
     }
 
-    /// Whether `key`, a board's id or its name, names this board.
-    /// A name never reads as an id, so a key matches by one or the other.
-    pub fn is(&self, key: &str) -> bool {
-        match key.parse::<BoardId>() {
-            Ok(id) => self.id == id,
-            Err(_) => Name::new(key).is_ok_and(|name| self.name == name),
-        }
+    /// The board of `project` in `events` named `name`, in any case.
+    pub fn named(events: &[Event], project: ProjectId, name: &str) -> Option<Self> {
+        let name = Name::new(name).ok()?;
+
+        Self::all(events).into_iter().find(|b| b.project == project && b.name == name)
     }
 }
 
@@ -60,15 +58,16 @@ mod tests {
     }
 
     #[test]
-    fn a_board_is_named_by_its_id_or_its_name_in_any_case() {
-        let boards = Board::all(&[board(ProjectId::new(), "ideas")]);
-        let ideas = &boards[0];
+    fn a_board_is_found_in_its_project_by_name_in_any_case() {
+        let (project, other) = (ProjectId::new(), ProjectId::new());
+        let events = [board(project, "ideas")];
 
-        assert!(ideas.is("ideas"));
-        assert!(ideas.is("IDEAS"));
-        assert!(ideas.is(&ideas.id.to_string()));
-        assert!(!ideas.is("plan"));
-        assert!(!ideas.is(&BoardId::new().to_string()));
-        assert!(!ideas.is("not a name"));
+        let found = |project, name: &str| Board::named(&events, project, name).map(|b| b.name);
+
+        assert_eq!(found(project, "ideas"), Some(Name::new("ideas").unwrap()));
+        assert_eq!(found(project, "IDEAS"), Some(Name::new("ideas").unwrap()));
+        assert_eq!(found(project, "plan"), None);
+        assert_eq!(found(project, "not a name"), None);
+        assert_eq!(found(other, "ideas"), None);
     }
 }

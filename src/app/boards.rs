@@ -30,7 +30,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         Ok(Board::all(&self.store.all().await?))
     }
 
-    /// The board of the project named `project` that `board`, its name or its id, names.
+    /// The board named `board` in the project named `project`.
     pub async fn board(&self, project: &str, board: &str) -> Result<Option<Board>> {
         let events = self.store.all().await?;
 
@@ -38,7 +38,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             return Ok(None);
         };
 
-        Ok(Board::all(&events).into_iter().find(|b| b.project == project.id && b.is(board)))
+        Ok(Board::named(&events, project.id, board))
     }
 }
 
@@ -109,23 +109,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_board_is_found_in_its_project_by_name_or_by_id() {
+    async fn a_board_is_found_in_its_project_by_name_only() {
         let store = in_project("/work/a");
         add_project(&store, "/work/b");
         let service = AppService::new(&store, Schemas);
         let first = service.create_board("percept-web", Actor::Human, "p0").await.unwrap().unwrap();
-        let id = first.id.to_string();
 
         let by_name = service.board("p0", "Board-1").await.unwrap();
-        let by_id = service.board("p0", &id).await.unwrap();
         let in_other_project = service.board("p1", "board-1").await.unwrap();
-        let by_id_in_other_project = service.board("p1", &id).await.unwrap();
         let unknown_board = service.board("p0", "board-2").await.unwrap();
         let unknown_project = service.board("nope", "board-1").await.unwrap();
 
-        assert_eq!(by_name, Some(first.clone()));
-        assert_eq!(by_id, Some(first));
-        assert_eq!((in_other_project, by_id_in_other_project, unknown_board, unknown_project), (None, None, None, None));
+        assert_eq!(by_name, Some(first));
+        assert_eq!((in_other_project, unknown_board, unknown_project), (None, None, None));
     }
 
     #[tokio::test]

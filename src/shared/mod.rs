@@ -3,7 +3,6 @@
 use std::cmp::Ordering;
 use std::fmt;
 use std::marker::PhantomData;
-use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -27,14 +26,6 @@ impl<T> Id<T> {
             uuid: Uuid::now_v7(),
             entity: PhantomData,
         }
-    }
-}
-
-impl<T> FromStr for Id<T> {
-    type Err = uuid::Error;
-
-    fn from_str(text: &str) -> std::result::Result<Self, Self::Err> {
-        Ok(Self { uuid: text.parse()?, entity: PhantomData })
     }
 }
 
@@ -68,12 +59,6 @@ impl<T> Ord for Id<T> {
     }
 }
 
-impl<T> fmt::Display for Id<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.uuid)
-    }
-}
-
 impl<T> fmt::Debug for Id<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "Id({})", self.uuid)
@@ -93,16 +78,6 @@ mod tests {
 
         assert_ne!(first, second);
         assert!(first < second);
-    }
-
-    #[test]
-    fn id_is_parsed_from_its_uuid_text() {
-        let id = Id::<Entity>::new();
-
-        let back: Id<Entity> = id.to_string().parse().unwrap();
-
-        assert_eq!(back, id);
-        assert!("not-an-id".parse::<Id<Entity>>().is_err());
     }
 
     #[test]

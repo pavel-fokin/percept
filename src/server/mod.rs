@@ -364,7 +364,7 @@ mod tests {
         assert_eq!(json_body(&created)["data"], board);
         assert_eq!(json_body(&all)["data"], json!([board]));
         assert_eq!(json_body(&by_name)["data"], board);
-        assert_eq!(json_body(&by_id)["data"], board);
+        assert!(by_id.starts_with("HTTP/1.1 404"));
         let event = log.0.lock().unwrap().last().unwrap().clone();
         assert_eq!(event.actor, Actor::Human);
         assert_eq!(event.source, Source { client: "percept-web".into(), path: "/Users/me/repo".into() });
