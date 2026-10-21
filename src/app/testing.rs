@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use serde_json::json;
 
-use crate::core::{Actor, ClientSessionId, EdgeKind, Event, EventStore, Name, Payload, Project, ProjectId, Schema, SchemaStore, SessionId, Source};
+use crate::core::{Actor, ClientSessionId, Definition, DefinitionStore, EdgeKind, Event, EventStore, Name, Payload, Project, ProjectId, SessionId, Source};
 use crate::shared::Result;
 
 pub(super) struct Fixed(pub(super) usize);
@@ -115,12 +115,12 @@ pub(super) fn add_session(store: &Memory, root: &str) -> SessionId {
     session
 }
 
-/// Has a schema for the map kinds the app tests use, and none for any other.
-pub(super) struct Schemas;
+/// Has a definition for the files the app tests use, keyed by file stem, and none for any other.
+pub(super) struct Definitions;
 
-impl SchemaStore for Schemas {
-    async fn schema(&self, _: &Path, kind: &str) -> Result<Schema> {
-        match kind {
+impl DefinitionStore for Definitions {
+    async fn definition(&self, file: &Path) -> Result<Definition> {
+        match file.file_stem().and_then(|s| s.to_str()).unwrap_or_default() {
             "decisions" => mini(
                 &[("question", &[]), ("option", &[])],
                 &[("answers", "option", "question"), ("raises", "question", "option")],
@@ -128,12 +128,12 @@ impl SchemaStore for Schemas {
             "tasks" => mini(&[("task", &[])], &[("blocks", "task", "task")]),
             "concepts" => mini(&[("concept", &["definition"])], &[]),
             "glossary" => mini(&[("term", &["definition", "source"])], &[]),
-            _ => Err(format!("no schema for {kind}").into()),
+            _ => Err(format!("no definition in {}", file.display()).into()),
         }
     }
 }
 
-fn mini(nodes: &[(&str, &[&str])], edges: &[(&str, &str, &str)]) -> Result<Schema> {
+fn mini(nodes: &[(&str, &[&str])], edges: &[(&str, &str, &str)]) -> Result<Definition> {
     let nodes = nodes
         .iter()
         .map(|(node, properties)| (node.to_string(), properties.iter().map(|p| p.to_string()).collect::<BTreeSet<_>>()))
@@ -143,14 +143,14 @@ fn mini(nodes: &[(&str, &[&str])], edges: &[(&str, &str, &str)]) -> Result<Schem
         .map(|(edge, from, to)| (edge.to_string(), EdgeKind { from: from.to_string(), to: to.to_string() }))
         .collect();
 
-    Schema::new("purpose".into(), "instructions".into(), nodes, edges)
+    Definition::new("purpose".into(), "instructions".into(), nodes, edges)
 }
 
-/// Has no schema for any map kind.
-pub(super) struct NoSchemas;
+/// Has no definition for any file.
+pub(super) struct NoDefinitions;
 
-impl SchemaStore for NoSchemas {
-    async fn schema(&self, _: &Path, kind: &str) -> Result<Schema> {
-        Err(format!("no schema for {kind}").into())
+impl DefinitionStore for NoDefinitions {
+    async fn definition(&self, file: &Path) -> Result<Definition> {
+        Err(format!("no definition in {}", file.display()).into())
     }
 }

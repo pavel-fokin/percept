@@ -11,7 +11,7 @@ use axum::Router;
 use tokio::net::TcpListener;
 
 use crate::app::AppService;
-use crate::core::{EventStore, SchemaStore};
+use crate::core::{DefinitionStore, EventStore};
 use crate::shared::Result;
 
 mod handlers;
@@ -26,7 +26,7 @@ const APPLE_TOUCH_ICON: &[u8] = include_bytes!("../../web/public/apple-touch-ico
 pub async fn serve<S, M>(service: Arc<AppService<S, M>>, home: PathBuf, port: u16, open: bool) -> Result<()>
 where
     S: EventStore + Send + Sync + 'static,
-    M: SchemaStore + Send + Sync + 'static,
+    M: DefinitionStore + Send + Sync + 'static,
 {
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
     let url = format!("http://{}", listener.local_addr()?);
@@ -42,7 +42,7 @@ where
 }
 
 /// What the handlers read: the use cases, and the home that paths are shown under.
-struct Api<S: EventStore, M: SchemaStore> {
+struct Api<S: EventStore, M: DefinitionStore> {
     service: Arc<AppService<S, M>>,
     home: PathBuf,
 }
@@ -50,7 +50,7 @@ struct Api<S: EventStore, M: SchemaStore> {
 fn router<S, M>(service: Arc<AppService<S, M>>, home: PathBuf) -> Router
 where
     S: EventStore + Send + Sync + 'static,
-    M: SchemaStore + Send + Sync + 'static,
+    M: DefinitionStore + Send + Sync + 'static,
 {
     Router::new()
         .route("/api/status", get(Api::<S, M>::status))
@@ -90,7 +90,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::{Actor, ClientSessionId, Event, MapId, Name, NodeId, ProjectId, Reference, Schema, SchemaStore, SessionId, Source};
+    use crate::core::{Actor, ClientSessionId, Definition, DefinitionStore, Event, MapId, Name, NodeId, ProjectId, Reference, SessionId, Source};
 
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
     const MAP: &str = "0190a0a0-0000-7000-8000-000000000003";
@@ -116,7 +116,7 @@ mod tests {
             let created = Event::session_created(Source::fixture(), session, project, ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
             let map: MapId = serde_json::from_value(json!(MAP))?;
-            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, "decisions");
+            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, "decisions", "/maps/decisions.toml".into());
             let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default(), self.1.clone());
             Ok([project_created, created].into_iter().chain(started).chain(self.2.clone()).chain([map_created, node]).collect())
         }
@@ -159,10 +159,10 @@ mod tests {
         }
     }
 
-    struct Schemas;
+    struct Definitions;
 
-    impl SchemaStore for Schemas {
-        async fn schema(&self, _: &std::path::Path, _: &str) -> Result<Schema> {
+    impl DefinitionStore for Definitions {
+        async fn definition(&self, _: &std::path::Path) -> Result<Definition> {
             unimplemented!()
         }
     }
@@ -178,7 +178,7 @@ mod tests {
     async fn serve<S: EventStore + Send + Sync + 'static>(store: S) -> std::net::SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = router(Arc::new(AppService::new(store, Schemas)), "/Users/me".into());
+        let app = router(Arc::new(AppService::new(store, Definitions)), "/Users/me".into());
         tokio::spawn(async move { axum::serve(listener, app).await });
 
         addr

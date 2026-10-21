@@ -3,10 +3,10 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::core::{EdgeKind, Schema, SchemaStore};
+use crate::core::{Definition, DefinitionStore, EdgeKind};
 use crate::shared::Result;
 
-/// Reads `<project>/.percept/schemas/<kind>.toml`.
+/// Reads a definition from a TOML file.
 pub struct TomlStore;
 
 #[derive(Deserialize)]
@@ -27,24 +27,23 @@ struct Edge {
     to: String,
 }
 
-impl SchemaStore for TomlStore {
-    async fn schema(&self, project: &Path, kind: &str) -> Result<Schema> {
-        let path = project.join(".percept").join("schemas").join(format!("{kind}.toml"));
-        let name = path.display();
+impl DefinitionStore for TomlStore {
+    async fn definition(&self, file: &Path) -> Result<Definition> {
+        let name = file.display();
 
-        let text = tokio::fs::read_to_string(&path).await.map_err(|e| format!("{name}: {e}"))?;
-        let file: File = toml::from_str(&text).map_err(|e| format!("{name}: {e}"))?;
+        let text = tokio::fs::read_to_string(file).await.map_err(|e| format!("{name}: {e}"))?;
+        let parsed: File = toml::from_str(&text).map_err(|e| format!("{name}: {e}"))?;
 
         let mut nodes = BTreeMap::new();
-        for (node, properties) in file.nodes {
+        for (node, properties) in parsed.nodes {
             if let Some((property, _)) = properties.iter().find(|(_, value)| !value.is_empty()) {
                 return Err(format!("{name}: property {property:?} of node kind {node:?} must be \"\"").into());
             }
             nodes.insert(node, properties.into_keys().collect::<BTreeSet<_>>());
         }
-        let edges = file.edges.into_iter().map(|(k, e)| (k, EdgeKind { from: e.from, to: e.to })).collect();
+        let edges = parsed.edges.into_iter().map(|(k, e)| (k, EdgeKind { from: e.from, to: e.to })).collect();
 
-        Schema::new(file.purpose, file.instructions, nodes, edges).map_err(|e| format!("{name}: {e}").into())
+        Definition::new(parsed.purpose, parsed.instructions, nodes, edges).map_err(|e| format!("{name}: {e}").into())
     }
 }
 
@@ -54,19 +53,19 @@ mod tests {
 
     use super::*;
 
-    /// A project directory holding one schema file with the given text.
-    fn project(text: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("percept-schema-{}", uuid::Uuid::now_v7()));
-        let schemas = dir.join(".percept").join("schemas");
-        std::fs::create_dir_all(&schemas).unwrap();
-        std::fs::write(schemas.join("notes.toml"), text).unwrap();
+    /// A definition file `notes.toml` holding the given text.
+    fn file(text: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("percept-definition-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("notes.toml");
+        std::fs::write(&file, text).unwrap();
 
-        dir
+        file
     }
 
     #[tokio::test]
     async fn reads_a_valid_file() {
-        let dir = project(
+        let file = file(
             r#"
             purpose = "p"
             instructions = "i"
@@ -83,31 +82,31 @@ mod tests {
             "#,
         );
 
-        let schema = TomlStore.schema(&dir, "notes").await.unwrap();
+        let definition = TomlStore.definition(&file).await.unwrap();
 
-        assert_eq!(schema.purpose(), "p");
-        assert_eq!(schema.instructions(), "i");
+        assert_eq!(definition.purpose(), "p");
+        assert_eq!(definition.instructions(), "i");
         let properties = BTreeMap::from([("body".to_string(), "x".to_string()), ("by".to_string(), "y".to_string())]);
-        assert!(schema.check_node("note", &properties).is_ok());
-        assert!(schema.check_node("topic", &properties).is_err());
-        assert!(schema.check_edge("about", "note", "topic").is_ok());
-        assert!(schema.check_edge("about", "topic", "note").is_err());
+        assert!(definition.check_node("note", &properties).is_ok());
+        assert!(definition.check_node("topic", &properties).is_err());
+        assert!(definition.check_edge("about", "note", "topic").is_ok());
+        assert!(definition.check_edge("about", "topic", "note").is_err());
     }
 
     #[tokio::test]
     async fn edges_may_be_absent() {
-        let dir = project("purpose = \"p\"\ninstructions = \"i\"\n[nodes.note]\n");
+        let file = file("purpose = \"p\"\ninstructions = \"i\"\n[nodes.note]\n");
 
-        let schema = TomlStore.schema(&dir, "notes").await.unwrap();
+        let definition = TomlStore.definition(&file).await.unwrap();
 
-        assert!(schema.check_edge("about", "note", "note").is_err());
+        assert!(definition.check_edge("about", "note", "note").is_err());
     }
 
     #[tokio::test]
     async fn a_missing_file_is_an_error_naming_it() {
-        let dir = project("");
+        let missing = file("").with_file_name("tasks.toml");
 
-        let error = TomlStore.schema(&dir, "tasks").await.err().unwrap();
+        let error = TomlStore.definition(&missing).await.err().unwrap();
 
         assert!(error.to_string().contains("tasks.toml"));
     }
@@ -123,9 +122,9 @@ mod tests {
         ];
 
         for text in cases {
-            let dir = project(text);
+            let file = file(text);
 
-            let error = TomlStore.schema(&dir, "notes").await.err().unwrap();
+            let error = TomlStore.definition(&file).await.err().unwrap();
 
             assert!(error.to_string().contains("notes.toml"), "{text}: {error}");
         }
