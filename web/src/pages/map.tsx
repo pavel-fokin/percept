@@ -127,7 +127,7 @@ function NodeRow({ path, node, links, shown, now }: { path: string; node: MapNod
                 </div>
               ))}
               {kinds.map((kind) => (
-                <div key={kind}>
+                <div key={`edge-${kind}`}>
                   <dt className="text-[13px] font-medium text-muted">{kind}</dt>
                   {(["→", "←"] as const).map((arrow) => {
                     const ends = links.filter((l) => l.kind === kind && l.arrow === arrow);
