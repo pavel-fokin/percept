@@ -95,6 +95,11 @@ body {
   background-color: var(--color-mark);
 }
 
+/* The scrim stays dark in either theme. */
+::backdrop {
+  background-color: color-mix(in srgb, var(--graphite-950) 60%, transparent);
+}
+
 :focus-visible {
   @apply outline-2 outline-offset-2 outline-text;
 }
