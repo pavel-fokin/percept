@@ -1,12 +1,12 @@
-import { Link, Outlet, ScrollRestoration } from "react-router";
-import { ThemeSwitch } from "./components/theme-switch";
+import { Outlet, ScrollRestoration } from "react-router";
+import { Sidebar } from "./components/sidebar";
 
 export default function App() {
   return (
     <>
-      <div className="flex min-h-dvh flex-col">
-        <Header />
-        <main className="flex flex-1 flex-col">
+      <div className="flex min-h-dvh flex-col md:flex-row">
+        <Sidebar />
+        <main className="flex min-w-0 flex-1 flex-col">
           <Outlet />
         </main>
       </div>
@@ -15,26 +15,11 @@ export default function App() {
   );
 }
 
-const column = "mx-auto w-full max-w-3xl px-4 sm:px-6";
-
 /** The reading width for pages of text; a page that needs the full width sits outside it. */
 export function Column() {
   return (
-    <div className={`${column} pb-24`}>
+    <div className="mx-auto w-full max-w-3xl px-4 pb-24 sm:px-6">
       <Outlet />
     </div>
-  );
-}
-
-function Header() {
-  return (
-    <header className={`${column} flex h-15 items-center justify-between sm:h-18`}>
-      <Link to="/" className="font-mono text-xl font-medium tracking-tight">
-        percept<span className="text-accent">.</span>
-      </Link>
-      <div className="-mr-3">
-        <ThemeSwitch />
-      </div>
-    </header>
   );
 }

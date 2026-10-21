@@ -47,8 +47,8 @@ export function Board() {
       proOptions={{ hideAttribution: true }}
     >
       <Background />
-      <Controls showInteractive={false} />
-      <Panel position="top-left">
+      <Controls position="bottom-right" showInteractive={false} />
+      <Panel position="top-right">
         <AddNote />
       </Panel>
     </ReactFlow>
