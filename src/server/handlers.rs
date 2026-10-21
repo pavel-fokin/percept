@@ -5,21 +5,37 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
+use serde::Deserialize;
+
 use super::responses::{self, BoardSummary, Data, MapDetail, MapSummary, ProjectSummary, Status};
 use super::Api;
-use crate::core::{Actor, DefinitionStore, EventStore, SessionId, Source};
+use crate::app::Taken;
+use crate::core::{Actor, DefinitionStore, EventStore, Name, SessionId, Source};
 use crate::shared::Error;
+
+/// The body of `POST /api/projects`.
+#[derive(Deserialize)]
+pub(super) struct NewProject {
+    name: String,
+}
 
 type Reply<T> = Result<Json<Data<T>>, ApiError>;
 
 pub(super) enum ApiError {
     NotFound,
+    /// The request is wrong; the message says how.
+    BadRequest(String),
+    /// The request clashes with what exists; the message says with what.
+    Conflict(String),
     Internal(Error),
 }
 
 impl From<Error> for ApiError {
     fn from(error: Error) -> Self {
-        Self::Internal(error)
+        match error.downcast::<Taken>() {
+            Ok(taken) => Self::Conflict(taken.to_string()),
+            Err(error) => Self::Internal(error),
+        }
     }
 }
 
@@ -27,6 +43,8 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         match self {
             Self::NotFound => StatusCode::NOT_FOUND.into_response(),
+            Self::BadRequest(message) => (StatusCode::BAD_REQUEST, message).into_response(),
+            Self::Conflict(message) => (StatusCode::CONFLICT, message).into_response(),
             Self::Internal(error) => {
                 eprintln!("percept: {error}");
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -49,6 +67,12 @@ where
         let projects = api.service.projects().await?;
         let projects = projects.into_iter().map(|p| ProjectSummary::new(p, &api.home)).collect();
         Ok(Json(Data { data: projects }))
+    }
+
+    pub(super) async fn create_project(State(api): State<Arc<Self>>, Json(body): Json<NewProject>) -> Reply<ProjectSummary> {
+        let name = Name::new(&body.name).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+        let project = api.service.create_project(Source::Web, Actor::Human, name, None).await?;
+        Ok(Json(Data { data: ProjectSummary::new(project, &api.home) }))
     }
 
     pub(super) async fn sessions(State(api): State<Arc<Self>>) -> Reply<Vec<responses::Session>> {

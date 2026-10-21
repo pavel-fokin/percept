@@ -243,7 +243,7 @@ mod tests {
             Event::tool_used(Source::fixture(), session, "Read", None, None, raw.clone()),
             Event::subagent_started(Source::fixture(), session, ClientAgentId::new("a1".into()), "builder", "Build it", raw.clone()),
             Event::subagent_reported(Source::fixture(), session, ClientAgentId::new("a1".into()), "done", raw),
-            Event::project_created(Source::fixture(), Actor::Human, ProjectId::new(), Name::new("percept").unwrap(), "/work/percept".into()),
+            Event::project_created(Source::fixture(), Actor::Human, ProjectId::new(), Name::new("percept").unwrap(), Some("/work/percept".into())),
             Event::board_created(Source::fixture(), Actor::Human, BoardId::new(), ProjectId::new(), Name::new("ideas").unwrap()),
             Event::map_created(Source::fixture(), Actor::Human, MapId::new(), ProjectId::new(), "decisions", "/maps/decisions.toml".into()),
             Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())]), Vec::new()),
@@ -277,6 +277,18 @@ mod tests {
 
         assert_eq!(value["source"], json!({"client": "percept-web"}));
         assert_eq!(back.source, Source::Web);
+    }
+
+    #[test]
+    fn a_project_without_a_root_is_a_null_root_and_a_missing_root_reads_the_same() {
+        let event = Event::project_created(Source::Web, Actor::Human, ProjectId::new(), Name::new("notes").unwrap(), None);
+        let mut line = EventLine::from(&event);
+        assert_eq!(line.payload["root"], json!(null));
+
+        line.payload.as_object_mut().unwrap().remove("root");
+        let back = Event::try_from(line).unwrap();
+
+        assert_eq!(back.payload, event.payload);
     }
 
     #[test]

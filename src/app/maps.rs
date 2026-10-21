@@ -190,7 +190,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
 
         let mut resolved = Vec::new();
         for reference in references {
-            resolved.push(resolve_reference(&events, project, source.path()?, reference).await?);
+            resolved.push(resolve_reference(&events, project, &source, reference).await?);
         }
 
         self.write(&map, Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties, resolved)).await
@@ -228,7 +228,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
 
         let mut all_references = node.references.clone();
         for reference in references {
-            all_references.push(resolve_reference(&events, project, source.path()?, reference).await?);
+            all_references.push(resolve_reference(&events, project, &source, reference).await?);
         }
 
         self.write(&map, Event::node_changed(source, actor, map.id, node.id, new_title, merged, all_references)).await
@@ -270,8 +270,8 @@ fn find_node<'a>(nodes: &'a [Node], map_kind: &str, title: &str) -> Result<&'a N
         .ok_or_else(|| format!("the {map_kind} map has no node titled {title:?}").into())
 }
 
-/// File references resolve against `folder`, the writer's checkout, and must stay inside it.
-async fn resolve_reference(events: &[Event], project: ProjectId, folder: &Path, reference: Ref) -> Result<Reference> {
+/// File references resolve against the writer's checkout and must stay inside it; the web has none.
+async fn resolve_reference(events: &[Event], project: ProjectId, source: &Source, reference: Ref) -> Result<Reference> {
     match reference {
         Ref::Message(quote) => {
             not_blank("message reference", &quote)?;
@@ -301,6 +301,7 @@ async fn resolve_reference(events: &[Event], project: ProjectId, folder: &Path, 
                 return Err("a file reference range must use 1-based lines with from <= to".into());
             }
 
+            let folder = source.path()?;
             let folder = tokio::fs::canonicalize(folder).await
                 .map_err(|error| format!("cannot read {}: {error}", folder.display()))?;
             let target = tokio::fs::canonicalize(folder.join(&path)).await
@@ -387,32 +388,6 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(store.0.lock().unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn every_map_command_outside_a_project_fails_and_writes_nothing() {
-        let store = in_project("/work/app");
-        let service = AppService::new(&store, Definitions);
-
-        let outside = service.project_at(Path::new("/elsewhere")).await;
-
-        assert_eq!(outside.err().unwrap().to_string(), "not in a project; run percept init");
-        assert_eq!(store.0.lock().unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn a_subfolder_works_on_the_maps_of_its_project() {
-        let store = in_project("/repo");
-        let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
-        let deep = Source::Checkout { client: "claude-code".into(), path: "/repo/src/deep".into() };
-        service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
-
-        service.add_node(deep.clone(), Actor::Human, project, "decisions", "question", "Q", Default::default(), Vec::new()).await.unwrap();
-
-        let map = service.map(project, "decisions").await.unwrap();
-        assert_eq!(map.nodes.len(), 1);
-        assert_eq!(service.maps(project).await.unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -637,7 +612,7 @@ mod tests {
         let events = store.0.lock().unwrap().clone();
         let project = Project::all(&events).remove(0);
 
-        let result = resolve_reference(&events, project.id, Path::new("/repo"), Ref::Message("Match".into())).await;
+        let result = resolve_reference(&events, project.id, &Source::Web, Ref::Message("Match".into())).await;
 
         assert!(result.is_err());
     }
@@ -775,11 +750,13 @@ mod tests {
         tokio::fs::symlink("inside.txt", project.join("alias.txt")).await.unwrap();
         tokio::fs::symlink("../outside.txt", project.join("escape.txt")).await.unwrap();
 
-        let stub = Project { id: crate::core::ProjectId::new(), name: crate::core::Name::new("stub").unwrap(), root: project.clone() };
+        let stub = Project { id: crate::core::ProjectId::new(), name: crate::core::Name::new("stub").unwrap(), root: Some(project.clone()) };
 
-        let inside = resolve_reference(&[], stub.id, &project, Ref::File { path: "alias.txt".into(), lines: (1, 1) }).await.unwrap();
-        let escape = resolve_reference(&[], stub.id, &project, Ref::File { path: "escape.txt".into(), lines: (1, 1) }).await;
-        let parent = resolve_reference(&[], stub.id, &project, Ref::File { path: "../outside.txt".into(), lines: (1, 1) }).await;
+        let writer = Source::Checkout { client: "claude-code".into(), path: project.clone() };
+
+        let inside = resolve_reference(&[], stub.id, &writer, Ref::File { path: "alias.txt".into(), lines: (1, 1) }).await.unwrap();
+        let escape = resolve_reference(&[], stub.id, &writer, Ref::File { path: "escape.txt".into(), lines: (1, 1) }).await;
+        let parent = resolve_reference(&[], stub.id, &writer, Ref::File { path: "../outside.txt".into(), lines: (1, 1) }).await;
 
         assert_eq!(inside, Reference::File { path: "inside.txt".into(), lines: (1, 1), excerpt: "inside".into() });
         assert!(escape.is_err());
@@ -1037,7 +1014,7 @@ mod tests {
     }
 
     async fn glossary_nodes(service: &AppService<&Memory, Definitions>) -> Vec<Node> {
-        let project = service.project_at(Path::new("/repo")).await.unwrap().id;
+        let project = service.project_at(Path::new("/repo")).await.unwrap().unwrap().id;
 
         service.map(project, "glossary").await.unwrap().nodes
     }

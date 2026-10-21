@@ -11,7 +11,7 @@ import { usePolling } from "../use-polling";
 
 const README = "https://github.com/pavel-fokin/percept#readme";
 
-type ProjectGroup = { project: string; root: string; maps: MapSummary[]; boards: BoardSummary[]; sessions: number; latest?: Session };
+type ProjectGroup = { project: string; root: string | null; maps: MapSummary[]; boards: BoardSummary[]; sessions: number; latest?: Session };
 
 const hasContent = (g: Pick<ProjectGroup, "maps" | "boards">) => g.maps.length > 0 || g.boards.length > 0;
 
@@ -54,6 +54,8 @@ export function Home() {
     <div className="mt-8 grid gap-14 sm:mt-14">
       {groups.map(({ project, root, maps, boards, sessions, latest }) => {
         const isEmpty = sessions === 0 && !hasContent({ maps, boards });
+        // Sessions reach only a project with a folder, so a project without one gets no hint.
+        const awaitsSessions = isEmpty && root !== null;
 
         return (
           <section key={project}>
@@ -64,10 +66,10 @@ export function Home() {
                   active {relative(new Date(latest.last_event_at), now)}
                 </time>
               )}
-              {isEmpty && <span className="flex-1 text-right font-mono text-sm text-muted wrap-anywhere">{root}</span>}
+              {awaitsSessions && <span className="flex-1 text-right font-mono text-sm text-muted wrap-anywhere">{root}</span>}
             </div>
 
-            {isEmpty && (
+            {awaitsSessions && (
               <p className="mt-6 text-muted">
                 No sessions yet. Start a coding session in this folder.{" "}
                 <a href={README} className={textLink}>

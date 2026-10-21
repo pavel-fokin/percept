@@ -2,7 +2,7 @@ import { isRouteErrorResponse } from "react-router";
 
 export type Project = {
   name: string;
-  root: string;
+  root: string | null;
 };
 
 export type Session = {
@@ -76,9 +76,12 @@ export async function getData<T>(url: string): Promise<T> {
   return ((await res.json()) as { data: T }).data;
 }
 
-/** Posts nothing to `url`; a refusal throws an Error with the server's reason. */
-export async function postData<T>(url: string): Promise<T> {
-  const res = await fetch(url, { method: "POST" });
+/** Posts `body` as JSON to `url`, or nothing; a refusal throws an Error with the server's reason. */
+export async function postData<T>(url: string, body?: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: "POST",
+    ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
+  });
   if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
   return ((await res.json()) as { data: T }).data;
 }

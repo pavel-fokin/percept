@@ -99,7 +99,7 @@ pub(super) fn add_project(store: &Memory, root: &str) {
     let source = Source::Checkout { client: "percept-cli".into(), path: root.into() };
     let name = Name::new(&format!("p{}", store.0.lock().unwrap().len())).unwrap();
 
-    store.0.lock().unwrap().push(Event::project_created(source, Actor::Human, ProjectId::new(), name, root.into()));
+    store.0.lock().unwrap().push(Event::project_created(source, Actor::Human, ProjectId::new(), name, Some(root.into())));
 }
 
 /// The id of the project nearest above `root`.

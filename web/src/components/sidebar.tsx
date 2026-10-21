@@ -1,6 +1,6 @@
 import { useRef, useState, useSyncExternalStore } from "react";
-import { Link, NavLink, useLoaderData } from "react-router";
-import { getData, type BoardSummary, type MapSummary, type Project } from "../api";
+import { Link, NavLink, useLoaderData, useNavigate } from "react-router";
+import { describe, getData, postData, type BoardSummary, type MapSummary, type Project } from "../api";
 import { boardUrl, mapUrl, sessionsUrl } from "../paths";
 import { BoardIcon } from "./board-icon";
 import { Chevron } from "./chevron";
@@ -50,7 +50,7 @@ function DesktopSidebar() {
     <header
       className={`sticky top-0 h-dvh flex-none overflow-hidden border-r border-border bg-surface transition-[width] motion-reduce:transition-none ${collapsed ? "w-14" : "w-60"}`}
     >
-      <Panel collapsed={collapsed} onToggle={toggle} />
+      <Panel collapsed={collapsed} onToggle={toggle} onCreated={() => {}} />
     </header>
   );
 }
@@ -76,13 +76,19 @@ function MobileSidebar() {
         onClick={closeOnClick}
         className="h-dvh max-h-none w-72 max-w-full -translate-x-full border-r border-border bg-surface text-text transition-[translate,display,overlay] transition-discrete open:translate-x-0 motion-reduce:transition-none starting:open:-translate-x-full"
       >
-        <Panel collapsed={false} onToggle={() => drawer.current?.close()} />
+        <Panel collapsed={false} onToggle={() => drawer.current?.close()} onCreated={() => drawer.current?.close()} />
       </dialog>
     </header>
   );
 }
 
-function Panel({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+type PanelProps = {
+  collapsed: boolean;
+  onToggle: () => void;
+  onCreated: () => void;
+};
+
+function Panel({ collapsed, onToggle, onCreated }: PanelProps) {
   const tree = useLoaderData<typeof loadTree>();
 
   return (
@@ -112,16 +118,7 @@ function Panel({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => vo
           <HomeIcon />
           <span className={collapsed ? "sr-only" : ""}>Home</span>
         </NavLink>
-        {/* Projects are created by `percept init` until the web can create one without a folder. */}
-        <button
-          type="button"
-          disabled
-          title={collapsed ? "New project" : undefined}
-          className={`${item} disabled:cursor-not-allowed disabled:opacity-50`}
-        >
-          <PlusIcon />
-          <span className={collapsed ? "sr-only" : ""}>New project</span>
-        </button>
+        <NewProject collapsed={collapsed} onToggle={onToggle} onCreated={onCreated} />
       </nav>
 
       {/* The rail has no room for a label per project, so the tree leaves with the labels. */}
@@ -155,6 +152,80 @@ function Panel({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => vo
 
       <ThemeSwitch />
     </div>
+  );
+}
+
+/** A "New project" row that becomes a name input; Enter creates the project and opens home. */
+function NewProject({ collapsed, onToggle, onCreated }: PanelProps) {
+  const navigate = useNavigate();
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState("");
+  const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  const cancel = () => {
+    setEditing(false);
+    setName("");
+    setError("");
+  };
+
+  const create = async (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    if (creating || !name.trim()) return;
+    setCreating(true);
+
+    try {
+      await postData("/api/projects", { name });
+      cancel();
+      void navigate("/");
+      onCreated();
+    } catch (err) {
+      setError(describe(err));
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  if (!editing || collapsed) {
+    return (
+      <button
+        type="button"
+        title={collapsed ? "New project" : undefined}
+        onClick={() => {
+          setEditing(true);
+          if (collapsed) onToggle();
+        }}
+        className={`${item} cursor-pointer`}
+      >
+        <PlusIcon />
+        <span className={collapsed ? "sr-only" : ""}>New project</span>
+      </button>
+    );
+  }
+
+  return (
+    <form onSubmit={(e) => void create(e)} className="grid gap-1 px-1">
+      <input
+        autoFocus
+        value={name}
+        readOnly={creating}
+        aria-label="Project name"
+        aria-describedby={error ? "new-project-error" : undefined}
+        placeholder="Project name"
+        onChange={(e) => {
+          setName(e.target.value);
+          setError("");
+        }}
+        onKeyDown={(e) => e.key === "Escape" && cancel()}
+        onBlur={() => !name.trim() && cancel()}
+        className="h-11 w-full rounded-md border border-border bg-bg px-3 text-base text-text placeholder:text-muted focus-visible:border-muted focus-visible:outline-none md:text-sm"
+      />
+      {error && (
+        <p id="new-project-error" role="alert" className="px-1 text-sm text-muted wrap-anywhere">
+          {error}
+        </p>
+      )}
+    </form>
   );
 }
 

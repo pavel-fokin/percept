@@ -1,33 +1,48 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::AppService;
 use crate::core::{Actor, DefinitionStore, Event, EventStore, Name, Project, ProjectId, Source};
 use crate::shared::Result;
 
+/// A project the log already holds blocks this one; the message says which.
+#[derive(Debug)]
+pub struct Taken(String);
+
+impl std::fmt::Display for Taken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Taken {}
+
 impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
-    /// Records a new project rooted at `source.path`, named `name`.
-    /// A root holds one project, and a name belongs to one.
+    /// Records a new project named `name`, rooted at `root` when it has one.
+    /// A root holds one project, and a name belongs to one; a clash fails with `Taken`.
     pub async fn create_project(
         &self,
         source: Source,
         actor: Actor,
         name: Name,
-    ) -> Result<Name> {
+        root: Option<PathBuf>,
+    ) -> Result<Project> {
         // Held until return, so parallel inits cannot both pass the checks.
         let _lock = self.store.lock().await?;
 
-        let root = source.path()?.to_owned();
         let projects = Project::all(&self.store.all().await?);
-        if projects.iter().any(|p| p.root == root) {
-            return Err(format!("{} is already a project", root.display()).into());
+        if let Some(root) = &root
+            && projects.iter().any(|p| p.root.as_ref() == Some(root))
+        {
+            return Err(Taken(format!("{} is already a project", root.display())).into());
         }
         if projects.iter().any(|p| p.name == name) {
-            return Err(format!("the name {} is taken", name.as_str()).into());
+            return Err(Taken(format!("the name {} is taken", name.as_str())).into());
         }
 
-        self.store.append(&Event::project_created(source.clone(), actor, ProjectId::new(), name.clone(), root)).await?;
+        let project = Project { id: ProjectId::new(), name, root };
+        self.store.append(&Event::project_created(source, actor, project.id, project.name.clone(), project.root.clone())).await?;
 
-        Ok(name)
+        Ok(project)
     }
 
     /// Every project in `ProjectCreated` order.
@@ -35,11 +50,9 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         Ok(Project::all(&self.store.all().await?))
     }
 
-    /// The nearest project at or above `path`.
-    pub async fn project_at(&self, path: &Path) -> Result<Project> {
-        let events = self.store.all().await?;
-
-        Ok(Project::containing(&events, path).ok_or("not in a project; run percept init")?)
+    /// The nearest project at or above `path`, if any.
+    pub async fn project_at(&self, path: &Path) -> Result<Option<Project>> {
+        Ok(Project::containing(&self.store.all().await?, path))
     }
 }
 
@@ -52,6 +65,10 @@ mod tests {
         Name::new(name).unwrap()
     }
 
+    fn root(path: &str) -> Option<PathBuf> {
+        Some(path.into())
+    }
+
     fn source(path: &str) -> Source {
         Source::Checkout { client: "percept-cli".into(), path: path.into() }
     }
@@ -61,11 +78,11 @@ mod tests {
         let store = Memory::default();
         let service = AppService::new(&store, Definitions);
 
-        let named = service.create_project(source("/work/a"), Actor::Human, name("Alpha")).await.unwrap();
+        let named = service.create_project(source("/work/a"), Actor::Human, name("Alpha"), root("/work/a")).await.unwrap();
 
-        assert_eq!(named.as_str(), "alpha");
+        assert_eq!(named.name.as_str(), "alpha");
         let projects = Project::all(&store.0.lock().unwrap());
-        let found: Vec<(&str, &std::path::Path)> = projects.iter().map(|p| (p.name.as_str(), p.root.as_path())).collect();
+        let found: Vec<(&str, &std::path::Path)> = projects.iter().map(|p| (p.name.as_str(), p.root.as_deref().unwrap())).collect();
         assert_eq!(found, vec![("alpha", "/work/a".as_ref())]);
     }
 
@@ -73,9 +90,9 @@ mod tests {
     async fn a_second_init_in_the_same_root_fails() {
         let store = Memory::default();
         let service = AppService::new(&store, Definitions);
-        service.create_project(source("/work/a"), Actor::Human, name("a")).await.unwrap();
+        service.create_project(source("/work/a"), Actor::Human, name("a"), root("/work/a")).await.unwrap();
 
-        let error = service.create_project(source("/work/a"), Actor::Human, name("other")).await.unwrap_err();
+        let error = service.create_project(source("/work/a"), Actor::Human, name("other"), root("/work/a")).await.unwrap_err();
 
         assert_eq!(error.to_string(), "/work/a is already a project");
         assert_eq!(store.0.lock().unwrap().len(), 1);
@@ -85,9 +102,9 @@ mod tests {
     async fn an_init_with_a_taken_name_fails_whatever_its_case() {
         let store = Memory::default();
         let service = AppService::new(&store, Definitions);
-        service.create_project(source("/work/a"), Actor::Human, name("app")).await.unwrap();
+        service.create_project(source("/work/a"), Actor::Human, name("app"), root("/work/a")).await.unwrap();
 
-        let error = service.create_project(source("/work/b"), Actor::Human, name("APP")).await.unwrap_err();
+        let error = service.create_project(source("/work/b"), Actor::Human, name("APP"), root("/work/b")).await.unwrap_err();
 
         assert_eq!(error.to_string(), "the name app is taken");
         assert_eq!(store.0.lock().unwrap().len(), 1);
@@ -95,8 +112,60 @@ mod tests {
 
     #[tokio::test]
     async fn a_broken_store_passes_through() {
-        let broken = AppService::new(Broken, Definitions).create_project(source("/work/a"), Actor::Human, name("a")).await;
+        let broken = AppService::new(Broken, Definitions).create_project(source("/work/a"), Actor::Human, name("a"), root("/work/a")).await;
 
         assert!(broken.is_err());
+    }
+
+    #[tokio::test]
+    async fn a_web_project_has_no_root_and_is_recorded_from_the_web() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Definitions);
+
+        service.create_project(Source::Web, Actor::Human, name("notes"), None).await.unwrap();
+
+        let events = store.0.lock().unwrap();
+        assert_eq!(Project::all(&events)[0].root, None);
+        assert_eq!(events[0].source, Source::Web);
+    }
+
+    #[tokio::test]
+    async fn a_rootless_project_still_owns_its_name() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Definitions);
+        service.create_project(Source::Web, Actor::Human, name("notes"), None).await.unwrap();
+
+        let web = service.create_project(Source::Web, Actor::Human, name("NOTES"), None).await.unwrap_err();
+        let init = service.create_project(source("/work/a"), Actor::Human, name("notes"), root("/work/a")).await.unwrap_err();
+
+        assert_eq!(web.to_string(), "the name notes is taken");
+        assert!(web.is::<Taken>());
+        assert!(init.is::<Taken>());
+        assert_eq!(store.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn rootless_projects_coexist() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Definitions);
+
+        service.create_project(Source::Web, Actor::Human, name("one"), None).await.unwrap();
+        service.create_project(Source::Web, Actor::Human, name("two"), None).await.unwrap();
+
+        assert_eq!(store.0.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_path_outside_every_project_has_none() {
+        let store = Memory::default();
+        let service = AppService::new(&store, Definitions);
+        service.create_project(source("/work/app"), Actor::Human, name("app"), root("/work/app")).await.unwrap();
+        service.create_project(Source::Web, Actor::Human, name("notes"), None).await.unwrap();
+
+        let inside = service.project_at(std::path::Path::new("/work/app/src")).await.unwrap();
+        let outside = service.project_at(std::path::Path::new("/elsewhere")).await.unwrap();
+
+        assert_eq!(inside.map(|p| p.name), Some(name("app")));
+        assert!(outside.is_none());
     }
 }
