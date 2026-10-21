@@ -137,41 +137,7 @@ pub(super) async fn show<S: EventStore, M: DefinitionStore>(service: &AppService
     let project = source_path(&std::env::current_dir()?).await;
 
     match map {
-        Some(kind) => {
-            let Map { kind, nodes, edges, .. } = service.map(&project, kind).await?;
-
-            println!("{kind}");
-
-            if !nodes.is_empty() {
-                println!();
-            }
-            for node in &nodes {
-                println!("{}  {}", node.kind, node.title);
-                for (key, value) in &node.properties {
-                    println!("  {key}: {value}");
-                }
-                for reference in &node.references {
-                    match reference {
-                        Reference::Message { quote, .. } => println!("  ref msg: {quote:?}"),
-                        Reference::File { path, lines: (from, to), excerpt } => {
-                            println!("  ref file: {}:{from}-{to}", path.display());
-                            for line in excerpt.split('\n') {
-                                println!("    {line}");
-                            }
-                        }
-                    }
-                }
-            }
-
-            let titles: BTreeMap<_, _> = nodes.iter().map(|n| (n.id, n.title.as_str())).collect();
-            let title = |id| titles.get(&id).copied().ok_or("an edge names a node that is not in its map");
-            if !edges.is_empty() {
-                println!();
-            }
-            for edge in edges {
-                println!("\"{}\"  {}  \"{}\"", title(edge.from)?, edge.kind, title(edge.to)?);
-            }
-        }
+        Some(kind) => println!("{}", map_markdown(&service.map(&project, kind).await?)?),
         None => {
             for map in service.maps(&project).await? {
                 println!("{}  {}, {}", map.kind, node_count(map.nodes.len()), edge_count(map.edges.len()));
@@ -186,12 +152,12 @@ pub(super) async fn describe<S: EventStore, M: DefinitionStore>(service: &AppSer
     let project = source_path(&std::env::current_dir()?).await;
     let definition = service.definition(&project, kind).await?;
 
-    println!("{}", markdown(kind, &definition));
+    println!("{}", definition_markdown(kind, &definition));
 
     Ok(())
 }
 
-fn markdown(kind: &str, definition: &Definition) -> String {
+fn definition_markdown(kind: &str, definition: &Definition) -> String {
     let mut text = format!(
         "# {kind}\n\n{}\n\n## Instructions\n\n{}\n\n## Schema\n\n| Node kind | Properties |\n|---|---|\n",
         definition.purpose().trim(),
@@ -211,6 +177,57 @@ fn markdown(kind: &str, definition: &Definition) -> String {
     }
 
     text.trim_end().to_string()
+}
+
+fn map_markdown(map: &Map) -> Result<String> {
+    let mut text = format!("# {}\n", map.kind);
+
+    if !map.nodes.is_empty() {
+        text.push_str("\n## Nodes\n");
+    }
+    for node in &map.nodes {
+        text.push_str(&format!("\n### {}: {}\n", node.kind, node.title));
+        if !node.properties.is_empty() || !node.references.is_empty() {
+            text.push('\n');
+        }
+        for (key, value) in &node.properties {
+            text.push_str(&format!("- {key}: {}\n", value.replace('\n', "\n  ")));
+        }
+        for reference in &node.references {
+            match reference {
+                Reference::Message { quote, .. } => text.push_str(&format!("- ref msg: {quote:?}\n")),
+                Reference::File { path, lines: (from, to), excerpt } => {
+                    let fence = fence(excerpt);
+                    text.push_str(&format!("- ref file: {}:{from}-{to}\n\n  {fence}\n", path.display()));
+                    for line in excerpt.split('\n') {
+                        if !line.is_empty() {
+                            text.push_str("  ");
+                        }
+                        text.push_str(line);
+                        text.push('\n');
+                    }
+                    text.push_str(&format!("  {fence}\n"));
+                }
+            }
+        }
+    }
+
+    let title = |id| map.node(id).map(|n| n.title.as_str()).ok_or("an edge names a node that is not in its map");
+    if !map.edges.is_empty() {
+        text.push_str("\n## Edges\n\n");
+    }
+    for edge in &map.edges {
+        text.push_str(&format!("- {} → {} → {}\n", title(edge.from)?, edge.kind, title(edge.to)?));
+    }
+
+    Ok(text.trim_end().to_string())
+}
+
+/// A code fence longer than any run of backticks in `text`, so `text` cannot close it.
+fn fence(text: &str) -> String {
+    let longest = text.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+
+    "`".repeat(longest.max(2) + 1)
 }
 
 fn node_count(count: usize) -> String {
@@ -245,7 +262,7 @@ fn writer(claudecode: Option<String>, codex_session_id: Option<String>) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::EdgeKind;
+    use crate::core::{EdgeKind, Event, EventId, MapId, NodeId};
 
     #[test]
     fn writer_follows_the_client_environment() {
@@ -390,7 +407,7 @@ mod tests {
         let edges = BTreeMap::from([("supersedes".to_string(), EdgeKind { from: "decision".into(), to: "decision".into() })]);
         let definition = Definition::new("Why.".into(), "\nKeep it.\n\nShort.\n".into(), nodes, edges).unwrap();
 
-        let text = markdown("decisions", &definition);
+        let text = definition_markdown("decisions", &definition);
 
         assert_eq!(text, "# decisions\n\nWhy.\n\n## Instructions\n\nKeep it.\n\nShort.\n\n## Schema\n\n\
             | Node kind | Properties |\n|---|---|\n| decision | by, why |\n| note |  |\n\n\
@@ -402,10 +419,44 @@ mod tests {
         let nodes = BTreeMap::from([("note".to_string(), Default::default())]);
         let definition = Definition::new("p".into(), "i".into(), nodes, BTreeMap::new()).unwrap();
 
-        let text = markdown("notes", &definition);
+        let text = definition_markdown("notes", &definition);
 
         assert!(text.ends_with("| note |  |"));
         assert!(!text.contains("Edge kind"));
+    }
+
+    #[test]
+    fn a_map_renders_as_markdown() {
+        let (map, question, option) = (MapId::new(), NodeId::new(), NodeId::new());
+        let why = BTreeMap::from([("why".to_string(), "One log.\nNo copies.".to_string())]);
+        let file = Reference::File { path: "src/a.rs".into(), lines: (1, 3), excerpt: "fn a() {\n\n}".into() };
+        let quote = Reference::Message { event: EventId::new(), quote: "Keep it".into() };
+        let events = [
+            Event::node_added(Source::fixture(), Actor::Human, map, question, "question", "Q", BTreeMap::new(), Vec::new()),
+            Event::node_added(Source::fixture(), Actor::Human, map, option, "option", "O", why, vec![file, quote]),
+            Event::edge_added(Source::fixture(), Actor::Human, map, "answers", option, question),
+        ];
+
+        let text = map_markdown(&Map::fixture(map, &events)).unwrap();
+
+        assert_eq!(text, "# concepts\n\n## Nodes\n\n### question: Q\n\n### option: O\n\n\
+            - why: One log.\n  No copies.\n- ref file: src/a.rs:1-3\n\n  ```\n  fn a() {\n\n  }\n  ```\n- ref msg: \"Keep it\"\n\n\
+            ## Edges\n\n- O → answers → Q");
+    }
+
+    #[test]
+    fn a_fence_outgrows_the_backticks_it_holds() {
+        assert_eq!(fence("plain"), "```");
+        assert_eq!(fence("```rust\n```"), "````");
+    }
+
+    #[test]
+    fn an_empty_map_renders_as_its_title() {
+        let map = MapId::new();
+
+        let text = map_markdown(&Map::fixture(map, &[])).unwrap();
+
+        assert_eq!(text, "# concepts");
     }
 
     #[test]
