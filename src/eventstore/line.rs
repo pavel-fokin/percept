@@ -40,6 +40,7 @@ impl From<&Event> for EventLine {
                 json!({ "session": session, "subagent": subagent.as_str(), "content": content })
             }
             Payload::ProjectCreated { project, name } => json!({ "project": project, "name": name.as_str() }),
+            Payload::BoardCreated { board, project, name } => json!({ "board": board, "project": project, "name": name.as_str() }),
             Payload::MapCreated { map, project, kind } => json!({ "map": map, "project": project, "kind": kind }),
             Payload::NodeAdded { map, node, kind, title, properties, references } => {
                 let references: Vec<ReferenceLine> = references.iter().map(ReferenceLine::from).collect();
@@ -103,6 +104,11 @@ impl TryFrom<EventLine> for Event {
                 content: field(p, "content")?,
             },
             Kind::ProjectCreated => Payload::ProjectCreated {
+                project: field(p, "project")?,
+                name: Name::new(&field::<String>(p, "name")?)?,
+            },
+            Kind::BoardCreated => Payload::BoardCreated {
+                board: field(p, "board")?,
                 project: field(p, "project")?,
                 name: Name::new(&field::<String>(p, "name")?)?,
             },
@@ -194,7 +200,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::core::{MapId, NodeId, ProjectId, SessionId};
+    use crate::core::{BoardId, MapId, NodeId, ProjectId, SessionId};
 
     #[test]
     fn every_payload_round_trips_through_a_line() {
@@ -210,6 +216,7 @@ mod tests {
             Event::subagent_started(Source::fixture(), session, ClientAgentId::new("a1".into()), "builder", "Build it", raw.clone()),
             Event::subagent_reported(Source::fixture(), session, ClientAgentId::new("a1".into()), "done", raw),
             Event::project_created(Source::fixture(), Actor::Human, ProjectId::new(), Name::new("percept").unwrap()),
+            Event::board_created(Source::fixture(), Actor::Human, BoardId::new(), ProjectId::new(), Name::new("ideas").unwrap()),
             Event::map_created(Source::fixture(), Actor::Human, MapId::new(), ProjectId::new(), "decisions"),
             Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())]), Vec::new()),
             Event::node_changed(Source::fixture(), Actor::Human, MapId::new(), NodeId::new(), "Why not?", BTreeMap::from([("definition".into(), "E".into())]), Vec::new()),

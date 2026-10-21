@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use axum::http::{header::CONTENT_TYPE, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::Router;
 use tokio::net::TcpListener;
 
@@ -60,6 +60,9 @@ where
         .route("/api/sessions/{id}/events", get(Api::<S, M>::session_events))
         .route("/api/maps", get(Api::<S, M>::maps))
         .route("/api/projects/{project}/maps/{kind}", get(Api::<S, M>::map))
+        .route("/api/boards", get(Api::<S, M>::boards))
+        .route("/api/projects/{project}/boards", post(Api::<S, M>::create_board))
+        .route("/api/projects/{project}/boards/{board}", get(Api::<S, M>::board))
         .route("/favicon.svg", get(|| async { asset("image/svg+xml", FAVICON_SVG) }))
         .route("/favicon.ico", get(|| async { asset("image/x-icon", FAVICON_ICO) }))
         .route("/apple-touch-icon.png", get(|| async { asset("image/png", APPLE_TOUCH_ICON) }))
@@ -120,6 +123,39 @@ mod tests {
 
         async fn append(&self, _: &Event) -> Result<()> {
             unimplemented!()
+        }
+    }
+
+    /// A log that takes appends, holding one project named `repo` rooted at `/Users/me/repo`.
+    struct Log(std::sync::Mutex<Vec<Event>>);
+
+    impl Log {
+        fn new() -> Self {
+            let source = Source { client: "claude-code".into(), path: "/Users/me/repo".into() };
+            let project = Event::project_created(source, Actor::Human, ProjectId::new(), Name::new("repo").unwrap());
+
+            Self(std::sync::Mutex::new(vec![project]))
+        }
+    }
+
+    impl EventStore for Arc<Log> {
+        type Lock = ();
+
+        async fn lock(&self) -> Result<()> {
+            Ok(())
+        }
+
+        async fn session(&self, _: &ClientSessionId) -> Result<Option<SessionId>> {
+            unimplemented!()
+        }
+
+        async fn all(&self) -> Result<Vec<Event>> {
+            Ok(self.0.lock().unwrap().clone())
+        }
+
+        async fn append(&self, event: &Event) -> Result<()> {
+            self.0.lock().unwrap().push(event.clone());
+            Ok(())
         }
     }
 
@@ -295,5 +331,76 @@ mod tests {
     async fn unknown_api_paths_are_not_found() {
         assert!(get_response("/api/nope").await.starts_with("HTTP/1.1 404"));
         assert!(get_response("/api").await.starts_with("HTTP/1.1 404"));
+    }
+
+    async fn serve_log(log: &Arc<Log>) -> std::net::SocketAddr {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = router(Arc::new(AppService::new(log.clone(), Schemas)), "/Users/me".into());
+        tokio::spawn(async move { axum::serve(listener, app).await });
+
+        addr
+    }
+
+    async fn send(addr: std::net::SocketAddr, method: &str, path: &str, body: &str) -> String {
+        let mut stream = TcpStream::connect(addr).await.unwrap();
+        let request = format!("{method} {path} HTTP/1.1\r\nHost: x\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+        stream.write_all(request.as_bytes()).await.unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).await.unwrap();
+        response
+    }
+
+    fn text_body(response: &str) -> &str {
+        response.rsplit("\r\n\r\n").next().unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_posted_board_is_created_and_returned_then_read_back() {
+        let log = Arc::new(Log::new());
+        let addr = serve_log(&log).await;
+
+        let created = send(addr, "POST", "/api/projects/repo/boards", r#"{"name":"Ideas"}"#).await;
+        let id = json_body(&created)["data"]["id"].as_str().unwrap().to_string();
+        let all = send(addr, "GET", "/api/boards", "").await;
+        let by_name = send(addr, "GET", "/api/projects/repo/boards/ideas", "").await;
+        let by_id = send(addr, "GET", &format!("/api/projects/repo/boards/{id}"), "").await;
+
+        let board = json!({ "id": id, "name": "ideas", "project": "repo" });
+        assert!(created.starts_with("HTTP/1.1 200"));
+        assert_eq!(json_body(&created)["data"], board);
+        assert_eq!(json_body(&all)["data"], json!([board]));
+        assert_eq!(json_body(&by_name)["data"], board);
+        assert_eq!(json_body(&by_id)["data"], board);
+        let event = log.0.lock().unwrap().last().unwrap().clone();
+        assert_eq!(event.actor, Actor::Human);
+        assert_eq!(event.source, Source { client: "percept-web".into(), path: "/Users/me/repo".into() });
+    }
+
+    #[tokio::test]
+    async fn a_taken_or_invalid_board_name_is_a_bad_request_with_the_reason() {
+        let addr = serve_log(&Arc::new(Log::new())).await;
+        send(addr, "POST", "/api/projects/repo/boards", r#"{"name":"ideas"}"#).await;
+
+        let taken = send(addr, "POST", "/api/projects/repo/boards", r#"{"name":"IDEAS"}"#).await;
+        let invalid = send(addr, "POST", "/api/projects/repo/boards", r#"{"name":"a b"}"#).await;
+
+        assert!(taken.starts_with("HTTP/1.1 400"));
+        assert_eq!(text_body(&taken), "the name ideas is taken");
+        assert!(invalid.starts_with("HTTP/1.1 400"));
+        assert!(text_body(&invalid).starts_with("invalid name"));
+    }
+
+    #[tokio::test]
+    async fn an_unknown_project_or_board_is_not_found() {
+        let addr = serve_log(&Arc::new(Log::new())).await;
+
+        let post = send(addr, "POST", "/api/projects/other/boards", r#"{"name":"ideas"}"#).await;
+        let no_board = send(addr, "GET", "/api/projects/repo/boards/ideas", "").await;
+        let no_project = send(addr, "GET", "/api/projects/other/boards/ideas", "").await;
+
+        assert!(post.starts_with("HTTP/1.1 404"));
+        assert!(no_board.starts_with("HTTP/1.1 404"));
+        assert!(no_project.starts_with("HTTP/1.1 404"));
     }
 }

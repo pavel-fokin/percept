@@ -28,7 +28,7 @@ pub enum SessionStatus {
 }
 
 impl SessionStatus {
-    /// The status a session is in after `event`; project and map events change none. A hook sends an agent message only when the agent stops.
+    /// The status a session is in after `event`; project, board and map events change none. A hook sends an agent message only when the agent stops.
     pub fn after(event: &Event) -> Option<Self> {
         match &event.payload {
             Payload::SessionStopped { .. } => Some(Self::Ended),
@@ -37,7 +37,7 @@ impl SessionStatus {
             Payload::Message { .. } | Payload::ToolUsed { .. } | Payload::SubagentStarted { .. } | Payload::SubagentReported { .. } => {
                 Some(Self::Working)
             }
-            Payload::ProjectCreated { .. } | Payload::MapCreated { .. } | Payload::NodeAdded { .. } | Payload::NodeChanged { .. } | Payload::NodeRemoved { .. } | Payload::EdgeAdded { .. } | Payload::EdgeRemoved { .. } => None,
+            Payload::ProjectCreated { .. } | Payload::BoardCreated { .. } | Payload::MapCreated { .. } | Payload::NodeAdded { .. } | Payload::NodeChanged { .. } | Payload::NodeRemoved { .. } | Payload::EdgeAdded { .. } | Payload::EdgeRemoved { .. } => None,
         }
     }
 }
