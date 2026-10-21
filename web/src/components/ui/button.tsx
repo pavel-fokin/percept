@@ -8,7 +8,7 @@ const base =
 const variants: Record<Variant, string> = {
   primary: "bg-text font-semibold text-bg hover:bg-text/85",
   secondary: "border border-border bg-surface text-text hover:border-muted",
-  ghost: "text-muted hover:bg-surface hover:text-text",
+  ghost: "text-muted hover:bg-border hover:text-text",
 };
 
 export function Button({ variant, className = "", ...props }: ButtonProps) {
