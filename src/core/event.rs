@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use super::{ClientAgentId, ClientSessionId, MapId, NodeId, ProjectId, ProjectName, Reference, SessionId};
+use super::{ClientAgentId, ClientSessionId, MapId, Name, NodeId, ProjectId, Reference, SessionId};
 use crate::shared::Id;
 
 pub type EventId = Id<Event>;
@@ -102,7 +102,7 @@ pub enum Payload {
     ToolUsed { session: SessionId, tool: String, input: Option<String>, output: Option<String> },
     SubagentStarted { session: SessionId, subagent: ClientAgentId, agent: String, task: String },
     SubagentReported { session: SessionId, subagent: ClientAgentId, content: String },
-    ProjectCreated { project: ProjectId, name: ProjectName },
+    ProjectCreated { project: ProjectId, name: Name },
     MapCreated { map: MapId, project: ProjectId, kind: String },
     NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
     /// The node's full new state, not a diff.
@@ -235,7 +235,7 @@ impl Event {
         Self::build(source, Actor::System, Payload::SessionStopped { session }, Some(raw))
     }
 
-    pub fn project_created(source: Source, actor: Actor, project: ProjectId, name: ProjectName) -> Self {
+    pub fn project_created(source: Source, actor: Actor, project: ProjectId, name: Name) -> Self {
         Self::build(source, actor, Payload::ProjectCreated { project, name }, None)
     }
 

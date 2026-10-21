@@ -5,7 +5,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::core::{Actor, ClientAgentId, ClientSessionId, Event, EventId, Kind, Payload, ProjectName, Reference, Source};
+use crate::core::{Actor, ClientAgentId, ClientSessionId, Event, EventId, Kind, Name, Payload, Reference, Source};
 use crate::shared::{Error, Result};
 
 /// One log line. The log format lives here, apart from the domain `Event`.
@@ -104,7 +104,7 @@ impl TryFrom<EventLine> for Event {
             },
             Kind::ProjectCreated => Payload::ProjectCreated {
                 project: field(p, "project")?,
-                name: ProjectName::new(&field::<String>(p, "name")?)?,
+                name: Name::new(&field::<String>(p, "name")?)?,
             },
             Kind::MapCreated => Payload::MapCreated {
                 map: field(p, "map")?,
@@ -209,7 +209,7 @@ mod tests {
             Event::tool_used(Source::fixture(), session, "Read", None, None, raw.clone()),
             Event::subagent_started(Source::fixture(), session, ClientAgentId::new("a1".into()), "builder", "Build it", raw.clone()),
             Event::subagent_reported(Source::fixture(), session, ClientAgentId::new("a1".into()), "done", raw),
-            Event::project_created(Source::fixture(), Actor::Human, ProjectId::new(), ProjectName::new("percept").unwrap()),
+            Event::project_created(Source::fixture(), Actor::Human, ProjectId::new(), Name::new("percept").unwrap()),
             Event::map_created(Source::fixture(), Actor::Human, MapId::new(), ProjectId::new(), "decisions"),
             Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())]), Vec::new()),
             Event::node_changed(Source::fixture(), Actor::Human, MapId::new(), NodeId::new(), "Why not?", BTreeMap::from([("definition".into(), "E".into())]), Vec::new()),

@@ -1,5 +1,5 @@
 use super::AppService;
-use crate::core::{Actor, Event, EventStore, Project, ProjectId, ProjectName, SchemaStore, Source};
+use crate::core::{Actor, Event, EventStore, Name, Project, ProjectId, SchemaStore, Source};
 use crate::shared::Result;
 
 impl<S: EventStore, M: SchemaStore> AppService<S, M> {
@@ -10,10 +10,10 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         source: Source,
         actor: Actor,
         name: Option<&str>,
-    ) -> Result<ProjectName> {
+    ) -> Result<Name> {
         let name = match name {
-            Some(name) => ProjectName::new(name)?,
-            None => ProjectName::from_root(&source.path)?,
+            Some(name) => Name::new(name)?,
+            None => Name::from_root(&source.path)?,
         };
 
         // Held until return, so parallel inits cannot both pass the checks.

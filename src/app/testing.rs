@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use serde_json::json;
 
-use crate::core::{Actor, ClientSessionId, EdgeKind, Event, EventStore, Payload, Project, ProjectId, ProjectName, Schema, SchemaStore, SessionId, Source};
+use crate::core::{Actor, ClientSessionId, EdgeKind, Event, EventStore, Name, Payload, Project, ProjectId, Schema, SchemaStore, SessionId, Source};
 use crate::shared::Result;
 
 pub(super) struct Fixed(pub(super) usize);
@@ -97,7 +97,7 @@ pub(super) fn in_project(root: &str) -> Memory {
 /// Appends a project rooted at `root`, named by a number so names never clash.
 pub(super) fn add_project(store: &Memory, root: &str) {
     let source = Source { client: "percept-cli".into(), path: root.into() };
-    let name = ProjectName::new(&format!("p{}", store.0.lock().unwrap().len())).unwrap();
+    let name = Name::new(&format!("p{}", store.0.lock().unwrap().len())).unwrap();
 
     store.0.lock().unwrap().push(Event::project_created(source, Actor::Human, ProjectId::new(), name));
 }
