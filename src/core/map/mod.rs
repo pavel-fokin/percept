@@ -1,9 +1,15 @@
+mod policy;
+mod schema;
+
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use jiff::Timestamp;
 
-use super::{Actor, Event, EventId, Payload, ProjectId, Schema};
+pub use policy::Policy;
+pub use schema::{EdgeKind, Schema, SchemaStore};
+
+use super::{Actor, Event, EventId, Payload, ProjectId};
 use crate::shared::{Id, Result};
 
 pub type MapId = Id<Map>;

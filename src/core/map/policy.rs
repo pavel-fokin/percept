@@ -1,4 +1,5 @@
-use super::{Actor, Change, Edge, Event, Map, Payload};
+use super::{Change, Edge, Map};
+use crate::core::{Actor, Event, Payload};
 use crate::shared::Result;
 
 /// Who may make a write. It judges new events only, never the log, so a later rule cannot invalidate it.
