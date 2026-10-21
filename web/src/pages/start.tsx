@@ -46,7 +46,7 @@ export function Start() {
       {groups.map(({ path, maps, sessions, latest }) => (
         <section key={path}>
           <div className="flex items-baseline justify-between gap-4">
-            <h2 className="min-w-0 font-mono text-[13px] font-normal wrap-anywhere">{path}</h2>
+            <h2 className="min-w-0 font-mono text-sm font-normal wrap-anywhere">{path}</h2>
             {latest && (
               <time dateTime={latest.last_event_at} className="flex-none text-sm text-muted tabular-nums">
                 active {relative(new Date(latest.last_event_at), now)}
@@ -57,10 +57,10 @@ export function Start() {
           {latest && (
             <Link
               to={sessionUrl(path, latest.id)}
-              className="-mx-3 mt-6 flex min-h-11 items-center gap-3 rounded-[10px] px-3 py-3 hover:bg-surface focus-visible:bg-surface"
+              className="-mx-3 mt-6 flex min-h-11 items-center gap-3 rounded-lg px-3 py-3 hover:bg-surface focus-visible:bg-surface"
             >
               <span className="grid min-w-0 flex-1 gap-0.5">
-                <span className="flex items-center gap-1.5 text-[13px] text-muted">
+                <span className="flex items-center gap-1.5 text-sm text-muted">
                   Latest session
                   {latest.status === "working" && <Working />}
                 </span>
@@ -103,9 +103,9 @@ function Working() {
 
 function Counter({ to, label, count }: { to: string; label: string; count: number }) {
   return (
-    <Link to={to} className="group flex min-h-11 items-baseline gap-2 rounded-[10px] px-3 py-2.5 hover:bg-surface focus-visible:bg-surface">
-      <span className="text-[17px] font-semibold tabular-nums">{count}</span>
-      <span className="text-[15px] text-muted group-hover:text-text">{label}</span>
+    <Link to={to} className="group flex min-h-11 items-baseline gap-2 rounded-lg px-3 py-2.5 hover:bg-surface focus-visible:bg-surface">
+      <span className="text-lg font-semibold tabular-nums">{count}</span>
+      <span className="text-base text-muted group-hover:text-text">{label}</span>
     </Link>
   );
 }

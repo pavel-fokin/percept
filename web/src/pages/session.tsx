@@ -90,7 +90,7 @@ export function SessionPage({ session, events }: { session: Session; events: Eve
             {exchange.prompt && (
               <section id={exchange.prompt.id} className={messageClass}>
                 <Who name="You" at={exchange.prompt.created_at} />
-                <p className="leading-[26px] wrap-anywhere whitespace-pre-line">{exchange.prompt.payload.content as string}</p>
+                <p className="leading-relaxed wrap-anywhere whitespace-pre-line">{exchange.prompt.payload.content as string}</p>
               </section>
             )}
             <AgentItems items={exchange.items} started={started} agent={clientName(session.client)} />
@@ -245,7 +245,7 @@ function ToolCall({ payload: { tool, input, output } }: { payload: ToolPayload }
   const [opened, setOpened] = useState(false);
 
   const line = (
-    <span className="flex min-w-0 gap-2 font-mono text-[13px]">
+    <span className="flex min-w-0 gap-2 font-mono text-sm">
       <span className="shrink-0 text-text">{tool}</span>
       {input && (
         <span title={input} className="min-w-0 truncate">
@@ -264,9 +264,9 @@ function ToolCall({ payload: { tool, input, output } }: { payload: ToolPayload }
         {line}
       </summary>
       {opened && (
-        <div className="mt-1 mb-2 grid gap-2 font-mono text-[13px] leading-[20px]">
+        <div className="mt-1 mb-2 grid gap-2 font-mono text-sm">
           {input && <p className="pl-5 whitespace-pre-wrap wrap-anywhere">{input}</p>}
-          {output && <pre className="max-h-80 overflow-auto rounded-[10px] bg-surface px-4 py-3.5">{output}</pre>}
+          {output && <pre className="max-h-80 overflow-auto rounded-lg bg-surface px-4 py-3.5">{output}</pre>}
         </div>
       )}
     </details>
@@ -288,7 +288,7 @@ function toolRuns(events: Event[]) {
 
 function Who({ name, at }: { name: string; at: string }) {
   return (
-    <div className="mb-2 flex items-baseline justify-between text-[13px]">
+    <div className="mb-2 flex items-baseline justify-between text-sm">
       <span className="font-medium text-muted">{name}</span>
       <time dateTime={at} title={full.format(new Date(at))} className="text-muted tabular-nums">
         {time.format(new Date(at))}

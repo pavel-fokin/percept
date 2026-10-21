@@ -22,14 +22,14 @@ const components: Components = {
   h5: styled("h5", heading),
   h6: styled("h6", heading),
   p: styled("p", "mb-4"),
-  ul: styled("ul", `mb-4 list-disc pl-[22px] ${nested}`),
-  ol: styled("ol", `mb-4 list-decimal pl-[22px] ${nested}`),
+  ul: styled("ul", `mb-4 list-disc pl-6 ${nested}`),
+  ol: styled("ol", `mb-4 list-decimal pl-6 ${nested}`),
   li: styled("li", "mb-2 marker:text-muted"),
   a: styled("a", textLink),
-  code: styled("code", "rounded bg-surface px-[5px] py-px font-mono text-sm"),
+  code: styled("code", "rounded bg-surface px-1 py-px font-mono text-sm"),
   pre: styled(
     "pre",
-    "mb-4 overflow-x-auto rounded-[10px] bg-surface px-4 py-3.5 font-mono text-[13.5px] leading-[22px] [&>code]:rounded-none [&>code]:bg-transparent [&>code]:p-0 [&>code]:text-[13.5px]",
+    "mb-4 overflow-x-auto rounded-lg bg-surface px-4 py-3.5 font-mono text-sm leading-relaxed [&>code]:rounded-none [&>code]:bg-transparent [&>code]:p-0",
   ),
   table: ({ node: _, ...props }) => (
     <div className="mb-4 overflow-x-auto">
@@ -42,7 +42,7 @@ const components: Components = {
 
 export const Markdown = memo(function Markdown({ text }: { text: string }) {
   return (
-    <div className="min-w-0 leading-[26px] wrap-anywhere [&>:first-child]:mt-0 [&>:last-child]:mb-0">
+    <div className="min-w-0 leading-relaxed wrap-anywhere [&>:first-child]:mt-0 [&>:last-child]:mb-0">
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
         {text}
       </ReactMarkdown>

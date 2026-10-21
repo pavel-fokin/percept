@@ -84,12 +84,12 @@ function NodeRow({ path, node, links, shown, now }: { path: string; node: MapNod
   const created = new Date(node.created_at);
   const changed = node.changed_at ? new Date(node.changed_at) : null;
   const at = changed ?? created;
-  const row = "flex min-h-11 items-start gap-2.5 rounded-[10px] px-3 py-2.5";
+  const row = "flex min-h-11 items-start gap-2.5 rounded-lg px-3 py-2.5";
   const content = (
     <>
       <span className="min-w-0 flex-1 wrap-anywhere">{node.title}</span>
       {shown && (
-        <time dateTime={at.toISOString()} title={full.format(at)} className="flex-none text-[13px] leading-6 text-muted tabular-nums">
+        <time dateTime={at.toISOString()} title={full.format(at)} className="flex-none text-sm leading-6 text-muted tabular-nums">
           {shown}
         </time>
       )}
@@ -109,12 +109,12 @@ function NodeRow({ path, node, links, shown, now }: { path: string; node: MapNod
     <li id={`node-${node.id}`}>
       <details className="group">
         <summary className={`${row} cursor-pointer list-none hover:bg-surface focus-visible:bg-surface [&::-webkit-details-marker]:hidden`}>
-          <Chevron className="mt-[5px] text-muted" />
+          <Chevron className="mt-1 text-muted" />
           {content}
         </summary>
         <div className="grid gap-3.5 pt-1 pr-3 pb-5 pl-9">
           {changed && (
-            <p className="text-[13px] text-muted tabular-nums">
+            <p className="text-sm text-muted tabular-nums">
               Added {dayAndTime(created, now)} · Changed {dayAndTime(changed, now)}
             </p>
           )}
@@ -122,19 +122,19 @@ function NodeRow({ path, node, links, shown, now }: { path: string; node: MapNod
             <dl className="grid gap-3.5">
               {properties.map(([key, value]) => (
                 <div key={key}>
-                  <dt className="text-[13px] font-medium text-muted">{key}</dt>
-                  <dd className="mt-0.5 leading-[26px] wrap-anywhere">{value}</dd>
+                  <dt className="text-sm font-medium text-muted">{key}</dt>
+                  <dd className="mt-0.5 leading-relaxed wrap-anywhere">{value}</dd>
                 </div>
               ))}
               {kinds.map((kind) => (
                 <div key={`edge-${kind}`}>
-                  <dt className="text-[13px] font-medium text-muted">{kind}</dt>
+                  <dt className="text-sm font-medium text-muted">{kind}</dt>
                   {(["→", "←"] as const).map((arrow) => {
                     const ends = links.filter((l) => l.kind === kind && l.arrow === arrow);
 
                     return (
                       ends.length > 0 && (
-                        <dd key={arrow} className="mt-0.5 leading-[26px] wrap-anywhere">
+                        <dd key={arrow} className="mt-0.5 leading-relaxed wrap-anywhere">
                           <span className="text-muted">{arrow} </span>
                           {ends.map((l, i) => (
                             <Fragment key={l.node.id}>

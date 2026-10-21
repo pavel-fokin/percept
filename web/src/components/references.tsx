@@ -12,7 +12,7 @@ export function References({ path, references }: { path: string; references: Ref
         <figure key={index} className="min-w-0">
           {"message" in reference ? (
             <>
-              <figcaption className="text-[13px] font-medium text-muted">
+              <figcaption className="text-sm font-medium text-muted">
                 <Link
                   to={`${sessionUrl(path, reference.message.session)}?q=${encodeURIComponent(reference.message.quote)}#${reference.message.event}`}
                   className={`${textLink} relative -my-3 inline-block py-3`}
@@ -20,16 +20,16 @@ export function References({ path, references }: { path: string; references: Ref
                   Message · {dayTime.format(new Date(reference.message.created_at))} →
                 </Link>
               </figcaption>
-              <blockquote className="mt-0.5 leading-[26px] whitespace-pre-wrap wrap-anywhere">
+              <blockquote className="mt-0.5 leading-relaxed whitespace-pre-wrap wrap-anywhere">
                 {reference.message.quote}
               </blockquote>
             </>
           ) : (
             <>
-              <figcaption className="text-[13px] font-medium text-muted wrap-anywhere">
+              <figcaption className="text-sm font-medium text-muted wrap-anywhere">
                 {reference.file.path}:{reference.file.lines[0]}-{reference.file.lines[1]}
               </figcaption>
-              <pre className="mt-1 overflow-x-auto rounded-[10px] bg-surface px-4 py-3.5 font-mono text-[13.5px] leading-[22px]">
+              <pre className="mt-1 overflow-x-auto rounded-lg bg-surface px-4 py-3.5 font-mono text-sm leading-relaxed">
                 {reference.file.excerpt}
               </pre>
             </>
