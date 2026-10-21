@@ -2,16 +2,16 @@ use std::collections::BTreeMap;
 
 use super::hook::Client;
 use crate::app::{AppService, Ref, source_path};
-use crate::core::{Actor, EventStore, Map, Reference, SchemaStore, Source};
+use crate::core::{Actor, DefinitionStore, EventStore, Map, Reference, Source};
 use crate::shared::Result;
 
-pub(super) async fn create<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, kind: &str) -> Result<()> {
+pub(super) async fn create<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, kind: &str) -> Result<()> {
     let (actor, source) = cli_writer().await?;
 
     service.create_map(source, actor, kind).await
 }
 
-pub(super) async fn add<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
+pub(super) async fn add<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
     let AddArgs { positionals, properties, references } = split_add(args)?;
 
     match positionals {
@@ -27,7 +27,7 @@ pub(super) async fn add<S: EventStore, M: SchemaStore>(service: &AppService<S, M
     }
 }
 
-pub(super) async fn change<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
+pub(super) async fn change<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
     let AddArgs { positionals, properties, references } = split_add(args)?;
 
     let (map, title, new_title) = match positionals {
@@ -40,7 +40,7 @@ pub(super) async fn change<S: EventStore, M: SchemaStore>(service: &AppService<S
     service.change_node(source, actor, map, title, new_title, properties, references).await
 }
 
-pub(super) async fn remove<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
+pub(super) async fn remove<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
     match split_remove(args)? {
         [map, title] => {
             let (actor, source) = cli_writer().await?;
@@ -131,7 +131,7 @@ pub(super) async fn cli_writer() -> Result<(Actor, Source)> {
     Ok((actor, source))
 }
 
-pub(super) async fn show<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, map: Option<&str>) -> Result<()> {
+pub(super) async fn show<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, map: Option<&str>) -> Result<()> {
     let project = source_path(&std::env::current_dir()?).await;
 
     match map {

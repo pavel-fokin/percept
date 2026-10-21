@@ -1,9 +1,9 @@
 use super::maps::cli_writer;
 use crate::app::AppService;
-use crate::core::{EventStore, Name, SchemaStore};
+use crate::core::{DefinitionStore, EventStore, Name};
 use crate::shared::Result;
 
-pub(super) async fn init<S: EventStore, M: SchemaStore>(service: &AppService<S, M>, name: Option<&str>) -> Result<()> {
+pub(super) async fn init<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, name: Option<&str>) -> Result<()> {
     let (actor, source) = cli_writer().await?;
 
     let name = match name {

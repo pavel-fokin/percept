@@ -7,7 +7,7 @@ use axum::Json;
 
 use super::responses::{self, BoardSummary, Data, MapDetail, MapSummary, ProjectSummary, Status};
 use super::Api;
-use crate::core::{Actor, EventStore, SchemaStore, SessionId};
+use crate::core::{Actor, DefinitionStore, EventStore, SessionId};
 use crate::shared::Error;
 
 type Reply<T> = Result<Json<Data<T>>, ApiError>;
@@ -38,7 +38,7 @@ impl IntoResponse for ApiError {
 impl<S, M> Api<S, M>
 where
     S: EventStore + Send + Sync + 'static,
-    M: SchemaStore + Send + Sync + 'static,
+    M: DefinitionStore + Send + Sync + 'static,
 {
     pub(super) async fn status(State(api): State<Arc<Self>>) -> Reply<Status> {
         let events = api.service.event_count().await?;

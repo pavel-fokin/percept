@@ -3,7 +3,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::core::{EdgeKind, Schema, SchemaStore};
+use crate::core::{Definition, DefinitionStore, EdgeKind};
 use crate::shared::Result;
 
 /// Reads `<project>/.percept/schemas/<kind>.toml`.
@@ -27,8 +27,8 @@ struct Edge {
     to: String,
 }
 
-impl SchemaStore for TomlStore {
-    async fn schema(&self, project: &Path, kind: &str) -> Result<Schema> {
+impl DefinitionStore for TomlStore {
+    async fn definition(&self, project: &Path, kind: &str) -> Result<Definition> {
         let path = project.join(".percept").join("schemas").join(format!("{kind}.toml"));
         let name = path.display();
 
@@ -44,7 +44,7 @@ impl SchemaStore for TomlStore {
         }
         let edges = file.edges.into_iter().map(|(k, e)| (k, EdgeKind { from: e.from, to: e.to })).collect();
 
-        Schema::new(file.purpose, file.instructions, nodes, edges).map_err(|e| format!("{name}: {e}").into())
+        Definition::new(file.purpose, file.instructions, nodes, edges).map_err(|e| format!("{name}: {e}").into())
     }
 }
 
@@ -54,9 +54,9 @@ mod tests {
 
     use super::*;
 
-    /// A project directory holding one schema file with the given text.
+    /// A project directory holding one definition file with the given text.
     fn project(text: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("percept-schema-{}", uuid::Uuid::now_v7()));
+        let dir = std::env::temp_dir().join(format!("percept-definition-{}", uuid::Uuid::now_v7()));
         let schemas = dir.join(".percept").join("schemas");
         std::fs::create_dir_all(&schemas).unwrap();
         std::fs::write(schemas.join("notes.toml"), text).unwrap();
@@ -83,31 +83,31 @@ mod tests {
             "#,
         );
 
-        let schema = TomlStore.schema(&dir, "notes").await.unwrap();
+        let definition = TomlStore.definition(&dir, "notes").await.unwrap();
 
-        assert_eq!(schema.purpose(), "p");
-        assert_eq!(schema.instructions(), "i");
+        assert_eq!(definition.purpose(), "p");
+        assert_eq!(definition.instructions(), "i");
         let properties = BTreeMap::from([("body".to_string(), "x".to_string()), ("by".to_string(), "y".to_string())]);
-        assert!(schema.check_node("note", &properties).is_ok());
-        assert!(schema.check_node("topic", &properties).is_err());
-        assert!(schema.check_edge("about", "note", "topic").is_ok());
-        assert!(schema.check_edge("about", "topic", "note").is_err());
+        assert!(definition.check_node("note", &properties).is_ok());
+        assert!(definition.check_node("topic", &properties).is_err());
+        assert!(definition.check_edge("about", "note", "topic").is_ok());
+        assert!(definition.check_edge("about", "topic", "note").is_err());
     }
 
     #[tokio::test]
     async fn edges_may_be_absent() {
         let dir = project("purpose = \"p\"\ninstructions = \"i\"\n[nodes.note]\n");
 
-        let schema = TomlStore.schema(&dir, "notes").await.unwrap();
+        let definition = TomlStore.definition(&dir, "notes").await.unwrap();
 
-        assert!(schema.check_edge("about", "note", "note").is_err());
+        assert!(definition.check_edge("about", "note", "note").is_err());
     }
 
     #[tokio::test]
     async fn a_missing_file_is_an_error_naming_it() {
         let dir = project("");
 
-        let error = TomlStore.schema(&dir, "tasks").await.err().unwrap();
+        let error = TomlStore.definition(&dir, "tasks").await.err().unwrap();
 
         assert!(error.to_string().contains("tasks.toml"));
     }
@@ -125,7 +125,7 @@ mod tests {
         for text in cases {
             let dir = project(text);
 
-            let error = TomlStore.schema(&dir, "notes").await.err().unwrap();
+            let error = TomlStore.definition(&dir, "notes").await.err().unwrap();
 
             assert!(error.to_string().contains("notes.toml"), "{text}: {error}");
         }

@@ -1,8 +1,8 @@
 use super::AppService;
-use crate::core::{Actor, Event, EventStore, Name, Project, ProjectId, SchemaStore, Source};
+use crate::core::{Actor, DefinitionStore, Event, EventStore, Name, Project, ProjectId, Source};
 use crate::shared::Result;
 
-impl<S: EventStore, M: SchemaStore> AppService<S, M> {
+impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
     /// Records a new project rooted at `source.path`, named `name`.
     /// A root holds one project, and a name belongs to one.
     pub async fn create_project(
@@ -36,7 +36,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{Broken, Memory, Schemas};
+    use crate::app::testing::{Broken, Definitions, Memory};
 
     fn name(name: &str) -> Name {
         Name::new(name).unwrap()
@@ -49,7 +49,7 @@ mod tests {
     #[tokio::test]
     async fn init_records_the_project_under_the_given_name() {
         let store = Memory::default();
-        let service = AppService::new(&store, Schemas);
+        let service = AppService::new(&store, Definitions);
 
         let named = service.create_project(source("/work/a"), Actor::Human, name("Alpha")).await.unwrap();
 
@@ -62,7 +62,7 @@ mod tests {
     #[tokio::test]
     async fn a_second_init_in_the_same_root_fails() {
         let store = Memory::default();
-        let service = AppService::new(&store, Schemas);
+        let service = AppService::new(&store, Definitions);
         service.create_project(source("/work/a"), Actor::Human, name("a")).await.unwrap();
 
         let error = service.create_project(source("/work/a"), Actor::Human, name("other")).await.unwrap_err();
@@ -74,7 +74,7 @@ mod tests {
     #[tokio::test]
     async fn an_init_with_a_taken_name_fails_whatever_its_case() {
         let store = Memory::default();
-        let service = AppService::new(&store, Schemas);
+        let service = AppService::new(&store, Definitions);
         service.create_project(source("/work/a"), Actor::Human, name("app")).await.unwrap();
 
         let error = service.create_project(source("/work/b"), Actor::Human, name("APP")).await.unwrap_err();
@@ -85,7 +85,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_broken_store_passes_through() {
-        let broken = AppService::new(Broken, Schemas).create_project(source("/work/a"), Actor::Human, name("a")).await;
+        let broken = AppService::new(Broken, Definitions).create_project(source("/work/a"), Actor::Human, name("a")).await;
 
         assert!(broken.is_err());
     }

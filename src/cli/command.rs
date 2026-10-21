@@ -9,7 +9,7 @@ use super::maps::{add, change, create, remove, show};
 use super::projects::init;
 use super::status::status;
 use crate::app::AppService;
-use crate::core::{EventStore, SchemaStore};
+use crate::core::{DefinitionStore, EventStore};
 use crate::server;
 
 /// Records what coding agents do.
@@ -64,7 +64,7 @@ enum Command {
     },
 }
 
-pub async fn run<S: EventStore + Send + Sync + 'static, M: SchemaStore + Send + Sync + 'static>(service: Arc<AppService<S, M>>, home: PathBuf) -> ExitCode {
+pub async fn run<S: EventStore + Send + Sync + 'static, M: DefinitionStore + Send + Sync + 'static>(service: Arc<AppService<S, M>>, home: PathBuf) -> ExitCode {
     // clap exits 2 on a usage error, and exit 2 blocks the agent's action.
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,

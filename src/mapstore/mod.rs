@@ -1,4 +1,4 @@
-//! Infrastructure layer: reads map schemas from TOML files in a project.
+//! Infrastructure layer: reads map definitions from TOML files in a project.
 
 mod toml_store;
 

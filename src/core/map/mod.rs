@@ -1,13 +1,13 @@
+mod definition;
 mod policy;
-mod schema;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use jiff::Timestamp;
 
+pub use definition::{Definition, DefinitionStore, EdgeKind};
 pub use policy::Policy;
-pub use schema::{EdgeKind, Schema, SchemaStore};
 
 use super::{Actor, Event, EventId, Payload, ProjectId};
 use crate::shared::{Id, Result};
@@ -107,23 +107,23 @@ impl Map {
         self.nodes.iter().find(|n| n.id == id)
     }
 
-    /// Refuses an event that would break the map or its `schema`: a node or an edge the schema does not allow,
+    /// Refuses an event that would break the map or its `definition`: a node or an edge the definition does not allow,
     /// a node title blank or held by another node, a node or an edge end that is not on the map, an edge the map already has or lacks.
-    pub fn check(&self, event: &Event, schema: &Schema) -> Result<()> {
+    pub fn check(&self, event: &Event, definition: &Definition) -> Result<()> {
         match &event.payload {
             Payload::NodeAdded { kind, title, properties, .. } => {
-                schema.check_node(kind, properties)?;
+                definition.check_node(kind, properties)?;
 
                 self.check_title(title, None)
             }
             Payload::NodeChanged { node, title, properties, .. } => {
-                schema.check_node(&self.on_map(*node)?.kind, properties)?;
+                definition.check_node(&self.on_map(*node)?.kind, properties)?;
 
                 self.check_title(title, Some(*node))
             }
             Payload::NodeRemoved { node, .. } => self.on_map(*node).map(|_| ()),
             Payload::EdgeAdded { kind, from, to, .. } => {
-                schema.check_edge(kind, &self.on_map(*from)?.kind, &self.on_map(*to)?.kind)?;
+                definition.check_edge(kind, &self.on_map(*from)?.kind, &self.on_map(*to)?.kind)?;
 
                 if self.edges.iter().any(|e| e.is(kind, *from, *to)) {
                     return Err(format!("the {} map already has this {kind} edge", self.kind).into());
@@ -464,25 +464,25 @@ mod tests {
     }
 
     /// `concept` nodes with a `definition`, linked by `links` and `cites`.
-    fn schema() -> Schema {
+    fn definition() -> Definition {
         let nodes = BTreeMap::from([("concept".to_string(), std::collections::BTreeSet::from(["definition".to_string()]))]);
         let edge = || crate::core::EdgeKind { from: "concept".into(), to: "concept".into() };
         let edges = BTreeMap::from([("links".to_string(), edge()), ("cites".to_string(), edge())]);
 
-        Schema::new("p".into(), "i".into(), nodes, edges).unwrap()
+        Definition::new("p".into(), "i".into(), nodes, edges).unwrap()
     }
 
     #[test]
-    fn check_refuses_what_the_schema_does_not_allow() {
+    fn check_refuses_what_the_definition_does_not_allow() {
         let (map, a, b, folded) = check_map();
         let colour = BTreeMap::from([("colour".to_string(), "red".to_string())]);
         let added = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "concept", "C", colour.clone(), Vec::new());
         let changed = Event::node_changed(Source::fixture(), Actor::Human, map, a, "A", colour, Vec::new());
         let edge = Event::edge_added(Source::fixture(), Actor::Human, map, "answers", b, a);
 
-        let added = folded.check(&added, &schema());
-        let changed = folded.check(&changed, &schema());
-        let edge = folded.check(&edge, &schema());
+        let added = folded.check(&added, &definition());
+        let changed = folded.check(&changed, &definition());
+        let edge = folded.check(&edge, &definition());
 
         assert!(added.unwrap_err().to_string().contains("colour"));
         assert!(changed.unwrap_err().to_string().contains("colour"));
@@ -493,9 +493,9 @@ mod tests {
     fn check_refuses_a_node_added_with_a_blank_title_or_one_another_node_holds() {
         let (map, _, _, folded) = check_map();
 
-        let blank = folded.check(&node_added(map, Actor::Agent, " ").1, &schema());
-        let taken = folded.check(&node_added(map, Actor::Agent, "A").1, &schema());
-        let free = folded.check(&node_added(map, Actor::Agent, "C").1, &schema());
+        let blank = folded.check(&node_added(map, Actor::Agent, " ").1, &definition());
+        let taken = folded.check(&node_added(map, Actor::Agent, "A").1, &definition());
+        let free = folded.check(&node_added(map, Actor::Agent, "C").1, &definition());
 
         assert_eq!(blank.unwrap_err().to_string(), "title must not be blank");
         assert_eq!(taken.unwrap_err().to_string(), "the concepts map already has a node titled \"A\"");
@@ -510,10 +510,10 @@ mod tests {
     fn check_refuses_a_node_changed_that_is_missing_or_gets_a_blank_or_taken_title() {
         let (map, a, _, folded) = check_map();
 
-        let missing = folded.check(&change(map, NodeId::new(), "C"), &schema());
-        let blank = folded.check(&change(map, a, " "), &schema());
-        let taken = folded.check(&change(map, a, "B"), &schema());
-        let renamed = folded.check(&change(map, a, "C"), &schema());
+        let missing = folded.check(&change(map, NodeId::new(), "C"), &definition());
+        let blank = folded.check(&change(map, a, " "), &definition());
+        let taken = folded.check(&change(map, a, "B"), &definition());
+        let renamed = folded.check(&change(map, a, "C"), &definition());
 
         assert_eq!(missing.unwrap_err().to_string(), "the concepts map has no such node");
         assert_eq!(blank.unwrap_err().to_string(), "title must not be blank");
@@ -525,7 +525,7 @@ mod tests {
     fn check_lets_a_node_keep_its_own_title_on_a_change() {
         let (map, a, _, folded) = check_map();
 
-        let result = folded.check(&change(map, a, "A"), &schema());
+        let result = folded.check(&change(map, a, "A"), &definition());
 
         assert!(result.is_ok());
     }
@@ -534,8 +534,8 @@ mod tests {
     fn check_refuses_a_node_removed_that_is_not_on_the_map() {
         let (map, a, _, folded) = check_map();
 
-        let missing = folded.check(&Event::node_removed(Source::fixture(), Actor::Human, map, NodeId::new()), &schema());
-        let present = folded.check(&Event::node_removed(Source::fixture(), Actor::Human, map, a), &schema());
+        let missing = folded.check(&Event::node_removed(Source::fixture(), Actor::Human, map, NodeId::new()), &definition());
+        let present = folded.check(&Event::node_removed(Source::fixture(), Actor::Human, map, a), &definition());
 
         assert_eq!(missing.unwrap_err().to_string(), "the concepts map has no such node");
         assert!(present.is_ok());
@@ -546,11 +546,11 @@ mod tests {
         let (map, a, b, folded) = check_map();
         let edge = |kind, from, to| Event::edge_added(Source::fixture(), Actor::Human, map, kind, from, to);
 
-        let from_missing = folded.check(&edge("links", NodeId::new(), b), &schema());
-        let to_missing = folded.check(&edge("links", a, NodeId::new()), &schema());
-        let repeated = folded.check(&edge("links", a, b), &schema());
-        let reversed = folded.check(&edge("links", b, a), &schema());
-        let other_kind = folded.check(&edge("cites", a, b), &schema());
+        let from_missing = folded.check(&edge("links", NodeId::new(), b), &definition());
+        let to_missing = folded.check(&edge("links", a, NodeId::new()), &definition());
+        let repeated = folded.check(&edge("links", a, b), &definition());
+        let reversed = folded.check(&edge("links", b, a), &definition());
+        let other_kind = folded.check(&edge("cites", a, b), &definition());
 
         assert_eq!(from_missing.unwrap_err().to_string(), "the concepts map has no such node");
         assert_eq!(to_missing.unwrap_err().to_string(), "the concepts map has no such node");
@@ -564,9 +564,9 @@ mod tests {
         let (map, a, b, folded) = check_map();
         let remove = |kind, from, to| Event::edge_removed(Source::fixture(), Actor::Human, map, kind, from, to);
 
-        let missing = folded.check(&remove("links", b, a), &schema());
-        let other_kind = folded.check(&remove("cites", a, b), &schema());
-        let present = folded.check(&remove("links", a, b), &schema());
+        let missing = folded.check(&remove("links", b, a), &definition());
+        let other_kind = folded.check(&remove("cites", a, b), &definition());
+        let present = folded.check(&remove("links", a, b), &definition());
 
         assert_eq!(missing.unwrap_err().to_string(), "the concepts map has no such links edge");
         assert!(other_kind.is_err());
@@ -584,7 +584,7 @@ mod tests {
         ];
 
         for event in &events {
-            assert!(folded.check(event, &schema()).is_ok());
+            assert!(folded.check(event, &definition()).is_ok());
         }
     }
 }
