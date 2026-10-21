@@ -1,6 +1,7 @@
 import { Link, useLoaderData, useRouteError } from "react-router";
 import { describe, getData, type BoardSummary, type MapSummary, type Project, type Session } from "../api";
 import { relative } from "../format";
+import { BoardIcon } from "../components/board-icon";
 import { NewBoard } from "../components/new-board";
 import { Spinner } from "../components/spinner";
 import { chip } from "../components/ui/chip";
@@ -15,7 +16,7 @@ type ProjectGroup = { project: string; root: string; maps: MapSummary[]; boards:
 const hasContent = (g: Pick<ProjectGroup, "maps" | "boards">) => g.maps.length > 0 || g.boards.length > 0;
 
 /** One group per project: those with sessions by newest session, then those with only maps or boards, then empty ones. */
-export async function loadStart() {
+export async function loadHome() {
   const [projects, sessions, maps, boards] = await Promise.all([
     getData<Project[]>("/api/projects"),
     getData<Session[]>("/api/sessions"),
@@ -42,8 +43,8 @@ export async function loadStart() {
   return [...active, ...rest.filter(hasContent), ...rest.filter((g) => !hasContent(g))];
 }
 
-export function Start() {
-  const groups = useLoaderData<typeof loadStart>();
+export function Home() {
+  const groups = useLoaderData<typeof loadHome>();
   usePolling(true);
   const now = new Date();
 
@@ -124,7 +125,7 @@ export function Start() {
   );
 }
 
-export function StartError() {
+export function HomeError() {
   return <p className="pt-6">Failed to load sessions: {describe(useRouteError())}</p>;
 }
 
@@ -136,16 +137,6 @@ function Working() {
       <Spinner />
       working
     </>
-  );
-}
-
-function BoardIcon() {
-  return (
-    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden className="size-4 flex-none text-muted">
-      <rect x="1.75" y="1.75" width="6" height="4.5" rx="1" />
-      <rect x="8.25" y="9.75" width="6" height="4.5" rx="1" />
-      <path d="M4.75 6.25v3.75a2 2 0 0 0 2 2h1.5" />
-    </svg>
   );
 }
 
