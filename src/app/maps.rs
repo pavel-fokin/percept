@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::AppService;
-use crate::core::{Actor, Event, EventId, EventStore, Map, MapId, Node, NodeId, Payload, Policy, Project, ProjectId, Reference, SchemaStore, SessionId, Source};
+use crate::core::{Actor, Event, EventId, EventStore, Map, MapId, Node, NodeId, Payload, Policy, Project, ProjectId, ProjectName, Reference, SchemaStore, SessionId, Source};
 use crate::shared::Result;
 
 #[derive(Debug, PartialEq)]
@@ -15,8 +15,7 @@ pub enum Ref {
 /// `messages` holds every message its nodes cite.
 pub struct MapDetail {
     pub map: Map,
-    /// The root of the map's project.
-    pub root: PathBuf,
+    pub project: ProjectName,
     pub messages: BTreeMap<EventId, CitedMessage>,
 }
 
@@ -62,14 +61,9 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         Ok(maps)
     }
 
-    /// Every map across all projects in log order, each with its nodes and edges and its project's root, from one read of the log.
-    pub async fn all_maps(&self) -> Result<Vec<(Map, PathBuf)>> {
-        let events = self.store.all().await?;
-
-        Map::all(&events).into_iter().map(|map| {
-            let root = root_of(&events, map.project)?;
-            Ok((map, root))
-        }).collect()
+    /// Every map across all projects in log order, each with its nodes and edges, from one read of the log.
+    pub async fn all_maps(&self) -> Result<Vec<Map>> {
+        Ok(Map::all(&self.store.all().await?))
     }
 
     /// The map of the given kind in the project containing `path`, with its nodes and edges, or an error if it has none.
@@ -77,15 +71,17 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
         Ok(self.located(path, kind).await?.map)
     }
 
-    /// The map with the given id, its nodes newest first and its edges in log order, from one read of the log.
-    pub async fn map_detail(&self, id: MapId) -> Result<Option<MapDetail>> {
+    /// The map of the given kind in the project of the given name, its nodes newest first and its edges in log order, from one read of the log.
+    pub async fn map_detail(&self, project: &str, kind: &str) -> Result<Option<MapDetail>> {
         let events = self.store.all().await?;
 
-        let Some(mut map) = Map::all(&events).into_iter().find(|m| m.id == id) else {
+        let Some(project) = Project::all(&events).into_iter().find(|p| p.name.as_str() == project) else {
+            return Ok(None);
+        };
+        let Some(mut map) = Map::all(&events).into_iter().find(|m| m.project == project.id && m.kind == kind) else {
             return Ok(None);
         };
         map.nodes.reverse();
-        let root = root_of(&events, map.project)?;
 
         let cited: BTreeSet<EventId> = map
             .nodes
@@ -105,7 +101,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
             })
             .collect();
 
-        Ok(Some(MapDetail { map, root, messages }))
+        Ok(Some(MapDetail { map, project: project.name, messages }))
     }
 
     /// Records a new edge on the project's map of the given kind, between the nodes with these titles.
@@ -263,14 +259,6 @@ fn project_at(events: &[Event], path: &Path) -> Result<(ProjectId, PathBuf)> {
     let project = Project::containing(&projects, path).ok_or("not in a project; run percept init")?;
 
     Ok((project.id, project.root.clone()))
-}
-
-fn root_of(events: &[Event], project: ProjectId) -> Result<PathBuf> {
-    Project::all(events)
-        .into_iter()
-        .find(|p| p.id == project)
-        .map(|p| p.root)
-        .ok_or_else(|| "a map names a project that was never created".into())
 }
 
 fn find_node<'a>(nodes: &'a [Node], map_kind: &str, title: &str) -> Result<&'a Node> {
@@ -870,7 +858,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn all_maps_span_projects_and_carry_each_maps_root() {
+    async fn all_maps_span_projects() {
         let store = in_project("/repo");
         add_project(&store, "/other");
         let service = AppService::new(&store, Schemas);
@@ -881,8 +869,9 @@ mod tests {
 
         let maps = service.all_maps().await.unwrap();
 
-        let found: Vec<(&str, &Path, usize)> = maps.iter().map(|(m, root)| (m.kind.as_str(), root.as_path(), m.nodes.len())).collect();
-        assert_eq!(found, vec![("decisions", Source::fixture().path.as_path(), 0), ("tasks", Path::new("/other"), 1)]);
+        let found: Vec<(&str, usize)> = maps.iter().map(|m| (m.kind.as_str(), m.nodes.len())).collect();
+        assert_eq!(found, vec![("decisions", 0), ("tasks", 1)]);
+        assert_ne!(maps[0].project, maps[1].project);
     }
 
     #[tokio::test]
@@ -895,10 +884,10 @@ mod tests {
         service.add_node(Source::fixture(), Actor::Human, "tasks", "task", "T", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, "decisions", "option", "O", Default::default(), Vec::new()).await.unwrap();
         service.add_edge(Source::fixture(), Actor::Human, "decisions", "O", "answers", "Q").await.unwrap();
-        let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
 
-        let detail = service.map_detail(map.id).await.unwrap().unwrap();
+        let detail = service.map_detail("p0", "decisions").await.unwrap().unwrap();
 
+        assert_eq!(detail.project.as_str(), "p0");
         let titles: Vec<&str> = detail.map.nodes.iter().map(|n| n.title.as_str()).collect();
         assert_eq!(titles, vec!["O", "Q"]);
         let edges: Vec<(&str, NodeId, NodeId)> = detail.map.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
@@ -921,9 +910,8 @@ mod tests {
             Source::fixture(), Actor::Human, "concepts", "concept", "C", BTreeMap::new(),
             vec![Ref::Message("Keep the text".into())],
         ).await.unwrap();
-        let map = service.map(&Source::fixture().path, "concepts").await.unwrap();
 
-        let detail = service.map_detail(map.id).await.unwrap().unwrap();
+        let detail = service.map_detail("p0", "concepts").await.unwrap().unwrap();
 
         assert_eq!(detail.messages.len(), 1);
         assert_eq!(detail.messages[&cited.id].session, session);
@@ -931,14 +919,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn map_detail_of_an_unknown_id_is_none() {
+    async fn map_detail_of_an_unknown_project_or_kind_is_none() {
         let store = in_project("/repo");
         let service = AppService::new(&store, Schemas);
         service.create_map(Source::fixture(), Actor::Human, "decisions").await.unwrap();
 
-        let detail = service.map_detail(MapId::new()).await.unwrap();
+        let no_project = service.map_detail("nope", "decisions").await.unwrap();
+        let no_kind = service.map_detail("p0", "tasks").await.unwrap();
 
-        assert!(detail.is_none());
+        assert!(no_project.is_none());
+        assert!(no_kind.is_none());
     }
 
     fn props(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
@@ -1189,13 +1179,12 @@ mod tests {
     async fn removing_a_node_drops_it_its_edges_and_the_summary_counts() {
         let store = in_project("/repo");
         let service = decisions(&store, Actor::Human).await;
-        let map = service.map(&Source::fixture().path, "decisions").await.unwrap();
 
         service.remove_node(Source::fixture(), Actor::Human, "decisions", "Q").await.unwrap();
 
         let last = store.0.lock().unwrap().last().unwrap().clone();
         assert_eq!(last.payload.kind(), crate::core::Kind::NodeRemoved);
-        let detail = service.map_detail(map.id).await.unwrap().unwrap();
+        let detail = service.map_detail("p0", "decisions").await.unwrap().unwrap();
         let titles: Vec<&str> = detail.map.nodes.iter().map(|n| n.title.as_str()).collect();
         assert_eq!(titles, vec!["O"]);
         assert!(detail.map.edges.is_empty());

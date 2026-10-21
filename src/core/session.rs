@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use jiff::Timestamp;
 use serde::Serialize;
 
@@ -10,11 +8,8 @@ use crate::shared::Id;
 pub struct Session {
     pub id: SessionId,
     pub client_session_id: ClientSessionId,
-    #[allow(dead_code, reason = "no response carries a session's project yet")]
     pub project: ProjectId,
     pub created_at: Timestamp,
-    /// Where the client ran, from the `source` of the `SessionCreated` event.
-    pub path: PathBuf,
     /// The client that ran it, from the same event.
     pub client: String,
     /// The first non-empty thing the human said, if they said anything.

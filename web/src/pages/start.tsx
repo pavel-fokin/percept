@@ -8,28 +8,28 @@ import { usePolling } from "../use-polling";
 
 const README = "https://github.com/pavel-fokin/percept#readme";
 
-type PathGroup = { path: string; maps: MapSummary[]; sessions: number; latest?: Session };
+type ProjectGroup = { project: string; maps: MapSummary[]; sessions: number; latest?: Session };
 
-/** One group per path, in order of each path's newest session; paths with only maps come last. */
+/** One group per project, in order of each project's newest session; projects with only maps come last. */
 export async function loadStart() {
   const [sessions, maps] = await Promise.all([
     getData<Session[]>("/api/sessions"),
     getData<MapSummary[]>("/api/maps"),
   ]);
 
-  const groups = new Map<string, PathGroup>();
-  const group = (path: string) => {
-    if (!groups.has(path)) groups.set(path, { path, maps: [], sessions: 0 });
-    return groups.get(path)!;
+  const groups = new Map<string, ProjectGroup>();
+  const group = (project: string) => {
+    if (!groups.has(project)) groups.set(project, { project, maps: [], sessions: 0 });
+    return groups.get(project)!;
   };
 
   // Latest by activity, so a working session stays in view when a newer one sits idle beside it.
   for (const session of sessions) {
-    const g = group(session.path);
+    const g = group(session.project);
     if (!g.latest || new Date(session.last_event_at) > new Date(g.latest.last_event_at)) g.latest = session;
     g.sessions += 1;
   }
-  for (const map of maps) group(map.path).maps.push(map);
+  for (const map of maps) group(map.project).maps.push(map);
 
   return [...groups.values()];
 }
@@ -43,10 +43,10 @@ export function Start() {
 
   return (
     <div className="mt-8 grid gap-14 sm:mt-14">
-      {groups.map(({ path, maps, sessions, latest }) => (
-        <section key={path}>
+      {groups.map(({ project, maps, sessions, latest }) => (
+        <section key={project}>
           <div className="flex items-baseline justify-between gap-4">
-            <h2 className="min-w-0 font-mono text-sm font-normal wrap-anywhere">{path}</h2>
+            <h2 className="min-w-0 font-mono text-sm font-normal wrap-anywhere">{project}</h2>
             {latest && (
               <time dateTime={latest.last_event_at} className="flex-none text-sm text-muted tabular-nums">
                 active {relative(new Date(latest.last_event_at), now)}
@@ -56,7 +56,7 @@ export function Start() {
 
           {latest && (
             <Link
-              to={sessionUrl(path, latest.id)}
+              to={sessionUrl(project, latest.id)}
               className="-mx-3 mt-6 flex min-h-11 items-center gap-3 rounded-lg px-3 py-3 hover:bg-surface focus-visible:bg-surface"
             >
               <span className="grid min-w-0 flex-1 gap-0.5">
@@ -74,11 +74,11 @@ export function Start() {
             </Link>
           )}
 
-          <nav aria-label={path} className="-mx-3 mt-2 flex flex-wrap gap-1">
+          <nav aria-label={project} className="-mx-3 mt-2 flex flex-wrap gap-1">
             {maps.map((map) => (
-              <Counter key={map.id} to={mapUrl(path, map.id)} label={map.kind} count={map.nodes} />
+              <Counter key={map.id} to={mapUrl(project, map.kind)} label={map.kind} count={map.nodes} />
             ))}
-            {sessions > 0 && <Counter to={sessionsUrl(path)} label="sessions" count={sessions} />}
+            {sessions > 0 && <Counter to={sessionsUrl(project)} label="sessions" count={sessions} />}
           </nav>
         </section>
       ))}

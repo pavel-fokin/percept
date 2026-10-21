@@ -5,7 +5,7 @@ import { dayTime } from "../format";
 import { sessionUrl } from "../paths";
 import { textLink } from "./ui/text-link";
 
-export function References({ path, references }: { path: string; references: Reference[] }) {
+export function References({ project, references }: { project: string; references: Reference[] }) {
   return (
     <div className="grid gap-3.5">
       {references.map((reference, index) => (
@@ -14,7 +14,7 @@ export function References({ path, references }: { path: string; references: Ref
             <>
               <figcaption className="text-sm font-medium text-muted">
                 <Link
-                  to={`${sessionUrl(path, reference.message.session)}?q=${encodeURIComponent(reference.message.quote)}#${reference.message.event}`}
+                  to={`${sessionUrl(project, reference.message.session)}?q=${encodeURIComponent(reference.message.quote)}#${reference.message.event}`}
                   className={`${textLink} relative -my-3 inline-block py-3`}
                 >
                   Message · {dayTime.format(new Date(reference.message.created_at))} →

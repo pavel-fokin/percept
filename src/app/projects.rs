@@ -31,6 +31,11 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
 
         Ok(name)
     }
+
+    /// Every project in `ProjectCreated` order.
+    pub async fn projects(&self) -> Result<Vec<Project>> {
+        Ok(Project::all(&self.store.all().await?))
+    }
 }
 
 #[cfg(test)]

@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use serde::Serialize;
 use serde_json::json;
 
-use super::paths::{display_path, display_paths};
+use super::paths::display_paths;
 use crate::app::{self, CitedMessage};
-use crate::core::{self, Actor, ClientSessionId, EventId, MapId, NodeId, Payload, SessionId, SessionStatus};
+use crate::core::{self, Actor, ClientSessionId, EventId, MapId, NodeId, Payload, Project, ProjectId, SessionId, SessionStatus};
 
 /// The envelope every API response is sent in.
 #[derive(Serialize)]
@@ -19,39 +19,44 @@ pub(super) struct Status {
     pub(super) events: usize,
 }
 
-/// A map as the page reads it, with its path as a human sees it.
+/// The name of the project with this id. Every session and map names a project that was created.
+fn project_name(projects: &[Project], id: ProjectId) -> String {
+    projects.iter().find(|p| p.id == id).map(|p| p.name.as_str().to_string()).expect("a project was created before what it holds")
+}
+
+/// A map as the page reads it, under the name of its project.
 #[derive(Serialize)]
 pub(super) struct MapSummary {
     id: MapId,
     kind: String,
-    path: String,
+    project: String,
     nodes: usize,
 }
 
 impl MapSummary {
-    pub(super) fn new((map, root): (core::Map, PathBuf), home: &Path) -> Self {
-        Self { id: map.id, kind: map.kind, path: display_path(&root, home), nodes: map.nodes.len() }
+    pub(super) fn new(map: core::Map, projects: &[Project]) -> Self {
+        Self { id: map.id, kind: map.kind, project: project_name(projects, map.project), nodes: map.nodes.len() }
     }
 }
 
-/// A whole map as the page reads it, with its path as a human sees it.
+/// A whole map as the page reads it, under the name of its project.
 #[derive(Serialize)]
 pub(super) struct MapDetail {
     id: MapId,
     kind: String,
-    path: String,
+    project: String,
     nodes: Vec<Node>,
     edges: Vec<Edge>,
 }
 
 impl MapDetail {
-    pub(super) fn new(detail: app::MapDetail, home: &Path) -> Self {
+    pub(super) fn new(detail: app::MapDetail) -> Self {
         let (map, messages) = (detail.map, &detail.messages);
 
         Self {
             id: map.id,
             kind: map.kind,
-            path: display_path(&detail.root, home),
+            project: detail.project.as_str().to_string(),
             nodes: map.nodes.into_iter().map(|n| Node::new(n, messages)).collect(),
             edges: map.edges.into_iter().map(Edge::from).collect(),
         }
@@ -117,27 +122,27 @@ impl From<core::Edge> for Edge {
     }
 }
 
-/// A session as the page reads it, with its path as a human sees it.
+/// A session as the page reads it, under the name of its project.
 #[derive(Serialize)]
 pub(super) struct Session {
     id: SessionId,
     client_session_id: ClientSessionId,
     created_at: jiff::Timestamp,
     title: Option<String>,
-    path: String,
+    project: String,
     client: String,
     status: SessionStatus,
     last_event_at: jiff::Timestamp,
 }
 
 impl Session {
-    pub(super) fn new(session: core::Session, home: &Path) -> Self {
+    pub(super) fn new(session: core::Session, projects: &[Project]) -> Self {
         Self {
             id: session.id,
             client_session_id: session.client_session_id,
             created_at: session.created_at,
             title: session.title,
-            path: display_path(&session.path, home),
+            project: project_name(projects, session.project),
             client: session.client,
             status: session.status,
             last_event_at: session.last_event_at,

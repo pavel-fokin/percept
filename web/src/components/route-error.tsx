@@ -11,7 +11,7 @@ export function RouteError({ notFound, failed }: { notFound: string; failed: str
       <p className="pt-6">
         {notFound}{" "}
         <Link to="/" className={textLink}>
-          All paths
+          All projects
         </Link>
       </p>
     );

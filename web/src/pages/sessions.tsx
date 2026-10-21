@@ -5,20 +5,20 @@ import { RouteError } from "../components/route-error";
 import { byDay, full, time, withChangedTimes } from "../format";
 import { sessionUrl } from "../paths";
 
-export async function loadPathSessions(path: string) {
-  const sessions = (await getData<Session[]>("/api/sessions")).filter((s) => s.path === path);
+export async function loadSessions(project: string) {
+  const sessions = (await getData<Session[]>("/api/sessions")).filter((s) => s.project === project);
   if (sessions.length === 0) throw new Response(null, { status: 404 });
 
-  return { path, sessions };
+  return { project, sessions };
 }
 
-export function PathSessions({ path, sessions }: { path: string; sessions: Session[] }) {
+export function Sessions({ project, sessions }: { project: string; sessions: Session[] }) {
   const days = byDay(sessions, (s) => s.created_at, new Date());
 
   return (
     <>
       <h1 className="mt-8 sm:mt-10">
-        <BackLink to="/" path={path} collection="sessions">
+        <BackLink to="/" project={project} collection="sessions">
           <span className="tabular-nums"> · {sessions.length}</span>
         </BackLink>
       </h1>
@@ -45,7 +45,7 @@ function SessionRow({ session, shown }: { session: Session; shown?: string }) {
   return (
     <li>
       <Link
-        to={sessionUrl(session.path, session.id)}
+        to={sessionUrl(session.project, session.id)}
         className="flex min-h-11 items-baseline gap-4 rounded-lg px-3 py-2.5 hover:bg-surface focus-visible:bg-surface sm:gap-6"
       >
         <span
@@ -65,6 +65,6 @@ function SessionRow({ session, shown }: { session: Session; shown?: string }) {
   );
 }
 
-export function PathSessionsError() {
-  return <RouteError notFound="No sessions recorded at this path." failed="sessions" />;
+export function SessionsError() {
+  return <RouteError notFound="No sessions recorded in this project." failed="sessions" />;
 }

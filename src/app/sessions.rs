@@ -38,7 +38,6 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
                         client_session_id: client_session_id.clone(),
                         project: *project,
                         created_at: e.created_at,
-                        path: e.source.path.clone(),
                         client: e.source.client.clone(),
                         title: titles.get(session).map(|t| t.to_string()),
                         status,
@@ -157,18 +156,6 @@ mod tests {
         let kinds: Vec<Kind> = events.iter().map(|e| e.payload.kind()).collect();
         assert_eq!(kinds, vec![Kind::SessionCreated, Kind::Message, Kind::ToolUsed]);
         assert!(service.session_events(SessionId::new()).await.unwrap().is_none());
-    }
-
-    #[tokio::test]
-    async fn path_is_the_source_path_of_the_created_event() {
-        let store = in_project("/");
-        let service = AppService::new(&store, Schemas);
-        let source = Source { client: "claude-code".into(), path: "/work/app".into() };
-        service.record(client_session_id("a"), source, |src, s| Event::tool_used(src, s, "Bash", None, None, json!({}))).await.unwrap();
-
-        let sessions = service.sessions().await.unwrap();
-
-        assert_eq!(sessions[0].path, std::path::Path::new("/work/app"));
     }
 
     #[tokio::test]
