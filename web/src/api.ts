@@ -76,9 +76,9 @@ export async function getData<T>(url: string): Promise<T> {
   return ((await res.json()) as { data: T }).data;
 }
 
-/** Posts `body` as JSON; a refusal throws an Error with the server's reason. */
-export async function postData<T>(url: string, body: unknown): Promise<T> {
-  const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+/** Posts nothing to `url`; a refusal throws an Error with the server's reason. */
+export async function postData<T>(url: string): Promise<T> {
+  const res = await fetch(url, { method: "POST" });
   if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
   return ((await res.json()) as { data: T }).data;
 }

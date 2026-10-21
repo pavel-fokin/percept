@@ -353,13 +353,13 @@ mod tests {
         let log = Arc::new(Log::new());
         let addr = serve(log.clone()).await;
 
-        let created = send(addr, "POST", "/api/projects/repo/boards", r#"{"name":"Ideas"}"#).await;
+        let created = send(addr, "POST", "/api/projects/repo/boards", "").await;
         let id = json_body(&created)["data"]["id"].as_str().unwrap().to_string();
         let all = send(addr, "GET", "/api/boards", "").await;
-        let by_name = send(addr, "GET", "/api/projects/repo/boards/ideas", "").await;
+        let by_name = send(addr, "GET", "/api/projects/repo/boards/board-1", "").await;
         let by_id = send(addr, "GET", &format!("/api/projects/repo/boards/{id}"), "").await;
 
-        let board = json!({ "id": id, "name": "ideas", "project": "repo" });
+        let board = json!({ "id": id, "name": "board-1", "project": "repo" });
         assert!(created.starts_with("HTTP/1.1 200"));
         assert_eq!(json_body(&created)["data"], board);
         assert_eq!(json_body(&all)["data"], json!([board]));
@@ -371,28 +371,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_taken_or_invalid_board_name_is_a_bad_request_with_the_reason() {
+    async fn posted_boards_are_named_in_turn() {
         let addr = serve(Arc::new(Log::new())).await;
-        send(addr, "POST", "/api/projects/repo/boards", r#"{"name":"ideas"}"#).await;
 
-        let taken = send(addr, "POST", "/api/projects/repo/boards", r#"{"name":"IDEAS"}"#).await;
-        let invalid = send(addr, "POST", "/api/projects/repo/boards", r#"{"name":"a b"}"#).await;
+        let first = send(addr, "POST", "/api/projects/repo/boards", "").await;
+        let second = send(addr, "POST", "/api/projects/repo/boards", "").await;
 
-        assert!(taken.starts_with("HTTP/1.1 400"));
-        assert_eq!(text_body(&taken), "the name ideas is taken");
-        assert!(invalid.starts_with("HTTP/1.1 400"));
-        assert!(text_body(&invalid).starts_with("invalid name"));
+        assert_eq!(json_body(&first)["data"]["name"], "board-1");
+        assert_eq!(json_body(&second)["data"]["name"], "board-2");
     }
 
     #[tokio::test]
     async fn an_unknown_project_or_board_is_not_found() {
-        let addr = serve(Arc::new(Log::new())).await;
+        let log = Arc::new(Log::new());
+        let addr = serve(log.clone()).await;
+        let before = log.0.lock().unwrap().len();
 
-        let post = send(addr, "POST", "/api/projects/other/boards", r#"{"name":"ideas"}"#).await;
-        let no_board = send(addr, "GET", "/api/projects/repo/boards/ideas", "").await;
+        let post = send(addr, "POST", "/api/projects/other/boards", "").await;
+        let no_board = send(addr, "GET", "/api/projects/repo/boards/board-1", "").await;
         let no_project = send(addr, "GET", "/api/projects/other/boards/ideas", "").await;
 
         assert!(post.starts_with("HTTP/1.1 404"));
+        assert_eq!(log.0.lock().unwrap().len(), before);
         assert!(no_board.starts_with("HTTP/1.1 404"));
         assert!(no_project.starts_with("HTTP/1.1 404"));
     }

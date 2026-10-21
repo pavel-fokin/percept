@@ -4,11 +4,9 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use serde::Deserialize;
 
 use super::responses::{self, BoardSummary, Data, MapDetail, MapSummary, ProjectSummary, Status};
 use super::Api;
-use crate::app::CreateBoardError;
 use crate::core::{Actor, EventStore, SchemaStore, SessionId};
 use crate::shared::Error;
 
@@ -16,24 +14,7 @@ type Reply<T> = Result<Json<Data<T>>, ApiError>;
 
 pub(super) enum ApiError {
     NotFound,
-    /// The reason, written as plain text for the page to show.
-    BadRequest(String),
     Internal(Error),
-}
-
-impl From<CreateBoardError> for ApiError {
-    fn from(error: CreateBoardError) -> Self {
-        match error {
-            CreateBoardError::UnknownProject => Self::NotFound,
-            CreateBoardError::InvalidName(_) | CreateBoardError::NameTaken(_) => Self::BadRequest(error.to_string()),
-            CreateBoardError::Store(error) => Self::Internal(error),
-        }
-    }
-}
-
-#[derive(Deserialize)]
-pub(super) struct NewBoard {
-    name: String,
 }
 
 impl From<Error> for ApiError {
@@ -46,7 +27,6 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         match self {
             Self::NotFound => StatusCode::NOT_FOUND.into_response(),
-            Self::BadRequest(reason) => (StatusCode::BAD_REQUEST, reason).into_response(),
             Self::Internal(error) => {
                 eprintln!("percept: {error}");
                 StatusCode::INTERNAL_SERVER_ERROR.into_response()
@@ -107,8 +87,8 @@ where
         Ok(Json(Data { data: BoardSummary::new(board, project) }))
     }
 
-    pub(super) async fn create_board(State(api): State<Arc<Self>>, Path(project): Path<String>, Json(new): Json<NewBoard>) -> Reply<BoardSummary> {
-        let board = api.service.create_board("percept-web", Actor::Human, &project, &new.name).await?;
+    pub(super) async fn create_board(State(api): State<Arc<Self>>, Path(project): Path<String>) -> Reply<BoardSummary> {
+        let board = api.service.create_board("percept-web", Actor::Human, &project).await?.ok_or(ApiError::NotFound)?;
         Ok(Json(Data { data: BoardSummary::new(board, project) }))
     }
 

@@ -10,6 +10,5 @@ mod sessions;
 mod testing;
 
 pub use app_service::AppService;
-pub use boards::CreateBoardError;
 pub use git::source_path;
 pub use maps::{CitedMessage, MapDetail, Ref};

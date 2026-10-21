@@ -1,54 +1,28 @@
-use std::fmt;
-
 use super::AppService;
 use crate::core::{Actor, Board, BoardId, Event, EventStore, Name, Project, SchemaStore, Source};
-use crate::shared::{Error, Result};
-
-/// Why a board was not created.
-#[derive(Debug)]
-pub enum CreateBoardError {
-    UnknownProject,
-    InvalidName(Error),
-    NameTaken(Name),
-    Store(Error),
-}
-
-impl From<Error> for CreateBoardError {
-    fn from(error: Error) -> Self {
-        Self::Store(error)
-    }
-}
-
-impl fmt::Display for CreateBoardError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnknownProject => write!(f, "no such project"),
-            Self::InvalidName(error) | Self::Store(error) => write!(f, "{error}"),
-            Self::NameTaken(name) => write!(f, "the name {} is taken", name.as_str()),
-        }
-    }
-}
+use crate::shared::Result;
 
 impl<S: EventStore, M: SchemaStore> AppService<S, M> {
-    /// Records a new board named `name` in the project named `project`, written by `client` from the project's root.
-    /// A board's name is unique within its project.
-    pub async fn create_board(&self, client: &str, actor: Actor, project: &str, name: &str) -> std::result::Result<Board, CreateBoardError> {
-        let name = Name::new(name).map_err(CreateBoardError::InvalidName)?;
-
-        // Held until return, so parallel creates cannot both pass the check.
+    /// Records a new board in the project named `project`, written by `client` from the project's root.
+    /// It is named `board-N`, N the smallest number no board of the project already uses.
+    pub async fn create_board(&self, client: &str, actor: Actor, project: &str) -> Result<Option<Board>> {
+        // Held until return, so parallel creates cannot both pick the same name.
         let _lock = self.store.lock().await?;
 
         let events = self.store.all().await?;
-        let project = Project::named(&events, project).ok_or(CreateBoardError::UnknownProject)?;
-        if Board::all(&events).iter().any(|b| b.project == project.id && b.name == name) {
-            return Err(CreateBoardError::NameTaken(name));
-        }
+        let Some(project) = Project::named(&events, project) else {
+            return Ok(None);
+        };
+
+        let taken: Vec<Name> = Board::all(&events).into_iter().filter(|b| b.project == project.id).map(|b| b.name).collect();
+        let free = (1..).map(|n| format!("board-{n}")).find(|name| !taken.iter().any(|t| t.as_str() == name)).expect("an unbounded range has a free number");
+        let name = Name::new(&free)?;
 
         let board = BoardId::new();
         let source = Source { client: client.into(), path: project.root };
         self.store.append(&Event::board_created(source, actor, board, project.id, name.clone())).await?;
 
-        Ok(Board { id: board, project: project.id, name })
+        Ok(Some(Board { id: board, project: project.id, name }))
     }
 
     /// Every board across all projects in `BoardCreated` order.
@@ -79,11 +53,11 @@ mod tests {
         let store = in_project("/work/a");
         let service = AppService::new(&store, Schemas);
 
-        let created = service.create_board("percept-web", Actor::Human, "p0", "Ideas").await.unwrap();
+        let created = service.create_board("percept-web", Actor::Human, "p0").await.unwrap().unwrap();
 
         let boards = service.boards().await.unwrap();
         assert_eq!(boards, vec![created.clone()]);
-        assert_eq!(created.name.as_str(), "ideas");
+        assert_eq!(created.name.as_str(), "board-1");
         let events = store.0.lock().unwrap();
         let event = events.last().unwrap();
         assert_eq!(event.actor, Actor::Human);
@@ -92,35 +66,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_taken_name_fails_whatever_its_case_but_another_project_may_reuse_it() {
+    async fn two_creates_are_numbered_in_turn_and_per_project() {
         let store = in_project("/work/a");
         add_project(&store, "/work/b");
         let service = AppService::new(&store, Schemas);
-        service.create_board("percept-web", Actor::Human, "p0", "ideas").await.unwrap();
 
-        let taken = service.create_board("percept-web", Actor::Human, "p0", "IDEAS").await.unwrap_err();
-        let other = service.create_board("percept-web", Actor::Human, "p1", "ideas").await;
+        let first = service.create_board("percept-web", Actor::Human, "p0").await.unwrap().unwrap();
+        let second = service.create_board("percept-web", Actor::Human, "p0").await.unwrap().unwrap();
+        let other = service.create_board("percept-web", Actor::Human, "p1").await.unwrap().unwrap();
 
-        assert!(matches!(taken, CreateBoardError::NameTaken(_)));
-        assert_eq!(taken.to_string(), "the name ideas is taken");
-        assert!(other.is_ok());
-        assert_eq!(service.boards().await.unwrap().len(), 2);
+        assert_eq!(first.name.as_str(), "board-1");
+        assert_eq!(second.name.as_str(), "board-2");
+        assert_eq!(other.name.as_str(), "board-1");
     }
 
     #[tokio::test]
-    async fn an_unknown_project_an_invalid_name_and_a_broken_store_write_nothing() {
+    async fn a_free_gap_is_reused() {
+        let store = in_project("/work/a");
+        let project = Project::named(&store.0.lock().unwrap(), "p0").unwrap();
+        for name in ["board-1", "board-3"] {
+            let source = Source { client: "percept-web".into(), path: "/work/a".into() };
+            store.0.lock().unwrap().push(Event::board_created(source, Actor::Human, BoardId::new(), project.id, Name::new(name).unwrap()));
+        }
+        let service = AppService::new(&store, Schemas);
+
+        let created = service.create_board("percept-web", Actor::Human, "p0").await.unwrap().unwrap();
+
+        assert_eq!(created.name.as_str(), "board-2");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_project_and_a_broken_store_write_nothing() {
         let store = in_project("/work/a");
         let service = AppService::new(&store, Schemas);
 
-        let unknown = service.create_board("percept-web", Actor::Human, "nope", "ideas").await.unwrap_err();
-        let invalid = service.create_board("percept-web", Actor::Human, "p0", "a b").await.unwrap_err();
-        let reads_as_id = service.create_board("percept-web", Actor::Human, "p0", "0190a3b2-7c4e-7d2f-8a1b-1c2d3e4f5a6b").await.unwrap_err();
-        let broken = AppService::new(Broken, Schemas).create_board("percept-web", Actor::Human, "p0", "ideas").await.unwrap_err();
+        let unknown = service.create_board("percept-web", Actor::Human, "nope").await.unwrap();
+        let broken = AppService::new(Broken, Schemas).create_board("percept-web", Actor::Human, "p0").await;
 
-        assert!(matches!(unknown, CreateBoardError::UnknownProject));
-        assert!(matches!(invalid, CreateBoardError::InvalidName(_)));
-        assert!(matches!(reads_as_id, CreateBoardError::InvalidName(_)));
-        assert!(matches!(broken, CreateBoardError::Store(_)));
+        assert_eq!(unknown, None);
+        assert!(broken.is_err());
         assert_eq!(store.0.lock().unwrap().len(), 1);
     }
 
@@ -129,18 +113,18 @@ mod tests {
         let store = in_project("/work/a");
         add_project(&store, "/work/b");
         let service = AppService::new(&store, Schemas);
-        let ideas = service.create_board("percept-web", Actor::Human, "p0", "ideas").await.unwrap();
-        let id = ideas.id.to_string();
+        let first = service.create_board("percept-web", Actor::Human, "p0").await.unwrap().unwrap();
+        let id = first.id.to_string();
 
-        let by_name = service.board("p0", "Ideas").await.unwrap();
+        let by_name = service.board("p0", "Board-1").await.unwrap();
         let by_id = service.board("p0", &id).await.unwrap();
-        let in_other_project = service.board("p1", "ideas").await.unwrap();
+        let in_other_project = service.board("p1", "board-1").await.unwrap();
         let by_id_in_other_project = service.board("p1", &id).await.unwrap();
-        let unknown_board = service.board("p0", "plan").await.unwrap();
-        let unknown_project = service.board("nope", "ideas").await.unwrap();
+        let unknown_board = service.board("p0", "board-2").await.unwrap();
+        let unknown_project = service.board("nope", "board-1").await.unwrap();
 
-        assert_eq!(by_name, Some(ideas.clone()));
-        assert_eq!(by_id, Some(ideas));
+        assert_eq!(by_name, Some(first.clone()));
+        assert_eq!(by_id, Some(first));
         assert_eq!((in_other_project, by_id_in_other_project, unknown_board, unknown_project), (None, None, None, None));
     }
 
