@@ -22,6 +22,12 @@ export type MapSummary = {
   nodes: number;
 };
 
+export type BoardSummary = {
+  id: string;
+  name: string;
+  project: string;
+};
+
 export type MapNode = {
   id: string;
   kind: string;
@@ -67,6 +73,13 @@ export type Event = {
 export async function getData<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) throw new Response(null, { status: res.status });
+  return ((await res.json()) as { data: T }).data;
+}
+
+/** Posts nothing to `url`; a refusal throws an Error with the server's reason. */
+export async function postData<T>(url: string): Promise<T> {
+  const res = await fetch(url, { method: "POST" });
+  if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
   return ((await res.json()) as { data: T }).data;
 }
 

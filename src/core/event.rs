@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use super::{ClientAgentId, ClientSessionId, MapId, NodeId, ProjectId, ProjectName, Reference, SessionId};
+use super::{BoardId, ClientAgentId, ClientSessionId, MapId, Name, NodeId, ProjectId, Reference, SessionId};
 use crate::shared::Id;
 
 pub type EventId = Id<Event>;
@@ -43,6 +43,7 @@ pub enum Kind {
     SubagentStarted,
     SubagentReported,
     ProjectCreated,
+    BoardCreated,
     MapCreated,
     NodeAdded,
     NodeChanged,
@@ -62,6 +63,7 @@ impl Kind {
             Self::SubagentStarted => "subagent.started",
             Self::SubagentReported => "subagent.reported",
             Self::ProjectCreated => "project.created",
+            Self::BoardCreated => "board.created",
             Self::MapCreated => "map.created",
             Self::NodeAdded => "node.added",
             Self::NodeChanged => "node.changed",
@@ -81,6 +83,7 @@ impl Kind {
             "subagent.started" => Some(Self::SubagentStarted),
             "subagent.reported" => Some(Self::SubagentReported),
             "project.created" => Some(Self::ProjectCreated),
+            "board.created" => Some(Self::BoardCreated),
             "map.created" => Some(Self::MapCreated),
             "node.added" => Some(Self::NodeAdded),
             "node.changed" => Some(Self::NodeChanged),
@@ -102,7 +105,8 @@ pub enum Payload {
     ToolUsed { session: SessionId, tool: String, input: Option<String>, output: Option<String> },
     SubagentStarted { session: SessionId, subagent: ClientAgentId, agent: String, task: String },
     SubagentReported { session: SessionId, subagent: ClientAgentId, content: String },
-    ProjectCreated { project: ProjectId, name: ProjectName },
+    ProjectCreated { project: ProjectId, name: Name },
+    BoardCreated { board: BoardId, project: ProjectId, name: Name },
     MapCreated { map: MapId, project: ProjectId, kind: String },
     NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
     /// The node's full new state, not a diff.
@@ -123,6 +127,7 @@ impl Payload {
             Self::SubagentStarted { .. } => Kind::SubagentStarted,
             Self::SubagentReported { .. } => Kind::SubagentReported,
             Self::ProjectCreated { .. } => Kind::ProjectCreated,
+            Self::BoardCreated { .. } => Kind::BoardCreated,
             Self::MapCreated { .. } => Kind::MapCreated,
             Self::NodeAdded { .. } => Kind::NodeAdded,
             Self::NodeChanged { .. } => Kind::NodeChanged,
@@ -141,7 +146,7 @@ impl Payload {
             | Self::ToolUsed { session, .. }
             | Self::SubagentStarted { session, .. }
             | Self::SubagentReported { session, .. } => Some(*session),
-            Self::ProjectCreated { .. } | Self::MapCreated { .. } | Self::NodeAdded { .. } | Self::NodeChanged { .. } | Self::NodeRemoved { .. } | Self::EdgeAdded { .. } | Self::EdgeRemoved { .. } => None,
+            Self::ProjectCreated { .. } | Self::BoardCreated { .. } | Self::MapCreated { .. } | Self::NodeAdded { .. } | Self::NodeChanged { .. } | Self::NodeRemoved { .. } | Self::EdgeAdded { .. } | Self::EdgeRemoved { .. } => None,
         }
     }
 
@@ -154,6 +159,7 @@ impl Payload {
             | Self::EdgeAdded { map, .. }
             | Self::EdgeRemoved { map, .. } => Some(*map),
             Self::ProjectCreated { .. }
+            | Self::BoardCreated { .. }
             | Self::SessionCreated { .. }
             | Self::SessionStarted { .. }
             | Self::SessionStopped { .. }
@@ -235,8 +241,12 @@ impl Event {
         Self::build(source, Actor::System, Payload::SessionStopped { session }, Some(raw))
     }
 
-    pub fn project_created(source: Source, actor: Actor, project: ProjectId, name: ProjectName) -> Self {
+    pub fn project_created(source: Source, actor: Actor, project: ProjectId, name: Name) -> Self {
         Self::build(source, actor, Payload::ProjectCreated { project, name }, None)
+    }
+
+    pub fn board_created(source: Source, actor: Actor, board: BoardId, project: ProjectId, name: Name) -> Self {
+        Self::build(source, actor, Payload::BoardCreated { board, project, name }, None)
     }
 
     pub fn map_created(source: Source, actor: Actor, map: MapId, project: ProjectId, kind: &str) -> Self {
@@ -427,6 +437,20 @@ mod tests {
     }
 
     #[test]
+    fn board_created_carries_the_actor_and_has_no_session() {
+        let (board, project, name) = (BoardId::new(), ProjectId::new(), Name::new("ideas").unwrap());
+
+        let event = Event::board_created(Source::fixture(), Actor::Human, board, project, name.clone());
+
+        assert_eq!(event.actor, Actor::Human);
+        assert_eq!(event.payload.kind(), Kind::BoardCreated);
+        assert_eq!(event.payload, Payload::BoardCreated { board, project, name });
+        assert_eq!(event.payload.session(), None);
+        assert_eq!(event.payload.map(), None);
+        assert_eq!(event.raw, None);
+    }
+
+    #[test]
     fn node_added_carries_the_actor_and_has_no_session() {
         let (map, node) = (MapId::new(), NodeId::new());
 
@@ -496,7 +520,7 @@ mod tests {
 
     #[test]
     fn every_kind_is_found_by_its_name() {
-        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed, Kind::SubagentStarted, Kind::SubagentReported, Kind::MapCreated, Kind::NodeAdded, Kind::NodeChanged, Kind::NodeRemoved, Kind::EdgeAdded, Kind::EdgeRemoved];
+        let kinds = [Kind::SessionCreated, Kind::SessionStarted, Kind::SessionStopped, Kind::Message, Kind::ToolUsed, Kind::SubagentStarted, Kind::SubagentReported, Kind::ProjectCreated, Kind::BoardCreated, Kind::MapCreated, Kind::NodeAdded, Kind::NodeChanged, Kind::NodeRemoved, Kind::EdgeAdded, Kind::EdgeRemoved];
 
         for kind in kinds {
             assert_eq!(Kind::from_name(kind.name()), Some(kind));

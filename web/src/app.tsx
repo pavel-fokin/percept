@@ -15,10 +15,13 @@ export default function App() {
   );
 }
 
+/** The side gutter of every page. */
+export const gutter = "px-4 sm:px-6";
+
 /** The reading width for pages of text; a page that needs the full width sits outside it. */
 export function Column() {
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 pb-24 sm:px-6">
+    <div className={`mx-auto w-full max-w-3xl pb-24 ${gutter}`}>
       <Outlet />
     </div>
   );

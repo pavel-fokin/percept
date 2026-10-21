@@ -133,6 +133,7 @@ impl Map {
                 Ok(())
             }
             Payload::ProjectCreated { .. }
+            | Payload::BoardCreated { .. }
             | Payload::MapCreated { .. }
             | Payload::SessionCreated { .. }
             | Payload::SessionStarted { .. }
@@ -191,6 +192,7 @@ impl Map {
             }
             Payload::EdgeRemoved { kind, from, to, .. } => self.edges.retain(|e| !e.is(kind, *from, *to)),
             Payload::ProjectCreated { .. }
+            | Payload::BoardCreated { .. }
             | Payload::MapCreated { .. }
             | Payload::SessionCreated { .. }
             | Payload::SessionStarted { .. }

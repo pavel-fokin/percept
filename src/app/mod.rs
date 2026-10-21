@@ -1,6 +1,7 @@
 //! Application layer: `AppService` runs use cases over the domain.
 
 mod app_service;
+mod boards;
 mod git;
 mod maps;
 mod projects;

@@ -5,9 +5,9 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
-use super::responses::{self, Data, MapDetail, MapSummary, ProjectSummary, Status};
+use super::responses::{self, BoardSummary, Data, MapDetail, MapSummary, ProjectSummary, Status};
 use super::Api;
-use crate::core::{EventStore, SchemaStore, SessionId};
+use crate::core::{Actor, EventStore, SchemaStore, SessionId};
 use crate::shared::Error;
 
 type Reply<T> = Result<Json<Data<T>>, ApiError>;
@@ -74,6 +74,22 @@ where
     pub(super) async fn map(State(api): State<Arc<Self>>, Path((project, kind)): Path<(String, String)>) -> Reply<MapDetail> {
         let detail = api.service.map_detail(&project, &kind).await?.ok_or(ApiError::NotFound)?;
         Ok(Json(Data { data: MapDetail::new(detail, project) }))
+    }
+
+    pub(super) async fn boards(State(api): State<Arc<Self>>) -> Reply<Vec<BoardSummary>> {
+        let boards = api.service.boards().await?;
+        let projects = api.service.projects().await?;
+        Ok(Json(Data { data: BoardSummary::all(boards, &projects) }))
+    }
+
+    pub(super) async fn board(State(api): State<Arc<Self>>, Path((project, board)): Path<(String, String)>) -> Reply<BoardSummary> {
+        let board = api.service.board(&project, &board).await?.ok_or(ApiError::NotFound)?;
+        Ok(Json(Data { data: BoardSummary::new(board, project) }))
+    }
+
+    pub(super) async fn create_board(State(api): State<Arc<Self>>, Path(project): Path<String>) -> Reply<BoardSummary> {
+        let board = api.service.create_board("percept-web", Actor::Human, &project).await?.ok_or(ApiError::NotFound)?;
+        Ok(Json(Data { data: BoardSummary::new(board, project) }))
     }
 
     pub(super) async fn session_events(State(api): State<Arc<Self>>, Path(id): Path<SessionId>) -> Reply<Vec<responses::Event>> {

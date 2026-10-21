@@ -74,7 +74,7 @@ impl<S: EventStore, M: SchemaStore> AppService<S, M> {
     pub async fn map_detail(&self, project: &str, kind: &str) -> Result<Option<MapDetail>> {
         let events = self.store.all().await?;
 
-        let Some(project) = Project::all(&events).into_iter().find(|p| p.name.as_str() == project) else {
+        let Some(project) = Project::named(&events, project) else {
             return Ok(None);
         };
         let Some(mut map) = Map::all(&events).into_iter().find(|m| m.project == project.id && m.kind == kind) else {
@@ -721,7 +721,7 @@ mod tests {
         tokio::fs::symlink("inside.txt", project.join("alias.txt")).await.unwrap();
         tokio::fs::symlink("../outside.txt", project.join("escape.txt")).await.unwrap();
 
-        let stub = Project { id: crate::core::ProjectId::new(), name: crate::core::ProjectName::new("stub").unwrap(), root: project.clone() };
+        let stub = Project { id: crate::core::ProjectId::new(), name: crate::core::Name::new("stub").unwrap(), root: project.clone() };
 
         let inside = resolve_reference(&[], &stub, &project, Ref::File { path: "alias.txt".into(), lines: (1, 1) }).await.unwrap();
         let escape = resolve_reference(&[], &stub, &project, Ref::File { path: "escape.txt".into(), lines: (1, 1) }).await;

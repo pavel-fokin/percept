@@ -51,6 +51,30 @@ impl MapSummary {
     }
 }
 
+/// A board as the page reads it, under the name of its project.
+#[derive(Serialize)]
+pub(super) struct BoardSummary {
+    id: core::BoardId,
+    name: String,
+    project: String,
+}
+
+impl BoardSummary {
+    pub(super) fn new(board: core::Board, project: String) -> Self {
+        Self { id: board.id, name: board.name.as_str().to_string(), project }
+    }
+
+    pub(super) fn all(boards: Vec<core::Board>, projects: &[Project]) -> Vec<Self> {
+        boards
+            .into_iter()
+            .map(|board| {
+                let project = project_name(projects, board.project);
+                Self::new(board, project)
+            })
+            .collect()
+    }
+}
+
 /// A whole map as the page reads it, under the name of its project.
 #[derive(Serialize)]
 pub(super) struct MapDetail {
@@ -199,6 +223,7 @@ fn payload(payload: &Payload, home: &Path) -> serde_json::Value {
         | Payload::SessionStarted { .. }
         | Payload::SessionStopped { .. }
         | Payload::ProjectCreated { .. }
+        | Payload::BoardCreated { .. }
         | Payload::MapCreated { .. }
         | Payload::NodeAdded { .. }
         | Payload::NodeChanged { .. }

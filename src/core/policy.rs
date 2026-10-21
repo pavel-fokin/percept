@@ -38,6 +38,7 @@ impl Policy {
                     .try_for_each(|e| refuse_human(&e.changes, &edge_name(map, e), &cascade))
             }
             Payload::ProjectCreated { .. }
+            | Payload::BoardCreated { .. }
             | Payload::MapCreated { .. }
             | Payload::NodeAdded { .. }
             | Payload::EdgeAdded { .. }
