@@ -2,7 +2,10 @@ import { useRef, useState } from "react";
 import {
   addEdge,
   Background,
+  BaseEdge,
   Controls,
+  EdgeLabelRenderer,
+  getBezierPath,
   Handle,
   MarkerType,
   Panel,
@@ -14,6 +17,8 @@ import {
   useStoreApi,
   type Connection,
   type DefaultEdgeOptions,
+  type EdgeProps,
+  type EdgeTypes,
   type Node,
   type NodeProps,
   type NodeTypes,
@@ -24,6 +29,8 @@ import { Button } from "../components/ui/button";
 type Note = Node<{ text: string }, "note">;
 
 const nodeTypes: NodeTypes = { note: NoteNode };
+
+const edgeTypes: EdgeTypes = { default: LabeledEdge };
 
 const edgeOptions: DefaultEdgeOptions = { markerEnd: { type: MarkerType.ArrowClosed, color: null } };
 
@@ -38,6 +45,7 @@ export function Board() {
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           nodeOrigin={[0.5, 0.5]}
           defaultEdgeOptions={edgeOptions}
           onNodesChange={onNodesChange}
@@ -99,5 +107,41 @@ function NoteNode({ id, data, selected }: NodeProps<Note>) {
       )}
       <Handle type="source" position={Position.Bottom} className="size-4 rounded-full border border-border bg-muted" />
     </div>
+  );
+}
+
+function LabeledEdge({ id, label, markerEnd, ...ends }: EdgeProps) {
+  const { updateEdge } = useReactFlow();
+  const [editing, setEditing] = useState(false);
+  const [path, labelX, labelY] = getBezierPath(ends);
+
+  return (
+    <>
+      <g onDoubleClick={() => setEditing(true)}>
+        <BaseEdge path={path} markerEnd={markerEnd} />
+      </g>
+      {(editing || label) && (
+        <EdgeLabelRenderer>
+          <div
+            onDoubleClick={() => setEditing(true)}
+            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
+            className="nodrag nopan pointer-events-auto absolute rounded-sm bg-bg px-1 text-xs"
+          >
+            {editing ? (
+              <input
+                autoFocus
+                value={typeof label === "string" ? label : ""}
+                onChange={(e) => updateEdge(id, { label: e.target.value })}
+                onBlur={() => setEditing(false)}
+                onKeyDown={(e) => e.key === "Escape" && setEditing(false)}
+                className="min-w-16 bg-transparent field-sizing-content outline-none"
+              />
+            ) : (
+              label
+            )}
+          </div>
+        </EdgeLabelRenderer>
+      )}
+    </>
   );
 }
