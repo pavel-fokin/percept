@@ -1,5 +1,5 @@
 import { useRef, useState, useSyncExternalStore } from "react";
-import { Link } from "react-router";
+import { Link, NavLink } from "react-router";
 import { ThemeSwitch } from "./theme-switch";
 import { IconButton } from "./ui/button";
 
@@ -81,12 +81,37 @@ function Panel({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => vo
         </div>
       </div>
 
+      <nav aria-label="Main" className="mt-4 grid gap-0.5">
+        <NavLink
+          to="/"
+          end
+          title={collapsed ? "Home" : undefined}
+          className={({ isActive }) => `${item} ${isActive ? "bg-border/50 text-text" : ""}`}
+        >
+          <HomeIcon />
+          <span className={collapsed ? "sr-only" : ""}>Home</span>
+        </NavLink>
+        {/* Projects are created by `percept init` until the web can create one without a folder. */}
+        <button
+          type="button"
+          disabled
+          title={collapsed ? "New project" : undefined}
+          className={`${item} disabled:cursor-not-allowed disabled:opacity-50`}
+        >
+          <PlusIcon />
+          <span className={collapsed ? "sr-only" : ""}>New project</span>
+        </button>
+      </nav>
+
       <div className="mt-auto">
         <ThemeSwitch />
       </div>
     </div>
   );
 }
+
+// An icon at the centre of a rail-wide square, so the rail keeps it in place.
+const item = "flex h-11 items-center gap-3 rounded-md px-3.5 text-sm whitespace-nowrap text-muted hover:bg-border/50 hover:text-text";
 
 function Wordmark({ className = "" }: { className?: string }) {
   return (
@@ -111,6 +136,23 @@ function PanelIcon({ className = "" }: { className?: string }) {
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden className={`size-4 ${className}`}>
       <rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2" />
       <path d="M6 2.75v10.5" />
+    </svg>
+  );
+}
+
+function HomeIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden className="size-4 flex-none">
+      <path d="M2.75 6.5 8 2.25l5.25 4.25v6.25a1 1 0 0 1-1 1h-8.5a1 1 0 0 1-1-1Z" />
+      <path d="M6.25 13.75v-4h3.5v4" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden className="size-4 flex-none">
+      <path d="M8 3v10M3 8h10" />
     </svg>
   );
 }
