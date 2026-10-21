@@ -4,7 +4,7 @@ use std::path::Path;
 use serde::Serialize;
 use serde_json::json;
 
-use super::paths::display_paths;
+use super::paths::{display_path, display_paths};
 use crate::app::{self, CitedMessage};
 use crate::core::{self, Actor, ClientSessionId, EventId, NodeId, Payload, Project, ProjectId, SessionId, SessionStatus};
 
@@ -22,6 +22,19 @@ pub(super) struct Status {
 /// The name of the project with this id. Every session and map names a project that was created.
 fn project_name(projects: &[Project], id: ProjectId) -> String {
     projects.iter().find(|p| p.id == id).map(|p| p.name.as_str().to_string()).expect("a project was created before what it holds")
+}
+
+/// A project as the page reads it: its name and its root shown from home.
+#[derive(Serialize)]
+pub(super) struct ProjectSummary {
+    name: String,
+    root: String,
+}
+
+impl ProjectSummary {
+    pub(super) fn new(project: Project, home: &Path) -> Self {
+        Self { name: project.name.as_str().to_string(), root: display_path(&project.root, home) }
+    }
 }
 
 /// A map as the page reads it, under the name of its project.

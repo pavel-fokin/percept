@@ -1,5 +1,10 @@
 import { isRouteErrorResponse } from "react-router";
 
+export type Project = {
+  name: string;
+  root: string;
+};
+
 export type Session = {
   id: string;
   client_session_id: string;

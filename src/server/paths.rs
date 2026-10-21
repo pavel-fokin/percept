@@ -1,5 +1,10 @@
 use std::path::Path;
 
+/// A path written from `~` when it is home or under it.
+pub(super) fn display_path(path: &Path, home: &Path) -> String {
+    display_paths(&path.display().to_string(), home)
+}
+
 /// Every path in `text` that starts at home written from `~`, so a command reads like a file path does.
 /// Home counts only as a whole path segment that begins a word: `/mnt/Users/me/a` and `/Users/me2` stay.
 /// A home of `/` or empty is no home: everything would sit under it.
@@ -39,6 +44,12 @@ mod tests {
         let shown = display_paths(text, Path::new(HOME));
 
         assert_eq!(shown, "cd ~ && sed -n 1,9p '~/a.rs' /Users/pavel-fokinx/b.rs");
+    }
+
+    #[test]
+    fn a_path_under_home_starts_with_a_tilde() {
+        assert_eq!(display_path(Path::new("/Users/pavel-fokin/code/repo"), Path::new(HOME)), "~/code/repo");
+        assert_eq!(display_path(Path::new("/srv/repo"), Path::new(HOME)), "/srv/repo");
     }
 
     #[test]

@@ -5,7 +5,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
-use super::responses::{self, Data, MapDetail, MapSummary, Status};
+use super::responses::{self, Data, MapDetail, MapSummary, ProjectSummary, Status};
 use super::Api;
 use crate::core::{EventStore, SchemaStore, SessionId};
 use crate::shared::Error;
@@ -43,6 +43,12 @@ where
     pub(super) async fn status(State(api): State<Arc<Self>>) -> Reply<Status> {
         let events = api.service.event_count().await?;
         Ok(Json(Data { data: Status { events } }))
+    }
+
+    pub(super) async fn projects(State(api): State<Arc<Self>>) -> Reply<Vec<ProjectSummary>> {
+        let projects = api.service.projects().await?;
+        let projects = projects.into_iter().map(|p| ProjectSummary::new(p, &api.home)).collect();
+        Ok(Json(Data { data: projects }))
     }
 
     pub(super) async fn sessions(State(api): State<Arc<Self>>) -> Reply<Vec<responses::Session>> {

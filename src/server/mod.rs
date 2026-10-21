@@ -54,6 +54,7 @@ where
 {
     Router::new()
         .route("/api/status", get(Api::<S, M>::status))
+        .route("/api/projects", get(Api::<S, M>::projects))
         .route("/api/sessions", get(Api::<S, M>::sessions))
         .route("/api/sessions/{id}", get(Api::<S, M>::session))
         .route("/api/sessions/{id}/events", get(Api::<S, M>::session_events))
@@ -108,7 +109,7 @@ mod tests {
         async fn all(&self) -> Result<Vec<Event>> {
             let session: SessionId = serde_json::from_value(json!(SESSION))?;
             let project: ProjectId = serde_json::from_value(json!(PROJECT))?;
-            let project_created = Event::project_created(Source::fixture(), Actor::Human, project, ProjectName::new("repo").unwrap());
+            let project_created = Event::project_created(Source { client: "claude-code".into(), path: "/Users/me/repo".into() }, Actor::Human, project, ProjectName::new("repo").unwrap());
             let created = Event::session_created(Source::fixture(), session, project, ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
             let map: MapId = serde_json::from_value(json!(MAP))?;
@@ -158,6 +159,14 @@ mod tests {
 
         assert!(response.starts_with("HTTP/1.1 200"));
         assert!(response.ends_with(r#"{"data":{"events":6}}"#));
+    }
+
+    #[tokio::test]
+    async fn projects_returns_each_name_with_its_root_from_home() {
+        let response = get_response("/api/projects").await;
+
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert_eq!(json_body(&response)["data"], json!([{ "name": "repo", "root": "~/repo" }]));
     }
 
     #[tokio::test]
