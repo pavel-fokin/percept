@@ -1,4 +1,5 @@
 mod definition;
+mod observed;
 mod places;
 mod policy;
 mod schema;
@@ -9,6 +10,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 
 pub use definition::{Definition, DefinitionStore};
+pub use observed::Observed;
 pub use places::{LastPlace, Place, Places};
 pub use policy::Policy;
 pub use schema::{EdgeKind, Schema};

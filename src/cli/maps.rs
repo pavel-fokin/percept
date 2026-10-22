@@ -1,9 +1,9 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use super::hook::Client;
 use crate::app::{AppService, Ref, source_path};
-use crate::core::{Actor, Definition, DefinitionStore, EventStore, Map, MapId, NodeId, Project, Reference, Source};
+use crate::core::{Actor, Definition, DefinitionStore, EventStore, Map, MapId, NodeId, Observed, Project, Reference, Source};
 use crate::shared::Result;
 
 pub(super) async fn create<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, name: &str, file: &Path) -> Result<()> {
@@ -189,37 +189,63 @@ pub(super) async fn describe<S: EventStore, M: DefinitionStore>(service: &AppSer
     let project = project_of(service, &source_path(&std::env::current_dir()?).await).await?;
     let map = map_of(service, &project, name).await?;
     let definition = service.definition(map).await?;
+    let observed = match definition.schema() {
+        Some(_) => None,
+        None => Some(service.map(map).await?.observed()),
+    };
 
-    println!("{}", definition_markdown(name, &definition));
+    println!("{}", definition_markdown(name, &definition, observed.as_ref()));
 
     Ok(())
 }
 
-fn definition_markdown(name: &str, definition: &Definition) -> String {
+/// `observed` is the schema read off a map whose definition declares none.
+fn definition_markdown(name: &str, definition: &Definition, observed: Option<&Observed>) -> String {
     let mut text = format!(
         "# {name}\n\n{}\n\n## Instructions\n\n{}\n",
         definition.purpose().trim(),
         definition.instructions().trim(),
     );
 
-    let Some(schema) = definition.schema() else {
-        return text.trim_end().to_string();
-    };
-
-    text.push_str("\n## Schema\n\n| Node kind | Properties |\n|---|---|\n");
-    for (node, properties) in schema.nodes() {
-        let properties: Vec<&str> = properties.iter().map(String::as_str).collect();
-        text.push_str(&format!("| {node} | {} |\n", properties.join(", ")));
-    }
-
-    if !schema.edges().is_empty() {
-        text.push_str("\n| Edge kind | From | To |\n|---|---|---|\n");
-    }
-    for (edge, ends) in schema.edges() {
-        text.push_str(&format!("| {edge} | {} | {} |\n", ends.from, ends.to));
+    if let Some(schema) = definition.schema() {
+        text.push_str("\n## Schema\n\n");
+        let nodes = schema.nodes().iter().map(|(kind, properties)| (kind.as_str(), properties));
+        let edges = schema.edges().iter().map(|(kind, ends)| (kind.as_str(), ends.from.as_str(), ends.to.as_str()));
+        text.push_str(&schema_tables(nodes, edges));
+    } else if let Some(observed) = observed {
+        text.push_str("\n## Schema\n\nObserved on the map, not checked.");
+        if observed.nodes.is_empty() {
+            text.push_str(" Nothing on the map yet.\n");
+        } else {
+            text.push_str("\n\n");
+            let nodes = observed.nodes.iter().map(|(kind, properties)| (kind.as_str(), properties));
+            let edges = observed.edges.iter().map(|(kind, from, to)| (kind.as_str(), from.as_str(), to.as_str()));
+            text.push_str(&schema_tables(nodes, edges));
+        }
     }
 
     text.trim_end().to_string()
+}
+
+fn schema_tables<'a>(
+    nodes: impl Iterator<Item = (&'a str, &'a BTreeSet<String>)>,
+    edges: impl Iterator<Item = (&'a str, &'a str, &'a str)>,
+) -> String {
+    let mut text = String::from("| Node kind | Properties |\n|---|---|\n");
+    for (kind, properties) in nodes {
+        let properties: Vec<&str> = properties.iter().map(String::as_str).collect();
+        text.push_str(&format!("| {kind} | {} |\n", properties.join(", ")));
+    }
+
+    let mut edges = edges.peekable();
+    if edges.peek().is_some() {
+        text.push_str("\n| Edge kind | From | To |\n|---|---|---|\n");
+    }
+    for (kind, from, to) in edges {
+        text.push_str(&format!("| {kind} | {from} | {to} |\n"));
+    }
+
+    text
 }
 
 fn map_markdown(map: &Map) -> Result<String> {
@@ -450,20 +476,54 @@ mod tests {
         let edges = BTreeMap::from([("supersedes".to_string(), EdgeKind { from: "decision".into(), to: "decision".into() })]);
         let definition = Definition::new("Why.".into(), "\nKeep it.\n\nShort.\n".into(), Some(Schema::new(nodes, edges).unwrap()));
 
-        let text = definition_markdown("decisions", &definition);
+        let text = definition_markdown("decisions", &definition, None);
 
         assert_eq!(text, "# decisions\n\nWhy.\n\n## Instructions\n\nKeep it.\n\nShort.\n\n## Schema\n\n\
             | Node kind | Properties |\n|---|---|\n| decision | by, why |\n| note |  |\n\n\
             | Edge kind | From | To |\n|---|---|---|\n| supersedes | decision | decision |");
     }
 
+    fn scratch() -> Definition {
+        Definition::new("Why.".into(), "Keep it.".into(), None)
+    }
+
     #[test]
-    fn without_a_schema_the_schema_section_is_left_out() {
-        let definition = Definition::new("Why.".into(), "Keep it.".into(), None);
+    fn without_a_schema_the_observed_schema_is_shown() {
+        let (map, a, b) = (MapId::new(), NodeId::new(), NodeId::new());
+        let place = BTreeMap::from([("where".to_string(), "here".to_string())]);
+        let events = [
+            Event::node_added(Source::fixture(), Actor::Human, map, a, "obstacle", "A", place, Vec::new()),
+            Event::node_added(Source::fixture(), Actor::Human, map, b, "cause", "B", BTreeMap::new(), Vec::new()),
+            Event::edge_added(Source::fixture(), Actor::Human, map, "caused-by", a, b),
+        ];
+        let observed = Map::fixture(map, &events).observed();
 
-        let text = definition_markdown("scratch", &definition);
+        let text = definition_markdown("scratch", &scratch(), Some(&observed));
 
-        assert_eq!(text, "# scratch\n\nWhy.\n\n## Instructions\n\nKeep it.");
+        assert_eq!(text, "# scratch\n\nWhy.\n\n## Instructions\n\nKeep it.\n\n## Schema\n\nObserved on the map, not checked.\n\n\
+            | Node kind | Properties |\n|---|---|\n| cause |  |\n| obstacle | where |\n\n\
+            | Edge kind | From | To |\n|---|---|---|\n| caused-by | obstacle | cause |");
+    }
+
+    #[test]
+    fn without_edges_the_observed_edge_table_is_left_out() {
+        let (map, a) = (MapId::new(), NodeId::new());
+        let events = [Event::node_added(Source::fixture(), Actor::Human, map, a, "note", "A", BTreeMap::new(), Vec::new())];
+        let observed = Map::fixture(map, &events).observed();
+
+        let text = definition_markdown("scratch", &scratch(), Some(&observed));
+
+        assert!(text.ends_with("| note |  |"));
+        assert!(!text.contains("Edge kind"));
+    }
+
+    #[test]
+    fn an_empty_map_without_a_schema_says_so() {
+        let observed = Map::fixture(MapId::new(), &[]).observed();
+
+        let text = definition_markdown("scratch", &scratch(), Some(&observed));
+
+        assert_eq!(text, "# scratch\n\nWhy.\n\n## Instructions\n\nKeep it.\n\n## Schema\n\nObserved on the map, not checked. Nothing on the map yet.");
     }
 
     #[test]
@@ -471,7 +531,7 @@ mod tests {
         let nodes = BTreeMap::from([("note".to_string(), Default::default())]);
         let definition = Definition::new("p".into(), "i".into(), Some(Schema::new(nodes, BTreeMap::new()).unwrap()));
 
-        let text = definition_markdown("notes", &definition);
+        let text = definition_markdown("notes", &definition, None);
 
         assert!(text.ends_with("| note |  |"));
         assert!(!text.contains("Edge kind"));
