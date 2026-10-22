@@ -120,7 +120,7 @@ where
 
     pub(super) async fn board(State(api): State<Arc<Self>>, Path((project, board)): Path<(String, String)>) -> Reply<BoardDetail> {
         let contents = api.service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
-        Ok(Json(Data { data: BoardDetail::new(contents, project) }))
+        Ok(Json(Data { data: BoardDetail::new(contents) }))
     }
 
     pub(super) async fn place_map(
@@ -128,21 +128,21 @@ where
         Path((project, board)): Path<(String, String)>,
         Json(body): Json<PlacedMap>,
     ) -> Reply<BoardDetail> {
-        let board_id = api.service.board(&project, &board).await?.ok_or(ApiError::NotFound)?.id;
-        let map = api.service.map_id(&project, &body.map).await?.ok_or(ApiError::NotFound)?;
-        api.service.place_map(Source::Web, Actor::Human, map, Place::Board(board_id)).await?;
+        let shown = api.service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
+        let map = api.service.map_id(shown.project.name.as_str(), &body.map).await?.ok_or(ApiError::NotFound)?;
+        api.service.place_map(Source::Web, Actor::Human, map, Place::Board(shown.board.id)).await?;
 
         let contents = api.service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
-        Ok(Json(Data { data: BoardDetail::new(contents, project) }))
+        Ok(Json(Data { data: BoardDetail::new(contents) }))
     }
 
     pub(super) async fn unplace_map(State(api): State<Arc<Self>>, Path((project, board, map)): Path<(String, String, String)>) -> Reply<BoardDetail> {
-        let board_id = api.service.board(&project, &board).await?.ok_or(ApiError::NotFound)?.id;
-        let map = api.service.map_id(&project, &map).await?.ok_or(ApiError::NotFound)?;
-        api.service.unplace_map(Source::Web, Actor::Human, map, Place::Board(board_id)).await?;
+        let shown = api.service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
+        let map = api.service.map_id(shown.project.name.as_str(), &map).await?.ok_or(ApiError::NotFound)?;
+        api.service.unplace_map(Source::Web, Actor::Human, map, Place::Board(shown.board.id)).await?;
 
         let contents = api.service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
-        Ok(Json(Data { data: BoardDetail::new(contents, project) }))
+        Ok(Json(Data { data: BoardDetail::new(contents) }))
     }
 
     pub(super) async fn create_board(State(api): State<Arc<Self>>, Path(project): Path<String>) -> Reply<BoardSummary> {

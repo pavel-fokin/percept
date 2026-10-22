@@ -2,8 +2,9 @@ use super::AppService;
 use crate::core::{Actor, Board, BoardId, DefinitionStore, Event, EventStore, Map, Name, Place, Project, Source};
 use crate::shared::Result;
 
-/// A board with the maps shown on it, each with its nodes and edges.
+/// A board of a project with the maps shown on it, each with its nodes and edges.
 pub struct BoardContents {
+    pub project: Project,
     pub board: Board,
     pub maps: Vec<Map>,
 }
@@ -34,17 +35,6 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         Ok(Board::all(&self.store.all().await?))
     }
 
-    /// The board named `board` in the project named `project`.
-    pub async fn board(&self, project: &str, board: &str) -> Result<Option<Board>> {
-        let events = self.store.all().await?;
-
-        let Some(project) = Project::named(&events, project) else {
-            return Ok(None);
-        };
-
-        Ok(Board::named(&events, project.id, board))
-    }
-
     /// The board named `board` in the project named `project`, with the maps shown on it, from one read of the log.
     pub async fn board_contents(&self, project: &str, board: &str) -> Result<Option<BoardContents>> {
         let events = self.store.all().await?;
@@ -58,7 +48,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
 
         let maps = Map::at(&events, Place::Board(board.id));
 
-        Ok(Some(BoardContents { board, maps }))
+        Ok(Some(BoardContents { project, board, maps }))
     }
 }
 
@@ -136,10 +126,12 @@ mod tests {
         let service = AppService::new(&store, Definitions);
         let first = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
 
-        let by_name = service.board("p0", "Board").await.unwrap();
-        let in_other_project = service.board("p1", "board").await.unwrap();
-        let unknown_board = service.board("p0", "board-1").await.unwrap();
-        let unknown_project = service.board("nope", "board").await.unwrap();
+        let found = async |project, board| service.board_contents(project, board).await.unwrap().map(|c| c.board);
+
+        let by_name = found("P0", "Board").await;
+        let in_other_project = found("p1", "board").await;
+        let unknown_board = found("p0", "board-1").await;
+        let unknown_project = found("nope", "board").await;
 
         assert_eq!(by_name, Some(first));
         assert_eq!((in_other_project, unknown_board, unknown_project), (None, None, None));
@@ -170,7 +162,6 @@ mod tests {
         let service = AppService::new(Broken, Definitions);
 
         assert!(service.boards().await.is_err());
-        assert!(service.board("p0", "ideas").await.is_err());
         assert!(service.board_contents("p0", "ideas").await.is_err());
     }
 }

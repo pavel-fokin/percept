@@ -85,10 +85,10 @@ pub(super) struct BoardDetail {
 }
 
 impl BoardDetail {
-    pub(super) fn new(contents: app::BoardContents, project: String) -> Self {
-        let app::BoardContents { board, maps } = contents;
+    pub(super) fn new(contents: app::BoardContents) -> Self {
+        let app::BoardContents { project, board, maps } = contents;
 
-        Self { id: board.id, name: board.name.as_str().to_string(), project, maps: maps.into_iter().map(BoardMap::from).collect() }
+        Self { id: board.id, name: board.name.as_str().to_string(), project: project.name.as_str().to_string(), maps: maps.into_iter().map(BoardMap::from).collect() }
     }
 }
 

@@ -113,11 +113,15 @@ function AddMap({ board, addable }: { board: BoardDetail; addable: MapSummary[] 
   const [open, setOpen] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
+  function toggle() {
+    setOpen(!open);
+    setFailure(null);
+  }
+
   async function add(map: string) {
     try {
       await postData<BoardDetail>(`/api/projects/${encodeURIComponent(board.project)}/boards/${encodeURIComponent(board.name)}/maps`, { map });
       setOpen(false);
-      setFailure(null);
       await revalidate();
     } catch (error) {
       setFailure(describe(error));
@@ -126,7 +130,7 @@ function AddMap({ board, addable }: { board: BoardDetail; addable: MapSummary[] 
 
   return (
     <div className="relative flex flex-col items-end gap-2">
-      <Button variant="secondary" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <Button variant="secondary" aria-expanded={open} onClick={toggle}>
         Add map
       </Button>
       {open && (
@@ -155,11 +159,15 @@ function RemoveMap({ board }: { board: BoardDetail }) {
   const [open, setOpen] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
 
+  function toggle() {
+    setOpen(!open);
+    setFailure(null);
+  }
+
   async function remove(map: string) {
     try {
       await deleteData<BoardDetail>(`/api/projects/${encodeURIComponent(board.project)}/boards/${encodeURIComponent(board.name)}/maps/${encodeURIComponent(map)}`);
       setOpen(false);
-      setFailure(null);
       await revalidate();
     } catch (error) {
       setFailure(`${map}: ${describe(error)}`);
@@ -168,7 +176,7 @@ function RemoveMap({ board }: { board: BoardDetail }) {
 
   return (
     <div className="relative flex flex-col items-end gap-2">
-      <Button variant="secondary" aria-expanded={open} onClick={() => setOpen(!open)}>
+      <Button variant="secondary" aria-expanded={open} onClick={toggle}>
         Remove map
       </Button>
       {open && (
