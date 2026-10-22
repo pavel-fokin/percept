@@ -8,8 +8,8 @@ import { RouteError } from "../components/route-error";
 import { textLink } from "../components/ui/text-link";
 import { byDay, changedWhen, dayAndTime, full, time, withChangedTimes } from "../format";
 
-export function loadMap(project: string, kind: string) {
-  return getData<MapDetail>(`/api/projects/${encodeURIComponent(project)}/maps/${encodeURIComponent(kind)}`);
+export function loadMap(project: string, name: string) {
+  return getData<MapDetail>(`/api/projects/${encodeURIComponent(project)}/maps/${encodeURIComponent(name)}`);
 }
 
 export function MapPage({ map }: { map: MapDetail }) {
@@ -20,7 +20,7 @@ export function MapPage({ map }: { map: MapDetail }) {
   return (
     <>
       <h1 className="mt-8 sm:mt-10">
-        <BackLink to="/" project={map.project} collection={map.kind}>
+        <BackLink to="/" project={map.project} collection={map.name}>
           <span className="tabular-nums"> · {map.nodes.length}</span>
         </BackLink>
       </h1>
@@ -40,9 +40,9 @@ export function MapPage({ map }: { map: MapDetail }) {
         </div>
       ) : (
         <section className="grid justify-items-center gap-3 py-16 text-center">
-          <h2 className="text-2xl font-semibold text-balance">No {map.kind} yet</h2>
+          <h2 className="text-2xl font-semibold text-balance">No {map.name} yet</h2>
           <p className="max-w-[36ch] text-muted">
-            <span className="capitalize">{map.kind}</span> appear here once an agent records one in this project.
+            <span className="capitalize">{map.name}</span> appear here once an agent records one in this project.
           </p>
         </section>
       )}

@@ -17,7 +17,7 @@ export type Session = {
 };
 
 export type MapSummary = {
-  kind: string;
+  name: string;
   project: string;
   nodes: number;
 };
@@ -49,7 +49,7 @@ export type MapEdge = {
 };
 
 export type MapDetail = {
-  kind: string;
+  name: string;
   project: string;
   nodes: MapNode[];
   edges: MapEdge[];

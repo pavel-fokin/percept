@@ -4,7 +4,7 @@ use crate::shared::Result;
 
 impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
     /// Records a new board in the project named `project`, written from `source`.
-    /// It is named `board-N`, N the smallest number no board of the project already uses.
+    /// It is named `board`, or `board-N` when taken, N the smallest number no board of the project already uses.
     pub async fn create_board(&self, source: Source, actor: Actor, project: &str) -> Result<Option<Board>> {
         // Held until return, so parallel creates cannot both pick the same name.
         let _lock = self.store.lock().await?;
@@ -15,8 +15,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         };
 
         let taken: Vec<Name> = Board::all(&events).into_iter().filter(|b| b.project == project.id).map(|b| b.name).collect();
-        let free = (1..).map(|n| format!("board-{n}")).find(|name| !taken.iter().any(|t| t.as_str() == name)).expect("an unbounded range has a free number");
-        let name = Name::new(&free)?;
+        let name = Name::free(&Name::new("board")?, &taken);
 
         let board = BoardId::new();
         self.store.append(&Event::board_created(source, actor, board, project.id, name.clone())).await?;
@@ -56,7 +55,7 @@ mod tests {
 
         let boards = service.boards().await.unwrap();
         assert_eq!(boards, vec![created.clone()]);
-        assert_eq!(created.name.as_str(), "board-1");
+        assert_eq!(created.name.as_str(), "board");
         let events = store.0.lock().unwrap();
         let event = events.last().unwrap();
         assert_eq!(event.actor, Actor::Human);
@@ -74,16 +73,16 @@ mod tests {
         let second = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
         let other = service.create_board(Source::Web, Actor::Human, "p1").await.unwrap().unwrap();
 
-        assert_eq!(first.name.as_str(), "board-1");
-        assert_eq!(second.name.as_str(), "board-2");
-        assert_eq!(other.name.as_str(), "board-1");
+        assert_eq!(first.name.as_str(), "board");
+        assert_eq!(second.name.as_str(), "board-1");
+        assert_eq!(other.name.as_str(), "board");
     }
 
     #[tokio::test]
     async fn a_free_gap_is_reused() {
         let store = in_project("/work/a");
         let project = Project::named(&store.0.lock().unwrap(), "p0").unwrap();
-        for name in ["board-1", "board-3"] {
+        for name in ["board", "board-2"] {
             let source = Source::Web;
             store.0.lock().unwrap().push(Event::board_created(source, Actor::Human, BoardId::new(), project.id, Name::new(name).unwrap()));
         }
@@ -91,7 +90,7 @@ mod tests {
 
         let created = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
 
-        assert_eq!(created.name.as_str(), "board-2");
+        assert_eq!(created.name.as_str(), "board-1");
     }
 
     #[tokio::test]
@@ -114,10 +113,10 @@ mod tests {
         let service = AppService::new(&store, Definitions);
         let first = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
 
-        let by_name = service.board("p0", "Board-1").await.unwrap();
-        let in_other_project = service.board("p1", "board-1").await.unwrap();
-        let unknown_board = service.board("p0", "board-2").await.unwrap();
-        let unknown_project = service.board("nope", "board-1").await.unwrap();
+        let by_name = service.board("p0", "Board").await.unwrap();
+        let in_other_project = service.board("p1", "board").await.unwrap();
+        let unknown_board = service.board("p0", "board-1").await.unwrap();
+        let unknown_project = service.board("nope", "board").await.unwrap();
 
         assert_eq!(by_name, Some(first));
         assert_eq!((in_other_project, unknown_board, unknown_project), (None, None, None));

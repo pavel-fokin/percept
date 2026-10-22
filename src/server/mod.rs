@@ -59,7 +59,7 @@ where
         .route("/api/sessions/{id}", get(Api::<S, M>::session))
         .route("/api/sessions/{id}/events", get(Api::<S, M>::session_events))
         .route("/api/maps", get(Api::<S, M>::maps))
-        .route("/api/projects/{project}/maps/{kind}", get(Api::<S, M>::map))
+        .route("/api/projects/{project}/maps/{name}", get(Api::<S, M>::map))
         .route("/api/boards", get(Api::<S, M>::boards))
         .route("/api/projects/{project}/boards", post(Api::<S, M>::create_board))
         .route("/api/projects/{project}/boards/{board}", get(Api::<S, M>::board))
@@ -116,7 +116,7 @@ mod tests {
             let created = Event::session_created(Source::fixture(), session, project, ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
             let map: MapId = serde_json::from_value(json!(MAP))?;
-            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, "decisions", "/maps/decisions.toml".into());
+            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into());
             let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default(), self.1.clone());
             Ok([project_created, created].into_iter().chain(started).chain(self.2.clone()).chain([map_created, node]).collect())
         }
@@ -246,7 +246,7 @@ mod tests {
         let data = body["data"].as_array().unwrap();
         assert_eq!(data.len(), 1);
         assert_eq!(data[0].as_object().unwrap().len(), 3);
-        assert_eq!(data[0]["kind"], "decisions");
+        assert_eq!(data[0]["name"], "decisions");
         assert_eq!(data[0]["project"], "repo");
         assert_eq!(data[0]["nodes"], 1);
     }
@@ -257,7 +257,7 @@ mod tests {
 
         assert!(response.starts_with("HTTP/1.1 200"));
         let data = &json_body(&response)["data"];
-        assert_eq!(data["kind"], "decisions");
+        assert_eq!(data["name"], "decisions");
         assert_eq!(data["project"], "repo");
         assert_eq!(data["nodes"].as_array().unwrap().len(), 1);
         assert_eq!(data["nodes"][0]["title"], "Q");
@@ -356,10 +356,10 @@ mod tests {
         let created = send(addr, "POST", "/api/projects/repo/boards", "").await;
         let id = json_body(&created)["data"]["id"].as_str().unwrap().to_string();
         let all = send(addr, "GET", "/api/boards", "").await;
-        let by_name = send(addr, "GET", "/api/projects/repo/boards/board-1", "").await;
+        let by_name = send(addr, "GET", "/api/projects/repo/boards/board", "").await;
         let by_id = send(addr, "GET", &format!("/api/projects/repo/boards/{id}"), "").await;
 
-        let board = json!({ "id": id, "name": "board-1", "project": "repo" });
+        let board = json!({ "id": id, "name": "board", "project": "repo" });
         assert!(created.starts_with("HTTP/1.1 200"));
         assert_eq!(json_body(&created)["data"], board);
         assert_eq!(json_body(&all)["data"], json!([board]));
@@ -377,8 +377,8 @@ mod tests {
         let first = send(addr, "POST", "/api/projects/repo/boards", "").await;
         let second = send(addr, "POST", "/api/projects/repo/boards", "").await;
 
-        assert_eq!(json_body(&first)["data"]["name"], "board-1");
-        assert_eq!(json_body(&second)["data"]["name"], "board-2");
+        assert_eq!(json_body(&first)["data"]["name"], "board");
+        assert_eq!(json_body(&second)["data"]["name"], "board-1");
     }
 
     #[tokio::test]
@@ -388,7 +388,7 @@ mod tests {
         let before = log.0.lock().unwrap().len();
 
         let post = send(addr, "POST", "/api/projects/other/boards", "").await;
-        let no_board = send(addr, "GET", "/api/projects/repo/boards/board-1", "").await;
+        let no_board = send(addr, "GET", "/api/projects/repo/boards/board", "").await;
         let no_project = send(addr, "GET", "/api/projects/other/boards/ideas", "").await;
 
         assert!(post.starts_with("HTTP/1.1 404"));

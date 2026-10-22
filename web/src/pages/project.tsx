@@ -20,7 +20,7 @@ export async function loadProject({ params }: LoaderFunctionArgs): Promise<Loade
     case "session":
       return { page: "session", data: await loadSession(route.project, route.id) };
     case "map":
-      return { page: "map", data: await loadMap(route.project, route.kind) };
+      return { page: "map", data: await loadMap(route.project, route.name) };
   }
 }
 

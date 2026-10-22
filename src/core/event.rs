@@ -126,7 +126,7 @@ pub enum Payload {
     SubagentReported { session: SessionId, subagent: ClientAgentId, content: String },
     ProjectCreated { project: ProjectId, name: Name, root: Option<PathBuf> },
     BoardCreated { board: BoardId, project: ProjectId, name: Name },
-    MapCreated { map: MapId, project: ProjectId, kind: String, definition: PathBuf },
+    MapCreated { map: MapId, project: ProjectId, name: Name, definition: PathBuf },
     NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
     /// The node's full new state, not a diff.
     NodeChanged { map: MapId, node: NodeId, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
@@ -268,8 +268,8 @@ impl Event {
         Self::build(source, actor, Payload::BoardCreated { board, project, name }, None)
     }
 
-    pub fn map_created(source: Source, actor: Actor, map: MapId, project: ProjectId, kind: &str, definition: PathBuf) -> Self {
-        let payload = Payload::MapCreated { map, project, kind: kind.into(), definition };
+    pub fn map_created(source: Source, actor: Actor, map: MapId, project: ProjectId, name: Name, definition: PathBuf) -> Self {
+        let payload = Payload::MapCreated { map, project, name, definition };
         Self::build(source, actor, payload, None)
     }
 
@@ -446,11 +446,11 @@ mod tests {
     fn map_created_carries_the_actor_and_has_no_session() {
         let (map, project) = (MapId::new(), ProjectId::new());
 
-        let event = Event::map_created(Source::fixture(), Actor::Human, map, project, "decisions", "/maps/decisions.toml".into());
+        let event = Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into());
 
         assert_eq!(event.actor, Actor::Human);
         assert_eq!(event.payload.kind(), Kind::MapCreated);
-        assert_eq!(event.payload, Payload::MapCreated { map, project, kind: "decisions".into(), definition: "/maps/decisions.toml".into() });
+        assert_eq!(event.payload, Payload::MapCreated { map, project, name: Name::new("decisions").unwrap(), definition: "/maps/decisions.toml".into() });
         assert_eq!(event.payload.session(), None);
         assert_eq!(event.raw, None);
     }

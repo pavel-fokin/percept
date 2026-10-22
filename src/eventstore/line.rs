@@ -41,7 +41,7 @@ impl From<&Event> for EventLine {
             }
             Payload::ProjectCreated { project, name, root } => json!({ "project": project, "name": name.as_str(), "root": root }),
             Payload::BoardCreated { board, project, name } => json!({ "board": board, "project": project, "name": name.as_str() }),
-            Payload::MapCreated { map, project, kind, definition } => json!({ "map": map, "project": project, "kind": kind, "definition": definition }),
+            Payload::MapCreated { map, project, name, definition } => json!({ "map": map, "project": project, "name": name.as_str(), "definition": definition }),
             Payload::NodeAdded { map, node, kind, title, properties, references } => {
                 let references: Vec<ReferenceLine> = references.iter().map(ReferenceLine::from).collect();
 
@@ -116,7 +116,7 @@ impl TryFrom<EventLine> for Event {
             Kind::MapCreated => Payload::MapCreated {
                 map: field(p, "map")?,
                 project: field(p, "project")?,
-                kind: field(p, "kind")?,
+                name: Name::new(&field::<String>(p, "name")?)?,
                 definition: field(p, "definition")?,
             },
             Kind::NodeAdded => Payload::NodeAdded {
@@ -245,7 +245,7 @@ mod tests {
             Event::subagent_reported(Source::fixture(), session, ClientAgentId::new("a1".into()), "done", raw),
             Event::project_created(Source::fixture(), Actor::Human, ProjectId::new(), Name::new("percept").unwrap(), Some("/work/percept".into())),
             Event::board_created(Source::fixture(), Actor::Human, BoardId::new(), ProjectId::new(), Name::new("ideas").unwrap()),
-            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), ProjectId::new(), "decisions", "/maps/decisions.toml".into()),
+            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), ProjectId::new(), Name::new("decisions").unwrap(), "/maps/decisions.toml".into()),
             Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())]), Vec::new()),
             Event::node_changed(Source::fixture(), Actor::Human, MapId::new(), NodeId::new(), "Why not?", BTreeMap::from([("definition".into(), "E".into())]), Vec::new()),
             Event::node_removed(Source::fixture(), Actor::Human, MapId::new(), NodeId::new()),
