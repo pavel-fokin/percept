@@ -37,6 +37,13 @@ impl Name {
         Self::new(name).ok()
     }
 
+    /// The first of `base`, `base-1`, `base-2`, … that `taken` does not hold.
+    pub fn free(base: &Name, taken: &[Name]) -> Name {
+        let numbered = (1..).map(|n| Name(format!("{}-{n}", base.0)));
+
+        std::iter::once(base.clone()).chain(numbered).find(|name| !taken.contains(name)).expect("an unbounded range has a free name")
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -60,6 +67,20 @@ mod tests {
         for name in ["", "my app", "a/b", "café", "a:b", ".", "..", ".x", "-x", "_x"] {
             assert!(Name::new(name).is_err(), "{name:?}");
         }
+    }
+
+    #[test]
+    fn a_free_name_is_the_base_then_the_first_unused_number() {
+        let name = |s: &str| Name::new(s).unwrap();
+        let base = name("board");
+
+        let free = |taken: &[&str]| Name::free(&base, &taken.iter().map(|s| name(s)).collect::<Vec<_>>()).as_str().to_string();
+
+        assert_eq!(free(&[]), "board");
+        assert_eq!(free(&["board"]), "board-1");
+        assert_eq!(free(&["board", "board-1"]), "board-2");
+        assert_eq!(free(&["board", "board-2"]), "board-1");
+        assert_eq!(free(&["board-1"]), "board");
     }
 
     #[test]

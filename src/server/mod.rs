@@ -356,10 +356,10 @@ mod tests {
         let created = send(addr, "POST", "/api/projects/repo/boards", "").await;
         let id = json_body(&created)["data"]["id"].as_str().unwrap().to_string();
         let all = send(addr, "GET", "/api/boards", "").await;
-        let by_name = send(addr, "GET", "/api/projects/repo/boards/board-1", "").await;
+        let by_name = send(addr, "GET", "/api/projects/repo/boards/board", "").await;
         let by_id = send(addr, "GET", &format!("/api/projects/repo/boards/{id}"), "").await;
 
-        let board = json!({ "id": id, "name": "board-1", "project": "repo" });
+        let board = json!({ "id": id, "name": "board", "project": "repo" });
         assert!(created.starts_with("HTTP/1.1 200"));
         assert_eq!(json_body(&created)["data"], board);
         assert_eq!(json_body(&all)["data"], json!([board]));
@@ -377,8 +377,8 @@ mod tests {
         let first = send(addr, "POST", "/api/projects/repo/boards", "").await;
         let second = send(addr, "POST", "/api/projects/repo/boards", "").await;
 
-        assert_eq!(json_body(&first)["data"]["name"], "board-1");
-        assert_eq!(json_body(&second)["data"]["name"], "board-2");
+        assert_eq!(json_body(&first)["data"]["name"], "board");
+        assert_eq!(json_body(&second)["data"]["name"], "board-1");
     }
 
     #[tokio::test]
@@ -388,7 +388,7 @@ mod tests {
         let before = log.0.lock().unwrap().len();
 
         let post = send(addr, "POST", "/api/projects/other/boards", "").await;
-        let no_board = send(addr, "GET", "/api/projects/repo/boards/board-1", "").await;
+        let no_board = send(addr, "GET", "/api/projects/repo/boards/board", "").await;
         let no_project = send(addr, "GET", "/api/projects/other/boards/ideas", "").await;
 
         assert!(post.starts_with("HTTP/1.1 404"));
