@@ -562,6 +562,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_map_without_a_schema_takes_any_kind_and_property_but_not_a_broken_graph() {
+        let store = in_project("/repo");
+        let project = id_at(&store, "/repo");
+        let service = AppService::new(&store, Definitions);
+        service.create_map(Source::fixture(), Actor::Human, project, "scratch", Path::new("/maps/scratch.toml")).await.unwrap();
+        let map = mid(&service, project, "scratch").await;
+        let colour = BTreeMap::from([("colour".to_string(), "red".to_string())]);
+        service.add_node(Source::fixture(), Actor::Human, map, "idea", "A", colour, Vec::new()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, map, "whim", "B", Default::default(), Vec::new()).await.unwrap();
+        let (a, b) = (nid(&service, project, "scratch", "A").await, nid(&service, project, "scratch", "B").await);
+
+        let edge = service.add_edge(Source::fixture(), Actor::Human, map, a, "echoes", b).await;
+        let duplicate_edge = service.add_edge(Source::fixture(), Actor::Human, map, a, "echoes", b).await;
+        let duplicate_title = service.add_node(Source::fixture(), Actor::Human, map, "other", "A", Default::default(), Vec::new()).await;
+
+        assert!(edge.is_ok());
+        assert!(duplicate_edge.is_err());
+        assert!(duplicate_title.is_err());
+    }
+
+    #[tokio::test]
     async fn add_node_fails_when_the_maps_definition_is_gone() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");

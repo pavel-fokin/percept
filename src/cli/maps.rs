@@ -197,20 +197,25 @@ pub(super) async fn describe<S: EventStore, M: DefinitionStore>(service: &AppSer
 
 fn definition_markdown(name: &str, definition: &Definition) -> String {
     let mut text = format!(
-        "# {name}\n\n{}\n\n## Instructions\n\n{}\n\n## Schema\n\n| Node kind | Properties |\n|---|---|\n",
+        "# {name}\n\n{}\n\n## Instructions\n\n{}\n",
         definition.purpose().trim(),
         definition.instructions().trim(),
     );
 
-    for (node, properties) in definition.schema().nodes() {
+    let Some(schema) = definition.schema() else {
+        return text.trim_end().to_string();
+    };
+
+    text.push_str("\n## Schema\n\n| Node kind | Properties |\n|---|---|\n");
+    for (node, properties) in schema.nodes() {
         let properties: Vec<&str> = properties.iter().map(String::as_str).collect();
         text.push_str(&format!("| {node} | {} |\n", properties.join(", ")));
     }
 
-    if !definition.schema().edges().is_empty() {
+    if !schema.edges().is_empty() {
         text.push_str("\n| Edge kind | From | To |\n|---|---|---|\n");
     }
-    for (edge, ends) in definition.schema().edges() {
+    for (edge, ends) in schema.edges() {
         text.push_str(&format!("| {edge} | {} | {} |\n", ends.from, ends.to));
     }
 
@@ -443,7 +448,7 @@ mod tests {
             ("note".to_string(), Default::default()),
         ]);
         let edges = BTreeMap::from([("supersedes".to_string(), EdgeKind { from: "decision".into(), to: "decision".into() })]);
-        let definition = Definition::new("Why.".into(), "\nKeep it.\n\nShort.\n".into(), Schema::new(nodes, edges).unwrap());
+        let definition = Definition::new("Why.".into(), "\nKeep it.\n\nShort.\n".into(), Some(Schema::new(nodes, edges).unwrap()));
 
         let text = definition_markdown("decisions", &definition);
 
@@ -453,9 +458,18 @@ mod tests {
     }
 
     #[test]
+    fn without_a_schema_the_schema_section_is_left_out() {
+        let definition = Definition::new("Why.".into(), "Keep it.".into(), None);
+
+        let text = definition_markdown("scratch", &definition);
+
+        assert_eq!(text, "# scratch\n\nWhy.\n\n## Instructions\n\nKeep it.");
+    }
+
+    #[test]
     fn without_edge_kinds_the_edge_table_is_left_out() {
         let nodes = BTreeMap::from([("note".to_string(), Default::default())]);
-        let definition = Definition::new("p".into(), "i".into(), Schema::new(nodes, BTreeMap::new()).unwrap());
+        let definition = Definition::new("p".into(), "i".into(), Some(Schema::new(nodes, BTreeMap::new()).unwrap()));
 
         let text = definition_markdown("notes", &definition);
 

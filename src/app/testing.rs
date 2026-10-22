@@ -132,6 +132,7 @@ impl DefinitionStore for Definitions {
             ),
             "tasks" => mini(&[("task", &[])], &[("blocks", "task", "task")]),
             "concepts" => mini(&[("concept", &["definition"])], &[]),
+            "scratch" => Ok(Definition::new("purpose".into(), "instructions".into(), None)),
             "glossary" => mini(&[("term", &["definition", "source"])], &[]),
             _ => Err(format!("no definition in {}", file.display()).into()),
         }
@@ -148,7 +149,7 @@ fn mini(nodes: &[(&str, &[&str])], edges: &[(&str, &str, &str)]) -> Result<Defin
         .map(|(edge, from, to)| (edge.to_string(), EdgeKind { from: from.to_string(), to: to.to_string() }))
         .collect();
 
-    Ok(Definition::new("purpose".into(), "instructions".into(), Schema::new(nodes, edges)?))
+    Ok(Definition::new("purpose".into(), "instructions".into(), Some(Schema::new(nodes, edges)?)))
 }
 
 /// Has no definition for any file.
