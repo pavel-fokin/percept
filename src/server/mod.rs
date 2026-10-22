@@ -54,7 +54,7 @@ where
 {
     Router::new()
         .route("/api/status", get(Api::<S, M>::status))
-        .route("/api/projects", get(Api::<S, M>::projects))
+        .route("/api/projects", get(Api::<S, M>::projects).post(Api::<S, M>::create_project))
         .route("/api/sessions", get(Api::<S, M>::sessions))
         .route("/api/sessions/{id}", get(Api::<S, M>::session))
         .route("/api/sessions/{id}/events", get(Api::<S, M>::session_events))
@@ -112,7 +112,7 @@ mod tests {
         async fn all(&self) -> Result<Vec<Event>> {
             let session: SessionId = serde_json::from_value(json!(SESSION))?;
             let project: ProjectId = serde_json::from_value(json!(PROJECT))?;
-            let project_created = Event::project_created(Source { client: "claude-code".into(), path: "/Users/me/repo".into() }, Actor::Human, project, Name::new("repo").unwrap());
+            let project_created = Event::project_created(Source::Checkout { client: "claude-code".into(), path: "/Users/me/repo".into() }, Actor::Human, project, Name::new("repo").unwrap(), Some("/Users/me/repo".into()));
             let created = Event::session_created(Source::fixture(), session, project, ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
             let map: MapId = serde_json::from_value(json!(MAP))?;
@@ -131,8 +131,8 @@ mod tests {
 
     impl Log {
         fn new() -> Self {
-            let source = Source { client: "claude-code".into(), path: "/Users/me/repo".into() };
-            let project = Event::project_created(source, Actor::Human, ProjectId::new(), Name::new("repo").unwrap());
+            let source = Source::Checkout { client: "claude-code".into(), path: "/Users/me/repo".into() };
+            let project = Event::project_created(source, Actor::Human, ProjectId::new(), Name::new("repo").unwrap(), Some("/Users/me/repo".into()));
 
             Self(std::sync::Mutex::new(vec![project]))
         }
@@ -367,7 +367,7 @@ mod tests {
         assert!(by_id.starts_with("HTTP/1.1 404"));
         let event = log.0.lock().unwrap().last().unwrap().clone();
         assert_eq!(event.actor, Actor::Human);
-        assert_eq!(event.source, Source { client: "percept-web".into(), path: "/Users/me/repo".into() });
+        assert_eq!(event.source, Source::Web);
     }
 
     #[tokio::test]
@@ -395,5 +395,46 @@ mod tests {
         assert_eq!(log.0.lock().unwrap().len(), before);
         assert!(no_board.starts_with("HTTP/1.1 404"));
         assert!(no_project.starts_with("HTTP/1.1 404"));
+    }
+
+    #[tokio::test]
+    async fn a_posted_project_is_created_without_a_root_and_listed() {
+        let log = Arc::new(Log::new());
+        let addr = serve(log.clone()).await;
+
+        let created = send(addr, "POST", "/api/projects", r#"{"name":"Notes"}"#).await;
+        let all = send(addr, "GET", "/api/projects", "").await;
+
+        let notes = json!({ "name": "notes", "root": null });
+        assert!(created.starts_with("HTTP/1.1 200"));
+        assert_eq!(json_body(&created)["data"], notes);
+        assert_eq!(json_body(&all)["data"], json!([{ "name": "repo", "root": "~/repo" }, notes]));
+        let event = log.0.lock().unwrap().last().unwrap().clone();
+        assert_eq!(event.actor, Actor::Human);
+        assert_eq!(event.source, Source::Web);
+    }
+
+    #[tokio::test]
+    async fn a_posted_project_with_a_taken_name_conflicts() {
+        let log = Arc::new(Log::new());
+        let addr = serve(log.clone()).await;
+
+        let response = send(addr, "POST", "/api/projects", r#"{"name":"REPO"}"#).await;
+
+        assert!(response.starts_with("HTTP/1.1 409"));
+        assert_eq!(text_body(&response), "the name repo is taken");
+        assert_eq!(log.0.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_posted_project_with_an_invalid_name_is_a_bad_request() {
+        let log = Arc::new(Log::new());
+        let addr = serve(log.clone()).await;
+
+        let response = send(addr, "POST", "/api/projects", r#"{"name":"my app"}"#).await;
+
+        assert!(response.starts_with("HTTP/1.1 400"));
+        assert!(text_body(&response).starts_with("invalid name"));
+        assert_eq!(log.0.lock().unwrap().len(), 1);
     }
 }

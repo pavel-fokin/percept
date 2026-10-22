@@ -24,16 +24,16 @@ fn project_name(projects: &[Project], id: ProjectId) -> String {
     projects.iter().find(|p| p.id == id).map(|p| p.name.as_str().to_string()).expect("a project was created before what it holds")
 }
 
-/// A project as the page reads it: its name and its root shown from home.
+/// A project as the page reads it: its name and its root shown from home, if it has one.
 #[derive(Serialize)]
 pub(super) struct ProjectSummary {
     name: String,
-    root: String,
+    root: Option<String>,
 }
 
 impl ProjectSummary {
     pub(super) fn new(project: Project, home: &Path) -> Self {
-        Self { name: project.name.as_str().to_string(), root: display_path(&project.root, home) }
+        Self { name: project.name.as_str().to_string(), root: project.root.map(|root| display_path(&root, home)) }
     }
 }
 

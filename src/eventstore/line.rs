@@ -12,7 +12,7 @@ use crate::shared::{Error, Result};
 #[derive(Serialize, Deserialize)]
 pub(super) struct EventLine {
     id: EventId,
-    source: Source,
+    source: SourceLine,
     actor: Actor,
     kind: String,
     payload: serde_json::Value,
@@ -39,7 +39,7 @@ impl From<&Event> for EventLine {
             Payload::SubagentReported { session, subagent, content } => {
                 json!({ "session": session, "subagent": subagent.as_str(), "content": content })
             }
-            Payload::ProjectCreated { project, name } => json!({ "project": project, "name": name.as_str() }),
+            Payload::ProjectCreated { project, name, root } => json!({ "project": project, "name": name.as_str(), "root": root }),
             Payload::BoardCreated { board, project, name } => json!({ "board": board, "project": project, "name": name.as_str() }),
             Payload::MapCreated { map, project, kind, definition } => json!({ "map": map, "project": project, "kind": kind, "definition": definition }),
             Payload::NodeAdded { map, node, kind, title, properties, references } => {
@@ -60,7 +60,7 @@ impl From<&Event> for EventLine {
 
         Self {
             id: event.id,
-            source: event.source.clone(),
+            source: SourceLine::from(&event.source),
             actor: event.actor,
             kind: event.payload.kind().name().into(),
             payload,
@@ -106,6 +106,7 @@ impl TryFrom<EventLine> for Event {
             Kind::ProjectCreated => Payload::ProjectCreated {
                 project: field(p, "project")?,
                 name: Name::new(&field::<String>(p, "name")?)?,
+                root: field(p, "root")?,
             },
             Kind::BoardCreated => Payload::BoardCreated {
                 board: field(p, "board")?,
@@ -154,12 +155,38 @@ impl TryFrom<EventLine> for Event {
 
         Ok(Event {
             id: line.id,
-            source: line.source,
+            source: line.source.into(),
             actor: line.actor,
             payload,
             raw: line.raw,
             created_at: line.created_at,
         })
+    }
+}
+
+/// A source with no `path` is the web.
+#[derive(Serialize, Deserialize)]
+struct SourceLine {
+    client: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    path: Option<PathBuf>,
+}
+
+impl From<&Source> for SourceLine {
+    fn from(source: &Source) -> Self {
+        match source {
+            Source::Checkout { client, path } => Self { client: client.clone(), path: Some(path.clone()) },
+            Source::Web => Self { client: Source::WEB_CLIENT.into(), path: None },
+        }
+    }
+}
+
+impl From<SourceLine> for Source {
+    fn from(line: SourceLine) -> Self {
+        match line.path {
+            Some(path) => Self::Checkout { client: line.client, path },
+            None => Self::Web,
+        }
     }
 }
 
@@ -216,7 +243,7 @@ mod tests {
             Event::tool_used(Source::fixture(), session, "Read", None, None, raw.clone()),
             Event::subagent_started(Source::fixture(), session, ClientAgentId::new("a1".into()), "builder", "Build it", raw.clone()),
             Event::subagent_reported(Source::fixture(), session, ClientAgentId::new("a1".into()), "done", raw),
-            Event::project_created(Source::fixture(), Actor::Human, ProjectId::new(), Name::new("percept").unwrap()),
+            Event::project_created(Source::fixture(), Actor::Human, ProjectId::new(), Name::new("percept").unwrap(), Some("/work/percept".into())),
             Event::board_created(Source::fixture(), Actor::Human, BoardId::new(), ProjectId::new(), Name::new("ideas").unwrap()),
             Event::map_created(Source::fixture(), Actor::Human, MapId::new(), ProjectId::new(), "decisions", "/maps/decisions.toml".into()),
             Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())]), Vec::new()),
@@ -238,6 +265,30 @@ mod tests {
             assert_eq!(back.raw, event.raw);
             assert_eq!(back.created_at, event.created_at);
         }
+    }
+
+    #[test]
+    fn a_web_source_is_a_line_without_a_path() {
+        let event = Event::board_created(Source::Web, Actor::Human, BoardId::new(), ProjectId::new(), Name::new("ideas").unwrap());
+
+        let value = serde_json::to_value(EventLine::from(&event)).unwrap();
+        let line: EventLine = serde_json::from_value(value.clone()).unwrap();
+        let back = Event::try_from(line).unwrap();
+
+        assert_eq!(value["source"], json!({"client": "percept-web"}));
+        assert_eq!(back.source, Source::Web);
+    }
+
+    #[test]
+    fn a_project_without_a_root_is_a_null_root_and_a_missing_root_reads_the_same() {
+        let event = Event::project_created(Source::Web, Actor::Human, ProjectId::new(), Name::new("notes").unwrap(), None);
+        let mut line = EventLine::from(&event);
+        assert_eq!(line.payload["root"], json!(null));
+
+        line.payload.as_object_mut().unwrap().remove("root");
+        let back = Event::try_from(line).unwrap();
+
+        assert_eq!(back.payload, event.payload);
     }
 
     #[test]

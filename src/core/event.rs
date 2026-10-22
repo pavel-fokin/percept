@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 use super::{BoardId, ClientAgentId, ClientSessionId, MapId, Name, NodeId, ProjectId, Reference, SessionId};
-use crate::shared::Id;
+use crate::shared::{Id, Result};
 
 pub type EventId = Id<Event>;
 
@@ -18,17 +18,36 @@ pub enum Actor {
     System,
 }
 
-/// Where an event came from: the coding client and the folder it ran in.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct Source {
-    pub client: String,
-    pub path: PathBuf,
+/// Where an event came from: a coding client in a checkout, or the web.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Source {
+    Checkout { client: String, path: PathBuf },
+    Web,
+}
+
+impl Source {
+    pub const WEB_CLIENT: &'static str = "percept-web";
+
+    pub fn client(&self) -> &str {
+        match self {
+            Self::Checkout { client, .. } => client,
+            Self::Web => Self::WEB_CLIENT,
+        }
+    }
+
+    /// The folder the event came from; the web has none.
+    pub fn path(&self) -> Result<&Path> {
+        match self {
+            Self::Checkout { path, .. } => Ok(path),
+            Self::Web => Err("this needs a checkout; the web has none".into()),
+        }
+    }
 }
 
 #[cfg(test)]
 impl Source {
     pub fn fixture() -> Self {
-        Self { client: "claude-code".into(), path: "/repo".into() }
+        Self::Checkout { client: "claude-code".into(), path: "/repo".into() }
     }
 }
 
@@ -105,7 +124,7 @@ pub enum Payload {
     ToolUsed { session: SessionId, tool: String, input: Option<String>, output: Option<String> },
     SubagentStarted { session: SessionId, subagent: ClientAgentId, agent: String, task: String },
     SubagentReported { session: SessionId, subagent: ClientAgentId, content: String },
-    ProjectCreated { project: ProjectId, name: Name },
+    ProjectCreated { project: ProjectId, name: Name, root: Option<PathBuf> },
     BoardCreated { board: BoardId, project: ProjectId, name: Name },
     MapCreated { map: MapId, project: ProjectId, kind: String, definition: PathBuf },
     NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
@@ -241,8 +260,8 @@ impl Event {
         Self::build(source, Actor::System, Payload::SessionStopped { session }, Some(raw))
     }
 
-    pub fn project_created(source: Source, actor: Actor, project: ProjectId, name: Name) -> Self {
-        Self::build(source, actor, Payload::ProjectCreated { project, name }, None)
+    pub fn project_created(source: Source, actor: Actor, project: ProjectId, name: Name, root: Option<PathBuf>) -> Self {
+        Self::build(source, actor, Payload::ProjectCreated { project, name, root }, None)
     }
 
     pub fn board_created(source: Source, actor: Actor, board: BoardId, project: ProjectId, name: Name) -> Self {

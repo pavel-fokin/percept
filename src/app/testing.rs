@@ -96,10 +96,15 @@ pub(super) fn in_project(root: &str) -> Memory {
 
 /// Appends a project rooted at `root`, named by a number so names never clash.
 pub(super) fn add_project(store: &Memory, root: &str) {
-    let source = Source { client: "percept-cli".into(), path: root.into() };
+    let source = Source::Checkout { client: "percept-cli".into(), path: root.into() };
     let name = Name::new(&format!("p{}", store.0.lock().unwrap().len())).unwrap();
 
-    store.0.lock().unwrap().push(Event::project_created(source, Actor::Human, ProjectId::new(), name));
+    store.0.lock().unwrap().push(Event::project_created(source, Actor::Human, ProjectId::new(), name, Some(root.into())));
+}
+
+/// The id of the project nearest above `root`.
+pub(super) fn id_at(store: &Memory, root: &str) -> ProjectId {
+    Project::containing(&store.0.lock().unwrap(), Path::new(root)).unwrap().id
 }
 
 /// Appends a session of the project nearest above `root` and returns its id.
@@ -108,7 +113,7 @@ pub(super) fn add_session(store: &Memory, root: &str) -> SessionId {
     let project = Project::containing(&events, Path::new(root)).unwrap().id;
 
     let session = SessionId::new();
-    let source = Source { client: "claude-code".into(), path: root.into() };
+    let source = Source::Checkout { client: "claude-code".into(), path: root.into() };
     let client_session_id = ClientSessionId::new(events.len().to_string());
     events.push(Event::session_created(source, session, project, client_session_id));
 

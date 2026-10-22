@@ -3,14 +3,14 @@ use std::path::Path;
 
 use super::hook::Client;
 use crate::app::{AppService, Ref, source_path};
-use crate::core::{Actor, Definition, DefinitionStore, EventStore, Map, Reference, Source};
+use crate::core::{Actor, Definition, DefinitionStore, EventStore, Map, ProjectId, Reference, Source};
 use crate::shared::Result;
 
 pub(super) async fn create<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, kind: &str, file: &Path) -> Result<()> {
-    let (actor, source) = cli_writer().await?;
+    let (actor, source, project) = project_writer(service).await?;
     let file = tokio::fs::canonicalize(file).await.map_err(|e| format!("{}: {e}", file.display()))?;
 
-    service.create_map(source, actor, kind, &file).await
+    service.create_map(source, actor, project, kind, &file).await
 }
 
 pub(super) async fn add<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
@@ -18,12 +18,12 @@ pub(super) async fn add<S: EventStore, M: DefinitionStore>(service: &AppService<
 
     match positionals {
         [map, kind, title] => {
-            let (actor, source) = cli_writer().await?;
-            service.add_node(source, actor, map, kind, title, properties, references).await
+            let (actor, source, project) = project_writer(service).await?;
+            service.add_node(source, actor, project, map, kind, title, properties, references).await
         }
         [map, from, kind, to] => {
-            let (actor, source) = cli_writer().await?;
-            service.add_edge(source, actor, map, from, kind, to).await
+            let (actor, source, project) = project_writer(service).await?;
+            service.add_edge(source, actor, project, map, from, kind, to).await
         }
         _ => Err("usage: percept add <map> <kind> <title> [--key value ...] [--ref 'msg:<text>' | --ref 'file:<path>:<from>-<to>' ...] | percept add <map> <from> <kind> <to>".into()),
     }
@@ -37,20 +37,20 @@ pub(super) async fn change<S: EventStore, M: DefinitionStore>(service: &AppServi
         [map, title, new_title] => (map, title, Some(new_title.as_str())),
         _ => return Err("usage: percept change <map> <title> [<new title>] [--key value ...] [--ref 'msg:<text>' | --ref 'file:<path>:<from>-<to>' ...]".into()),
     };
-    let (actor, source) = cli_writer().await?;
+    let (actor, source, project) = project_writer(service).await?;
 
-    service.change_node(source, actor, map, title, new_title, properties, references).await
+    service.change_node(source, actor, project, map, title, new_title, properties, references).await
 }
 
 pub(super) async fn remove<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
     match split_remove(args)? {
         [map, title] => {
-            let (actor, source) = cli_writer().await?;
-            service.remove_node(source, actor, map, title).await
+            let (actor, source, project) = project_writer(service).await?;
+            service.remove_node(source, actor, project, map, title).await
         }
         [map, from, kind, to] => {
-            let (actor, source) = cli_writer().await?;
-            service.remove_edge(source, actor, map, from, kind, to).await
+            let (actor, source, project) = project_writer(service).await?;
+            service.remove_edge(source, actor, project, map, from, kind, to).await
         }
         _ => Err("usage: percept remove <map> <title> | percept remove <map> <from> <kind> <to>".into()),
     }
@@ -124,22 +124,35 @@ fn parse_reference(value: &str) -> Result<Ref> {
     Err("--ref expects msg:<text> or file:<path>:<from>-<to>".into())
 }
 
+/// The writer, as `cli_writer` finds it, and the project its checkout belongs to.
+async fn project_writer<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>) -> Result<(Actor, Source, ProjectId)> {
+    let (actor, source) = cli_writer().await?;
+    let project = project_of(service, source.path()?).await?;
+
+    Ok((actor, source, project))
+}
+
+/// The project the checkout at `path` belongs to.
+async fn project_of<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, path: &Path) -> Result<ProjectId> {
+    Ok(service.project_at(path).await?.ok_or("not in a project; run percept init")?.id)
+}
+
 pub(super) async fn cli_writer() -> Result<(Actor, Source)> {
     let client = writer(env_flag("CLAUDECODE"), env_flag("CODEX_SESSION_ID"))?;
     let actor = if client.is_some() { Actor::Agent } else { Actor::Human };
     let name = client.map_or("percept-cli", Client::name);
-    let source = Source { client: name.into(), path: source_path(&std::env::current_dir()?).await };
+    let source = Source::Checkout { client: name.into(), path: source_path(&std::env::current_dir()?).await };
 
     Ok((actor, source))
 }
 
 pub(super) async fn show<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, map: Option<&str>) -> Result<()> {
-    let project = source_path(&std::env::current_dir()?).await;
+    let project = project_of(service, &source_path(&std::env::current_dir()?).await).await?;
 
     match map {
-        Some(kind) => println!("{}", map_markdown(&service.map(&project, kind).await?)?),
+        Some(kind) => println!("{}", map_markdown(&service.map(project, kind).await?)?),
         None => {
-            for map in service.maps(&project).await? {
+            for map in service.maps(project).await? {
                 println!("{}  {}, {}", map.kind, node_count(map.nodes.len()), edge_count(map.edges.len()));
             }
         }
@@ -149,8 +162,8 @@ pub(super) async fn show<S: EventStore, M: DefinitionStore>(service: &AppService
 }
 
 pub(super) async fn describe<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, kind: &str) -> Result<()> {
-    let project = source_path(&std::env::current_dir()?).await;
-    let definition = service.definition(&project, kind).await?;
+    let project = project_of(service, &source_path(&std::env::current_dir()?).await).await?;
+    let definition = service.definition(project, kind).await?;
 
     println!("{}", definition_markdown(kind, &definition));
 

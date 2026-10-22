@@ -7,9 +7,9 @@ use crate::shared::Result;
 pub struct Name(String);
 
 impl Name {
-    /// Lowercases `name`, so names are case-insensitive, then validates it.
+    /// Trims and lowercases `name`, so names ignore case and surrounding space, then validates it.
     pub fn new(name: &str) -> Result<Self> {
-        let name = name.to_lowercase();
+        let name = name.trim().to_lowercase();
         let starts_well = name.starts_with(|c: char| c.is_ascii_lowercase() || c.is_ascii_digit());
         if !starts_well || !name.chars().all(allowed) {
             return Err(format!("invalid name {name:?}: start with a-z or 0-9, then use a-z, 0-9, '.', '_' and '-'").into());
@@ -51,8 +51,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_name_is_lowercased() {
-        assert_eq!(Name::new("My-App_1.0").unwrap().as_str(), "my-app_1.0");
+    fn a_name_is_trimmed_and_lowercased() {
+        assert_eq!(Name::new(" My-App_1.0\n").unwrap().as_str(), "my-app_1.0");
     }
 
     #[test]
