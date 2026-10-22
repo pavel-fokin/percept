@@ -6,11 +6,11 @@ use crate::app::{AppService, Ref, source_path};
 use crate::core::{Actor, Definition, DefinitionStore, EventStore, Map, ProjectId, Reference, Source};
 use crate::shared::Result;
 
-pub(super) async fn create<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, kind: &str, file: &Path) -> Result<()> {
+pub(super) async fn create<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, name: &str, file: &Path) -> Result<()> {
     let (actor, source, project) = project_writer(service).await?;
     let file = tokio::fs::canonicalize(file).await.map_err(|e| format!("{}: {e}", file.display()))?;
 
-    service.create_map(source, actor, project, kind, &file).await
+    service.create_map(source, actor, project, name, &file).await
 }
 
 pub(super) async fn add<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
@@ -150,10 +150,10 @@ pub(super) async fn show<S: EventStore, M: DefinitionStore>(service: &AppService
     let project = project_of(service, &source_path(&std::env::current_dir()?).await).await?;
 
     match map {
-        Some(kind) => println!("{}", map_markdown(&service.map(project, kind).await?)?),
+        Some(name) => println!("{}", map_markdown(&service.map(project, name).await?)?),
         None => {
             for map in service.maps(project).await? {
-                println!("{}  {}, {}", map.kind, node_count(map.nodes.len()), edge_count(map.edges.len()));
+                println!("{}  {}, {}", map.name.as_str(), node_count(map.nodes.len()), edge_count(map.edges.len()));
             }
         }
     }
@@ -161,18 +161,18 @@ pub(super) async fn show<S: EventStore, M: DefinitionStore>(service: &AppService
     Ok(())
 }
 
-pub(super) async fn describe<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, kind: &str) -> Result<()> {
+pub(super) async fn describe<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, name: &str) -> Result<()> {
     let project = project_of(service, &source_path(&std::env::current_dir()?).await).await?;
-    let definition = service.definition(project, kind).await?;
+    let definition = service.definition(project, name).await?;
 
-    println!("{}", definition_markdown(kind, &definition));
+    println!("{}", definition_markdown(name, &definition));
 
     Ok(())
 }
 
-fn definition_markdown(kind: &str, definition: &Definition) -> String {
+fn definition_markdown(name: &str, definition: &Definition) -> String {
     let mut text = format!(
-        "# {kind}\n\n{}\n\n## Instructions\n\n{}\n\n## Schema\n\n| Node kind | Properties |\n|---|---|\n",
+        "# {name}\n\n{}\n\n## Instructions\n\n{}\n\n## Schema\n\n| Node kind | Properties |\n|---|---|\n",
         definition.purpose().trim(),
         definition.instructions().trim(),
     );
@@ -193,7 +193,7 @@ fn definition_markdown(kind: &str, definition: &Definition) -> String {
 }
 
 fn map_markdown(map: &Map) -> Result<String> {
-    let mut text = format!("# {}\n", map.kind);
+    let mut text = format!("# {}\n", map.name.as_str());
 
     if !map.nodes.is_empty() {
         text.push_str("\n## Nodes\n");

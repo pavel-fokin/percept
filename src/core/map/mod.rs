@@ -9,7 +9,7 @@ use jiff::Timestamp;
 pub use definition::{Definition, DefinitionStore, EdgeKind};
 pub use policy::Policy;
 
-use super::{Actor, Event, EventId, Payload, ProjectId};
+use super::{Actor, Event, EventId, Name, Payload, ProjectId};
 use crate::shared::{Id, Result};
 
 pub type MapId = Id<Map>;
@@ -19,7 +19,7 @@ pub type NodeId = Id<Node>;
 /// Its nodes and edges are folded from the log, both in log order.
 pub struct Map {
     pub id: MapId,
-    pub kind: String,
+    pub name: Name,
     pub project: ProjectId,
     /// The absolute path of the file that defines the map.
     pub definition: PathBuf,
@@ -64,7 +64,7 @@ impl Edge {
 impl Map {
     /// The map `id` after `events`, created by a `MapCreated` event placed first.
     pub fn fixture(id: MapId, events: &[Event]) -> Self {
-        let created = Event::map_created(crate::core::Source::fixture(), Actor::Human, id, ProjectId::new(), "concepts", "/maps/concepts.toml".into());
+        let created = Event::map_created(crate::core::Source::fixture(), Actor::Human, id, ProjectId::new(), Name::new("concepts").unwrap(), "/maps/concepts.toml".into());
         let log: Vec<Event> = std::iter::once(created).chain(events.iter().cloned()).collect();
 
         Self::all(&log).remove(0)
@@ -86,9 +86,9 @@ impl Map {
 
         for event in events {
             match &event.payload {
-                Payload::MapCreated { map, project, kind, definition } => maps.push(Self {
+                Payload::MapCreated { map, project, name, definition } => maps.push(Self {
                     id: *map,
-                    kind: kind.clone(),
+                    name: name.clone(),
                     definition: definition.clone(),
                     project: *project,
                     nodes: Vec::new(),
@@ -129,14 +129,14 @@ impl Map {
                 definition.check_edge(kind, &self.on_map(*from)?.kind, &self.on_map(*to)?.kind)?;
 
                 if self.edges.iter().any(|e| e.is(kind, *from, *to)) {
-                    return Err(format!("the {} map already has this {kind} edge", self.kind).into());
+                    return Err(format!("the {} map already has this {kind} edge", self.name.as_str()).into());
                 }
 
                 Ok(())
             }
             Payload::EdgeRemoved { kind, from, to, .. } => {
                 if !self.edges.iter().any(|e| e.is(kind, *from, *to)) {
-                    return Err(format!("the {} map has no such {kind} edge", self.kind).into());
+                    return Err(format!("the {} map has no such {kind} edge", self.name.as_str()).into());
                 }
 
                 Ok(())
@@ -155,7 +155,7 @@ impl Map {
     }
 
     fn on_map(&self, id: NodeId) -> Result<&Node> {
-        self.node(id).ok_or_else(|| format!("the {} map has no such node", self.kind).into())
+        self.node(id).ok_or_else(|| format!("the {} map has no such node", self.name.as_str()).into())
     }
 
     /// A title is not blank and is held by no node but `own`.
@@ -164,7 +164,7 @@ impl Map {
             return Err("title must not be blank".into());
         }
         if self.nodes.iter().any(|n| Some(n.id) != own && n.title == title) {
-            return Err(format!("the {} map already has a node titled {title:?}", self.kind).into());
+            return Err(format!("the {} map already has a node titled {title:?}", self.name.as_str()).into());
         }
 
         Ok(())
@@ -349,7 +349,7 @@ mod tests {
             Event::node_removed(Source::fixture(), Actor::Agent, other, b),
         ];
 
-        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, ProjectId::new(), "concepts", "/maps/concepts.toml".into());
+        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, ProjectId::new(), Name::new("concepts").unwrap(), "/maps/concepts.toml".into());
         let log: Vec<Event> = [created(map), created(other)].into_iter().chain(events).collect();
 
         let maps = Map::all(&log);
@@ -435,7 +435,9 @@ mod tests {
         let (b, add_b) = node_added(second, Actor::Agent, "B");
         let (_, add_lost) = node_added(uncreated, Actor::Human, "Lost");
         let (one, two) = (ProjectId::new(), ProjectId::new());
-        let created = |id, project, kind| Event::map_created(Source::fixture(), Actor::Human, id, project, kind, format!("/maps/{kind}.toml").into());
+        let created = |id, project, name: &str| {
+            Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new(name).unwrap(), format!("/maps/{name}.toml").into())
+        };
         let events = [
             created(first, one, "concepts"),
             add_lost,
@@ -449,7 +451,7 @@ mod tests {
 
         let maps = Map::all(&events);
 
-        let found: Vec<(MapId, &str, ProjectId)> = maps.iter().map(|m| (m.id, m.kind.as_str(), m.project)).collect();
+        let found: Vec<(MapId, &str, ProjectId)> = maps.iter().map(|m| (m.id, m.name.as_str(), m.project)).collect();
         assert_eq!(found, vec![(first, "concepts", one), (second, "decisions", two)]);
         assert_eq!(maps[0].nodes.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(), vec!["A"]);
         assert_eq!(maps[0].edges.iter().map(|e| (e.from, e.to)).collect::<Vec<_>>(), vec![(a, a)]);
@@ -581,7 +583,7 @@ mod tests {
         let (map, _, _, folded) = check_map();
         let session = crate::core::SessionId::new();
         let events = [
-            Event::map_created(Source::fixture(), Actor::Human, map, ProjectId::new(), "concepts", "/maps/concepts.toml".into()),
+            Event::map_created(Source::fixture(), Actor::Human, map, ProjectId::new(), Name::new("concepts").unwrap(), "/maps/concepts.toml".into()),
             Event::session_created(Source::fixture(), session, crate::core::ProjectId::new(), crate::core::ClientSessionId::new("c".into())),
             Event::message(Source::fixture(), session, Actor::Human, "Hello", serde_json::json!({})),
         ];

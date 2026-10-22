@@ -40,14 +40,14 @@ impl ProjectSummary {
 /// A map as the page reads it, under the name of its project.
 #[derive(Serialize)]
 pub(super) struct MapSummary {
-    kind: String,
+    name: String,
     project: String,
     nodes: usize,
 }
 
 impl MapSummary {
     pub(super) fn new(map: core::Map, projects: &[Project]) -> Self {
-        Self { kind: map.kind, project: project_name(projects, map.project), nodes: map.nodes.len() }
+        Self { name: map.name.as_str().to_string(), project: project_name(projects, map.project), nodes: map.nodes.len() }
     }
 }
 
@@ -78,7 +78,7 @@ impl BoardSummary {
 /// A whole map as the page reads it, under the name of its project.
 #[derive(Serialize)]
 pub(super) struct MapDetail {
-    kind: String,
+    name: String,
     project: String,
     nodes: Vec<Node>,
     edges: Vec<Edge>,
@@ -89,7 +89,7 @@ impl MapDetail {
         let (map, messages) = (detail.map, &detail.messages);
 
         Self {
-            kind: map.kind,
+            name: map.name.as_str().to_string(),
             project,
             nodes: map.nodes.into_iter().map(|n| Node::new(n, messages)).collect(),
             edges: map.edges.into_iter().map(Edge::from).collect(),

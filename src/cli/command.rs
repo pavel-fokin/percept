@@ -29,10 +29,10 @@ enum Command {
     },
     /// Creates a project at the root of the current git repository, or in the current folder outside one, named after that folder unless a name is given.
     Init { name: Option<String> },
-    /// Creates a map of the given kind in the current project, defined by the given TOML file.
+    /// Creates a map with the given name in the current project, defined by the given TOML file.
     Create {
         #[arg(allow_hyphen_values = true)]
-        kind: String,
+        name: String,
         file: PathBuf,
     },
     /// Adds a node, `add <map> <kind> <title>`, or an edge, `add <map> <from> <kind> <to>`.
@@ -80,7 +80,7 @@ pub async fn run<S: EventStore + Send + Sync + 'static, M: DefinitionStore + Sen
         None => status(&service).await,
         Some(Command::Hook { client }) => hook(&service, client).await,
         Some(Command::Init { name }) => init(&service, name.as_deref()).await,
-        Some(Command::Create { kind, file }) => create(&service, &kind, &file).await,
+        Some(Command::Create { name, file }) => create(&service, &name, &file).await,
         Some(Command::Add { args }) => add(&service, &args).await,
         Some(Command::Change { args }) => change(&service, &args).await,
         Some(Command::Remove { args }) => remove(&service, &args).await,

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::AppService;
-use crate::core::{Actor, Definition, DefinitionStore, Event, EventId, EventStore, Map, MapId, Node, NodeId, Payload, Policy, Project, ProjectId, Reference, SessionId, Source};
+use crate::core::{Actor, Definition, DefinitionStore, Event, EventId, EventStore, Map, MapId, Name, Node, NodeId, Payload, Policy, Project, ProjectId, Reference, SessionId, Source};
 use crate::shared::Result;
 
 #[derive(Debug, PartialEq)]
@@ -26,16 +26,16 @@ pub struct CitedMessage {
 }
 
 impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
-    /// Records a new map defined by `file`, an absolute path, in the project. A project holds at most one map of each kind.
+    /// Records a new map defined by `file`, an absolute path, in the project. A project holds at most one map of each name.
     pub async fn create_map(
         &self,
         source: Source,
         actor: Actor,
         project: ProjectId,
-        kind: &str,
+        name: &str,
         file: &Path,
     ) -> Result<()> {
-        not_blank("kind", kind)?;
+        let name = Name::new(name)?;
         if !file.is_absolute() {
             return Err(format!("the definition file {} must be an absolute path", file.display()).into());
         }
@@ -44,13 +44,13 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         let _lock = self.store.lock().await?;
 
         let events = self.store.all().await?;
-        if Map::all(&events).iter().any(|m| m.project == project && m.kind == kind) {
-            return Err(format!("this project already has a {kind} map").into());
+        if Map::all(&events).iter().any(|m| m.project == project && m.name == name) {
+            return Err(format!("this project already has a {} map", name.as_str()).into());
         }
 
         self.definitions.definition(file).await?;
 
-        self.store.append(&Event::map_created(source, actor, MapId::new(), project, kind, file.into())).await
+        self.store.append(&Event::map_created(source, actor, MapId::new(), project, name, file.into())).await
     }
 
     /// The maps of the project in log order, each with its nodes and edges, from one read of the log.
@@ -66,26 +66,26 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         Ok(Map::all(&self.store.all().await?))
     }
 
-    /// The map of the given kind in the project, with its nodes and edges, or an error if it has none.
-    pub async fn map(&self, project: ProjectId, kind: &str) -> Result<Map> {
-        Ok(self.located(project, kind).await?.map)
+    /// The map of the given name in the project, with its nodes and edges, or an error if it has none.
+    pub async fn map(&self, project: ProjectId, name: &str) -> Result<Map> {
+        Ok(self.located(project, name).await?.map)
     }
 
-    /// The definition of the map of the given kind in the project, or an error if the project has no such map or its definition cannot be read.
-    pub async fn definition(&self, project: ProjectId, kind: &str) -> Result<Definition> {
-        let map = self.map(project, kind).await?;
+    /// The definition of the map of the given name in the project, or an error if the project has no such map or its definition cannot be read.
+    pub async fn definition(&self, project: ProjectId, name: &str) -> Result<Definition> {
+        let map = self.map(project, name).await?;
 
         self.definitions.definition(&map.definition).await
     }
 
-    /// The map of the given kind in the project of the given name, its nodes newest first and its edges in log order, from one read of the log.
-    pub async fn map_detail(&self, project: &str, kind: &str) -> Result<Option<MapDetail>> {
+    /// The map of the given name in the project of the given name, its nodes newest first and its edges in log order, from one read of the log.
+    pub async fn map_detail(&self, project: &str, name: &str) -> Result<Option<MapDetail>> {
         let events = self.store.all().await?;
 
         let Some(project) = Project::named(&events, project) else {
             return Ok(None);
         };
-        let Some(mut map) = Map::all(&events).into_iter().find(|m| m.project == project.id && m.kind == kind) else {
+        let Some(mut map) = Map::all(&events).into_iter().find(|m| m.project == project.id && m.name.as_str() == name) else {
             return Ok(None);
         };
         map.nodes.reverse();
@@ -111,14 +111,14 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         Ok(Some(MapDetail { map, messages }))
     }
 
-    /// Records a new edge on the project's map of the given kind, between the nodes with these titles.
+    /// Records a new edge on the project's map of the given name, between the nodes with these titles.
     #[allow(clippy::too_many_arguments, reason = "the inputs for adding an edge")]
     pub async fn add_edge(
         &self,
         source: Source,
         actor: Actor,
         project: ProjectId,
-        map_kind: &str,
+        map_name: &str,
         from: &str,
         kind: &str,
         to: &str,
@@ -128,21 +128,21 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         // Held until return, so the nodes cannot change between the check and the append.
         let _lock = self.store.lock().await?;
 
-        let Located { map, .. } = self.located(project, map_kind).await?;
+        let Located { map, .. } = self.located(project, map_name).await?;
 
-        let (from, to) = (find_node(&map.nodes, map_kind, from)?.id, find_node(&map.nodes, map_kind, to)?.id);
+        let (from, to) = (find_node(&map.nodes, map_name, from)?.id, find_node(&map.nodes, map_name, to)?.id);
 
         self.write(&map, Event::edge_added(source, actor, map.id, kind, from, to)).await
     }
 
-    /// Records the removal of the edge of this kind between the nodes with these titles on the project's map of the given kind.
+    /// Records the removal of the edge of this kind between the nodes with these titles on the project's map of the given name.
     #[allow(clippy::too_many_arguments, reason = "the inputs for removing an edge")]
     pub async fn remove_edge(
         &self,
         source: Source,
         actor: Actor,
         project: ProjectId,
-        map_kind: &str,
+        map_name: &str,
         from: &str,
         kind: &str,
         to: &str,
@@ -150,32 +150,32 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         // Held until return, so the edge cannot change between the check and the append.
         let _lock = self.store.lock().await?;
 
-        let Located { map, .. } = self.located(project, map_kind).await?;
+        let Located { map, .. } = self.located(project, map_name).await?;
 
-        let (from, to) = (find_node(&map.nodes, map_kind, from)?.id, find_node(&map.nodes, map_kind, to)?.id);
+        let (from, to) = (find_node(&map.nodes, map_name, from)?.id, find_node(&map.nodes, map_name, to)?.id);
 
         self.write(&map, Event::edge_removed(source, actor, map.id, kind, from, to)).await
     }
 
-    /// Records the removal of the node with this title, and with it every edge from or to it, from the project's map of the given kind.
-    pub async fn remove_node(&self, source: Source, actor: Actor, project: ProjectId, map_kind: &str, title: &str) -> Result<()> {
+    /// Records the removal of the node with this title, and with it every edge from or to it, from the project's map of the given name.
+    pub async fn remove_node(&self, source: Source, actor: Actor, project: ProjectId, map_name: &str, title: &str) -> Result<()> {
         // Held until return, so the node cannot change between the check and the append.
         let _lock = self.store.lock().await?;
 
-        let Located { map, .. } = self.located(project, map_kind).await?;
-        let node = find_node(&map.nodes, map_kind, title)?.id;
+        let Located { map, .. } = self.located(project, map_name).await?;
+        let node = find_node(&map.nodes, map_name, title)?.id;
 
         self.write(&map, Event::node_removed(source, actor, map.id, node)).await
     }
 
-    /// Records a new node on the project's map of the given kind. A title is unique within its map.
+    /// Records a new node on the project's map of the given name. A title is unique within its map.
     #[allow(clippy::too_many_arguments, reason = "the inputs for adding a node")]
     pub async fn add_node(
         &self,
         source: Source,
         actor: Actor,
         project: ProjectId,
-        map_kind: &str,
+        map_name: &str,
         kind: &str,
         title: &str,
         properties: BTreeMap<String, String>,
@@ -186,7 +186,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         // Held until return, so parallel adds cannot both pass the check.
         let _lock = self.store.lock().await?;
 
-        let Located { events, map } = self.located(project, map_kind).await?;
+        let Located { events, map } = self.located(project, map_name).await?;
 
         let mut resolved = Vec::new();
         for reference in references {
@@ -196,7 +196,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         self.write(&map, Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties, resolved)).await
     }
 
-    /// Records the full new state of the node with this title on the project's map of the given kind.
+    /// Records the full new state of the node with this title on the project's map of the given name.
     /// Each property in `properties` is set; the others keep their values.
     /// `references` are resolved and appended to the node's own. A new title is unique within its map.
     #[allow(clippy::too_many_arguments, reason = "the inputs for changing a node")]
@@ -205,7 +205,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         source: Source,
         actor: Actor,
         project: ProjectId,
-        map_kind: &str,
+        map_name: &str,
         title: &str,
         new_title: Option<&str>,
         properties: BTreeMap<String, String>,
@@ -214,8 +214,8 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         // Held until return, so the node cannot change between the check and the append.
         let _lock = self.store.lock().await?;
 
-        let Located { events, map } = self.located(project, map_kind).await?;
-        let node = find_node(&map.nodes, map_kind, title)?;
+        let Located { events, map } = self.located(project, map_name).await?;
+        let node = find_node(&map.nodes, map_name, title)?;
 
         let new_title = new_title.unwrap_or(&node.title);
 
@@ -234,14 +234,14 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         self.write(&map, Event::node_changed(source, actor, map.id, node.id, new_title, merged, all_references)).await
     }
 
-    /// The log and the map of the given kind in the project.
-    async fn located(&self, project: ProjectId, map_kind: &str) -> Result<Located> {
+    /// The log and the map of the given name in the project.
+    async fn located(&self, project: ProjectId, map_name: &str) -> Result<Located> {
         let events = self.store.all().await?;
 
         let map = Map::all(&events)
             .into_iter()
-            .find(|m| m.project == project && m.kind == map_kind)
-            .ok_or_else(|| format!("this project has no {map_kind} map"))?;
+            .find(|m| m.project == project && m.name.as_str() == map_name)
+            .ok_or_else(|| format!("this project has no {map_name} map"))?;
 
         Ok(Located { events, map })
     }
@@ -263,11 +263,11 @@ struct Located {
     map: Map,
 }
 
-fn find_node<'a>(nodes: &'a [Node], map_kind: &str, title: &str) -> Result<&'a Node> {
+fn find_node<'a>(nodes: &'a [Node], map_name: &str, title: &str) -> Result<&'a Node> {
     nodes
         .iter()
         .find(|n| n.title == title)
-        .ok_or_else(|| format!("the {map_kind} map has no node titled {title:?}").into())
+        .ok_or_else(|| format!("the {map_name} map has no node titled {title:?}").into())
 }
 
 /// File references resolve against the writer's checkout and must stay inside it; the web has none.
@@ -334,7 +334,7 @@ mod tests {
     use crate::app::testing::{Broken, Definitions, Memory, NoDefinitions, add_project, add_session, id_at, in_project};
 
     #[tokio::test]
-    async fn the_same_map_kind_can_be_created_in_two_projects_but_not_twice_in_one() {
+    async fn the_same_map_name_can_be_created_in_two_projects_but_not_twice_in_one() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
         let service = AppService::new(&store, Definitions);
@@ -348,6 +348,19 @@ mod tests {
 
         assert!(again.is_err());
         assert_eq!(store.0.lock().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn a_map_name_is_validated_and_ignores_case() {
+        let store = in_project("/repo");
+        let project = id_at(&store, "/repo");
+        let service = AppService::new(&store, Definitions);
+
+        let invalid = service.create_map(Source::fixture(), Actor::Human, project, "my map", Path::new("/maps/decisions.toml")).await;
+        service.create_map(Source::fixture(), Actor::Human, project, "Decisions", Path::new("/maps/decisions.toml")).await.unwrap();
+
+        assert!(invalid.is_err());
+        assert_eq!(service.maps(project).await.unwrap()[0].name.as_str(), "decisions");
     }
 
     #[tokio::test]
@@ -404,7 +417,7 @@ mod tests {
 
         let maps = service.maps(project).await.unwrap();
 
-        let found: Vec<&str> = maps.iter().map(|m| m.kind.as_str()).collect();
+        let found: Vec<&str> = maps.iter().map(|m| m.name.as_str()).collect();
         assert_eq!(found, vec!["decisions", "tasks"]);
     }
 
@@ -915,7 +928,7 @@ mod tests {
 
         let maps = service.maps(project).await.unwrap();
 
-        let found: Vec<(&str, usize, usize)> = maps.iter().map(|m| (m.kind.as_str(), m.nodes.len(), m.edges.len())).collect();
+        let found: Vec<(&str, usize, usize)> = maps.iter().map(|m| (m.name.as_str(), m.nodes.len(), m.edges.len())).collect();
         assert_eq!(found, vec![("decisions", 2, 1), ("tasks", 1, 0)]);
     }
 
@@ -933,7 +946,7 @@ mod tests {
 
         let maps = service.all_maps().await.unwrap();
 
-        let found: Vec<(&str, usize)> = maps.iter().map(|m| (m.kind.as_str(), m.nodes.len())).collect();
+        let found: Vec<(&str, usize)> = maps.iter().map(|m| (m.name.as_str(), m.nodes.len())).collect();
         assert_eq!(found, vec![("decisions", 0), ("tasks", 1)]);
         assert_ne!(maps[0].project, maps[1].project);
     }
@@ -956,7 +969,7 @@ mod tests {
         assert_eq!(titles, vec!["O", "Q"]);
         let edges: Vec<(&str, NodeId, NodeId)> = detail.map.edges.iter().map(|e| (e.kind.as_str(), e.from, e.to)).collect();
         assert_eq!(edges, vec![("answers", detail.map.nodes[0].id, detail.map.nodes[1].id)]);
-        assert_eq!(detail.map.kind, "decisions");
+        assert_eq!(detail.map.name.as_str(), "decisions");
     }
 
     #[tokio::test]

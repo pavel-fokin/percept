@@ -138,8 +138,8 @@ function Panel({ collapsed, onToggle, onCreated }: PanelProps) {
                   </NavLink>
                 ))}
                 {maps.map((map) => (
-                  <NavLink key={map.kind} to={mapUrl(name, map.kind)} className={child}>
-                    <span className="min-w-0 truncate pl-7">{map.kind}</span>
+                  <NavLink key={map.name} to={mapUrl(name, map.name)} className={child}>
+                    <span className="min-w-0 truncate pl-7">{map.name}</span>
                   </NavLink>
                 ))}
                 <NavLink to={sessionsUrl(name)} className={child}>
