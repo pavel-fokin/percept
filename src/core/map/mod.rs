@@ -175,7 +175,7 @@ impl Map {
         }
     }
 
-    fn on_map(&self, id: NodeId) -> Result<&Node> {
+    pub fn on_map(&self, id: NodeId) -> Result<&Node> {
         self.node(id).ok_or_else(|| format!("the {} map has no such node", self.name.as_str()).into())
     }
 

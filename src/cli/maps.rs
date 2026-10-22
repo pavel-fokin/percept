@@ -3,7 +3,7 @@ use std::path::Path;
 
 use super::hook::Client;
 use crate::app::{AppService, Ref, source_path};
-use crate::core::{Actor, Definition, DefinitionStore, EventStore, Map, MapId, Project, Reference, Source};
+use crate::core::{Actor, Definition, DefinitionStore, EventStore, Map, MapId, NodeId, Project, Reference, Source};
 use crate::shared::Result;
 
 pub(super) async fn create<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, name: &str, file: &Path) -> Result<()> {
@@ -25,7 +25,8 @@ pub(super) async fn add<S: EventStore, M: DefinitionStore>(service: &AppService<
         [map, from, kind, to] => {
             let (actor, source, project) = project_writer(service).await?;
             let map = map_of(service, &project, map).await?;
-            service.add_edge(source, actor, map, from, kind, to).await
+            let found = service.map(map).await?;
+            service.add_edge(source, actor, map, node_of(&found, from)?, kind, node_of(&found, to)?).await
         }
         _ => Err("usage: percept add <map> <kind> <title> [--key value ...] [--ref 'msg:<text>' | --ref 'file:<path>:<from>-<to>' ...] | percept add <map> <from> <kind> <to>".into()),
     }
@@ -41,8 +42,9 @@ pub(super) async fn change<S: EventStore, M: DefinitionStore>(service: &AppServi
     };
     let (actor, source, project) = project_writer(service).await?;
     let map = map_of(service, &project, map).await?;
+    let node = node_of(&service.map(map).await?, title)?;
 
-    service.change_node(source, actor, map, title, new_title, properties, references).await
+    service.change_node(source, actor, map, node, new_title, properties, references).await
 }
 
 pub(super) async fn remove<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
@@ -50,12 +52,14 @@ pub(super) async fn remove<S: EventStore, M: DefinitionStore>(service: &AppServi
         [map, title] => {
             let (actor, source, project) = project_writer(service).await?;
             let map = map_of(service, &project, map).await?;
-            service.remove_node(source, actor, map, title).await
+            let node = node_of(&service.map(map).await?, title)?;
+            service.remove_node(source, actor, map, node).await
         }
         [map, from, kind, to] => {
             let (actor, source, project) = project_writer(service).await?;
             let map = map_of(service, &project, map).await?;
-            service.remove_edge(source, actor, map, from, kind, to).await
+            let found = service.map(map).await?;
+            service.remove_edge(source, actor, map, node_of(&found, from)?, kind, node_of(&found, to)?).await
         }
         _ => Err("usage: percept remove <map> <title> | percept remove <map> <from> <kind> <to>".into()),
     }
@@ -145,6 +149,13 @@ async fn project_of<S: EventStore, M: DefinitionStore>(service: &AppService<S, M
 /// The map of the project named `name`.
 async fn map_of<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, project: &Project, name: &str) -> Result<MapId> {
     Ok(service.map_id(project.name.as_str(), name).await?.ok_or_else(|| format!("this project has no {name} map"))?)
+}
+
+/// The node of `map` titled `title`.
+fn node_of(map: &Map, title: &str) -> Result<NodeId> {
+    let node = map.nodes.iter().find(|n| n.title == title);
+
+    Ok(node.ok_or_else(|| format!("the {} map has no node titled {title:?}", map.name.as_str()))?.id)
 }
 
 pub(super) async fn cli_writer() -> Result<(Actor, Source)> {
@@ -469,6 +480,19 @@ mod tests {
         assert_eq!(text, "# concepts\n\n## Nodes\n\n### question: Q\n\n### option: O\n\n\
             - why: One log.\n  No copies.\n- ref file: src/a.rs:1-3\n\n  ```\n  fn a() {\n\n  }\n  ```\n- ref msg: \"Keep it\"\n\n\
             ## Edges\n\n- O → answers → Q");
+    }
+
+    #[test]
+    fn a_title_is_resolved_to_its_node_and_an_unknown_one_is_an_error() {
+        let (map, question) = (MapId::new(), NodeId::new());
+        let events = [Event::node_added(Source::fixture(), Actor::Human, map, question, "question", "Q", BTreeMap::new(), Vec::new())];
+        let found = Map::fixture(map, &events);
+
+        let known = node_of(&found, "Q");
+        let unknown = node_of(&found, "nope");
+
+        assert_eq!(known.unwrap(), question);
+        assert_eq!(unknown.unwrap_err().to_string(), "the concepts map has no node titled \"nope\"");
     }
 
     #[test]
