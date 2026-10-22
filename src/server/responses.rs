@@ -120,6 +120,8 @@ struct BoardNode {
 pub(super) struct MapDetail {
     name: String,
     project: String,
+    /// The names of the boards the map is on.
+    boards: Vec<String>,
     nodes: Vec<Node>,
     edges: Vec<Edge>,
 }
@@ -131,6 +133,7 @@ impl MapDetail {
         Self {
             name: map.name.as_str().to_string(),
             project,
+            boards: detail.boards.iter().map(|b| b.name.as_str().to_string()).collect(),
             nodes: map.nodes.into_iter().map(|n| Node::new(n, messages)).collect(),
             edges: map.edges.into_iter().map(Edge::from).collect(),
         }

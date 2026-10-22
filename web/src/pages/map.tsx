@@ -1,4 +1,5 @@
 import { Fragment } from "react";
+import { Link } from "react-router";
 
 import { getData, type MapDetail, type MapEdge, type MapNode } from "../api";
 import { BackLink } from "../components/back-link";
@@ -7,6 +8,7 @@ import { References } from "../components/references";
 import { RouteError } from "../components/route-error";
 import { textLink } from "../components/ui/text-link";
 import { byDay, changedWhen, dayAndTime, full, time, withChangedTimes } from "../format";
+import { boardUrl } from "../paths";
 
 export function loadMap(project: string, name: string) {
   return getData<MapDetail>(`/api/projects/${encodeURIComponent(project)}/maps/${encodeURIComponent(name)}`);
@@ -24,6 +26,20 @@ export function MapPage({ map }: { map: MapDetail }) {
           <span className="tabular-nums"> · {map.nodes.length}</span>
         </BackLink>
       </h1>
+
+      {map.boards.length > 0 && (
+        <p className="text-sm text-muted wrap-anywhere">
+          On{" "}
+          {map.boards.map((board, i) => (
+            <Fragment key={board}>
+              {i > 0 && " · "}
+              <Link to={boardUrl(map.project, board)} className={`${textLink} inline-block py-1.5 hover:text-text`}>
+                {board}
+              </Link>
+            </Fragment>
+          ))}
+        </p>
+      )}
 
       {map.nodes.length > 0 ? (
         <div className="mt-8 grid gap-8 sm:mt-10 sm:gap-10">

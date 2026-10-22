@@ -59,6 +59,7 @@ export type MapEdge = {
 export type MapDetail = {
   name: string;
   project: string;
+  boards: string[];
   nodes: MapNode[];
   edges: MapEdge[];
 };

@@ -12,9 +12,10 @@ pub enum Ref {
 }
 
 /// A map with its nodes newest first and its edges in log order.
-/// `messages` holds every message its nodes cite.
+/// `messages` holds every message its nodes cite; `boards` the boards the map is on, in creation order.
 pub struct MapDetail {
     pub map: Map,
+    pub boards: Vec<Board>,
     pub messages: BTreeMap<EventId, CitedMessage>,
 }
 
@@ -132,6 +133,8 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         };
         map.nodes.reverse();
 
+        let boards = Board::all(&events).into_iter().filter(|b| map.places.contains(Place::Board(b.id))).collect();
+
         let cited: BTreeSet<EventId> = map
             .nodes
             .iter()
@@ -150,7 +153,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
             })
             .collect();
 
-        Ok(Some(MapDetail { map, messages }))
+        Ok(Some(MapDetail { map, boards, messages }))
     }
 
     /// Records a new edge on the map, between the nodes with these titles.
@@ -1063,6 +1066,26 @@ mod tests {
 
         assert_eq!(in_project.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(), vec!["decisions"]);
         assert_eq!(all.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(), vec!["decisions"]);
+    }
+
+    #[tokio::test]
+    async fn map_detail_names_the_boards_the_map_is_on_in_creation_order() {
+        let store = in_project("/repo");
+        let project = id_at(&store, "/repo");
+        let service = AppService::new(&store, Definitions);
+        service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
+        let map = mid(&service, project, "decisions").await;
+        let first = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap().id;
+        let second = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap().id;
+        service.create_board(Source::Web, Actor::Human, "p0").await.unwrap();
+        let none = service.map_detail(map).await.unwrap().unwrap().boards;
+        service.place_map(Source::Web, Actor::Human, map, Place::Board(second)).await.unwrap();
+        service.place_map(Source::Web, Actor::Human, map, Place::Board(first)).await.unwrap();
+
+        let boards = service.map_detail(map).await.unwrap().unwrap().boards;
+
+        assert!(none.is_empty());
+        assert_eq!(boards.iter().map(|b| b.id).collect::<Vec<_>>(), vec![first, second]);
     }
 
     #[tokio::test]
