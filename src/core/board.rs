@@ -35,7 +35,7 @@ impl Board {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{Actor, MapId, Source};
+    use crate::core::{Actor, MapId, Places, Source};
 
     fn board(project: ProjectId, name: &str) -> Event {
         Event::board_created(Source::fixture(), Actor::Human, BoardId::new(), project, Name::new(name).unwrap())
@@ -46,7 +46,7 @@ mod tests {
         let project = ProjectId::new();
         let events = [
             board(project, "ideas"),
-            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into()),
+            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::fixture(project)),
             board(project, "plan"),
         ];
 

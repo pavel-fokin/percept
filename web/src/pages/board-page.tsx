@@ -1,12 +1,18 @@
 import type { LoaderFunctionArgs } from "react-router";
-import { getData, type BoardSummary } from "../api";
+import { getData, type BoardDetail, type MapSummary } from "../api";
 import { gutter } from "../app";
 import { RouteError } from "../components/route-error";
 
-/** Loads the board only to tell a missing one apart; its contents are not saved yet. */
-export function loadBoard({ params }: LoaderFunctionArgs) {
+/** The board with the maps on it, and the maps of its project that could be added. */
+export async function loadBoard({ params }: LoaderFunctionArgs) {
   const { project, board } = params;
-  return getData<BoardSummary>(`/api/projects/${encodeURIComponent(project!)}/boards/${encodeURIComponent(board!)}`);
+  const [detail, maps] = await Promise.all([
+    getData<BoardDetail>(`/api/projects/${encodeURIComponent(project!)}/boards/${encodeURIComponent(board!)}`),
+    getData<MapSummary[]>("/api/maps"),
+  ]);
+  const shown = new Set(detail.maps.map((m) => m.name));
+
+  return { board: detail, addable: maps.filter((m) => m.project === detail.project && !shown.has(m.name)) };
 }
 
 export function BoardError() {

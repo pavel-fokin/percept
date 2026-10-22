@@ -85,7 +85,7 @@ mod tests {
     fn projects_are_folded_from_their_events_in_log_order() {
         let events = [
             Event::project_created(source("/a"), Actor::Human, ProjectId::new(), Name::new("a").unwrap(), Some("/a".into())),
-            Event::map_created(Source::fixture(), Actor::Human, crate::core::MapId::new(), ProjectId::new(), Name::new("decisions").unwrap(), "/maps/decisions.toml".into()),
+            Event::map_created(Source::fixture(), Actor::Human, crate::core::MapId::new(), ProjectId::new(), Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), crate::core::Places::fixture(ProjectId::new())),
             Event::project_created(source("/b"), Actor::Human, ProjectId::new(), Name::new("b").unwrap(), Some("/b".into())),
         ];
 

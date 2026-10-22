@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::AppService;
-use crate::core::{Actor, Definition, DefinitionStore, Event, EventId, EventStore, Map, MapId, Name, Node, NodeId, Payload, Policy, Project, ProjectId, Reference, SessionId, Source};
+use crate::core::{Actor, Board, Definition, DefinitionStore, Event, EventId, EventStore, Map, MapId, Name, Node, NodeId, Payload, Place, Places, Policy, Project, ProjectId, Reference, SessionId, Source};
 use crate::shared::Result;
 
 #[derive(Debug, PartialEq)]
@@ -12,9 +12,10 @@ pub enum Ref {
 }
 
 /// A map with its nodes newest first and its edges in log order.
-/// `messages` holds every message its nodes cite.
+/// `messages` holds every message its nodes cite; `boards` the boards the map is on, in creation order.
 pub struct MapDetail {
     pub map: Map,
+    pub boards: Vec<Board>,
     pub messages: BTreeMap<EventId, CitedMessage>,
 }
 
@@ -50,20 +51,54 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
 
         self.definitions.definition(file).await?;
 
-        self.store.append(&Event::map_created(source, actor, MapId::new(), project, name, file.into())).await
+        let places = Places::new([Place::Project(project)])?;
+
+        self.store.append(&Event::map_created(source, actor, MapId::new(), project, name, file.into(), places)).await
+    }
+
+    /// Records that the map is shown at `place` too. Nothing is written when it already is.
+    pub async fn place_map(&self, source: Source, actor: Actor, map: MapId, place: Place) -> Result<()> {
+        // Held until return, so the places cannot change between the check and the append.
+        let _lock = self.store.lock().await?;
+
+        let Located { events, map } = self.located(map).await?;
+
+        let places = map.places.with(place);
+        if places == map.places {
+            return Ok(());
+        }
+        places.check_in(map.project, &Board::all(&events))?;
+
+        self.store.append(&Event::map_changed(source, actor, map.id, places)).await
+    }
+
+    /// Records that the map is no longer shown at `place`. Nothing is written when it was not.
+    /// A map shown only at `place` fails with `LastPlace`.
+    pub async fn unplace_map(&self, source: Source, actor: Actor, map: MapId, place: Place) -> Result<()> {
+        // Held until return, so the places cannot change between the check and the append.
+        let _lock = self.store.lock().await?;
+
+        let Located { map, .. } = self.located(map).await?;
+
+        let places = map.places.without(place)?;
+        if places == map.places {
+            return Ok(());
+        }
+
+        self.store.append(&Event::map_changed(source, actor, map.id, places)).await
     }
 
     /// The maps of the project in log order, each with its nodes and edges, from one read of the log.
     pub async fn maps(&self, project: ProjectId) -> Result<Vec<Map>> {
-        let mut maps = Map::all(&self.store.all().await?);
-        maps.retain(|m| m.project == project);
-
-        Ok(maps)
+        Ok(Map::at(&self.store.all().await?, Place::Project(project)))
     }
 
-    /// Every map across all projects in log order, each with its nodes and edges, from one read of the log.
+    /// Every map placed in its own project, across all projects, in log order, each with its nodes and edges, from one read of the log.
     pub async fn all_maps(&self) -> Result<Vec<Map>> {
-        Ok(Map::all(&self.store.all().await?))
+        let mut maps = Map::all(&self.store.all().await?);
+        maps.retain(|m| m.places.contains(Place::Project(m.project)));
+
+        Ok(maps)
     }
 
     /// The id of the map named `map` in the project named `project`, in any case.
@@ -98,6 +133,8 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         };
         map.nodes.reverse();
 
+        let boards = Board::all(&events).into_iter().filter(|b| map.places.contains(Place::Board(b.id))).collect();
+
         let cited: BTreeSet<EventId> = map
             .nodes
             .iter()
@@ -116,7 +153,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
             })
             .collect();
 
-        Ok(Some(MapDetail { map, messages }))
+        Ok(Some(MapDetail { map, boards, messages }))
     }
 
     /// Records a new edge on the map, between the nodes with these titles.
@@ -332,7 +369,69 @@ fn not_blank(name: &str, value: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::BoardId;
     use crate::app::testing::{Broken, Definitions, Memory, NoDefinitions, add_project, add_session, id_at, in_project};
+
+    #[tokio::test]
+    async fn a_placed_map_is_shown_there_and_placing_again_writes_nothing() {
+        let store = in_project("/repo");
+        let project = id_at(&store, "/repo");
+        let service = AppService::new(&store, Definitions);
+        service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
+        let map = service.map_id("p0", "decisions").await.unwrap().unwrap();
+        let board = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap().id;
+
+        service.place_map(Source::Web, Actor::Human, map, Place::Board(board)).await.unwrap();
+        let written = store.0.lock().unwrap().len();
+        service.place_map(Source::Web, Actor::Human, map, Place::Board(board)).await.unwrap();
+        service.place_map(Source::Web, Actor::Human, map, Place::Project(project)).await.unwrap();
+
+        let places = service.map(map).await.unwrap().places;
+        assert!(places.contains(Place::Project(project)) && places.contains(Place::Board(board)));
+        assert_eq!(store.0.lock().unwrap().len(), written);
+        assert!(matches!(store.0.lock().unwrap().last().unwrap().payload, Payload::MapChanged { .. }));
+    }
+
+    #[tokio::test]
+    async fn an_unplaced_map_stays_elsewhere_and_its_last_place_stays() {
+        let store = in_project("/repo");
+        let project = id_at(&store, "/repo");
+        let service = AppService::new(&store, Definitions);
+        service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
+        let map = service.map_id("p0", "decisions").await.unwrap().unwrap();
+        let board = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap().id;
+        service.place_map(Source::Web, Actor::Human, map, Place::Board(board)).await.unwrap();
+
+        service.unplace_map(Source::Web, Actor::Human, map, Place::Board(board)).await.unwrap();
+        let written = store.0.lock().unwrap().len();
+        service.unplace_map(Source::Web, Actor::Human, map, Place::Board(board)).await.unwrap();
+        let last = service.unplace_map(Source::Web, Actor::Human, map, Place::Project(project)).await;
+
+        let places = service.map(map).await.unwrap().places;
+        assert!(places.contains(Place::Project(project)) && !places.contains(Place::Board(board)));
+        assert!(last.unwrap_err().is::<crate::core::LastPlace>());
+        assert_eq!(store.0.lock().unwrap().len(), written);
+    }
+
+    #[tokio::test]
+    async fn a_map_is_not_placed_in_another_project_or_on_a_board_of_one() {
+        let store = in_project("/repo");
+        add_project(&store, "/other");
+        let (project, other) = (id_at(&store, "/repo"), id_at(&store, "/other"));
+        let service = AppService::new(&store, Definitions);
+        service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
+        let map = service.map_id("p0", "decisions").await.unwrap().unwrap();
+        let foreign_board = service.create_board(Source::Web, Actor::Human, "p1").await.unwrap().unwrap().id;
+        let written = store.0.lock().unwrap().len();
+
+        let to_project = service.place_map(Source::Web, Actor::Human, map, Place::Project(other)).await;
+        let to_foreign_board = service.place_map(Source::Web, Actor::Human, map, Place::Board(foreign_board)).await;
+        let to_unknown_board = service.place_map(Source::Web, Actor::Human, map, Place::Board(BoardId::new())).await;
+        let unknown_map = service.place_map(Source::Web, Actor::Human, MapId::new(), Place::Project(project)).await;
+
+        assert!(to_project.is_err() && to_foreign_board.is_err() && to_unknown_board.is_err() && unknown_map.is_err());
+        assert_eq!(store.0.lock().unwrap().len(), written);
+    }
 
     #[tokio::test]
     async fn the_same_map_name_can_be_created_in_two_projects_but_not_twice_in_one() {
@@ -950,6 +1049,43 @@ mod tests {
         let found: Vec<(&str, usize)> = maps.iter().map(|m| (m.name.as_str(), m.nodes.len())).collect();
         assert_eq!(found, vec![("decisions", 0), ("tasks", 1)]);
         assert_ne!(maps[0].project, maps[1].project);
+    }
+
+    #[tokio::test]
+    async fn listings_leave_out_a_map_placed_only_on_a_board() {
+        let store = in_project("/repo");
+        let project = id_at(&store, "/repo");
+        let service = AppService::new(&store, Definitions);
+        service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
+        let places = Places::new([Place::Board(crate::core::BoardId::new())]).unwrap();
+        let draft = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("draft").unwrap(), "/maps/draft.toml".into(), places);
+        store.0.lock().unwrap().push(draft);
+
+        let in_project = service.maps(project).await.unwrap();
+        let all = service.all_maps().await.unwrap();
+
+        assert_eq!(in_project.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(), vec!["decisions"]);
+        assert_eq!(all.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(), vec!["decisions"]);
+    }
+
+    #[tokio::test]
+    async fn map_detail_names_the_boards_the_map_is_on_in_creation_order() {
+        let store = in_project("/repo");
+        let project = id_at(&store, "/repo");
+        let service = AppService::new(&store, Definitions);
+        service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
+        let map = mid(&service, project, "decisions").await;
+        let first = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap().id;
+        let second = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap().id;
+        service.create_board(Source::Web, Actor::Human, "p0").await.unwrap();
+        let none = service.map_detail(map).await.unwrap().unwrap().boards;
+        service.place_map(Source::Web, Actor::Human, map, Place::Board(second)).await.unwrap();
+        service.place_map(Source::Web, Actor::Human, map, Place::Board(first)).await.unwrap();
+
+        let boards = service.map_detail(map).await.unwrap().unwrap().boards;
+
+        assert!(none.is_empty());
+        assert_eq!(boards.iter().map(|b| b.id).collect::<Vec<_>>(), vec![first, second]);
     }
 
     #[tokio::test]

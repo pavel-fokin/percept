@@ -7,16 +7,22 @@ use axum::Json;
 
 use serde::Deserialize;
 
-use super::responses::{self, BoardSummary, Data, MapDetail, MapSummary, ProjectSummary, Status};
+use super::responses::{self, BoardDetail, BoardSummary, Data, MapDetail, MapSummary, ProjectSummary, Status};
 use super::Api;
 use crate::app::Taken;
-use crate::core::{Actor, DefinitionStore, EventStore, Name, SessionId, Source};
+use crate::core::{Actor, DefinitionStore, EventStore, LastPlace, Name, Place, SessionId, Source};
 use crate::shared::Error;
 
 /// The body of `POST /api/projects`.
 #[derive(Deserialize)]
 pub(super) struct NewProject {
     name: String,
+}
+
+/// The body of `POST /api/projects/{project}/boards/{board}/maps`: the name of a map of the project.
+#[derive(Deserialize)]
+pub(super) struct PlacedMap {
+    map: String,
 }
 
 type Reply<T> = Result<Json<Data<T>>, ApiError>;
@@ -32,8 +38,13 @@ pub(super) enum ApiError {
 
 impl From<Error> for ApiError {
     fn from(error: Error) -> Self {
-        match error.downcast::<Taken>() {
-            Ok(taken) => Self::Conflict(taken.to_string()),
+        let error = match error.downcast::<Taken>() {
+            Ok(taken) => return Self::Conflict(taken.to_string()),
+            Err(error) => error,
+        };
+
+        match error.downcast::<LastPlace>() {
+            Ok(last) => Self::Conflict(last.to_string()),
             Err(error) => Self::Internal(error),
         }
     }
@@ -107,9 +118,31 @@ where
         Ok(Json(Data { data: BoardSummary::all(boards, &projects) }))
     }
 
-    pub(super) async fn board(State(api): State<Arc<Self>>, Path((project, board)): Path<(String, String)>) -> Reply<BoardSummary> {
-        let board = api.service.board(&project, &board).await?.ok_or(ApiError::NotFound)?;
-        Ok(Json(Data { data: BoardSummary::new(board, project) }))
+    pub(super) async fn board(State(api): State<Arc<Self>>, Path((project, board)): Path<(String, String)>) -> Reply<BoardDetail> {
+        let contents = api.service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
+        Ok(Json(Data { data: BoardDetail::new(contents) }))
+    }
+
+    pub(super) async fn place_map(
+        State(api): State<Arc<Self>>,
+        Path((project, board)): Path<(String, String)>,
+        Json(body): Json<PlacedMap>,
+    ) -> Reply<BoardDetail> {
+        let shown = api.service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
+        let map = api.service.map_id(shown.project.name.as_str(), &body.map).await?.ok_or(ApiError::NotFound)?;
+        api.service.place_map(Source::Web, Actor::Human, map, Place::Board(shown.board.id)).await?;
+
+        let contents = api.service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
+        Ok(Json(Data { data: BoardDetail::new(contents) }))
+    }
+
+    pub(super) async fn unplace_map(State(api): State<Arc<Self>>, Path((project, board, map)): Path<(String, String, String)>) -> Reply<BoardDetail> {
+        let shown = api.service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
+        let map = api.service.map_id(shown.project.name.as_str(), &map).await?.ok_or(ApiError::NotFound)?;
+        api.service.unplace_map(Source::Web, Actor::Human, map, Place::Board(shown.board.id)).await?;
+
+        let contents = api.service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
+        Ok(Json(Data { data: BoardDetail::new(contents) }))
     }
 
     pub(super) async fn create_board(State(api): State<Arc<Self>>, Path(project): Path<String>) -> Reply<BoardSummary> {

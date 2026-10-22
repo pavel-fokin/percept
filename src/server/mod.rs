@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use axum::http::{header::CONTENT_TYPE, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::Router;
 use tokio::net::TcpListener;
 
@@ -63,6 +63,8 @@ where
         .route("/api/boards", get(Api::<S, M>::boards))
         .route("/api/projects/{project}/boards", post(Api::<S, M>::create_board))
         .route("/api/projects/{project}/boards/{board}", get(Api::<S, M>::board))
+        .route("/api/projects/{project}/boards/{board}/maps", post(Api::<S, M>::place_map))
+        .route("/api/projects/{project}/boards/{board}/maps/{map}", delete(Api::<S, M>::unplace_map))
         .route("/favicon.svg", get(|| async { asset("image/svg+xml", FAVICON_SVG) }))
         .route("/favicon.ico", get(|| async { asset("image/x-icon", FAVICON_ICO) }))
         .route("/apple-touch-icon.png", get(|| async { asset("image/png", APPLE_TOUCH_ICON) }))
@@ -90,7 +92,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::{Actor, ClientSessionId, Definition, DefinitionStore, Event, MapId, Name, NodeId, ProjectId, Reference, SessionId, Source};
+    use crate::core::{Actor, BoardId, ClientSessionId, Definition, DefinitionStore, Event, MapId, Name, NodeId, Payload, Place, Places, Project, ProjectId, Reference, SessionId, Source};
 
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
     const MAP: &str = "0190a0a0-0000-7000-8000-000000000003";
@@ -116,7 +118,7 @@ mod tests {
             let created = Event::session_created(Source::fixture(), session, project, ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
             let map: MapId = serde_json::from_value(json!(MAP))?;
-            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into());
+            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::fixture(project));
             let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default(), self.1.clone());
             Ok([project_created, created].into_iter().chain(started).chain(self.2.clone()).chain([map_created, node]).collect())
         }
@@ -363,11 +365,88 @@ mod tests {
         assert!(created.starts_with("HTTP/1.1 200"));
         assert_eq!(json_body(&created)["data"], board);
         assert_eq!(json_body(&all)["data"], json!([board]));
-        assert_eq!(json_body(&by_name)["data"], board);
+        assert_eq!(json_body(&by_name)["data"], json!({ "id": id, "name": "board", "project": "repo", "maps": [] }));
         assert!(by_id.starts_with("HTTP/1.1 404"));
         let event = log.0.lock().unwrap().last().unwrap().clone();
         assert_eq!(event.actor, Actor::Human);
         assert_eq!(event.source, Source::Web);
+    }
+
+    #[tokio::test]
+    async fn a_posted_map_is_shown_on_the_board_with_its_nodes_and_edges() {
+        let log = Arc::new(Log::new());
+        let project = Project::all(&log.0.lock().unwrap()).remove(0).id;
+        let map = MapId::new();
+        let (a, b) = (NodeId::new(), NodeId::new());
+        log.0.lock().unwrap().extend([
+            Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::fixture(project)),
+            Event::node_added(Source::fixture(), Actor::Human, map, a, "question", "Q", Default::default(), Vec::new()),
+            Event::node_added(Source::fixture(), Actor::Human, map, b, "option", "O", Default::default(), Vec::new()),
+            Event::edge_added(Source::fixture(), Actor::Human, map, "answers", b, a),
+        ]);
+        let addr = serve(log.clone()).await;
+        send(addr, "POST", "/api/projects/repo/boards", "").await;
+
+        let placed = send(addr, "POST", "/api/projects/repo/boards/board/maps", r#"{"map":"Decisions"}"#).await;
+        let again = send(addr, "POST", "/api/projects/repo/boards/board/maps", r#"{"map":"decisions"}"#).await;
+        let read = send(addr, "GET", "/api/projects/repo/boards/board", "").await;
+        let unknown = send(addr, "POST", "/api/projects/repo/boards/board/maps", r#"{"map":"tasks"}"#).await;
+
+        let maps = json!([{
+            "name": "decisions",
+            "nodes": [{ "id": a, "title": "Q" }, { "id": b, "title": "O" }],
+            "edges": [{ "kind": "answers", "from": b, "to": a }],
+        }]);
+        assert!(placed.starts_with("HTTP/1.1 200"));
+        assert_eq!(json_body(&placed)["data"]["maps"], maps);
+        assert_eq!(json_body(&again)["data"]["maps"], maps);
+        assert_eq!(json_body(&read)["data"]["maps"], maps);
+        assert!(unknown.starts_with("HTTP/1.1 404"));
+        let events = log.0.lock().unwrap();
+        let changes = events.iter().filter(|e| matches!(e.payload, Payload::MapChanged { .. })).count();
+        assert_eq!(changes, 1);
+        assert_eq!(events.last().unwrap().source, Source::Web);
+    }
+
+    #[tokio::test]
+    async fn a_deleted_map_leaves_the_board_unless_the_board_is_its_only_place() {
+        let log = Arc::new(Log::new());
+        let project = Project::all(&log.0.lock().unwrap()).remove(0).id;
+        log.0.lock().unwrap().push(Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::fixture(project)));
+        let addr = serve(log.clone()).await;
+        send(addr, "POST", "/api/projects/repo/boards", "").await;
+        send(addr, "POST", "/api/projects/repo/boards/board/maps", r#"{"map":"decisions"}"#).await;
+
+        let removed = send(addr, "DELETE", "/api/projects/repo/boards/board/maps/Decisions", "").await;
+        let again = send(addr, "DELETE", "/api/projects/repo/boards/board/maps/decisions", "").await;
+        let unknown = send(addr, "DELETE", "/api/projects/repo/boards/board/maps/tasks", "").await;
+
+        assert!(removed.starts_with("HTTP/1.1 200"));
+        assert_eq!(json_body(&removed)["data"]["maps"], json!([]));
+        assert!(again.starts_with("HTTP/1.1 200"));
+        assert!(unknown.starts_with("HTTP/1.1 404"));
+        let changes = |log: &Log| log.0.lock().unwrap().iter().filter(|e| matches!(e.payload, Payload::MapChanged { .. })).count();
+        assert_eq!(changes(&log), 2);
+    }
+
+    #[tokio::test]
+    async fn a_deleted_map_shown_only_on_the_board_is_a_conflict() {
+        let log = Arc::new(Log::new());
+        let project = Project::all(&log.0.lock().unwrap()).remove(0).id;
+        let map = MapId::new();
+        log.0.lock().unwrap().push(Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::fixture(project)));
+        let addr = serve(log.clone()).await;
+        let created = send(addr, "POST", "/api/projects/repo/boards", "").await;
+        let board: BoardId = serde_json::from_value(json_body(&created)["data"]["id"].clone()).unwrap();
+        let only_here = Places::new([Place::Board(board)]).unwrap();
+        log.0.lock().unwrap().push(Event::map_changed(Source::fixture(), Actor::Human, map, only_here));
+        let written = log.0.lock().unwrap().len();
+
+        let response = send(addr, "DELETE", "/api/projects/repo/boards/board/maps/decisions", "").await;
+
+        assert!(response.starts_with("HTTP/1.1 409"));
+        assert_eq!(text_body(&response), "this is the only place the map is shown");
+        assert_eq!(log.0.lock().unwrap().len(), written);
     }
 
     #[tokio::test]

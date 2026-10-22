@@ -28,6 +28,14 @@ export type BoardSummary = {
   project: string;
 };
 
+export type BoardMap = {
+  name: string;
+  nodes: { id: string; title: string }[];
+  edges: MapEdge[];
+};
+
+export type BoardDetail = BoardSummary & { maps: BoardMap[] };
+
 export type MapNode = {
   id: string;
   kind: string;
@@ -51,6 +59,7 @@ export type MapEdge = {
 export type MapDetail = {
   name: string;
   project: string;
+  boards: string[];
   nodes: MapNode[];
   edges: MapEdge[];
 };
@@ -82,6 +91,13 @@ export async function postData<T>(url: string, body?: unknown): Promise<T> {
     method: "POST",
     ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
   });
+  if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+  return ((await res.json()) as { data: T }).data;
+}
+
+/** Sends a DELETE to `url`; a refusal throws an Error with the server's reason. */
+export async function deleteData<T>(url: string): Promise<T> {
+  const res = await fetch(url, { method: "DELETE" });
   if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
   return ((await res.json()) as { data: T }).data;
 }

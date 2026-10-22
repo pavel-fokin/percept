@@ -37,7 +37,7 @@ impl SessionStatus {
             Payload::Message { .. } | Payload::ToolUsed { .. } | Payload::SubagentStarted { .. } | Payload::SubagentReported { .. } => {
                 Some(Self::Working)
             }
-            Payload::ProjectCreated { .. } | Payload::BoardCreated { .. } | Payload::MapCreated { .. } | Payload::NodeAdded { .. } | Payload::NodeChanged { .. } | Payload::NodeRemoved { .. } | Payload::EdgeAdded { .. } | Payload::EdgeRemoved { .. } => None,
+            Payload::ProjectCreated { .. } | Payload::BoardCreated { .. } | Payload::MapCreated { .. } | Payload::MapChanged { .. } | Payload::NodeAdded { .. } | Payload::NodeChanged { .. } | Payload::NodeRemoved { .. } | Payload::EdgeAdded { .. } | Payload::EdgeRemoved { .. } => None,
         }
     }
 }
