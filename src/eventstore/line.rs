@@ -5,7 +5,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::core::{Actor, ClientAgentId, ClientSessionId, Event, EventId, Kind, Name, Payload, Reference, Source};
+use crate::core::{Actor, BoardId, ClientAgentId, ClientSessionId, Event, EventId, Kind, Name, Payload, Place, Places, ProjectId, Reference, Source};
 use crate::shared::{Error, Result};
 
 /// One log line. The log format lives here, apart from the domain `Event`.
@@ -41,7 +41,11 @@ impl From<&Event> for EventLine {
             }
             Payload::ProjectCreated { project, name, root } => json!({ "project": project, "name": name.as_str(), "root": root }),
             Payload::BoardCreated { board, project, name } => json!({ "board": board, "project": project, "name": name.as_str() }),
-            Payload::MapCreated { map, project, name, definition } => json!({ "map": map, "project": project, "name": name.as_str(), "definition": definition }),
+            Payload::MapCreated { map, project, name, definition, places } => {
+                let places: Vec<PlaceLine> = places.iter().map(PlaceLine::from).collect();
+
+                json!({ "map": map, "project": project, "name": name.as_str(), "definition": definition, "places": places })
+            }
             Payload::NodeAdded { map, node, kind, title, properties, references } => {
                 let references: Vec<ReferenceLine> = references.iter().map(ReferenceLine::from).collect();
 
@@ -118,6 +122,7 @@ impl TryFrom<EventLine> for Event {
                 project: field(p, "project")?,
                 name: Name::new(&field::<String>(p, "name")?)?,
                 definition: field(p, "definition")?,
+                places: Places::new(field::<Vec<PlaceLine>>(p, "places")?.into_iter().map(Place::from))?,
             },
             Kind::NodeAdded => Payload::NodeAdded {
                 map: field(p, "map")?,
@@ -215,6 +220,31 @@ impl From<ReferenceLine> for Reference {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum PlaceLine {
+    Project(ProjectId),
+    Board(BoardId),
+}
+
+impl From<Place> for PlaceLine {
+    fn from(place: Place) -> Self {
+        match place {
+            Place::Project(project) => Self::Project(project),
+            Place::Board(board) => Self::Board(board),
+        }
+    }
+}
+
+impl From<PlaceLine> for Place {
+    fn from(line: PlaceLine) -> Self {
+        match line {
+            PlaceLine::Project(project) => Self::Project(project),
+            PlaceLine::Board(board) => Self::Board(board),
+        }
+    }
+}
+
 fn field<T: DeserializeOwned>(
     payload: &serde_json::Value,
     name: &str,
@@ -228,12 +258,13 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
-    use crate::core::{BoardId, MapId, NodeId, ProjectId, SessionId};
+    use crate::core::{MapId, NodeId, SessionId};
 
     #[test]
     fn every_payload_round_trips_through_a_line() {
         let session = SessionId::new();
         let raw = json!({"r": 1});
+        let project = ProjectId::new();
         let events = [
             Event::session_created(Source::fixture(), session, ProjectId::new(), ClientSessionId::new("a".into())),
             Event::session_started(Source::fixture(), session, raw.clone()),
@@ -245,7 +276,7 @@ mod tests {
             Event::subagent_reported(Source::fixture(), session, ClientAgentId::new("a1".into()), "done", raw),
             Event::project_created(Source::fixture(), Actor::Human, ProjectId::new(), Name::new("percept").unwrap(), Some("/work/percept".into())),
             Event::board_created(Source::fixture(), Actor::Human, BoardId::new(), ProjectId::new(), Name::new("ideas").unwrap()),
-            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), ProjectId::new(), Name::new("decisions").unwrap(), "/maps/decisions.toml".into()),
+            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::new([Place::Project(project), Place::Board(BoardId::new())]).unwrap()),
             Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())]), Vec::new()),
             Event::node_changed(Source::fixture(), Actor::Human, MapId::new(), NodeId::new(), "Why not?", BTreeMap::from([("definition".into(), "E".into())]), Vec::new()),
             Event::node_removed(Source::fixture(), Actor::Human, MapId::new(), NodeId::new()),
@@ -289,6 +320,23 @@ mod tests {
         let back = Event::try_from(line).unwrap();
 
         assert_eq!(back.payload, event.payload);
+    }
+
+    #[test]
+    fn a_map_line_without_places_or_with_none_is_a_read_error() {
+        let project = ProjectId::new();
+        let event = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::fixture(project));
+        let mut line = EventLine::from(&event);
+        assert_eq!(line.payload["places"], json!([{ "project": project }]));
+
+        line.payload["places"] = json!([]);
+        let empty = Event::try_from(line);
+        let mut line = EventLine::from(&event);
+        line.payload.as_object_mut().unwrap().remove("places");
+        let missing = Event::try_from(line);
+
+        assert!(empty.is_err());
+        assert!(missing.is_err());
     }
 
     #[test]

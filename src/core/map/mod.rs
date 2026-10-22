@@ -1,4 +1,5 @@
 mod definition;
+mod places;
 mod policy;
 
 use std::collections::BTreeMap;
@@ -7,6 +8,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 
 pub use definition::{Definition, DefinitionStore, EdgeKind};
+pub use places::{Place, Places};
 pub use policy::Policy;
 
 use super::{Actor, Event, EventId, Name, Payload, ProjectId};
@@ -23,6 +25,7 @@ pub struct Map {
     pub project: ProjectId,
     /// The absolute path of the file that defines the map.
     pub definition: PathBuf,
+    pub places: Places,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
 }
@@ -64,7 +67,8 @@ impl Edge {
 impl Map {
     /// The map `id` after `events`, created by a `MapCreated` event placed first.
     pub fn fixture(id: MapId, events: &[Event]) -> Self {
-        let created = Event::map_created(crate::core::Source::fixture(), Actor::Human, id, ProjectId::new(), Name::new("concepts").unwrap(), "/maps/concepts.toml".into());
+        let project = ProjectId::new();
+        let created = Event::map_created(crate::core::Source::fixture(), Actor::Human, id, project, Name::new("concepts").unwrap(), "/maps/concepts.toml".into(), Places::fixture(project));
         let log: Vec<Event> = std::iter::once(created).chain(events.iter().cloned()).collect();
 
         Self::all(&log).remove(0)
@@ -86,6 +90,14 @@ impl Map {
         Self::all(events).into_iter().find(|m| m.project == project && m.name == name)
     }
 
+    /// The maps of `events` shown at `place`, in `MapCreated` order.
+    pub fn at(events: &[Event], place: Place) -> Vec<Self> {
+        let mut maps = Self::all(events);
+        maps.retain(|m| m.places.contains(place));
+
+        maps
+    }
+
     /// Every map in `events` in `MapCreated` order, each after the events that reached it.
     /// Events of a map with no `MapCreated` are ignored.
     pub fn all(events: &[Event]) -> Vec<Self> {
@@ -93,11 +105,12 @@ impl Map {
 
         for event in events {
             match &event.payload {
-                Payload::MapCreated { map, project, name, definition } => maps.push(Self {
+                Payload::MapCreated { map, project, name, definition, places } => maps.push(Self {
                     id: *map,
                     name: name.clone(),
                     definition: definition.clone(),
                     project: *project,
+                    places: places.clone(),
                     nodes: Vec::new(),
                     edges: Vec::new(),
                 }),
@@ -236,7 +249,7 @@ mod tests {
     #[test]
     fn a_map_is_found_in_its_project_by_name_in_any_case() {
         let (project, other) = (ProjectId::new(), ProjectId::new());
-        let created = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into());
+        let created = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::fixture(project));
         let events = [created];
 
         let found = |project, name: &str| Map::named(&events, project, name).map(|m| m.name);
@@ -371,7 +384,8 @@ mod tests {
             Event::node_removed(Source::fixture(), Actor::Agent, other, b),
         ];
 
-        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, ProjectId::new(), Name::new("concepts").unwrap(), "/maps/concepts.toml".into());
+        let project = ProjectId::new();
+        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new("concepts").unwrap(), "/maps/concepts.toml".into(), Places::fixture(project));
         let log: Vec<Event> = [created(map), created(other)].into_iter().chain(events).collect();
 
         let maps = Map::all(&log);
@@ -458,7 +472,7 @@ mod tests {
         let (_, add_lost) = node_added(uncreated, Actor::Human, "Lost");
         let (one, two) = (ProjectId::new(), ProjectId::new());
         let created = |id, project, name: &str| {
-            Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new(name).unwrap(), format!("/maps/{name}.toml").into())
+            Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new(name).unwrap(), format!("/maps/{name}.toml").into(), Places::fixture(project))
         };
         let events = [
             created(first, one, "concepts"),
@@ -479,6 +493,26 @@ mod tests {
         assert_eq!(maps[0].edges.iter().map(|e| (e.from, e.to)).collect::<Vec<_>>(), vec![(a, a)]);
         assert_eq!(maps[1].nodes.iter().map(|n| n.title.as_str()).collect::<Vec<_>>(), vec!["B"]);
         assert_eq!(maps[1].edges.iter().map(|e| (e.from, e.to)).collect::<Vec<_>>(), vec![(b, b)]);
+    }
+
+    #[test]
+    fn maps_at_a_place_are_those_placed_there_in_log_order() {
+        let (project, board) = (ProjectId::new(), crate::core::BoardId::new());
+        let (draft, listed, both) = (MapId::new(), MapId::new(), MapId::new());
+        let created = |id, places: &[Place]| {
+            Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new("m").unwrap(), "/maps/m.toml".into(), Places::new(places.iter().copied()).unwrap())
+        };
+        let events = [
+            created(draft, &[Place::Board(board)]),
+            created(listed, &[Place::Project(project)]),
+            created(both, &[Place::Project(project), Place::Board(board)]),
+        ];
+
+        let on_board: Vec<MapId> = Map::at(&events, Place::Board(board)).iter().map(|m| m.id).collect();
+        let in_project: Vec<MapId> = Map::at(&events, Place::Project(project)).iter().map(|m| m.id).collect();
+
+        assert_eq!(on_board, vec![draft, both]);
+        assert_eq!(in_project, vec![listed, both]);
     }
 
     fn check_map() -> (MapId, NodeId, NodeId, Map) {
@@ -605,7 +639,7 @@ mod tests {
         let (map, _, _, folded) = check_map();
         let session = crate::core::SessionId::new();
         let events = [
-            Event::map_created(Source::fixture(), Actor::Human, map, ProjectId::new(), Name::new("concepts").unwrap(), "/maps/concepts.toml".into()),
+            Event::map_created(Source::fixture(), Actor::Human, map, ProjectId::new(), Name::new("concepts").unwrap(), "/maps/concepts.toml".into(), Places::fixture(ProjectId::new())),
             Event::session_created(Source::fixture(), session, crate::core::ProjectId::new(), crate::core::ClientSessionId::new("c".into())),
             Event::message(Source::fixture(), session, Actor::Human, "Hello", serde_json::json!({})),
         ];

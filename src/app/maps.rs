@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::AppService;
-use crate::core::{Actor, Definition, DefinitionStore, Event, EventId, EventStore, Map, MapId, Name, Node, NodeId, Payload, Policy, Project, ProjectId, Reference, SessionId, Source};
+use crate::core::{Actor, Definition, DefinitionStore, Event, EventId, EventStore, Map, MapId, Name, Node, NodeId, Payload, Place, Places, Policy, Project, ProjectId, Reference, SessionId, Source};
 use crate::shared::Result;
 
 #[derive(Debug, PartialEq)]
@@ -50,20 +50,22 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
 
         self.definitions.definition(file).await?;
 
-        self.store.append(&Event::map_created(source, actor, MapId::new(), project, name, file.into())).await
+        let places = Places::new([Place::Project(project)])?;
+
+        self.store.append(&Event::map_created(source, actor, MapId::new(), project, name, file.into(), places)).await
     }
 
     /// The maps of the project in log order, each with its nodes and edges, from one read of the log.
     pub async fn maps(&self, project: ProjectId) -> Result<Vec<Map>> {
-        let mut maps = Map::all(&self.store.all().await?);
-        maps.retain(|m| m.project == project);
-
-        Ok(maps)
+        Ok(Map::at(&self.store.all().await?, Place::Project(project)))
     }
 
-    /// Every map across all projects in log order, each with its nodes and edges, from one read of the log.
+    /// Every map placed in its own project, across all projects, in log order, each with its nodes and edges, from one read of the log.
     pub async fn all_maps(&self) -> Result<Vec<Map>> {
-        Ok(Map::all(&self.store.all().await?))
+        let mut maps = Map::all(&self.store.all().await?);
+        maps.retain(|m| m.places.contains(Place::Project(m.project)));
+
+        Ok(maps)
     }
 
     /// The id of the map named `map` in the project named `project`, in any case.
@@ -950,6 +952,23 @@ mod tests {
         let found: Vec<(&str, usize)> = maps.iter().map(|m| (m.name.as_str(), m.nodes.len())).collect();
         assert_eq!(found, vec![("decisions", 0), ("tasks", 1)]);
         assert_ne!(maps[0].project, maps[1].project);
+    }
+
+    #[tokio::test]
+    async fn listings_leave_out_a_map_placed_only_on_a_board() {
+        let store = in_project("/repo");
+        let project = id_at(&store, "/repo");
+        let service = AppService::new(&store, Definitions);
+        service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
+        let places = Places::new([Place::Board(crate::core::BoardId::new())]).unwrap();
+        let draft = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("draft").unwrap(), "/maps/draft.toml".into(), places);
+        store.0.lock().unwrap().push(draft);
+
+        let in_project = service.maps(project).await.unwrap();
+        let all = service.all_maps().await.unwrap();
+
+        assert_eq!(in_project.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(), vec!["decisions"]);
+        assert_eq!(all.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(), vec!["decisions"]);
     }
 
     #[tokio::test]

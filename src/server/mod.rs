@@ -90,7 +90,7 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::{Actor, ClientSessionId, Definition, DefinitionStore, Event, MapId, Name, NodeId, ProjectId, Reference, SessionId, Source};
+    use crate::core::{Actor, ClientSessionId, Definition, DefinitionStore, Event, MapId, Name, NodeId, Places, ProjectId, Reference, SessionId, Source};
 
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
     const MAP: &str = "0190a0a0-0000-7000-8000-000000000003";
@@ -116,7 +116,7 @@ mod tests {
             let created = Event::session_created(Source::fixture(), session, project, ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
             let map: MapId = serde_json::from_value(json!(MAP))?;
-            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into());
+            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::fixture(project));
             let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default(), self.1.clone());
             Ok([project_created, created].into_iter().chain(started).chain(self.2.clone()).chain([map_created, node]).collect())
         }
