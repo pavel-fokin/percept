@@ -79,6 +79,13 @@ pub struct Change {
 }
 
 impl Map {
+    /// The map of `project` in `events` named `name`, in any case.
+    pub fn named(events: &[Event], project: ProjectId, name: &str) -> Option<Self> {
+        let name = Name::new(name).ok()?;
+
+        Self::all(events).into_iter().find(|m| m.project == project && m.name == name)
+    }
+
     /// Every map in `events` in `MapCreated` order, each after the events that reached it.
     /// Events of a map with no `MapCreated` are ignored.
     pub fn all(events: &[Event]) -> Vec<Self> {
@@ -224,6 +231,21 @@ mod tests {
         let event = Event::node_added(Source::fixture(), actor, map, node, "concept", title, BTreeMap::new(), Vec::new());
 
         (node, event)
+    }
+
+    #[test]
+    fn a_map_is_found_in_its_project_by_name_in_any_case() {
+        let (project, other) = (ProjectId::new(), ProjectId::new());
+        let created = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into());
+        let events = [created];
+
+        let found = |project, name: &str| Map::named(&events, project, name).map(|m| m.name);
+
+        assert_eq!(found(project, "decisions"), Some(Name::new("decisions").unwrap()));
+        assert_eq!(found(project, "DECISIONS"), Some(Name::new("decisions").unwrap()));
+        assert_eq!(found(project, "tasks"), None);
+        assert_eq!(found(project, "not a name"), None);
+        assert_eq!(found(other, "decisions"), None);
     }
 
     #[test]

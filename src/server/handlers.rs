@@ -96,7 +96,8 @@ where
     }
 
     pub(super) async fn map(State(api): State<Arc<Self>>, Path((project, name)): Path<(String, String)>) -> Reply<MapDetail> {
-        let detail = api.service.map_detail(&project, &name).await?.ok_or(ApiError::NotFound)?;
+        let map = api.service.map_id(&project, &name).await?.ok_or(ApiError::NotFound)?;
+        let detail = api.service.map_detail(map).await?.ok_or(ApiError::NotFound)?;
         Ok(Json(Data { data: MapDetail::new(detail, project) }))
     }
 
