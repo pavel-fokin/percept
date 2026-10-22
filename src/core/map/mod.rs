@@ -1,15 +1,17 @@
 mod definition;
 mod places;
 mod policy;
+mod schema;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use jiff::Timestamp;
 
-pub use definition::{Definition, DefinitionStore, EdgeKind};
+pub use definition::{Definition, DefinitionStore};
 pub use places::{LastPlace, Place, Places};
 pub use policy::Policy;
+pub use schema::{EdgeKind, Schema};
 
 use super::{Actor, Event, EventId, Name, Payload, ProjectId};
 use crate::shared::{Id, Result};
@@ -135,18 +137,18 @@ impl Map {
     pub fn check(&self, event: &Event, definition: &Definition) -> Result<()> {
         match &event.payload {
             Payload::NodeAdded { kind, title, properties, .. } => {
-                definition.check_node(kind, properties)?;
+                definition.schema().check_node(kind, properties)?;
 
                 self.check_title(title, None)
             }
             Payload::NodeChanged { node, title, properties, .. } => {
-                definition.check_node(&self.on_map(*node)?.kind, properties)?;
+                definition.schema().check_node(&self.on_map(*node)?.kind, properties)?;
 
                 self.check_title(title, Some(*node))
             }
             Payload::NodeRemoved { node, .. } => self.on_map(*node).map(|_| ()),
             Payload::EdgeAdded { kind, from, to, .. } => {
-                definition.check_edge(kind, &self.on_map(*from)?.kind, &self.on_map(*to)?.kind)?;
+                definition.schema().check_edge(kind, &self.on_map(*from)?.kind, &self.on_map(*to)?.kind)?;
 
                 if self.edges.iter().any(|e| e.is(kind, *from, *to)) {
                     return Err(format!("the {} map already has this {kind} edge", self.name.as_str()).into());
@@ -546,7 +548,7 @@ mod tests {
         let edge = || crate::core::EdgeKind { from: "concept".into(), to: "concept".into() };
         let edges = BTreeMap::from([("links".to_string(), edge()), ("cites".to_string(), edge())]);
 
-        Definition::new("p".into(), "i".into(), nodes, edges).unwrap()
+        Definition::new("p".into(), "i".into(), crate::core::Schema::new(nodes, edges).unwrap())
     }
 
     #[test]

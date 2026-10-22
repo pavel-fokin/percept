@@ -3,7 +3,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::core::{Definition, DefinitionStore, EdgeKind};
+use crate::core::{Definition, DefinitionStore, EdgeKind, Schema};
 use crate::shared::Result;
 
 /// Reads a definition from a TOML file.
@@ -43,7 +43,9 @@ impl DefinitionStore for TomlStore {
         }
         let edges = parsed.edges.into_iter().map(|(k, e)| (k, EdgeKind { from: e.from, to: e.to })).collect();
 
-        Definition::new(parsed.purpose, parsed.instructions, nodes, edges).map_err(|e| format!("{name}: {e}").into())
+        let schema = Schema::new(nodes, edges).map_err(|e| format!("{name}: {e}"))?;
+
+        Ok(Definition::new(parsed.purpose, parsed.instructions, schema))
     }
 }
 
@@ -87,10 +89,10 @@ mod tests {
         assert_eq!(definition.purpose(), "p");
         assert_eq!(definition.instructions(), "i");
         let properties = BTreeMap::from([("body".to_string(), "x".to_string()), ("by".to_string(), "y".to_string())]);
-        assert!(definition.check_node("note", &properties).is_ok());
-        assert!(definition.check_node("topic", &properties).is_err());
-        assert!(definition.check_edge("about", "note", "topic").is_ok());
-        assert!(definition.check_edge("about", "topic", "note").is_err());
+        assert!(definition.schema().check_node("note", &properties).is_ok());
+        assert!(definition.schema().check_node("topic", &properties).is_err());
+        assert!(definition.schema().check_edge("about", "note", "topic").is_ok());
+        assert!(definition.schema().check_edge("about", "topic", "note").is_err());
     }
 
     #[tokio::test]
@@ -99,7 +101,7 @@ mod tests {
 
         let definition = TomlStore.definition(&file).await.unwrap();
 
-        assert!(definition.check_edge("about", "note", "note").is_err());
+        assert!(definition.schema().check_edge("about", "note", "note").is_err());
     }
 
     #[tokio::test]

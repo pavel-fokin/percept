@@ -202,15 +202,15 @@ fn definition_markdown(name: &str, definition: &Definition) -> String {
         definition.instructions().trim(),
     );
 
-    for (node, properties) in definition.nodes() {
+    for (node, properties) in definition.schema().nodes() {
         let properties: Vec<&str> = properties.iter().map(String::as_str).collect();
         text.push_str(&format!("| {node} | {} |\n", properties.join(", ")));
     }
 
-    if !definition.edges().is_empty() {
+    if !definition.schema().edges().is_empty() {
         text.push_str("\n| Edge kind | From | To |\n|---|---|---|\n");
     }
-    for (edge, ends) in definition.edges() {
+    for (edge, ends) in definition.schema().edges() {
         text.push_str(&format!("| {edge} | {} | {} |\n", ends.from, ends.to));
     }
 
@@ -300,7 +300,7 @@ fn writer(claudecode: Option<String>, codex_session_id: Option<String>) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::{EdgeKind, Event, EventId, MapId, NodeId};
+    use crate::core::{EdgeKind, Event, Schema, EventId, MapId, NodeId};
 
     #[test]
     fn writer_follows_the_client_environment() {
@@ -443,7 +443,7 @@ mod tests {
             ("note".to_string(), Default::default()),
         ]);
         let edges = BTreeMap::from([("supersedes".to_string(), EdgeKind { from: "decision".into(), to: "decision".into() })]);
-        let definition = Definition::new("Why.".into(), "\nKeep it.\n\nShort.\n".into(), nodes, edges).unwrap();
+        let definition = Definition::new("Why.".into(), "\nKeep it.\n\nShort.\n".into(), Schema::new(nodes, edges).unwrap());
 
         let text = definition_markdown("decisions", &definition);
 
@@ -455,7 +455,7 @@ mod tests {
     #[test]
     fn without_edge_kinds_the_edge_table_is_left_out() {
         let nodes = BTreeMap::from([("note".to_string(), Default::default())]);
-        let definition = Definition::new("p".into(), "i".into(), nodes, BTreeMap::new()).unwrap();
+        let definition = Definition::new("p".into(), "i".into(), Schema::new(nodes, BTreeMap::new()).unwrap());
 
         let text = definition_markdown("notes", &definition);
 
