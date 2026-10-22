@@ -3,7 +3,7 @@ use std::path::Path;
 
 use super::hook::Client;
 use crate::app::{AppService, Ref, source_path};
-use crate::core::{Actor, Definition, DefinitionStore, EventStore, Map, MapId, NodeId, Observed, Project, Reference, Source};
+use crate::core::{Actor, Definition, DefinitionStore, EventStore, Map, MapId, NodeId, Project, Reference, Source};
 use crate::shared::Result;
 
 pub(super) async fn create<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, name: &str, file: &Path) -> Result<()> {
@@ -189,18 +189,15 @@ pub(super) async fn describe<S: EventStore, M: DefinitionStore>(service: &AppSer
     let project = project_of(service, &source_path(&std::env::current_dir()?).await).await?;
     let map = map_of(service, &project, name).await?;
     let definition = service.definition(map).await?;
-    let observed = match definition.schema() {
-        Some(_) => None,
-        None => Some(service.map(map).await?.observed()),
-    };
+    let map = service.map(map).await?;
 
-    println!("{}", definition_markdown(name, &definition, observed.as_ref()));
+    println!("{}", definition_markdown(name, &definition, &map));
 
     Ok(())
 }
 
-/// `observed` is the schema read off a map whose definition declares none.
-fn definition_markdown(name: &str, definition: &Definition, observed: Option<&Observed>) -> String {
+/// A definition without a schema shows the kinds `map` uses instead.
+fn definition_markdown(name: &str, definition: &Definition, map: &Map) -> String {
     let mut text = format!(
         "# {name}\n\n{}\n\n## Instructions\n\n{}\n",
         definition.purpose().trim(),
@@ -212,7 +209,8 @@ fn definition_markdown(name: &str, definition: &Definition, observed: Option<&Ob
         let nodes = schema.nodes().iter().map(|(kind, properties)| (kind.as_str(), properties));
         let edges = schema.edges().iter().map(|(kind, ends)| (kind.as_str(), ends.from.as_str(), ends.to.as_str()));
         text.push_str(&schema_tables(nodes, edges));
-    } else if let Some(observed) = observed {
+    } else {
+        let observed = map.observed();
         text.push_str("\n## Schema\n\nObserved on the map, not checked.");
         if observed.nodes.is_empty() {
             text.push_str(" Nothing on the map yet.\n");
@@ -476,7 +474,7 @@ mod tests {
         let edges = BTreeMap::from([("supersedes".to_string(), EdgeKind { from: "decision".into(), to: "decision".into() })]);
         let definition = Definition::new("Why.".into(), "\nKeep it.\n\nShort.\n".into(), Some(Schema::new(nodes, edges).unwrap()));
 
-        let text = definition_markdown("decisions", &definition, None);
+        let text = definition_markdown("decisions", &definition, &Map::fixture(MapId::new(), &[]));
 
         assert_eq!(text, "# decisions\n\nWhy.\n\n## Instructions\n\nKeep it.\n\nShort.\n\n## Schema\n\n\
             | Node kind | Properties |\n|---|---|\n| decision | by, why |\n| note |  |\n\n\
@@ -496,9 +494,9 @@ mod tests {
             Event::node_added(Source::fixture(), Actor::Human, map, b, "cause", "B", BTreeMap::new(), Vec::new()),
             Event::edge_added(Source::fixture(), Actor::Human, map, "caused-by", a, b),
         ];
-        let observed = Map::fixture(map, &events).observed();
+        let map = Map::fixture(map, &events);
 
-        let text = definition_markdown("scratch", &scratch(), Some(&observed));
+        let text = definition_markdown("scratch", &scratch(), &map);
 
         assert_eq!(text, "# scratch\n\nWhy.\n\n## Instructions\n\nKeep it.\n\n## Schema\n\nObserved on the map, not checked.\n\n\
             | Node kind | Properties |\n|---|---|\n| cause |  |\n| obstacle | where |\n\n\
@@ -509,9 +507,9 @@ mod tests {
     fn without_edges_the_observed_edge_table_is_left_out() {
         let (map, a) = (MapId::new(), NodeId::new());
         let events = [Event::node_added(Source::fixture(), Actor::Human, map, a, "note", "A", BTreeMap::new(), Vec::new())];
-        let observed = Map::fixture(map, &events).observed();
+        let map = Map::fixture(map, &events);
 
-        let text = definition_markdown("scratch", &scratch(), Some(&observed));
+        let text = definition_markdown("scratch", &scratch(), &map);
 
         assert!(text.ends_with("| note |  |"));
         assert!(!text.contains("Edge kind"));
@@ -519,9 +517,9 @@ mod tests {
 
     #[test]
     fn an_empty_map_without_a_schema_says_so() {
-        let observed = Map::fixture(MapId::new(), &[]).observed();
+        let map = Map::fixture(MapId::new(), &[]);
 
-        let text = definition_markdown("scratch", &scratch(), Some(&observed));
+        let text = definition_markdown("scratch", &scratch(), &map);
 
         assert_eq!(text, "# scratch\n\nWhy.\n\n## Instructions\n\nKeep it.\n\n## Schema\n\nObserved on the map, not checked. Nothing on the map yet.");
     }
@@ -531,7 +529,7 @@ mod tests {
         let nodes = BTreeMap::from([("note".to_string(), Default::default())]);
         let definition = Definition::new("p".into(), "i".into(), Some(Schema::new(nodes, BTreeMap::new()).unwrap()));
 
-        let text = definition_markdown("notes", &definition, None);
+        let text = definition_markdown("notes", &definition, &Map::fixture(MapId::new(), &[]));
 
         assert!(text.ends_with("| note |  |"));
         assert!(!text.contains("Edge kind"));

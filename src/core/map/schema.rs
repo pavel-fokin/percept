@@ -18,7 +18,7 @@ impl Schema {
     /// A schema needs a node kind, and each edge kind links declared node kinds.
     pub fn new(nodes: BTreeMap<String, BTreeSet<String>>, edges: BTreeMap<String, EdgeKind>) -> Result<Self> {
         if nodes.is_empty() {
-            return Err("a definition needs at least one node kind".into());
+            return Err("a schema needs at least one node kind".into());
         }
 
         for (kind, edge) in &edges {
