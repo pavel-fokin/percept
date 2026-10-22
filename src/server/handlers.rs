@@ -10,7 +10,7 @@ use serde::Deserialize;
 use super::responses::{self, BoardDetail, BoardSummary, Data, MapDetail, MapSummary, ProjectSummary, Status};
 use super::Api;
 use crate::app::Taken;
-use crate::core::{Actor, DefinitionStore, EventStore, Name, Place, SessionId, Source};
+use crate::core::{Actor, DefinitionStore, EventStore, LastPlace, Name, Place, SessionId, Source};
 use crate::shared::Error;
 
 /// The body of `POST /api/projects`.
@@ -38,8 +38,13 @@ pub(super) enum ApiError {
 
 impl From<Error> for ApiError {
     fn from(error: Error) -> Self {
-        match error.downcast::<Taken>() {
-            Ok(taken) => Self::Conflict(taken.to_string()),
+        let error = match error.downcast::<Taken>() {
+            Ok(taken) => return Self::Conflict(taken.to_string()),
+            Err(error) => error,
+        };
+
+        match error.downcast::<LastPlace>() {
+            Ok(last) => Self::Conflict(last.to_string()),
             Err(error) => Self::Internal(error),
         }
     }
@@ -126,6 +131,15 @@ where
         let board_id = api.service.board(&project, &board).await?.ok_or(ApiError::NotFound)?.id;
         let map = api.service.map_id(&project, &body.map).await?.ok_or(ApiError::NotFound)?;
         api.service.place_map(Source::Web, Actor::Human, map, Place::Board(board_id)).await?;
+
+        let contents = api.service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
+        Ok(Json(Data { data: BoardDetail::new(contents, project) }))
+    }
+
+    pub(super) async fn unplace_map(State(api): State<Arc<Self>>, Path((project, board, map)): Path<(String, String, String)>) -> Reply<BoardDetail> {
+        let board_id = api.service.board(&project, &board).await?.ok_or(ApiError::NotFound)?.id;
+        let map = api.service.map_id(&project, &map).await?.ok_or(ApiError::NotFound)?;
+        api.service.unplace_map(Source::Web, Actor::Human, map, Place::Board(board_id)).await?;
 
         let contents = api.service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
         Ok(Json(Data { data: BoardDetail::new(contents, project) }))

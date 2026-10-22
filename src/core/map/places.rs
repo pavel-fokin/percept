@@ -10,6 +10,18 @@ pub enum Place {
     Board(BoardId),
 }
 
+/// Taking a place away would leave the map shown nowhere.
+#[derive(Debug)]
+pub struct LastPlace;
+
+impl std::fmt::Display for LastPlace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("this is the only place the map is shown")
+    }
+}
+
+impl std::error::Error for LastPlace {}
+
 /// The places a map is shown. A map is shown in at least one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Places(BTreeSet<Place>);
@@ -31,6 +43,17 @@ impl Places {
         places.insert(place);
 
         Self(places)
+    }
+
+    /// These places less `place`. Refuses to leave none, with `LastPlace`.
+    pub fn without(&self, place: Place) -> Result<Self> {
+        let mut places = self.0.clone();
+        places.remove(&place);
+        if places.is_empty() {
+            return Err(LastPlace.into());
+        }
+
+        Ok(Self(places))
     }
 
     /// Refuses a project other than the map's own `project`, and a board that is not one of that project's `boards`.
@@ -86,6 +109,20 @@ mod tests {
         assert!(added.contains(Place::Project(project)) && added.contains(Place::Board(board)));
         assert_eq!(added.with(Place::Board(board)), added);
         assert!(!places.contains(Place::Board(board)));
+    }
+
+    #[test]
+    fn without_removes_a_place_but_never_the_last() {
+        let (project, board) = (ProjectId::new(), BoardId::new());
+        let places = Places::fixture(project).with(Place::Board(board));
+
+        let removed = places.without(Place::Board(board)).unwrap();
+        let unheld = removed.without(Place::Board(board)).unwrap();
+        let last = removed.without(Place::Project(project));
+
+        assert_eq!(removed, Places::fixture(project));
+        assert_eq!(unheld, removed);
+        assert!(last.unwrap_err().is::<LastPlace>());
     }
 
     #[test]

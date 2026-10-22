@@ -14,7 +14,7 @@ import {
 } from "@xyflow/react";
 import { useLoaderData, useRevalidator } from "react-router";
 
-import { describe, postData, type BoardDetail, type MapSummary } from "../api";
+import { deleteData, describe, postData, type BoardDetail, type MapSummary } from "../api";
 import { Button } from "../components/ui/button";
 import { usePolling } from "../use-polling";
 import type { loadBoard } from "./board-page";
@@ -57,8 +57,9 @@ export function Board() {
     >
       <Background />
       <Controls position="bottom-right" showInteractive={false} />
-      <Panel position="top-right">
+      <Panel position="top-right" className="flex flex-col items-end gap-2">
         <AddMap board={board} addable={addable} />
+        <RemoveMap board={board} />
       </Panel>
     </ReactFlow>
   );
@@ -140,6 +141,47 @@ function AddMap({ board, addable }: { board: BoardDetail; addable: MapSummary[] 
             >
               <span className="min-w-0 truncate">{map.name}</span>
               <span className="text-muted tabular-nums">{map.nodes}</span>
+            </button>
+          ))}
+          {failure && <p className="px-3 py-2 wrap-anywhere text-muted">{failure}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RemoveMap({ board }: { board: BoardDetail }) {
+  const { revalidate } = useRevalidator();
+  const [open, setOpen] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  async function remove(map: string) {
+    try {
+      await deleteData<BoardDetail>(`/api/projects/${encodeURIComponent(board.project)}/boards/${encodeURIComponent(board.name)}/maps/${encodeURIComponent(map)}`);
+      setOpen(false);
+      setFailure(null);
+      await revalidate();
+    } catch (error) {
+      setFailure(`${map}: ${describe(error)}`);
+    }
+  }
+
+  return (
+    <div className="relative flex flex-col items-end gap-2">
+      <Button variant="secondary" aria-expanded={open} onClick={() => setOpen(!open)}>
+        Remove map
+      </Button>
+      {open && (
+        <div className="w-56 rounded-md border border-border bg-surface p-1 text-sm">
+          {board.maps.length === 0 && <p className="px-3 py-2 text-muted">No maps on this board.</p>}
+          {board.maps.map((map) => (
+            <button
+              key={map.name}
+              type="button"
+              onClick={() => void remove(map.name)}
+              className="flex min-h-11 w-full cursor-pointer items-center rounded-md px-3 text-left hover:bg-border/50"
+            >
+              <span className="min-w-0 truncate">{map.name}</span>
             </button>
           ))}
           {failure && <p className="px-3 py-2 wrap-anywhere text-muted">{failure}</p>}

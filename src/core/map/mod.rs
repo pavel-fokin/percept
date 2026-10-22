@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use jiff::Timestamp;
 
 pub use definition::{Definition, DefinitionStore, EdgeKind};
-pub use places::{Place, Places};
+pub use places::{LastPlace, Place, Places};
 pub use policy::Policy;
 
 use super::{Actor, Event, EventId, Name, Payload, ProjectId};

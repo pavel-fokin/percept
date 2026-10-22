@@ -71,6 +71,22 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         self.store.append(&Event::map_changed(source, actor, map.id, places)).await
     }
 
+    /// Records that the map is no longer shown at `place`. Nothing is written when it was not.
+    /// A map shown only at `place` fails with `LastPlace`.
+    pub async fn unplace_map(&self, source: Source, actor: Actor, map: MapId, place: Place) -> Result<()> {
+        // Held until return, so the places cannot change between the check and the append.
+        let _lock = self.store.lock().await?;
+
+        let Located { map, .. } = self.located(map).await?;
+
+        let places = map.places.without(place)?;
+        if places == map.places {
+            return Ok(());
+        }
+
+        self.store.append(&Event::map_changed(source, actor, map.id, places)).await
+    }
+
     /// The maps of the project in log order, each with its nodes and edges, from one read of the log.
     pub async fn maps(&self, project: ProjectId) -> Result<Vec<Map>> {
         Ok(Map::at(&self.store.all().await?, Place::Project(project)))
@@ -371,6 +387,27 @@ mod tests {
         assert!(places.contains(Place::Project(project)) && places.contains(Place::Board(board)));
         assert_eq!(store.0.lock().unwrap().len(), written);
         assert!(matches!(store.0.lock().unwrap().last().unwrap().payload, Payload::MapChanged { .. }));
+    }
+
+    #[tokio::test]
+    async fn an_unplaced_map_stays_elsewhere_and_its_last_place_stays() {
+        let store = in_project("/repo");
+        let project = id_at(&store, "/repo");
+        let service = AppService::new(&store, Definitions);
+        service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
+        let map = service.map_id("p0", "decisions").await.unwrap().unwrap();
+        let board = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap().id;
+        service.place_map(Source::Web, Actor::Human, map, Place::Board(board)).await.unwrap();
+
+        service.unplace_map(Source::Web, Actor::Human, map, Place::Board(board)).await.unwrap();
+        let written = store.0.lock().unwrap().len();
+        service.unplace_map(Source::Web, Actor::Human, map, Place::Board(board)).await.unwrap();
+        let last = service.unplace_map(Source::Web, Actor::Human, map, Place::Project(project)).await;
+
+        let places = service.map(map).await.unwrap().places;
+        assert!(places.contains(Place::Project(project)) && !places.contains(Place::Board(board)));
+        assert!(last.unwrap_err().is::<crate::core::LastPlace>());
+        assert_eq!(store.0.lock().unwrap().len(), written);
     }
 
     #[tokio::test]
