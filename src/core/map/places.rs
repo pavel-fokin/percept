@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use crate::core::{BoardId, ProjectId};
+use crate::core::{Board, BoardId, ProjectId};
 use crate::shared::Result;
 
 /// Where a map is shown: its project's map list, or a board.
@@ -23,6 +23,29 @@ impl Places {
         }
 
         Ok(Self(places))
+    }
+
+    /// These places and `place`.
+    pub fn with(&self, place: Place) -> Self {
+        let mut places = self.0.clone();
+        places.insert(place);
+
+        Self(places)
+    }
+
+    /// Refuses a project other than the map's own `project`, and a board that is not one of that project's `boards`.
+    pub fn check_in(&self, project: ProjectId, boards: &[Board]) -> Result<()> {
+        for place in self.iter() {
+            match place {
+                Place::Project(id) if id != project => return Err("a map is shown only in its own project".into()),
+                Place::Board(id) if !boards.iter().any(|b| b.id == id && b.project == project) => {
+                    return Err("a map is shown only on a board of its own project".into());
+                }
+                Place::Project(_) | Place::Board(_) => {}
+            }
+        }
+
+        Ok(())
     }
 
     pub fn contains(&self, place: Place) -> bool {
@@ -51,6 +74,32 @@ mod tests {
         let result = Places::new([]);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn with_adds_a_place_and_keeps_the_rest() {
+        let (project, board) = (ProjectId::new(), BoardId::new());
+        let places = Places::fixture(project);
+
+        let added = places.with(Place::Board(board));
+
+        assert!(added.contains(Place::Project(project)) && added.contains(Place::Board(board)));
+        assert_eq!(added.with(Place::Board(board)), added);
+        assert!(!places.contains(Place::Board(board)));
+    }
+
+    #[test]
+    fn check_in_accepts_the_own_project_and_its_boards_only() {
+        let (project, other) = (ProjectId::new(), ProjectId::new());
+        let own = Board { id: BoardId::new(), project, name: crate::core::Name::new("own").unwrap() };
+        let foreign = Board { id: BoardId::new(), project: other, name: crate::core::Name::new("foreign").unwrap() };
+        let boards = [own.clone(), foreign.clone()];
+        let shown_at = |place| Places::fixture(project).with(place);
+
+        assert!(shown_at(Place::Board(own.id)).check_in(project, &boards).is_ok());
+        assert!(shown_at(Place::Board(foreign.id)).check_in(project, &boards).is_err());
+        assert!(shown_at(Place::Board(BoardId::new())).check_in(project, &boards).is_err());
+        assert!(shown_at(Place::Project(other)).check_in(project, &boards).is_err());
     }
 
     #[test]

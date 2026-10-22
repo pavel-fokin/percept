@@ -1,6 +1,12 @@
 use super::AppService;
-use crate::core::{Actor, Board, BoardId, DefinitionStore, Event, EventStore, Name, Project, Source};
+use crate::core::{Actor, Board, BoardId, DefinitionStore, Event, EventStore, Map, Name, Place, Project, Source};
 use crate::shared::Result;
+
+/// A board with the maps shown on it, each with its nodes and edges.
+pub struct BoardContents {
+    pub board: Board,
+    pub maps: Vec<Map>,
+}
 
 impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
     /// Records a new board in the project named `project`, written from `source`.
@@ -38,12 +44,29 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
 
         Ok(Board::named(&events, project.id, board))
     }
+
+    /// The board named `board` in the project named `project`, with the maps shown on it, from one read of the log.
+    pub async fn board_contents(&self, project: &str, board: &str) -> Result<Option<BoardContents>> {
+        let events = self.store.all().await?;
+
+        let Some(project) = Project::named(&events, project) else {
+            return Ok(None);
+        };
+        let Some(board) = Board::named(&events, project.id, board) else {
+            return Ok(None);
+        };
+
+        let maps = Map::at(&events, Place::Board(board.id));
+
+        Ok(Some(BoardContents { board, maps }))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{add_project, in_project, Broken, Definitions};
+    use crate::app::testing::{add_project, id_at, in_project, Broken, Definitions};
+    use std::path::Path;
     use crate::core::Payload;
 
     #[tokio::test]
@@ -123,10 +146,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_board_holds_the_maps_placed_on_it() {
+        let store = in_project("/work/a");
+        let project = id_at(&store, "/work/a");
+        let service = AppService::new(&store, Definitions);
+        let board = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
+        for name in ["decisions", "tasks"] {
+            service.create_map(Source::Web, Actor::Human, project, name, Path::new(&format!("/maps/{name}.toml"))).await.unwrap();
+        }
+        let decisions = service.map_id("p0", "decisions").await.unwrap().unwrap();
+        service.place_map(Source::Web, Actor::Human, decisions, Place::Board(board.id)).await.unwrap();
+
+        let contents = service.board_contents("p0", "board").await.unwrap().unwrap();
+        let unknown = service.board_contents("p0", "nope").await.unwrap();
+
+        assert_eq!(contents.board, board);
+        assert_eq!(contents.maps.iter().map(|m| m.id).collect::<Vec<_>>(), vec![decisions]);
+        assert!(unknown.is_none());
+    }
+
+    #[tokio::test]
     async fn reads_pass_store_errors_through() {
         let service = AppService::new(Broken, Definitions);
 
         assert!(service.boards().await.is_err());
         assert!(service.board("p0", "ideas").await.is_err());
+        assert!(service.board_contents("p0", "ideas").await.is_err());
     }
 }

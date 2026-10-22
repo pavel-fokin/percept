@@ -41,6 +41,7 @@ impl Policy {
             Payload::ProjectCreated { .. }
             | Payload::BoardCreated { .. }
             | Payload::MapCreated { .. }
+            | Payload::MapChanged { .. }
             | Payload::NodeAdded { .. }
             | Payload::EdgeAdded { .. }
             | Payload::SessionCreated { .. }

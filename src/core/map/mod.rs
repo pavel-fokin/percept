@@ -164,6 +164,7 @@ impl Map {
             Payload::ProjectCreated { .. }
             | Payload::BoardCreated { .. }
             | Payload::MapCreated { .. }
+            | Payload::MapChanged { .. }
             | Payload::SessionCreated { .. }
             | Payload::SessionStarted { .. }
             | Payload::SessionStopped { .. }
@@ -196,6 +197,7 @@ impl Map {
         let change = Change { actor: event.actor, at: event.created_at };
 
         match &event.payload {
+            Payload::MapChanged { places, .. } => self.places = places.clone(),
             Payload::NodeAdded { node, kind, title, properties, references, .. } => self.nodes.push(Node {
                 id: *node,
                 kind: kind.clone(),
@@ -513,6 +515,20 @@ mod tests {
 
         assert_eq!(on_board, vec![draft, both]);
         assert_eq!(in_project, vec![listed, both]);
+    }
+
+    #[test]
+    fn a_map_changed_event_replaces_the_places_of_its_map_only() {
+        let (project, board) = (ProjectId::new(), crate::core::BoardId::new());
+        let (changed, kept) = (MapId::new(), MapId::new());
+        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new("m").unwrap(), "/maps/m.toml".into(), Places::fixture(project));
+        let moved = Places::new([Place::Project(project), Place::Board(board)]).unwrap();
+        let events = [created(changed), created(kept), Event::map_changed(Source::fixture(), Actor::Human, changed, moved.clone())];
+
+        let maps = Map::all(&events);
+
+        assert_eq!(maps[0].places, moved);
+        assert_eq!(maps[1].places, Places::fixture(project));
     }
 
     fn check_map() -> (MapId, NodeId, NodeId, Map) {

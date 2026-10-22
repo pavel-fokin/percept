@@ -28,6 +28,14 @@ export type BoardSummary = {
   project: string;
 };
 
+export type BoardMap = {
+  name: string;
+  nodes: { id: string; title: string }[];
+  edges: MapEdge[];
+};
+
+export type BoardDetail = BoardSummary & { maps: BoardMap[] };
+
 export type MapNode = {
   id: string;
   kind: string;

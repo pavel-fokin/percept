@@ -75,6 +75,46 @@ impl BoardSummary {
     }
 }
 
+/// A board with the maps shown on it, as the page draws it: each map's nodes by title and its edges.
+#[derive(Serialize)]
+pub(super) struct BoardDetail {
+    id: core::BoardId,
+    name: String,
+    project: String,
+    maps: Vec<BoardMap>,
+}
+
+impl BoardDetail {
+    pub(super) fn new(contents: app::BoardContents, project: String) -> Self {
+        let app::BoardContents { board, maps } = contents;
+
+        Self { id: board.id, name: board.name.as_str().to_string(), project, maps: maps.into_iter().map(BoardMap::from).collect() }
+    }
+}
+
+#[derive(Serialize)]
+struct BoardMap {
+    name: String,
+    nodes: Vec<BoardNode>,
+    edges: Vec<Edge>,
+}
+
+impl From<core::Map> for BoardMap {
+    fn from(map: core::Map) -> Self {
+        Self {
+            name: map.name.as_str().to_string(),
+            nodes: map.nodes.into_iter().map(|n| BoardNode { id: n.id, title: n.title }).collect(),
+            edges: map.edges.into_iter().map(Edge::from).collect(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct BoardNode {
+    id: NodeId,
+    title: String,
+}
+
 /// A whole map as the page reads it, under the name of its project.
 #[derive(Serialize)]
 pub(super) struct MapDetail {
@@ -225,6 +265,7 @@ fn payload(payload: &Payload, home: &Path) -> serde_json::Value {
         | Payload::ProjectCreated { .. }
         | Payload::BoardCreated { .. }
         | Payload::MapCreated { .. }
+        | Payload::MapChanged { .. }
         | Payload::NodeAdded { .. }
         | Payload::NodeChanged { .. }
         | Payload::NodeRemoved { .. }

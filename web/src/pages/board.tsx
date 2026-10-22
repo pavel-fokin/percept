@@ -1,141 +1,150 @@
-import { useRef, useState } from "react";
+import { useMemo, useState } from "react";
+import dagre from "@dagrejs/dagre";
 import {
   Background,
-  BaseEdge,
   Controls,
-  EdgeLabelRenderer,
-  getBezierPath,
   Handle,
   MarkerType,
   Panel,
   Position,
   ReactFlow,
-  useReactFlow,
-  useStoreApi,
-  type EdgeProps,
+  type Edge,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
+import { useLoaderData, useRevalidator } from "react-router";
 
+import { describe, postData, type BoardDetail, type MapSummary } from "../api";
 import { Button } from "../components/ui/button";
+import { usePolling } from "../use-polling";
+import type { loadBoard } from "./board-page";
 
-type Note = Node<{ text: string }, "note">;
+type MapNode = Node<{ title: string; map: string }, "map-node">;
 
-const nodeTypes = { note: NoteNode };
-
-const edgeTypes = { default: LabeledEdge };
+const nodeTypes = { "map-node": MapNodeCard };
 
 const edgeOptions = { markerEnd: { type: MarkerType.ArrowClosed, color: null } };
 
-const handle = "size-4 rounded-full border border-border bg-muted";
+const labelStyle = { fill: "var(--color-muted)" };
 
-function caretToEnd(e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) {
-  const end = e.currentTarget.value.length;
-  e.currentTarget.setSelectionRange(end, end);
-}
+const labelBgStyle = { fill: "var(--color-bg)" };
+
+const handle = "size-1 border-0 opacity-0";
+
+const NODE_WIDTH = 192;
+const NODE_HEIGHT = 64;
 
 export function Board() {
+  const { board, addable } = useLoaderData<typeof loadBoard>();
+  const { nodes, edges } = useMemo(() => layout(board), [board]);
+
+  usePolling(true);
+
   return (
     <ReactFlow
+      // Another set of maps refits the view; a refresh with the same maps keeps where the reader is.
+      key={board.maps.map((m) => m.name).join("/")}
       className="flex-1"
-      defaultNodes={[]}
-      defaultEdges={[]}
+      nodes={nodes}
+      edges={edges}
       nodeTypes={nodeTypes}
-      edgeTypes={edgeTypes}
-      nodeOrigin={[0.5, 0]}
       defaultEdgeOptions={edgeOptions}
+      nodesDraggable={false}
+      nodesConnectable={false}
+      fitView
+      minZoom={0.1}
       proOptions={{ hideAttribution: true }}
     >
       <Background />
       <Controls position="bottom-right" showInteractive={false} />
       <Panel position="top-right">
-        <AddNote />
+        <AddMap board={board} addable={addable} />
       </Panel>
     </ReactFlow>
   );
 }
 
-function AddNote() {
-  const { addNodes } = useReactFlow();
-  const store = useStoreApi();
-  const count = useRef(0);
+/** The nodes and edges of every map on the board, placed top to bottom by dagre. */
+function layout(board: BoardDetail) {
+  const graph = new dagre.graphlib.Graph();
+  graph.setGraph({ rankdir: "TB", nodesep: 40, ranksep: 80 });
+  graph.setDefaultEdgeLabel(() => ({}));
 
-  function add() {
-    const { width, height, transform: [x, y, zoom] } = store.getState();
-    const position = { x: (width / 2 - x) / zoom, y: (height / 2 - y) / zoom };
-
-    addNodes({ id: `note-${count.current++}`, type: "note", position, data: { text: "" } });
+  for (const map of board.maps) {
+    for (const node of map.nodes) graph.setNode(node.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
+    for (const edge of map.edges) graph.setEdge(edge.from, edge.to);
   }
+  dagre.layout(graph);
 
-  return (
-    <Button variant="secondary" onClick={add}>
-      + Note
-    </Button>
+  const nodes = board.maps.flatMap((map) =>
+    map.nodes.map(
+      (node): MapNode => {
+        const { x, y } = graph.node(node.id);
+        return {
+          id: node.id,
+          type: "map-node",
+          position: { x: x - NODE_WIDTH / 2, y: y - NODE_HEIGHT / 2 },
+          data: { title: node.title, map: map.name },
+        };
+      },
+    ),
   );
+  const edges = board.maps.flatMap((map) =>
+    map.edges.map((edge): Edge => ({ id: `${edge.from}-${edge.kind}-${edge.to}`, source: edge.from, target: edge.to, label: edge.kind, labelStyle, labelBgStyle })),
+  );
+
+  return { nodes, edges };
 }
 
-function NoteNode({ id, data, selected }: NodeProps<Note>) {
-  const { updateNodeData } = useReactFlow();
-  const [editing, setEditing] = useState(false);
-  const ring = selected ? "border-text" : "border-border";
-
+function MapNodeCard({ data }: NodeProps<MapNode>) {
   return (
-    <div
-      onDoubleClick={() => setEditing(true)}
-      className={`min-h-16 w-48 rounded-md border bg-surface p-3 text-sm ${ring}`}
-    >
+    <div style={{ width: NODE_WIDTH, height: NODE_HEIGHT }} className="overflow-hidden rounded-md border border-border bg-surface px-3 py-2 text-sm">
       <Handle type="target" position={Position.Top} className={handle} />
-      {editing ? (
-        <textarea
-          autoFocus
-          onFocus={caretToEnd}
-          value={data.text}
-          onChange={(e) => updateNodeData(id, { text: e.target.value })}
-          onBlur={() => setEditing(false)}
-          onKeyDown={(e) => e.key === "Escape" && setEditing(false)}
-          className="nodrag nopan nowheel block w-full resize-none bg-transparent field-sizing-content outline-none"
-        />
-      ) : (
-        <p className={`break-words whitespace-pre-wrap ${data.text ? "" : "text-muted"}`}>{data.text || "Empty note"}</p>
-      )}
+      <p className="truncate font-mono text-xs text-muted">{data.map}</p>
+      <p className="line-clamp-2 break-words">{data.title}</p>
       <Handle type="source" position={Position.Bottom} className={handle} />
     </div>
   );
 }
 
-function LabeledEdge({ id, label, markerEnd, ...ends }: EdgeProps) {
-  const { updateEdge } = useReactFlow();
-  const [editing, setEditing] = useState(false);
-  const [path, labelX, labelY] = getBezierPath(ends);
+function AddMap({ board, addable }: { board: BoardDetail; addable: MapSummary[] }) {
+  const { revalidate } = useRevalidator();
+  const [open, setOpen] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+
+  async function add(map: string) {
+    try {
+      await postData<BoardDetail>(`/api/projects/${encodeURIComponent(board.project)}/boards/${encodeURIComponent(board.name)}/maps`, { map });
+      setOpen(false);
+      setFailure(null);
+      await revalidate();
+    } catch (error) {
+      setFailure(describe(error));
+    }
+  }
 
   return (
-    <>
-      <g onDoubleClick={() => setEditing(true)}>
-        <BaseEdge path={path} markerEnd={markerEnd} />
-      </g>
-      {(editing || label) && (
-        <EdgeLabelRenderer>
-          <div
-            onDoubleClick={() => setEditing(true)}
-            style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}
-            className="nodrag nopan pointer-events-auto absolute rounded-sm bg-bg px-1 text-xs"
-          >
-            {editing ? (
-              <input
-                autoFocus
-                onFocus={caretToEnd}
-                value={typeof label === "string" ? label : ""}
-                onChange={(e) => updateEdge(id, { label: e.target.value })}
-                onBlur={() => setEditing(false)}
-                onKeyDown={(e) => e.key === "Escape" && setEditing(false)}
-                className="min-w-16 bg-transparent field-sizing-content outline-none"
-              />
-            ) : (
-              label
-            )}
-          </div>
-        </EdgeLabelRenderer>
+    <div className="relative flex flex-col items-end gap-2">
+      <Button variant="secondary" aria-expanded={open} onClick={() => setOpen(!open)}>
+        Add map
+      </Button>
+      {open && (
+        <div className="w-56 rounded-md border border-border bg-surface p-1 text-sm">
+          {addable.length === 0 && <p className="px-3 py-2 text-muted">No other maps in {board.project}.</p>}
+          {addable.map((map) => (
+            <button
+              key={map.name}
+              type="button"
+              onClick={() => void add(map.name)}
+              className="flex min-h-11 w-full cursor-pointer items-center justify-between gap-3 rounded-md px-3 text-left hover:bg-border/50"
+            >
+              <span className="min-w-0 truncate">{map.name}</span>
+              <span className="text-muted tabular-nums">{map.nodes}</span>
+            </button>
+          ))}
+          {failure && <p className="px-3 py-2 wrap-anywhere text-muted">{failure}</p>}
+        </div>
       )}
-    </>
+    </div>
   );
 }
