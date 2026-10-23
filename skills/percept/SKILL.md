@@ -32,7 +32,7 @@ Every write prints the full path of what it changed. Reuse that path.
 
 ## Choose a map
 
-1. Run `percept show` to list the project's maps and boards, and
+1. Run `percept show` to see the project's path, maps and boards, and
    `percept show /<project>/<board>` to list a board's maps.
 2. To work through a question or task, use the board the user names,
    or create one. Lay the question out across several maps on it, one

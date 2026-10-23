@@ -242,8 +242,12 @@ pub(super) async fn show<S: EventStore, M: SkillStore>(service: &AppService<S, M
 
     match address::target(service, address.as_ref()).await? {
         Target::Map(map) => println!("{}", map_markdown(&map)?),
-        Target::Board(board) => board.maps.iter().for_each(|map| println!("{}", map_line(map))),
+        Target::Board(board) => {
+            println!("/{}/{}", board.project.name.as_str(), board.board.name.as_str());
+            board.maps.iter().for_each(|map| println!("{}", map_line(map)));
+        }
         Target::Project(project) => {
+            println!("/{}", project.name.as_str());
             service.maps(project.id).await?.iter().for_each(|map| println!("{}", map_line(map)));
             for (board, maps) in service.project_boards(project.id).await? {
                 println!("{}/  {}", board.name.as_str(), map_count(maps.len()));
