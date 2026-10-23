@@ -8,6 +8,7 @@ use crate::core::{EdgeKind, Schema, Skill, SkillStore};
 use crate::shared::Result;
 
 /// Reads a skill from a directory in the agentskills.io format.
+#[derive(Clone)]
 pub struct MarkdownStore;
 
 #[derive(Deserialize)]

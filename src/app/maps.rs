@@ -70,9 +70,6 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
             return Err(format!("the skill {} must be an absolute path", skill.display()).into());
         }
 
-        // Held until return, so parallel creates cannot both pass the check.
-        let _lock = self.store.lock().await?;
-
         let events = self.store.all().await?;
         Project::check_free(&events, project, &name)?;
         places.check_in(project, &Board::all(&events))?;
@@ -87,9 +84,6 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
 
     /// Records that the map is shown at `place` too. Nothing is written when it already is.
     pub async fn place_map(&self, source: Source, actor: Actor, map: MapId, place: Place) -> Result<()> {
-        // Held until return, so the places cannot change between the check and the append.
-        let _lock = self.store.lock().await?;
-
         let Located { events, map } = self.located(map).await?;
 
         let places = map.places.with(place);
@@ -104,9 +98,6 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
     /// Records that the map is no longer shown at `place`. Nothing is written when it was not.
     /// A map shown only at `place` fails with `LastPlace`.
     pub async fn unplace_map(&self, source: Source, actor: Actor, map: MapId, place: Place) -> Result<()> {
-        // Held until return, so the places cannot change between the check and the append.
-        let _lock = self.store.lock().await?;
-
         let Located { map, .. } = self.located(map).await?;
 
         let places = map.places.without(place)?;
@@ -203,9 +194,6 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
     ) -> Result<()> {
         not_blank("kind", kind)?;
 
-        // Held until return, so the nodes cannot change between the check and the append.
-        let _lock = self.store.lock().await?;
-
         let Located { map, .. } = self.located(map).await?;
 
         self.write(&map, Event::edge_added(source, actor, map.id, kind, from, to)).await
@@ -222,9 +210,6 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         kind: &str,
         to: NodeId,
     ) -> Result<()> {
-        // Held until return, so the edge cannot change between the check and the append.
-        let _lock = self.store.lock().await?;
-
         let Located { map, .. } = self.located(map).await?;
 
         self.write(&map, Event::edge_removed(source, actor, map.id, kind, from, to)).await
@@ -232,9 +217,6 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
 
     /// Records the removal of the node, and with it every edge from or to it, from the map.
     pub async fn remove_node(&self, source: Source, actor: Actor, map: MapId, node: NodeId) -> Result<()> {
-        // Held until return, so the node cannot change between the check and the append.
-        let _lock = self.store.lock().await?;
-
         let Located { map, .. } = self.located(map).await?;
 
         self.write(&map, Event::node_removed(source, actor, map.id, node)).await
@@ -253,9 +235,6 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         references: Vec<Ref>,
     ) -> Result<()> {
         not_blank("kind", kind)?;
-
-        // Held until return, so parallel adds cannot both pass the check.
-        let _lock = self.store.lock().await?;
 
         let Located { events, map } = self.located(map).await?;
 
@@ -281,9 +260,6 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         properties: BTreeMap<String, String>,
         references: Vec<Ref>,
     ) -> Result<()> {
-        // Held until return, so the node cannot change between the check and the append.
-        let _lock = self.store.lock().await?;
-
         let Located { events, map } = self.located(map).await?;
         let node = map.on_map(node)?;
 

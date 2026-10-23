@@ -71,9 +71,6 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         source: Source,
         event: impl FnOnce(Source, SessionId) -> Event,
     ) -> Result<()> {
-        // Held until return, so parallel hooks cannot create the same session twice.
-        let _lock = self.store.lock().await?;
-
         let session = match self.store.session(&client_session_id).await? {
             Some(session) => session,
             None => {

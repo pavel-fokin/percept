@@ -1,6 +1,5 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::Arc;
 
 use clap::{Parser, Subcommand};
 
@@ -9,8 +8,9 @@ use super::maps::{add, change, describe, new_board, new_map, remove, show, skill
 use super::projects::init;
 use super::status::status;
 use crate::app::AppService;
-use crate::core::{EventStore, SkillStore};
+use crate::core::{EventLog, SkillStore};
 use crate::server;
+use crate::shared::Result;
 
 /// Records what coding agents do.
 #[derive(Parser)]
@@ -84,7 +84,7 @@ enum Command {
     },
 }
 
-pub async fn run<S: EventStore + Send + Sync + 'static, M: SkillStore + Send + Sync + 'static>(service: Arc<AppService<S, M>>, home: PathBuf) -> ExitCode {
+pub async fn run<L: EventLog + Send + Sync + 'static, M: SkillStore + Clone + Send + Sync + 'static>(log: L, skills: M, home: PathBuf) -> ExitCode {
     // clap exits 2 on a usage error, and exit 2 blocks the agent's action.
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
@@ -94,18 +94,8 @@ pub async fn run<S: EventStore + Send + Sync + 'static, M: SkillStore + Send + S
         }
     };
     let result = match cli.command {
-        None => status(&service).await,
-        Some(Command::Hook { client }) => hook(&service, client).await,
-        Some(Command::Init { name }) => init(&service, name.as_deref()).await,
-        Some(Command::New { what: New::Board { path } }) => new_board(&service, &path).await,
-        Some(Command::New { what: New::Map { path, skill } }) => new_map(&service, &home, &path, &skill).await,
-        Some(Command::Skills) => skills(&service, &home).await,
-        Some(Command::Add { args }) => add(&service, &args).await,
-        Some(Command::Change { args }) => change(&service, &args).await,
-        Some(Command::Remove { args }) => remove(&service, &args).await,
-        Some(Command::Show { map }) => show(&service, map.as_deref()).await,
-        Some(Command::Describe { map }) => describe(&service, &map).await,
-        Some(Command::Ui { port, no_open }) => server::serve(service, home, port, !no_open).await,
+        Some(Command::Ui { port, no_open }) => server::serve(log, skills, home, port, !no_open).await,
+        command => operate(&log, skills, &home, command).await,
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -113,6 +103,27 @@ pub async fn run<S: EventStore + Send + Sync + 'static, M: SkillStore + Send + S
             eprintln!("percept: {error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+/// Runs one command in one transaction.
+async fn operate<L: EventLog, M: SkillStore>(log: &L, skill_store: M, home: &Path, command: Option<Command>) -> Result<()> {
+    let service = AppService::new(log.begin().await?, skill_store);
+    let service = &service;
+
+    match command {
+        None => status(service).await,
+        Some(Command::Hook { client }) => hook(service, client).await,
+        Some(Command::Init { name }) => init(service, name.as_deref()).await,
+        Some(Command::New { what: New::Board { path } }) => new_board(service, &path).await,
+        Some(Command::New { what: New::Map { path, skill } }) => new_map(service, home, &path, &skill).await,
+        Some(Command::Skills) => skills(service, home).await,
+        Some(Command::Add { args }) => add(service, &args).await,
+        Some(Command::Change { args }) => change(service, &args).await,
+        Some(Command::Remove { args }) => remove(service, &args).await,
+        Some(Command::Show { map }) => show(service, map.as_deref()).await,
+        Some(Command::Describe { map }) => describe(service, &map).await,
+        Some(Command::Ui { .. }) => unreachable!("percept ui begins a transaction per request"),
     }
 }
 

@@ -10,12 +10,6 @@ use crate::shared::Result;
 pub(super) struct Fixed(pub(super) usize);
 
 impl EventStore for Fixed {
-    type Lock = ();
-
-    async fn lock(&self) -> Result<()> {
-        unimplemented!()
-    }
-
     async fn session(&self, _: &ClientSessionId) -> Result<Option<SessionId>> {
         unimplemented!()
     }
@@ -34,12 +28,6 @@ impl EventStore for Fixed {
 pub(super) struct Broken;
 
 impl EventStore for Broken {
-    type Lock = ();
-
-    async fn lock(&self) -> Result<()> {
-        Err("boom".into())
-    }
-
     async fn session(&self, _: &ClientSessionId) -> Result<Option<SessionId>> {
         Err("boom".into())
     }
@@ -57,12 +45,6 @@ impl EventStore for Broken {
 pub(super) struct Memory(pub(super) Mutex<Vec<Event>>);
 
 impl EventStore for &Memory {
-    type Lock = ();
-
-    async fn lock(&self) -> Result<()> {
-        Ok(())
-    }
-
     async fn session(&self, client_session_id: &ClientSessionId) -> Result<Option<SessionId>> {
         let events = self.0.lock().unwrap();
         Ok(events

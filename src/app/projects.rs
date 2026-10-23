@@ -26,9 +26,6 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         name: Name,
         root: Option<PathBuf>,
     ) -> Result<Project> {
-        // Held until return, so parallel inits cannot both pass the checks.
-        let _lock = self.store.lock().await?;
-
         let projects = Project::all(&self.store.all().await?);
         if let Some(root) = &root
             && projects.iter().any(|p| p.root.as_ref() == Some(root))

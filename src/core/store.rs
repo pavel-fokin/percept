@@ -1,12 +1,15 @@
 use super::{ClientSessionId, Event, SessionId};
 use crate::shared::Result;
 
+/// The log of events. An operation begins a transaction and runs on it.
+pub trait EventLog {
+    type Transaction: EventStore + Send + Sync;
+
+    /// Takes the log's lock and reads the log once. Dropping the transaction releases the lock.
+    fn begin(&self) -> impl Future<Output = Result<Self::Transaction>> + Send;
+}
+
 pub trait EventStore {
-    /// Held while recording; dropping it releases the lock.
-    type Lock: Send;
-
-    fn lock(&self) -> impl Future<Output = Result<Self::Lock>> + Send;
-
     fn session(
         &self,
         client_session_id: &ClientSessionId,

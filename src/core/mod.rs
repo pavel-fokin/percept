@@ -14,4 +14,4 @@ pub use map::{Skill, SkillStore, Edge, EdgeKind, Map, MapId, Node, NodeId, LastP
 pub use name::Name;
 pub use project::{Project, ProjectId};
 pub use session::{ClientAgentId, ClientSessionId, Session, SessionId, SessionStatus};
-pub use store::EventStore;
+pub use store::{EventLog, EventStore};
