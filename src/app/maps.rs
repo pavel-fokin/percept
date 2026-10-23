@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::AppService;
-use crate::core::{Actor, Board, Definition, DefinitionStore, Event, EventId, EventStore, Map, MapId, Name, Node, NodeId, Payload, Place, Places, Policy, Project, ProjectId, Reference, SessionId, Source};
+use crate::core::{Actor, Board, Definition, DefinitionStore, Event, EventId, EventStore, Map, MapId, Name, NodeId, Payload, Place, Places, Policy, Project, ProjectId, Reference, SessionId, Source};
 use crate::shared::Result;
 
 #[derive(Debug, PartialEq)]
@@ -156,16 +156,16 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         Ok(Some(MapDetail { map, boards, messages }))
     }
 
-    /// Records a new edge on the map, between the nodes with these titles.
+    /// Records a new edge on the map, between these nodes.
     #[allow(clippy::too_many_arguments, reason = "the inputs for adding an edge")]
     pub async fn add_edge(
         &self,
         source: Source,
         actor: Actor,
         map: MapId,
-        from: &str,
+        from: NodeId,
         kind: &str,
-        to: &str,
+        to: NodeId,
     ) -> Result<()> {
         not_blank("kind", kind)?;
 
@@ -174,39 +174,34 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
 
         let Located { map, .. } = self.located(map).await?;
 
-        let (from, to) = (find_node(&map, from)?.id, find_node(&map, to)?.id);
-
         self.write(&map, Event::edge_added(source, actor, map.id, kind, from, to)).await
     }
 
-    /// Records the removal of the edge of this kind between the nodes with these titles on the map.
+    /// Records the removal of the edge of this kind between these nodes on the map.
     #[allow(clippy::too_many_arguments, reason = "the inputs for removing an edge")]
     pub async fn remove_edge(
         &self,
         source: Source,
         actor: Actor,
         map: MapId,
-        from: &str,
+        from: NodeId,
         kind: &str,
-        to: &str,
+        to: NodeId,
     ) -> Result<()> {
         // Held until return, so the edge cannot change between the check and the append.
         let _lock = self.store.lock().await?;
 
         let Located { map, .. } = self.located(map).await?;
 
-        let (from, to) = (find_node(&map, from)?.id, find_node(&map, to)?.id);
-
         self.write(&map, Event::edge_removed(source, actor, map.id, kind, from, to)).await
     }
 
-    /// Records the removal of the node with this title, and with it every edge from or to it, from the map.
-    pub async fn remove_node(&self, source: Source, actor: Actor, map: MapId, title: &str) -> Result<()> {
+    /// Records the removal of the node, and with it every edge from or to it, from the map.
+    pub async fn remove_node(&self, source: Source, actor: Actor, map: MapId, node: NodeId) -> Result<()> {
         // Held until return, so the node cannot change between the check and the append.
         let _lock = self.store.lock().await?;
 
         let Located { map, .. } = self.located(map).await?;
-        let node = find_node(&map, title)?.id;
 
         self.write(&map, Event::node_removed(source, actor, map.id, node)).await
     }
@@ -238,7 +233,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         self.write(&map, Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties, resolved)).await
     }
 
-    /// Records the full new state of the node with this title on the map.
+    /// Records the full new state of the node on the map.
     /// Each property in `properties` is set; the others keep their values.
     /// `references` are resolved and appended to the node's own. A new title is unique within its map.
     #[allow(clippy::too_many_arguments, reason = "the inputs for changing a node")]
@@ -247,7 +242,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         source: Source,
         actor: Actor,
         map: MapId,
-        title: &str,
+        node: NodeId,
         new_title: Option<&str>,
         properties: BTreeMap<String, String>,
         references: Vec<Ref>,
@@ -256,7 +251,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         let _lock = self.store.lock().await?;
 
         let Located { events, map } = self.located(map).await?;
-        let node = find_node(&map, title)?;
+        let node = map.on_map(node)?;
 
         let new_title = new_title.unwrap_or(&node.title);
 
@@ -264,7 +259,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         merged.extend(properties);
 
         if new_title == node.title && merged == node.properties && references.is_empty() {
-            return Err(format!("the change leaves {title:?} as it is").into());
+            return Err(format!("the change leaves {:?} as it is", node.title).into());
         }
 
         let mut all_references = node.references.clone();
@@ -299,13 +294,6 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
 struct Located {
     events: Vec<Event>,
     map: Map,
-}
-
-fn find_node<'a>(map: &'a Map, title: &str) -> Result<&'a Node> {
-    map.nodes
-        .iter()
-        .find(|n| n.title == title)
-        .ok_or_else(|| format!("the {} map has no node titled {title:?}", map.name.as_str()).into())
 }
 
 /// File references resolve against the writer's checkout and must stay inside it; the web has none.
@@ -369,7 +357,7 @@ fn not_blank(name: &str, value: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::BoardId;
+    use crate::core::{BoardId, Node};
     use crate::app::testing::{Broken, Definitions, Memory, NoDefinitions, add_project, add_session, id_at, in_project};
 
     #[tokio::test]
@@ -561,16 +549,37 @@ mod tests {
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "option", "O", Default::default(), Vec::new()).await.unwrap();
 
-        let unknown_kind = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "O", "blocks", "Q").await;
-        let wrong_from = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "Q", "answers", "Q").await;
-        let wrong_to = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "O", "answers", "O").await;
-        let valid = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "O", "answers", "Q").await;
+        let unknown_kind = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "blocks", nid(&service, project, "decisions", "Q").await).await;
+        let wrong_from = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "Q").await, "answers", nid(&service, project, "decisions", "Q").await).await;
+        let wrong_to = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", nid(&service, project, "decisions", "O").await).await;
+        let valid = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", nid(&service, project, "decisions", "Q").await).await;
 
         assert!(unknown_kind.unwrap_err().to_string().contains("answers"));
         assert!(wrong_from.unwrap_err().to_string().contains("from"));
         assert!(wrong_to.unwrap_err().to_string().contains("to"));
         assert!(valid.is_ok());
         assert_eq!(store.0.lock().unwrap().len(), 5);
+    }
+
+    #[tokio::test]
+    async fn a_map_without_a_schema_takes_any_kind_and_property_but_not_a_broken_graph() {
+        let store = in_project("/repo");
+        let project = id_at(&store, "/repo");
+        let service = AppService::new(&store, Definitions);
+        service.create_map(Source::fixture(), Actor::Human, project, "scratch", Path::new("/maps/scratch.toml")).await.unwrap();
+        let map = mid(&service, project, "scratch").await;
+        let colour = BTreeMap::from([("colour".to_string(), "red".to_string())]);
+        service.add_node(Source::fixture(), Actor::Human, map, "idea", "A", colour, Vec::new()).await.unwrap();
+        service.add_node(Source::fixture(), Actor::Human, map, "whim", "B", Default::default(), Vec::new()).await.unwrap();
+        let (a, b) = (nid(&service, project, "scratch", "A").await, nid(&service, project, "scratch", "B").await);
+
+        let edge = service.add_edge(Source::fixture(), Actor::Human, map, a, "echoes", b).await;
+        let duplicate_edge = service.add_edge(Source::fixture(), Actor::Human, map, a, "echoes", b).await;
+        let duplicate_title = service.add_node(Source::fixture(), Actor::Human, map, "other", "A", Default::default(), Vec::new()).await;
+
+        assert!(edge.is_ok());
+        assert!(duplicate_edge.is_err());
+        assert!(duplicate_title.is_err());
     }
 
     #[tokio::test]
@@ -913,7 +922,7 @@ mod tests {
 
         let map = service.create_map(Source::fixture(), Actor::Human, project, " ", Path::new("/maps/blank.toml")).await;
         let node = service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "option", "", Default::default(), Vec::new()).await;
-        let edge = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "Q", "", "Q").await;
+        let edge = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "Q").await, "", nid(&service, project, "decisions", "Q").await).await;
 
         assert!(map.is_err());
         assert!(node.is_err());
@@ -929,10 +938,10 @@ mod tests {
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "option", "O", Default::default(), Vec::new()).await.unwrap();
-        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "O", "answers", "Q").await.unwrap();
+        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", nid(&service, project, "decisions", "Q").await).await.unwrap();
 
-        let again = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "O", "answers", "Q").await;
-        let other_kind = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "Q", "raises", "O").await;
+        let again = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", nid(&service, project, "decisions", "Q").await).await;
+        let other_kind = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "Q").await, "raises", nid(&service, project, "decisions", "O").await).await;
 
         assert!(again.is_err());
         assert!(other_kind.is_ok());
@@ -982,12 +991,12 @@ mod tests {
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "option", "O", Default::default(), Vec::new()).await.unwrap();
 
-        let missing_to = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "O", "answers", "nope").await;
-        let missing_from = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "nope", "answers", "Q").await;
-        let missing_map = service.add_edge(Source::fixture(), Actor::Human, MapId::new(), "O", "answers", "Q").await;
-        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "O", "answers", "Q").await.unwrap();
+        let missing_to = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", NodeId::new()).await;
+        let missing_from = service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, NodeId::new(), "answers", nid(&service, project, "decisions", "Q").await).await;
+        let missing_map = service.add_edge(Source::fixture(), Actor::Human, MapId::new(), NodeId::new(), "answers", NodeId::new()).await;
+        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", nid(&service, project, "decisions", "Q").await).await.unwrap();
 
-        assert!(missing_to.unwrap_err().to_string().contains("\"nope\""));
+        assert!(missing_to.unwrap_err().to_string().contains("no such node"));
         assert!(missing_from.is_err());
         assert!(missing_map.is_err());
         assert_eq!(store.0.lock().unwrap().len(), 5);
@@ -1003,9 +1012,9 @@ mod tests {
         for (map, kind, title) in [("decisions", "question", "Q"), ("decisions", "option", "O"), ("tasks", "task", "T"), ("tasks", "task", "U")] {
             service.add_node(Source::fixture(), Actor::Human, mid(&service, project, map).await, kind, title, Default::default(), Vec::new()).await.unwrap();
         }
-        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "O", "answers", "Q").await.unwrap();
-        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "tasks").await, "T", "blocks", "U").await.unwrap();
-        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "Q", "raises", "O").await.unwrap();
+        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", nid(&service, project, "decisions", "Q").await).await.unwrap();
+        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "tasks").await, nid(&service, project, "tasks", "T").await, "blocks", nid(&service, project, "tasks", "U").await).await.unwrap();
+        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "Q").await, "raises", nid(&service, project, "decisions", "O").await).await.unwrap();
 
         let map = service.map(mid(&service, project, "decisions").await).await.unwrap();
 
@@ -1024,7 +1033,7 @@ mod tests {
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "option", "O", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "tasks").await, "task", "T", Default::default(), Vec::new()).await.unwrap();
-        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "O", "answers", "Q").await.unwrap();
+        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", nid(&service, project, "decisions", "Q").await).await.unwrap();
 
         let maps = service.maps(project).await.unwrap();
 
@@ -1098,7 +1107,7 @@ mod tests {
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "tasks").await, "task", "T", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "option", "O", Default::default(), Vec::new()).await.unwrap();
-        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "O", "answers", "Q").await.unwrap();
+        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", nid(&service, project, "decisions", "Q").await).await.unwrap();
 
         let detail = service.map_detail(mid(&service, project, "decisions").await).await.unwrap().unwrap();
 
@@ -1155,6 +1164,10 @@ mod tests {
         Map::named(&service.store.all().await.unwrap(), project, name).unwrap().id
     }
 
+    async fn nid<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, project: ProjectId, map: &str, title: &str) -> NodeId {
+        service.map(mid(service, project, map).await).await.unwrap().nodes.iter().find(|n| n.title == title).unwrap().id
+    }
+
     fn props(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
     }
@@ -1186,7 +1199,7 @@ mod tests {
         let before = glossary_nodes(&service).await;
 
         service.change_node(
-            Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "Log", Some("Event log"),
+            Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, Some("Event log"),
             props(&[("definition", "Append-only.")]), Vec::new(),
         ).await.unwrap();
 
@@ -1211,7 +1224,7 @@ mod tests {
         let project = id_at(&store, "/repo");
         let service = glossary(&store).await;
 
-        service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "Log", None, props(&[("source", "spec")]), Vec::new()).await.unwrap();
+        service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, None, props(&[("source", "spec")]), Vec::new()).await.unwrap();
 
         let nodes = glossary_nodes(&service).await;
         assert_eq!(nodes[0].title, "Log");
@@ -1224,7 +1237,7 @@ mod tests {
         let project = id_at(&store, "/repo");
         let service = glossary(&store).await;
 
-        service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "Log", None, props(&[("source", "")]), Vec::new()).await.unwrap();
+        service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, None, props(&[("source", "")]), Vec::new()).await.unwrap();
 
         let nodes = glossary_nodes(&service).await;
         assert_eq!(nodes[0].properties, props(&[("definition", "One log."), ("source", "")]));
@@ -1242,8 +1255,8 @@ mod tests {
         let second = Event::message(Source::fixture(), session, Actor::Human, "Second quote", json!({}));
         store.0.lock().unwrap().extend([first.clone(), second.clone()]);
 
-        service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "Log", None, BTreeMap::new(), vec![Ref::Message("First quote".into())]).await.unwrap();
-        service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "Log", None, BTreeMap::new(), vec![Ref::Message("Second quote".into())]).await.unwrap();
+        service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, None, BTreeMap::new(), vec![Ref::Message("First quote".into())]).await.unwrap();
+        service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, None, BTreeMap::new(), vec![Ref::Message("Second quote".into())]).await.unwrap();
 
         let nodes = glossary_nodes(&service).await;
         assert_eq!(nodes[0].references, vec![
@@ -1259,9 +1272,9 @@ mod tests {
         let service = glossary(&store).await;
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "term", "Other", BTreeMap::new(), Vec::new()).await.unwrap();
 
-        let taken = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "Log", Some("Other"), BTreeMap::new(), Vec::new()).await;
-        let blank = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "Log", Some(" "), BTreeMap::new(), Vec::new()).await;
-        let same = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "Log", Some("Log"), props(&[("source", "spec")]), Vec::new()).await;
+        let taken = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, Some("Other"), BTreeMap::new(), Vec::new()).await;
+        let blank = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, Some(" "), BTreeMap::new(), Vec::new()).await;
+        let same = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, Some("Log"), props(&[("source", "spec")]), Vec::new()).await;
 
         assert!(taken.unwrap_err().to_string().contains("\"Other\""));
         assert!(blank.unwrap_err().to_string().contains("blank"));
@@ -1275,7 +1288,7 @@ mod tests {
         let project = id_at(&store, "/repo");
         let service = glossary(&store).await;
 
-        let result = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "Log", None, props(&[("colour", "red")]), Vec::new()).await;
+        let result = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, None, props(&[("colour", "red")]), Vec::new()).await;
 
         assert!(result.unwrap_err().to_string().contains("colour"));
         assert_eq!(store.0.lock().unwrap().len(), 3);
@@ -1287,10 +1300,10 @@ mod tests {
         let project = id_at(&store, "/repo");
         let service = glossary(&store).await;
 
-        let nothing = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "Log", None, BTreeMap::new(), Vec::new()).await;
-        let same_title = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "Log", Some("Log"), BTreeMap::new(), Vec::new()).await;
-        let same_value = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "Log", None, props(&[("source", "docs")]), Vec::new()).await;
-        let absent_drop = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "Log", None, props(&[("definition", "One log."), ("source", "docs")]), Vec::new()).await;
+        let nothing = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, None, BTreeMap::new(), Vec::new()).await;
+        let same_title = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, Some("Log"), BTreeMap::new(), Vec::new()).await;
+        let same_value = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, None, props(&[("source", "docs")]), Vec::new()).await;
+        let absent_drop = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, None, props(&[("definition", "One log."), ("source", "docs")]), Vec::new()).await;
 
         assert!(nothing.is_err());
         assert!(same_title.is_err());
@@ -1305,10 +1318,10 @@ mod tests {
         let project = id_at(&store, "/repo");
         let service = glossary(&store).await;
 
-        let node = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "Nope", None, props(&[("source", "x")]), Vec::new()).await;
-        let map = service.change_node(Source::fixture(), Actor::Human, MapId::new(), "Log", None, props(&[("source", "x")]), Vec::new()).await;
+        let node = service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, NodeId::new(), None, props(&[("source", "x")]), Vec::new()).await;
+        let map = service.change_node(Source::fixture(), Actor::Human, MapId::new(), NodeId::new(), None, props(&[("source", "x")]), Vec::new()).await;
 
-        assert!(node.unwrap_err().to_string().contains("\"Nope\""));
+        assert!(node.unwrap_err().to_string().contains("no such node"));
         assert!(map.is_err());
         assert_eq!(store.0.lock().unwrap().len(), 3);
     }
@@ -1319,7 +1332,7 @@ mod tests {
         let project = id_at(&store, "/repo");
         let service = glossary(&store).await;
 
-        let result = service.change_node(Source::fixture(), Actor::Agent, mid(&service, project, "glossary").await, "Log", None, props(&[("source", "x")]), Vec::new()).await;
+        let result = service.change_node(Source::fixture(), Actor::Agent, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, None, props(&[("source", "x")]), Vec::new()).await;
 
         assert!(result.unwrap_err().to_string().contains("only a human may change it"));
         assert_eq!(store.0.lock().unwrap().len(), 3);
@@ -1333,9 +1346,9 @@ mod tests {
         service.create_map(Source::fixture(), Actor::Human, project, "glossary", Path::new("/maps/glossary.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Agent, mid(&service, project, "glossary").await, "term", "Log", BTreeMap::new(), Vec::new()).await.unwrap();
 
-        let agent = service.change_node(Source::fixture(), Actor::Agent, mid(&service, project, "glossary").await, "Log", None, props(&[("source", "a")]), Vec::new()).await;
-        service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, "Log", None, props(&[("source", "h")]), Vec::new()).await.unwrap();
-        let after_human = service.change_node(Source::fixture(), Actor::Agent, mid(&service, project, "glossary").await, "Log", None, props(&[("source", "b")]), Vec::new()).await;
+        let agent = service.change_node(Source::fixture(), Actor::Agent, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, None, props(&[("source", "a")]), Vec::new()).await;
+        service.change_node(Source::fixture(), Actor::Human, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, None, props(&[("source", "h")]), Vec::new()).await.unwrap();
+        let after_human = service.change_node(Source::fixture(), Actor::Agent, mid(&service, project, "glossary").await, nid(&service, project, "glossary", "Log").await, None, props(&[("source", "b")]), Vec::new()).await;
 
         assert!(agent.is_ok());
         assert!(after_human.is_err());
@@ -1348,7 +1361,7 @@ mod tests {
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "option", "O", Default::default(), Vec::new()).await.unwrap();
-        service.add_edge(Source::fixture(), actor, mid(&service, project, "decisions").await, "O", "answers", "Q").await.unwrap();
+        service.add_edge(Source::fixture(), actor, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", nid(&service, project, "decisions", "Q").await).await.unwrap();
 
         service
     }
@@ -1359,7 +1372,7 @@ mod tests {
         let project = id_at(&store, "/repo");
         let service = decisions(&store, Actor::Human).await;
 
-        service.remove_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "O", "answers", "Q").await.unwrap();
+        service.remove_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", nid(&service, project, "decisions", "Q").await).await.unwrap();
 
         let last = store.0.lock().unwrap().last().unwrap().clone();
         assert_eq!(last.actor, Actor::Human);
@@ -1374,14 +1387,14 @@ mod tests {
         let project = id_at(&store, "/repo");
         let service = decisions(&store, Actor::Human).await;
 
-        let from = service.remove_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "Nope", "answers", "Q").await;
-        let to = service.remove_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "O", "answers", "Nope").await;
-        let reversed = service.remove_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "Q", "answers", "O").await;
-        let kind = service.remove_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "O", "raises", "Q").await;
-        let map = service.remove_edge(Source::fixture(), Actor::Human, MapId::new(), "O", "answers", "Q").await;
+        let from = service.remove_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, NodeId::new(), "answers", nid(&service, project, "decisions", "Q").await).await;
+        let to = service.remove_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", NodeId::new()).await;
+        let reversed = service.remove_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "Q").await, "answers", nid(&service, project, "decisions", "O").await).await;
+        let kind = service.remove_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "raises", nid(&service, project, "decisions", "Q").await).await;
+        let map = service.remove_edge(Source::fixture(), Actor::Human, MapId::new(), NodeId::new(), "answers", NodeId::new()).await;
 
-        assert!(from.unwrap_err().to_string().contains("\"Nope\""));
-        assert!(to.unwrap_err().to_string().contains("\"Nope\""));
+        assert!(from.unwrap_err().to_string().contains("answers"));
+        assert!(to.unwrap_err().to_string().contains("answers"));
         assert!(reversed.unwrap_err().to_string().contains("answers"));
         assert!(kind.unwrap_err().to_string().contains("raises"));
         assert!(map.is_err());
@@ -1394,7 +1407,7 @@ mod tests {
         let project = id_at(&store, "/repo");
         let service = decisions(&store, Actor::Human).await;
 
-        let result = service.remove_edge(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, "O", "answers", "Q").await;
+        let result = service.remove_edge(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", nid(&service, project, "decisions", "Q").await).await;
 
         let error = result.unwrap_err().to_string();
         assert!(error.contains("\"O\" answers \"Q\""));
@@ -1408,8 +1421,8 @@ mod tests {
         let project = id_at(&store, "/repo");
         let service = decisions(&store, Actor::Agent).await;
 
-        let removed = service.remove_edge(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, "O", "answers", "Q").await;
-        let again = service.add_edge(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, "O", "answers", "Q").await;
+        let removed = service.remove_edge(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", nid(&service, project, "decisions", "Q").await).await;
+        let again = service.add_edge(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", nid(&service, project, "decisions", "Q").await).await;
 
         assert!(removed.is_ok());
         assert!(again.is_ok());
@@ -1423,7 +1436,7 @@ mod tests {
         let project = id_at(&store, "/repo");
         let service = decisions(&store, Actor::Human).await;
 
-        service.remove_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "Q").await.unwrap();
+        service.remove_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "Q").await).await.unwrap();
 
         let last = store.0.lock().unwrap().last().unwrap().clone();
         assert_eq!(last.payload.kind(), crate::core::Kind::NodeRemoved);
@@ -1440,7 +1453,7 @@ mod tests {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
         let service = decisions(&store, Actor::Human).await;
-        service.remove_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "Q").await.unwrap();
+        service.remove_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "Q").await).await.unwrap();
 
         let again = service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await;
 
@@ -1455,10 +1468,10 @@ mod tests {
         let project = id_at(&store, "/repo");
         let service = decisions(&store, Actor::Human).await;
 
-        let node = service.remove_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "Nope").await;
-        let map = service.remove_node(Source::fixture(), Actor::Human, MapId::new(), "Q").await;
+        let node = service.remove_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, NodeId::new()).await;
+        let map = service.remove_node(Source::fixture(), Actor::Human, MapId::new(), NodeId::new()).await;
 
-        assert!(node.unwrap_err().to_string().contains("\"Nope\""));
+        assert!(node.unwrap_err().to_string().contains("no such node"));
         assert!(map.is_err());
         assert_eq!(store.0.lock().unwrap().len(), 5);
     }
@@ -1469,7 +1482,7 @@ mod tests {
         let project = id_at(&store, "/repo");
         let service = decisions(&store, Actor::Agent).await;
 
-        let result = service.remove_node(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, "Q").await;
+        let result = service.remove_node(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "Q").await).await;
 
         assert!(result.unwrap_err().to_string().contains("\"Q\" was written by a human, so only a human may remove it"));
         assert_eq!(store.0.lock().unwrap().len(), 5);
@@ -1483,9 +1496,9 @@ mod tests {
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, "option", "O", Default::default(), Vec::new()).await.unwrap();
-        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "O", "answers", "Q").await.unwrap();
+        service.add_edge(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", nid(&service, project, "decisions", "Q").await).await.unwrap();
 
-        let result = service.remove_node(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, "Q").await;
+        let result = service.remove_node(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "Q").await).await;
 
         let error = result.unwrap_err().to_string();
         assert!(error.contains("\"O\" answers \"Q\""));
@@ -1501,9 +1514,9 @@ mod tests {
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, "option", "O", Default::default(), Vec::new()).await.unwrap();
-        service.add_edge(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, "O", "answers", "Q").await.unwrap();
+        service.add_edge(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "O").await, "answers", nid(&service, project, "decisions", "Q").await).await.unwrap();
 
-        let result = service.remove_node(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, "Q").await;
+        let result = service.remove_node(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, nid(&service, project, "decisions", "Q").await).await;
 
         assert!(result.is_ok());
         let maps = service.maps(project).await.unwrap();

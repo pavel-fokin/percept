@@ -1,15 +1,18 @@
 mod definition;
+mod observed;
 mod places;
 mod policy;
+mod schema;
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use jiff::Timestamp;
 
-pub use definition::{Definition, DefinitionStore, EdgeKind};
+pub use definition::{Definition, DefinitionStore};
 pub use places::{LastPlace, Place, Places};
 pub use policy::Policy;
+pub use schema::{EdgeKind, Schema};
 
 use super::{Actor, Event, EventId, Name, Payload, ProjectId};
 use crate::shared::{Id, Result};
@@ -175,7 +178,7 @@ impl Map {
         }
     }
 
-    fn on_map(&self, id: NodeId) -> Result<&Node> {
+    pub fn on_map(&self, id: NodeId) -> Result<&Node> {
         self.node(id).ok_or_else(|| format!("the {} map has no such node", self.name.as_str()).into())
     }
 
@@ -546,7 +549,7 @@ mod tests {
         let edge = || crate::core::EdgeKind { from: "concept".into(), to: "concept".into() };
         let edges = BTreeMap::from([("links".to_string(), edge()), ("cites".to_string(), edge())]);
 
-        Definition::new("p".into(), "i".into(), nodes, edges).unwrap()
+        Definition::new("p".into(), "i".into(), Some(crate::core::Schema::new(nodes, edges).unwrap()))
     }
 
     #[test]

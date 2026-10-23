@@ -3,7 +3,7 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::core::{Definition, DefinitionStore, EdgeKind};
+use crate::core::{Definition, DefinitionStore, EdgeKind, Schema};
 use crate::shared::Result;
 
 /// Reads a definition from a TOML file.
@@ -14,10 +14,8 @@ pub struct TomlStore;
 struct File {
     purpose: String,
     instructions: String,
-    #[serde(default)]
-    nodes: BTreeMap<String, BTreeMap<String, String>>,
-    #[serde(default)]
-    edges: BTreeMap<String, Edge>,
+    nodes: Option<BTreeMap<String, BTreeMap<String, String>>>,
+    edges: Option<BTreeMap<String, Edge>>,
 }
 
 #[derive(Deserialize)]
@@ -27,6 +25,20 @@ struct Edge {
     to: String,
 }
 
+/// A schema from the declared node and edge kinds; every property value must be `""`.
+fn schema(declared: BTreeMap<String, BTreeMap<String, String>>, edges: BTreeMap<String, Edge>) -> Result<Schema> {
+    let mut nodes = BTreeMap::new();
+    for (node, properties) in declared {
+        if let Some((property, _)) = properties.iter().find(|(_, value)| !value.is_empty()) {
+            return Err(format!("property {property:?} of node kind {node:?} must be \"\"").into());
+        }
+        nodes.insert(node, properties.into_keys().collect::<BTreeSet<_>>());
+    }
+    let edges = edges.into_iter().map(|(k, e)| (k, EdgeKind { from: e.from, to: e.to })).collect();
+
+    Schema::new(nodes, edges)
+}
+
 impl DefinitionStore for TomlStore {
     async fn definition(&self, file: &Path) -> Result<Definition> {
         let name = file.display();
@@ -34,16 +46,12 @@ impl DefinitionStore for TomlStore {
         let text = tokio::fs::read_to_string(file).await.map_err(|e| format!("{name}: {e}"))?;
         let parsed: File = toml::from_str(&text).map_err(|e| format!("{name}: {e}"))?;
 
-        let mut nodes = BTreeMap::new();
-        for (node, properties) in parsed.nodes {
-            if let Some((property, _)) = properties.iter().find(|(_, value)| !value.is_empty()) {
-                return Err(format!("{name}: property {property:?} of node kind {node:?} must be \"\"").into());
-            }
-            nodes.insert(node, properties.into_keys().collect::<BTreeSet<_>>());
-        }
-        let edges = parsed.edges.into_iter().map(|(k, e)| (k, EdgeKind { from: e.from, to: e.to })).collect();
+        let schema = match (parsed.nodes, parsed.edges) {
+            (None, None) => None,
+            (nodes, edges) => Some(schema(nodes.unwrap_or_default(), edges.unwrap_or_default()).map_err(|e| format!("{name}: {e}"))?),
+        };
 
-        Definition::new(parsed.purpose, parsed.instructions, nodes, edges).map_err(|e| format!("{name}: {e}").into())
+        Ok(Definition::new(parsed.purpose, parsed.instructions, schema))
     }
 }
 
@@ -103,6 +111,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_file_without_nodes_or_edges_has_no_schema() {
+        let file = file("purpose = \"p\"\ninstructions = \"i\"\n");
+
+        let definition = TomlStore.definition(&file).await.unwrap();
+
+        assert!(definition.schema().is_none());
+        assert!(definition.check_node("any", &BTreeMap::from([("p".to_string(), "x".to_string())])).is_ok());
+    }
+
+    #[tokio::test]
     async fn a_missing_file_is_an_error_naming_it() {
         let missing = file("").with_file_name("tasks.toml");
 
@@ -117,7 +135,8 @@ mod tests {
             "purpose = \"p\"\ninstructions = \"i\"\nextra = 1\n[nodes.note]\n",
             "purpose = \"p\"\ninstructions = \"i\"\n[nodes.note]\nbody = \"text\"\n",
             "purpose = \"p\"\ninstructions = \"i\"\n[nodes.note]\n[edges.about]\nfrom = \"note\"\nto = \"topic\"\n",
-            "purpose = \"p\"\ninstructions = \"i\"\n",
+            "purpose = \"p\"\ninstructions = \"i\"\n[edges.about]\nfrom = \"note\"\nto = \"note\"\n",
+            "purpose = \"p\"\ninstructions = \"i\"\n[nodes]\n",
             "purpose = \"p\"\n[nodes.note]\n",
         ];
 

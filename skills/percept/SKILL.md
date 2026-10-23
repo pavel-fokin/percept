@@ -12,7 +12,7 @@ definition. `percept describe <map>` prints it as markdown:
 |---|---|
 | Line under the title | what the map is for |
 | Instructions | what belongs on the map and how to write it |
-| Schema | each node kind with its properties, each edge kind with the node kinds it links |
+| Schema | each node kind with its properties, each edge kind with the node kinds it links; observed from the map when the definition declares none |
 
 ## Reflect
 
@@ -43,8 +43,10 @@ definition. `percept describe <map>` prints it as markdown:
    removes its edges.
 6. percept refuses an agent's change or removal of what a human wrote.
    Leave it as it is, and tell the user what you would change and why.
-7. Use only the kinds and properties the definition declares. Leave out a
-   property that has no value.
+7. Use only the kinds and properties the definition declares. A schema
+   marked observed is not checked: reuse its kinds and properties, and
+   add a new one only when none fits. Leave out a property that has no
+   value.
 8. Add references with the node when they help a reader check it.
    Repeat `--ref` for each source:
 

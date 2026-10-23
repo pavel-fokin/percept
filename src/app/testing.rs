@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use serde_json::json;
 
-use crate::core::{Actor, ClientSessionId, Definition, DefinitionStore, EdgeKind, Event, EventStore, Name, Payload, Project, ProjectId, SessionId, Source};
+use crate::core::{Actor, ClientSessionId, Definition, DefinitionStore, EdgeKind, Event, EventStore, Name, Payload, Project, ProjectId, Schema, SessionId, Source};
 use crate::shared::Result;
 
 pub(super) struct Fixed(pub(super) usize);
@@ -132,6 +132,7 @@ impl DefinitionStore for Definitions {
             ),
             "tasks" => mini(&[("task", &[])], &[("blocks", "task", "task")]),
             "concepts" => mini(&[("concept", &["definition"])], &[]),
+            "scratch" => Ok(Definition::new("purpose".into(), "instructions".into(), None)),
             "glossary" => mini(&[("term", &["definition", "source"])], &[]),
             _ => Err(format!("no definition in {}", file.display()).into()),
         }
@@ -148,7 +149,7 @@ fn mini(nodes: &[(&str, &[&str])], edges: &[(&str, &str, &str)]) -> Result<Defin
         .map(|(edge, from, to)| (edge.to_string(), EdgeKind { from: from.to_string(), to: to.to_string() }))
         .collect();
 
-    Definition::new("purpose".into(), "instructions".into(), nodes, edges)
+    Ok(Definition::new("purpose".into(), "instructions".into(), Some(Schema::new(nodes, edges)?)))
 }
 
 /// Has no definition for any file.
