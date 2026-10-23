@@ -167,12 +167,6 @@ mod tests {
     struct Log(Vec<Event>);
 
     impl EventStore for Log {
-        type Lock = ();
-
-        async fn lock(&self) -> Result<()> {
-            Ok(())
-        }
-
         async fn session(&self, _: &ClientSessionId) -> Result<Option<SessionId>> {
             Ok(None)
         }

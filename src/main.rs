@@ -7,9 +7,7 @@ mod server;
 mod shared;
 
 use std::process::ExitCode;
-use std::sync::Arc;
 
-use crate::app::AppService;
 use crate::eventstore::JsonlStore;
 use crate::skillstore::MarkdownStore;
 
@@ -20,5 +18,5 @@ async fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let store = JsonlStore::new(home.join(".percept").join("percept.jsonl"));
-    cli::run(Arc::new(AppService::new(store, MarkdownStore)), home).await
+    cli::run(store, MarkdownStore, home).await
 }

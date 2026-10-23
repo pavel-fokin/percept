@@ -1,11 +1,12 @@
 use std::io::ErrorKind;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use tokio::io::AsyncWriteExt;
 
 use super::line::EventLine;
 use crate::core::{ClientSessionId, Event, EventStore, Payload, SessionId};
-use crate::shared::Result;
+use crate::shared::{Begin, Result};
 
 pub struct JsonlStore {
     path: PathBuf,
@@ -17,15 +18,18 @@ impl JsonlStore {
     }
 }
 
-/// Holds the advisory lock; closing the file on drop releases it.
-pub struct Lock {
-    _file: std::fs::File,
+/// The log read once under the advisory lock; closing the lock file on drop releases it.
+pub struct Transaction {
+    path: PathBuf,
+    events: Mutex<Vec<Event>>,
+    _lock: std::fs::File,
 }
 
-impl EventStore for JsonlStore {
-    type Lock = Lock;
+/// Takes the log's lock and reads the log once; dropping the transaction releases the lock.
+impl Begin for JsonlStore {
+    type Transaction = Transaction;
 
-    async fn lock(&self) -> Result<Lock> {
+    async fn begin(&self) -> Result<Transaction> {
         let mut name = self.path.clone().into_os_string();
         name.push(".lock");
         let path = PathBuf::from(name);
@@ -45,32 +49,18 @@ impl EventStore for JsonlStore {
             Ok(file)
         };
 
-        let file = tokio::task::spawn_blocking(acquire)
+        let lock = tokio::task::spawn_blocking(acquire)
             .await?
             .map_err(|error| format!("{}.lock: {error}", self.path.display()))?;
 
-        Ok(Lock { _file: file })
+        let events = self.read().await?;
+
+        Ok(Transaction { path: self.path.clone(), events: Mutex::new(events), _lock: lock })
     }
+}
 
-    async fn session(
-        &self,
-        client_session_id: &ClientSessionId,
-    ) -> Result<Option<SessionId>> {
-        let session = self
-            .all()
-            .await?
-            .into_iter()
-            .find_map(|e| match e.payload {
-                Payload::SessionCreated { session, client_session_id: id, .. } if id == *client_session_id => {
-                    Some(session)
-                }
-                _ => None,
-            });
-
-        Ok(session)
-    }
-
-    async fn all(&self) -> Result<Vec<Event>> {
+impl JsonlStore {
+    async fn read(&self) -> Result<Vec<Event>> {
         let text = match tokio::fs::read_to_string(&self.path).await {
             Ok(text) => text,
             Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
@@ -85,6 +75,31 @@ impl EventStore for JsonlStore {
                 })
             })
             .collect()
+    }
+}
+
+impl EventStore for Transaction {
+    async fn session(
+        &self,
+        client_session_id: &ClientSessionId,
+    ) -> Result<Option<SessionId>> {
+        let session = self
+            .events
+            .lock()
+            .unwrap()
+            .iter()
+            .find_map(|e| match &e.payload {
+                Payload::SessionCreated { session, client_session_id: id, .. } if id == client_session_id => {
+                    Some(*session)
+                }
+                _ => None,
+            });
+
+        Ok(session)
+    }
+
+    async fn all(&self) -> Result<Vec<Event>> {
+        Ok(self.events.lock().unwrap().clone())
     }
 
     async fn append(&self, event: &Event) -> Result<()> {
@@ -103,7 +118,6 @@ impl EventStore for JsonlStore {
                 .open(path)
                 .await?;
 
-            // One write call, so concurrent appends do not interleave.
             file.write_all(line.as_bytes()).await?;
             // tokio buffers the write; flush surfaces its error.
             file.flush().await
@@ -111,7 +125,10 @@ impl EventStore for JsonlStore {
 
         write
             .await
-            .map_err(|error| format!("{}: {error}", path.display()).into())
+            .map_err(|error| format!("{}: {error}", path.display()))?;
+        self.events.lock().unwrap().push(event.clone());
+
+        Ok(())
     }
 }
 
@@ -155,14 +172,14 @@ mod tests {
     #[tokio::test]
     async fn missing_file_has_no_events() {
         let file = TempFile::new();
-        assert_eq!(file.store().all().await.unwrap().len(), 0);
+        assert_eq!(file.store().begin().await.unwrap().all().await.unwrap().len(), 0);
     }
 
     #[tokio::test]
     async fn empty_file_has_no_events() {
         let file = TempFile::new();
         file.write("");
-        assert_eq!(file.store().all().await.unwrap().len(), 0);
+        assert_eq!(file.store().begin().await.unwrap().all().await.unwrap().len(), 0);
     }
 
     #[tokio::test]
@@ -176,7 +193,7 @@ mod tests {
             .collect();
         file.write(&text);
 
-        let events = file.store().all().await.unwrap();
+        let events = file.store().begin().await.unwrap().all().await.unwrap();
 
         assert_eq!(events.iter().map(|e| e.id).collect::<Vec<_>>(), ids);
     }
@@ -184,17 +201,18 @@ mod tests {
     #[tokio::test]
     async fn append_creates_the_file_and_round_trips() {
         let file = TempFile::new();
-        let store = file.store();
-        store
+        let transaction = file.store().begin().await.unwrap();
+        transaction
             .append(&Event::message(Source::fixture(), SessionId::new(), Actor::Human, "hi", json!({"a": 1})))
             .await
             .unwrap();
-        store
+        transaction
             .append(&Event::session_started(Source::fixture(), SessionId::new(), json!({"b": 2})))
             .await
             .unwrap();
+        drop(transaction);
 
-        let events = store.all().await.unwrap();
+        let events = file.store().begin().await.unwrap().all().await.unwrap();
 
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].actor, Actor::Human);
@@ -209,37 +227,63 @@ mod tests {
     async fn append_creates_a_missing_directory() {
         let dir = TempFile::new();
         let nested = JsonlStore::new(dir.0.join("sub").join("log.jsonl"));
-        nested.append(&Event::tool_used(Source::fixture(), SessionId::new(), "Bash", None, None, json!(null))).await.unwrap();
-        assert_eq!(nested.all().await.unwrap().len(), 1);
+        let transaction = nested.begin().await.unwrap();
+        transaction.append(&Event::tool_used(Source::fixture(), SessionId::new(), "Bash", None, None, json!(null))).await.unwrap();
+        assert_eq!(transaction.all().await.unwrap().len(), 1);
         let _ = fs::remove_dir_all(&dir.0);
     }
 
     #[tokio::test]
     async fn session_finds_a_created_session_and_none_for_an_unknown_client_session_id() {
         let file = TempFile::new();
-        let store = file.store();
+        let transaction = file.store().begin().await.unwrap();
         let created = Event::session_created(Source::fixture(), SessionId::new(), ProjectId::new(), ClientSessionId::new("a".into()));
         let session = created.payload.session().unwrap();
-        store.append(&created).await.unwrap();
+        transaction.append(&created).await.unwrap();
 
-        let found = store.session(&ClientSessionId::new("a".into())).await.unwrap();
-        let unknown = store.session(&ClientSessionId::new("b".into())).await.unwrap();
+        let found = transaction.session(&ClientSessionId::new("a".into())).await.unwrap();
+        let unknown = transaction.session(&ClientSessionId::new("b".into())).await.unwrap();
 
         assert_eq!(found, Some(session));
         assert_eq!(unknown, None);
     }
 
     #[tokio::test]
-    async fn lock_creates_a_sibling_lock_file_and_can_be_retaken_after_drop() {
+    async fn a_transaction_reads_the_file_once() {
         let file = TempFile::new();
-        let store = file.store();
+        let transaction = file.store().begin().await.unwrap();
+
+        file.write(&(serde_json::to_string(&EventLine::from(&Event::tool_used(Source::fixture(), SessionId::new(), "Bash", None, None, json!({})))).unwrap() + "\n"));
+
+        assert_eq!(transaction.all().await.unwrap().len(), 0);
+        assert_eq!(transaction.all().await.unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_append_is_visible_in_the_transaction_and_in_the_file() {
+        let file = TempFile::new();
+        let transaction = file.store().begin().await.unwrap();
+        let event = Event::tool_used(Source::fixture(), SessionId::new(), "Bash", None, None, json!({}));
+
+        transaction.append(&event).await.unwrap();
+
+        assert_eq!(transaction.all().await.unwrap()[0].id, event.id);
+        assert_eq!(fs::read_to_string(&file.0).unwrap().lines().count(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_transaction_holds_the_sibling_lock_file_until_dropped() {
+        let file = TempFile::new();
         let lock_path = PathBuf::from(format!("{}.lock", file.0.display()));
 
-        drop(store.lock().await.unwrap());
-        let again = store.lock().await;
+        let transaction = file.store().begin().await.unwrap();
+        let other = fs::OpenOptions::new().write(true).open(&lock_path).unwrap();
+        let held = other.try_lock().is_err();
+        drop(transaction);
+        let released = other.try_lock().is_ok();
 
-        assert!(lock_path.exists());
-        assert!(again.is_ok());
+        assert!(held);
+        assert!(released);
         let _ = fs::remove_file(lock_path);
     }
 
@@ -247,6 +291,6 @@ mod tests {
     async fn malformed_line_is_an_error() {
         let file = TempFile::new();
         file.write("not json\n");
-        assert!(file.store().all().await.is_err());
+        assert!(file.store().begin().await.is_err());
     }
 }

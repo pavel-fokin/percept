@@ -1,12 +1,9 @@
 use super::{ClientSessionId, Event, SessionId};
 use crate::shared::Result;
 
+/// One transaction's view of the log. `all` and `session` read the snapshot taken at `begin`;
+/// an `append` is visible to the reads that follow it in the same transaction.
 pub trait EventStore {
-    /// Held while recording; dropping it releases the lock.
-    type Lock: Send;
-
-    fn lock(&self) -> impl Future<Output = Result<Self::Lock>> + Send;
-
     fn session(
         &self,
         client_session_id: &ClientSessionId,

@@ -13,9 +13,6 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
     /// Records a new board in the project named `project`, written from `source`.
     /// It is named `board`, or `board-N` when taken, N the smallest number no board or map of the project already uses.
     pub async fn create_board(&self, source: Source, actor: Actor, project: &str) -> Result<Option<Board>> {
-        // Held until return, so parallel creates cannot both pick the same name.
-        let _lock = self.store.lock().await?;
-
         let events = self.store.all().await?;
         let Some(project) = Project::named(&events, project) else {
             return Ok(None);
@@ -29,9 +26,6 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
     /// Records a new board named `name` in the project. No board or map of the project may have the name.
     pub async fn create_named_board(&self, source: Source, actor: Actor, project: ProjectId, name: &str) -> Result<Board> {
         let name = Name::new(name)?;
-
-        // Held until return, so parallel creates cannot both pass the check.
-        let _lock = self.store.lock().await?;
 
         let events = self.store.all().await?;
         Project::check_free(&events, project, &name)?;

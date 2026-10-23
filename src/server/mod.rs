@@ -12,7 +12,7 @@ use tokio::net::TcpListener;
 
 use crate::app::AppService;
 use crate::core::{EventStore, SkillStore};
-use crate::shared::Result;
+use crate::shared::{Begin, Result};
 
 mod handlers;
 mod paths;
@@ -23,10 +23,10 @@ const FAVICON_SVG: &[u8] = include_bytes!("../../web/public/favicon.svg");
 const FAVICON_ICO: &[u8] = include_bytes!("../../web/public/favicon.ico");
 const APPLE_TOUCH_ICON: &[u8] = include_bytes!("../../web/public/apple-touch-icon.png");
 
-pub async fn serve<S, M>(service: Arc<AppService<S, M>>, home: PathBuf, port: u16, open: bool) -> Result<()>
+pub async fn serve<L, M>(log: L, skills: M, home: PathBuf, port: u16, open: bool) -> Result<()>
 where
-    S: EventStore + Send + Sync + 'static,
-    M: SkillStore + Send + Sync + 'static,
+    L: Begin<Transaction: EventStore + Send + Sync> + Send + Sync + 'static,
+    M: SkillStore + Clone + Send + Sync + 'static,
 {
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
     let url = format!("http://{}", listener.local_addr()?);
@@ -37,39 +37,47 @@ where
         let _ = Command::new(opener).arg(&url).spawn();
     }
 
-    axum::serve(listener, router(service, home)).await?;
+    axum::serve(listener, router(log, skills, home)).await?;
     Ok(())
 }
 
-/// What the handlers read: the use cases, and the home that paths are shown under.
-struct Api<S: EventStore, M: SkillStore> {
-    service: Arc<AppService<S, M>>,
+/// What the handlers read: the log and skills the use cases run over, and the home that paths are shown under.
+struct Api<L: Begin<Transaction: EventStore + Send + Sync>, M: SkillStore> {
+    log: L,
+    skills: M,
     home: PathBuf,
 }
 
-fn router<S, M>(service: Arc<AppService<S, M>>, home: PathBuf) -> Router
+impl<L: Begin<Transaction: EventStore + Send + Sync>, M: SkillStore + Clone> Api<L, M> {
+    /// The use cases over a new transaction, one for each request.
+    async fn service(&self) -> Result<AppService<L::Transaction, M>> {
+        Ok(AppService::new(self.log.begin().await?, self.skills.clone()))
+    }
+}
+
+fn router<L, M>(log: L, skills: M, home: PathBuf) -> Router
 where
-    S: EventStore + Send + Sync + 'static,
-    M: SkillStore + Send + Sync + 'static,
+    L: Begin<Transaction: EventStore + Send + Sync> + Send + Sync + 'static,
+    M: SkillStore + Clone + Send + Sync + 'static,
 {
     Router::new()
-        .route("/api/status", get(Api::<S, M>::status))
-        .route("/api/projects", get(Api::<S, M>::projects).post(Api::<S, M>::create_project))
-        .route("/api/sessions", get(Api::<S, M>::sessions))
-        .route("/api/sessions/{id}", get(Api::<S, M>::session))
-        .route("/api/sessions/{id}/events", get(Api::<S, M>::session_events))
-        .route("/api/maps", get(Api::<S, M>::maps))
-        .route("/api/projects/{project}/maps/{name}", get(Api::<S, M>::map))
-        .route("/api/boards", get(Api::<S, M>::boards))
-        .route("/api/projects/{project}/boards", post(Api::<S, M>::create_board))
-        .route("/api/projects/{project}/boards/{board}", get(Api::<S, M>::board))
-        .route("/api/projects/{project}/boards/{board}/maps", post(Api::<S, M>::place_map))
-        .route("/api/projects/{project}/boards/{board}/maps/{map}", delete(Api::<S, M>::unplace_map))
+        .route("/api/status", get(Api::<L, M>::status))
+        .route("/api/projects", get(Api::<L, M>::projects).post(Api::<L, M>::create_project))
+        .route("/api/sessions", get(Api::<L, M>::sessions))
+        .route("/api/sessions/{id}", get(Api::<L, M>::session))
+        .route("/api/sessions/{id}/events", get(Api::<L, M>::session_events))
+        .route("/api/maps", get(Api::<L, M>::maps))
+        .route("/api/projects/{project}/maps/{name}", get(Api::<L, M>::map))
+        .route("/api/boards", get(Api::<L, M>::boards))
+        .route("/api/projects/{project}/boards", post(Api::<L, M>::create_board))
+        .route("/api/projects/{project}/boards/{board}", get(Api::<L, M>::board))
+        .route("/api/projects/{project}/boards/{board}/maps", post(Api::<L, M>::place_map))
+        .route("/api/projects/{project}/boards/{board}/maps/{map}", delete(Api::<L, M>::unplace_map))
         .route("/favicon.svg", get(|| async { asset("image/svg+xml", FAVICON_SVG) }))
         .route("/favicon.ico", get(|| async { asset("image/x-icon", FAVICON_ICO) }))
         .route("/apple-touch-icon.png", get(|| async { asset("image/png", APPLE_TOUCH_ICON) }))
         .fallback(fallback)
-        .with_state(Arc::new(Api { service, home }))
+        .with_state(Arc::new(Api { log, skills, home }))
 }
 
 fn asset(content_type: &'static str, body: &'static [u8]) -> impl IntoResponse {
@@ -92,21 +100,24 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::{Actor, BoardId, ClientSessionId, Event, MapId, Name, NodeId, Payload, Place, Places, Project, ProjectId, Reference, SessionId, Skill, SkillStore, Source};
+    use crate::core::{Actor, BoardId, ClientSessionId, Event, EventStore, MapId, Name, NodeId, Payload, Place, Places, Project, ProjectId, Reference, SessionId, Skill, SkillStore, Source};
 
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
     const MAP: &str = "0190a0a0-0000-7000-8000-000000000003";
     const PROJECT: &str = "0190a0a0-0000-7000-8000-000000000004";
 
+    #[derive(Clone)]
     struct Fixed(usize, Vec<Reference>, Vec<Event>);
 
-    impl EventStore for Fixed {
-        type Lock = ();
+    impl Begin for Fixed {
+        type Transaction = Fixed;
 
-        async fn lock(&self) -> Result<()> {
-            unimplemented!()
+        async fn begin(&self) -> Result<Fixed> {
+            Ok(self.clone())
         }
+    }
 
+    impl EventStore for Fixed {
         async fn session(&self, _: &ClientSessionId) -> Result<Option<SessionId>> {
             unimplemented!()
         }
@@ -140,13 +151,15 @@ mod tests {
         }
     }
 
-    impl EventStore for Arc<Log> {
-        type Lock = ();
+    impl Begin for Arc<Log> {
+        type Transaction = Arc<Log>;
 
-        async fn lock(&self) -> Result<()> {
-            Ok(())
+        async fn begin(&self) -> Result<Arc<Log>> {
+            Ok(self.clone())
         }
+    }
 
+    impl EventStore for Arc<Log> {
         async fn session(&self, _: &ClientSessionId) -> Result<Option<SessionId>> {
             unimplemented!()
         }
@@ -161,6 +174,7 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
     struct Skills;
 
     impl SkillStore for Skills {
@@ -181,10 +195,10 @@ mod tests {
         serde_json::from_str(text_body(response)).unwrap()
     }
 
-    async fn serve<S: EventStore + Send + Sync + 'static>(store: S) -> std::net::SocketAddr {
+    async fn serve<L: Begin<Transaction: EventStore + Send + Sync> + Send + Sync + 'static>(log: L) -> std::net::SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let app = router(Arc::new(AppService::new(store, Skills)), "/Users/me".into());
+        let app = router(log, Skills, "/Users/me".into());
         tokio::spawn(async move { axum::serve(listener, app).await });
 
         addr
