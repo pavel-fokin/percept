@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
-use super::{BoardId, ClientAgentId, ClientSessionId, MapId, Name, NodeId, Places, ProjectId, Reference, SessionId};
+use super::{BoardId, ClientAgentId, ClientSessionId, MapId, Name, NodeId, Places, ProjectId, Reference, Schema, SessionId};
 use crate::shared::{Id, Result};
 
 pub type EventId = Id<Event>;
@@ -129,7 +129,7 @@ pub enum Payload {
     SubagentReported { session: SessionId, subagent: ClientAgentId, content: String },
     ProjectCreated { project: ProjectId, name: Name, root: Option<PathBuf> },
     BoardCreated { board: BoardId, project: ProjectId, name: Name },
-    MapCreated { map: MapId, project: ProjectId, name: Name, skill: PathBuf, places: Places },
+    MapCreated { map: MapId, project: ProjectId, name: Name, skill: PathBuf, schema: Option<Schema>, places: Places },
     /// The map's full new state, not a diff.
     MapChanged { map: MapId, places: Places },
     NodeAdded { map: MapId, node: NodeId, kind: String, title: String, properties: BTreeMap<String, String>, references: Vec<Reference> },
@@ -275,8 +275,9 @@ impl Event {
         Self::build(source, actor, Payload::BoardCreated { board, project, name }, None)
     }
 
-    pub fn map_created(source: Source, actor: Actor, map: MapId, project: ProjectId, name: Name, skill: PathBuf, places: Places) -> Self {
-        let payload = Payload::MapCreated { map, project, name, skill, places };
+    #[allow(clippy::too_many_arguments, reason = "the fields of map.created")]
+    pub fn map_created(source: Source, actor: Actor, map: MapId, project: ProjectId, name: Name, skill: PathBuf, schema: Option<Schema>, places: Places) -> Self {
+        let payload = Payload::MapCreated { map, project, name, skill, schema, places };
         Self::build(source, actor, payload, None)
     }
 
@@ -459,11 +460,11 @@ mod tests {
 
         let places = Places::fixture(project);
 
-        let event = Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), places.clone());
+        let event = Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), None, places.clone());
 
         assert_eq!(event.actor, Actor::Human);
         assert_eq!(event.payload.kind(), Kind::MapCreated);
-        assert_eq!(event.payload, Payload::MapCreated { map, project, name: Name::new("decisions").unwrap(), skill: "/maps/decisions.toml".into(), places });
+        assert_eq!(event.payload, Payload::MapCreated { map, project, name: Name::new("decisions").unwrap(), skill: "/maps/decisions.toml".into(), schema: None, places });
         assert_eq!(event.payload.session(), None);
         assert_eq!(event.raw, None);
     }

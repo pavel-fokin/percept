@@ -131,7 +131,7 @@ mod tests {
             let created = Event::session_created(Source::fixture(), session, project, ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
             let map: MapId = serde_json::from_value(json!(MAP))?;
-            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::fixture(project));
+            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), None, Places::fixture(project));
             let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default(), self.1.clone());
             Ok([project_created, created].into_iter().chain(started).chain(self.2.clone()).chain([map_created, node]).collect())
         }
@@ -429,7 +429,7 @@ mod tests {
         let map = MapId::new();
         let (a, b) = (NodeId::new(), NodeId::new());
         log.0.lock().unwrap().extend([
-            Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::fixture(project)),
+            Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), None, Places::fixture(project)),
             Event::node_added(Source::fixture(), Actor::Human, map, a, "question", "Q", Default::default(), Vec::new()),
             Event::node_added(Source::fixture(), Actor::Human, map, b, "option", "O", Default::default(), Vec::new()),
             Event::edge_added(Source::fixture(), Actor::Human, map, "answers", b, a),
@@ -462,7 +462,7 @@ mod tests {
     async fn a_deleted_map_leaves_the_board_unless_the_board_is_its_only_place() {
         let log = Arc::new(Log::new());
         let project = Project::all(&log.0.lock().unwrap()).remove(0).id;
-        log.0.lock().unwrap().push(Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::fixture(project)));
+        log.0.lock().unwrap().push(Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), None, Places::fixture(project)));
         let addr = serve(log.clone()).await;
         send(addr, "POST", "/api/projects/repo/boards", "").await;
         send(addr, "POST", "/api/projects/repo/boards/board/maps", r#"{"map":"decisions"}"#).await;
@@ -484,7 +484,7 @@ mod tests {
         let log = Arc::new(Log::new());
         let project = Project::all(&log.0.lock().unwrap()).remove(0).id;
         let map = MapId::new();
-        log.0.lock().unwrap().push(Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::fixture(project)));
+        log.0.lock().unwrap().push(Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), None, Places::fixture(project)));
         let addr = serve(log.clone()).await;
         let created = send(addr, "POST", "/api/projects/repo/boards", "").await;
         let board: BoardId = serde_json::from_value(json_body(&created)["data"]["id"].clone()).unwrap();

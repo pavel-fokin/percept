@@ -3,12 +3,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::shared::Result;
 
 /// The node and edge kinds a map allows.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Schema {
     nodes: BTreeMap<String, BTreeSet<String>>,
     edges: BTreeMap<String, EdgeKind>,
 }
 
 /// The node kinds an edge kind links.
+#[derive(Debug, Clone, PartialEq)]
 pub struct EdgeKind {
     pub from: String,
     pub to: String,

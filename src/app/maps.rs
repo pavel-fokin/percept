@@ -74,9 +74,9 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         Project::check_free(&events, project, &name)?;
         places.check_in(project, &Board::all(&events))?;
 
-        self.skills.skill(skill).await?;
+        let schema = self.skills.skill(skill).await?.schema().cloned();
 
-        let event = Event::map_created(source, actor, MapId::new(), project, name, skill.into(), places);
+        let event = Event::map_created(source, actor, MapId::new(), project, name, skill.into(), schema, places);
         self.store.append(&event).await?;
 
         Ok(Map::all(&[event]).remove(0))
@@ -137,10 +137,8 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         Ok(self.located(map).await?.map)
     }
 
-    /// The skill of the map, or an error if there is no such map or its skill cannot be read.
-    pub async fn skill(&self, map: MapId) -> Result<Skill> {
-        let map = self.map(map).await?;
-
+    /// The skill the map was created from, as it reads now.
+    pub async fn skill(&self, map: &Map) -> Result<Skill> {
         self.skills.skill(&map.skill).await
     }
 
@@ -284,11 +282,9 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         Ok(Located { events, map })
     }
 
-    /// The one way a node or an edge event reaches the log: the map, under its skill, and then the policy see it first.
+    /// The one way a node or an edge event reaches the log: the map, under its schema, and then the policy see it first.
     async fn write(&self, map: &Map, event: Event) -> Result<()> {
-        let skill = self.skills.skill(&map.skill).await?;
-
-        map.check(&event, &skill)?;
+        map.check(&event)?;
         Policy::check(&event, map)?;
 
         self.store.append(&event).await
@@ -637,17 +633,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn add_node_fails_when_the_maps_skill_is_gone() {
+    async fn a_map_keeps_its_schema_once_its_skill_is_gone() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
         let service = AppService::new(&store, Skills);
-        service.create_map(Source::fixture(), Actor::Human, project, "tasks", Path::new("/skills/tasks")).await.unwrap();
+        let map = service.create_map(Source::fixture(), Actor::Human, project, "tasks", Path::new("/skills/tasks")).await.unwrap();
         let gone = AppService::new(&store, NoSkills);
 
-        let result = gone.add_node(Source::fixture(), Actor::Human, MapId::new(), "task", "T", Default::default(), Vec::new()).await;
+        let valid = gone.add_node(Source::fixture(), Actor::Human, map.id, "task", "T", Default::default(), Vec::new()).await;
+        let invalid = gone.add_node(Source::fixture(), Actor::Human, map.id, "bogus", "U", Default::default(), Vec::new()).await;
 
-        assert!(result.is_err());
-        assert_eq!(store.0.lock().unwrap().len(), 2);
+        assert!(valid.is_ok());
+        assert!(invalid.is_err());
+        assert_eq!(store.0.lock().unwrap().len(), 3);
     }
 
     #[tokio::test]
@@ -1121,7 +1119,7 @@ mod tests {
         let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/skills/decisions")).await.unwrap();
         let places = Places::new([Place::Board(crate::core::BoardId::new())]).unwrap();
-        let draft = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("draft").unwrap(), "/skills/draft".into(), places);
+        let draft = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("draft").unwrap(), "/skills/draft".into(), None, places);
         store.0.lock().unwrap().push(draft);
 
         let in_project = service.maps(project).await.unwrap();

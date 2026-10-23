@@ -10,14 +10,16 @@ percept keeps maps of what a project understands. A project holds
 maps and boards. A board is a space for working on one question or
 task: it shows only the maps created on it. A map is created from a
 skill in the library, `~/.percept/skills`. The skill says what belongs
-on the map and how to write it, and may declare a schema.
-`percept describe <map>` prints a map's skill as markdown:
+on the map and how to write it, and may declare a schema. The map
+keeps the schema it was created with; a later edit to the skill
+changes its instructions only. `percept describe <map>` prints a map
+as markdown:
 
 | Part | Holds |
 |---|---|
 | Line under the title | what the skill is for |
-| Instructions | what belongs on the map and how to write it |
-| Schema | each node kind with its properties, each edge kind with the node kinds it links; observed from the map when the skill declares none |
+| Instructions | what belongs on the map and how to write it, as the skill reads now |
+| Schema | the map's node kinds with their properties, and edge kinds with the node kinds they link; observed from the map when it has none |
 
 Commands name a map or a board by a bare name in the current project,
 or by an absolute path:
@@ -82,7 +84,7 @@ Every write prints the full path of what it changed. Reuse that path.
    removes its edges.
 4. percept refuses an agent's change or removal of what a human wrote.
    Leave it as it is, and tell the user what you would change and why.
-5. Use only the kinds and properties the skill declares. A schema
+5. Use only the kinds and properties the map's schema declares. A schema
    marked observed is not checked: reuse its kinds and properties, and
    add a new one only when none fits. Leave out a property that has no
    value.
