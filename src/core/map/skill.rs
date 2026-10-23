@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::path::Path;
 
 use super::Schema;
@@ -32,19 +31,9 @@ impl Skill {
     pub fn schema(&self) -> Option<&Schema> {
         self.schema.as_ref()
     }
-
-    /// Without a schema, any node kind and property is allowed.
-    pub fn check_node(&self, kind: &str, properties: &BTreeMap<String, String>) -> Result<()> {
-        self.schema.as_ref().map_or(Ok(()), |s| s.check_node(kind, properties))
-    }
-
-    /// Without a schema, any edge kind between any node kinds is allowed.
-    pub fn check_edge(&self, kind: &str, from: &str, to: &str) -> Result<()> {
-        self.schema.as_ref().map_or(Ok(()), |s| s.check_edge(kind, from, to))
-    }
 }
 
-/// Reads the skill a map is declared by.
+/// Reads the skills maps are created from.
 pub trait SkillStore {
     /// The skill at `path`.
     fn skill(

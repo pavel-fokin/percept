@@ -26,8 +26,10 @@ pub struct Map {
     pub id: MapId,
     pub name: Name,
     pub project: ProjectId,
-    /// The absolute path of the skill directory that defines the map.
+    /// The absolute path of the skill directory the map was created from.
     pub skill: PathBuf,
+    /// Copied from the skill when the map was created; without one, any node kind, property and edge is allowed.
+    pub schema: Option<Schema>,
     pub places: Places,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
@@ -71,7 +73,7 @@ impl Map {
     /// The map `id` after `events`, created by a `MapCreated` event placed first.
     pub fn fixture(id: MapId, events: &[Event]) -> Self {
         let project = ProjectId::new();
-        let created = Event::map_created(crate::core::Source::fixture(), Actor::Human, id, project, Name::new("concepts").unwrap(), "/maps/concepts.toml".into(), Places::fixture(project));
+        let created = Event::map_created(crate::core::Source::fixture(), Actor::Human, id, project, Name::new("concepts").unwrap(), "/maps/concepts.toml".into(), None, Places::fixture(project));
         let log: Vec<Event> = std::iter::once(created).chain(events.iter().cloned()).collect();
 
         Self::all(&log).remove(0)
@@ -108,10 +110,11 @@ impl Map {
 
         for event in events {
             match &event.payload {
-                Payload::MapCreated { map, project, name, skill, places } => maps.push(Self {
+                Payload::MapCreated { map, project, name, skill, schema, places } => maps.push(Self {
                     id: *map,
                     name: name.clone(),
                     skill: skill.clone(),
+                    schema: schema.clone(),
                     project: *project,
                     places: places.clone(),
                     nodes: Vec::new(),
@@ -133,23 +136,23 @@ impl Map {
         self.nodes.iter().find(|n| n.id == id)
     }
 
-    /// Refuses an event that would break the map or its `skill`: a node or an edge the skill does not allow,
+    /// Refuses an event that would break the map or its schema: a node or an edge the schema does not allow,
     /// a node title blank or held by another node, a node or an edge end that is not on the map, an edge the map already has or lacks.
-    pub fn check(&self, event: &Event, skill: &Skill) -> Result<()> {
+    pub fn check(&self, event: &Event) -> Result<()> {
         match &event.payload {
             Payload::NodeAdded { kind, title, properties, .. } => {
-                skill.check_node(kind, properties)?;
+                self.check_node(kind, properties)?;
 
                 self.check_title(title, None)
             }
             Payload::NodeChanged { node, title, properties, .. } => {
-                skill.check_node(&self.on_map(*node)?.kind, properties)?;
+                self.check_node(&self.on_map(*node)?.kind, properties)?;
 
                 self.check_title(title, Some(*node))
             }
             Payload::NodeRemoved { node, .. } => self.on_map(*node).map(|_| ()),
             Payload::EdgeAdded { kind, from, to, .. } => {
-                skill.check_edge(kind, &self.on_map(*from)?.kind, &self.on_map(*to)?.kind)?;
+                self.check_edge(kind, &self.on_map(*from)?.kind, &self.on_map(*to)?.kind)?;
 
                 if self.edges.iter().any(|e| e.is(kind, *from, *to)) {
                     return Err(format!("the {} map already has this {kind} edge", self.name.as_str()).into());
@@ -176,6 +179,14 @@ impl Map {
             | Payload::SubagentStarted { .. }
             | Payload::SubagentReported { .. } => Ok(()),
         }
+    }
+
+    fn check_node(&self, kind: &str, properties: &BTreeMap<String, String>) -> Result<()> {
+        self.schema.as_ref().map_or(Ok(()), |s| s.check_node(kind, properties))
+    }
+
+    fn check_edge(&self, kind: &str, from: &str, to: &str) -> Result<()> {
+        self.schema.as_ref().map_or(Ok(()), |s| s.check_edge(kind, from, to))
     }
 
     pub fn on_map(&self, id: NodeId) -> Result<&Node> {
@@ -254,7 +265,7 @@ mod tests {
     #[test]
     fn a_map_is_found_in_its_project_by_name_in_any_case() {
         let (project, other) = (ProjectId::new(), ProjectId::new());
-        let created = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::fixture(project));
+        let created = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), None, Places::fixture(project));
         let events = [created];
 
         let found = |project, name: &str| Map::named(&events, project, name).map(|m| m.name);
@@ -390,7 +401,7 @@ mod tests {
         ];
 
         let project = ProjectId::new();
-        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new("concepts").unwrap(), "/maps/concepts.toml".into(), Places::fixture(project));
+        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new("concepts").unwrap(), "/maps/concepts.toml".into(), None, Places::fixture(project));
         let log: Vec<Event> = [created(map), created(other)].into_iter().chain(events).collect();
 
         let maps = Map::all(&log);
@@ -477,7 +488,7 @@ mod tests {
         let (_, add_lost) = node_added(uncreated, Actor::Human, "Lost");
         let (one, two) = (ProjectId::new(), ProjectId::new());
         let created = |id, project, name: &str| {
-            Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new(name).unwrap(), format!("/maps/{name}.toml").into(), Places::fixture(project))
+            Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new(name).unwrap(), format!("/maps/{name}.toml").into(), None, Places::fixture(project))
         };
         let events = [
             created(first, one, "concepts"),
@@ -505,7 +516,7 @@ mod tests {
         let (project, board) = (ProjectId::new(), crate::core::BoardId::new());
         let (draft, listed, both) = (MapId::new(), MapId::new(), MapId::new());
         let created = |id, places: &[Place]| {
-            Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new("m").unwrap(), "/maps/m.toml".into(), Places::new(places.iter().copied()).unwrap())
+            Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new("m").unwrap(), "/maps/m.toml".into(), None, Places::new(places.iter().copied()).unwrap())
         };
         let events = [
             created(draft, &[Place::Board(board)]),
@@ -524,7 +535,7 @@ mod tests {
     fn a_map_changed_event_replaces_the_places_of_its_map_only() {
         let (project, board) = (ProjectId::new(), crate::core::BoardId::new());
         let (changed, kept) = (MapId::new(), MapId::new());
-        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new("m").unwrap(), "/maps/m.toml".into(), Places::fixture(project));
+        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new("m").unwrap(), "/maps/m.toml".into(), None, Places::fixture(project));
         let moved = Places::new([Place::Project(project), Place::Board(board)]).unwrap();
         let events = [created(changed), created(kept), Event::map_changed(Source::fixture(), Actor::Human, changed, moved.clone())];
 
@@ -540,29 +551,32 @@ mod tests {
         let (b, add_b) = node_added(map, Actor::Human, "B");
         let edge = Event::edge_added(Source::fixture(), Actor::Human, map, "links", a, b);
 
-        (map, a, b, Map::fixture(map, &[add_a, add_b, edge]))
+        let mut folded = Map::fixture(map, &[add_a, add_b, edge]);
+        folded.schema = Some(schema());
+
+        (map, a, b, folded)
     }
 
     /// `concept` nodes with a `definition`, linked by `links` and `cites`.
-    fn skill() -> Skill {
+    fn schema() -> Schema {
         let nodes = BTreeMap::from([("concept".to_string(), std::collections::BTreeSet::from(["definition".to_string()]))]);
         let edge = || crate::core::EdgeKind { from: "concept".into(), to: "concept".into() };
         let edges = BTreeMap::from([("links".to_string(), edge()), ("cites".to_string(), edge())]);
 
-        Skill::new("concepts".into(), "p".into(), "i".into(), Some(crate::core::Schema::new(nodes, edges).unwrap()))
+        Schema::new(nodes, edges).unwrap()
     }
 
     #[test]
-    fn check_refuses_what_the_skill_does_not_allow() {
+    fn check_refuses_what_the_schema_does_not_allow() {
         let (map, a, b, folded) = check_map();
         let colour = BTreeMap::from([("colour".to_string(), "red".to_string())]);
         let added = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "concept", "C", colour.clone(), Vec::new());
         let changed = Event::node_changed(Source::fixture(), Actor::Human, map, a, "A", colour, Vec::new());
         let edge = Event::edge_added(Source::fixture(), Actor::Human, map, "answers", b, a);
 
-        let added = folded.check(&added, &skill());
-        let changed = folded.check(&changed, &skill());
-        let edge = folded.check(&edge, &skill());
+        let added = folded.check(&added);
+        let changed = folded.check(&changed);
+        let edge = folded.check(&edge);
 
         assert!(added.unwrap_err().to_string().contains("colour"));
         assert!(changed.unwrap_err().to_string().contains("colour"));
@@ -573,9 +587,9 @@ mod tests {
     fn check_refuses_a_node_added_with_a_blank_title_or_one_another_node_holds() {
         let (map, _, _, folded) = check_map();
 
-        let blank = folded.check(&node_added(map, Actor::Agent, " ").1, &skill());
-        let taken = folded.check(&node_added(map, Actor::Agent, "A").1, &skill());
-        let free = folded.check(&node_added(map, Actor::Agent, "C").1, &skill());
+        let blank = folded.check(&node_added(map, Actor::Agent, " ").1);
+        let taken = folded.check(&node_added(map, Actor::Agent, "A").1);
+        let free = folded.check(&node_added(map, Actor::Agent, "C").1);
 
         assert_eq!(blank.unwrap_err().to_string(), "title must not be blank");
         assert_eq!(taken.unwrap_err().to_string(), "the concepts map already has a node titled \"A\"");
@@ -590,10 +604,10 @@ mod tests {
     fn check_refuses_a_node_changed_that_is_missing_or_gets_a_blank_or_taken_title() {
         let (map, a, _, folded) = check_map();
 
-        let missing = folded.check(&change(map, NodeId::new(), "C"), &skill());
-        let blank = folded.check(&change(map, a, " "), &skill());
-        let taken = folded.check(&change(map, a, "B"), &skill());
-        let renamed = folded.check(&change(map, a, "C"), &skill());
+        let missing = folded.check(&change(map, NodeId::new(), "C"));
+        let blank = folded.check(&change(map, a, " "));
+        let taken = folded.check(&change(map, a, "B"));
+        let renamed = folded.check(&change(map, a, "C"));
 
         assert_eq!(missing.unwrap_err().to_string(), "the concepts map has no such node");
         assert_eq!(blank.unwrap_err().to_string(), "title must not be blank");
@@ -605,7 +619,7 @@ mod tests {
     fn check_lets_a_node_keep_its_own_title_on_a_change() {
         let (map, a, _, folded) = check_map();
 
-        let result = folded.check(&change(map, a, "A"), &skill());
+        let result = folded.check(&change(map, a, "A"));
 
         assert!(result.is_ok());
     }
@@ -614,8 +628,8 @@ mod tests {
     fn check_refuses_a_node_removed_that_is_not_on_the_map() {
         let (map, a, _, folded) = check_map();
 
-        let missing = folded.check(&Event::node_removed(Source::fixture(), Actor::Human, map, NodeId::new()), &skill());
-        let present = folded.check(&Event::node_removed(Source::fixture(), Actor::Human, map, a), &skill());
+        let missing = folded.check(&Event::node_removed(Source::fixture(), Actor::Human, map, NodeId::new()));
+        let present = folded.check(&Event::node_removed(Source::fixture(), Actor::Human, map, a));
 
         assert_eq!(missing.unwrap_err().to_string(), "the concepts map has no such node");
         assert!(present.is_ok());
@@ -626,11 +640,11 @@ mod tests {
         let (map, a, b, folded) = check_map();
         let edge = |kind, from, to| Event::edge_added(Source::fixture(), Actor::Human, map, kind, from, to);
 
-        let from_missing = folded.check(&edge("links", NodeId::new(), b), &skill());
-        let to_missing = folded.check(&edge("links", a, NodeId::new()), &skill());
-        let repeated = folded.check(&edge("links", a, b), &skill());
-        let reversed = folded.check(&edge("links", b, a), &skill());
-        let other_kind = folded.check(&edge("cites", a, b), &skill());
+        let from_missing = folded.check(&edge("links", NodeId::new(), b));
+        let to_missing = folded.check(&edge("links", a, NodeId::new()));
+        let repeated = folded.check(&edge("links", a, b));
+        let reversed = folded.check(&edge("links", b, a));
+        let other_kind = folded.check(&edge("cites", a, b));
 
         assert_eq!(from_missing.unwrap_err().to_string(), "the concepts map has no such node");
         assert_eq!(to_missing.unwrap_err().to_string(), "the concepts map has no such node");
@@ -644,9 +658,9 @@ mod tests {
         let (map, a, b, folded) = check_map();
         let remove = |kind, from, to| Event::edge_removed(Source::fixture(), Actor::Human, map, kind, from, to);
 
-        let missing = folded.check(&remove("links", b, a), &skill());
-        let other_kind = folded.check(&remove("cites", a, b), &skill());
-        let present = folded.check(&remove("links", a, b), &skill());
+        let missing = folded.check(&remove("links", b, a));
+        let other_kind = folded.check(&remove("cites", a, b));
+        let present = folded.check(&remove("links", a, b));
 
         assert_eq!(missing.unwrap_err().to_string(), "the concepts map has no such links edge");
         assert!(other_kind.is_err());
@@ -654,17 +668,29 @@ mod tests {
     }
 
     #[test]
+    fn check_allows_any_kind_without_a_schema() {
+        let (map, _, _, mut folded) = check_map();
+        folded.schema = None;
+        let colour = BTreeMap::from([("colour".to_string(), "red".to_string())]);
+        let added = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "other", "C", colour, Vec::new());
+
+        let result = folded.check(&added);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
     fn check_passes_every_other_payload() {
         let (map, _, _, folded) = check_map();
         let session = crate::core::SessionId::new();
         let events = [
-            Event::map_created(Source::fixture(), Actor::Human, map, ProjectId::new(), Name::new("concepts").unwrap(), "/maps/concepts.toml".into(), Places::fixture(ProjectId::new())),
+            Event::map_created(Source::fixture(), Actor::Human, map, ProjectId::new(), Name::new("concepts").unwrap(), "/maps/concepts.toml".into(), None, Places::fixture(ProjectId::new())),
             Event::session_created(Source::fixture(), session, crate::core::ProjectId::new(), crate::core::ClientSessionId::new("c".into())),
             Event::message(Source::fixture(), session, Actor::Human, "Hello", serde_json::json!({})),
         ];
 
         for event in &events {
-            assert!(folded.check(event, &skill()).is_ok());
+            assert!(folded.check(event).is_ok());
         }
     }
 }

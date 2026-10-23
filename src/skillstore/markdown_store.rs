@@ -168,10 +168,10 @@ mod tests {
         assert_eq!(skill.description(), "p");
         assert_eq!(skill.instructions(), "i");
         let properties = BTreeMap::from([("body".to_string(), "x".to_string()), ("by".to_string(), "y".to_string())]);
-        assert!(skill.check_node("note", &properties).is_ok());
-        assert!(skill.check_node("topic", &properties).is_err());
-        assert!(skill.check_edge("about", "note", "topic").is_ok());
-        assert!(skill.check_edge("about", "topic", "note").is_err());
+        assert!(skill.schema().unwrap().check_node("note", &properties).is_ok());
+        assert!(skill.schema().unwrap().check_node("topic", &properties).is_err());
+        assert!(skill.schema().unwrap().check_edge("about", "note", "topic").is_ok());
+        assert!(skill.schema().unwrap().check_edge("about", "topic", "note").is_err());
     }
 
     #[tokio::test]
@@ -180,7 +180,7 @@ mod tests {
 
         let skill = MarkdownStore.skill(&dir).await.unwrap();
 
-        assert!(skill.check_edge("about", "note", "note").is_err());
+        assert!(skill.schema().unwrap().check_edge("about", "note", "note").is_err());
     }
 
     #[tokio::test]
@@ -190,7 +190,6 @@ mod tests {
         let skill = MarkdownStore.skill(&dir).await.unwrap();
 
         assert!(skill.schema().is_none());
-        assert!(skill.check_node("any", &BTreeMap::from([("p".to_string(), "x".to_string())])).is_ok());
     }
 
     #[tokio::test]

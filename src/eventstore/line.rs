@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use jiff::Timestamp;
@@ -5,7 +6,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::core::{Actor, BoardId, ClientAgentId, ClientSessionId, Event, EventId, Kind, Name, Payload, Place, Places, ProjectId, Reference, Source};
+use crate::core::{Actor, BoardId, ClientAgentId, ClientSessionId, EdgeKind, Event, EventId, Kind, Name, Payload, Place, Places, ProjectId, Reference, Schema, Source};
 use crate::shared::{Error, Result};
 
 /// One log line. The log format lives here, apart from the domain `Event`.
@@ -41,10 +42,11 @@ impl From<&Event> for EventLine {
             }
             Payload::ProjectCreated { project, name, root } => json!({ "project": project, "name": name.as_str(), "root": root }),
             Payload::BoardCreated { board, project, name } => json!({ "board": board, "project": project, "name": name.as_str() }),
-            Payload::MapCreated { map, project, name, skill, places } => {
+            Payload::MapCreated { map, project, name, skill, schema, places } => {
                 let places: Vec<PlaceLine> = places.iter().map(PlaceLine::from).collect();
+                let schema = schema.as_ref().map(SchemaLine::from);
 
-                json!({ "map": map, "project": project, "name": name.as_str(), "skill": skill, "places": places })
+                json!({ "map": map, "project": project, "name": name.as_str(), "skill": skill, "schema": schema, "places": places })
             }
             Payload::MapChanged { map, places } => {
                 let places: Vec<PlaceLine> = places.iter().map(PlaceLine::from).collect();
@@ -127,6 +129,7 @@ impl TryFrom<EventLine> for Event {
                 project: field(p, "project")?,
                 name: Name::new(&field::<String>(p, "name")?)?,
                 skill: field(p, "skill")?,
+                schema: field::<Option<SchemaLine>>(p, "schema")?.map(Schema::try_from).transpose()?,
                 places: Places::new(field::<Vec<PlaceLine>>(p, "places")?.into_iter().map(Place::from))?,
             },
             Kind::MapChanged => Payload::MapChanged {
@@ -230,6 +233,37 @@ impl From<ReferenceLine> for Reference {
 }
 
 #[derive(Serialize, Deserialize)]
+struct SchemaLine {
+    nodes: BTreeMap<String, BTreeSet<String>>,
+    edges: BTreeMap<String, EdgeLine>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct EdgeLine {
+    from: String,
+    to: String,
+}
+
+impl From<&Schema> for SchemaLine {
+    fn from(schema: &Schema) -> Self {
+        Self {
+            nodes: schema.nodes().clone(),
+            edges: schema.edges().iter().map(|(kind, e)| (kind.clone(), EdgeLine { from: e.from.clone(), to: e.to.clone() })).collect(),
+        }
+    }
+}
+
+impl TryFrom<SchemaLine> for Schema {
+    type Error = Error;
+
+    fn try_from(line: SchemaLine) -> Result<Self> {
+        let edges = line.edges.into_iter().map(|(kind, e)| (kind, EdgeKind { from: e.from, to: e.to })).collect();
+
+        Schema::new(line.nodes, edges)
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum PlaceLine {
     Project(ProjectId),
@@ -264,8 +298,6 @@ fn field<T: DeserializeOwned>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
-
     use super::*;
     use crate::core::{MapId, NodeId, SessionId};
 
@@ -285,7 +317,7 @@ mod tests {
             Event::subagent_reported(Source::fixture(), session, ClientAgentId::new("a1".into()), "done", raw),
             Event::project_created(Source::fixture(), Actor::Human, ProjectId::new(), Name::new("percept").unwrap(), Some("/work/percept".into())),
             Event::board_created(Source::fixture(), Actor::Human, BoardId::new(), ProjectId::new(), Name::new("ideas").unwrap()),
-            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::new([Place::Project(project), Place::Board(BoardId::new())]).unwrap()),
+            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), None, Places::new([Place::Project(project), Place::Board(BoardId::new())]).unwrap()),
             Event::map_changed(Source::fixture(), Actor::Human, MapId::new(), Places::new([Place::Project(project), Place::Board(BoardId::new())]).unwrap()),
             Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())]), Vec::new()),
             Event::node_changed(Source::fixture(), Actor::Human, MapId::new(), NodeId::new(), "Why not?", BTreeMap::from([("definition".into(), "E".into())]), Vec::new()),
@@ -333,9 +365,31 @@ mod tests {
     }
 
     #[test]
+    fn a_maps_schema_round_trips_through_a_line_and_is_checked_on_read() {
+        let project = ProjectId::new();
+        let nodes = BTreeMap::from([("note".to_string(), BTreeSet::from(["body".to_string()])), ("topic".to_string(), BTreeSet::new())]);
+        let edges = BTreeMap::from([("about".to_string(), EdgeKind { from: "note".into(), to: "topic".into() })]);
+        let schema = Schema::new(nodes, edges).unwrap();
+        let created = |schema| Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("notes").unwrap(), "/skills/notes".into(), schema, Places::fixture(project));
+        let with = created(Some(schema));
+        let without = created(None);
+
+        let mut broken = EventLine::from(&with);
+        broken.payload["schema"]["edges"]["about"]["to"] = json!("missing");
+
+        for event in [&with, &without] {
+            let text = serde_json::to_string(&EventLine::from(event)).unwrap();
+            let back = Event::try_from(serde_json::from_str::<EventLine>(&text).unwrap()).unwrap();
+            assert_eq!(back.payload, event.payload);
+        }
+        assert_eq!(EventLine::from(&without).payload["schema"], json!(null));
+        assert!(Event::try_from(broken).is_err());
+    }
+
+    #[test]
     fn a_map_line_without_places_or_with_none_is_a_read_error() {
         let project = ProjectId::new();
-        let event = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), Places::fixture(project));
+        let event = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), None, Places::fixture(project));
         let mut line = EventLine::from(&event);
         assert_eq!(line.payload["places"], json!([{ "project": project }]));
 
