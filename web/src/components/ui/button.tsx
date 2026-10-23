@@ -1,6 +1,6 @@
 type Variant = "primary" | "secondary" | "ghost";
 
-type ButtonProps = React.ComponentProps<"button"> & { variant: Variant };
+type ButtonProps = React.ComponentProps<"button"> & { variant: Variant; large?: boolean };
 
 const base =
   "inline-flex cursor-pointer items-center justify-center gap-2 rounded-md text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50";
@@ -13,8 +13,8 @@ const variants: Record<Variant, string> = {
   ghost,
 };
 
-export function Button({ variant, className = "", ...props }: ButtonProps) {
-  return <button type="button" className={`${base} h-8 px-3 ${variants[variant]} ${className}`} {...props} />;
+export function Button({ variant, large = false, className = "", ...props }: ButtonProps) {
+  return <button type="button" className={`${base} ${large ? "h-11" : "h-8"} px-3 ${variants[variant]} ${className}`} {...props} />;
 }
 
 // An icon alone tells no one what the button does, so the label is required.
