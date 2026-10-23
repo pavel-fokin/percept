@@ -33,6 +33,10 @@ const labelBgStyle = { fill: "var(--color-bg)" };
 
 const handle = "size-1 border-0 opacity-0";
 
+const sourceHandle = "size-3 border border-muted bg-surface";
+
+type Ends = { from: string; to: string };
+
 const NODE_WIDTH = 192;
 const NODE_HEIGHT = 64;
 
@@ -41,9 +45,37 @@ export function Board() {
   const { nodes, edges } = useMemo(() => layout(board), [board]);
   const [activeName, setActiveName] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [edgeId, setEdgeId] = useState<string | null>(null);
+  // The node the next tapped node is connected from.
+  const [connecting, setConnecting] = useState<string | null>(null);
+  const [ends, setEnds] = useState<Ends | null>(null);
   const active = board.maps.find((m) => m.name === activeName) ?? board.maps[0];
   const selected = board.maps.flatMap((m) => m.nodes.map((n) => ({ map: m.name, node: n }))).find((n) => n.node.id === selectedId);
   const shown = useMemo(() => nodes.map((n) => ({ ...n, selected: n.id === selectedId })), [nodes, selectedId]);
+  const shownEdges = useMemo(() => edges.map((e) => ({ ...e, selected: e.id === edgeId })), [edges, edgeId]);
+  const selectedEdge = board.maps.flatMap((m) => m.edges.map((e) => ({ map: m, edge: e }))).find((e) => edgeKey(e.edge) === edgeId);
+
+  function clear() {
+    setSelectedId(null);
+    setEdgeId(null);
+    setConnecting(null);
+    setEnds(null);
+  }
+
+  function selectNode(id: string) {
+    if (connecting) {
+      setEnds({ from: connecting, to: id });
+      setConnecting(null);
+      return;
+    }
+    clear();
+    setSelectedId(id);
+  }
+
+  function selectEdge(id: string) {
+    clear();
+    setEdgeId(id);
+  }
 
   usePolling(true);
 
@@ -53,13 +85,18 @@ export function Board() {
       key={board.maps.map((m) => m.name).join("/")}
       className="flex-1"
       nodes={shown}
-      edges={edges}
-      onNodeClick={(_, node) => setSelectedId(node.id)}
-      onPaneClick={() => setSelectedId(null)}
+      edges={shownEdges}
+      onNodeClick={(_, node) => selectNode(node.id)}
+      onEdgeClick={(_, edge) => selectEdge(edge.id)}
+      onConnect={({ source, target }) => {
+        clear();
+        setEnds({ from: source, to: target });
+      }}
+      onPaneClick={clear}
       nodeTypes={nodeTypes}
       defaultEdgeOptions={edgeOptions}
       nodesDraggable={false}
-      nodesConnectable={false}
+      nodesConnectable
       fitView
       minZoom={0.1}
       proOptions={{ hideAttribution: true }}
@@ -74,12 +111,18 @@ export function Board() {
       <Panel position="top-right" className="flex flex-col items-end gap-2">
         {active && <MapPicker maps={board.maps} active={active.name} onChange={setActiveName} />}
         {active && <AddNode key={active.name} project={board.project} map={active} />}
-        {selected && <EditNode key={selected.node.id} project={board.project} map={selected.map} node={selected.node} onGone={() => setSelectedId(null)} />}
+        {selected && <EditNode key={selected.node.id} project={board.project} map={selected.map} node={selected.node} connecting={connecting !== null} onConnect={() => setConnecting(connecting ? null : selected.node.id)} onGone={clear} />}
+        {ends && <ConnectEdge key={`${ends.from}-${ends.to}`} project={board.project} maps={board.maps} ends={ends} onDone={clear} />}
+        {selectedEdge && <RemoveEdge key={edgeId} project={board.project} map={selectedEdge.map} edge={selectedEdge.edge} onGone={clear} />}
         <AddMap board={board} addable={addable} />
         <RemoveMap board={board} />
       </Panel>
     </ReactFlow>
   );
+}
+
+function edgeKey(edge: { from: string; kind: string; to: string }) {
+  return `${edge.from}-${edge.kind}-${edge.to}`;
 }
 
 /** The nodes and edges of every map on the board, placed top to bottom by dagre. */
@@ -108,7 +151,7 @@ function layout(board: BoardDetail) {
     ),
   );
   const edges = board.maps.flatMap((map) =>
-    map.edges.map((edge): Edge => ({ id: `${edge.from}-${edge.kind}-${edge.to}`, source: edge.from, target: edge.to, label: edge.kind, labelStyle, labelBgStyle })),
+    map.edges.map((edge): Edge => ({ id: edgeKey(edge), source: edge.from, target: edge.to, label: edge.kind, labelStyle, labelBgStyle })),
   );
 
   return { nodes, edges };
@@ -123,7 +166,7 @@ function MapNodeCard({ data, selected }: NodeProps<MapNode>) {
       <Handle type="target" position={Position.Top} className={handle} />
       <p className="truncate font-mono text-xs text-muted">{data.map}</p>
       <p className="line-clamp-2 break-words">{data.title}</p>
-      <Handle type="source" position={Position.Bottom} className={handle} />
+      <Handle type="source" position={Position.Bottom} className={sourceHandle} />
     </div>
   );
 }
@@ -230,7 +273,21 @@ function AddNode({ project, map }: { project: string; map: BoardMap }) {
   );
 }
 
-function EditNode({ project, map, node, onGone }: { project: string; map: string; node: { id: string; kind: string; title: string }; onGone: () => void }) {
+function EditNode({
+  project,
+  map,
+  node,
+  connecting,
+  onConnect,
+  onGone,
+}: {
+  project: string;
+  map: string;
+  node: { id: string; kind: string; title: string };
+  connecting: boolean;
+  onConnect: () => void;
+  onGone: () => void;
+}) {
   const { revalidate } = useRevalidator();
   const [failure, setFailure] = useState<string | null>(null);
   const [title, setTitle] = useState(node.title);
@@ -277,8 +334,115 @@ function EditNode({ project, map, node, onGone }: { project: string; map: string
           Delete
         </Button>
       </div>
+      <Button type="button" variant="secondary" aria-pressed={connecting} onClick={onConnect} className="h-11">
+        {connecting ? "Cancel connect" : "Connect"}
+      </Button>
+      {connecting && <p className="px-1 py-1 text-muted">Tap the node to connect to.</p>}
       {failure && <p className="px-1 py-1 wrap-anywhere text-muted">{failure}</p>}
     </form>
+  );
+}
+
+/** Picks the kind of an edge between two nodes of one map and adds it. */
+function ConnectEdge({ project, maps, ends, onDone }: { project: string; maps: BoardMap[]; ends: Ends; onDone: () => void }) {
+  const { revalidate } = useRevalidator();
+  const [failure, setFailure] = useState<string | null>(null);
+  const [typed, setTyped] = useState("");
+  const [picked, setPicked] = useState("");
+  const found = (id: string) => maps.flatMap((m) => m.nodes.map((node) => ({ map: m, node }))).find((n) => n.node.id === id);
+  const [from, to] = [found(ends.from), found(ends.to)];
+
+  if (!from || !to) return null;
+  if (from.map !== to.map) return <p className="w-64 rounded-md border border-border bg-surface p-2 text-sm text-muted">Both nodes must be on one map.</p>;
+
+  const { map } = from;
+  const fitting = map.kinds.edges.filter((e) => e.from === from.node.kind && e.to === to.node.kind).map((e) => e.kind);
+  const options = map.kinds.declared ? fitting : [...new Set(map.kinds.edges.map((e) => e.kind))];
+  const kind = map.kinds.declared ? picked || fitting[0] : typed.trim();
+
+  async function create(event: FormEvent) {
+    event.preventDefault();
+    try {
+      await postData<unknown>(`${mapApi(project, map.name)}/edges`, { from: ends.from, kind, to: ends.to });
+      await revalidate();
+      onDone();
+    } catch (error) {
+      setFailure(describe(error));
+    }
+  }
+
+  if (map.kinds.declared && fitting.length === 0) {
+    return <p className="w-64 rounded-md border border-border bg-surface p-2 text-sm text-muted">No edge kind links a {from.node.kind} to a {to.node.kind}.</p>;
+  }
+
+  return (
+    <form onSubmit={(e) => void create(e)} className="grid w-64 gap-1 rounded-md border border-border bg-surface p-2 text-sm">
+      <p className="wrap-anywhere text-muted">
+        {from.node.title} to {to.node.title}
+      </p>
+      {map.kinds.declared ? (
+        <select value={kind} aria-label="Edge kind" onChange={(e) => setPicked(e.target.value)} className={field}>
+          {options.map((k) => (
+            <option key={k} value={k}>
+              {k}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <>
+          <input
+            value={typed}
+            list="edge-kinds"
+            required
+            aria-label="Edge kind"
+            placeholder="Edge kind"
+            onChange={(e) => {
+              setTyped(e.target.value);
+              setFailure(null);
+            }}
+            className={field}
+          />
+          <datalist id="edge-kinds">
+            {options.map((k) => (
+              <option key={k} value={k} />
+            ))}
+          </datalist>
+        </>
+      )}
+      <Button type="submit" variant="secondary" disabled={!kind} className="h-11">
+        Connect
+      </Button>
+      {failure && <p className="px-1 py-1 wrap-anywhere text-muted">{failure}</p>}
+    </form>
+  );
+}
+
+function RemoveEdge({ project, map, edge, onGone }: { project: string; map: BoardMap; edge: { from: string; kind: string; to: string }; onGone: () => void }) {
+  const { revalidate } = useRevalidator();
+  const [failure, setFailure] = useState<string | null>(null);
+  const title = (id: string) => map.nodes.find((n) => n.id === id)?.title ?? id;
+
+  async function remove() {
+    try {
+      const query = new URLSearchParams({ from: edge.from, kind: edge.kind, to: edge.to });
+      await deleteData<unknown>(`${mapApi(project, map.name)}/edges?${query}`);
+      onGone();
+      await revalidate();
+    } catch (error) {
+      setFailure(describe(error));
+    }
+  }
+
+  return (
+    <div className="grid w-64 gap-1 rounded-md border border-border bg-surface p-2 text-sm">
+      <p className="wrap-anywhere">
+        {title(edge.from)} <span className="font-mono text-xs text-muted">{edge.kind}</span> {title(edge.to)}
+      </p>
+      <Button type="button" variant="secondary" onClick={() => void remove()} className="h-11">
+        Delete
+      </Button>
+      {failure && <p className="px-1 py-1 wrap-anywhere text-muted">{failure}</p>}
+    </div>
   );
 }
 
