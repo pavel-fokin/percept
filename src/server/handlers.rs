@@ -10,8 +10,8 @@ use serde::Deserialize;
 use super::responses::{self, BoardDetail, BoardSummary, Data, MapDetail, MapSummary, ProjectSummary, Status};
 use super::Api;
 use crate::app::Taken;
-use crate::core::{Actor, EventLog, LastPlace, Name, Place, SessionId, SkillStore, Source};
-use crate::shared::Error;
+use crate::core::{Actor, EventStore, LastPlace, Name, Place, SessionId, SkillStore, Source};
+use crate::shared::{Begin, Error};
 
 /// The body of `POST /api/projects`.
 #[derive(Deserialize)]
@@ -66,7 +66,7 @@ impl IntoResponse for ApiError {
 
 impl<L, M> Api<L, M>
 where
-    L: EventLog + Send + Sync + 'static,
+    L: Begin<Transaction: EventStore + Send + Sync> + Send + Sync + 'static,
     M: SkillStore + Clone + Send + Sync + 'static,
 {
     pub(super) async fn status(State(api): State<Arc<Self>>) -> Reply<Status> {

@@ -5,8 +5,8 @@ use std::sync::Mutex;
 use tokio::io::AsyncWriteExt;
 
 use super::line::EventLine;
-use crate::core::{ClientSessionId, Event, EventLog, EventStore, Payload, SessionId};
-use crate::shared::Result;
+use crate::core::{ClientSessionId, Event, EventStore, Payload, SessionId};
+use crate::shared::{Begin, Result};
 
 pub struct JsonlStore {
     path: PathBuf,
@@ -25,7 +25,8 @@ pub struct Transaction {
     _lock: std::fs::File,
 }
 
-impl EventLog for JsonlStore {
+/// Takes the log's lock and reads the log once; dropping the transaction releases the lock.
+impl Begin for JsonlStore {
     type Transaction = Transaction;
 
     async fn begin(&self) -> Result<Transaction> {

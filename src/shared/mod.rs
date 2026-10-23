@@ -10,6 +10,13 @@ use uuid::Uuid;
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Something an operation begins; dropping what `begin` returns ends it.
+pub trait Begin {
+    type Transaction;
+
+    fn begin(&self) -> impl Future<Output = Result<Self::Transaction>> + Send;
+}
+
 /// A UUIDv7 that identifies one entity of type `T`.
 #[derive(Serialize, Deserialize)]
 #[serde(transparent, bound = "")]

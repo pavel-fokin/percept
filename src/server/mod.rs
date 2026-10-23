@@ -11,8 +11,8 @@ use axum::Router;
 use tokio::net::TcpListener;
 
 use crate::app::AppService;
-use crate::core::{EventLog, SkillStore};
-use crate::shared::Result;
+use crate::core::{EventStore, SkillStore};
+use crate::shared::{Begin, Result};
 
 mod handlers;
 mod paths;
@@ -25,7 +25,7 @@ const APPLE_TOUCH_ICON: &[u8] = include_bytes!("../../web/public/apple-touch-ico
 
 pub async fn serve<L, M>(log: L, skills: M, home: PathBuf, port: u16, open: bool) -> Result<()>
 where
-    L: EventLog + Send + Sync + 'static,
+    L: Begin<Transaction: EventStore + Send + Sync> + Send + Sync + 'static,
     M: SkillStore + Clone + Send + Sync + 'static,
 {
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
@@ -42,13 +42,13 @@ where
 }
 
 /// What the handlers read: the log and skills the use cases run over, and the home that paths are shown under.
-struct Api<L: EventLog, M: SkillStore> {
+struct Api<L: Begin<Transaction: EventStore + Send + Sync>, M: SkillStore> {
     log: L,
     skills: M,
     home: PathBuf,
 }
 
-impl<L: EventLog, M: SkillStore + Clone> Api<L, M> {
+impl<L: Begin<Transaction: EventStore + Send + Sync>, M: SkillStore + Clone> Api<L, M> {
     /// The use cases over a new transaction, one for each request.
     async fn service(&self) -> Result<AppService<L::Transaction, M>> {
         Ok(AppService::new(self.log.begin().await?, self.skills.clone()))
@@ -57,7 +57,7 @@ impl<L: EventLog, M: SkillStore + Clone> Api<L, M> {
 
 fn router<L, M>(log: L, skills: M, home: PathBuf) -> Router
 where
-    L: EventLog + Send + Sync + 'static,
+    L: Begin<Transaction: EventStore + Send + Sync> + Send + Sync + 'static,
     M: SkillStore + Clone + Send + Sync + 'static,
 {
     Router::new()
@@ -109,7 +109,7 @@ mod tests {
     #[derive(Clone)]
     struct Fixed(usize, Vec<Reference>, Vec<Event>);
 
-    impl EventLog for Fixed {
+    impl Begin for Fixed {
         type Transaction = Fixed;
 
         async fn begin(&self) -> Result<Fixed> {
@@ -151,7 +151,7 @@ mod tests {
         }
     }
 
-    impl EventLog for Arc<Log> {
+    impl Begin for Arc<Log> {
         type Transaction = Arc<Log>;
 
         async fn begin(&self) -> Result<Arc<Log>> {
@@ -195,7 +195,7 @@ mod tests {
         serde_json::from_str(text_body(response)).unwrap()
     }
 
-    async fn serve<L: EventLog + Send + Sync + 'static>(log: L) -> std::net::SocketAddr {
+    async fn serve<L: Begin<Transaction: EventStore + Send + Sync> + Send + Sync + 'static>(log: L) -> std::net::SocketAddr {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let app = router(log, Skills, "/Users/me".into());

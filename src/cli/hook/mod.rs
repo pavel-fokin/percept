@@ -5,8 +5,8 @@ use clap::ValueEnum;
 use tokio::io::AsyncReadExt;
 
 use crate::app::{AppService, source_path};
-use crate::core::{Actor, ClientSessionId, Event, EventLog, SessionId, SkillStore, Source};
-use crate::shared::Result;
+use crate::core::{Actor, ClientSessionId, Event, EventStore, SessionId, SkillStore, Source};
+use crate::shared::{Begin, Result};
 
 #[derive(Debug, Clone, Copy, PartialEq, ValueEnum)]
 pub(super) enum Client {
@@ -30,7 +30,7 @@ enum Translation {
 }
 
 /// Begins a transaction only for a payload that records something.
-pub(super) async fn hook<L: EventLog, M: SkillStore>(log: &L, skill_store: M, client: Client) -> Result<()> {
+pub(super) async fn hook<L: Begin<Transaction: EventStore + Send + Sync>, M: SkillStore>(log: &L, skill_store: M, client: Client) -> Result<()> {
     let mut input = String::new();
     tokio::io::stdin().read_to_string(&mut input).await?;
     let raw: serde_json::Value = serde_json::from_str(&input)?;

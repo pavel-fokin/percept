@@ -8,9 +8,9 @@ use super::maps::{add, change, describe, new_board, new_map, remove, show, skill
 use super::projects::init;
 use super::status::status;
 use crate::app::AppService;
-use crate::core::{EventLog, SkillStore};
+use crate::core::{EventStore, SkillStore};
 use crate::server;
-use crate::shared::Result;
+use crate::shared::{Begin, Result};
 
 /// Records what coding agents do.
 #[derive(Parser)]
@@ -99,7 +99,7 @@ enum Operation {
     Describe { map: String },
 }
 
-pub async fn run<L: EventLog + Send + Sync + 'static, M: SkillStore + Clone + Send + Sync + 'static>(log: L, skill_store: M, home: PathBuf) -> ExitCode {
+pub async fn run<L: Begin<Transaction: EventStore + Send + Sync> + Send + Sync + 'static, M: SkillStore + Clone + Send + Sync + 'static>(log: L, skill_store: M, home: PathBuf) -> ExitCode {
     // clap exits 2 on a usage error, and exit 2 blocks the agent's action.
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
@@ -125,7 +125,7 @@ pub async fn run<L: EventLog + Send + Sync + 'static, M: SkillStore + Clone + Se
 }
 
 /// Runs one operation in one transaction; no operation means the status.
-async fn operate<L: EventLog, M: SkillStore>(log: &L, skill_store: M, home: &Path, operation: Option<Operation>) -> Result<()> {
+async fn operate<L: Begin<Transaction: EventStore + Send + Sync>, M: SkillStore>(log: &L, skill_store: M, home: &Path, operation: Option<Operation>) -> Result<()> {
     let service = AppService::new(log.begin().await?, skill_store);
     let service = &service;
 
