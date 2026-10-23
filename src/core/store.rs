@@ -9,6 +9,8 @@ pub trait EventLog {
     fn begin(&self) -> impl Future<Output = Result<Self::Transaction>> + Send;
 }
 
+/// One transaction's view of the log. `all` and `session` read the snapshot taken at `begin`;
+/// an `append` is visible to the reads that follow it in the same transaction.
 pub trait EventStore {
     fn session(
         &self,

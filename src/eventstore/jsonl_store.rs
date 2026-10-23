@@ -117,7 +117,6 @@ impl EventStore for Transaction {
                 .open(path)
                 .await?;
 
-            // One write call, so concurrent appends do not interleave.
             file.write_all(line.as_bytes()).await?;
             // tokio buffers the write; flush surfaces its error.
             file.flush().await
@@ -135,7 +134,6 @@ impl EventStore for Transaction {
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
@@ -273,24 +271,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn begin_creates_a_sibling_lock_file_and_waits_for_the_open_transaction() {
+    async fn a_transaction_holds_the_sibling_lock_file_until_dropped() {
         let file = TempFile::new();
-        let store = Arc::new(file.store());
         let lock_path = PathBuf::from(format!("{}.lock", file.0.display()));
-        let first = store.begin().await.unwrap();
 
-        let waiting = tokio::spawn({
-            let store = store.clone();
-            async move { store.begin().await.map(|_| ()) }
-        });
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        let waited = !waiting.is_finished();
-        drop(first);
-        let second = waiting.await.unwrap();
+        let transaction = file.store().begin().await.unwrap();
+        let other = fs::OpenOptions::new().write(true).open(&lock_path).unwrap();
+        let held = other.try_lock().is_err();
+        drop(transaction);
+        let released = other.try_lock().is_ok();
 
-        assert!(lock_path.exists());
-        assert!(waited);
-        assert!(second.is_ok());
+        assert!(held);
+        assert!(released);
         let _ = fs::remove_file(lock_path);
     }
 

@@ -48,8 +48,8 @@ fn library(home: &Path) -> PathBuf {
     home.join(".percept").join("skills")
 }
 
-pub(super) async fn skills<S: EventStore, M: SkillStore>(service: &AppService<S, M>, home: &Path) -> Result<()> {
-    for (name, skill) in service.skills(&library(home)).await? {
+pub(super) async fn skills<M: SkillStore>(skill_store: &M, home: &Path) -> Result<()> {
+    for (name, skill) in skill_store.skills(&library(home)).await? {
         match skill {
             Ok(skill) => println!("{}  {}", skill.name(), skill.description().split_whitespace().collect::<Vec<_>>().join(" ")),
             Err(error) => eprintln!("percept: skipped {name}: {error}"),
