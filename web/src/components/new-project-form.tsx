@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
 import { describe, postData } from "../api";
+import { field } from "./ui/field";
 
 /** A project-name input; Enter creates the project and opens home. Escape or blurring it empty calls `onCancel`. */
 export function NewProjectForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: () => void }) {
@@ -41,7 +42,7 @@ export function NewProjectForm({ onCreated, onCancel }: { onCreated: () => void;
         }}
         onKeyDown={(e) => e.key === "Escape" && onCancel()}
         onBlur={() => !name.trim() && onCancel()}
-        className="h-11 w-full rounded-md border border-border bg-bg px-3 text-base text-text placeholder:text-muted focus-visible:border-muted focus-visible:outline-none md:text-sm"
+        className={field}
       />
       {error && (
         <p id="new-project-error" role="alert" className="px-1 text-sm text-muted wrap-anywhere">

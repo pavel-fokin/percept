@@ -115,7 +115,7 @@ export function Home() {
                 <Link
                   key={board.id}
                   to={boardUrl(project, board.name)}
-                  className={`group flex items-center gap-2 ${chip}`}
+                  className={`group gap-2 ${chip}`}
                 >
                   <BoardIcon />
                   <span className="text-base text-muted group-hover:text-text">{board.name}</span>
@@ -147,9 +147,11 @@ function Working() {
 
 function Counter({ to, label, count }: { to: string; label: string; count: number }) {
   return (
-    <Link to={to} className={`group flex items-baseline gap-2 ${chip}`}>
-      <span className="text-lg font-semibold tabular-nums">{count}</span>
-      <span className="text-base text-muted group-hover:text-text">{label}</span>
+    <Link to={to} className={`group ${chip}`}>
+      <span className="flex items-baseline gap-2">
+        <span className="text-lg font-semibold tabular-nums">{count}</span>
+        <span className="text-base text-muted group-hover:text-text">{label}</span>
+      </span>
     </Link>
   );
 }
@@ -165,7 +167,7 @@ function EmptyState() {
         {editing ? (
           <NewProjectForm onCreated={() => {}} onCancel={() => setEditing(false)} />
         ) : (
-          <Button variant="primary" large onClick={() => setEditing(true)}>
+          <Button variant="primary" onClick={() => setEditing(true)}>
             New project
           </Button>
         )}
@@ -178,8 +180,6 @@ function EmptyState() {
 
 // The clipboard API exists only on https and localhost; over a LAN address the command stays selectable text.
 const canCopy = window.isSecureContext && "clipboard" in navigator;
-
-const commandBox = "flex h-11 items-center gap-6 rounded-md border border-border bg-surface pr-3 pl-4 font-mono text-sm text-text";
 
 function CopyCommand({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
@@ -195,16 +195,11 @@ function CopyCommand({ command }: { command: string }) {
     setCopied(true);
   };
 
-  if (!canCopy) return <code className={`${commandBox} select-all`}>{command}</code>;
+  if (!canCopy) return <code className="font-mono text-sm text-text select-all">{command}</code>;
 
   return (
     <>
-      <button
-        type="button"
-        aria-label={`Copy ${command}`}
-        onClick={() => void copy()}
-        className={`${commandBox} cursor-pointer transition-colors hover:border-muted`}
-      >
+      <Button variant="secondary" aria-label={`Copy ${command}`} onClick={() => void copy()} className="gap-6 font-mono">
         {command}
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden className="size-4 text-muted">
           {copied ? (
@@ -216,7 +211,7 @@ function CopyCommand({ command }: { command: string }) {
             </>
           )}
         </svg>
-      </button>
+      </Button>
       <span role="status" className="sr-only">
         {copied ? "Copied" : ""}
       </span>

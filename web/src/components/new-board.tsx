@@ -22,7 +22,7 @@ export function NewBoard({ project }: { project: string }) {
   };
 
   return (
-    <Button variant="secondary" large className="first:ml-3" disabled={creating} onClick={() => void create()}>
+    <Button variant="secondary" className="first:ml-3" disabled={creating} onClick={() => void create()}>
       + Board
     </Button>
   );

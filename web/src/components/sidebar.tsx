@@ -97,7 +97,8 @@ function Panel({ collapsed, onToggle, onCreated }: PanelProps) {
     <div className="flex h-full flex-col p-1.5">
       <div className="flex items-center justify-between">
         {!collapsed && <Wordmark className="px-2.5" />}
-        <div className="group">
+        {/* A rail-wide square, so the toggle stays centred over the row icons when the button shrinks under a mouse. */}
+        <div className="group grid size-11 place-items-center">
           <IconButton
             variant="ghost"
             label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
