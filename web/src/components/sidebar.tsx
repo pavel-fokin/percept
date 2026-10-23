@@ -25,8 +25,9 @@ export async function loadTree() {
     getData<BoardSummary[]>("/api/boards"),
   ]);
 
-  return projects.map(({ name }) => ({
+  return projects.map(({ name, root }) => ({
     name,
+    root,
     boards: boards.filter((b) => b.project === name),
     maps: maps.filter((m) => m.project === name),
   }));
@@ -125,7 +126,7 @@ function Panel({ collapsed, onToggle, onCreated }: PanelProps) {
       {/* The rail has no room for a label per project, so the tree leaves with the labels. */}
       <div className="mt-4 min-h-0 flex-1 overflow-y-auto">
         {!collapsed &&
-          tree.map(({ name, boards, maps }) => (
+          tree.map(({ name, root, boards, maps }) => (
             <details key={name} open className="group">
               <summary className="flex h-9 cursor-pointer list-none items-center gap-2 rounded-md px-3.5 font-mono text-sm text-muted hover:bg-border/50 hover:text-text [&::-webkit-details-marker]:hidden">
                 <Chevron />
@@ -143,9 +144,12 @@ function Panel({ collapsed, onToggle, onCreated }: PanelProps) {
                     <span className="min-w-0 truncate pl-7">{map.name}</span>
                   </NavLink>
                 ))}
-                <NavLink to={sessionsUrl(name)} className={child}>
-                  <span className="pl-7">sessions</span>
-                </NavLink>
+                {/* Sessions reach only a project with a folder. */}
+                {root !== null && (
+                  <NavLink to={sessionsUrl(name)} className={child}>
+                    <span className="pl-7">sessions</span>
+                  </NavLink>
+                )}
               </nav>
             </details>
           ))}
