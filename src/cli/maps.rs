@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, Path};
 
 use super::address::{self, Address, Target};
 use super::hook::Client;
-use crate::app::{AppService, Ref, source_path};
+use crate::app::{AppService, Ref, library, source_path};
 use crate::core::{Actor, EventStore, Map, NodeId, Project, Reference, Skill, SkillStore, Source};
 use crate::shared::Result;
 
@@ -41,11 +41,6 @@ pub(super) async fn new_map<S: EventStore, M: SkillStore>(service: &AppService<S
     println!("Created {}.", address::of(service, &map).await?);
 
     Ok(())
-}
-
-/// The directory the skills live in.
-fn library(home: &Path) -> PathBuf {
-    home.join(".percept").join("skills")
 }
 
 pub(super) async fn skills<M: SkillStore>(skill_store: &M, home: &Path) -> Result<()> {
