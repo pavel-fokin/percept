@@ -105,9 +105,9 @@ Every write prints the full path of what it changed. Reuse that path.
    | `--ref 'msg:<text>'` | a project message containing this text, copied verbatim |
    | `--ref 'file:<path>:<from>-<to>'` | a project file's lines, numbered from 1, both bounds included |
 
-   File paths are relative to the project root; a project without a
-folder takes none. Message lookup prefers
-   human messages, then agent messages, newest first within each.
+   File paths are relative to the project root. A project without a
+   folder takes no file references. Message lookup prefers human
+   messages, then agent messages, newest first within each.
    Both forms save the quoted text with the node. On `change`, each
    `--ref` adds to the node's references.
 7. Tell the user what you added, changed, and removed, one line per

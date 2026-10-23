@@ -50,7 +50,7 @@ export function Board() {
   const [connecting, setConnecting] = useState<string | null>(null);
   const [ends, setEnds] = useState<Ends | null>(null);
   const active = board.maps.find((m) => m.name === activeName) ?? board.maps[0];
-  const selected = board.maps.flatMap((m) => m.nodes.map((n) => ({ map: m.name, node: n }))).find((n) => n.node.id === selectedId);
+  const selected = selectedId ? located(board.maps, selectedId) : undefined;
   const shown = useMemo(() => nodes.map((n) => ({ ...n, selected: n.id === selectedId })), [nodes, selectedId]);
   const shownEdges = useMemo(() => edges.map((e) => ({ ...e, selected: e.id === edgeId })), [edges, edgeId]);
   const selectedEdge = board.maps.flatMap((m) => m.edges.map((e) => ({ map: m, edge: e }))).find((e) => edgeKey(e.edge) === edgeId);
@@ -63,6 +63,7 @@ export function Board() {
   }
 
   function selectNode(id: string) {
+    if (connecting === id) return;
     if (connecting) {
       setEnds({ from: connecting, to: id });
       setConnecting(null);
@@ -89,6 +90,7 @@ export function Board() {
       onNodeClick={(_, node) => selectNode(node.id)}
       onEdgeClick={(_, edge) => selectEdge(edge.id)}
       onConnect={({ source, target }) => {
+        if (source === target) return;
         clear();
         setEnds({ from: source, to: target });
       }}
@@ -111,7 +113,7 @@ export function Board() {
       <Panel position="top-right" className="flex flex-col items-end gap-2">
         {active && <MapPicker maps={board.maps} active={active.name} onChange={setActiveName} />}
         {active && <AddNode key={active.name} project={board.project} map={active} />}
-        {selected && <EditNode key={selected.node.id} project={board.project} map={selected.map} node={selected.node} connecting={connecting !== null} onConnect={() => setConnecting(connecting ? null : selected.node.id)} onGone={clear} />}
+        {selected && <EditNode key={`${selected.node.id}-${selected.node.title}`} project={board.project} map={selected.map.name} node={selected.node} connecting={connecting !== null} onConnect={() => setConnecting(connecting ? null : selected.node.id)} onGone={clear} />}
         {ends && <ConnectEdge key={`${ends.from}-${ends.to}`} project={board.project} maps={board.maps} ends={ends} onDone={clear} />}
         {selectedEdge && <RemoveEdge key={edgeId} project={board.project} map={selectedEdge.map} edge={selectedEdge.edge} onGone={clear} />}
         <AddMap board={board} addable={addable} />
@@ -119,6 +121,11 @@ export function Board() {
       </Panel>
     </ReactFlow>
   );
+}
+
+/** The node with this id and the map on the board that holds it. */
+function located(maps: BoardMap[], id: string) {
+  return maps.flatMap((map) => map.nodes.map((node) => ({ map, node }))).find((n) => n.node.id === id);
 }
 
 function edgeKey(edge: { from: string; kind: string; to: string }) {
@@ -208,7 +215,7 @@ function AddNode({ project, map }: { project: string; map: BoardMap }) {
   async function create(event: FormEvent) {
     event.preventDefault();
     try {
-      await postData<unknown>(`${mapApi(project, map.name)}/nodes`, { kind, title });
+      await postData<unknown>(`${mapApi(project, map.name)}/nodes`, { kind, title: title.trim() });
       setTitle("");
       setFailure(null);
       await revalidate();
@@ -296,7 +303,7 @@ function EditNode({
   async function rename(event: FormEvent) {
     event.preventDefault();
     try {
-      await patchData<unknown>(url, { title });
+      await patchData<unknown>(url, { title: title.trim() });
       setFailure(null);
       await revalidate();
     } catch (error) {
@@ -327,7 +334,7 @@ function EditNode({
         className={field}
       />
       <div className="grid grid-cols-2 gap-1">
-        <Button type="submit" variant="secondary" disabled={!title.trim() || title === node.title} className="h-11">
+        <Button type="submit" variant="secondary" disabled={!title.trim() || title.trim() === node.title} className="h-11">
           Rename
         </Button>
         <Button type="button" variant="secondary" onClick={() => void remove()} className="h-11">
@@ -349,8 +356,7 @@ function ConnectEdge({ project, maps, ends, onDone }: { project: string; maps: B
   const [failure, setFailure] = useState<string | null>(null);
   const [typed, setTyped] = useState("");
   const [picked, setPicked] = useState("");
-  const found = (id: string) => maps.flatMap((m) => m.nodes.map((node) => ({ map: m, node }))).find((n) => n.node.id === id);
-  const [from, to] = [found(ends.from), found(ends.to)];
+  const [from, to] = [located(maps, ends.from), located(maps, ends.to)];
 
   if (!from || !to) return null;
   if (from.map !== to.map) return <p className="w-64 rounded-md border border-border bg-surface p-2 text-sm text-muted">Both nodes must be on one map.</p>;

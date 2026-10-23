@@ -2,9 +2,9 @@ use std::collections::BTreeSet;
 
 use super::Map;
 
-/// The kinds a person may give a node or an edge on a map.
+/// The node and edge kinds a map takes.
 pub struct Kinds {
-    /// Whether the map's schema declares them, so only these are allowed; else they are read off the map.
+    /// Whether the map's schema declares them, so only these are allowed; else they are read off the map and any kind is taken.
     pub declared: bool,
     pub nodes: BTreeSet<String>,
     /// The `(edge kind, from node kind, to node kind)` triples.
