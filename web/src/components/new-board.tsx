@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router";
 import { postData, type BoardSummary } from "../api";
 import { boardUrl } from "../paths";
-import { chip } from "./ui/chip";
+import { Button } from "./ui/button";
 
 /** A `+ Board` button that creates a board in `project` at once and opens it. */
 export function NewBoard({ project }: { project: string }) {
@@ -22,13 +22,8 @@ export function NewBoard({ project }: { project: string }) {
   };
 
   return (
-    <button
-      type="button"
-      disabled={creating}
-      onClick={() => void create()}
-      className={`${chip} cursor-pointer text-base text-muted hover:text-text`}
-    >
+    <Button variant="secondary" large className="first:ml-3" disabled={creating} onClick={() => void create()}>
       + Board
-    </button>
+    </Button>
   );
 }
