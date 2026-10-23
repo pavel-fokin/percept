@@ -4,7 +4,7 @@ use crate::shared::Id;
 pub type BoardId = Id<Board>;
 
 /// A thinking surface in one project, created by a `BoardCreated` event.
-/// Its name is unique within the project.
+/// Its name is one namespace with the project's maps; `Project::check_free` owns the rule.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Board {
     pub id: BoardId,

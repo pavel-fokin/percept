@@ -28,7 +28,7 @@ pub struct CitedMessage {
 
 impl<S: EventStore, M: SkillStore> AppService<S, M> {
     /// Records a new map defined by the skill directory `skill`, an absolute path, in the project's map list.
-    /// No board or map of the project may have the name.
+    /// No board or map of the project may have the name. Returns the new map.
     pub async fn create_map(
         &self,
         source: Source,
@@ -36,7 +36,7 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         project: ProjectId,
         name: &str,
         skill: &Path,
-    ) -> Result<()> {
+    ) -> Result<Map> {
         let places = Places::new([Place::Project(project)])?;
 
         self.create_map_at(source, actor, project, places, name, skill).await
@@ -50,7 +50,7 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         board: &Board,
         name: &str,
         skill: &Path,
-    ) -> Result<()> {
+    ) -> Result<Map> {
         let places = Places::new([Place::Board(board.id)])?;
 
         self.create_map_at(source, actor, board.project, places, name, skill).await
@@ -64,7 +64,7 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         places: Places,
         name: &str,
         skill: &Path,
-    ) -> Result<()> {
+    ) -> Result<Map> {
         let name = Name::new(name)?;
         if !skill.is_absolute() {
             return Err(format!("the skill {} must be an absolute path", skill.display()).into());
@@ -79,7 +79,10 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
 
         self.skills.skill(skill).await?;
 
-        self.store.append(&Event::map_created(source, actor, MapId::new(), project, name, skill.into(), places)).await
+        let event = Event::map_created(source, actor, MapId::new(), project, name, skill.into(), places);
+        self.store.append(&event).await?;
+
+        Ok(Map::all(&[event]).remove(0))
     }
 
     /// Records that the map is shown at `place` too. Nothing is written when it already is.
@@ -470,6 +473,22 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_created_map_is_returned_with_its_places() {
+        let store = in_project("/repo");
+        let project = id_at(&store, "/repo");
+        let service = AppService::new(&store, Skills);
+        let board = service.create_named_board(Source::Web, Actor::Human, project, "storage").await.unwrap();
+
+        let listed = service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/skills/decisions")).await.unwrap();
+        let shelved = service.create_map_on_board(Source::fixture(), Actor::Human, &board, "choice", Path::new("/skills/decisions")).await.unwrap();
+
+        assert_eq!(listed.id, service.map_id("p0", "decisions").await.unwrap().unwrap());
+        assert!(listed.places.contains(Place::Project(project)));
+        assert_eq!(shelved.id, service.map_id("p0", "choice").await.unwrap().unwrap());
+        assert!(shelved.places.contains(Place::Board(board.id)));
+    }
+
+    #[tokio::test]
     async fn a_map_is_refused_a_name_a_board_has() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
@@ -478,7 +497,7 @@ mod tests {
 
         let result = service.create_map(Source::fixture(), Actor::Human, project, "Storage", Path::new("/skills/decisions")).await;
 
-        assert_eq!(result.unwrap_err().to_string(), "this project already has a storage board");
+        assert_eq!(result.err().unwrap().to_string(), "this project already has a storage board");
         assert_eq!(store.0.lock().unwrap().len(), 2);
     }
 
@@ -525,7 +544,7 @@ mod tests {
         let without_skill = service.create_map(Source::fixture(), Actor::Human, project, "nope", Path::new("/skills/nope")).await;
 
         assert!(with_skill.is_ok());
-        assert!(without_skill.unwrap_err().to_string().contains("nope"));
+        assert!(without_skill.err().unwrap().to_string().contains("nope"));
         assert_eq!(store.0.lock().unwrap().len(), 2);
     }
 

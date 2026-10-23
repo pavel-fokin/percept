@@ -4,7 +4,7 @@ use std::fmt;
 use std::path::Path;
 
 use crate::app::{AppService, BoardContents, source_path};
-use crate::core::{EventStore, Map, Name, Place, Project, SkillStore};
+use crate::core::{Board, EventStore, Map, Name, Place, Project, SkillStore};
 use crate::shared::Result;
 
 /// A bare name, for a map of the current project, or an absolute path of one to three segments:
@@ -72,18 +72,52 @@ pub(super) async fn target<S: EventStore, M: SkillStore>(service: &AppService<S,
     match address {
         None => Ok(Target::Project(project_of(service, &source_path(&std::env::current_dir()?).await).await?)),
         Some(Address::Absolute(segments)) if segments.len() == 1 => Ok(Target::Project(project_named(service, &segments[0]).await?)),
-        Some(Address::Absolute(segments)) if segments.len() == 2 => {
-            let address = address.expect("matched Some");
-            let board = service.board_contents(&segments[0], &segments[1]).await?;
+        Some(address @ Address::Absolute(segments)) if segments.len() == 2 => {
             let map = in_project(service, address, &segments[0], &segments[1]).await;
 
-            match (board, map) {
-                (Some(_), Ok(_)) => Err(format!("{address} is both a board and a map").into()),
-                (Some(board), Err(_)) => Ok(Target::Board(board)),
-                (None, map) => map.map(Target::Map),
-            }
+            board_or_map(service, address, &segments[0], &segments[1], map).await
+        }
+        Some(address @ Address::Bare(name)) => {
+            let project = project_of(service, &source_path(&std::env::current_dir()?).await).await?;
+            let map = map(service, address).await;
+
+            board_or_map(service, address, project.name.as_str(), name, map).await
         }
         Some(address) => map(service, address).await.map(Target::Map),
+    }
+}
+
+/// The board or the map `address` names, given the lookup of the map; naming both is an error.
+async fn board_or_map<S: EventStore, M: SkillStore>(service: &AppService<S, M>, address: &Address, project: &str, name: &str, map: Result<Map>) -> Result<Target> {
+    let board = service.board_contents(project, name).await?;
+
+    match (board, map) {
+        (Some(_), Ok(_)) => Err(format!("{address} is both a board and a map").into()),
+        (Some(board), Err(_)) => Ok(Target::Board(board)),
+        (None, map) => map.map(Target::Map),
+    }
+}
+
+/// Where a new board or map named by `address` goes: its project, the board it is shown on (none for the project's list) and its name.
+/// A bare name goes in `current`. `noun` is "board" or "map", for the error on a path of the wrong shape.
+pub(super) async fn new_at<S: EventStore, M: SkillStore>(
+    service: &AppService<S, M>,
+    current: Project,
+    address: &Address,
+    noun: &str,
+) -> Result<(Project, Option<Board>, String)> {
+    match address {
+        Address::Bare(name) => Ok((current, None, name.clone())),
+        Address::Absolute(segments) => match segments.as_slice() {
+            [project, name] => Ok((project_named(service, project).await?, None, name.clone())),
+            [project, board, name] => {
+                let project = project_named(service, project).await?;
+                let contents = service.board_contents(project.name.as_str(), board).await?.ok_or_else(|| format!("no board /{}/{board}", project.name.as_str()))?;
+
+                Ok((project, Some(contents.board), name.clone()))
+            }
+            _ => Err(format!("{:?} is not a {noun} name or a path like /<project>/<{noun}>", address.to_string()).into()),
+        },
     }
 }
 
@@ -286,6 +320,42 @@ mod tests {
         let found = target(&service, Some(&address("/repo/plan"))).await.ok().unwrap();
 
         assert!(matches!(found, Target::Board(b) if b.board.name.as_str() == "plan" && b.maps.len() == 1));
+    }
+
+    #[tokio::test]
+    async fn a_bare_name_is_a_board_or_a_map_of_the_project() {
+        let service = service();
+        let show = async |name: &str| {
+            let address = address(name);
+            let map = map(&service, &Address::Absolute(vec!["repo".into(), name.into()])).await;
+
+            board_or_map(&service, &address, "repo", name, map).await
+        };
+
+        let board = show("plan").await.err().map(|e| e.to_string());
+        let ambiguous = show("ideas").await.err().map(|e| e.to_string());
+        let listed = show("d").await.ok().unwrap();
+
+        assert_eq!(board.as_deref(), Some("no map at /repo/plan"));
+        assert_eq!(ambiguous.as_deref(), Some("ideas is both a board and a map"));
+        assert!(matches!(listed, Target::Map(m) if m.name.as_str() == "d"));
+    }
+
+    #[tokio::test]
+    async fn a_new_board_or_map_goes_in_the_current_project_a_named_one_or_a_board() {
+        let service = service();
+        let current = || service.project_named("repo");
+        let at = async |text: &str| {
+            let current = current().await.unwrap().unwrap();
+            new_at(&service, current, &address(text), "map").await.map(|(p, b, n)| (p.name.as_str().to_string(), b.map(|b| b.name.as_str().to_string()), n))
+        };
+
+        assert_eq!(at("m").await.unwrap(), ("repo".into(), None, "m".into()));
+        assert_eq!(at("/other/m").await.unwrap(), ("other".into(), None, "m".into()));
+        assert_eq!(at("/repo/ideas/m").await.unwrap(), ("repo".into(), Some("ideas".into()), "m".into()));
+        assert_eq!(at("/repo/nope/m").await.unwrap_err().to_string(), "no board /repo/nope");
+        assert_eq!(at("/nope/m").await.unwrap_err().to_string(), "no project nope");
+        assert_eq!(at("/repo").await.unwrap_err().to_string(), "\"/repo\" is not a map name or a path like /<project>/<map>");
     }
 
     #[tokio::test]

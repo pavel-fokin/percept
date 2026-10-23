@@ -10,13 +10,10 @@ use crate::shared::Result;
 pub(super) async fn new_board<S: EventStore, M: SkillStore>(service: &AppService<S, M>, path: &str) -> Result<()> {
     let (actor, source, current) = project_writer(service).await?;
 
-    let (project, name) = match Address::parse(path)? {
-        Address::Bare(name) => (current, name),
-        Address::Absolute(segments) => match segments.as_slice() {
-            [project, name] => (address::project_named(service, project).await?, name.clone()),
-            _ => return Err(format!("{path:?} is not a board name or a path like /<project>/<board>").into()),
-        },
-    };
+    let (project, board, name) = address::new_at(service, current, &Address::parse(path)?, "board").await?;
+    if board.is_some() {
+        return Err(format!("{path:?} is not a board name or a path like /<project>/<board>").into());
+    }
 
     let board = service.create_named_board(source, actor, project.id, &name).await?;
 
@@ -34,27 +31,14 @@ pub(super) async fn new_map<S: EventStore, M: SkillStore>(service: &AppService<S
     let (actor, source, current) = project_writer(service).await?;
     let dir = library(home).join(skill);
 
-    let (project, board, name) = match Address::parse(path)? {
-        Address::Bare(name) => (current, None, name),
-        Address::Absolute(segments) => match segments.as_slice() {
-            [project, name] => (address::project_named(service, project).await?, None, name.clone()),
-            [project, board, name] => {
-                address::project_named(service, project).await?;
-                let contents = service.board_contents(project, board).await?.ok_or_else(|| format!("no board /{project}/{board}"))?;
+    let (project, board, name) = address::new_at(service, current, &Address::parse(path)?, "map").await?;
 
-                (contents.project, Some(contents.board), name.clone())
-            }
-            _ => return Err(format!("{path:?} is not a map name or a path like /<project>/<map>").into()),
-        },
-    };
-
-    match &board {
+    let map = match &board {
         Some(board) => service.create_map_on_board(source, actor, board, &name, &dir).await?,
         None => service.create_map(source, actor, project.id, &name, &dir).await?,
-    }
+    };
 
-    let created = service.map_id(project.name.as_str(), &name).await?.ok_or("the created map is missing")?;
-    println!("Created {}.", address::of(service, &service.map(created).await?).await?);
+    println!("Created {}.", address::of(service, &map).await?);
 
     Ok(())
 }
@@ -82,16 +66,18 @@ pub(super) async fn add<S: EventStore, M: SkillStore>(service: &AppService<S, M>
         [map, kind, title] => {
             let (actor, source, _) = project_writer(service).await?;
             let map = map_at(service, map).await?;
+            let at = address::of(service, &map).await?;
             service.add_node(source, actor, map.id, kind, title, properties, references).await?;
 
-            println!("Added {kind} {title:?} to {}.", address::of(service, &map).await?);
+            println!("Added {kind} {title:?} to {at}.");
         }
         [map, from, kind, to] => {
             let (actor, source, _) = project_writer(service).await?;
             let map = map_at(service, map).await?;
+            let at = address::of(service, &map).await?;
             service.add_edge(source, actor, map.id, node_of(&map, from)?, kind, node_of(&map, to)?).await?;
 
-            println!("Added {from:?} {kind} {to:?} to {}.", address::of(service, &map).await?);
+            println!("Added {from:?} {kind} {to:?} to {at}.");
         }
         _ => return Err("usage: percept add <map> <kind> <title> [--key value ...] [--ref 'msg:<text>' | --ref 'file:<path>:<from>-<to>' ...] | percept add <map> <from> <kind> <to>".into()),
     }
@@ -110,10 +96,11 @@ pub(super) async fn change<S: EventStore, M: SkillStore>(service: &AppService<S,
     let (actor, source, _) = project_writer(service).await?;
     let map = map_at(service, map).await?;
     let node = node_of(&map, title)?;
+    let at = address::of(service, &map).await?;
 
     service.change_node(source, actor, map.id, node, new_title, properties, references).await?;
 
-    println!("Changed {:?} on {}.", new_title.unwrap_or(title), address::of(service, &map).await?);
+    println!("Changed {:?} on {at}.", new_title.unwrap_or(title));
 
     Ok(())
 }
@@ -123,16 +110,18 @@ pub(super) async fn remove<S: EventStore, M: SkillStore>(service: &AppService<S,
         [map, title] => {
             let (actor, source, _) = project_writer(service).await?;
             let map = map_at(service, map).await?;
+            let at = address::of(service, &map).await?;
             service.remove_node(source, actor, map.id, node_of(&map, title)?).await?;
 
-            println!("Removed {title:?} from {}.", address::of(service, &map).await?);
+            println!("Removed {title:?} from {at}.");
         }
         [map, from, kind, to] => {
             let (actor, source, _) = project_writer(service).await?;
             let map = map_at(service, map).await?;
+            let at = address::of(service, &map).await?;
             service.remove_edge(source, actor, map.id, node_of(&map, from)?, kind, node_of(&map, to)?).await?;
 
-            println!("Removed {from:?} {kind} {to:?} from {}.", address::of(service, &map).await?);
+            println!("Removed {from:?} {kind} {to:?} from {at}.");
         }
         _ => return Err("usage: percept remove <map> <title> | percept remove <map> <from> <kind> <to>".into()),
     }
