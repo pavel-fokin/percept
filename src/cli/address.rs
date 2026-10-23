@@ -199,7 +199,7 @@ mod tests {
     }
 
     fn created(project: ProjectId, name: &str, places: Places) -> Event {
-        Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, N::new(name).unwrap(), "/skills/s".into(), None, places)
+        Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, N::new(name).unwrap(), Some("/skills/s".into()), None, places)
     }
 
     /// Projects repo and other; repo has the board ideas and the maps d (listed), shelf (on ideas only), both

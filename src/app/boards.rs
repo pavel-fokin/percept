@@ -121,7 +121,7 @@ mod tests {
         let store = in_project("/work/a");
         let project = id_at(&store, "/work/a");
         let service = AppService::new(&store, Skills);
-        service.create_map(Source::Web, Actor::Human, project, "decisions", Path::new("/skills/decisions")).await.unwrap();
+        service.create_map(Source::Web, Actor::Human, project, "decisions", Some(Path::new("/skills/decisions"))).await.unwrap();
 
         let board = service.create_named_board(Source::Web, Actor::Agent, project, "Storage").await.unwrap();
         let duplicate = service.create_named_board(Source::Web, Actor::Agent, project, "storage").await;
@@ -139,7 +139,7 @@ mod tests {
         let store = in_project("/work/a");
         let project = id_at(&store, "/work/a");
         let service = AppService::new(&store, Skills);
-        service.create_map(Source::Web, Actor::Human, project, "board", Path::new("/skills/decisions")).await.unwrap();
+        service.create_map(Source::Web, Actor::Human, project, "board", Some(Path::new("/skills/decisions"))).await.unwrap();
 
         let created = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
 
@@ -199,7 +199,7 @@ mod tests {
         let service = AppService::new(&store, Skills);
         let board = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
         for name in ["decisions", "tasks"] {
-            service.create_map(Source::Web, Actor::Human, project, name, Path::new(&format!("/skills/{name}"))).await.unwrap();
+            service.create_map(Source::Web, Actor::Human, project, name, Some(Path::new(&format!("/skills/{name}")))).await.unwrap();
         }
         let decisions = service.map_id("p0", "decisions").await.unwrap().unwrap();
         service.place_map(Source::Web, Actor::Human, decisions, Place::Board(board.id)).await.unwrap();
@@ -221,7 +221,7 @@ mod tests {
         let first = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
         let second = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
         service.create_board(Source::Web, Actor::Human, "p1").await.unwrap();
-        service.create_map(Source::Web, Actor::Human, project, "decisions", Path::new("/skills/decisions")).await.unwrap();
+        service.create_map(Source::Web, Actor::Human, project, "decisions", Some(Path::new("/skills/decisions"))).await.unwrap();
         let decisions = service.map_id("p0", "decisions").await.unwrap().unwrap();
         service.place_map(Source::Web, Actor::Human, decisions, Place::Board(second.id)).await.unwrap();
 

@@ -56,6 +56,14 @@ Every write prints the full path of what it changed. Reuse that path.
 
    The first puts the map in the project's map list, the second on
    the board only.
+
+   A map can also be created without `--skill`. It is a free sketch:
+   no schema, no instructions, any node and edge kinds. Prefer a skill
+   that fits.
+
+   ```
+   percept new map <map>
+   ```
 4. Run `percept describe <map>`, then `percept show <map>`.
 
 ## Write on a map
