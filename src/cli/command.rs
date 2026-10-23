@@ -5,11 +5,11 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 
 use super::hook::{Client, hook};
-use super::maps::{add, change, create, describe, remove, show};
+use super::maps::{add, change, create, describe, remove, show, skills};
 use super::projects::init;
 use super::status::status;
 use crate::app::AppService;
-use crate::core::{DefinitionStore, EventStore};
+use crate::core::{EventStore, SkillStore};
 use crate::server;
 
 /// Records what coding agents do.
@@ -29,12 +29,14 @@ enum Command {
     },
     /// Creates a project at the root of the current git repository, or in the current folder outside one, named after that folder unless a name is given.
     Init { name: Option<String> },
-    /// Creates a map with the given name in the current project, defined by the given TOML file.
+    /// Creates a map with the given name in the current project, from the skill of that name in ~/.percept/skills.
     Create {
         #[arg(allow_hyphen_values = true)]
         name: String,
-        file: PathBuf,
+        skill: String,
     },
+    /// Lists the skills in ~/.percept/skills that a map can be created from.
+    Skills,
     /// Adds a node, `add <map> <kind> <title>`, or an edge, `add <map> <from> <kind> <to>`.
     #[command(after_help = "Node options: --key <value> for properties; repeat --ref 'msg:<text>' or --ref 'file:<path>:<from>-<to>' for saved excerpts.")]
     Add {
@@ -54,7 +56,7 @@ enum Command {
     },
     /// Lists the current project's maps, or one map's nodes and edges.
     Show { map: Option<String> },
-    /// Prints a map's definition as markdown: its purpose, instructions, and node and edge kinds.
+    /// Prints a map's skill as markdown: its purpose, instructions, and node and edge kinds.
     Describe { map: String },
     /// Serves the page in the browser.
     Ui {
@@ -67,7 +69,7 @@ enum Command {
     },
 }
 
-pub async fn run<S: EventStore + Send + Sync + 'static, M: DefinitionStore + Send + Sync + 'static>(service: Arc<AppService<S, M>>, home: PathBuf) -> ExitCode {
+pub async fn run<S: EventStore + Send + Sync + 'static, M: SkillStore + Send + Sync + 'static>(service: Arc<AppService<S, M>>, home: PathBuf) -> ExitCode {
     // clap exits 2 on a usage error, and exit 2 blocks the agent's action.
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
@@ -80,7 +82,8 @@ pub async fn run<S: EventStore + Send + Sync + 'static, M: DefinitionStore + Sen
         None => status(&service).await,
         Some(Command::Hook { client }) => hook(&service, client).await,
         Some(Command::Init { name }) => init(&service, name.as_deref()).await,
-        Some(Command::Create { name, file }) => create(&service, &name, &file).await,
+        Some(Command::Create { name, skill }) => create(&service, &home, &name, &skill).await,
+        Some(Command::Skills) => skills(&service, &home).await,
         Some(Command::Add { args }) => add(&service, &args).await,
         Some(Command::Change { args }) => change(&service, &args).await,
         Some(Command::Remove { args }) => remove(&service, &args).await,

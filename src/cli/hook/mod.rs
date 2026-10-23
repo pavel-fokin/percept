@@ -5,7 +5,7 @@ use clap::ValueEnum;
 use tokio::io::AsyncReadExt;
 
 use crate::app::{AppService, source_path};
-use crate::core::{Actor, ClientSessionId, DefinitionStore, Event, EventStore, SessionId, Source};
+use crate::core::{Actor, ClientSessionId, Event, EventStore, SessionId, SkillStore, Source};
 use crate::shared::Result;
 
 #[derive(Debug, Clone, Copy, PartialEq, ValueEnum)]
@@ -29,7 +29,7 @@ enum Translation {
     Skip,
 }
 
-pub(super) async fn hook<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, client: Client) -> Result<()> {
+pub(super) async fn hook<S: EventStore, M: SkillStore>(service: &AppService<S, M>, client: Client) -> Result<()> {
     let mut input = String::new();
     tokio::io::stdin().read_to_string(&mut input).await?;
     let raw: serde_json::Value = serde_json::from_str(&input)?;

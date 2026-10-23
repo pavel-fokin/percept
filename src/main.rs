@@ -2,7 +2,7 @@ mod app;
 mod cli;
 mod core;
 mod eventstore;
-mod mapstore;
+mod skillstore;
 mod server;
 mod shared;
 
@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::app::AppService;
 use crate::eventstore::JsonlStore;
-use crate::mapstore::TomlStore;
+use crate::skillstore::MarkdownStore;
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -20,5 +20,5 @@ async fn main() -> ExitCode {
         return ExitCode::FAILURE;
     };
     let store = JsonlStore::new(home.join(".percept").join("percept.jsonl"));
-    cli::run(Arc::new(AppService::new(store, TomlStore)), home).await
+    cli::run(Arc::new(AppService::new(store, MarkdownStore)), home).await
 }

@@ -41,10 +41,10 @@ impl From<&Event> for EventLine {
             }
             Payload::ProjectCreated { project, name, root } => json!({ "project": project, "name": name.as_str(), "root": root }),
             Payload::BoardCreated { board, project, name } => json!({ "board": board, "project": project, "name": name.as_str() }),
-            Payload::MapCreated { map, project, name, definition, places } => {
+            Payload::MapCreated { map, project, name, skill, places } => {
                 let places: Vec<PlaceLine> = places.iter().map(PlaceLine::from).collect();
 
-                json!({ "map": map, "project": project, "name": name.as_str(), "definition": definition, "places": places })
+                json!({ "map": map, "project": project, "name": name.as_str(), "skill": skill, "places": places })
             }
             Payload::MapChanged { map, places } => {
                 let places: Vec<PlaceLine> = places.iter().map(PlaceLine::from).collect();
@@ -126,7 +126,7 @@ impl TryFrom<EventLine> for Event {
                 map: field(p, "map")?,
                 project: field(p, "project")?,
                 name: Name::new(&field::<String>(p, "name")?)?,
-                definition: field(p, "definition")?,
+                skill: field(p, "skill")?,
                 places: Places::new(field::<Vec<PlaceLine>>(p, "places")?.into_iter().map(Place::from))?,
             },
             Kind::MapChanged => Payload::MapChanged {

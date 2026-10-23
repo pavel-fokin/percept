@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use serde_json::json;
 
-use crate::core::{Actor, ClientSessionId, Definition, DefinitionStore, EdgeKind, Event, EventStore, Name, Payload, Project, ProjectId, Schema, SessionId, Source};
+use crate::core::{Actor, ClientSessionId, EdgeKind, Event, EventStore, Name, Payload, Project, ProjectId, Schema, SessionId, Skill, SkillStore, Source};
 use crate::shared::Result;
 
 pub(super) struct Fixed(pub(super) usize);
@@ -120,26 +120,30 @@ pub(super) fn add_session(store: &Memory, root: &str) -> SessionId {
     session
 }
 
-/// Has a definition for the files the app tests use, keyed by file stem, and none for any other.
-pub(super) struct Definitions;
+/// Has a skill for the paths the app tests use, keyed by file stem, and none for any other.
+pub(super) struct Skills;
 
-impl DefinitionStore for Definitions {
-    async fn definition(&self, file: &Path) -> Result<Definition> {
-        match file.file_stem().and_then(|s| s.to_str()).unwrap_or_default() {
+impl SkillStore for Skills {
+    async fn skill(&self, path: &Path) -> Result<Skill> {
+        match path.file_stem().and_then(|s| s.to_str()).unwrap_or_default() {
             "decisions" => mini(
                 &[("question", &[]), ("option", &[])],
                 &[("answers", "option", "question"), ("raises", "question", "option")],
             ),
             "tasks" => mini(&[("task", &[])], &[("blocks", "task", "task")]),
             "concepts" => mini(&[("concept", &["definition"])], &[]),
-            "scratch" => Ok(Definition::new("purpose".into(), "instructions".into(), None)),
+            "scratch" => Ok(Skill::new("scratch".into(), "purpose".into(), "instructions".into(), None)),
             "glossary" => mini(&[("term", &["definition", "source"])], &[]),
-            _ => Err(format!("no definition in {}", file.display()).into()),
+            _ => Err(format!("no skill in {}", path.display()).into()),
         }
+    }
+
+    async fn skills(&self, _: &Path) -> Result<Vec<(String, Result<Skill>)>> {
+        Ok(vec![("scratch".into(), self.skill(Path::new("scratch")).await)])
     }
 }
 
-fn mini(nodes: &[(&str, &[&str])], edges: &[(&str, &str, &str)]) -> Result<Definition> {
+fn mini(nodes: &[(&str, &[&str])], edges: &[(&str, &str, &str)]) -> Result<Skill> {
     let nodes = nodes
         .iter()
         .map(|(node, properties)| (node.to_string(), properties.iter().map(|p| p.to_string()).collect::<BTreeSet<_>>()))
@@ -149,14 +153,18 @@ fn mini(nodes: &[(&str, &[&str])], edges: &[(&str, &str, &str)]) -> Result<Defin
         .map(|(edge, from, to)| (edge.to_string(), EdgeKind { from: from.to_string(), to: to.to_string() }))
         .collect();
 
-    Ok(Definition::new("purpose".into(), "instructions".into(), Some(Schema::new(nodes, edges)?)))
+    Ok(Skill::new("mini".into(), "purpose".into(), "instructions".into(), Some(Schema::new(nodes, edges)?)))
 }
 
-/// Has no definition for any file.
-pub(super) struct NoDefinitions;
+/// Has no skill for any file.
+pub(super) struct NoSkills;
 
-impl DefinitionStore for NoDefinitions {
-    async fn definition(&self, file: &Path) -> Result<Definition> {
-        Err(format!("no definition in {}", file.display()).into())
+impl SkillStore for NoSkills {
+    async fn skill(&self, path: &Path) -> Result<Skill> {
+        Err(format!("no skill in {}", path.display()).into())
+    }
+
+    async fn skills(&self, _: &Path) -> Result<Vec<(String, Result<Skill>)>> {
+        Ok(Vec::new())
     }
 }

@@ -1,5 +1,5 @@
 use super::AppService;
-use crate::core::{Actor, Board, BoardId, DefinitionStore, Event, EventStore, Map, Name, Place, Project, Source};
+use crate::core::{Actor, Board, BoardId, Event, EventStore, Map, Name, Place, Project, SkillStore, Source};
 use crate::shared::Result;
 
 /// A board of a project with the maps shown on it, each with its nodes and edges.
@@ -9,7 +9,7 @@ pub struct BoardContents {
     pub maps: Vec<Map>,
 }
 
-impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
+impl<S: EventStore, M: SkillStore> AppService<S, M> {
     /// Records a new board in the project named `project`, written from `source`.
     /// It is named `board`, or `board-N` when taken, N the smallest number no board of the project already uses.
     pub async fn create_board(&self, source: Source, actor: Actor, project: &str) -> Result<Option<Board>> {
@@ -55,14 +55,14 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{add_project, id_at, in_project, Broken, Definitions};
+    use crate::app::testing::{add_project, id_at, in_project, Broken, Skills};
     use std::path::Path;
     use crate::core::Payload;
 
     #[tokio::test]
     async fn a_created_board_is_folded_from_the_log() {
         let store = in_project("/work/a");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
 
         let created = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
 
@@ -80,7 +80,7 @@ mod tests {
     async fn two_creates_are_numbered_in_turn_and_per_project() {
         let store = in_project("/work/a");
         add_project(&store, "/work/b");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
 
         let first = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
         let second = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
@@ -99,7 +99,7 @@ mod tests {
             let source = Source::Web;
             store.0.lock().unwrap().push(Event::board_created(source, Actor::Human, BoardId::new(), project.id, Name::new(name).unwrap()));
         }
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
 
         let created = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
 
@@ -109,10 +109,10 @@ mod tests {
     #[tokio::test]
     async fn an_unknown_project_and_a_broken_store_write_nothing() {
         let store = in_project("/work/a");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
 
         let unknown = service.create_board(Source::Web, Actor::Human, "nope").await.unwrap();
-        let broken = AppService::new(Broken, Definitions).create_board(Source::Web, Actor::Human, "p0").await;
+        let broken = AppService::new(Broken, Skills).create_board(Source::Web, Actor::Human, "p0").await;
 
         assert_eq!(unknown, None);
         assert!(broken.is_err());
@@ -123,7 +123,7 @@ mod tests {
     async fn a_board_is_found_in_its_project_by_name_only() {
         let store = in_project("/work/a");
         add_project(&store, "/work/b");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         let first = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
 
         let found = async |project, board| service.board_contents(project, board).await.unwrap().map(|c| c.board);
@@ -141,10 +141,10 @@ mod tests {
     async fn a_board_holds_the_maps_placed_on_it() {
         let store = in_project("/work/a");
         let project = id_at(&store, "/work/a");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         let board = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
         for name in ["decisions", "tasks"] {
-            service.create_map(Source::Web, Actor::Human, project, name, Path::new(&format!("/maps/{name}.toml"))).await.unwrap();
+            service.create_map(Source::Web, Actor::Human, project, name, Path::new(&format!("/skills/{name}"))).await.unwrap();
         }
         let decisions = service.map_id("p0", "decisions").await.unwrap().unwrap();
         service.place_map(Source::Web, Actor::Human, decisions, Place::Board(board.id)).await.unwrap();
@@ -159,7 +159,7 @@ mod tests {
 
     #[tokio::test]
     async fn reads_pass_store_errors_through() {
-        let service = AppService::new(Broken, Definitions);
+        let service = AppService::new(Broken, Skills);
 
         assert!(service.boards().await.is_err());
         assert!(service.board_contents("p0", "ideas").await.is_err());

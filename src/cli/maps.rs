@@ -1,19 +1,40 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use super::hook::Client;
 use crate::app::{AppService, Ref, source_path};
-use crate::core::{Actor, Definition, DefinitionStore, EventStore, Map, MapId, NodeId, Project, Reference, Source};
+use crate::core::{Actor, EventStore, Map, MapId, NodeId, Project, Reference, Skill, SkillStore, Source};
 use crate::shared::Result;
 
-pub(super) async fn create<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, name: &str, file: &Path) -> Result<()> {
-    let (actor, source, project) = project_writer(service).await?;
-    let file = tokio::fs::canonicalize(file).await.map_err(|e| format!("{}: {e}", file.display()))?;
+pub(super) async fn create<S: EventStore, M: SkillStore>(service: &AppService<S, M>, home: &Path, name: &str, skill: &str) -> Result<()> {
+    let mut parts = Path::new(skill).components();
+    if !matches!((parts.next(), parts.next()), (Some(Component::Normal(_)), None)) {
+        return Err(format!("{skill:?} is not a skill name").into());
+    }
 
-    service.create_map(source, actor, project.id, name, &file).await
+    let (actor, source, project) = project_writer(service).await?;
+    let dir = library(home).join(skill);
+
+    service.create_map(source, actor, project.id, name, &dir).await
 }
 
-pub(super) async fn add<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
+/// The directory the skills live in.
+fn library(home: &Path) -> PathBuf {
+    home.join(".percept").join("skills")
+}
+
+pub(super) async fn skills<S: EventStore, M: SkillStore>(service: &AppService<S, M>, home: &Path) -> Result<()> {
+    for (name, skill) in service.skills(&library(home)).await? {
+        match skill {
+            Ok(skill) => println!("{}  {}", skill.name(), skill.description().split_whitespace().collect::<Vec<_>>().join(" ")),
+            Err(error) => eprintln!("percept: skipped {name}: {error}"),
+        }
+    }
+
+    Ok(())
+}
+
+pub(super) async fn add<S: EventStore, M: SkillStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
     let AddArgs { positionals, properties, references } = split_add(args)?;
 
     match positionals {
@@ -32,7 +53,7 @@ pub(super) async fn add<S: EventStore, M: DefinitionStore>(service: &AppService<
     }
 }
 
-pub(super) async fn change<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
+pub(super) async fn change<S: EventStore, M: SkillStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
     let AddArgs { positionals, properties, references } = split_add(args)?;
 
     let (map, title, new_title) = match positionals {
@@ -47,7 +68,7 @@ pub(super) async fn change<S: EventStore, M: DefinitionStore>(service: &AppServi
     service.change_node(source, actor, map, node, new_title, properties, references).await
 }
 
-pub(super) async fn remove<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
+pub(super) async fn remove<S: EventStore, M: SkillStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
     match split_remove(args)? {
         [map, title] => {
             let (actor, source, project) = project_writer(service).await?;
@@ -134,7 +155,7 @@ fn parse_reference(value: &str) -> Result<Ref> {
 }
 
 /// The writer, as `cli_writer` finds it, and the project its checkout belongs to.
-async fn project_writer<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>) -> Result<(Actor, Source, Project)> {
+async fn project_writer<S: EventStore, M: SkillStore>(service: &AppService<S, M>) -> Result<(Actor, Source, Project)> {
     let (actor, source) = cli_writer().await?;
     let project = project_of(service, source.path()?).await?;
 
@@ -142,12 +163,12 @@ async fn project_writer<S: EventStore, M: DefinitionStore>(service: &AppService<
 }
 
 /// The project the checkout at `path` belongs to.
-async fn project_of<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, path: &Path) -> Result<Project> {
+async fn project_of<S: EventStore, M: SkillStore>(service: &AppService<S, M>, path: &Path) -> Result<Project> {
     Ok(service.project_at(path).await?.ok_or("not in a project; run percept init")?)
 }
 
 /// The map of the project named `name`.
-async fn map_of<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, project: &Project, name: &str) -> Result<MapId> {
+async fn map_of<S: EventStore, M: SkillStore>(service: &AppService<S, M>, project: &Project, name: &str) -> Result<MapId> {
     Ok(service.map_id(project.name.as_str(), name).await?.ok_or_else(|| format!("this project has no {name} map"))?)
 }
 
@@ -167,7 +188,7 @@ pub(super) async fn cli_writer() -> Result<(Actor, Source)> {
     Ok((actor, source))
 }
 
-pub(super) async fn show<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, map: Option<&str>) -> Result<()> {
+pub(super) async fn show<S: EventStore, M: SkillStore>(service: &AppService<S, M>, map: Option<&str>) -> Result<()> {
     let project = project_of(service, &source_path(&std::env::current_dir()?).await).await?;
 
     match map {
@@ -185,26 +206,26 @@ pub(super) async fn show<S: EventStore, M: DefinitionStore>(service: &AppService
     Ok(())
 }
 
-pub(super) async fn describe<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, name: &str) -> Result<()> {
+pub(super) async fn describe<S: EventStore, M: SkillStore>(service: &AppService<S, M>, name: &str) -> Result<()> {
     let project = project_of(service, &source_path(&std::env::current_dir()?).await).await?;
     let map = map_of(service, &project, name).await?;
-    let definition = service.definition(map).await?;
+    let skill = service.skill(map).await?;
     let map = service.map(map).await?;
 
-    println!("{}", definition_markdown(name, &definition, &map));
+    println!("{}", skill_markdown(name, &skill, &map));
 
     Ok(())
 }
 
-/// A definition without a schema shows the kinds `map` uses instead.
-fn definition_markdown(name: &str, definition: &Definition, map: &Map) -> String {
+/// A skill without a schema shows the kinds `map` uses instead.
+fn skill_markdown(name: &str, skill: &Skill, map: &Map) -> String {
     let mut text = format!(
         "# {name}\n\n{}\n\n## Instructions\n\n{}\n",
-        definition.purpose().trim(),
-        definition.instructions().trim(),
+        skill.description().trim(),
+        skill.instructions().trim(),
     );
 
-    if let Some(schema) = definition.schema() {
+    if let Some(schema) = skill.schema() {
         text.push_str("\n## Schema\n\n");
         let nodes = schema.nodes().iter().map(|(kind, properties)| (kind.as_str(), properties));
         let edges = schema.edges().iter().map(|(kind, ends)| (kind.as_str(), ends.from.as_str(), ends.to.as_str()));
@@ -466,23 +487,23 @@ mod tests {
     }
 
     #[test]
-    fn a_definition_renders_as_markdown() {
+    fn a_skill_renders_as_markdown() {
         let nodes = BTreeMap::from([
             ("decision".to_string(), ["why", "by"].map(String::from).into()),
             ("note".to_string(), Default::default()),
         ]);
         let edges = BTreeMap::from([("supersedes".to_string(), EdgeKind { from: "decision".into(), to: "decision".into() })]);
-        let definition = Definition::new("Why.".into(), "\nKeep it.\n\nShort.\n".into(), Some(Schema::new(nodes, edges).unwrap()));
+        let skill = Skill::new("decisions".into(), "Why.".into(), "\nKeep it.\n\nShort.\n".into(), Some(Schema::new(nodes, edges).unwrap()));
 
-        let text = definition_markdown("decisions", &definition, &Map::fixture(MapId::new(), &[]));
+        let text = skill_markdown("decisions", &skill, &Map::fixture(MapId::new(), &[]));
 
         assert_eq!(text, "# decisions\n\nWhy.\n\n## Instructions\n\nKeep it.\n\nShort.\n\n## Schema\n\n\
             | Node kind | Properties |\n|---|---|\n| decision | by, why |\n| note |  |\n\n\
             | Edge kind | From | To |\n|---|---|---|\n| supersedes | decision | decision |");
     }
 
-    fn scratch() -> Definition {
-        Definition::new("Why.".into(), "Keep it.".into(), None)
+    fn scratch() -> Skill {
+        Skill::new("scratch".into(), "Why.".into(), "Keep it.".into(), None)
     }
 
     #[test]
@@ -496,7 +517,7 @@ mod tests {
         ];
         let map = Map::fixture(map, &events);
 
-        let text = definition_markdown("scratch", &scratch(), &map);
+        let text = skill_markdown("scratch", &scratch(), &map);
 
         assert_eq!(text, "# scratch\n\nWhy.\n\n## Instructions\n\nKeep it.\n\n## Schema\n\nObserved on the map, not checked.\n\n\
             | Node kind | Properties |\n|---|---|\n| cause |  |\n| obstacle | where |\n\n\
@@ -509,7 +530,7 @@ mod tests {
         let events = [Event::node_added(Source::fixture(), Actor::Human, map, a, "note", "A", BTreeMap::new(), Vec::new())];
         let map = Map::fixture(map, &events);
 
-        let text = definition_markdown("scratch", &scratch(), &map);
+        let text = skill_markdown("scratch", &scratch(), &map);
 
         assert!(text.ends_with("| note |  |"));
         assert!(!text.contains("Edge kind"));
@@ -519,7 +540,7 @@ mod tests {
     fn an_empty_map_without_a_schema_says_so() {
         let map = Map::fixture(MapId::new(), &[]);
 
-        let text = definition_markdown("scratch", &scratch(), &map);
+        let text = skill_markdown("scratch", &scratch(), &map);
 
         assert_eq!(text, "# scratch\n\nWhy.\n\n## Instructions\n\nKeep it.\n\n## Schema\n\nObserved on the map, not checked. Nothing on the map yet.");
     }
@@ -527,9 +548,9 @@ mod tests {
     #[test]
     fn without_edge_kinds_the_edge_table_is_left_out() {
         let nodes = BTreeMap::from([("note".to_string(), Default::default())]);
-        let definition = Definition::new("p".into(), "i".into(), Some(Schema::new(nodes, BTreeMap::new()).unwrap()));
+        let skill = Skill::new("notes".into(), "p".into(), "i".into(), Some(Schema::new(nodes, BTreeMap::new()).unwrap()));
 
-        let text = definition_markdown("notes", &definition, &Map::fixture(MapId::new(), &[]));
+        let text = skill_markdown("notes", &skill, &Map::fixture(MapId::new(), &[]));
 
         assert!(text.ends_with("| note |  |"));
         assert!(!text.contains("Edge kind"));
