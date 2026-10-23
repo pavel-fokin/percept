@@ -27,7 +27,8 @@ pub struct CitedMessage {
 }
 
 impl<S: EventStore, M: SkillStore> AppService<S, M> {
-    /// Records a new map defined by the skill directory `skill`, an absolute path, in the project. A project holds at most one map of each name.
+    /// Records a new map defined by the skill directory `skill`, an absolute path, in the project's map list.
+    /// No board or map of the project may have the name. Returns the new map.
     pub async fn create_map(
         &self,
         source: Source,
@@ -35,7 +36,35 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         project: ProjectId,
         name: &str,
         skill: &Path,
-    ) -> Result<()> {
+    ) -> Result<Map> {
+        let places = Places::new([Place::Project(project)])?;
+
+        self.create_map_at(source, actor, project, places, name, skill).await
+    }
+
+    /// Like `create_map`, but the map is shown on the board only, not in the project's map list.
+    pub async fn create_map_on_board(
+        &self,
+        source: Source,
+        actor: Actor,
+        board: &Board,
+        name: &str,
+        skill: &Path,
+    ) -> Result<Map> {
+        let places = Places::new([Place::Board(board.id)])?;
+
+        self.create_map_at(source, actor, board.project, places, name, skill).await
+    }
+
+    async fn create_map_at(
+        &self,
+        source: Source,
+        actor: Actor,
+        project: ProjectId,
+        places: Places,
+        name: &str,
+        skill: &Path,
+    ) -> Result<Map> {
         let name = Name::new(name)?;
         if !skill.is_absolute() {
             return Err(format!("the skill {} must be an absolute path", skill.display()).into());
@@ -45,15 +74,15 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         let _lock = self.store.lock().await?;
 
         let events = self.store.all().await?;
-        if Map::named(&events, project, name.as_str()).is_some() {
-            return Err(format!("this project already has a {} map", name.as_str()).into());
-        }
+        Project::check_free(&events, project, &name)?;
+        places.check_in(project, &Board::all(&events))?;
 
         self.skills.skill(skill).await?;
 
-        let places = Places::new([Place::Project(project)])?;
+        let event = Event::map_created(source, actor, MapId::new(), project, name, skill.into(), places);
+        self.store.append(&event).await?;
 
-        self.store.append(&Event::map_created(source, actor, MapId::new(), project, name, skill.into(), places)).await
+        Ok(Map::all(&[event]).remove(0))
     }
 
     /// Records that the map is shown at `place` too. Nothing is written when it already is.
@@ -444,6 +473,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_created_map_is_returned_with_its_places() {
+        let store = in_project("/repo");
+        let project = id_at(&store, "/repo");
+        let service = AppService::new(&store, Skills);
+        let board = service.create_named_board(Source::Web, Actor::Human, project, "storage").await.unwrap();
+
+        let listed = service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/skills/decisions")).await.unwrap();
+        let shelved = service.create_map_on_board(Source::fixture(), Actor::Human, &board, "choice", Path::new("/skills/decisions")).await.unwrap();
+
+        assert_eq!(listed.id, service.map_id("p0", "decisions").await.unwrap().unwrap());
+        assert!(listed.places.contains(Place::Project(project)));
+        assert_eq!(shelved.id, service.map_id("p0", "choice").await.unwrap().unwrap());
+        assert!(shelved.places.contains(Place::Board(board.id)));
+    }
+
+    #[tokio::test]
+    async fn a_map_is_refused_a_name_a_board_has() {
+        let store = in_project("/repo");
+        let project = id_at(&store, "/repo");
+        let service = AppService::new(&store, Skills);
+        service.create_named_board(Source::Web, Actor::Human, project, "storage").await.unwrap();
+
+        let result = service.create_map(Source::fixture(), Actor::Human, project, "Storage", Path::new("/skills/decisions")).await;
+
+        assert_eq!(result.err().unwrap().to_string(), "this project already has a storage board");
+        assert_eq!(store.0.lock().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_map_created_on_a_board_is_shown_there_only() {
+        let store = in_project("/repo");
+        let project = id_at(&store, "/repo");
+        add_project(&store, "/other");
+        let service = AppService::new(&store, Skills);
+        let board = service.create_named_board(Source::Web, Actor::Human, project, "storage").await.unwrap();
+        let foreign = service.create_named_board(Source::Web, Actor::Human, id_at(&store, "/other"), "far").await.unwrap();
+
+        service.create_map_on_board(Source::fixture(), Actor::Agent, &board, "choice", Path::new("/skills/decisions")).await.unwrap();
+        let taken = service.create_map_on_board(Source::fixture(), Actor::Agent, &board, "storage", Path::new("/skills/decisions")).await;
+        let elsewhere = service.create_map_on_board(Source::fixture(), Actor::Agent, &Board { project, ..foreign }, "far-map", Path::new("/skills/decisions")).await;
+
+        let map = service.map_id("p0", "choice").await.unwrap().unwrap();
+        let places = service.map(map).await.unwrap().places;
+        assert!(places.contains(Place::Board(board.id)) && !places.contains(Place::Project(project)));
+        assert!(service.maps(project).await.unwrap().is_empty());
+        assert!(taken.is_err() && elsewhere.is_err());
+    }
+
+    #[tokio::test]
     async fn a_map_name_is_validated_and_ignores_case() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
@@ -466,7 +544,7 @@ mod tests {
         let without_skill = service.create_map(Source::fixture(), Actor::Human, project, "nope", Path::new("/skills/nope")).await;
 
         assert!(with_skill.is_ok());
-        assert!(without_skill.unwrap_err().to_string().contains("nope"));
+        assert!(without_skill.err().unwrap().to_string().contains("nope"));
         assert_eq!(store.0.lock().unwrap().len(), 2);
     }
 

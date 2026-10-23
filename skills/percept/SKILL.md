@@ -6,9 +6,11 @@ description: >-
   reflect, or to record what was decided or learned.
 ---
 
-percept keeps maps of what a project understands. A map is created
-from a skill in the library, `~/.percept/skills`. The skill says what
-belongs on the map and how to write it, and may declare a schema.
+percept keeps maps of what a project understands. A project holds
+maps and boards. A board is a space for working on one question or
+task: it shows only the maps created on it. A map is created from a
+skill in the library, `~/.percept/skills`. The skill says what belongs
+on the map and how to write it, and may declare a schema.
 `percept describe <map>` prints a map's skill as markdown:
 
 | Part | Holds |
@@ -17,19 +19,42 @@ belongs on the map and how to write it, and may declare a schema.
 | Instructions | what belongs on the map and how to write it |
 | Schema | each node kind with its properties, each edge kind with the node kinds it links; observed from the map when the skill declares none |
 
+Commands name a map or a board by a bare name in the current project,
+or by an absolute path:
+
+| Path | Names |
+|---|---|
+| `/<project>/<map>` | a map in the project's map list |
+| `/<project>/<board>` | a board |
+| `/<project>/<board>/<map>` | a map on a board |
+
+Every write prints the full path of what it changed. Reuse that path.
+
 ## Choose a map
 
-1. Run `percept show` to list the project's maps.
-2. When none fits what the discussion needs, run `percept skills` to
+1. Run `percept show` to see the project's path, maps and boards, and
+   `percept show /<project>/<board>` to list a board's maps.
+2. To work through a question or task, use the board the user names,
+   or create one. Lay the question out across several maps on it, one
+   for each way of looking at it:
+
+   ```
+   percept new board <board>
+   ```
+
+3. When no map fits what the discussion needs, run `percept skills` to
    list the library. Pick a skill by its description and create a map
    from it. One skill can back many maps, so name the map for what it
    will hold:
 
    ```
-   percept create <map> <skill>
+   percept new map <map> --skill <skill>
+   percept new map /<project>/<board>/<map> --skill <skill>
    ```
 
-3. Run `percept describe <map>`, then `percept show <map>`.
+   The first puts the map in the project's map list, the second on
+   the board only.
+4. Run `percept describe <map>`, then `percept show <map>`.
 
 ## Write on a map
 
