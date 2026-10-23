@@ -1,14 +1,15 @@
 import { useState } from "react";
-import { IconButton } from "./ui/button";
 
 type Theme = "light" | "dark";
 
-export function ThemeSwitch() {
+/** A sidebar row; `className` gives it the row style, and a collapsed rail keeps only the icon. */
+export function ThemeSwitch({ collapsed, className }: { collapsed: boolean; className: string }) {
   const [theme, setTheme] = useState<Theme>(
     document.documentElement.dataset.theme === "light" ? "light" : "dark",
   );
 
   const next: Theme = theme === "dark" ? "light" : "dark";
+  const label = next === "light" ? "Light" : "Dark";
 
   const toggle = () => {
     document.documentElement.dataset.theme = next;
@@ -16,10 +17,10 @@ export function ThemeSwitch() {
     localStorage.setItem("theme", next);
   };
 
-  // The icon shows the theme a click switches to.
+  // The icon and label show the theme a click switches to.
   return (
-    <IconButton variant="ghost" label={`Switch to ${next} theme`} onClick={toggle}>
-      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" className="size-4">
+    <button type="button" title={collapsed ? `${label} theme` : undefined} onClick={toggle} className={`${className} cursor-pointer`}>
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden className="size-4 flex-none">
         {next === "light" ? (
           <>
             <circle cx="8" cy="8" r="3" />
@@ -29,6 +30,7 @@ export function ThemeSwitch() {
           <path d="M13.5 10A6 6 0 0 1 6 2.5a6 6 0 1 0 7.5 7.5Z" />
         )}
       </svg>
-    </IconButton>
+      <span className={collapsed ? "sr-only" : ""}>{label} theme</span>
+    </button>
   );
 }

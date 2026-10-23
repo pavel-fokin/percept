@@ -150,18 +150,19 @@ function Panel({ collapsed, onToggle, onCreated }: PanelProps) {
           ))}
       </div>
 
-      <nav aria-label="Library" className="grid gap-0.5">
-        <NavLink
-          to="/skills"
-          title={collapsed ? "Skills" : undefined}
-          className={({ isActive }) => `${item} ${isActive ? "bg-border/50 text-text" : ""}`}
-        >
-          <BookIcon />
-          <span className={collapsed ? "sr-only" : ""}>Skills</span>
-        </NavLink>
-      </nav>
-
-      <ThemeSwitch />
+      <div className="grid gap-0.5">
+        <nav aria-label="Library">
+          <NavLink
+            to="/skills"
+            title={collapsed ? "Skills" : undefined}
+            className={({ isActive }) => `${item} ${isActive ? "bg-border/50 text-text" : ""}`}
+          >
+            <BookIcon />
+            <span className={collapsed ? "sr-only" : ""}>Skills</span>
+          </NavLink>
+        </nav>
+        <ThemeSwitch collapsed={collapsed} className={item} />
+      </div>
     </div>
   );
 }
