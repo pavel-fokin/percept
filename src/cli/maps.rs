@@ -14,9 +14,6 @@ pub(super) async fn create<S: EventStore, M: SkillStore>(service: &AppService<S,
 
     let (actor, source, project) = project_writer(service).await?;
     let dir = library(home).join(skill);
-    if !tokio::fs::try_exists(&dir).await? {
-        return Err(format!("no skill named {skill:?} in {}", dir.parent().unwrap_or(&dir).display()).into());
-    }
 
     service.create_map(source, actor, project.id, name, &dir).await
 }

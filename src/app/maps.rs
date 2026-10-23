@@ -27,18 +27,18 @@ pub struct CitedMessage {
 }
 
 impl<S: EventStore, M: SkillStore> AppService<S, M> {
-    /// Records a new map defined by `file`, an absolute path, in the project. A project holds at most one map of each name.
+    /// Records a new map defined by the skill directory `skill`, an absolute path, in the project. A project holds at most one map of each name.
     pub async fn create_map(
         &self,
         source: Source,
         actor: Actor,
         project: ProjectId,
         name: &str,
-        file: &Path,
+        skill: &Path,
     ) -> Result<()> {
         let name = Name::new(name)?;
-        if !file.is_absolute() {
-            return Err(format!("the skill {} must be an absolute path", file.display()).into());
+        if !skill.is_absolute() {
+            return Err(format!("the skill {} must be an absolute path", skill.display()).into());
         }
 
         // Held until return, so parallel creates cannot both pass the check.
@@ -49,11 +49,11 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
             return Err(format!("this project already has a {} map", name.as_str()).into());
         }
 
-        self.skills.skill(file).await?;
+        self.skills.skill(skill).await?;
 
         let places = Places::new([Place::Project(project)])?;
 
-        self.store.append(&Event::map_created(source, actor, MapId::new(), project, name, file.into(), places)).await
+        self.store.append(&Event::map_created(source, actor, MapId::new(), project, name, skill.into(), places)).await
     }
 
     /// Records that the map is shown at `place` too. Nothing is written when it already is.

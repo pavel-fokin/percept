@@ -120,7 +120,7 @@ pub(super) fn add_session(store: &Memory, root: &str) -> SessionId {
     session
 }
 
-/// Has a skill for the files the app tests use, keyed by file stem, and none for any other.
+/// Has a skill for the paths the app tests use, keyed by file stem, and none for any other.
 pub(super) struct Skills;
 
 impl SkillStore for Skills {

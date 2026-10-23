@@ -65,7 +65,7 @@ impl SkillStore for MarkdownStore {
     async fn skill(&self, path: &Path) -> Result<Skill> {
         let file = path.join("SKILL.md");
         let text = tokio::fs::read_to_string(&file).await.map_err(|e| format!("{}: {e}", file.display()))?;
-        let (yaml, body) = split(&text).map_err(|e| format!("{}: {e}", file.display()))?;
+        let (yaml, body) = split(text.trim_start_matches('\u{feff}')).map_err(|e| format!("{}: {e}", file.display()))?;
         let front: Frontmatter = serde_yaml_ng::from_str(yaml).map_err(|e| format!("{}: {e}", file.display()))?;
         if front.name.is_empty() || front.description.is_empty() {
             return Err(format!("{}: name and description must not be empty", file.display()).into());
@@ -99,8 +99,8 @@ impl SkillStore for MarkdownStore {
 
         let mut skills = Vec::new();
         while let Some(entry) = entries.next_entry().await? {
-            if tokio::fs::metadata(entry.path()).await.is_ok_and(|m| m.is_dir()) {
-                let name = entry.file_name().to_string_lossy().into_owned();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.starts_with('.') && tokio::fs::metadata(entry.path()).await.is_ok_and(|m| m.is_dir()) {
                 let skill = self.skill(&entry.path()).await;
                 skills.push((name, skill));
             }

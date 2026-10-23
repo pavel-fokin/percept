@@ -26,7 +26,7 @@ pub struct Map {
     pub id: MapId,
     pub name: Name,
     pub project: ProjectId,
-    /// The absolute path of the file that defines the map.
+    /// The absolute path of the skill directory that defines the map.
     pub skill: PathBuf,
     pub places: Places,
     pub nodes: Vec<Node>,
