@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Component, Path};
+use std::path::Path;
 
 use super::address::{self, Address, Target};
 use super::hook::Client;
-use crate::app::{AppService, Ref, library, source_path};
+use crate::app::{AppService, Ref, library, skill_dir, source_path};
 use crate::core::{Actor, EventStore, Map, NodeId, Project, Reference, Skill, SkillStore, Source};
 use crate::shared::Result;
 
@@ -23,15 +23,9 @@ pub(super) async fn new_board<S: EventStore, M: SkillStore>(service: &AppService
 }
 
 pub(super) async fn new_map<S: EventStore, M: SkillStore>(service: &AppService<S, M>, home: &Path, path: &str, skill: Option<&str>) -> Result<()> {
-    if let Some(skill) = skill {
-        let mut parts = Path::new(skill).components();
-        if !matches!((parts.next(), parts.next()), (Some(Component::Normal(_)), None)) {
-            return Err(format!("{skill:?} is not a skill name").into());
-        }
-    }
+    let dir = skill.map(|skill| skill_dir(home, skill)).transpose()?;
 
     let (actor, source, current) = project_writer(service).await?;
-    let dir = skill.map(|skill| library(home).join(skill));
 
     let (project, board, name) = address::new_at(service, current, &Address::parse(path)?, "map").await?;
 

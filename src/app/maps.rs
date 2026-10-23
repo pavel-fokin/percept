@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use super::AppService;
+use super::{AppService, Taken};
 use crate::core::{Actor, Board, Event, EventId, EventStore, Map, MapId, Name, NodeId, Payload, Place, Places, Policy, Project, ProjectId, Reference, SessionId, Skill, SkillStore, Source};
 use crate::shared::Result;
 
@@ -71,7 +71,7 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         }
 
         let events = self.store.all().await?;
-        Project::check_free(&events, project, &name)?;
+        Project::check_free(&events, project, &name).map_err(|taken| Taken(taken.to_string()))?;
         places.check_in(project, &Board::all(&events))?;
 
         let schema = match skill {
