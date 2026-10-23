@@ -549,7 +549,7 @@ mod tests {
         let edge = || crate::core::EdgeKind { from: "concept".into(), to: "concept".into() };
         let edges = BTreeMap::from([("links".to_string(), edge()), ("cites".to_string(), edge())]);
 
-        Skill::new("p".into(), "i".into(), Some(crate::core::Schema::new(nodes, edges).unwrap()))
+        Skill::new("concepts".into(), "p".into(), "i".into(), Some(crate::core::Schema::new(nodes, edges).unwrap()))
     }
 
     #[test]

@@ -87,7 +87,27 @@ impl SkillStore for MarkdownStore {
             Err(e) => return Err(format!("{}: {e}", file.display()).into()),
         };
 
-        Ok(Skill::new(front.description, body.trim().to_string(), schema))
+        Ok(Skill::new(front.name, front.description, body.trim().to_string(), schema))
+    }
+
+    async fn skills(&self, library: &Path) -> Result<Vec<(String, Result<Skill>)>> {
+        let mut entries = match tokio::fs::read_dir(library).await {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) => return Err(format!("{}: {e}", library.display()).into()),
+        };
+
+        let mut skills = Vec::new();
+        while let Some(entry) = entries.next_entry().await? {
+            if tokio::fs::metadata(entry.path()).await.is_ok_and(|m| m.is_dir()) {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                let skill = self.skill(&entry.path()).await;
+                skills.push((name, skill));
+            }
+        }
+        skills.sort_by(|a, b| a.0.cmp(&b.0));
+
+        Ok(skills)
     }
 }
 
@@ -212,6 +232,34 @@ mod tests {
 
             assert!(error.to_string().contains("SKILL.md"), "{text}: {error}");
         }
+    }
+
+    #[tokio::test]
+    async fn a_library_lists_its_skill_directories_by_name() {
+        let library = std::env::temp_dir().join(format!("percept-library-{}", uuid::Uuid::now_v7()));
+        for name in ["zeta", "alpha"] {
+            std::fs::create_dir_all(library.join(name)).unwrap();
+            std::fs::write(library.join(name).join("SKILL.md"), format!("---\nname: {name}\ndescription: d\n---\ni")).unwrap();
+        }
+        std::fs::create_dir_all(library.join("broken")).unwrap();
+        std::fs::write(library.join(".DS_Store"), "").unwrap();
+
+        let skills = MarkdownStore.skills(&library).await.unwrap();
+
+        let names: Vec<_> = skills.iter().map(|(name, _)| name.as_str()).collect();
+        assert_eq!(names, ["alpha", "broken", "zeta"]);
+        assert_eq!(skills[0].1.as_ref().unwrap().name(), "alpha");
+        assert!(skills[1].1.as_ref().err().unwrap().to_string().contains("SKILL.md"));
+        assert!(skills[2].1.is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_missing_library_holds_no_skills() {
+        let library = std::env::temp_dir().join(format!("percept-library-{}", uuid::Uuid::now_v7()));
+
+        let skills = MarkdownStore.skills(&library).await.unwrap();
+
+        assert!(skills.is_empty());
     }
 
     #[tokio::test]

@@ -124,6 +124,11 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         self.skills.skill(&map.skill).await
     }
 
+    /// The skills in the directory `library`, each with the name of its directory.
+    pub async fn skills(&self, library: &Path) -> Result<Vec<(String, Result<Skill>)>> {
+        self.skills.skills(library).await
+    }
+
     /// The map, its nodes newest first and its edges in log order, from one read of the log.
     pub async fn map_detail(&self, map: MapId) -> Result<Option<MapDetail>> {
         let events = self.store.all().await?;

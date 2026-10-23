@@ -5,7 +5,7 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 
 use super::hook::{Client, hook};
-use super::maps::{add, change, create, describe, remove, show};
+use super::maps::{add, change, create, describe, remove, show, skills};
 use super::projects::init;
 use super::status::status;
 use crate::app::AppService;
@@ -35,6 +35,8 @@ enum Command {
         name: String,
         skill: String,
     },
+    /// Lists the skills in ~/.percept/skills that a map can be created from.
+    Skills,
     /// Adds a node, `add <map> <kind> <title>`, or an edge, `add <map> <from> <kind> <to>`.
     #[command(after_help = "Node options: --key <value> for properties; repeat --ref 'msg:<text>' or --ref 'file:<path>:<from>-<to>' for saved excerpts.")]
     Add {
@@ -81,6 +83,7 @@ pub async fn run<S: EventStore + Send + Sync + 'static, M: SkillStore + Send + S
         Some(Command::Hook { client }) => hook(&service, client).await,
         Some(Command::Init { name }) => init(&service, name.as_deref()).await,
         Some(Command::Create { name, skill }) => create(&service, &home, &name, &skill).await,
+        Some(Command::Skills) => skills(&service, &home).await,
         Some(Command::Add { args }) => add(&service, &args).await,
         Some(Command::Change { args }) => change(&service, &args).await,
         Some(Command::Remove { args }) => remove(&service, &args).await,

@@ -132,10 +132,14 @@ impl SkillStore for Skills {
             ),
             "tasks" => mini(&[("task", &[])], &[("blocks", "task", "task")]),
             "concepts" => mini(&[("concept", &["definition"])], &[]),
-            "scratch" => Ok(Skill::new("purpose".into(), "instructions".into(), None)),
+            "scratch" => Ok(Skill::new("scratch".into(), "purpose".into(), "instructions".into(), None)),
             "glossary" => mini(&[("term", &["definition", "source"])], &[]),
             _ => Err(format!("no skill in {}", path.display()).into()),
         }
+    }
+
+    async fn skills(&self, _: &Path) -> Result<Vec<(String, Result<Skill>)>> {
+        Ok(vec![("scratch".into(), self.skill(Path::new("scratch")).await)])
     }
 }
 
@@ -149,7 +153,7 @@ fn mini(nodes: &[(&str, &[&str])], edges: &[(&str, &str, &str)]) -> Result<Skill
         .map(|(edge, from, to)| (edge.to_string(), EdgeKind { from: from.to_string(), to: to.to_string() }))
         .collect();
 
-    Ok(Skill::new("purpose".into(), "instructions".into(), Some(Schema::new(nodes, edges)?)))
+    Ok(Skill::new("mini".into(), "purpose".into(), "instructions".into(), Some(Schema::new(nodes, edges)?)))
 }
 
 /// Has no skill for any file.
@@ -158,5 +162,9 @@ pub(super) struct NoSkills;
 impl SkillStore for NoSkills {
     async fn skill(&self, path: &Path) -> Result<Skill> {
         Err(format!("no skill in {}", path.display()).into())
+    }
+
+    async fn skills(&self, _: &Path) -> Result<Vec<(String, Result<Skill>)>> {
+        Ok(Vec::new())
     }
 }

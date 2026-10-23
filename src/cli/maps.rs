@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 
 use super::hook::Client;
 use crate::app::{AppService, Ref, source_path};
@@ -13,12 +13,28 @@ pub(super) async fn create<S: EventStore, M: SkillStore>(service: &AppService<S,
     }
 
     let (actor, source, project) = project_writer(service).await?;
-    let dir = home.join(".percept").join("skills").join(skill);
+    let dir = library(home).join(skill);
     if !tokio::fs::try_exists(&dir).await? {
         return Err(format!("no skill named {skill:?} in {}", dir.parent().unwrap_or(&dir).display()).into());
     }
 
     service.create_map(source, actor, project.id, name, &dir).await
+}
+
+/// The directory the skills live in.
+fn library(home: &Path) -> PathBuf {
+    home.join(".percept").join("skills")
+}
+
+pub(super) async fn skills<S: EventStore, M: SkillStore>(service: &AppService<S, M>, home: &Path) -> Result<()> {
+    for (name, skill) in service.skills(&library(home)).await? {
+        match skill {
+            Ok(skill) => println!("{}  {}", skill.name(), skill.description().split_whitespace().collect::<Vec<_>>().join(" ")),
+            Err(error) => eprintln!("percept: skipped {name}: {error}"),
+        }
+    }
+
+    Ok(())
 }
 
 pub(super) async fn add<S: EventStore, M: SkillStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
@@ -480,7 +496,7 @@ mod tests {
             ("note".to_string(), Default::default()),
         ]);
         let edges = BTreeMap::from([("supersedes".to_string(), EdgeKind { from: "decision".into(), to: "decision".into() })]);
-        let skill = Skill::new("Why.".into(), "\nKeep it.\n\nShort.\n".into(), Some(Schema::new(nodes, edges).unwrap()));
+        let skill = Skill::new("decisions".into(), "Why.".into(), "\nKeep it.\n\nShort.\n".into(), Some(Schema::new(nodes, edges).unwrap()));
 
         let text = skill_markdown("decisions", &skill, &Map::fixture(MapId::new(), &[]));
 
@@ -490,7 +506,7 @@ mod tests {
     }
 
     fn scratch() -> Skill {
-        Skill::new("Why.".into(), "Keep it.".into(), None)
+        Skill::new("scratch".into(), "Why.".into(), "Keep it.".into(), None)
     }
 
     #[test]
@@ -535,7 +551,7 @@ mod tests {
     #[test]
     fn without_edge_kinds_the_edge_table_is_left_out() {
         let nodes = BTreeMap::from([("note".to_string(), Default::default())]);
-        let skill = Skill::new("p".into(), "i".into(), Some(Schema::new(nodes, BTreeMap::new()).unwrap()));
+        let skill = Skill::new("notes".into(), "p".into(), "i".into(), Some(Schema::new(nodes, BTreeMap::new()).unwrap()));
 
         let text = skill_markdown("notes", &skill, &Map::fixture(MapId::new(), &[]));
 

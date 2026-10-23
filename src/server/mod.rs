@@ -167,6 +167,10 @@ mod tests {
         async fn skill(&self, _: &std::path::Path) -> Result<Skill> {
             unimplemented!()
         }
+
+        async fn skills(&self, _: &std::path::Path) -> Result<Vec<(String, Result<Skill>)>> {
+            unimplemented!()
+        }
     }
 
     fn text_body(response: &str) -> &str {
