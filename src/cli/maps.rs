@@ -244,9 +244,9 @@ pub(super) async fn show<S: EventStore, M: SkillStore>(service: &AppService<S, M
 
 pub(super) async fn describe<S: EventStore, M: SkillStore>(service: &AppService<S, M>, path: &str) -> Result<()> {
     let map = map_at(service, path).await?;
-    let skill = service.skill(map.id).await?;
+    let skill = service.skill(&map).await;
 
-    println!("{}", skill_markdown(map.name.as_str(), &skill, &map));
+    println!("{}", map_description(&map, &skill));
 
     Ok(())
 }
@@ -255,15 +255,15 @@ fn map_line(map: &Map) -> String {
     format!("{}  {}, {}", map.name.as_str(), node_count(map.nodes.len()), edge_count(map.edges.len()))
 }
 
-/// A skill without a schema shows the kinds `map` uses instead.
-fn skill_markdown(name: &str, skill: &Skill, map: &Map) -> String {
-    let mut text = format!(
-        "# {name}\n\n{}\n\n## Instructions\n\n{}\n",
-        skill.description().trim(),
-        skill.instructions().trim(),
-    );
+/// The map's schema under its skill's description and instructions; a map without a schema shows the kinds it uses instead.
+fn map_description(map: &Map, skill: &Result<Skill>) -> String {
+    let mut text = format!("# {}\n\n", map.name.as_str());
+    match skill {
+        Ok(skill) => text.push_str(&format!("{}\n\n## Instructions\n\n{}\n", skill.description().trim(), skill.instructions().trim())),
+        Err(e) => text.push_str(&format!("The skill cannot be read: {e}.\n")),
+    }
 
-    if let Some(schema) = skill.schema() {
+    if let Some(schema) = &map.schema {
         text.push_str("\n## Schema\n\n");
         let nodes = schema.nodes().iter().map(|(kind, properties)| (kind.as_str(), properties));
         let edges = schema.edges().iter().map(|(kind, ends)| (kind.as_str(), ends.from.as_str(), ends.to.as_str()));
@@ -531,24 +531,36 @@ mod tests {
         }
     }
 
+    /// A skill `Why.` with instructions `Keep it.`.
+    fn skill() -> Result<Skill> {
+        Ok(Skill::new("scratch".into(), "Why.".into(), "\nKeep it.\n".into(), None))
+    }
+
     #[test]
-    fn a_skill_renders_as_markdown() {
+    fn a_map_with_a_schema_is_described_by_its_skill_and_its_own_schema() {
         let nodes = BTreeMap::from([
             ("decision".to_string(), ["why", "by"].map(String::from).into()),
             ("note".to_string(), Default::default()),
         ]);
         let edges = BTreeMap::from([("supersedes".to_string(), EdgeKind { from: "decision".into(), to: "decision".into() })]);
-        let skill = Skill::new("decisions".into(), "Why.".into(), "\nKeep it.\n\nShort.\n".into(), Some(Schema::new(nodes, edges).unwrap()));
+        let mut map = Map::fixture(MapId::new(), &[]);
+        map.schema = Some(Schema::new(nodes, edges).unwrap());
 
-        let text = skill_markdown("decisions", &skill, &Map::fixture(MapId::new(), &[]));
+        let text = map_description(&map, &skill());
 
-        assert_eq!(text, "# decisions\n\nWhy.\n\n## Instructions\n\nKeep it.\n\nShort.\n\n## Schema\n\n\
+        assert_eq!(text, "# concepts\n\nWhy.\n\n## Instructions\n\nKeep it.\n\n## Schema\n\n\
             | Node kind | Properties |\n|---|---|\n| decision | by, why |\n| note |  |\n\n\
             | Edge kind | From | To |\n|---|---|---|\n| supersedes | decision | decision |");
     }
 
-    fn scratch() -> Skill {
-        Skill::new("scratch".into(), "Why.".into(), "Keep it.".into(), None)
+    #[test]
+    fn a_map_whose_skill_cannot_be_read_is_described_by_its_schema_and_the_error() {
+        let mut map = Map::fixture(MapId::new(), &[]);
+        map.schema = Some(Schema::new(BTreeMap::from([("note".to_string(), Default::default())]), BTreeMap::new()).unwrap());
+
+        let text = map_description(&map, &Err("/skills/gone/SKILL.md: not found".into()));
+
+        assert_eq!(text, "# concepts\n\nThe skill cannot be read: /skills/gone/SKILL.md: not found.\n\n## Schema\n\n| Node kind | Properties |\n|---|---|\n| note |  |");
     }
 
     #[test]
@@ -562,9 +574,9 @@ mod tests {
         ];
         let map = Map::fixture(map, &events);
 
-        let text = skill_markdown("scratch", &scratch(), &map);
+        let text = map_description(&map, &skill());
 
-        assert_eq!(text, "# scratch\n\nWhy.\n\n## Instructions\n\nKeep it.\n\n## Schema\n\nObserved on the map, not checked.\n\n\
+        assert_eq!(text, "# concepts\n\nWhy.\n\n## Instructions\n\nKeep it.\n\n## Schema\n\nObserved on the map, not checked.\n\n\
             | Node kind | Properties |\n|---|---|\n| cause |  |\n| obstacle | where |\n\n\
             | Edge kind | From | To |\n|---|---|---|\n| caused-by | obstacle | cause |");
     }
@@ -575,7 +587,7 @@ mod tests {
         let events = [Event::node_added(Source::fixture(), Actor::Human, map, a, "note", "A", BTreeMap::new(), Vec::new())];
         let map = Map::fixture(map, &events);
 
-        let text = skill_markdown("scratch", &scratch(), &map);
+        let text = map_description(&map, &skill());
 
         assert!(text.ends_with("| note |  |"));
         assert!(!text.contains("Edge kind"));
@@ -585,20 +597,9 @@ mod tests {
     fn an_empty_map_without_a_schema_says_so() {
         let map = Map::fixture(MapId::new(), &[]);
 
-        let text = skill_markdown("scratch", &scratch(), &map);
+        let text = map_description(&map, &skill());
 
-        assert_eq!(text, "# scratch\n\nWhy.\n\n## Instructions\n\nKeep it.\n\n## Schema\n\nObserved on the map, not checked. Nothing on the map yet.");
-    }
-
-    #[test]
-    fn without_edge_kinds_the_edge_table_is_left_out() {
-        let nodes = BTreeMap::from([("note".to_string(), Default::default())]);
-        let skill = Skill::new("notes".into(), "p".into(), "i".into(), Some(Schema::new(nodes, BTreeMap::new()).unwrap()));
-
-        let text = skill_markdown("notes", &skill, &Map::fixture(MapId::new(), &[]));
-
-        assert!(text.ends_with("| note |  |"));
-        assert!(!text.contains("Edge kind"));
+        assert_eq!(text, "# concepts\n\nWhy.\n\n## Instructions\n\nKeep it.\n\n## Schema\n\nObserved on the map, not checked. Nothing on the map yet.");
     }
 
     #[test]

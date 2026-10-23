@@ -137,10 +137,8 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         Ok(self.located(map).await?.map)
     }
 
-    /// The skill of the map, or an error if there is no such map or its skill cannot be read.
-    pub async fn skill(&self, map: MapId) -> Result<Skill> {
-        let map = self.map(map).await?;
-
+    /// The skill the map was created from, as it reads now.
+    pub async fn skill(&self, map: &Map) -> Result<Skill> {
         self.skills.skill(&map.skill).await
     }
 
