@@ -66,6 +66,7 @@ where
         .route("/api/sessions", get(Api::<L, M>::sessions))
         .route("/api/sessions/{id}", get(Api::<L, M>::session))
         .route("/api/sessions/{id}/events", get(Api::<L, M>::session_events))
+        .route("/api/skills", get(Api::<L, M>::skills))
         .route("/api/maps", get(Api::<L, M>::maps))
         .route("/api/projects/{project}/maps/{name}", get(Api::<L, M>::map))
         .route("/api/boards", get(Api::<L, M>::boards))
@@ -97,10 +98,11 @@ async fn fallback(uri: Uri) -> Response {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::collections::{BTreeMap, BTreeSet};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
 
-    use crate::core::{Actor, BoardId, ClientSessionId, Event, EventStore, MapId, Name, NodeId, Payload, Place, Places, Project, ProjectId, Reference, SessionId, Skill, SkillStore, Source};
+    use crate::core::{Actor, BoardId, ClientSessionId, EdgeKind, Event, EventStore, MapId, Name, NodeId, Payload, Place, Places, Project, ProjectId, Reference, Schema, SessionId, Skill, SkillStore, Source};
 
     const SESSION: &str = "0190a0a0-0000-7000-8000-000000000001";
     const MAP: &str = "0190a0a0-0000-7000-8000-000000000003";
@@ -182,8 +184,17 @@ mod tests {
             unimplemented!()
         }
 
-        async fn skills(&self, _: &std::path::Path) -> Result<Vec<(String, Result<Skill>)>> {
-            unimplemented!()
+        async fn skills(&self, library: &std::path::Path) -> Result<Vec<(String, Result<Skill>)>> {
+            assert_eq!(library, std::path::Path::new("/Users/me/.percept/skills"));
+            let nodes = BTreeMap::from([("question".to_string(), BTreeSet::from(["status".to_string()]))]);
+            let edges = BTreeMap::from([("answers".to_string(), EdgeKind { from: "question".into(), to: "question".into() })]);
+            let schema = Schema::new(nodes, edges)?;
+
+            Ok(vec![
+                ("broken".into(), Err("/Users/me/.percept/skills/broken: no SKILL.md".into())),
+                ("decision".into(), Ok(Skill::new("decision".into(), "Decide.".into(), "Do it.".into(), Some(schema)))),
+                ("plain".into(), Ok(Skill::new("plain".into(), "Anything.".into(), "Write.".into(), None))),
+            ])
         }
     }
 
@@ -230,6 +241,27 @@ mod tests {
 
         assert!(response.starts_with("HTTP/1.1 200"));
         assert!(response.ends_with(r#"{"data":{"events":6}}"#));
+    }
+
+    #[tokio::test]
+    async fn skills_returns_the_library_and_each_skill_or_its_error() {
+        let response = get_response("/api/skills").await;
+
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert_eq!(
+            json_body(&response)["data"],
+            json!({
+                "library": "~/.percept/skills",
+                "skills": [
+                    { "name": "broken", "error": "~/.percept/skills/broken: no SKILL.md" },
+                    {
+                        "name": "decision", "description": "Decide.", "instructions": "Do it.",
+                        "schema": { "nodes": { "question": ["status"] }, "edges": { "answers": { "from": "question", "to": "question" } } }
+                    },
+                    { "name": "plain", "description": "Anything.", "instructions": "Write.", "schema": null },
+                ]
+            })
+        );
     }
 
     #[tokio::test]

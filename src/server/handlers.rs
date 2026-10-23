@@ -7,9 +7,9 @@ use axum::Json;
 
 use serde::Deserialize;
 
-use super::responses::{self, BoardDetail, BoardSummary, Data, MapDetail, MapSummary, ProjectSummary, Status};
+use super::responses::{self, BoardDetail, BoardSummary, Data, MapDetail, MapSummary, ProjectSummary, Skills, Status};
 use super::Api;
-use crate::app::Taken;
+use crate::app::{library, Taken};
 use crate::core::{Actor, EventStore, LastPlace, Name, Place, SessionId, SkillStore, Source};
 use crate::shared::{Begin, Error};
 
@@ -73,6 +73,12 @@ where
         let service = api.service().await?;
         let events = service.event_count().await?;
         Ok(Json(Data { data: Status { events } }))
+    }
+
+    pub(super) async fn skills(State(api): State<Arc<Self>>) -> Reply<Skills> {
+        let library = library(&api.home);
+        let skills = api.skills.skills(&library).await?;
+        Ok(Json(Data { data: Skills::new(&library, skills, &api.home) }))
     }
 
     pub(super) async fn projects(State(api): State<Arc<Self>>) -> Reply<Vec<ProjectSummary>> {

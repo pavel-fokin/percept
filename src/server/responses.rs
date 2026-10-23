@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
 use serde::Serialize;
@@ -6,7 +6,7 @@ use serde_json::json;
 
 use super::paths::{display_path, display_paths};
 use crate::app::{self, CitedMessage};
-use crate::core::{self, Actor, ClientSessionId, EventId, NodeId, Payload, Project, ProjectId, SessionId, SessionStatus};
+use crate::core::{self, Actor, ClientSessionId, EventId, NodeId, Payload, Project, ProjectId, Schema, SessionId, SessionStatus, Skill};
 
 /// The envelope every API response is sent in.
 #[derive(Serialize)]
@@ -17,6 +17,61 @@ pub(super) struct Data<T> {
 #[derive(Serialize)]
 pub(super) struct Status {
     pub(super) events: usize,
+}
+
+/// The skill library as the page reads it: where it is and the skills in it.
+#[derive(Serialize)]
+pub(super) struct Skills {
+    library: String,
+    skills: Vec<SkillSummary>,
+}
+
+impl Skills {
+    pub(super) fn new(library: &Path, skills: Vec<(String, crate::shared::Result<Skill>)>, home: &Path) -> Self {
+        let skills = skills.into_iter().map(|(name, skill)| SkillSummary::new(name, skill, home)).collect();
+        Self { library: display_path(library, home), skills }
+    }
+}
+
+/// A skill as the page reads it, or the error that kept it from being read.
+#[derive(Serialize)]
+#[serde(untagged)]
+enum SkillSummary {
+    Read { name: String, description: String, instructions: String, schema: Option<SchemaSummary> },
+    Unreadable { name: String, error: String },
+}
+
+impl SkillSummary {
+    fn new(name: String, skill: crate::shared::Result<Skill>, home: &Path) -> Self {
+        match skill {
+            Ok(skill) => Self::Read {
+                name: skill.name().to_string(),
+                description: skill.description().to_string(),
+                instructions: skill.instructions().to_string(),
+                schema: skill.schema().map(SchemaSummary::new),
+            },
+            Err(error) => Self::Unreadable { name, error: display_paths(&error.to_string(), home) },
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct SchemaSummary {
+    nodes: BTreeMap<String, BTreeSet<String>>,
+    edges: BTreeMap<String, EdgeSummary>,
+}
+
+impl SchemaSummary {
+    fn new(schema: &Schema) -> Self {
+        let edges = schema.edges().iter().map(|(kind, edge)| (kind.clone(), EdgeSummary { from: edge.from.clone(), to: edge.to.clone() })).collect();
+        Self { nodes: schema.nodes().clone(), edges }
+    }
+}
+
+#[derive(Serialize)]
+struct EdgeSummary {
+    from: String,
+    to: String,
 }
 
 /// The name of the project with this id. Every session and map names a project that was created.
