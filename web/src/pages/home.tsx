@@ -1,9 +1,12 @@
+import { useEffect, useState } from "react";
 import { Link, useLoaderData, useRouteError } from "react-router";
 import { describe, getData, type BoardSummary, type MapSummary, type Project, type Session } from "../api";
 import { relative } from "../format";
 import { BoardIcon } from "../components/board-icon";
 import { NewBoard } from "../components/new-board";
+import { NewProjectForm } from "../components/new-project-form";
 import { Spinner } from "../components/spinner";
+import { Button } from "../components/ui/button";
 import { chip } from "../components/ui/chip";
 import { textLink } from "../components/ui/text-link";
 import { boardUrl, mapUrl, sessionsUrl, sessionUrl } from "../paths";
@@ -152,15 +155,71 @@ function Counter({ to, label, count }: { to: string; label: string; count: numbe
 }
 
 function EmptyState() {
+  const [editing, setEditing] = useState(false);
+
   return (
     <section className="grid justify-items-center gap-3 py-16 text-center">
       <h2 className="text-2xl font-semibold text-balance">No projects yet</h2>
-      <p className="max-w-[36ch] text-muted">
-        Run <code className="font-mono text-sm">percept init</code> in a repository to start recording its sessions.
-      </p>
-      <a href={README} className={`mt-2 ${textLink}`}>
-        Set up a client
-      </a>
+      <p className="max-w-[36ch] text-muted">A project holds the maps and boards you think a question through on.</p>
+      <div className="mt-2 w-full max-w-xs">
+        {editing ? (
+          <NewProjectForm onCreated={() => {}} onCancel={() => setEditing(false)} />
+        ) : (
+          <Button variant="primary" large onClick={() => setEditing(true)}>
+            New project
+          </Button>
+        )}
+      </div>
+      <p className="mt-6 max-w-[36ch] text-sm text-muted">Working in a repository? Run this there to record its coding sessions:</p>
+      <CopyCommand command="percept init" />
     </section>
+  );
+}
+
+// The clipboard API exists only on https and localhost; over a LAN address the command stays selectable text.
+const canCopy = window.isSecureContext && "clipboard" in navigator;
+
+const commandBox = "flex h-11 items-center gap-6 rounded-md border border-border bg-surface pr-3 pl-4 font-mono text-sm text-text";
+
+function CopyCommand({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  const copy = async () => {
+    await navigator.clipboard.writeText(command);
+    setCopied(true);
+  };
+
+  if (!canCopy) return <code className={`${commandBox} select-all`}>{command}</code>;
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label={`Copy ${command}`}
+        onClick={() => void copy()}
+        className={`${commandBox} cursor-pointer transition-colors hover:border-muted`}
+      >
+        {command}
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden className="size-4 text-muted">
+          {copied ? (
+            <path d="M3 8.5l3.5 3.5L13 4.5" />
+          ) : (
+            <>
+              <rect x="5.75" y="5.75" width="8" height="8" rx="1.5" />
+              <path d="M10.25 3.5v-.25a1.5 1.5 0 0 0-1.5-1.5h-5a1.5 1.5 0 0 0-1.5 1.5v5a1.5 1.5 0 0 0 1.5 1.5h.25" />
+            </>
+          )}
+        </svg>
+      </button>
+      <span role="status" className="sr-only">
+        {copied ? "Copied" : ""}
+      </span>
+    </>
   );
 }

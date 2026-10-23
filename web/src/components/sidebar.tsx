@@ -1,9 +1,10 @@
 import { useRef, useState, useSyncExternalStore } from "react";
-import { Link, NavLink, useLoaderData, useNavigate } from "react-router";
-import { describe, getData, postData, type BoardSummary, type MapSummary, type Project } from "../api";
+import { Link, NavLink, useLoaderData } from "react-router";
+import { getData, type BoardSummary, type MapSummary, type Project } from "../api";
 import { boardUrl, mapUrl, sessionsUrl } from "../paths";
 import { BoardIcon } from "./board-icon";
 import { Chevron } from "./chevron";
+import { NewProjectForm } from "./new-project-form";
 import { ThemeSwitch } from "./theme-switch";
 import { IconButton } from "./ui/button";
 
@@ -167,36 +168,9 @@ function Panel({ collapsed, onToggle, onCreated }: PanelProps) {
   );
 }
 
-/** A "New project" row that becomes a name input; Enter creates the project and opens home. */
+/** A "New project" row that becomes the name input. */
 function NewProject({ collapsed, onToggle, onCreated }: PanelProps) {
-  const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
-  const [name, setName] = useState("");
-  const [error, setError] = useState("");
-  const [creating, setCreating] = useState(false);
-
-  const cancel = () => {
-    setEditing(false);
-    setName("");
-    setError("");
-  };
-
-  const create = async (e: React.SyntheticEvent) => {
-    e.preventDefault();
-    if (creating || !name.trim()) return;
-    setCreating(true);
-
-    try {
-      await postData("/api/projects", { name });
-      cancel();
-      void navigate("/");
-      onCreated();
-    } catch (err) {
-      setError(describe(err));
-    } finally {
-      setCreating(false);
-    }
-  };
 
   if (!editing || collapsed) {
     return (
@@ -215,30 +189,7 @@ function NewProject({ collapsed, onToggle, onCreated }: PanelProps) {
     );
   }
 
-  return (
-    <form onSubmit={(e) => void create(e)} className="grid gap-1 px-1">
-      <input
-        autoFocus
-        value={name}
-        readOnly={creating}
-        aria-label="Project name"
-        aria-describedby={error ? "new-project-error" : undefined}
-        placeholder="Project name"
-        onChange={(e) => {
-          setName(e.target.value);
-          setError("");
-        }}
-        onKeyDown={(e) => e.key === "Escape" && cancel()}
-        onBlur={() => !name.trim() && cancel()}
-        className="h-11 w-full rounded-md border border-border bg-bg px-3 text-base text-text placeholder:text-muted focus-visible:border-muted focus-visible:outline-none md:text-sm"
-      />
-      {error && (
-        <p id="new-project-error" role="alert" className="px-1 text-sm text-muted wrap-anywhere">
-          {error}
-        </p>
-      )}
-    </form>
-  );
+  return <NewProjectForm onCreated={onCreated} onCancel={() => setEditing(false)} />;
 }
 
 // An icon at the centre of a rail-wide square, so the rail keeps it in place.
