@@ -64,6 +64,15 @@ export type MapDetail = {
   edges: MapEdge[];
 };
 
+export type Skill = {
+  name: string;
+  description: string;
+  instructions: string;
+  schema: { nodes: Record<string, string[]>; edges: Record<string, { from: string; to: string }> } | null;
+};
+
+export type SkillEntry = Skill | { name: string; error: string };
+
 export type Event = {
   id: string;
   actor: "human" | "agent" | "system";

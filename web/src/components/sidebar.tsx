@@ -150,6 +150,17 @@ function Panel({ collapsed, onToggle, onCreated }: PanelProps) {
           ))}
       </div>
 
+      <nav aria-label="Library" className="grid gap-0.5">
+        <NavLink
+          to="/skills"
+          title={collapsed ? "Skills" : undefined}
+          className={({ isActive }) => `${item} ${isActive ? "bg-border/50 text-text" : ""}`}
+        >
+          <BookIcon />
+          <span className={collapsed ? "sr-only" : ""}>Skills</span>
+        </NavLink>
+      </nav>
+
       <ThemeSwitch />
     </div>
   );
@@ -267,6 +278,14 @@ function HomeIcon() {
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden className="size-4 flex-none">
       <path d="M2.75 6.5 8 2.25l5.25 4.25v6.25a1 1 0 0 1-1 1h-8.5a1 1 0 0 1-1-1Z" />
       <path d="M6.25 13.75v-4h3.5v4" />
+    </svg>
+  );
+}
+
+function BookIcon() {
+  return (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden className="size-4 flex-none">
+      <path d="M8 3.75C6.75 2.75 4.5 2.5 2 2.75v9.5c2.5-.25 4.75 0 6 1 1.25-1 3.5-1.25 6-1v-9.5c-2.5-.25-4.75 0-6 1ZM8 3.75v9.5" />
     </svg>
   );
 }
