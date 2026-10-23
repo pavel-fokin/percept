@@ -7,6 +7,9 @@ use serde::Deserialize;
 use crate::core::{EdgeKind, Schema, Skill, SkillStore};
 use crate::shared::Result;
 
+/// The `metadata` key of SKILL.md that names the schema file of the map the skill produces.
+const SCHEMA_KEY: &str = "percept-schema";
+
 /// Reads a skill from a directory in the agentskills.io format.
 #[derive(Clone)]
 pub struct MarkdownStore;
@@ -15,13 +18,17 @@ pub struct MarkdownStore;
 struct Frontmatter {
     name: String,
     description: String,
+    #[serde(default)]
+    metadata: BTreeMap<String, serde_yaml_ng::Value>,
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SchemaFile {
-    nodes: Option<BTreeMap<String, BTreeMap<String, String>>>,
-    edges: Option<BTreeMap<String, Edge>>,
+    #[serde(default)]
+    nodes: BTreeMap<String, BTreeMap<String, String>>,
+    #[serde(default)]
+    edges: BTreeMap<String, Edge>,
 }
 
 #[derive(Deserialize)]
@@ -75,17 +82,18 @@ impl SkillStore for MarkdownStore {
             return Err(format!("{}: name {:?} must match the directory name", file.display(), front.name).into());
         }
 
-        let file = path.join("assets").join("schema.toml");
-        let schema = match tokio::fs::read_to_string(&file).await {
-            Ok(text) => {
+        let schema = match front.metadata.get(SCHEMA_KEY) {
+            None => None,
+            Some(declared) => {
+                let Some(relative) = declared.as_str().map(Path::new).filter(|p| p.is_relative()) else {
+                    return Err(format!("{}: {SCHEMA_KEY} must be a path relative to the skill directory", file.display()).into());
+                };
+                let file = path.join(relative);
+                let text = tokio::fs::read_to_string(&file).await.map_err(|e| format!("{}: {e}", file.display()))?;
                 let parsed: SchemaFile = toml::from_str(&text).map_err(|e| format!("{}: {e}", file.display()))?;
-                match (parsed.nodes, parsed.edges) {
-                    (None, None) => None,
-                    (nodes, edges) => Some(schema(nodes.unwrap_or_default(), edges.unwrap_or_default()).map_err(|e| format!("{}: {e}", file.display()))?),
-                }
+
+                Some(schema(parsed.nodes, parsed.edges).map_err(|e| format!("{}: {e}", file.display()))?)
             }
-            Err(e) if e.kind() == ErrorKind::NotFound => None,
-            Err(e) => return Err(format!("{}: {e}", file.display()).into()),
         };
 
         Ok(Skill::new(front.name, front.description, body.trim().to_string(), schema))
@@ -134,10 +142,12 @@ mod tests {
 
     const SKILL: &str = "---\nname: notes\ndescription: p\n---\n\ni\n\n";
 
+    const WITH_SCHEMA: &str = "---\nname: notes\ndescription: p\nmetadata:\n  percept-schema: assets/schema.toml\n---\n\ni\n\n";
+
     #[tokio::test]
     async fn reads_a_valid_skill() {
         let dir = dir(
-            Some(SKILL),
+            Some(WITH_SCHEMA),
             Some(
                 r#"
                 [nodes.note]
@@ -166,7 +176,7 @@ mod tests {
 
     #[tokio::test]
     async fn edges_may_be_absent() {
-        let dir = dir(Some(SKILL), Some("[nodes.note]\n"));
+        let dir = dir(Some(WITH_SCHEMA), Some("[nodes.note]\n"));
 
         let skill = MarkdownStore.skill(&dir).await.unwrap();
 
@@ -174,22 +184,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_skill_without_a_schema_file_has_no_schema() {
-        let dir = dir(Some(SKILL), None);
+    async fn a_skill_that_declares_no_schema_has_none() {
+        let dir = dir(Some(SKILL), Some("[nodes.note]\n"));
 
         let skill = MarkdownStore.skill(&dir).await.unwrap();
 
         assert!(skill.schema().is_none());
         assert!(skill.check_node("any", &BTreeMap::from([("p".to_string(), "x".to_string())])).is_ok());
-    }
-
-    #[tokio::test]
-    async fn an_empty_schema_file_has_no_schema() {
-        let dir = dir(Some(SKILL), Some(""));
-
-        let skill = MarkdownStore.skill(&dir).await.unwrap();
-
-        assert!(skill.schema().is_none());
     }
 
     #[tokio::test]
@@ -271,14 +272,37 @@ mod tests {
             "[nodes.note]\n[edges.about]\nfrom = \"note\"\nto = \"topic\"\n",
             "[edges.about]\nfrom = \"note\"\nto = \"note\"\n",
             "[nodes]\n",
+            "",
         ];
 
         for text in cases {
-            let dir = dir(Some(SKILL), Some(text));
+            let dir = dir(Some(WITH_SCHEMA), Some(text));
 
             let error = MarkdownStore.skill(&dir).await.err().unwrap();
 
             assert!(error.to_string().contains("schema.toml"), "{text}: {error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_declared_schema_file_that_is_missing_is_an_error_naming_it() {
+        let dir = dir(Some(WITH_SCHEMA), None);
+
+        let error = MarkdownStore.skill(&dir).await.err().unwrap();
+
+        assert!(error.to_string().contains("schema.toml"));
+    }
+
+    #[tokio::test]
+    async fn a_schema_path_that_is_not_relative_is_an_error() {
+        let cases = ["/tmp/schema.toml", "[assets/schema.toml]"];
+
+        for path in cases {
+            let dir = dir(Some(&format!("---\nname: notes\ndescription: p\nmetadata:\n  percept-schema: {path}\n---\ni")), None);
+
+            let error = MarkdownStore.skill(&dir).await.err().unwrap();
+
+            assert!(error.to_string().contains("percept-schema"), "{path}: {error}");
         }
     }
 }
