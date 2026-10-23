@@ -63,7 +63,7 @@ export function Home() {
         return (
           <section key={project}>
             <div className="flex items-baseline justify-between gap-4">
-              <h2 className="min-w-0 font-mono text-sm font-normal wrap-anywhere">{project}</h2>
+              <h2 className="min-w-0 font-semibold wrap-anywhere">{project}</h2>
               {latest && (
                 <time dateTime={latest.last_event_at} className="flex-none text-sm text-muted tabular-nums">
                   active {relative(new Date(latest.last_event_at), now)}
