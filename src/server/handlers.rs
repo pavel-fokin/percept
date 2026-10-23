@@ -1,6 +1,7 @@
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -9,8 +10,8 @@ use serde::Deserialize;
 
 use super::responses::{self, BoardDetail, BoardSummary, Data, MapDetail, MapSummary, ProjectSummary, Skills, Status};
 use super::Api;
-use crate::app::{library, skill_dir, Taken};
-use crate::core::{Actor, EventStore, LastPlace, Name, Place, SessionId, SkillStore, Source};
+use crate::app::{library, skill_dir, Refused, Taken};
+use crate::core::{Actor, EventStore, LastPlace, Name, NodeId, Place, SessionId, SkillStore, Source};
 use crate::shared::{Begin, Error};
 
 /// The body of `POST /api/projects`.
@@ -31,6 +32,27 @@ pub(super) struct NewMap {
     skill: Option<String>,
 }
 
+/// The body of `POST /api/projects/{project}/maps/{map}/nodes`.
+#[derive(Deserialize)]
+pub(super) struct NewNode {
+    kind: String,
+    title: String,
+}
+
+/// The body of `PATCH /api/projects/{project}/maps/{map}/nodes/{node}`.
+#[derive(Deserialize)]
+pub(super) struct Retitled {
+    title: String,
+}
+
+/// An edge: the body of `POST /api/projects/{project}/maps/{map}/edges`, the query of its `DELETE`.
+#[derive(Deserialize)]
+pub(super) struct EdgeEnds {
+    from: NodeId,
+    kind: String,
+    to: NodeId,
+}
+
 type Reply<T> = Result<Json<Data<T>>, ApiError>;
 
 pub(super) enum ApiError {
@@ -49,8 +71,13 @@ impl From<Error> for ApiError {
             Err(error) => error,
         };
 
-        match error.downcast::<LastPlace>() {
-            Ok(last) => Self::Conflict(last.to_string()),
+        let error = match error.downcast::<LastPlace>() {
+            Ok(last) => return Self::Conflict(last.to_string()),
+            Err(error) => error,
+        };
+
+        match error.downcast::<Refused>() {
+            Ok(refused) => Self::BadRequest(refused.to_string()),
             Err(error) => Self::Internal(error),
         }
     }
@@ -181,6 +208,59 @@ where
 
         let contents = service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
         Ok(Json(Data { data: BoardDetail::new(contents) }))
+    }
+
+    pub(super) async fn add_node(
+        State(api): State<Arc<Self>>,
+        Path((project, map)): Path<(String, String)>,
+        Json(body): Json<NewNode>,
+    ) -> Reply<MapDetail> {
+        let service = api.service().await?;
+        let id = service.map_id(&project, &map).await?.ok_or(ApiError::NotFound)?;
+        service.add_node(Source::Web, Actor::Human, id, &body.kind, &body.title, BTreeMap::new(), Vec::new()).await?;
+
+        let detail = service.map_detail(id).await?.ok_or(ApiError::NotFound)?;
+        Ok(Json(Data { data: MapDetail::new(detail, project) }))
+    }
+
+    pub(super) async fn change_node(
+        State(api): State<Arc<Self>>,
+        Path((project, map, node)): Path<(String, String, NodeId)>,
+        Json(body): Json<Retitled>,
+    ) -> Reply<MapDetail> {
+        let service = api.service().await?;
+        let id = service.map_id(&project, &map).await?.ok_or(ApiError::NotFound)?;
+        service.change_node(Source::Web, Actor::Human, id, node, Some(&body.title), BTreeMap::new(), Vec::new()).await?;
+
+        let detail = service.map_detail(id).await?.ok_or(ApiError::NotFound)?;
+        Ok(Json(Data { data: MapDetail::new(detail, project) }))
+    }
+
+    pub(super) async fn remove_node(State(api): State<Arc<Self>>, Path((project, map, node)): Path<(String, String, NodeId)>) -> Reply<MapDetail> {
+        let service = api.service().await?;
+        let id = service.map_id(&project, &map).await?.ok_or(ApiError::NotFound)?;
+        service.remove_node(Source::Web, Actor::Human, id, node).await?;
+
+        let detail = service.map_detail(id).await?.ok_or(ApiError::NotFound)?;
+        Ok(Json(Data { data: MapDetail::new(detail, project) }))
+    }
+
+    pub(super) async fn add_edge(State(api): State<Arc<Self>>, Path((project, map)): Path<(String, String)>, Json(edge): Json<EdgeEnds>) -> Reply<MapDetail> {
+        let service = api.service().await?;
+        let id = service.map_id(&project, &map).await?.ok_or(ApiError::NotFound)?;
+        service.add_edge(Source::Web, Actor::Human, id, edge.from, &edge.kind, edge.to).await?;
+
+        let detail = service.map_detail(id).await?.ok_or(ApiError::NotFound)?;
+        Ok(Json(Data { data: MapDetail::new(detail, project) }))
+    }
+
+    pub(super) async fn remove_edge(State(api): State<Arc<Self>>, Path((project, map)): Path<(String, String)>, Query(edge): Query<EdgeEnds>) -> Reply<MapDetail> {
+        let service = api.service().await?;
+        let id = service.map_id(&project, &map).await?.ok_or(ApiError::NotFound)?;
+        service.remove_edge(Source::Web, Actor::Human, id, edge.from, &edge.kind, edge.to).await?;
+
+        let detail = service.map_detail(id).await?.ok_or(ApiError::NotFound)?;
+        Ok(Json(Data { data: MapDetail::new(detail, project) }))
     }
 
     pub(super) async fn create_board(State(api): State<Arc<Self>>, Path(project): Path<String>) -> Reply<BoardSummary> {

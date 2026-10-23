@@ -99,15 +99,15 @@ async fn board_or_map<S: EventStore, M: SkillStore>(service: &AppService<S, M>, 
 }
 
 /// Where a new board or map named by `address` goes: its project, the board it is shown on (none for the project's list) and its name.
-/// A bare name goes in `current`. `noun` is "board" or "map", for the error on a path of the wrong shape.
+/// A bare name goes in the project of the checkout at `here`. `noun` is "board" or "map", for the error on a path of the wrong shape.
 pub(super) async fn new_at<S: EventStore, M: SkillStore>(
     service: &AppService<S, M>,
-    current: Project,
+    here: &Path,
     address: &Address,
     noun: &str,
 ) -> Result<(Project, Option<Board>, String)> {
     match address {
-        Address::Bare(name) => Ok((current, None, name.clone())),
+        Address::Bare(name) => Ok((project_of(service, here).await?, None, name.clone())),
         Address::Absolute(segments) => match segments.as_slice() {
             [project, name] => Ok((project_named(service, project).await?, None, name.clone())),
             [project, board, name] => {
@@ -195,7 +195,7 @@ mod tests {
     fn project(name: &str) -> (ProjectId, Event) {
         let id = ProjectId::new();
 
-        (id, Event::project_created(Source::fixture(), Actor::Human, id, N::new(name).unwrap(), None))
+        (id, Event::project_created(Source::fixture(), Actor::Human, id, N::new(name).unwrap(), Some(format!("/{name}").into())))
     }
 
     fn created(project: ProjectId, name: &str, places: Places) -> Event {
@@ -338,10 +338,8 @@ mod tests {
     #[tokio::test]
     async fn a_new_board_or_map_goes_in_the_current_project_a_named_one_or_a_board() {
         let service = service();
-        let current = || service.project_named("repo");
         let at = async |text: &str| {
-            let current = current().await.unwrap().unwrap();
-            new_at(&service, current, &address(text), "map").await.map(|(p, b, n)| (p.name.as_str().to_string(), b.map(|b| b.name.as_str().to_string()), n))
+            new_at(&service, Path::new("/repo/src"), &address(text), "map").await.map(|(p, b, n)| (p.name.as_str().to_string(), b.map(|b| b.name.as_str().to_string()), n))
         };
 
         assert_eq!(at("m").await.unwrap(), ("repo".into(), None, "m".into()));

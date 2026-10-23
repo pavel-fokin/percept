@@ -150,6 +150,7 @@ impl BoardDetail {
 #[derive(Serialize)]
 struct BoardMap {
     name: String,
+    kinds: Kinds,
     nodes: Vec<BoardNode>,
     edges: Vec<Edge>,
 }
@@ -158,7 +159,8 @@ impl From<core::Map> for BoardMap {
     fn from(map: core::Map) -> Self {
         Self {
             name: map.name.as_str().to_string(),
-            nodes: map.nodes.into_iter().map(|n| BoardNode { id: n.id, title: n.title }).collect(),
+            kinds: map.kinds().into(),
+            nodes: map.nodes.into_iter().map(|n| BoardNode { id: n.id, kind: n.kind, title: n.title }).collect(),
             edges: map.edges.into_iter().map(Edge::from).collect(),
         }
     }
@@ -167,7 +169,31 @@ impl From<core::Map> for BoardMap {
 #[derive(Serialize)]
 struct BoardNode {
     id: NodeId,
+    kind: String,
     title: String,
+}
+
+/// The kinds a person may give a node or an edge on a map.
+#[derive(Serialize)]
+struct Kinds {
+    /// Whether the map's schema declares them; if not, any kind is allowed and these are suggestions.
+    declared: bool,
+    nodes: BTreeSet<String>,
+    edges: Vec<EdgeKinds>,
+}
+
+#[derive(Serialize)]
+struct EdgeKinds {
+    kind: String,
+    from: String,
+    to: String,
+}
+
+impl From<core::Kinds> for Kinds {
+    fn from(kinds: core::Kinds) -> Self {
+        let edges = kinds.edges.into_iter().map(|(kind, from, to)| EdgeKinds { kind, from, to }).collect();
+        Self { declared: kinds.declared, nodes: kinds.nodes, edges }
+    }
 }
 
 /// A whole map as the page reads it, under the name of its project.

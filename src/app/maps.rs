@@ -3,7 +3,23 @@ use std::path::{Path, PathBuf};
 
 use super::{AppService, Taken};
 use crate::core::{Actor, Board, Event, EventId, EventStore, Map, MapId, Name, NodeId, Payload, Place, Places, Policy, Project, ProjectId, Reference, SessionId, Skill, SkillStore, Source};
-use crate::shared::Result;
+use crate::shared::{Error, Result};
+
+/// A node or an edge write the map, its schema or the policy turns down; the message says why.
+#[derive(Debug)]
+pub struct Refused(String);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+fn refused(error: Error) -> Error {
+    Refused(error.to_string()).into()
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Ref {
@@ -87,7 +103,7 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
 
     /// Records that the map is shown at `place` too. Nothing is written when it already is.
     pub async fn place_map(&self, source: Source, actor: Actor, map: MapId, place: Place) -> Result<()> {
-        let Located { events, map } = self.located(map).await?;
+        let Located { events, map, .. } = self.located(map).await?;
 
         let places = map.places.with(place);
         if places == map.places {
@@ -235,11 +251,11 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
     ) -> Result<()> {
         not_blank("kind", kind)?;
 
-        let Located { events, map } = self.located(map).await?;
+        let Located { events, project, map } = self.located(map).await?;
 
         let mut resolved = Vec::new();
         for reference in references {
-            resolved.push(resolve_reference(&events, map.project, &source, reference).await?);
+            resolved.push(resolve_reference(&events, &project, reference).await?);
         }
 
         self.write(&map, Event::node_added(source, actor, map.id, NodeId::new(), kind, title, properties, resolved)).await
@@ -259,8 +275,8 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         properties: BTreeMap<String, String>,
         references: Vec<Ref>,
     ) -> Result<()> {
-        let Located { events, map } = self.located(map).await?;
-        let node = map.on_map(node)?;
+        let Located { events, project, map } = self.located(map).await?;
+        let node = map.on_map(node).map_err(refused)?;
 
         let new_title = new_title.unwrap_or(&node.title);
 
@@ -268,12 +284,12 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         merged.extend(properties);
 
         if new_title == node.title && merged == node.properties && references.is_empty() {
-            return Err(format!("the change leaves {:?} as it is", node.title).into());
+            return Err(Refused(format!("the change leaves {:?} as it is", node.title)).into());
         }
 
         let mut all_references = node.references.clone();
         for reference in references {
-            all_references.push(resolve_reference(&events, map.project, &source, reference).await?);
+            all_references.push(resolve_reference(&events, &project, reference).await?);
         }
 
         self.write(&map, Event::node_changed(source, actor, map.id, node.id, new_title, merged, all_references)).await
@@ -284,14 +300,15 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         let events = self.store.all().await?;
 
         let map = Map::all(&events).into_iter().find(|m| m.id == map).ok_or("no such map")?;
+        let project = Project::all(&events).into_iter().find(|p| p.id == map.project).ok_or("the map's project is missing")?;
 
-        Ok(Located { events, map })
+        Ok(Located { events, project, map })
     }
 
     /// The one way a node or an edge event reaches the log: the map, under its schema, and then the policy see it first.
     async fn write(&self, map: &Map, event: Event) -> Result<()> {
-        map.check(&event)?;
-        Policy::check(&event, map)?;
+        map.check(&event).map_err(refused)?;
+        Policy::check(&event, map).map_err(refused)?;
 
         self.store.append(&event).await
     }
@@ -300,11 +317,12 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
 /// A map found in its project, with the log it was read from.
 struct Located {
     events: Vec<Event>,
+    project: Project,
     map: Map,
 }
 
-/// File references resolve against the writer's checkout and must stay inside it; the web has none.
-async fn resolve_reference(events: &[Event], project: ProjectId, source: &Source, reference: Ref) -> Result<Reference> {
+/// File references resolve against the project's root and must stay inside it; a project without one holds none.
+async fn resolve_reference(events: &[Event], project: &Project, reference: Ref) -> Result<Reference> {
     match reference {
         Ref::Message(quote) => {
             not_blank("message reference", &quote)?;
@@ -312,7 +330,7 @@ async fn resolve_reference(events: &[Event], project: ProjectId, source: &Source
             let sessions: BTreeSet<SessionId> = events
                 .iter()
                 .filter_map(|event| match &event.payload {
-                    Payload::SessionCreated { session, project: of, .. } if *of == project => Some(*session),
+                    Payload::SessionCreated { session, project: of, .. } if *of == project.id => Some(*session),
                     _ => None,
                 })
                 .collect();
@@ -334,7 +352,7 @@ async fn resolve_reference(events: &[Event], project: ProjectId, source: &Source
                 return Err("a file reference range must use 1-based lines with from <= to".into());
             }
 
-            let folder = source.path()?;
+            let folder = project.root.as_deref().ok_or("a file reference needs a project with a folder")?;
             let folder = tokio::fs::canonicalize(folder).await
                 .map_err(|error| format!("cannot read {}: {error}", folder.display()))?;
             let target = tokio::fs::canonicalize(folder.join(&path)).await
@@ -355,7 +373,7 @@ async fn resolve_reference(events: &[Event], project: ProjectId, source: &Source
 
 fn not_blank(name: &str, value: &str) -> Result<()> {
     if value.trim().is_empty() {
-        return Err(format!("{name} must not be blank").into());
+        return Err(Refused(format!("{name} must not be blank")).into());
     }
 
     Ok(())
@@ -809,7 +827,7 @@ mod tests {
         let events = store.0.lock().unwrap().clone();
         let project = Project::all(&events).remove(0);
 
-        let result = resolve_reference(&events, project.id, &Source::Web, Ref::Message("Match".into())).await;
+        let result = resolve_reference(&events, &project, Ref::Message("Match".into())).await;
 
         assert!(result.is_err());
     }
@@ -822,14 +840,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_web_source_cannot_write_a_file_reference() {
-        let store = in_project("/repo");
-        let project = id_at(&store, "/repo");
+    async fn a_project_without_a_root_holds_no_file_reference() {
+        let store = Memory::default();
+        let project = ProjectId::new();
+        store.0.lock().unwrap().push(Event::project_created(Source::Web, Actor::Human, project, Name::new("web").unwrap(), None));
         let service = AppService::new(&store, Skills);
-        service.create_map(Source::fixture(), Actor::Human, project, "concepts", Some(Path::new("/skills/concepts"))).await.unwrap();
+        service.create_map(Source::Web, Actor::Human, project, "concepts", Some(Path::new("/skills/concepts"))).await.unwrap();
 
         let result = service.add_node(
-            Source::Web, Actor::Human, mid(&service, project, "concepts").await, "concept", "Excerpts", BTreeMap::new(),
+            Source::fixture(), Actor::Human, mid(&service, project, "concepts").await, "concept", "Excerpts", BTreeMap::new(),
             vec![Ref::File { path: "text.txt".into(), lines: (1, 1) }],
         ).await;
 
@@ -949,11 +968,9 @@ mod tests {
 
         let stub = Project { id: crate::core::ProjectId::new(), name: crate::core::Name::new("stub").unwrap(), root: Some(project.clone()) };
 
-        let writer = Source::Checkout { client: "claude-code".into(), path: project.clone() };
-
-        let inside = resolve_reference(&[], stub.id, &writer, Ref::File { path: "alias.txt".into(), lines: (1, 1) }).await.unwrap();
-        let escape = resolve_reference(&[], stub.id, &writer, Ref::File { path: "escape.txt".into(), lines: (1, 1) }).await;
-        let parent = resolve_reference(&[], stub.id, &writer, Ref::File { path: "../outside.txt".into(), lines: (1, 1) }).await;
+        let inside = resolve_reference(&[], &stub, Ref::File { path: "alias.txt".into(), lines: (1, 1) }).await.unwrap();
+        let escape = resolve_reference(&[], &stub, Ref::File { path: "escape.txt".into(), lines: (1, 1) }).await;
+        let parent = resolve_reference(&[], &stub, Ref::File { path: "../outside.txt".into(), lines: (1, 1) }).await;
 
         assert_eq!(inside, Reference::File { path: "inside.txt".into(), lines: (1, 1), excerpt: "inside".into() });
         assert!(escape.is_err());
@@ -962,28 +979,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_file_reference_resolves_against_the_writers_folder_not_the_project_root() {
+    async fn a_file_reference_resolves_against_the_project_root_not_the_writers_folder() {
         let source = file_project().await;
-        let worktree = source.path().unwrap().join("worktree");
-        tokio::fs::create_dir(&worktree).await.unwrap();
-        tokio::fs::write(worktree.join("only-here.txt"), "mine").await.unwrap();
+        tokio::fs::write(source.path().unwrap().join("text.txt"), "root").await.unwrap();
         let store = in_project(source.path().unwrap().to_str().unwrap());
         let project = id_at(&store, source.path().unwrap().to_str().unwrap());
         let service = AppService::new(&store, Skills);
         service.create_map(source.clone(), Actor::Human, project, "concepts", Some(Path::new("/skills/concepts"))).await.unwrap();
-        let writer = Source::Checkout { client: "claude-code".into(), path: worktree };
+        let elsewhere = Source::Checkout { client: "claude-code".into(), path: "/elsewhere".into() };
 
-        let found = service.add_node(
-            writer.clone(), Actor::Agent, mid(&service, project, "concepts").await, "concept", "A", BTreeMap::new(),
-            vec![Ref::File { path: "only-here.txt".into(), lines: (1, 1) }],
-        ).await;
-        let at_root = service.add_node(
-            source.clone(), Actor::Agent, mid(&service, project, "concepts").await, "concept", "B", BTreeMap::new(),
-            vec![Ref::File { path: "only-here.txt".into(), lines: (1, 1) }],
-        ).await;
+        service.add_node(
+            elsewhere, Actor::Agent, mid(&service, project, "concepts").await, "concept", "A", BTreeMap::new(),
+            vec![Ref::File { path: "text.txt".into(), lines: (1, 1) }],
+        ).await.unwrap();
 
-        found.unwrap();
-        assert!(at_root.is_err());
+        let nodes = service.map(mid(&service, project, "concepts").await).await.unwrap().nodes;
+        assert_eq!(nodes[0].references, vec![Reference::File { path: "text.txt".into(), lines: (1, 1), excerpt: "root".into() }]);
         tokio::fs::remove_dir_all(source.path().unwrap()).await.unwrap();
     }
 

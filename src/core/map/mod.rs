@@ -1,4 +1,5 @@
 mod skill;
+mod kinds;
 mod observed;
 mod places;
 mod policy;
@@ -9,6 +10,7 @@ use std::path::PathBuf;
 
 use jiff::Timestamp;
 
+pub use kinds::Kinds;
 pub use skill::{Skill, SkillStore};
 pub use places::{LastPlace, Place, Places};
 pub use policy::Policy;

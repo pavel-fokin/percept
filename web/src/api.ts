@@ -28,9 +28,17 @@ export type BoardSummary = {
   project: string;
 };
 
+/** What a person may name a node or an edge on a map. Undeclared kinds are only suggestions: any kind is allowed. */
+export type Kinds = {
+  declared: boolean;
+  nodes: string[];
+  edges: { kind: string; from: string; to: string }[];
+};
+
 export type BoardMap = {
   name: string;
-  nodes: { id: string; title: string }[];
+  kinds: Kinds;
+  nodes: { id: string; kind: string; title: string }[];
   edges: MapEdge[];
 };
 
@@ -100,6 +108,13 @@ export async function postData<T>(url: string, body?: unknown): Promise<T> {
     method: "POST",
     ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
   });
+  if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
+  return ((await res.json()) as { data: T }).data;
+}
+
+/** Patches `url` with `body` as JSON; a refusal throws an Error with the server's reason. */
+export async function patchData<T>(url: string, body: unknown): Promise<T> {
+  const res = await fetch(url, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error((await res.text()) || `HTTP ${res.status}`);
   return ((await res.json()) as { data: T }).data;
 }

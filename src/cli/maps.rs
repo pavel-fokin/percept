@@ -4,13 +4,13 @@ use std::path::Path;
 use super::address::{self, Address, Target};
 use super::hook::Client;
 use crate::app::{AppService, Ref, library, skill_dir, source_path};
-use crate::core::{Actor, EventStore, Map, NodeId, Project, Reference, Skill, SkillStore, Source};
+use crate::core::{Actor, EventStore, Map, NodeId, Reference, Skill, SkillStore, Source};
 use crate::shared::Result;
 
 pub(super) async fn new_board<S: EventStore, M: SkillStore>(service: &AppService<S, M>, path: &str) -> Result<()> {
-    let (actor, source, current) = project_writer(service).await?;
+    let (actor, source) = cli_writer().await?;
 
-    let (project, board, name) = address::new_at(service, current, &Address::parse(path)?, "board").await?;
+    let (project, board, name) = address::new_at(service, source.path()?, &Address::parse(path)?, "board").await?;
     if board.is_some() {
         return Err(format!("{path:?} is not a board name or a path like /<project>/<board>").into());
     }
@@ -25,9 +25,9 @@ pub(super) async fn new_board<S: EventStore, M: SkillStore>(service: &AppService
 pub(super) async fn new_map<S: EventStore, M: SkillStore>(service: &AppService<S, M>, home: &Path, path: &str, skill: Option<&str>) -> Result<()> {
     let dir = skill.map(|skill| skill_dir(home, skill)).transpose()?;
 
-    let (actor, source, current) = project_writer(service).await?;
+    let (actor, source) = cli_writer().await?;
 
-    let (project, board, name) = address::new_at(service, current, &Address::parse(path)?, "map").await?;
+    let (project, board, name) = address::new_at(service, source.path()?, &Address::parse(path)?, "map").await?;
 
     let map = match &board {
         Some(board) => service.create_map_on_board(source, actor, board, &name, dir.as_deref()).await?,
@@ -55,7 +55,7 @@ pub(super) async fn add<S: EventStore, M: SkillStore>(service: &AppService<S, M>
 
     match positionals {
         [map, kind, title] => {
-            let (actor, source, _) = project_writer(service).await?;
+            let (actor, source) = cli_writer().await?;
             let map = map_at(service, map).await?;
             let at = address::of(service, &map).await?;
             service.add_node(source, actor, map.id, kind, title, properties, references).await?;
@@ -63,7 +63,7 @@ pub(super) async fn add<S: EventStore, M: SkillStore>(service: &AppService<S, M>
             println!("Added {kind} {title:?} to {at}.");
         }
         [map, from, kind, to] => {
-            let (actor, source, _) = project_writer(service).await?;
+            let (actor, source) = cli_writer().await?;
             let map = map_at(service, map).await?;
             let at = address::of(service, &map).await?;
             service.add_edge(source, actor, map.id, node_of(&map, from)?, kind, node_of(&map, to)?).await?;
@@ -84,7 +84,7 @@ pub(super) async fn change<S: EventStore, M: SkillStore>(service: &AppService<S,
         [map, title, new_title] => (map, title, Some(new_title.as_str())),
         _ => return Err("usage: percept change <map> <title> [<new title>] [--key value ...] [--ref 'msg:<text>' | --ref 'file:<path>:<from>-<to>' ...]".into()),
     };
-    let (actor, source, _) = project_writer(service).await?;
+    let (actor, source) = cli_writer().await?;
     let map = map_at(service, map).await?;
     let node = node_of(&map, title)?;
     let at = address::of(service, &map).await?;
@@ -99,7 +99,7 @@ pub(super) async fn change<S: EventStore, M: SkillStore>(service: &AppService<S,
 pub(super) async fn remove<S: EventStore, M: SkillStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
     match split_remove(args)? {
         [map, title] => {
-            let (actor, source, _) = project_writer(service).await?;
+            let (actor, source) = cli_writer().await?;
             let map = map_at(service, map).await?;
             let at = address::of(service, &map).await?;
             service.remove_node(source, actor, map.id, node_of(&map, title)?).await?;
@@ -107,7 +107,7 @@ pub(super) async fn remove<S: EventStore, M: SkillStore>(service: &AppService<S,
             println!("Removed {title:?} from {at}.");
         }
         [map, from, kind, to] => {
-            let (actor, source, _) = project_writer(service).await?;
+            let (actor, source) = cli_writer().await?;
             let map = map_at(service, map).await?;
             let at = address::of(service, &map).await?;
             service.remove_edge(source, actor, map.id, node_of(&map, from)?, kind, node_of(&map, to)?).await?;
@@ -186,14 +186,6 @@ fn parse_reference(value: &str) -> Result<Ref> {
     }
 
     Err("--ref expects msg:<text> or file:<path>:<from>-<to>".into())
-}
-
-/// The writer, as `cli_writer` finds it, and the project its checkout belongs to.
-async fn project_writer<S: EventStore, M: SkillStore>(service: &AppService<S, M>) -> Result<(Actor, Source, Project)> {
-    let (actor, source) = cli_writer().await?;
-    let project = address::project_of(service, source.path()?).await?;
-
-    Ok((actor, source, project))
 }
 
 /// The map the argument `text` names.
