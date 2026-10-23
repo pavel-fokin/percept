@@ -16,12 +16,11 @@ import { useLoaderData, useRevalidator } from "react-router";
 
 import { deleteData, describe, getData, patchData, postData, type BoardDetail, type BoardMap, type MapSummary, type Skill, type SkillEntry } from "../api";
 import { Button } from "../components/ui/button";
+import { field } from "../components/ui/field";
 import { usePolling } from "../use-polling";
 import type { loadBoard } from "./board-page";
 
 type MapNode = Node<{ title: string; map: string }, "map-node">;
-
-const field = "h-11 w-full rounded-md border border-border bg-bg px-3 text-base text-text placeholder:text-muted focus-visible:border-muted focus-visible:outline-none md:text-sm";
 
 const nodeTypes = { "map-node": MapNodeCard };
 
@@ -270,7 +269,7 @@ function AddNode({ project, map }: { project: string; map: BoardMap }) {
             }}
             className={field}
           />
-          <Button type="submit" variant="secondary" disabled={!kind || !title.trim()} className="h-11">
+          <Button type="submit" variant="secondary" disabled={!kind || !title.trim()}>
             Add
           </Button>
           {failure && <p className="px-1 py-1 wrap-anywhere text-muted">{failure}</p>}
@@ -334,14 +333,14 @@ function EditNode({
         className={field}
       />
       <div className="grid grid-cols-2 gap-1">
-        <Button type="submit" variant="secondary" disabled={!title.trim() || title.trim() === node.title} className="h-11">
+        <Button type="submit" variant="secondary" disabled={!title.trim() || title.trim() === node.title}>
           Rename
         </Button>
-        <Button type="button" variant="secondary" onClick={() => void remove()} className="h-11">
+        <Button type="button" variant="secondary" onClick={() => void remove()}>
           Delete
         </Button>
       </div>
-      <Button type="button" variant="secondary" aria-pressed={connecting} onClick={onConnect} className="h-11">
+      <Button type="button" variant="secondary" aria-pressed={connecting} onClick={onConnect}>
         {connecting ? "Cancel connect" : "Connect"}
       </Button>
       {connecting && <p className="px-1 py-1 text-muted">Tap the node to connect to.</p>}
@@ -415,7 +414,7 @@ function ConnectEdge({ project, maps, ends, onDone }: { project: string; maps: B
           </datalist>
         </>
       )}
-      <Button type="submit" variant="secondary" disabled={!kind} className="h-11">
+      <Button type="submit" variant="secondary" disabled={!kind}>
         Connect
       </Button>
       {failure && <p className="px-1 py-1 wrap-anywhere text-muted">{failure}</p>}
@@ -444,7 +443,7 @@ function RemoveEdge({ project, map, edge, onGone }: { project: string; map: Boar
       <p className="wrap-anywhere">
         {title(edge.from)} <span className="font-mono text-xs text-muted">{edge.kind}</span> {title(edge.to)}
       </p>
-      <Button type="button" variant="secondary" onClick={() => void remove()} className="h-11">
+      <Button type="button" variant="secondary" onClick={() => void remove()}>
         Delete
       </Button>
       {failure && <p className="px-1 py-1 wrap-anywhere text-muted">{failure}</p>}
@@ -529,7 +528,7 @@ function AddMap({ board, addable }: { board: BoardDetail; addable: MapSummary[] 
                 setName(e.target.value);
                 setFailure(null);
               }}
-              className="h-11 w-full rounded-md border border-border bg-bg px-3 text-base text-text placeholder:text-muted focus-visible:border-muted focus-visible:outline-none md:text-sm"
+              className={field}
             />
             <select
               value={skill}
@@ -538,7 +537,7 @@ function AddMap({ board, addable }: { board: BoardDetail; addable: MapSummary[] 
                 setSkill(e.target.value);
                 setFailure(null);
               }}
-              className="h-11 w-full rounded-md border border-border bg-bg px-3 text-base text-text focus-visible:border-muted focus-visible:outline-none md:text-sm"
+              className={field}
             >
               <option value="">No skill</option>
               {skills.map((s) => (
@@ -547,7 +546,7 @@ function AddMap({ board, addable }: { board: BoardDetail; addable: MapSummary[] 
                 </option>
               ))}
             </select>
-            <Button type="submit" variant="secondary" disabled={!name.trim()} className="h-11">
+            <Button type="submit" variant="secondary" disabled={!name.trim()}>
               Add
             </Button>
           </form>

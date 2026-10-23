@@ -45,7 +45,7 @@ export function NewMessage({ events }: { events: Event[] }) {
         <Button
           variant="secondary"
           onClick={jump}
-          className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-1/2 z-10 min-h-11 -translate-x-1/2 whitespace-nowrap"
+          className="fixed bottom-[calc(1rem+env(safe-area-inset-bottom))] left-1/2 z-10 -translate-x-1/2 whitespace-nowrap"
         >
           <span aria-hidden>↓</span>
           {target.label}
