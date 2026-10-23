@@ -1,16 +1,24 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Component, Path};
 
 use super::hook::Client;
 use crate::app::{AppService, Ref, source_path};
 use crate::core::{Actor, EventStore, Map, MapId, NodeId, Project, Reference, Skill, SkillStore, Source};
 use crate::shared::Result;
 
-pub(super) async fn create<S: EventStore, M: SkillStore>(service: &AppService<S, M>, name: &str, file: &Path) -> Result<()> {
-    let (actor, source, project) = project_writer(service).await?;
-    let file = tokio::fs::canonicalize(file).await.map_err(|e| format!("{}: {e}", file.display()))?;
+pub(super) async fn create<S: EventStore, M: SkillStore>(service: &AppService<S, M>, home: &Path, name: &str, skill: &str) -> Result<()> {
+    let mut parts = Path::new(skill).components();
+    if !matches!((parts.next(), parts.next()), (Some(Component::Normal(_)), None)) {
+        return Err(format!("{skill:?} is not a skill name").into());
+    }
 
-    service.create_map(source, actor, project.id, name, &file).await
+    let (actor, source, project) = project_writer(service).await?;
+    let dir = home.join(".percept").join("skills").join(skill);
+    if !tokio::fs::try_exists(&dir).await? {
+        return Err(format!("no skill named {skill:?} in {}", dir.parent().unwrap_or(&dir).display()).into());
+    }
+
+    service.create_map(source, actor, project.id, name, &dir).await
 }
 
 pub(super) async fn add<S: EventStore, M: SkillStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {

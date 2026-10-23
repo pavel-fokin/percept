@@ -144,7 +144,7 @@ mod tests {
         let service = AppService::new(&store, Skills);
         let board = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
         for name in ["decisions", "tasks"] {
-            service.create_map(Source::Web, Actor::Human, project, name, Path::new(&format!("/maps/{name}.toml"))).await.unwrap();
+            service.create_map(Source::Web, Actor::Human, project, name, Path::new(&format!("/skills/{name}"))).await.unwrap();
         }
         let decisions = service.map_id("p0", "decisions").await.unwrap().unwrap();
         service.place_map(Source::Web, Actor::Human, decisions, Place::Board(board.id)).await.unwrap();

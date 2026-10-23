@@ -1,5 +1,5 @@
-//! Infrastructure layer: reads map skills from TOML files.
+//! Infrastructure layer: reads map skills from agent skill directories.
 
-mod toml_store;
+mod markdown_store;
 
-pub use toml_store::TomlStore;
+pub use markdown_store::MarkdownStore;
