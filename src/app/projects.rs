@@ -4,9 +4,9 @@ use super::AppService;
 use crate::core::{Actor, Event, EventStore, Name, Project, ProjectId, SkillStore, Source};
 use crate::shared::Result;
 
-/// A project the log already holds blocks this one; the message says which.
+/// A name or root the log already holds, for a project, map or board; the message says which.
 #[derive(Debug)]
-pub struct Taken(String);
+pub struct Taken(pub(super) String);
 
 impl std::fmt::Display for Taken {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

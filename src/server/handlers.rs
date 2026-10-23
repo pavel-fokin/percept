@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 use super::responses::{self, BoardDetail, BoardSummary, Data, MapDetail, MapSummary, ProjectSummary, Skills, Status};
 use super::Api;
-use crate::app::{library, Taken};
+use crate::app::{library, skill_dir, Taken};
 use crate::core::{Actor, EventStore, LastPlace, Name, Place, SessionId, SkillStore, Source};
 use crate::shared::{Begin, Error};
 
@@ -23,6 +23,12 @@ pub(super) struct NewProject {
 #[derive(Deserialize)]
 pub(super) struct PlacedMap {
     map: String,
+}
+
+/// The body of `POST /api/projects/{project}/boards/{board}/maps/{map}`: the skill to create the map from, if any.
+#[derive(Deserialize)]
+pub(super) struct NewMap {
+    skill: Option<String>,
 }
 
 type Reply<T> = Result<Json<Data<T>>, ApiError>;
@@ -147,6 +153,21 @@ where
         let shown = service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
         let map = service.map_id(shown.project.name.as_str(), &body.map).await?.ok_or(ApiError::NotFound)?;
         service.place_map(Source::Web, Actor::Human, map, Place::Board(shown.board.id)).await?;
+
+        let contents = service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
+        Ok(Json(Data { data: BoardDetail::new(contents) }))
+    }
+
+    pub(super) async fn create_map(
+        State(api): State<Arc<Self>>,
+        Path((project, board, map)): Path<(String, String, String)>,
+        Json(body): Json<NewMap>,
+    ) -> Reply<BoardDetail> {
+        let name = Name::new(&map).map_err(|error| ApiError::BadRequest(error.to_string()))?;
+        let dir = body.skill.as_deref().map(|skill| skill_dir(&api.home, skill)).transpose().map_err(|error| ApiError::BadRequest(error.to_string()))?;
+        let service = api.service().await?;
+        let shown = service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
+        service.create_map_on_board(Source::Web, Actor::Human, &shown.board, name.as_str(), dir.as_deref()).await?;
 
         let contents = service.board_contents(&project, &board).await?.ok_or(ApiError::NotFound)?;
         Ok(Json(Data { data: BoardDetail::new(contents) }))

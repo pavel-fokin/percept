@@ -317,7 +317,7 @@ mod tests {
             Event::subagent_reported(Source::fixture(), session, ClientAgentId::new("a1".into()), "done", raw),
             Event::project_created(Source::fixture(), Actor::Human, ProjectId::new(), Name::new("percept").unwrap(), Some("/work/percept".into())),
             Event::board_created(Source::fixture(), Actor::Human, BoardId::new(), ProjectId::new(), Name::new("ideas").unwrap()),
-            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), None, Places::new([Place::Project(project), Place::Board(BoardId::new())]).unwrap()),
+            Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), Some("/maps/decisions.toml".into()), None, Places::new([Place::Project(project), Place::Board(BoardId::new())]).unwrap()),
             Event::map_changed(Source::fixture(), Actor::Human, MapId::new(), Places::new([Place::Project(project), Place::Board(BoardId::new())]).unwrap()),
             Event::node_added(Source::fixture(), Actor::Agent, MapId::new(), NodeId::new(), "question", "Why?", BTreeMap::from([("definition".into(), "D".into())]), Vec::new()),
             Event::node_changed(Source::fixture(), Actor::Human, MapId::new(), NodeId::new(), "Why not?", BTreeMap::from([("definition".into(), "E".into())]), Vec::new()),
@@ -370,26 +370,28 @@ mod tests {
         let nodes = BTreeMap::from([("note".to_string(), BTreeSet::from(["body".to_string()])), ("topic".to_string(), BTreeSet::new())]);
         let edges = BTreeMap::from([("about".to_string(), EdgeKind { from: "note".into(), to: "topic".into() })]);
         let schema = Schema::new(nodes, edges).unwrap();
-        let created = |schema| Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("notes").unwrap(), "/skills/notes".into(), schema, Places::fixture(project));
+        let created = |schema| Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("notes").unwrap(), Some("/skills/notes".into()), schema, Places::fixture(project));
         let with = created(Some(schema));
         let without = created(None);
+        let skill_less = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("scratch").unwrap(), None, None, Places::fixture(project));
 
         let mut broken = EventLine::from(&with);
         broken.payload["schema"]["edges"]["about"]["to"] = json!("missing");
 
-        for event in [&with, &without] {
+        for event in [&with, &without, &skill_less] {
             let text = serde_json::to_string(&EventLine::from(event)).unwrap();
             let back = Event::try_from(serde_json::from_str::<EventLine>(&text).unwrap()).unwrap();
             assert_eq!(back.payload, event.payload);
         }
         assert_eq!(EventLine::from(&without).payload["schema"], json!(null));
+        assert_eq!(EventLine::from(&skill_less).payload["skill"], json!(null));
         assert!(Event::try_from(broken).is_err());
     }
 
     #[test]
     fn a_map_line_without_places_or_with_none_is_a_read_error() {
         let project = ProjectId::new();
-        let event = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), None, Places::fixture(project));
+        let event = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), Some("/maps/decisions.toml".into()), None, Places::fixture(project));
         let mut line = EventLine::from(&event);
         assert_eq!(line.payload["places"], json!([{ "project": project }]));
 

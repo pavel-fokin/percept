@@ -27,12 +27,12 @@ enum New {
         #[arg(allow_hyphen_values = true)]
         path: String,
     },
-    /// Creates a map from a skill.
+    /// Creates a map from a skill, or without one.
     Map {
         #[arg(allow_hyphen_values = true)]
         path: String,
         #[arg(long)]
-        skill: String,
+        skill: Option<String>,
     },
 }
 
@@ -67,7 +67,7 @@ enum Operation {
     /// Creates a project at the root of the current git repository, or in the current folder outside one, named after that folder unless a name is given.
     #[command(display_order = 1)]
     Init { name: Option<String> },
-    /// Creates a board, `new board <path>`, or a map, `new map <path> --skill <skill>`. A <path> is a name in the current project or `/<project>/<board>`; a map's is also `/<project>/<map>` or `/<project>/<board>/<map>`, the last shows the map on that board only. A map is made from the skill of that name in ~/.percept/skills. Boards and maps of a project share names.
+    /// Creates a board, `new board <path>`, or a map, `new map <path> [--skill <skill>]`. A <path> is a name in the current project or `/<project>/<board>`; a map's is also `/<project>/<map>` or `/<project>/<board>/<map>`, the last shows the map on that board only. A map is made from the skill of that name in ~/.percept/skills, or without one. Boards and maps of a project share names.
     #[command(display_order = 2)]
     New {
         #[command(subcommand)]
@@ -133,7 +133,7 @@ async fn operate<L: Begin<Transaction: EventStore + Send + Sync>, M: SkillStore>
         None => status(service).await,
         Some(Operation::Init { name }) => init(service, name.as_deref()).await,
         Some(Operation::New { what: New::Board { path } }) => new_board(service, &path).await,
-        Some(Operation::New { what: New::Map { path, skill } }) => new_map(service, home, &path, &skill).await,
+        Some(Operation::New { what: New::Map { path, skill } }) => new_map(service, home, &path, skill.as_deref()).await,
         Some(Operation::Add { args }) => add(service, &args).await,
         Some(Operation::Change { args }) => change(service, &args).await,
         Some(Operation::Remove { args }) => remove(service, &args).await,
@@ -183,13 +183,14 @@ mod tests {
     }
 
     #[test]
-    fn new_takes_a_board_or_a_map_with_a_required_skill() {
+    fn new_takes_a_board_or_a_map_with_an_optional_skill() {
         let board = Cli::try_parse_from(["percept", "new", "board", "storage"]).unwrap();
         let map = Cli::try_parse_from(["percept", "new", "map", "/p/b/m", "--skill", "decision"]).unwrap();
+        let bare = Cli::try_parse_from(["percept", "new", "map", "scratch"]).unwrap();
 
         assert!(matches!(board.command, Some(Command::Operation(Operation::New { what: New::Board { path } })) if path == "storage"));
-        assert!(matches!(map.command, Some(Command::Operation(Operation::New { what: New::Map { path, skill } })) if path == "/p/b/m" && skill == "decision"));
-        assert!(Cli::try_parse_from(["percept", "new", "map", "m"]).is_err());
+        assert!(matches!(map.command, Some(Command::Operation(Operation::New { what: New::Map { path, skill } })) if path == "/p/b/m" && skill.as_deref() == Some("decision")));
+        assert!(matches!(bare.command, Some(Command::Operation(Operation::New { what: New::Map { path, skill } })) if path == "scratch" && skill.is_none()));
         assert!(Cli::try_parse_from(["percept", "new", "project", "p"]).is_err());
         assert!(Cli::try_parse_from(["percept", "create", "m", "decision"]).is_err());
     }

@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Component, Path};
+use std::path::Path;
 
 use super::address::{self, Address, Target};
 use super::hook::Client;
-use crate::app::{AppService, Ref, library, source_path};
+use crate::app::{AppService, Ref, library, skill_dir, source_path};
 use crate::core::{Actor, EventStore, Map, NodeId, Project, Reference, Skill, SkillStore, Source};
 use crate::shared::Result;
 
@@ -22,20 +22,16 @@ pub(super) async fn new_board<S: EventStore, M: SkillStore>(service: &AppService
     Ok(())
 }
 
-pub(super) async fn new_map<S: EventStore, M: SkillStore>(service: &AppService<S, M>, home: &Path, path: &str, skill: &str) -> Result<()> {
-    let mut parts = Path::new(skill).components();
-    if !matches!((parts.next(), parts.next()), (Some(Component::Normal(_)), None)) {
-        return Err(format!("{skill:?} is not a skill name").into());
-    }
+pub(super) async fn new_map<S: EventStore, M: SkillStore>(service: &AppService<S, M>, home: &Path, path: &str, skill: Option<&str>) -> Result<()> {
+    let dir = skill.map(|skill| skill_dir(home, skill)).transpose()?;
 
     let (actor, source, current) = project_writer(service).await?;
-    let dir = library(home).join(skill);
 
     let (project, board, name) = address::new_at(service, current, &Address::parse(path)?, "map").await?;
 
     let map = match &board {
-        Some(board) => service.create_map_on_board(source, actor, board, &name, &dir).await?,
-        None => service.create_map(source, actor, project.id, &name, &dir).await?,
+        Some(board) => service.create_map_on_board(source, actor, board, &name, dir.as_deref()).await?,
+        None => service.create_map(source, actor, project.id, &name, dir.as_deref()).await?,
     };
 
     println!("Created {}.", address::of(service, &map).await?);
@@ -256,11 +252,12 @@ fn map_line(map: &Map) -> String {
 }
 
 /// The map's schema under its skill's description and instructions; a map without a schema shows the kinds it uses instead.
-fn map_description(map: &Map, skill: &Result<Skill>) -> String {
-    let mut text = format!("# {}\n\n", map.name.as_str());
+fn map_description(map: &Map, skill: &Result<Option<Skill>>) -> String {
+    let mut text = format!("# {}\n", map.name.as_str());
     match skill {
-        Ok(skill) => text.push_str(&format!("{}\n\n## Instructions\n\n{}\n", skill.description().trim(), skill.instructions().trim())),
-        Err(e) => text.push_str(&format!("The skill cannot be read: {e}.\n")),
+        Ok(Some(skill)) => text.push_str(&format!("\n{}\n\n## Instructions\n\n{}\n", skill.description().trim(), skill.instructions().trim())),
+        Ok(None) => {}
+        Err(e) => text.push_str(&format!("\nThe skill cannot be read: {e}.\n")),
     }
 
     if let Some(schema) = &map.schema {
@@ -532,8 +529,8 @@ mod tests {
     }
 
     /// A skill `Why.` with instructions `Keep it.`.
-    fn skill() -> Result<Skill> {
-        Ok(Skill::new("scratch".into(), "Why.".into(), "\nKeep it.\n".into(), None))
+    fn skill() -> Result<Option<Skill>> {
+        Ok(Some(Skill::new("scratch".into(), "Why.".into(), "\nKeep it.\n".into(), None)))
     }
 
     #[test]
@@ -591,6 +588,17 @@ mod tests {
 
         assert!(text.ends_with("| note |  |"));
         assert!(!text.contains("Edge kind"));
+    }
+
+    #[test]
+    fn a_map_without_a_skill_is_described_by_its_heading_and_observed_kinds() {
+        let (map, a) = (MapId::new(), NodeId::new());
+        let events = [Event::node_added(Source::fixture(), Actor::Human, map, a, "note", "A", BTreeMap::new(), Vec::new())];
+        let map = Map::fixture(map, &events);
+
+        let text = map_description(&map, &Ok(None));
+
+        assert_eq!(text, "# concepts\n\n## Schema\n\nObserved on the map, not checked.\n\n| Node kind | Properties |\n|---|---|\n| note |  |");
     }
 
     #[test]

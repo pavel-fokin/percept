@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import dagre from "@dagrejs/dagre";
 import {
   Background,
@@ -14,7 +14,7 @@ import {
 } from "@xyflow/react";
 import { useLoaderData, useRevalidator } from "react-router";
 
-import { deleteData, describe, postData, type BoardDetail, type MapSummary } from "../api";
+import { deleteData, describe, getData, postData, type BoardDetail, type MapSummary, type Skill, type SkillEntry } from "../api";
 import { Button } from "../components/ui/button";
 import { usePolling } from "../use-polling";
 import type { loadBoard } from "./board-page";
@@ -112,10 +112,38 @@ function AddMap({ board, addable }: { board: BoardDetail; addable: MapSummary[] 
   const { revalidate } = useRevalidator();
   const [open, setOpen] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [skills, setSkills] = useState<string[]>([]);
+  const [name, setName] = useState("");
+  const [skill, setSkill] = useState("");
 
-  function toggle() {
+  // The library is read when the panel opens, not on every poll of the board.
+  async function toggle() {
     setOpen(!open);
     setFailure(null);
+    setName("");
+    setSkill("");
+    if (open) return;
+
+    try {
+      const library = await getData<{ skills: SkillEntry[] }>("/api/skills");
+      setSkills(library.skills.filter((s): s is Skill => !("error" in s)).map((s) => s.name));
+    } catch (error) {
+      setSkills([]);
+      setFailure(`skills: ${describe(error)}`);
+    }
+  }
+
+  async function create(event: FormEvent) {
+    event.preventDefault();
+    try {
+      await postData<BoardDetail>(`/api/projects/${encodeURIComponent(board.project)}/boards/${encodeURIComponent(board.name)}/maps/${encodeURIComponent(name.trim())}`, {
+        skill: skill || null,
+      });
+      setOpen(false);
+      await revalidate();
+    } catch (error) {
+      setFailure(describe(error));
+    }
   }
 
   async function add(map: string) {
@@ -130,11 +158,11 @@ function AddMap({ board, addable }: { board: BoardDetail; addable: MapSummary[] 
 
   return (
     <div className="relative flex flex-col items-end gap-2">
-      <Button variant="secondary" aria-expanded={open} onClick={toggle}>
+      <Button variant="secondary" aria-expanded={open} onClick={() => void toggle()}>
         Add map
       </Button>
       {open && (
-        <div className="w-56 rounded-md border border-border bg-surface p-1 text-sm">
+        <div className="w-64 rounded-md border border-border bg-surface p-1 text-sm">
           {addable.length === 0 && <p className="px-3 py-2 text-muted">No other maps in {board.project}.</p>}
           {addable.map((map) => (
             <button
@@ -147,6 +175,38 @@ function AddMap({ board, addable }: { board: BoardDetail; addable: MapSummary[] 
               <span className="text-muted tabular-nums">{map.nodes}</span>
             </button>
           ))}
+          <form onSubmit={(e) => void create(e)} className="mt-1 grid gap-1 border-t border-border px-2 pt-2 pb-1">
+            <p className="text-muted">New map</p>
+            <input
+              value={name}
+              aria-label="Map name"
+              placeholder="Map name"
+              onChange={(e) => {
+                setName(e.target.value);
+                setFailure(null);
+              }}
+              className="h-11 w-full rounded-md border border-border bg-bg px-3 text-base text-text placeholder:text-muted focus-visible:border-muted focus-visible:outline-none md:text-sm"
+            />
+            <select
+              value={skill}
+              aria-label="Skill"
+              onChange={(e) => {
+                setSkill(e.target.value);
+                setFailure(null);
+              }}
+              className="h-11 w-full rounded-md border border-border bg-bg px-3 text-base text-text focus-visible:border-muted focus-visible:outline-none md:text-sm"
+            >
+              <option value="">No skill</option>
+              {skills.map((s) => (
+                <option key={s} value={s}>
+                  {s}
+                </option>
+              ))}
+            </select>
+            <Button type="submit" variant="secondary" disabled={!name.trim()} className="h-11">
+              Add
+            </Button>
+          </form>
           {failure && <p className="px-3 py-2 wrap-anywhere text-muted">{failure}</p>}
         </div>
       )}

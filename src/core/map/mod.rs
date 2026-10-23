@@ -26,8 +26,8 @@ pub struct Map {
     pub id: MapId,
     pub name: Name,
     pub project: ProjectId,
-    /// The absolute path of the skill directory the map was created from.
-    pub skill: PathBuf,
+    /// The absolute path of the skill directory the map was created from, if any.
+    pub skill: Option<PathBuf>,
     /// Copied from the skill when the map was created; without one, any node kind, property and edge is allowed.
     pub schema: Option<Schema>,
     pub places: Places,
@@ -73,7 +73,7 @@ impl Map {
     /// The map `id` after `events`, created by a `MapCreated` event placed first.
     pub fn fixture(id: MapId, events: &[Event]) -> Self {
         let project = ProjectId::new();
-        let created = Event::map_created(crate::core::Source::fixture(), Actor::Human, id, project, Name::new("concepts").unwrap(), "/maps/concepts.toml".into(), None, Places::fixture(project));
+        let created = Event::map_created(crate::core::Source::fixture(), Actor::Human, id, project, Name::new("concepts").unwrap(), Some("/maps/concepts.toml".into()), None, Places::fixture(project));
         let log: Vec<Event> = std::iter::once(created).chain(events.iter().cloned()).collect();
 
         Self::all(&log).remove(0)
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn a_map_is_found_in_its_project_by_name_in_any_case() {
         let (project, other) = (ProjectId::new(), ProjectId::new());
-        let created = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), None, Places::fixture(project));
+        let created = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), Some("/maps/decisions.toml".into()), None, Places::fixture(project));
         let events = [created];
 
         let found = |project, name: &str| Map::named(&events, project, name).map(|m| m.name);
@@ -401,7 +401,7 @@ mod tests {
         ];
 
         let project = ProjectId::new();
-        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new("concepts").unwrap(), "/maps/concepts.toml".into(), None, Places::fixture(project));
+        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new("concepts").unwrap(), Some("/maps/concepts.toml".into()), None, Places::fixture(project));
         let log: Vec<Event> = [created(map), created(other)].into_iter().chain(events).collect();
 
         let maps = Map::all(&log);
@@ -488,7 +488,7 @@ mod tests {
         let (_, add_lost) = node_added(uncreated, Actor::Human, "Lost");
         let (one, two) = (ProjectId::new(), ProjectId::new());
         let created = |id, project, name: &str| {
-            Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new(name).unwrap(), format!("/maps/{name}.toml").into(), None, Places::fixture(project))
+            Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new(name).unwrap(), Some(format!("/maps/{name}.toml").into()), None, Places::fixture(project))
         };
         let events = [
             created(first, one, "concepts"),
@@ -516,7 +516,7 @@ mod tests {
         let (project, board) = (ProjectId::new(), crate::core::BoardId::new());
         let (draft, listed, both) = (MapId::new(), MapId::new(), MapId::new());
         let created = |id, places: &[Place]| {
-            Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new("m").unwrap(), "/maps/m.toml".into(), None, Places::new(places.iter().copied()).unwrap())
+            Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new("m").unwrap(), Some("/maps/m.toml".into()), None, Places::new(places.iter().copied()).unwrap())
         };
         let events = [
             created(draft, &[Place::Board(board)]),
@@ -535,7 +535,7 @@ mod tests {
     fn a_map_changed_event_replaces_the_places_of_its_map_only() {
         let (project, board) = (ProjectId::new(), crate::core::BoardId::new());
         let (changed, kept) = (MapId::new(), MapId::new());
-        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new("m").unwrap(), "/maps/m.toml".into(), None, Places::fixture(project));
+        let created = |id| Event::map_created(Source::fixture(), Actor::Human, id, project, Name::new("m").unwrap(), Some("/maps/m.toml".into()), None, Places::fixture(project));
         let moved = Places::new([Place::Project(project), Place::Board(board)]).unwrap();
         let events = [created(changed), created(kept), Event::map_changed(Source::fixture(), Actor::Human, changed, moved.clone())];
 
@@ -684,7 +684,7 @@ mod tests {
         let (map, _, _, folded) = check_map();
         let session = crate::core::SessionId::new();
         let events = [
-            Event::map_created(Source::fixture(), Actor::Human, map, ProjectId::new(), Name::new("concepts").unwrap(), "/maps/concepts.toml".into(), None, Places::fixture(ProjectId::new())),
+            Event::map_created(Source::fixture(), Actor::Human, map, ProjectId::new(), Name::new("concepts").unwrap(), Some("/maps/concepts.toml".into()), None, Places::fixture(ProjectId::new())),
             Event::session_created(Source::fixture(), session, crate::core::ProjectId::new(), crate::core::ClientSessionId::new("c".into())),
             Event::message(Source::fixture(), session, Actor::Human, "Hello", serde_json::json!({})),
         ];

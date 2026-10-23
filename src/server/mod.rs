@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use axum::http::{header::CONTENT_TYPE, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{get, post};
 use axum::Router;
 use tokio::net::TcpListener;
 
@@ -73,7 +73,7 @@ where
         .route("/api/projects/{project}/boards", post(Api::<L, M>::create_board))
         .route("/api/projects/{project}/boards/{board}", get(Api::<L, M>::board))
         .route("/api/projects/{project}/boards/{board}/maps", post(Api::<L, M>::place_map))
-        .route("/api/projects/{project}/boards/{board}/maps/{map}", delete(Api::<L, M>::unplace_map))
+        .route("/api/projects/{project}/boards/{board}/maps/{map}", post(Api::<L, M>::create_map).delete(Api::<L, M>::unplace_map))
         .route("/favicon.svg", get(|| async { asset("image/svg+xml", FAVICON_SVG) }))
         .route("/favicon.ico", get(|| async { asset("image/x-icon", FAVICON_ICO) }))
         .route("/apple-touch-icon.png", get(|| async { asset("image/png", APPLE_TOUCH_ICON) }))
@@ -131,7 +131,7 @@ mod tests {
             let created = Event::session_created(Source::fixture(), session, project, ClientSessionId::new("k".into()));
             let started = (1..self.0).map(move |_| Event::session_started(Source::fixture(), session, json!({})));
             let map: MapId = serde_json::from_value(json!(MAP))?;
-            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), None, Places::fixture(project));
+            let map_created = Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), Some("/maps/decisions.toml".into()), None, Places::fixture(project));
             let node = Event::node_added(Source::fixture(), Actor::Human, map, NodeId::new(), "question", "Q", Default::default(), self.1.clone());
             Ok([project_created, created].into_iter().chain(started).chain(self.2.clone()).chain([map_created, node]).collect())
         }
@@ -180,8 +180,10 @@ mod tests {
     struct Skills;
 
     impl SkillStore for Skills {
-        async fn skill(&self, _: &std::path::Path) -> Result<Skill> {
-            unimplemented!()
+        async fn skill(&self, dir: &std::path::Path) -> Result<Skill> {
+            assert_eq!(dir, std::path::Path::new("/Users/me/.percept/skills/plain"));
+
+            Ok(Skill::new("plain".into(), "Anything.".into(), "Write.".into(), None))
         }
 
         async fn skills(&self, library: &std::path::Path) -> Result<Vec<(String, Result<Skill>)>> {
@@ -429,7 +431,7 @@ mod tests {
         let map = MapId::new();
         let (a, b) = (NodeId::new(), NodeId::new());
         log.0.lock().unwrap().extend([
-            Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), None, Places::fixture(project)),
+            Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), Some("/maps/decisions.toml".into()), None, Places::fixture(project)),
             Event::node_added(Source::fixture(), Actor::Human, map, a, "question", "Q", Default::default(), Vec::new()),
             Event::node_added(Source::fixture(), Actor::Human, map, b, "option", "O", Default::default(), Vec::new()),
             Event::edge_added(Source::fixture(), Actor::Human, map, "answers", b, a),
@@ -462,7 +464,7 @@ mod tests {
     async fn a_deleted_map_leaves_the_board_unless_the_board_is_its_only_place() {
         let log = Arc::new(Log::new());
         let project = Project::all(&log.0.lock().unwrap()).remove(0).id;
-        log.0.lock().unwrap().push(Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), None, Places::fixture(project)));
+        log.0.lock().unwrap().push(Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("decisions").unwrap(), Some("/maps/decisions.toml".into()), None, Places::fixture(project)));
         let addr = serve(log.clone()).await;
         send(addr, "POST", "/api/projects/repo/boards", "").await;
         send(addr, "POST", "/api/projects/repo/boards/board/maps", r#"{"map":"decisions"}"#).await;
@@ -484,7 +486,7 @@ mod tests {
         let log = Arc::new(Log::new());
         let project = Project::all(&log.0.lock().unwrap()).remove(0).id;
         let map = MapId::new();
-        log.0.lock().unwrap().push(Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), "/maps/decisions.toml".into(), None, Places::fixture(project)));
+        log.0.lock().unwrap().push(Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), Some("/maps/decisions.toml".into()), None, Places::fixture(project)));
         let addr = serve(log.clone()).await;
         let created = send(addr, "POST", "/api/projects/repo/boards", "").await;
         let board: BoardId = serde_json::from_value(json_body(&created)["data"]["id"].clone()).unwrap();
@@ -496,6 +498,48 @@ mod tests {
 
         assert!(response.starts_with("HTTP/1.1 409"));
         assert_eq!(text_body(&response), "this is the only place the map is shown");
+        assert_eq!(log.0.lock().unwrap().len(), written);
+    }
+
+    #[tokio::test]
+    async fn a_posted_map_is_created_on_the_board_with_or_without_a_skill() {
+        let log = Arc::new(Log::new());
+        let addr = serve(log.clone()).await;
+        send(addr, "POST", "/api/projects/repo/boards", "").await;
+
+        let bare = send(addr, "POST", "/api/projects/repo/boards/board/maps/Notes", r#"{"skill":null}"#).await;
+        let skilled = send(addr, "POST", "/api/projects/repo/boards/board/maps/ideas", r#"{"skill":"plain"}"#).await;
+
+        assert!(bare.starts_with("HTTP/1.1 200"));
+        assert!(skilled.starts_with("HTTP/1.1 200"));
+        let names: Vec<_> = json_body(&skilled)["data"]["maps"].as_array().unwrap().iter().map(|m| m["name"].clone()).collect();
+        assert_eq!(names, [json!("notes"), json!("ideas")]);
+        let events = log.0.lock().unwrap();
+        let created: Vec<_> = events.iter().filter(|e| matches!(e.payload, Payload::MapCreated { .. })).collect();
+        assert_eq!(created.len(), 2);
+        assert!(created.iter().all(|e| e.source == Source::Web && e.actor == Actor::Human));
+    }
+
+    #[tokio::test]
+    async fn a_posted_map_with_a_bad_or_taken_name_or_skill_is_refused() {
+        let log = Arc::new(Log::new());
+        let addr = serve(log.clone()).await;
+        send(addr, "POST", "/api/projects/repo/boards", "").await;
+        send(addr, "POST", "/api/projects/repo/boards/board/maps/notes", r#"{"skill":null}"#).await;
+        let written = log.0.lock().unwrap().len();
+
+        let invalid = send(addr, "POST", "/api/projects/repo/boards/board/maps/my%20map", r#"{"skill":null}"#).await;
+        let taken = send(addr, "POST", "/api/projects/repo/boards/board/maps/Notes", r#"{"skill":null}"#).await;
+        let path = send(addr, "POST", "/api/projects/repo/boards/board/maps/ideas", r#"{"skill":"../plain"}"#).await;
+        let unknown = send(addr, "POST", "/api/projects/repo/boards/nope/maps/ideas", r#"{"skill":null}"#).await;
+
+        assert!(invalid.starts_with("HTTP/1.1 400"));
+        assert!(text_body(&invalid).starts_with("invalid name"));
+        assert!(taken.starts_with("HTTP/1.1 409"));
+        assert_eq!(text_body(&taken), "this project already has a notes map");
+        assert!(path.starts_with("HTTP/1.1 400"));
+        assert_eq!(text_body(&path), "\"../plain\" is not a skill name");
+        assert!(unknown.starts_with("HTTP/1.1 404"));
         assert_eq!(log.0.lock().unwrap().len(), written);
     }
 
