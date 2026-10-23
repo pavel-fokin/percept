@@ -37,8 +37,8 @@
 
   --color-bg: var(--graphite-950);
   --color-surface: var(--graphite-900);
-  --color-text: var(--graphite-200);
-  --color-muted: var(--graphite-400);
+  --color-text: var(--graphite-100);
+  --color-muted: var(--graphite-300);
   /* The wordmark dot only. Links, buttons and focus stay monochrome. */
   --color-accent: var(--ink-400);
   --color-border: var(--graphite-800);
