@@ -50,6 +50,11 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         Ok(Project::all(&self.store.all().await?))
     }
 
+    /// The project named `name`, in any case, if any.
+    pub async fn project_named(&self, name: &str) -> Result<Option<Project>> {
+        Ok(Project::named(&self.store.all().await?, name))
+    }
+
     /// The nearest project at or above `path`, if any.
     pub async fn project_at(&self, path: &Path) -> Result<Option<Project>> {
         Ok(Project::containing(&self.store.all().await?, path))

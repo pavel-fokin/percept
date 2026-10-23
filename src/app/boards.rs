@@ -1,5 +1,5 @@
 use super::AppService;
-use crate::core::{Actor, Board, BoardId, Event, EventStore, Map, Name, Place, Project, SkillStore, Source};
+use crate::core::{Actor, Board, BoardId, Event, EventStore, Map, Name, Place, Project, ProjectId, SkillStore, Source};
 use crate::shared::Result;
 
 /// A board of a project with the maps shown on it, each with its nodes and edges.
@@ -33,6 +33,21 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
     /// Every board across all projects in `BoardCreated` order.
     pub async fn boards(&self) -> Result<Vec<Board>> {
         Ok(Board::all(&self.store.all().await?))
+    }
+
+    /// The boards of the project in `BoardCreated` order, each with the maps shown on it, from one read of the log.
+    pub async fn project_boards(&self, project: ProjectId) -> Result<Vec<(Board, Vec<Map>)>> {
+        let events = self.store.all().await?;
+
+        let boards = Board::all(&events).into_iter().filter(|b| b.project == project);
+
+        Ok(boards
+            .map(|board| {
+                let maps = Map::at(&events, Place::Board(board.id));
+
+                (board, maps)
+            })
+            .collect())
     }
 
     /// The board named `board` in the project named `project`, with the maps shown on it, from one read of the log.
@@ -158,10 +173,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_project_lists_its_boards_with_their_maps() {
+        let store = in_project("/work/a");
+        add_project(&store, "/work/b");
+        let project = id_at(&store, "/work/a");
+        let service = AppService::new(&store, Skills);
+        let first = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
+        let second = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
+        service.create_board(Source::Web, Actor::Human, "p1").await.unwrap();
+        service.create_map(Source::Web, Actor::Human, project, "decisions", Path::new("/skills/decisions")).await.unwrap();
+        let decisions = service.map_id("p0", "decisions").await.unwrap().unwrap();
+        service.place_map(Source::Web, Actor::Human, decisions, Place::Board(second.id)).await.unwrap();
+
+        let boards = service.project_boards(project).await.unwrap();
+
+        let found: Vec<(BoardId, usize)> = boards.iter().map(|(board, maps)| (board.id, maps.len())).collect();
+        assert_eq!(found, vec![(first.id, 0), (second.id, 1)]);
+        assert!(service.project_boards(ProjectId::new()).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn reads_pass_store_errors_through() {
         let service = AppService::new(Broken, Skills);
 
         assert!(service.boards().await.is_err());
         assert!(service.board_contents("p0", "ideas").await.is_err());
+        assert!(service.project_boards(ProjectId::new()).await.is_err());
     }
 }

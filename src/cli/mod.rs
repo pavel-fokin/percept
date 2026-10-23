@@ -1,5 +1,6 @@
 //! Presentation layer: the command-line interface.
 
+mod address;
 mod command;
 mod hook;
 mod maps;

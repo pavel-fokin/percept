@@ -37,7 +37,7 @@ enum Command {
     },
     /// Lists the skills in ~/.percept/skills that a map can be created from.
     Skills,
-    /// Adds a node, `add <map> <kind> <title>`, or an edge, `add <map> <from> <kind> <to>`.
+    /// Adds a node, `add <map> <kind> <title>`, or an edge, `add <map> <from> <kind> <to>`. A <map> is a name in the current project, `/<project>/<map>` or `/<project>/<board>/<map>`; every write prints the path of the map.
     #[command(after_help = "Node options: --key <value> for properties; repeat --ref 'msg:<text>' or --ref 'file:<path>:<from>-<to>' for saved excerpts.")]
     Add {
         #[arg(allow_hyphen_values = true)]
@@ -54,7 +54,7 @@ enum Command {
         #[arg(allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Lists the current project's maps, or one map's nodes and edges.
+    /// Lists a project's maps and boards (`show`, `show /<project>`), a board's maps (`show /<project>/<board>`), or one map's nodes and edges.
     Show { map: Option<String> },
     /// Prints a map's skill as markdown: its purpose, instructions, and node and edge kinds.
     Describe { map: String },

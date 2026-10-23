@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
+use super::address::{self, Address, Target};
 use super::hook::Client;
 use crate::app::{AppService, Ref, source_path};
-use crate::core::{Actor, EventStore, Map, MapId, NodeId, Project, Reference, Skill, SkillStore, Source};
+use crate::core::{Actor, EventStore, Map, NodeId, Project, Reference, Skill, SkillStore, Source};
 use crate::shared::Result;
 
 pub(super) async fn create<S: EventStore, M: SkillStore>(service: &AppService<S, M>, home: &Path, name: &str, skill: &str) -> Result<()> {
@@ -15,7 +16,12 @@ pub(super) async fn create<S: EventStore, M: SkillStore>(service: &AppService<S,
     let (actor, source, project) = project_writer(service).await?;
     let dir = library(home).join(skill);
 
-    service.create_map(source, actor, project.id, name, &dir).await
+    service.create_map(source, actor, project.id, name, &dir).await?;
+
+    let created = service.map_id(project.name.as_str(), name).await?.ok_or("the created map is missing")?;
+    println!("Created {}.", address::of(service, &service.map(created).await?).await?);
+
+    Ok(())
 }
 
 /// The directory the skills live in.
@@ -39,18 +45,23 @@ pub(super) async fn add<S: EventStore, M: SkillStore>(service: &AppService<S, M>
 
     match positionals {
         [map, kind, title] => {
-            let (actor, source, project) = project_writer(service).await?;
-            let map = map_of(service, &project, map).await?;
-            service.add_node(source, actor, map, kind, title, properties, references).await
+            let (actor, source, _) = project_writer(service).await?;
+            let map = map_at(service, map).await?;
+            service.add_node(source, actor, map.id, kind, title, properties, references).await?;
+
+            println!("Added {kind} {title:?} to {}.", address::of(service, &map).await?);
         }
         [map, from, kind, to] => {
-            let (actor, source, project) = project_writer(service).await?;
-            let map = map_of(service, &project, map).await?;
-            let found = service.map(map).await?;
-            service.add_edge(source, actor, map, node_of(&found, from)?, kind, node_of(&found, to)?).await
+            let (actor, source, _) = project_writer(service).await?;
+            let map = map_at(service, map).await?;
+            service.add_edge(source, actor, map.id, node_of(&map, from)?, kind, node_of(&map, to)?).await?;
+
+            println!("Added {from:?} {kind} {to:?} to {}.", address::of(service, &map).await?);
         }
-        _ => Err("usage: percept add <map> <kind> <title> [--key value ...] [--ref 'msg:<text>' | --ref 'file:<path>:<from>-<to>' ...] | percept add <map> <from> <kind> <to>".into()),
+        _ => return Err("usage: percept add <map> <kind> <title> [--key value ...] [--ref 'msg:<text>' | --ref 'file:<path>:<from>-<to>' ...] | percept add <map> <from> <kind> <to>".into()),
     }
+
+    Ok(())
 }
 
 pub(super) async fn change<S: EventStore, M: SkillStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
@@ -61,29 +72,37 @@ pub(super) async fn change<S: EventStore, M: SkillStore>(service: &AppService<S,
         [map, title, new_title] => (map, title, Some(new_title.as_str())),
         _ => return Err("usage: percept change <map> <title> [<new title>] [--key value ...] [--ref 'msg:<text>' | --ref 'file:<path>:<from>-<to>' ...]".into()),
     };
-    let (actor, source, project) = project_writer(service).await?;
-    let map = map_of(service, &project, map).await?;
-    let node = node_of(&service.map(map).await?, title)?;
+    let (actor, source, _) = project_writer(service).await?;
+    let map = map_at(service, map).await?;
+    let node = node_of(&map, title)?;
 
-    service.change_node(source, actor, map, node, new_title, properties, references).await
+    service.change_node(source, actor, map.id, node, new_title, properties, references).await?;
+
+    println!("Changed {:?} on {}.", new_title.unwrap_or(title), address::of(service, &map).await?);
+
+    Ok(())
 }
 
 pub(super) async fn remove<S: EventStore, M: SkillStore>(service: &AppService<S, M>, args: &[String]) -> Result<()> {
     match split_remove(args)? {
         [map, title] => {
-            let (actor, source, project) = project_writer(service).await?;
-            let map = map_of(service, &project, map).await?;
-            let node = node_of(&service.map(map).await?, title)?;
-            service.remove_node(source, actor, map, node).await
+            let (actor, source, _) = project_writer(service).await?;
+            let map = map_at(service, map).await?;
+            service.remove_node(source, actor, map.id, node_of(&map, title)?).await?;
+
+            println!("Removed {title:?} from {}.", address::of(service, &map).await?);
         }
         [map, from, kind, to] => {
-            let (actor, source, project) = project_writer(service).await?;
-            let map = map_of(service, &project, map).await?;
-            let found = service.map(map).await?;
-            service.remove_edge(source, actor, map, node_of(&found, from)?, kind, node_of(&found, to)?).await
+            let (actor, source, _) = project_writer(service).await?;
+            let map = map_at(service, map).await?;
+            service.remove_edge(source, actor, map.id, node_of(&map, from)?, kind, node_of(&map, to)?).await?;
+
+            println!("Removed {from:?} {kind} {to:?} from {}.", address::of(service, &map).await?);
         }
-        _ => Err("usage: percept remove <map> <title> | percept remove <map> <from> <kind> <to>".into()),
+        _ => return Err("usage: percept remove <map> <title> | percept remove <map> <from> <kind> <to>".into()),
     }
+
+    Ok(())
 }
 
 fn split_remove(args: &[String]) -> Result<&[String]> {
@@ -157,19 +176,14 @@ fn parse_reference(value: &str) -> Result<Ref> {
 /// The writer, as `cli_writer` finds it, and the project its checkout belongs to.
 async fn project_writer<S: EventStore, M: SkillStore>(service: &AppService<S, M>) -> Result<(Actor, Source, Project)> {
     let (actor, source) = cli_writer().await?;
-    let project = project_of(service, source.path()?).await?;
+    let project = address::project_of(service, source.path()?).await?;
 
     Ok((actor, source, project))
 }
 
-/// The project the checkout at `path` belongs to.
-async fn project_of<S: EventStore, M: SkillStore>(service: &AppService<S, M>, path: &Path) -> Result<Project> {
-    Ok(service.project_at(path).await?.ok_or("not in a project; run percept init")?)
-}
-
-/// The map of the project named `name`.
-async fn map_of<S: EventStore, M: SkillStore>(service: &AppService<S, M>, project: &Project, name: &str) -> Result<MapId> {
-    Ok(service.map_id(project.name.as_str(), name).await?.ok_or_else(|| format!("this project has no {name} map"))?)
+/// The map the argument `text` names.
+async fn map_at<S: EventStore, M: SkillStore>(service: &AppService<S, M>, text: &str) -> Result<Map> {
+    address::map(service, &Address::parse(text)?).await
 }
 
 /// The node of `map` titled `title`.
@@ -188,17 +202,16 @@ pub(super) async fn cli_writer() -> Result<(Actor, Source)> {
     Ok((actor, source))
 }
 
-pub(super) async fn show<S: EventStore, M: SkillStore>(service: &AppService<S, M>, map: Option<&str>) -> Result<()> {
-    let project = project_of(service, &source_path(&std::env::current_dir()?).await).await?;
+pub(super) async fn show<S: EventStore, M: SkillStore>(service: &AppService<S, M>, path: Option<&str>) -> Result<()> {
+    let address = path.map(Address::parse).transpose()?;
 
-    match map {
-        Some(name) => {
-            let map = map_of(service, &project, name).await?;
-            println!("{}", map_markdown(&service.map(map).await?)?)
-        }
-        None => {
-            for map in service.maps(project.id).await? {
-                println!("{}  {}, {}", map.name.as_str(), node_count(map.nodes.len()), edge_count(map.edges.len()));
+    match address::target(service, address.as_ref()).await? {
+        Target::Map(map) => println!("{}", map_markdown(&map)?),
+        Target::Board(board) => board.maps.iter().for_each(|map| println!("{}", map_line(map))),
+        Target::Project(project) => {
+            service.maps(project.id).await?.iter().for_each(|map| println!("{}", map_line(map)));
+            for (board, maps) in service.project_boards(project.id).await? {
+                println!("{}/  {}", board.name.as_str(), map_count(maps.len()));
             }
         }
     }
@@ -206,15 +219,17 @@ pub(super) async fn show<S: EventStore, M: SkillStore>(service: &AppService<S, M
     Ok(())
 }
 
-pub(super) async fn describe<S: EventStore, M: SkillStore>(service: &AppService<S, M>, name: &str) -> Result<()> {
-    let project = project_of(service, &source_path(&std::env::current_dir()?).await).await?;
-    let map = map_of(service, &project, name).await?;
-    let skill = service.skill(map).await?;
-    let map = service.map(map).await?;
+pub(super) async fn describe<S: EventStore, M: SkillStore>(service: &AppService<S, M>, path: &str) -> Result<()> {
+    let map = map_at(service, path).await?;
+    let skill = service.skill(map.id).await?;
 
-    println!("{}", skill_markdown(name, &skill, &map));
+    println!("{}", skill_markdown(map.name.as_str(), &skill, &map));
 
     Ok(())
+}
+
+fn map_line(map: &Map) -> String {
+    format!("{}  {}, {}", map.name.as_str(), node_count(map.nodes.len()), edge_count(map.edges.len()))
 }
 
 /// A skill without a schema shows the kinds `map` uses instead.
@@ -322,6 +337,13 @@ fn node_count(count: usize) -> String {
     match count {
         1 => "1 node".to_string(),
         n => format!("{n} nodes"),
+    }
+}
+
+fn map_count(count: usize) -> String {
+    match count {
+        1 => "1 map".to_string(),
+        n => format!("{n} maps"),
     }
 }
 
@@ -608,6 +630,13 @@ mod tests {
         assert_eq!(node_count(0), "0 nodes");
         assert_eq!(node_count(1), "1 node");
         assert_eq!(node_count(2), "2 nodes");
+    }
+
+    #[test]
+    fn map_count_phrasings() {
+        assert_eq!(map_count(0), "0 maps");
+        assert_eq!(map_count(1), "1 map");
+        assert_eq!(map_count(2), "2 maps");
     }
 
     #[test]
