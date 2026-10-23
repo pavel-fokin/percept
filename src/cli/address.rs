@@ -104,7 +104,7 @@ pub(super) async fn of<S: EventStore, M: SkillStore>(service: &AppService<S, M>,
     Ok(format!("/{}/{}/{}", project.name.as_str(), board.ok_or("the map is shown nowhere")?.name.as_str(), map.name.as_str()))
 }
 
-async fn project_named<S: EventStore, M: SkillStore>(service: &AppService<S, M>, name: &str) -> Result<Project> {
+pub(super) async fn project_named<S: EventStore, M: SkillStore>(service: &AppService<S, M>, name: &str) -> Result<Project> {
     Ok(service.project_named(name).await?.ok_or_else(|| format!("no project {name}"))?)
 }
 

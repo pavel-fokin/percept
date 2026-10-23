@@ -5,7 +5,7 @@ use std::sync::Arc;
 use clap::{Parser, Subcommand};
 
 use super::hook::{Client, hook};
-use super::maps::{add, change, create, describe, remove, show, skills};
+use super::maps::{add, change, describe, new_board, new_map, remove, show, skills};
 use super::projects::init;
 use super::status::status;
 use crate::app::AppService;
@@ -21,6 +21,22 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+enum New {
+    /// Creates a board.
+    Board {
+        #[arg(allow_hyphen_values = true)]
+        path: String,
+    },
+    /// Creates a map from a skill.
+    Map {
+        #[arg(allow_hyphen_values = true)]
+        path: String,
+        #[arg(long)]
+        skill: String,
+    },
+}
+
+#[derive(Subcommand)]
 enum Command {
     /// Records a hook payload read from stdin.
     Hook {
@@ -29,11 +45,10 @@ enum Command {
     },
     /// Creates a project at the root of the current git repository, or in the current folder outside one, named after that folder unless a name is given.
     Init { name: Option<String> },
-    /// Creates a map with the given name in the current project, from the skill of that name in ~/.percept/skills.
-    Create {
-        #[arg(allow_hyphen_values = true)]
-        name: String,
-        skill: String,
+    /// Creates a board, `new board <path>`, or a map, `new map <path> --skill <skill>`. A <path> is a name in the current project or `/<project>/<board>`; a map's is also `/<project>/<map>` or `/<project>/<board>/<map>`, the last shows the map on that board only. A map is made from the skill of that name in ~/.percept/skills. Boards and maps of a project share names.
+    New {
+        #[command(subcommand)]
+        what: New,
     },
     /// Lists the skills in ~/.percept/skills that a map can be created from.
     Skills,
@@ -82,7 +97,8 @@ pub async fn run<S: EventStore + Send + Sync + 'static, M: SkillStore + Send + S
         None => status(&service).await,
         Some(Command::Hook { client }) => hook(&service, client).await,
         Some(Command::Init { name }) => init(&service, name.as_deref()).await,
-        Some(Command::Create { name, skill }) => create(&service, &home, &name, &skill).await,
+        Some(Command::New { what: New::Board { path } }) => new_board(&service, &path).await,
+        Some(Command::New { what: New::Map { path, skill } }) => new_map(&service, &home, &path, &skill).await,
         Some(Command::Skills) => skills(&service, &home).await,
         Some(Command::Add { args }) => add(&service, &args).await,
         Some(Command::Change { args }) => change(&service, &args).await,
@@ -138,5 +154,17 @@ mod tests {
 
         let Some(Command::Remove { args }) = cli.command else { panic!("expected remove") };
         assert_eq!(args, ["m", "A", "links", "B", "--ref", "msg:x"]);
+    }
+
+    #[test]
+    fn new_takes_a_board_or_a_map_with_a_required_skill() {
+        let board = Cli::try_parse_from(["percept", "new", "board", "storage"]).unwrap();
+        let map = Cli::try_parse_from(["percept", "new", "map", "/p/b/m", "--skill", "decision"]).unwrap();
+
+        assert!(matches!(board.command, Some(Command::New { what: New::Board { path } }) if path == "storage"));
+        assert!(matches!(map.command, Some(Command::New { what: New::Map { path, skill } }) if path == "/p/b/m" && skill == "decision"));
+        assert!(Cli::try_parse_from(["percept", "new", "map", "m"]).is_err());
+        assert!(Cli::try_parse_from(["percept", "new", "project", "p"]).is_err());
+        assert!(Cli::try_parse_from(["percept", "create", "m", "decision"]).is_err());
     }
 }

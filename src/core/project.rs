@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use super::{Event, Name, Payload};
-use crate::shared::Id;
+use super::{Board, Event, Map, Name, Payload};
+use crate::shared::{Id, Result};
 
 pub type ProjectId = Id<Project>;
 
@@ -39,6 +39,26 @@ impl Project {
             .into_iter()
             .filter(|p| p.root.as_deref().is_some_and(|root| path.starts_with(root)))
             .max_by_key(|p| p.root.as_ref().map(|root| root.components().count()))
+    }
+
+    /// The names the boards and maps of `project` hold. They share one namespace, so a path names at most one of them.
+    pub fn taken(events: &[Event], project: ProjectId) -> Vec<Name> {
+        let boards = Board::all(events).into_iter().filter(|b| b.project == project).map(|b| b.name);
+        let maps = Map::all(events).into_iter().filter(|m| m.project == project).map(|m| m.name);
+
+        boards.chain(maps).collect()
+    }
+
+    /// Refuses `name` when a board or a map of `project` already has it.
+    pub fn check_free(events: &[Event], project: ProjectId, name: &Name) -> Result<()> {
+        if Map::named(events, project, name.as_str()).is_some() {
+            return Err(format!("this project already has a {} map", name.as_str()).into());
+        }
+        if Board::named(events, project, name.as_str()).is_some() {
+            return Err(format!("this project already has a {} board", name.as_str()).into());
+        }
+
+        Ok(())
     }
 }
 
@@ -110,5 +130,24 @@ mod tests {
 
         assert!(Project::containing(&events, Path::new("/")).is_none());
         assert!(Project::containing(&events, Path::new("/work/app")).is_none());
+    }
+
+    #[test]
+    fn boards_and_maps_share_one_namespace_per_project() {
+        let (project, other) = (ProjectId::new(), ProjectId::new());
+        let name = |s: &str| Name::new(s).unwrap();
+        let events = [
+            Event::board_created(Source::fixture(), Actor::Human, crate::core::BoardId::new(), project, name("ideas")),
+            Event::map_created(Source::fixture(), Actor::Human, crate::core::MapId::new(), project, name("decisions"), "/s".into(), crate::core::Places::fixture(project)),
+        ];
+
+        let check = |project, text: &str| Project::check_free(&events, project, &name(text)).map_err(|e| e.to_string());
+
+        assert_eq!(check(project, "decisions"), Err("this project already has a decisions map".into()));
+        assert_eq!(check(project, "ideas"), Err("this project already has a ideas board".into()));
+        assert_eq!(check(project, "plan"), Ok(()));
+        assert_eq!(check(other, "ideas"), Ok(()));
+        assert_eq!(Project::taken(&events, project), vec![name("ideas"), name("decisions")]);
+        assert!(Project::taken(&events, other).is_empty());
     }
 }

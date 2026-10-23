@@ -7,18 +7,53 @@ use crate::app::{AppService, Ref, source_path};
 use crate::core::{Actor, EventStore, Map, NodeId, Project, Reference, Skill, SkillStore, Source};
 use crate::shared::Result;
 
-pub(super) async fn create<S: EventStore, M: SkillStore>(service: &AppService<S, M>, home: &Path, name: &str, skill: &str) -> Result<()> {
+pub(super) async fn new_board<S: EventStore, M: SkillStore>(service: &AppService<S, M>, path: &str) -> Result<()> {
+    let (actor, source, current) = project_writer(service).await?;
+
+    let (project, name) = match Address::parse(path)? {
+        Address::Bare(name) => (current, name),
+        Address::Absolute(segments) => match segments.as_slice() {
+            [project, name] => (address::project_named(service, project).await?, name.clone()),
+            _ => return Err(format!("{path:?} is not a board name or a path like /<project>/<board>").into()),
+        },
+    };
+
+    let board = service.create_named_board(source, actor, project.id, &name).await?;
+
+    println!("Created /{}/{}.", project.name.as_str(), board.name.as_str());
+
+    Ok(())
+}
+
+pub(super) async fn new_map<S: EventStore, M: SkillStore>(service: &AppService<S, M>, home: &Path, path: &str, skill: &str) -> Result<()> {
     let mut parts = Path::new(skill).components();
     if !matches!((parts.next(), parts.next()), (Some(Component::Normal(_)), None)) {
         return Err(format!("{skill:?} is not a skill name").into());
     }
 
-    let (actor, source, project) = project_writer(service).await?;
+    let (actor, source, current) = project_writer(service).await?;
     let dir = library(home).join(skill);
 
-    service.create_map(source, actor, project.id, name, &dir).await?;
+    let (project, board, name) = match Address::parse(path)? {
+        Address::Bare(name) => (current, None, name),
+        Address::Absolute(segments) => match segments.as_slice() {
+            [project, name] => (address::project_named(service, project).await?, None, name.clone()),
+            [project, board, name] => {
+                address::project_named(service, project).await?;
+                let contents = service.board_contents(project, board).await?.ok_or_else(|| format!("no board /{project}/{board}"))?;
 
-    let created = service.map_id(project.name.as_str(), name).await?.ok_or("the created map is missing")?;
+                (contents.project, Some(contents.board), name.clone())
+            }
+            _ => return Err(format!("{path:?} is not a map name or a path like /<project>/<map>").into()),
+        },
+    };
+
+    match &board {
+        Some(board) => service.create_map_on_board(source, actor, board, &name, &dir).await?,
+        None => service.create_map(source, actor, project.id, &name, &dir).await?,
+    }
+
+    let created = service.map_id(project.name.as_str(), &name).await?.ok_or("the created map is missing")?;
     println!("Created {}.", address::of(service, &service.map(created).await?).await?);
 
     Ok(())

@@ -11,7 +11,7 @@ pub struct BoardContents {
 
 impl<S: EventStore, M: SkillStore> AppService<S, M> {
     /// Records a new board in the project named `project`, written from `source`.
-    /// It is named `board`, or `board-N` when taken, N the smallest number no board of the project already uses.
+    /// It is named `board`, or `board-N` when taken, N the smallest number no board or map of the project already uses.
     pub async fn create_board(&self, source: Source, actor: Actor, project: &str) -> Result<Option<Board>> {
         // Held until return, so parallel creates cannot both pick the same name.
         let _lock = self.store.lock().await?;
@@ -21,13 +21,29 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
             return Ok(None);
         };
 
-        let taken: Vec<Name> = Board::all(&events).into_iter().filter(|b| b.project == project.id).map(|b| b.name).collect();
-        let name = Name::free(&Name::new("board")?, &taken);
+        let name = Name::free(&Name::new("board")?, &Project::taken(&events, project.id));
 
+        self.append_board(source, actor, project.id, name).await.map(Some)
+    }
+
+    /// Records a new board named `name` in the project. No board or map of the project may have the name.
+    pub async fn create_named_board(&self, source: Source, actor: Actor, project: ProjectId, name: &str) -> Result<Board> {
+        let name = Name::new(name)?;
+
+        // Held until return, so parallel creates cannot both pass the check.
+        let _lock = self.store.lock().await?;
+
+        let events = self.store.all().await?;
+        Project::check_free(&events, project, &name)?;
+
+        self.append_board(source, actor, project, name).await
+    }
+
+    async fn append_board(&self, source: Source, actor: Actor, project: ProjectId, name: Name) -> Result<Board> {
         let board = BoardId::new();
-        self.store.append(&Event::board_created(source, actor, board, project.id, name.clone())).await?;
+        self.store.append(&Event::board_created(source, actor, board, project, name.clone())).await?;
 
-        Ok(Some(Board { id: board, project: project.id, name }))
+        Ok(Board { id: board, project, name })
     }
 
     /// Every board across all projects in `BoardCreated` order.
@@ -104,6 +120,36 @@ mod tests {
         assert_eq!(first.name.as_str(), "board");
         assert_eq!(second.name.as_str(), "board-1");
         assert_eq!(other.name.as_str(), "board");
+    }
+
+    #[tokio::test]
+    async fn a_named_board_is_recorded_and_a_taken_name_is_refused() {
+        let store = in_project("/work/a");
+        let project = id_at(&store, "/work/a");
+        let service = AppService::new(&store, Skills);
+        service.create_map(Source::Web, Actor::Human, project, "decisions", Path::new("/skills/decisions")).await.unwrap();
+
+        let board = service.create_named_board(Source::Web, Actor::Agent, project, "Storage").await.unwrap();
+        let duplicate = service.create_named_board(Source::Web, Actor::Agent, project, "storage").await;
+        let like_a_map = service.create_named_board(Source::Web, Actor::Agent, project, "decisions").await;
+
+        assert_eq!(board.name.as_str(), "storage");
+        assert_eq!(service.boards().await.unwrap(), vec![board]);
+        assert_eq!(duplicate.unwrap_err().to_string(), "this project already has a storage board");
+        assert_eq!(like_a_map.unwrap_err().to_string(), "this project already has a decisions map");
+        assert_eq!(store.0.lock().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn an_auto_named_board_skips_the_names_of_maps() {
+        let store = in_project("/work/a");
+        let project = id_at(&store, "/work/a");
+        let service = AppService::new(&store, Skills);
+        service.create_map(Source::Web, Actor::Human, project, "board", Path::new("/skills/decisions")).await.unwrap();
+
+        let created = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap();
+
+        assert_eq!(created.name.as_str(), "board-1");
     }
 
     #[tokio::test]

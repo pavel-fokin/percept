@@ -26,7 +26,7 @@ belongs on the map and how to write it, and may declare a schema.
    will hold:
 
    ```
-   percept create <map> <skill>
+   percept new map <map> --skill <skill>
    ```
 
 3. Run `percept describe <map>`, then `percept show <map>`.
