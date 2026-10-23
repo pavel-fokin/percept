@@ -2,7 +2,7 @@ mod app;
 mod cli;
 mod core;
 mod eventstore;
-mod mapstore;
+mod skillstore;
 mod server;
 mod shared;
 
@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::app::AppService;
 use crate::eventstore::JsonlStore;
-use crate::mapstore::TomlStore;
+use crate::skillstore::TomlStore;
 
 #[tokio::main]
 async fn main() -> ExitCode {

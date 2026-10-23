@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use super::AppService;
-use crate::core::{Actor, DefinitionStore, Event, EventStore, Name, Project, ProjectId, Source};
+use crate::core::{Actor, Event, EventStore, Name, Project, ProjectId, SkillStore, Source};
 use crate::shared::Result;
 
 /// A project the log already holds blocks this one; the message says which.
@@ -16,7 +16,7 @@ impl std::fmt::Display for Taken {
 
 impl std::error::Error for Taken {}
 
-impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
+impl<S: EventStore, M: SkillStore> AppService<S, M> {
     /// Records a new project named `name`, rooted at `root` when it has one.
     /// A root holds one project, and a name belongs to one; a clash fails with `Taken`.
     pub async fn create_project(
@@ -59,7 +59,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::testing::{Broken, Definitions, Memory};
+    use crate::app::testing::{Broken, Memory, Skills};
 
     fn name(name: &str) -> Name {
         Name::new(name).unwrap()
@@ -76,7 +76,7 @@ mod tests {
     #[tokio::test]
     async fn init_records_the_project_under_the_given_name() {
         let store = Memory::default();
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
 
         let named = service.create_project(source("/work/a"), Actor::Human, name("Alpha"), root("/work/a")).await.unwrap();
 
@@ -89,7 +89,7 @@ mod tests {
     #[tokio::test]
     async fn a_second_init_in_the_same_root_fails() {
         let store = Memory::default();
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_project(source("/work/a"), Actor::Human, name("a"), root("/work/a")).await.unwrap();
 
         let error = service.create_project(source("/work/a"), Actor::Human, name("other"), root("/work/a")).await.unwrap_err();
@@ -101,7 +101,7 @@ mod tests {
     #[tokio::test]
     async fn an_init_with_a_taken_name_fails_whatever_its_case() {
         let store = Memory::default();
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_project(source("/work/a"), Actor::Human, name("app"), root("/work/a")).await.unwrap();
 
         let error = service.create_project(source("/work/b"), Actor::Human, name("APP"), root("/work/b")).await.unwrap_err();
@@ -112,7 +112,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_broken_store_passes_through() {
-        let broken = AppService::new(Broken, Definitions).create_project(source("/work/a"), Actor::Human, name("a"), root("/work/a")).await;
+        let broken = AppService::new(Broken, Skills).create_project(source("/work/a"), Actor::Human, name("a"), root("/work/a")).await;
 
         assert!(broken.is_err());
     }
@@ -120,7 +120,7 @@ mod tests {
     #[tokio::test]
     async fn a_web_project_has_no_root_and_is_recorded_from_the_web() {
         let store = Memory::default();
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
 
         service.create_project(Source::Web, Actor::Human, name("notes"), None).await.unwrap();
 
@@ -132,7 +132,7 @@ mod tests {
     #[tokio::test]
     async fn a_rootless_project_still_owns_its_name() {
         let store = Memory::default();
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_project(Source::Web, Actor::Human, name("notes"), None).await.unwrap();
 
         let web = service.create_project(Source::Web, Actor::Human, name("NOTES"), None).await.unwrap_err();
@@ -147,7 +147,7 @@ mod tests {
     #[tokio::test]
     async fn rootless_projects_coexist() {
         let store = Memory::default();
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
 
         service.create_project(Source::Web, Actor::Human, name("one"), None).await.unwrap();
         service.create_project(Source::Web, Actor::Human, name("two"), None).await.unwrap();
@@ -158,7 +158,7 @@ mod tests {
     #[tokio::test]
     async fn a_path_outside_every_project_has_none() {
         let store = Memory::default();
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_project(source("/work/app"), Actor::Human, name("app"), root("/work/app")).await.unwrap();
         service.create_project(Source::Web, Actor::Human, name("notes"), None).await.unwrap();
 

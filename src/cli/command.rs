@@ -9,7 +9,7 @@ use super::maps::{add, change, create, describe, remove, show};
 use super::projects::init;
 use super::status::status;
 use crate::app::AppService;
-use crate::core::{DefinitionStore, EventStore};
+use crate::core::{EventStore, SkillStore};
 use crate::server;
 
 /// Records what coding agents do.
@@ -54,7 +54,7 @@ enum Command {
     },
     /// Lists the current project's maps, or one map's nodes and edges.
     Show { map: Option<String> },
-    /// Prints a map's definition as markdown: its purpose, instructions, and node and edge kinds.
+    /// Prints a map's skill as markdown: its purpose, instructions, and node and edge kinds.
     Describe { map: String },
     /// Serves the page in the browser.
     Ui {
@@ -67,7 +67,7 @@ enum Command {
     },
 }
 
-pub async fn run<S: EventStore + Send + Sync + 'static, M: DefinitionStore + Send + Sync + 'static>(service: Arc<AppService<S, M>>, home: PathBuf) -> ExitCode {
+pub async fn run<S: EventStore + Send + Sync + 'static, M: SkillStore + Send + Sync + 'static>(service: Arc<AppService<S, M>>, home: PathBuf) -> ExitCode {
     // clap exits 2 on a usage error, and exit 2 blocks the agent's action.
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,

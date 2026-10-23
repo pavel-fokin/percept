@@ -5,19 +5,19 @@ use super::Schema;
 use crate::shared::Result;
 
 /// What a map is for, how to write it, and the schema it follows, if it has one.
-pub struct Definition {
-    purpose: String,
+pub struct Skill {
+    description: String,
     instructions: String,
     schema: Option<Schema>,
 }
 
-impl Definition {
-    pub fn new(purpose: String, instructions: String, schema: Option<Schema>) -> Self {
-        Self { purpose, instructions, schema }
+impl Skill {
+    pub fn new(description: String, instructions: String, schema: Option<Schema>) -> Self {
+        Self { description, instructions, schema }
     }
 
-    pub fn purpose(&self) -> &str {
-        &self.purpose
+    pub fn description(&self) -> &str {
+        &self.description
     }
 
     pub fn instructions(&self) -> &str {
@@ -39,11 +39,11 @@ impl Definition {
     }
 }
 
-/// Reads the definition a map is declared by.
-pub trait DefinitionStore {
-    /// The definition in `file`.
-    fn definition(
+/// Reads the skill a map is declared by.
+pub trait SkillStore {
+    /// The skill at `path`.
+    fn skill(
         &self,
-        file: &Path,
-    ) -> impl Future<Output = Result<Definition>> + Send;
+        path: &Path,
+    ) -> impl Future<Output = Result<Skill>> + Send;
 }

@@ -3,10 +3,10 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-use crate::core::{Definition, DefinitionStore, EdgeKind, Schema};
+use crate::core::{EdgeKind, Schema, Skill, SkillStore};
 use crate::shared::Result;
 
-/// Reads a definition from a TOML file.
+/// Reads a skill from a TOML file.
 pub struct TomlStore;
 
 #[derive(Deserialize)]
@@ -39,11 +39,11 @@ fn schema(declared: BTreeMap<String, BTreeMap<String, String>>, edges: BTreeMap<
     Schema::new(nodes, edges)
 }
 
-impl DefinitionStore for TomlStore {
-    async fn definition(&self, file: &Path) -> Result<Definition> {
-        let name = file.display();
+impl SkillStore for TomlStore {
+    async fn skill(&self, path: &Path) -> Result<Skill> {
+        let name = path.display();
 
-        let text = tokio::fs::read_to_string(file).await.map_err(|e| format!("{name}: {e}"))?;
+        let text = tokio::fs::read_to_string(path).await.map_err(|e| format!("{name}: {e}"))?;
         let parsed: File = toml::from_str(&text).map_err(|e| format!("{name}: {e}"))?;
 
         let schema = match (parsed.nodes, parsed.edges) {
@@ -51,7 +51,7 @@ impl DefinitionStore for TomlStore {
             (nodes, edges) => Some(schema(nodes.unwrap_or_default(), edges.unwrap_or_default()).map_err(|e| format!("{name}: {e}"))?),
         };
 
-        Ok(Definition::new(parsed.purpose, parsed.instructions, schema))
+        Ok(Skill::new(parsed.purpose, parsed.instructions, schema))
     }
 }
 
@@ -61,9 +61,9 @@ mod tests {
 
     use super::*;
 
-    /// A definition file `notes.toml` holding the given text.
+    /// A skill file `notes.toml` holding the given text.
     fn file(text: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("percept-definition-{}", uuid::Uuid::now_v7()));
+        let dir = std::env::temp_dir().join(format!("percept-skill-{}", uuid::Uuid::now_v7()));
         std::fs::create_dir_all(&dir).unwrap();
         let file = dir.join("notes.toml");
         std::fs::write(&file, text).unwrap();
@@ -90,41 +90,41 @@ mod tests {
             "#,
         );
 
-        let definition = TomlStore.definition(&file).await.unwrap();
+        let skill = TomlStore.skill(&file).await.unwrap();
 
-        assert_eq!(definition.purpose(), "p");
-        assert_eq!(definition.instructions(), "i");
+        assert_eq!(skill.description(), "p");
+        assert_eq!(skill.instructions(), "i");
         let properties = BTreeMap::from([("body".to_string(), "x".to_string()), ("by".to_string(), "y".to_string())]);
-        assert!(definition.check_node("note", &properties).is_ok());
-        assert!(definition.check_node("topic", &properties).is_err());
-        assert!(definition.check_edge("about", "note", "topic").is_ok());
-        assert!(definition.check_edge("about", "topic", "note").is_err());
+        assert!(skill.check_node("note", &properties).is_ok());
+        assert!(skill.check_node("topic", &properties).is_err());
+        assert!(skill.check_edge("about", "note", "topic").is_ok());
+        assert!(skill.check_edge("about", "topic", "note").is_err());
     }
 
     #[tokio::test]
     async fn edges_may_be_absent() {
         let file = file("purpose = \"p\"\ninstructions = \"i\"\n[nodes.note]\n");
 
-        let definition = TomlStore.definition(&file).await.unwrap();
+        let skill = TomlStore.skill(&file).await.unwrap();
 
-        assert!(definition.check_edge("about", "note", "note").is_err());
+        assert!(skill.check_edge("about", "note", "note").is_err());
     }
 
     #[tokio::test]
     async fn a_file_without_nodes_or_edges_has_no_schema() {
         let file = file("purpose = \"p\"\ninstructions = \"i\"\n");
 
-        let definition = TomlStore.definition(&file).await.unwrap();
+        let skill = TomlStore.skill(&file).await.unwrap();
 
-        assert!(definition.schema().is_none());
-        assert!(definition.check_node("any", &BTreeMap::from([("p".to_string(), "x".to_string())])).is_ok());
+        assert!(skill.schema().is_none());
+        assert!(skill.check_node("any", &BTreeMap::from([("p".to_string(), "x".to_string())])).is_ok());
     }
 
     #[tokio::test]
     async fn a_missing_file_is_an_error_naming_it() {
         let missing = file("").with_file_name("tasks.toml");
 
-        let error = TomlStore.definition(&missing).await.err().unwrap();
+        let error = TomlStore.skill(&missing).await.err().unwrap();
 
         assert!(error.to_string().contains("tasks.toml"));
     }
@@ -143,7 +143,7 @@ mod tests {
         for text in cases {
             let file = file(text);
 
-            let error = TomlStore.definition(&file).await.err().unwrap();
+            let error = TomlStore.skill(&file).await.err().unwrap();
 
             assert!(error.to_string().contains("notes.toml"), "{text}: {error}");
         }

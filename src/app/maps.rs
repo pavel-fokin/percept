@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::AppService;
-use crate::core::{Actor, Board, Definition, DefinitionStore, Event, EventId, EventStore, Map, MapId, Name, NodeId, Payload, Place, Places, Policy, Project, ProjectId, Reference, SessionId, Source};
+use crate::core::{Actor, Board, Event, EventId, EventStore, Map, MapId, Name, NodeId, Payload, Place, Places, Policy, Project, ProjectId, Reference, SessionId, Skill, SkillStore, Source};
 use crate::shared::Result;
 
 #[derive(Debug, PartialEq)]
@@ -26,7 +26,7 @@ pub struct CitedMessage {
     pub created_at: jiff::Timestamp,
 }
 
-impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
+impl<S: EventStore, M: SkillStore> AppService<S, M> {
     /// Records a new map defined by `file`, an absolute path, in the project. A project holds at most one map of each name.
     pub async fn create_map(
         &self,
@@ -38,7 +38,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
     ) -> Result<()> {
         let name = Name::new(name)?;
         if !file.is_absolute() {
-            return Err(format!("the definition file {} must be an absolute path", file.display()).into());
+            return Err(format!("the skill {} must be an absolute path", file.display()).into());
         }
 
         // Held until return, so parallel creates cannot both pass the check.
@@ -49,7 +49,7 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
             return Err(format!("this project already has a {} map", name.as_str()).into());
         }
 
-        self.definitions.definition(file).await?;
+        self.skills.skill(file).await?;
 
         let places = Places::new([Place::Project(project)])?;
 
@@ -117,11 +117,11 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         Ok(self.located(map).await?.map)
     }
 
-    /// The definition of the map, or an error if there is no such map or its definition cannot be read.
-    pub async fn definition(&self, map: MapId) -> Result<Definition> {
+    /// The skill of the map, or an error if there is no such map or its skill cannot be read.
+    pub async fn skill(&self, map: MapId) -> Result<Skill> {
         let map = self.map(map).await?;
 
-        self.definitions.definition(&map.definition).await
+        self.skills.skill(&map.skill).await
     }
 
     /// The map, its nodes newest first and its edges in log order, from one read of the log.
@@ -279,11 +279,11 @@ impl<S: EventStore, M: DefinitionStore> AppService<S, M> {
         Ok(Located { events, map })
     }
 
-    /// The one way a node or an edge event reaches the log: the map, under its definition, and then the policy see it first.
+    /// The one way a node or an edge event reaches the log: the map, under its skill, and then the policy see it first.
     async fn write(&self, map: &Map, event: Event) -> Result<()> {
-        let definition = self.definitions.definition(&map.definition).await?;
+        let skill = self.skills.skill(&map.skill).await?;
 
-        map.check(&event, &definition)?;
+        map.check(&event, &skill)?;
         Policy::check(&event, map)?;
 
         self.store.append(&event).await
@@ -358,13 +358,13 @@ fn not_blank(name: &str, value: &str) -> Result<()> {
 mod tests {
     use super::*;
     use crate::core::{BoardId, Node};
-    use crate::app::testing::{Broken, Definitions, Memory, NoDefinitions, add_project, add_session, id_at, in_project};
+    use crate::app::testing::{Broken, Memory, NoSkills, Skills, add_project, add_session, id_at, in_project};
 
     #[tokio::test]
     async fn a_placed_map_is_shown_there_and_placing_again_writes_nothing() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         let map = service.map_id("p0", "decisions").await.unwrap().unwrap();
         let board = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap().id;
@@ -384,7 +384,7 @@ mod tests {
     async fn an_unplaced_map_stays_elsewhere_and_its_last_place_stays() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         let map = service.map_id("p0", "decisions").await.unwrap().unwrap();
         let board = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap().id;
@@ -406,7 +406,7 @@ mod tests {
         let store = in_project("/repo");
         add_project(&store, "/other");
         let (project, other) = (id_at(&store, "/repo"), id_at(&store, "/other"));
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         let map = service.map_id("p0", "decisions").await.unwrap().unwrap();
         let foreign_board = service.create_board(Source::Web, Actor::Human, "p1").await.unwrap().unwrap().id;
@@ -425,7 +425,7 @@ mod tests {
     async fn the_same_map_name_can_be_created_in_two_projects_but_not_twice_in_one() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         add_project(&store, "/other");
         let other = Source::Checkout { client: "claude-code".into(), path: "/other".into() };
         let other_project = id_at(&store, "/other");
@@ -442,7 +442,7 @@ mod tests {
     async fn a_map_name_is_validated_and_ignores_case() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
 
         let invalid = service.create_map(Source::fixture(), Actor::Human, project, "my map", Path::new("/maps/decisions.toml")).await;
         service.create_map(Source::fixture(), Actor::Human, project, "Decisions", Path::new("/maps/decisions.toml")).await.unwrap();
@@ -452,16 +452,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_map_is_created_only_from_a_definition() {
+    async fn a_map_is_created_only_from_a_skill() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
 
-        let with_definition = service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await;
-        let without_definition = service.create_map(Source::fixture(), Actor::Human, project, "nope", Path::new("/maps/nope.toml")).await;
+        let with_skill = service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await;
+        let without_skill = service.create_map(Source::fixture(), Actor::Human, project, "nope", Path::new("/maps/nope.toml")).await;
 
-        assert!(with_definition.is_ok());
-        assert!(without_definition.unwrap_err().to_string().contains("nope"));
+        assert!(with_skill.is_ok());
+        assert!(without_skill.unwrap_err().to_string().contains("nope"));
         assert_eq!(store.0.lock().unwrap().len(), 2);
     }
 
@@ -469,21 +469,21 @@ mod tests {
     async fn a_map_is_checked_against_its_own_file_whatever_its_kind() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "choices", Path::new("/elsewhere/decisions.toml")).await.unwrap();
 
         let added = service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "choices").await, "question", "Q", Default::default(), Vec::new()).await;
         let map = service.map(mid(&service, project, "choices").await).await.unwrap();
 
         assert!(added.is_ok());
-        assert_eq!(map.definition, Path::new("/elsewhere/decisions.toml"));
+        assert_eq!(map.skill, Path::new("/elsewhere/decisions.toml"));
     }
 
     #[tokio::test]
-    async fn a_relative_definition_file_is_an_error() {
+    async fn a_relative_skill_file_is_an_error() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
 
         let result = service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("maps/decisions.toml")).await;
 
@@ -495,7 +495,7 @@ mod tests {
     async fn maps_are_the_current_projects_in_log_order() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         add_project(&store, "/other");
         let other = Source::Checkout { client: "claude-code".into(), path: "/other".into() };
         let other_project = id_at(&store, "/other");
@@ -513,7 +513,7 @@ mod tests {
     async fn add_node_to_a_missing_map_is_an_error() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
 
         let result = service.add_node(Source::fixture(), Actor::Human, MapId::new(), "task", "T", Default::default(), Vec::new()).await;
@@ -526,7 +526,7 @@ mod tests {
     async fn add_node_checks_its_kind_and_properties_against_the_schema() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "concepts", Path::new("/maps/concepts.toml")).await.unwrap();
         let undeclared = BTreeMap::from([("colour".to_string(), "red".to_string())]);
 
@@ -544,7 +544,7 @@ mod tests {
     async fn add_edge_checks_its_kind_and_ends_against_the_schema() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "option", "O", Default::default(), Vec::new()).await.unwrap();
@@ -565,7 +565,7 @@ mod tests {
     async fn a_map_without_a_schema_takes_any_kind_and_property_but_not_a_broken_graph() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "scratch", Path::new("/maps/scratch.toml")).await.unwrap();
         let map = mid(&service, project, "scratch").await;
         let colour = BTreeMap::from([("colour".to_string(), "red".to_string())]);
@@ -583,12 +583,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn add_node_fails_when_the_maps_definition_is_gone() {
+    async fn add_node_fails_when_the_maps_skill_is_gone() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "tasks", Path::new("/maps/tasks.toml")).await.unwrap();
-        let gone = AppService::new(&store, NoDefinitions);
+        let gone = AppService::new(&store, NoSkills);
 
         let result = gone.add_node(Source::fixture(), Actor::Human, MapId::new(), "task", "T", Default::default(), Vec::new()).await;
 
@@ -600,7 +600,7 @@ mod tests {
     async fn add_node_records_its_properties() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "concepts", Path::new("/maps/concepts.toml")).await.unwrap();
         let properties = BTreeMap::from([("definition".to_string(), "One log.".to_string())]);
 
@@ -616,7 +616,7 @@ mod tests {
 
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "concepts", Path::new("/maps/concepts.toml")).await.unwrap();
         add_project(&store, "/other");
         let (first, second, foreign_session) = (add_session(&store, "/repo"), add_session(&store, "/repo"), add_session(&store, "/other"));
@@ -652,7 +652,7 @@ mod tests {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
         add_project(&store, "/other");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "concepts", Path::new("/maps/concepts.toml")).await.unwrap();
         let (own, foreign) = (add_session(&store, "/repo/src"), add_session(&store, "/other"));
         let said = Event::message(Source::fixture(), own, Actor::Human, "Only here", json!({}));
@@ -675,7 +675,7 @@ mod tests {
 
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "concepts", Path::new("/maps/concepts.toml")).await.unwrap();
         let session = add_session(&store, "/repo");
         let latest = Event::message(Source::fixture(), session, Actor::Agent, "A --flag: exact text Z", json!({}));
@@ -701,7 +701,7 @@ mod tests {
 
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "concepts", Path::new("/maps/concepts.toml")).await.unwrap();
         let session = add_session(&store, "/repo");
         store.0.lock().unwrap().push(Event::message(
@@ -750,7 +750,7 @@ mod tests {
     async fn a_web_source_cannot_write_a_file_reference() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "concepts", Path::new("/maps/concepts.toml")).await.unwrap();
 
         let result = service.add_node(
@@ -768,7 +768,7 @@ mod tests {
         tokio::fs::write(source.path().unwrap().join("text.txt"), "first\r\n\nthird\nlast").await.unwrap();
         let store = in_project(source.path().unwrap().to_str().unwrap());
         let project = id_at(&store, source.path().unwrap().to_str().unwrap());
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(source.clone(), Actor::Human, project, "concepts", Path::new("/maps/concepts.toml")).await.unwrap();
 
         service.add_node(
@@ -800,7 +800,7 @@ mod tests {
         tokio::fs::write(source.path().unwrap().join("src/a:b.rs"), "code\n").await.unwrap();
         let store = in_project(source.path().unwrap().to_str().unwrap());
         let project = id_at(&store, source.path().unwrap().to_str().unwrap());
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(source.clone(), Actor::Human, project, "concepts", Path::new("/maps/concepts.toml")).await.unwrap();
         let session = add_session(&store, source.path().unwrap().to_str().unwrap());
         let message = Event::message(source.clone(), session, Actor::Human, "Keep code", json!({}));
@@ -834,7 +834,7 @@ mod tests {
         tokio::fs::write(source.path().unwrap().join("binary"), [0xff]).await.unwrap();
         let store = in_project(source.path().unwrap().to_str().unwrap());
         let project = id_at(&store, source.path().unwrap().to_str().unwrap());
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(source.clone(), Actor::Human, project, "concepts", Path::new("/maps/concepts.toml")).await.unwrap();
         let invalid = [
             Ref::File { path: "".into(), lines: (1, 1) },
@@ -894,7 +894,7 @@ mod tests {
         tokio::fs::write(worktree.join("only-here.txt"), "mine").await.unwrap();
         let store = in_project(source.path().unwrap().to_str().unwrap());
         let project = id_at(&store, source.path().unwrap().to_str().unwrap());
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(source.clone(), Actor::Human, project, "concepts", Path::new("/maps/concepts.toml")).await.unwrap();
         let writer = Source::Checkout { client: "claude-code".into(), path: worktree };
 
@@ -916,7 +916,7 @@ mod tests {
     async fn blank_kinds_and_titles_are_errors() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
 
@@ -934,7 +934,7 @@ mod tests {
     async fn a_repeated_edge_is_an_error() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "option", "O", Default::default(), Vec::new()).await.unwrap();
@@ -951,7 +951,7 @@ mod tests {
     async fn a_node_title_is_unique_within_its_map_but_not_across_maps() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.create_map(Source::fixture(), Actor::Human, project, "tasks", Path::new("/maps/tasks.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Why?", Default::default(), Vec::new()).await.unwrap();
@@ -968,7 +968,7 @@ mod tests {
     async fn nodes_are_the_maps_own_in_log_order() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.create_map(Source::fixture(), Actor::Human, project, "tasks", Path::new("/maps/tasks.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
@@ -986,7 +986,7 @@ mod tests {
     async fn an_edge_links_two_titled_nodes_and_a_missing_title_is_an_error() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "option", "O", Default::default(), Vec::new()).await.unwrap();
@@ -1006,7 +1006,7 @@ mod tests {
     async fn edges_are_the_maps_own_in_log_order_and_name_node_ids() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.create_map(Source::fixture(), Actor::Human, project, "tasks", Path::new("/maps/tasks.toml")).await.unwrap();
         for (map, kind, title) in [("decisions", "question", "Q"), ("decisions", "option", "O"), ("tasks", "task", "T"), ("tasks", "task", "U")] {
@@ -1027,7 +1027,7 @@ mod tests {
     async fn maps_carry_each_maps_nodes_and_edges() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.create_map(Source::fixture(), Actor::Human, project, "tasks", Path::new("/maps/tasks.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
@@ -1046,7 +1046,7 @@ mod tests {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
         add_project(&store, "/other");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         let other = Source::Checkout { client: "claude-code".into(), path: "/other".into() };
         let other_project = id_at(&store, "/other");
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
@@ -1064,7 +1064,7 @@ mod tests {
     async fn listings_leave_out_a_map_placed_only_on_a_board() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         let places = Places::new([Place::Board(crate::core::BoardId::new())]).unwrap();
         let draft = Event::map_created(Source::fixture(), Actor::Human, MapId::new(), project, Name::new("draft").unwrap(), "/maps/draft.toml".into(), places);
@@ -1081,7 +1081,7 @@ mod tests {
     async fn map_detail_names_the_boards_the_map_is_on_in_creation_order() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         let map = mid(&service, project, "decisions").await;
         let first = service.create_board(Source::Web, Actor::Human, "p0").await.unwrap().unwrap().id;
@@ -1101,7 +1101,7 @@ mod tests {
     async fn map_detail_has_nodes_newest_first_and_edges_in_log_order() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.create_map(Source::fixture(), Actor::Human, project, "tasks", Path::new("/maps/tasks.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
@@ -1124,7 +1124,7 @@ mod tests {
 
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "concepts", Path::new("/maps/concepts.toml")).await.unwrap();
         let session = add_session(&store, "/repo");
         let cited = Event::message(Source::fixture(), session, Actor::Human, "Keep the text", json!({}));
@@ -1146,7 +1146,7 @@ mod tests {
     async fn an_unknown_map_has_no_id_and_no_detail() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
 
         let no_project = service.map_id("nope", "decisions").await.unwrap();
@@ -1160,11 +1160,11 @@ mod tests {
         assert!(no_detail.is_none());
     }
 
-    async fn mid<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, project: ProjectId, name: &str) -> MapId {
+    async fn mid<S: EventStore, M: SkillStore>(service: &AppService<S, M>, project: ProjectId, name: &str) -> MapId {
         Map::named(&service.store.all().await.unwrap(), project, name).unwrap().id
     }
 
-    async fn nid<S: EventStore, M: DefinitionStore>(service: &AppService<S, M>, project: ProjectId, map: &str, title: &str) -> NodeId {
+    async fn nid<S: EventStore, M: SkillStore>(service: &AppService<S, M>, project: ProjectId, map: &str, title: &str) -> NodeId {
         service.map(mid(service, project, map).await).await.unwrap().nodes.iter().find(|n| n.title == title).unwrap().id
     }
 
@@ -1172,8 +1172,8 @@ mod tests {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
     }
 
-    async fn glossary(store: &Memory) -> AppService<&Memory, Definitions> {
-        let service = AppService::new(store, Definitions);
+    async fn glossary(store: &Memory) -> AppService<&Memory, Skills> {
+        let service = AppService::new(store, Skills);
         let project = id_at(store, "/repo");
         service.create_map(Source::fixture(), Actor::Human, project, "glossary", Path::new("/maps/glossary.toml")).await.unwrap();
         service.add_node(
@@ -1184,7 +1184,7 @@ mod tests {
         service
     }
 
-    async fn glossary_nodes(service: &AppService<&Memory, Definitions>) -> Vec<Node> {
+    async fn glossary_nodes(service: &AppService<&Memory, Skills>) -> Vec<Node> {
         let project = service.project_at(Path::new("/repo")).await.unwrap().unwrap().id;
 
         service.map(mid(service, project, "glossary").await).await.unwrap().nodes
@@ -1342,7 +1342,7 @@ mod tests {
     async fn an_agent_may_change_its_own_node_until_a_human_changes_it() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "glossary", Path::new("/maps/glossary.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Agent, mid(&service, project, "glossary").await, "term", "Log", BTreeMap::new(), Vec::new()).await.unwrap();
 
@@ -1355,8 +1355,8 @@ mod tests {
         assert_eq!(store.0.lock().unwrap().len(), 5);
     }
 
-    async fn decisions(store: &Memory, actor: Actor) -> AppService<&Memory, Definitions> {
-        let service = AppService::new(store, Definitions);
+    async fn decisions(store: &Memory, actor: Actor) -> AppService<&Memory, Skills> {
+        let service = AppService::new(store, Skills);
         let project = id_at(store, "/repo");
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Human, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
@@ -1492,7 +1492,7 @@ mod tests {
     async fn the_policy_refuses_an_agent_removing_its_node_under_a_human_edge_and_the_log_stays() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, "option", "O", Default::default(), Vec::new()).await.unwrap();
@@ -1510,7 +1510,7 @@ mod tests {
     async fn an_agent_may_remove_its_node_with_agents_edges() {
         let store = in_project("/repo");
         let project = id_at(&store, "/repo");
-        let service = AppService::new(&store, Definitions);
+        let service = AppService::new(&store, Skills);
         service.create_map(Source::fixture(), Actor::Human, project, "decisions", Path::new("/maps/decisions.toml")).await.unwrap();
         service.add_node(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, "question", "Q", Default::default(), Vec::new()).await.unwrap();
         service.add_node(Source::fixture(), Actor::Agent, mid(&service, project, "decisions").await, "option", "O", Default::default(), Vec::new()).await.unwrap();
@@ -1525,7 +1525,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_map_passes_store_errors_through() {
-        let result = AppService::new(Broken, Definitions).create_map(Source::fixture(), Actor::Human, ProjectId::new(), "decisions", Path::new("/maps/decisions.toml")).await;
+        let result = AppService::new(Broken, Skills).create_map(Source::fixture(), Actor::Human, ProjectId::new(), "decisions", Path::new("/maps/decisions.toml")).await;
 
         assert!(result.is_err());
     }

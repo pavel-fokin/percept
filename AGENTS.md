@@ -44,10 +44,10 @@ A layer imports only the layers to its right:
 
 - `cli` → `server` → `app` → `core` → `shared`
 - `eventstore` → `core` → `shared`
-- `mapstore` → `core` → `shared`
+- `skillstore` → `core` → `shared`
 
 `core` defines the store traits. `eventstore` implements the event
-store, and `mapstore` the schema store. `main.rs` wires both into `app`.
+store, and `skillstore` the skill store. `main.rs` wires both into `app`.
 
 I/O is async on tokio. A trait method that does I/O returns
 `impl Future<Output = …> + Send`, and async code never makes a blocking call.
