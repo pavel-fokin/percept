@@ -10,7 +10,7 @@ mod store;
 
 pub use board::{Board, BoardId};
 pub use event::{Actor, Event, EventId, Kind, Payload, Source};
-pub use map::{Skill, SkillStore, Edge, EdgeKind, Map, MapId, Node, NodeId, LastPlace, Place, Places, Policy, Reference, Schema};
+pub use map::{Kinds, Skill, SkillStore, Edge, EdgeKind, Map, MapId, Node, NodeId, LastPlace, Place, Places, Policy, Reference, Schema};
 pub use name::Name;
 pub use project::{Project, ProjectId};
 pub use session::{ClientAgentId, ClientSessionId, Session, SessionId, SessionStatus};

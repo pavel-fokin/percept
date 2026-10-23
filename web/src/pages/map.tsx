@@ -58,7 +58,7 @@ export function MapPage({ map }: { map: MapDetail }) {
         <section className="grid justify-items-center gap-3 py-16 text-center">
           <h2 className="text-2xl font-semibold text-balance">No {map.name} yet</h2>
           <p className="max-w-[36ch] text-muted">
-            <span className="capitalize">{map.name}</span> appear here once an agent records one in this project.
+            <span className="capitalize">{map.name}</span> appear here once someone adds one: on a board, or by asking an agent.
           </p>
         </section>
       )}

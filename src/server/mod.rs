@@ -449,7 +449,12 @@ mod tests {
 
         let maps = json!([{
             "name": "decisions",
-            "nodes": [{ "id": a, "title": "Q" }, { "id": b, "title": "O" }],
+            "kinds": {
+                "declared": false,
+                "nodes": ["option", "question"],
+                "edges": [{ "kind": "answers", "from": "option", "to": "question" }],
+            },
+            "nodes": [{ "id": a, "kind": "question", "title": "Q" }, { "id": b, "kind": "option", "title": "O" }],
             "edges": [{ "kind": "answers", "from": b, "to": a }],
         }]);
         assert!(placed.starts_with("HTTP/1.1 200"));
@@ -461,6 +466,34 @@ mod tests {
         let changes = events.iter().filter(|e| matches!(e.payload, Payload::MapChanged { .. })).count();
         assert_eq!(changes, 1);
         assert_eq!(events.last().unwrap().source, Source::Web);
+    }
+
+    #[tokio::test]
+    async fn a_declared_schema_gives_the_board_its_kinds_instead_of_the_observed_ones() {
+        let log = Arc::new(Log::new());
+        let project = Project::all(&log.0.lock().unwrap()).remove(0).id;
+        let (map, a) = (MapId::new(), NodeId::new());
+        let schema = Schema::new(
+            BTreeMap::from([("question".to_string(), BTreeSet::new()), ("option".to_string(), BTreeSet::new())]),
+            BTreeMap::from([("answers".to_string(), EdgeKind { from: "option".into(), to: "question".into() })]),
+        )
+        .unwrap();
+        log.0.lock().unwrap().extend([
+            Event::map_created(Source::fixture(), Actor::Human, map, project, Name::new("decisions").unwrap(), Some("/maps/decisions.toml".into()), Some(schema), Places::fixture(project)),
+            Event::node_added(Source::fixture(), Actor::Human, map, a, "question", "Q", Default::default(), Vec::new()),
+        ]);
+        let addr = serve(log.clone()).await;
+        send(addr, "POST", "/api/projects/repo/boards", "").await;
+        send(addr, "POST", "/api/projects/repo/boards/board/maps", r#"{"map":"decisions"}"#).await;
+
+        let read = send(addr, "GET", "/api/projects/repo/boards/board", "").await;
+
+        let kinds = json!({
+            "declared": true,
+            "nodes": ["option", "question"],
+            "edges": [{ "kind": "answers", "from": "option", "to": "question" }],
+        });
+        assert_eq!(json_body(&read)["data"]["maps"][0]["kinds"], kinds);
     }
 
     #[tokio::test]
