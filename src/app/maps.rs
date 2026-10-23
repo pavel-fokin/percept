@@ -3,7 +3,23 @@ use std::path::{Path, PathBuf};
 
 use super::{AppService, Taken};
 use crate::core::{Actor, Board, Event, EventId, EventStore, Map, MapId, Name, NodeId, Payload, Place, Places, Policy, Project, ProjectId, Reference, SessionId, Skill, SkillStore, Source};
-use crate::shared::Result;
+use crate::shared::{Error, Result};
+
+/// A node or an edge write the map, its schema or the policy turns down; the message says why.
+#[derive(Debug)]
+pub struct Refused(String);
+
+impl std::fmt::Display for Refused {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Refused {}
+
+fn refused(error: Error) -> Error {
+    Refused(error.to_string()).into()
+}
 
 #[derive(Debug, PartialEq)]
 pub enum Ref {
@@ -260,7 +276,7 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         references: Vec<Ref>,
     ) -> Result<()> {
         let Located { events, project, map } = self.located(map).await?;
-        let node = map.on_map(node)?;
+        let node = map.on_map(node).map_err(refused)?;
 
         let new_title = new_title.unwrap_or(&node.title);
 
@@ -268,7 +284,7 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
         merged.extend(properties);
 
         if new_title == node.title && merged == node.properties && references.is_empty() {
-            return Err(format!("the change leaves {:?} as it is", node.title).into());
+            return Err(Refused(format!("the change leaves {:?} as it is", node.title)).into());
         }
 
         let mut all_references = node.references.clone();
@@ -291,8 +307,8 @@ impl<S: EventStore, M: SkillStore> AppService<S, M> {
 
     /// The one way a node or an edge event reaches the log: the map, under its schema, and then the policy see it first.
     async fn write(&self, map: &Map, event: Event) -> Result<()> {
-        map.check(&event)?;
-        Policy::check(&event, map)?;
+        map.check(&event).map_err(refused)?;
+        Policy::check(&event, map).map_err(refused)?;
 
         self.store.append(&event).await
     }
@@ -357,7 +373,7 @@ async fn resolve_reference(events: &[Event], project: &Project, reference: Ref) 
 
 fn not_blank(name: &str, value: &str) -> Result<()> {
     if value.trim().is_empty() {
-        return Err(format!("{name} must not be blank").into());
+        return Err(Refused(format!("{name} must not be blank")).into());
     }
 
     Ok(())

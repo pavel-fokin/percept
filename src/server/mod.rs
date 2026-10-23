@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use axum::http::{header::CONTENT_TYPE, StatusCode, Uri};
 use axum::response::{Html, IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::Router;
 use tokio::net::TcpListener;
 
@@ -69,6 +69,9 @@ where
         .route("/api/skills", get(Api::<L, M>::skills))
         .route("/api/maps", get(Api::<L, M>::maps))
         .route("/api/projects/{project}/maps/{name}", get(Api::<L, M>::map))
+        .route("/api/projects/{project}/maps/{name}/nodes", post(Api::<L, M>::add_node))
+        .route("/api/projects/{project}/maps/{name}/nodes/{node}", patch(Api::<L, M>::change_node).delete(Api::<L, M>::remove_node))
+        .route("/api/projects/{project}/maps/{name}/edges", post(Api::<L, M>::add_edge).delete(Api::<L, M>::remove_edge))
         .route("/api/boards", get(Api::<L, M>::boards))
         .route("/api/projects/{project}/boards", post(Api::<L, M>::create_board))
         .route("/api/projects/{project}/boards/{board}", get(Api::<L, M>::board))
@@ -539,6 +542,56 @@ mod tests {
         assert_eq!(text_body(&taken), "this project already has a notes map");
         assert!(path.starts_with("HTTP/1.1 400"));
         assert_eq!(text_body(&path), "\"../plain\" is not a skill name");
+        assert!(unknown.starts_with("HTTP/1.1 404"));
+        assert_eq!(log.0.lock().unwrap().len(), written);
+    }
+
+    #[tokio::test]
+    async fn a_human_draws_nodes_and_edges_on_a_map_from_the_web() {
+        let log = Arc::new(Log::new());
+        let addr = serve(log.clone()).await;
+        send(addr, "POST", "/api/projects/repo/boards", "").await;
+        send(addr, "POST", "/api/projects/repo/boards/board/maps/notes", r#"{"skill":null}"#).await;
+        let nodes = "/api/projects/repo/maps/notes/nodes";
+
+        let a = json_body(&send(addr, "POST", nodes, r#"{"kind":"idea","title":"A"}"#).await)["data"]["nodes"][0]["id"].clone();
+        let b = json_body(&send(addr, "POST", nodes, r#"{"kind":"idea","title":"B"}"#).await)["data"]["nodes"][0]["id"].clone();
+        let (a, b) = (a.as_str().unwrap(), b.as_str().unwrap());
+        let linked = send(addr, "POST", "/api/projects/repo/maps/notes/edges", &format!(r#"{{"from":"{a}","kind":"has","to":"{b}"}}"#)).await;
+        let renamed = send(addr, "PATCH", &format!("{nodes}/{a}"), r#"{"title":"Root"}"#).await;
+        let unlinked = send(addr, "DELETE", &format!("/api/projects/repo/maps/notes/edges?from={a}&kind=has&to={b}"), "").await;
+        let removed = send(addr, "DELETE", &format!("{nodes}/{b}"), "").await;
+
+        assert_eq!(json_body(&linked)["data"]["edges"], json!([{ "kind": "has", "from": a, "to": b }]));
+        assert_eq!(json_body(&renamed)["data"]["nodes"][1]["title"], "Root");
+        assert_eq!(json_body(&unlinked)["data"]["edges"], json!([]));
+        let left: Vec<_> = json_body(&removed)["data"]["nodes"].as_array().unwrap().iter().map(|n| n["title"].clone()).collect();
+        assert_eq!(left, [json!("Root")]);
+        let events = log.0.lock().unwrap();
+        let drawn: Vec<_> = events.iter().filter(|e| e.payload.map().is_some() && !matches!(e.payload, Payload::MapCreated { .. })).collect();
+        assert_eq!(drawn.len(), 6);
+        assert!(drawn.iter().all(|e| e.source == Source::Web && e.actor == Actor::Human));
+    }
+
+    #[tokio::test]
+    async fn a_drawing_the_map_turns_down_is_a_bad_request_and_an_unknown_map_is_not_found() {
+        let log = Arc::new(Log::new());
+        let addr = serve(log.clone()).await;
+        send(addr, "POST", "/api/projects/repo/boards", "").await;
+        send(addr, "POST", "/api/projects/repo/boards/board/maps/notes", r#"{"skill":null}"#).await;
+        send(addr, "POST", "/api/projects/repo/maps/notes/nodes", r#"{"kind":"idea","title":"A"}"#).await;
+        let written = log.0.lock().unwrap().len();
+
+        let blank = send(addr, "POST", "/api/projects/repo/maps/notes/nodes", r#"{"kind":"idea","title":" "}"#).await;
+        let taken = send(addr, "POST", "/api/projects/repo/maps/notes/nodes", r#"{"kind":"idea","title":"A"}"#).await;
+        let missing = send(addr, "DELETE", "/api/projects/repo/maps/notes/nodes/0190a0a0-0000-7000-8000-0000000000ff", "").await;
+        let unknown = send(addr, "POST", "/api/projects/repo/maps/nope/nodes", r#"{"kind":"idea","title":"B"}"#).await;
+
+        assert!(blank.starts_with("HTTP/1.1 400"));
+        assert_eq!(text_body(&blank), "title must not be blank");
+        assert!(taken.starts_with("HTTP/1.1 400"));
+        assert_eq!(text_body(&taken), "the notes map already has a node titled \"A\"");
+        assert!(missing.starts_with("HTTP/1.1 400"));
         assert!(unknown.starts_with("HTTP/1.1 404"));
         assert_eq!(log.0.lock().unwrap().len(), written);
     }

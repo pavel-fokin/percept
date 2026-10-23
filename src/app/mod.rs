@@ -13,6 +13,6 @@ mod testing;
 pub use app_service::AppService;
 pub use boards::BoardContents;
 pub use git::source_path;
-pub use maps::{CitedMessage, MapDetail, Ref};
+pub use maps::{CitedMessage, MapDetail, Ref, Refused};
 pub use projects::Taken;
 pub use skills::{library, skill_dir};
